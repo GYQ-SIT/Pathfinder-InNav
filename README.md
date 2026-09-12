@@ -8,19 +8,16 @@ generate a schematic interior in 3D, and navigate inside — including across fl
 
 ## Repository layout
 
-​```
-Pathfinder-InNav/
-├── README.md
-├── .gitignore                 # UnrealEngine template
-└── docs/
-    ├── proposal.md
-    ├── design/
-    │   ├── product-design.md
-    │   └── ui-ux/             # wireframes, user flows, mockups
-    ├── architecture.md        # system architecture + tech stack
-    ├── deliverables.md        # ownership + M1/M2/M3 targets
-    └── planning/              # Feature Plan + Technical Deliverable Plan
-​```
+- `README.md` — this file
+- `.gitignore` — UnrealEngine template
+- `docs/`
+  - `proposal.md` — project proposal
+  - `design/`
+    - `product-design.md` — product design document
+    - `ui-ux/` — wireframes, user flows, mockups
+  - `architecture.md` — system architecture + tech stack
+  - `deliverables.md` — ownership + M1/M2/M3 targets
+  - `planning/` — Feature Plan + Technical Deliverable Plan
 
 ## Prerequisites
 
