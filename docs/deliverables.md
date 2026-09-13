@@ -33,7 +33,7 @@ demonstrable check — not "it exists".
 
 ### T01 — Model Import & Building Selection
 - **What it is:** Import the school model into UE; let the user select a building at runtime.
-- **Supports:** _(building selection / interior generation — Fxx TBD)_
+- **Supports:** _(building selection / interior generation — F01 TBD)_
 - **Owner:** _Import & Selection Dev (TBD)_
 - **Jira Epic:** `INNAVI-T01`
 - **M1 target:** School model loads in UE; user can click a building and it is highlighted/selected.
@@ -42,7 +42,7 @@ demonstrable check — not "it exists".
 
 ### T02 — Data Input & JSON System
 - **What it is:** UMG interface to enter/manage interior data (rooms, room types, floors, elevators, stairs, corridors); save and load as JSON.
-- **Supports:** _(data entry / save-load — Fxx TBD)_
+- **Supports:** _(data entry / save-load — F02 TBD)_
 - **Owner:** _Editor UI / Data Dev (TBD)_
 - **Jira Epic:** `INNAVI-T02`
 - **M1 target:** User enters a set of interior data, saves it to JSON, and loads it back to reproduce the same data.
@@ -51,7 +51,7 @@ demonstrable check — not "it exists".
 
 ### T03 — Procedural Interior Generator
 - **What it is:** Read JSON and spawn a schematic interior at runtime from a modular kit (walls, windows, doors, corridors, stairs, elevators). Elevators/doors recorded as input/output nodes.
-- **Supports:** _(interior generation — Fxx TBD)_
+- **Supports:** _(interior generation — F03 TBD)_
 - **Owner:** _Generation Dev (TBD)_
 - **Jira Epic:** `INNAVI-T03`
 - **M1 target:** Given a JSON file, generate the corresponding rooms, corridors, and stairs for at least one multi-floor building.
@@ -60,7 +60,7 @@ demonstrable check — not "it exists".
 
 ### T04 — Indoor Navigation System
 - **What it is:** Runtime navigation over the generated interior, including cross-floor routing via elevators/stairs as abstract connectors (runtime NavMesh + NavLinks).
-- **Supports:** _(navigation / routing — Fxx TBD)_
+- **Supports:** _(navigation / routing — F04 TBD)_
 - **Owner:** _Navigation Dev (TBD)_
 - **Jira Epic:** `INNAVI-T04`
 - **M1 target:** Compute and display a route from one room to another, including at least one cross-floor path (e.g. Level 1 → elevator → Level 8 → target room).
