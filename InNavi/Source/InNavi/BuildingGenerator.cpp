@@ -22,7 +22,6 @@ void ABuildingGenerator::BeginPlay()
 
 void ABuildingGenerator::GenerateBuildings()
 {
-	// Path: <ProjectDir>/Data/buildings.json
 	FString FilePath = FPaths::ProjectDir() / TEXT("Data") / TEXT("buildings.json");
 
 	FString JsonString;
@@ -39,6 +38,12 @@ void ABuildingGenerator::GenerateBuildings()
 		UE_LOG(LogTemp, Error, TEXT("Failed to parse JSON"));
 		return;
 	}
+
+	float Scale = 1.f;
+	RootObject->TryGetNumberField(TEXT("scale"), Scale);
+
+	float GlobalFloorHeight = 300.f;
+	RootObject->TryGetNumberField(TEXT("floorHeight"), GlobalFloorHeight);
 
 	const TArray<TSharedPtr<FJsonValue>>* BuildingsArray;
 	if (!RootObject->TryGetArrayField(TEXT("buildings"), BuildingsArray))
@@ -60,11 +65,26 @@ void ABuildingGenerator::GenerateBuildings()
 			continue;
 		}
 
-		FString Id     = B->GetStringField(TEXT("id"));
-		FString Name   = B->GetStringField(TEXT("name"));
-		float   Height = B->GetNumberField(TEXT("height"));
+		FString Id   = B->GetStringField(TEXT("id"));
+		FString Name = B->GetStringField(TEXT("name"));
 
-		// Read the footprint vertex array
+		// Each building has its own floorCount and floorHeight (falls back to global)
+		int32 FloorCount = 10;
+		B->TryGetNumberField(TEXT("floorCount"), FloorCount);
+
+		float FloorHeight = GlobalFloorHeight;   // default to global
+		B->TryGetNumberField(TEXT("floorHeight"), FloorHeight);   // override if building has its own
+
+		float Height = FloorCount * FloorHeight;
+
+		FVector2D Offset(0.f, 0.f);
+		const TArray<TSharedPtr<FJsonValue>>* OffsetArray;
+		if (B->TryGetArrayField(TEXT("offset"), OffsetArray) && OffsetArray->Num() >= 2)
+		{
+			Offset.X = (*OffsetArray)[0]->AsNumber();
+			Offset.Y = (*OffsetArray)[1]->AsNumber();
+		}
+
 		const TArray<TSharedPtr<FJsonValue>>* FootprintArray;
 		if (!B->TryGetArrayField(TEXT("footprint"), FootprintArray))
 		{
@@ -84,13 +104,12 @@ void ABuildingGenerator::GenerateBuildings()
 			}
 		}
 
-		// Spawn a PolyBuilding and build its mesh
 		APolyBuilding* NewBuilding = GetWorld()->SpawnActor<APolyBuilding>(FVector::ZeroVector, FRotator::ZeroRotator);
 		if (NewBuilding)
 		{
 			NewBuilding->BuildingId = Id;
 			NewBuilding->BuildingName = Name;
-			NewBuilding->BuildFromFootprint(Footprint, Height);
+			NewBuilding->BuildFromFootprint(Footprint, Height, Scale, Offset);
 		}
 	}
 

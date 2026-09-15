@@ -35,13 +35,11 @@ void ANavPlayerController::OnClick()
 		APolyBuilding* ClickedBuilding = Cast<APolyBuilding>(Hit.GetActor());
 		if (ClickedBuilding)
 		{
-			// Un-highlight the previously selected building
 			if (SelectedBuilding && SelectedBuilding != ClickedBuilding)
 			{
 				SelectedBuilding->SetHighlighted(false);
 			}
 
-			// Highlight the new one
 			ClickedBuilding->SetHighlighted(true);
 			SelectedBuilding = ClickedBuilding;
 

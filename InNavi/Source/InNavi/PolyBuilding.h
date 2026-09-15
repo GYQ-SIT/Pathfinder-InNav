@@ -17,18 +17,25 @@ class INNAVI_API APolyBuilding : public AActor
 public:
 	APolyBuilding();
 
-	// Build the 3D mesh by extruding a 2D polygon footprint up to a height
-	void BuildFromFootprint(const TArray<FVector2D>& Footprint, float Height);
+	// Build the 3D mesh by extruding a 2D polygon footprint up to a height.
+	// Offset shifts the whole building in the XY plane (in the same units as the footprint, before scale).
+	void BuildFromFootprint(const TArray<FVector2D>& Footprint, float Height, float Scale, FVector2D Offset);
 
 	// Highlight / unhighlight this building
 	void SetHighlighted(bool bHighlighted);
 
-	// This building's id and name (e.g. "E2", "Block E2")
+	// Data
 	UPROPERTY()
 	FString BuildingId;
 
 	UPROPERTY()
 	FString BuildingName;
+
+	UPROPERTY()
+	FVector2D BuildingOffset;
+
+	UPROPERTY()
+	float BuildingHeight;
 
 private:
 	UPROPERTY()
