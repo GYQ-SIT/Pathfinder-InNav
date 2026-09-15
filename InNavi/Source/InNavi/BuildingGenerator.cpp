@@ -8,6 +8,47 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
+// ---- Helper: do segments AB and CD properly cross each other? ----
+static bool SegmentsIntersect(const FVector2D& A, const FVector2D& B, const FVector2D& C, const FVector2D& D)
+{
+	auto Cross = [](const FVector2D& O, const FVector2D& P1, const FVector2D& P2)
+	{
+		return (P1.X - O.X) * (P2.Y - O.Y) - (P1.Y - O.Y) * (P2.X - O.X);
+	};
+
+	const float d1 = Cross(C, D, A);
+	const float d2 = Cross(C, D, B);
+	const float d3 = Cross(A, B, C);
+	const float d4 = Cross(A, B, D);
+
+	return ((d1 > 0.f) != (d2 > 0.f)) && ((d3 > 0.f) != (d4 > 0.f));
+}
+
+// ---- Helper: does this polygon's outline cross itself? (non-adjacent edges only) ----
+static bool PolygonSelfIntersects(const TArray<FVector2D>& Poly)
+{
+	const int32 N = Poly.Num();
+	for (int32 i = 0; i < N; i++)
+	{
+		const int32 iNext = (i + 1) % N;
+		for (int32 j = i + 1; j < N; j++)
+		{
+			const int32 jNext = (j + 1) % N;
+			// Skip edges that share a vertex with edge i - they touch by construction, not a crossing.
+			if (j == iNext || jNext == i)
+			{
+				continue;
+			}
+
+			if (SegmentsIntersect(Poly[i], Poly[iNext], Poly[j], Poly[jNext]))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 ABuildingGenerator::ABuildingGenerator()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -39,7 +80,7 @@ void ABuildingGenerator::GenerateBuildings()
 		return;
 	}
 
-	float Scale = 1.f;
+	Scale = 1.f;
 	RootObject->TryGetNumberField(TEXT("scale"), Scale);
 
 	float GlobalFloorHeight = 300.f;
@@ -75,8 +116,6 @@ void ABuildingGenerator::GenerateBuildings()
 		float FloorHeight = GlobalFloorHeight;   // default to global
 		B->TryGetNumberField(TEXT("floorHeight"), FloorHeight);   // override if building has its own
 
-		float Height = FloorCount * FloorHeight;
-
 		FVector2D Offset(0.f, 0.f);
 		const TArray<TSharedPtr<FJsonValue>>* OffsetArray;
 		if (B->TryGetArrayField(TEXT("offset"), OffsetArray) && OffsetArray->Num() >= 2)
@@ -104,14 +143,53 @@ void ABuildingGenerator::GenerateBuildings()
 			}
 		}
 
-		APolyBuilding* NewBuilding = GetWorld()->SpawnActor<APolyBuilding>(FVector::ZeroVector, FRotator::ZeroRotator);
-		if (NewBuilding)
-		{
-			NewBuilding->BuildingId = Id;
-			NewBuilding->BuildingName = Name;
-			NewBuilding->BuildFromFootprint(Footprint, Height, Scale, Offset);
-		}
+		SpawnBuildingFromData(Id, Name, Footprint, FloorCount, FloorHeight, Offset);
 	}
 
 	UE_LOG(LogTemp, Warning, TEXT("Generated %d buildings from JSON"), BuildingsArray->Num());
+}
+
+APolyBuilding* ABuildingGenerator::SpawnBuildingFromData(const FString& Id, const FString& Name, const TArray<FVector2D>& Footprint, int32 FloorCount, float FloorHeight, FVector2D Offset)
+{
+	if (Id.IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("SpawnBuildingFromData: building id cannot be empty"));
+		return nullptr;
+	}
+
+	if (UsedBuildingIds.Contains(Id))
+	{
+		UE_LOG(LogTemp, Error, TEXT("SpawnBuildingFromData: building id '%s' is already in use"), *Id);
+		return nullptr;
+	}
+
+	if (Footprint.Num() < 3)
+	{
+		UE_LOG(LogTemp, Error, TEXT("SpawnBuildingFromData: building '%s' needs at least 3 footprint points (has %d)"), *Id, Footprint.Num());
+		return nullptr;
+	}
+
+	if (PolygonSelfIntersects(Footprint))
+	{
+		UE_LOG(LogTemp, Error, TEXT("SpawnBuildingFromData: building '%s' footprint crosses itself - fix the outline before finishing"), *Id);
+		return nullptr;
+	}
+
+	if (!GetWorld())
+	{
+		return nullptr;
+	}
+
+	const float Height = FloorCount * FloorHeight;
+
+	APolyBuilding* NewBuilding = GetWorld()->SpawnActor<APolyBuilding>(FVector::ZeroVector, FRotator::ZeroRotator);
+	if (NewBuilding)
+	{
+		NewBuilding->BuildingId = Id;
+		NewBuilding->BuildingName = Name;
+		NewBuilding->BuildFromFootprint(Footprint, Height, Scale, Offset);
+		UsedBuildingIds.Add(Id);
+	}
+
+	return NewBuilding;
 }

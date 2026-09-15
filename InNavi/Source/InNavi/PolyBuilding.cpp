@@ -142,6 +142,16 @@ void APolyBuilding::BuildFromFootprint(const TArray<FVector2D>& Footprint, float
 		Poly2D[i] = FVector2D((Footprint[i].X + Offset.X) * Scale, (Footprint[i].Y + Offset.Y) * Scale);
 	}
 
+	// Normalize to counter-clockwise winding so the side walls always face outward,
+	// regardless of which direction the footprint points were traced/clicked in.
+	if (PolygonSignedArea(Poly2D) < 0.f)
+	{
+		for (int32 i = 0, j = N - 1; i < j; i++, j--)
+		{
+			Poly2D.Swap(i, j);
+		}
+	}
+
 	TArray<FVector> Vertices;
 	TArray<int32> Triangles;
 
