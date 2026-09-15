@@ -1,25 +1,16 @@
 {
   "buildings": [
     {
-      "id": "bld_A",
-      "name": "Block A",
-      "originX": 0,    "originY": 0,
-      "width": 400,    "depth": 300,
-      "floorCount": 5, "floorHeight": 100
+      "id": "bld_test_rect",
+      "name": "Test Rectangle",
+      "footprint": [ [0,0], [400,0], [400,300], [0,300] ],
+      "height": 500
     },
     {
-      "id": "bld_B",
-      "name": "Block B",
-      "originX": 1000, "originY": 0,
-      "width": 300,    "depth": 300,
-      "floorCount": 3, "floorHeight": 100
-    },
-    {
-      "id": "bld_C",
-      "name": "Block C",
-      "originX": 500,  "originY": 900,
-      "width": 250,    "depth": 500,
-      "floorCount": 8, "floorHeight": 100
+      "id": "bld_test_L",
+      "name": "Test L-Shape",
+      "footprint": [ [600,0], [1000,0], [1000,200], [800,200], [800,400], [600,400] ],
+      "height": 400
     }
   ]
 }
