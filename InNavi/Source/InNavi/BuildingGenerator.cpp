@@ -2,7 +2,7 @@
 
 
 #include "BuildingGenerator.h"
-#include "Components/StaticMeshComponent.h"
+#include "Building.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
@@ -47,6 +47,11 @@ void ABuildingGenerator::GenerateBuildings()
 		return;
 	}
 
+	if (!GetWorld())
+	{
+		return;
+	}
+
 	for (const TSharedPtr<FJsonValue>& Value : *BuildingsArray)
 	{
 		const TSharedPtr<FJsonObject> B = Value->AsObject();
@@ -61,44 +66,17 @@ void ABuildingGenerator::GenerateBuildings()
 		float Depth = B->GetNumberField(TEXT("depth"));
 		int32 FloorCount = B->GetIntegerField(TEXT("floorCount"));
 		float FloorH = B->GetNumberField(TEXT("floorHeight"));
+		FString Name = B->GetStringField(TEXT("name"));
 
 		float Height = FloorCount * FloorH;
-
-		// The engine cube is 100x100x100 units at scale 1, so scale = size / 100
-		FVector Scale(Width / 100.f, Depth / 100.f, Height / 100.f);
-
-		// Place the box so its base sits on the ground (Z = half height),
-		// and its corner starts at the origin.
 		FVector Location(OriginX + Width * 0.5f, OriginY + Depth * 0.5f, Height * 0.5f);
 
-		SpawnBox(Location, Scale);
+		ABuilding* NewBuilding = GetWorld()->SpawnActor<ABuilding>(Location, FRotator::ZeroRotator);
+		if (NewBuilding)
+		{
+			NewBuilding->InitBuilding(Name, FVector(Width, Depth, Height));
+		}
 	}
 
 	UE_LOG(LogTemp, Warning, TEXT("Generated %d buildings from JSON"), BuildingsArray->Num());
-}
-
-void ABuildingGenerator::SpawnBox(FVector Location, FVector Scale)
-{
-	if (!GetWorld())
-	{
-		return;
-	}
-
-	AActor* BoxActor = GetWorld()->SpawnActor<AActor>(Location, FRotator::ZeroRotator);
-	if (!BoxActor)
-	{
-		return;
-	}
-
-	UStaticMeshComponent* MeshComp = NewObject<UStaticMeshComponent>(BoxActor);
-	MeshComp->RegisterComponent();
-	BoxActor->SetRootComponent(MeshComp);
-
-	UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeMesh)
-	{
-		MeshComp->SetStaticMesh(CubeMesh);
-	}
-
-	MeshComp->SetWorldScale3D(Scale);
 }

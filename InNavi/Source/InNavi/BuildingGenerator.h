@@ -18,9 +18,6 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
-	// Spawns a box at the given location with the given scale
-	void SpawnBox(FVector Location, FVector Scale);
-
-	// Reads buildings.json and generates one shell box per building
+	// Reads buildings.json and generates one Building per entry
 	void GenerateBuildings();
 };
