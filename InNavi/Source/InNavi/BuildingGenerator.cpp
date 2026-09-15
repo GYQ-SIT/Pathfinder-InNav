@@ -2,7 +2,7 @@
 
 
 #include "BuildingGenerator.h"
-#include "Building.h"
+#include "PolyBuilding.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
@@ -60,21 +60,37 @@ void ABuildingGenerator::GenerateBuildings()
 			continue;
 		}
 
-		float OriginX = B->GetNumberField(TEXT("originX"));
-		float OriginY = B->GetNumberField(TEXT("originY"));
-		float Width = B->GetNumberField(TEXT("width"));
-		float Depth = B->GetNumberField(TEXT("depth"));
-		int32 FloorCount = B->GetIntegerField(TEXT("floorCount"));
-		float FloorH = B->GetNumberField(TEXT("floorHeight"));
-		FString Name = B->GetStringField(TEXT("name"));
+		FString Id     = B->GetStringField(TEXT("id"));
+		FString Name   = B->GetStringField(TEXT("name"));
+		float   Height = B->GetNumberField(TEXT("height"));
 
-		float Height = FloorCount * FloorH;
-		FVector Location(OriginX + Width * 0.5f, OriginY + Depth * 0.5f, Height * 0.5f);
+		// Read the footprint vertex array
+		const TArray<TSharedPtr<FJsonValue>>* FootprintArray;
+		if (!B->TryGetArrayField(TEXT("footprint"), FootprintArray))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Building %s has no footprint"), *Id);
+			continue;
+		}
 
-		ABuilding* NewBuilding = GetWorld()->SpawnActor<ABuilding>(Location, FRotator::ZeroRotator);
+		TArray<FVector2D> Footprint;
+		for (const TSharedPtr<FJsonValue>& PointValue : *FootprintArray)
+		{
+			const TArray<TSharedPtr<FJsonValue>>* Pair;
+			if (PointValue->TryGetArray(Pair) && Pair->Num() >= 2)
+			{
+				float X = (*Pair)[0]->AsNumber();
+				float Y = (*Pair)[1]->AsNumber();
+				Footprint.Add(FVector2D(X, Y));
+			}
+		}
+
+		// Spawn a PolyBuilding and build its mesh
+		APolyBuilding* NewBuilding = GetWorld()->SpawnActor<APolyBuilding>(FVector::ZeroVector, FRotator::ZeroRotator);
 		if (NewBuilding)
 		{
-			NewBuilding->InitBuilding(Name, FVector(Width, Depth, Height));
+			NewBuilding->BuildingId = Id;
+			NewBuilding->BuildingName = Name;
+			NewBuilding->BuildFromFootprint(Footprint, Height);
 		}
 	}
 

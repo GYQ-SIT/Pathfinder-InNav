@@ -2,7 +2,7 @@
 
 
 #include "NavPlayerController.h"
-#include "Building.h"
+#include "PolyBuilding.h"
 
 ANavPlayerController::ANavPlayerController()
 {
@@ -32,7 +32,7 @@ void ANavPlayerController::OnClick()
 
 	if (Hit.bBlockingHit)
 	{
-		ABuilding* ClickedBuilding = Cast<ABuilding>(Hit.GetActor());
+		APolyBuilding* ClickedBuilding = Cast<APolyBuilding>(Hit.GetActor());
 		if (ClickedBuilding)
 		{
 			// Un-highlight the previously selected building

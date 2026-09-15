@@ -10,14 +10,13 @@ UCLASS()
 class INNAVI_API ABuildingGenerator : public AActor
 {
 	GENERATED_BODY()
-
-public:
+	
+public:	
 	ABuildingGenerator();
 
 protected:
 	virtual void BeginPlay() override;
 
 private:
-	// Reads buildings.json and generates one Building per entry
 	void GenerateBuildings();
 };

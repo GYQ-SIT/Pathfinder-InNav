@@ -6,7 +6,7 @@
 #include "GameFramework/PlayerController.h"
 #include "NavPlayerController.generated.h"
 
-class ABuilding;
+class APolyBuilding;
 
 UCLASS()
 class INNAVI_API ANavPlayerController : public APlayerController
@@ -23,7 +23,6 @@ protected:
 private:
 	void OnClick();
 
-	// The currently selected building (to un-highlight when a new one is picked)
 	UPROPERTY()
-	ABuilding* SelectedBuilding;
+	APolyBuilding* SelectedBuilding;
 };
