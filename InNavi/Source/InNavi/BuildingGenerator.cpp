@@ -63,13 +63,18 @@ void ABuildingGenerator::BeginPlay()
 
 void ABuildingGenerator::GenerateBuildings()
 {
-	FString FilePath = FPaths::ProjectDir() / TEXT("Data") / TEXT("buildings.json");
+	const FString FilePath = FPaths::ProjectDir() / TEXT("Data") / TEXT("buildings.json");
+	const int32 Count = LoadBuildingsFromFile(FilePath);
+	UE_LOG(LogTemp, Warning, TEXT("Generated %d buildings from JSON"), Count);
+}
 
+int32 ABuildingGenerator::LoadBuildingsFromFile(const FString& FilePath)
+{
 	FString JsonString;
 	if (!FFileHelper::LoadFileToString(JsonString, *FilePath))
 	{
 		UE_LOG(LogTemp, Error, TEXT("Could not read JSON file at: %s"), *FilePath);
-		return;
+		return 0;
 	}
 
 	TSharedPtr<FJsonObject> RootObject;
@@ -77,7 +82,7 @@ void ABuildingGenerator::GenerateBuildings()
 	if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
 	{
 		UE_LOG(LogTemp, Error, TEXT("Failed to parse JSON"));
-		return;
+		return 0;
 	}
 
 	Scale = 1.f;
@@ -90,13 +95,15 @@ void ABuildingGenerator::GenerateBuildings()
 	if (!RootObject->TryGetArrayField(TEXT("buildings"), BuildingsArray))
 	{
 		UE_LOG(LogTemp, Error, TEXT("No 'buildings' array found in JSON"));
-		return;
+		return 0;
 	}
 
 	if (!GetWorld())
 	{
-		return;
+		return 0;
 	}
+
+	int32 SpawnedCount = 0;
 
 	for (const TSharedPtr<FJsonValue>& Value : *BuildingsArray)
 	{
@@ -143,10 +150,13 @@ void ABuildingGenerator::GenerateBuildings()
 			}
 		}
 
-		SpawnBuildingFromData(Id, Name, Footprint, FloorCount, FloorHeight, Offset);
+		if (SpawnBuildingFromData(Id, Name, Footprint, FloorCount, FloorHeight, Offset))
+		{
+			SpawnedCount++;
+		}
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("Generated %d buildings from JSON"), BuildingsArray->Num());
+	return SpawnedCount;
 }
 
 APolyBuilding* ABuildingGenerator::SpawnBuildingFromData(const FString& Id, const FString& Name, const TArray<FVector2D>& Footprint, int32 FloorCount, float FloorHeight, FVector2D Offset)

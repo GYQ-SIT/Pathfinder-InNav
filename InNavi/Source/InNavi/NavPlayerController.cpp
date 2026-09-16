@@ -10,6 +10,9 @@
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+#include "DesktopPlatformModule.h"
+#include "IDesktopPlatform.h"
+#include "Framework/Application/SlateApplication.h"
 
 ANavPlayerController::ANavPlayerController()
 {
@@ -203,7 +206,7 @@ void ANavPlayerController::AddFootprintPointUnderCursor()
 	UE_LOG(LogTemp, Warning, TEXT("Footprint point %d added: (%.1f, %.1f)"), PendingFootprint.Num(), NewPoint.X, NewPoint.Y);
 }
 
-void ANavPlayerController::FinishBuilding()
+void ANavPlayerController::FinishBuilding(const FString& CustomId, const FString& CustomName)
 {
 	if (!bBuildMode)
 	{
@@ -222,18 +225,25 @@ void ANavPlayerController::FinishBuilding()
 		return;
 	}
 
-	const FString NewId = FString::Printf(TEXT("NEW_%d"), NextNewBuildingIndex);
-	APolyBuilding* NewBuilding = Generator->SpawnBuildingFromData(NewId, NewId, PendingFootprint, 5, 300.f, FVector2D::ZeroVector);
+	// Empty CustomId/CustomName means "let the user skip naming it" - fall back to auto-numbering.
+	const bool bUsingAutoId = CustomId.IsEmpty();
+	const FString NewId = bUsingAutoId ? FString::Printf(TEXT("NEW_%d"), NextNewBuildingIndex) : CustomId;
+	const FString NewName = CustomName.IsEmpty() ? NewId : CustomName;
+
+	APolyBuilding* NewBuilding = Generator->SpawnBuildingFromData(NewId, NewName, PendingFootprint, 5, 300.f, FVector2D::ZeroVector);
 
 	if (!NewBuilding)
 	{
-		// Spawn was rejected (e.g. self-intersecting outline) - keep the drawn points and preview
-		// so the user can see what's there; Esc still cancels and starts over.
+		// Spawn was rejected (e.g. self-intersecting outline, or a typed-in id that's already taken)
+		// - keep the drawn points and preview so the user can see what's there; Esc still cancels.
 		UE_LOG(LogTemp, Warning, TEXT("Could not finish this building - see error above. Press Esc to discard and redraw."));
 		return;
 	}
 
-	NextNewBuildingIndex++;
+	if (bUsingAutoId)
+	{
+		NextNewBuildingIndex++;
+	}
 	FlushPersistentDebugLines(GetWorld());
 	PendingFootprint.Reset();
 	OnFootprintPointCountChanged.Broadcast(0);
@@ -266,6 +276,51 @@ APolyBuilding* ANavPlayerController::CreateRegularPolygonBuilding(const FString&
 	}
 
 	return Generator->CreateRegularPolygonBuilding(Id, Name, Position, Sides, Radius, RotationDegrees, FloorCount, FloorHeight);
+}
+
+int32 ANavPlayerController::ImportBuildingDataFromFile()
+{
+	if (!Generator)
+	{
+		UE_LOG(LogTemp, Error, TEXT("ImportBuildingDataFromFile: no BuildingGenerator found in the level"));
+		return 0;
+	}
+
+	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
+	if (!DesktopPlatform)
+	{
+		UE_LOG(LogTemp, Error, TEXT("ImportBuildingDataFromFile: desktop platform not available"));
+		return 0;
+	}
+
+	const void* ParentWindowHandle = nullptr;
+	if (FSlateApplication::IsInitialized())
+	{
+		TSharedPtr<SWindow> ActiveWindow = FSlateApplication::Get().GetActiveTopLevelWindow();
+		if (ActiveWindow.IsValid() && ActiveWindow->GetNativeWindow().IsValid())
+		{
+			ParentWindowHandle = ActiveWindow->GetNativeWindow()->GetOSWindowHandle();
+		}
+	}
+
+	TArray<FString> OutFiles;
+	const bool bPicked = DesktopPlatform->OpenFileDialog(
+		ParentWindowHandle,
+		TEXT("Import building data"),
+		TEXT(""),
+		TEXT(""),
+		TEXT("JSON files (*.json)|*.json"),
+		EFileDialogFlags::None,
+		OutFiles);
+
+	if (!bPicked || OutFiles.Num() == 0)
+	{
+		return 0;
+	}
+
+	const int32 Count = Generator->LoadBuildingsFromFile(OutFiles[0]);
+	UE_LOG(LogTemp, Warning, TEXT("ImportBuildingDataFromFile: loaded %d buildings from %s"), Count, *OutFiles[0]);
+	return Count;
 }
 
 void ANavPlayerController::ConfirmShapeTest()

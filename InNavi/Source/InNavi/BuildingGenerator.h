@@ -38,6 +38,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	APolyBuilding* CreateRegularPolygonBuilding(const FString& Id, const FString& Name, FVector2D Position, int32 Sides, float Radius, float RotationDegrees, int32 FloorCount, float FloorHeight);
 
+	// Parses a buildings.json-format file (same schema as Data/buildings.json - "scale",
+	// "floorHeight", "buildings": [...]) and spawns everything in it via SpawnBuildingFromData.
+	// Used both for the automatic startup load (GenerateBuildings) and for runtime import
+	// (NavPlayerController's file-dialog import). The file's top-level "scale" overwrites Scale
+	// for the whole generator (affects unit conversion for anything created afterward, including
+	// Plan A/B) - already-spawned buildings keep their existing geometry either way. Importing a
+	// second file with a different scale is not something the UI should offer without a warning.
+	// Returns how many buildings were successfully spawned.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	int32 LoadBuildingsFromFile(const FString& FilePath);
+
 protected:
 	virtual void BeginPlay() override;
 

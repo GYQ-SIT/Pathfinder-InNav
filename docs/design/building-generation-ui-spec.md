@@ -35,9 +35,13 @@ Draw mode and parameter mode are **not options on the start screen** — they're
 
 ### 2.1 Import building data
 
-The exact file-picking mechanism isn't decided yet (a real OS file dialog vs a dropdown of preset files bundled with the project) — **build against the interface below first; the picker UI can be filled in once that's decided.**
+Decided: this uses the OS's native "open file" dialog, not an in-app preset list.
 
-There is currently **no Blueprint-callable entry point for this step** — the existing `buildings.json` load happens automatically in `BuildingGenerator`'s `BeginPlay`, it isn't a runtime-callable function. Once the file-picking approach is decided I'll add a `BlueprintCallable` function `ImportBuildingData(file path)`. **For now, build out "Start from blank" and the edit-screen tools first; this part can stay a stub.**
+| UI element | Call / bind | Notes |
+|---|---|---|
+| "Import" button | `ImportBuildingDataFromFile()` | Opens the native file dialog filtered to `.json` right away — no separate "browse" step needed in UMG, the OS dialog is the browse step. Returns an `int32`: how many buildings were spawned. Returns `0` if the user cancels the dialog or the file fails to parse (see the Output Log for why) |
+
+There's no separate "confirm" step in the interface — the function only returns once the user has closed the OS dialog (picked a file or cancelled), so a single button press does the whole "pick + confirm" job. If your mockup has a two-step "choose file, then confirm" flow, you can just call this once, and use the returned count (>0) to move on to showing the loaded building list.
 
 ### 2.2 Start from blank
 
@@ -54,7 +58,8 @@ User clicks points on the ground to trace out a building outline.
 | Toggle button | `ToggleBuildMode()` | Turns draw mode on/off. Once on, clicking the ground (handled entirely in C++, nothing the UI needs to do) adds a point |
 | Toggle state indicator | Bind event `OnBuildModeChanged(bool)` | Don't poll — bind this once; the bool param is the new on/off state |
 | Point count display ("N points added") | Bind event `OnFootprintPointCountChanged(int32)` | Broadcasts the current point count after every point added, and after cancel/finish clears it back to 0 |
-| "Finish" button | `FinishBuilding()` | Needs at least 3 points to succeed; fails on a self-intersecting outline, a duplicate id, etc. (failure reason currently only goes to the Output Log — ping me if you need a failure event for an in-game toast) |
+| Building id / name text fields (optional) | Pass into `FinishBuilding` as `CustomId`/`CustomName` | Optional. Leave both empty (or don't add the fields at all) and it auto-numbers ("NEW_1", "NEW_2", ...) same as before |
+| "Finish" button | `FinishBuilding(CustomId, CustomName)` | Needs at least 3 points to succeed; fails on a self-intersecting outline, a duplicate id, etc. (failure reason currently only goes to the Output Log — ping me if you need a failure event for an in-game toast). Both params are optional and default to empty if you don't wire the text fields above |
 | "Cancel" button | `CancelBuilding()` | Clears the points drawn so far |
 
 The `B`/`Enter`/`Esc` keyboard shortcuts still work and do the same thing as the buttons above — both stay usable.
@@ -97,5 +102,4 @@ Both functions return the spawned building (success) or `nullptr` (failure, e.g.
 
 ## 6. Still open
 
-1. Exactly how "Import building data" picks a file (see 2.1) — I'll add the matching function once this is decided.
-2. Plan A failure reasons (duplicate id / self-intersecting outline / not enough points) currently only show up in the Output Log — let me know if you want a failure-reason event so the UI can show a proper error message.
+1. Plan A failure reasons (duplicate id / self-intersecting outline / not enough points) currently only show up in the Output Log — let me know if you want a failure-reason event so the UI can show a proper error message.

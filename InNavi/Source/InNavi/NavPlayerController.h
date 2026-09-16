@@ -35,15 +35,22 @@ public:
 	FOnBuildModeChanged OnBuildModeChanged;
 
 	// Plan A: confirm (generate from the currently drawn points) / cancel the in-progress footprint.
-	// Bind these to on-screen buttons - they do the same thing as the Enter/Esc keys.
+	// Bind Finish to an on-screen button; pass CustomId/CustomName from optional text fields if you
+	// want to let the user name the building, or leave them empty to auto-generate ("NEW_1", ...).
 	UFUNCTION(BlueprintCallable, Category = "Building")
-	void FinishBuilding();
+	void FinishBuilding(const FString& CustomId = FString(), const FString& CustomName = FString());
 
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void CancelBuilding();
 
 	UPROPERTY(BlueprintAssignable, Category = "Building")
 	FOnFootprintPointCountChanged OnFootprintPointCountChanged;
+
+	// Opens the OS "open file" dialog filtered to .json, and if the user picks one, loads it the
+	// same way the startup buildings.json is loaded. Returns how many buildings were spawned (0 if
+	// the user cancelled the dialog or the file failed to load).
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	int32 ImportBuildingDataFromFile();
 
 	// Plan B: the permanent entry points Padre's parameter form should call directly (thin
 	// pass-throughs to BuildingGenerator, so UI only ever needs a reference to the PlayerController).
