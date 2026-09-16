@@ -556,15 +556,87 @@ bool ANavPlayerController::SaveCurrentProject()
 
 	if (CurrentProjectFilePath.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("SaveCurrentProject: no current project file yet"));
-		OnActionFailed.Broadcast(TEXT("Nothing to save to yet - open an existing file first."));
-		return false;
+		// No file yet (e.g. a brand-new session) - ask where to save, same dialog Open uses.
+		const FString ChosenPath = BrowseForSaveLocation();
+		if (ChosenPath.IsEmpty())
+		{
+			// User cancelled the dialog - not a failure, nothing to report.
+			return false;
+		}
+		return SaveCurrentProjectAs(ChosenPath);
 	}
 
 	const bool bSuccess = Generator->SaveBuildingsToFile(CurrentProjectFilePath);
 	if (bSuccess)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Saved to %s"), *CurrentProjectFilePath);
+	}
+	else
+	{
+		OnActionFailed.Broadcast(TEXT("Could not save - see the Output Log for details."));
+	}
+	return bSuccess;
+}
+
+FString ANavPlayerController::BrowseForSaveLocation()
+{
+	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
+	if (!DesktopPlatform)
+	{
+		UE_LOG(LogTemp, Error, TEXT("BrowseForSaveLocation: desktop platform not available"));
+		OnActionFailed.Broadcast(TEXT("Could not open the save dialog on this system."));
+		return FString();
+	}
+
+	const void* ParentWindowHandle = nullptr;
+	if (FSlateApplication::IsInitialized())
+	{
+		TSharedPtr<SWindow> ActiveWindow = FSlateApplication::Get().GetActiveTopLevelWindow();
+		if (ActiveWindow.IsValid() && ActiveWindow->GetNativeWindow().IsValid())
+		{
+			ParentWindowHandle = ActiveWindow->GetNativeWindow()->GetOSWindowHandle();
+		}
+	}
+
+	TArray<FString> OutFiles;
+	const bool bPicked = DesktopPlatform->SaveFileDialog(
+		ParentWindowHandle,
+		TEXT("Save building data"),
+		TEXT(""),
+		TEXT("NewProject.json"),
+		TEXT("JSON files (*.json)|*.json"),
+		EFileDialogFlags::None,
+		OutFiles);
+
+	if (!bPicked || OutFiles.Num() == 0)
+	{
+		// User cancelled the dialog - not a failure, nothing to report.
+		return FString();
+	}
+
+	return OutFiles[0];
+}
+
+bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
+{
+	if (!Generator)
+	{
+		UE_LOG(LogTemp, Error, TEXT("SaveCurrentProjectAs: no BuildingGenerator found in the level"));
+		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."));
+		return false;
+	}
+
+	if (FilePath.IsEmpty())
+	{
+		OnActionFailed.Broadcast(TEXT("No save location chosen."));
+		return false;
+	}
+
+	const bool bSuccess = Generator->SaveBuildingsToFile(FilePath);
+	if (bSuccess)
+	{
+		CurrentProjectFilePath = FilePath;
+		UE_LOG(LogTemp, Warning, TEXT("Saved to %s"), *FilePath);
 	}
 	else
 	{

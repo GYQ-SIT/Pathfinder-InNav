@@ -75,15 +75,27 @@ public:
 	int32 LoadBuildingDataFromPath(const FString& FilePath);
 
 	// The file Ctrl+S / SaveCurrentProject saves to. Set automatically after a successful
-	// LoadBuildingDataFromPath (Open); empty otherwise (e.g. right after New, until a "Save As"
-	// flow gives it one - not built yet).
+	// LoadBuildingDataFromPath (Open) or the first SaveCurrentProject on a brand-new (New) session.
 	UFUNCTION(BlueprintPure, Category = "Building")
 	FString GetCurrentProjectFilePath() const { return CurrentProjectFilePath; }
 
-	// Saves every currently-spawned building back to GetCurrentProjectFilePath() (bound to Ctrl+S).
-	// Fails if there's no current project file yet. Returns true on success.
+	// Saves every currently-spawned building (bound to Ctrl+S). If there's no current project file
+	// yet (e.g. a New session), this opens the OS "save file" dialog first (same as BrowseForSaveLocation)
+	// and remembers whatever the user picks; otherwise it saves straight to GetCurrentProjectFilePath().
+	// Returns true on success; false if the user cancelled the dialog or the save failed.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	bool SaveCurrentProject();
+
+	// Opens the OS "save file" dialog and returns the path picked (empty if cancelled). Doesn't save
+	// anything - SaveCurrentProject already calls this automatically when needed, so most UI never
+	// needs to call it directly. Exposed for an explicit "Save As" button later.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	FString BrowseForSaveLocation();
+
+	// Saves to an explicit path (e.g. one BrowseForSaveLocation returned) and makes it the current
+	// project file, so later Ctrl+S calls reuse it without re-prompting. Returns true on success.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	bool SaveCurrentProjectAs(const FString& FilePath);
 
 	// Plan B: the permanent entry points Padre's parameter form should call directly (thin
 	// pass-throughs to BuildingGenerator, so UI only ever needs a reference to the PlayerController).
