@@ -624,6 +624,28 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 	return Wall;
 }
 
+bool AInteriorGenerator::DeleteRoom(const FString& RoomId)
+{
+	for (auto& Pair : RoomsByFloor)
+	{
+		TArray<AInteriorRoom*>& Rooms = Pair.Value.Rooms;
+		for (int32 i = 0; i < Rooms.Num(); i++)
+		{
+			if (Rooms[i] && Rooms[i]->RoomId == RoomId)
+			{
+				Rooms[i]->Destroy();
+				Rooms.RemoveAt(i);
+				UsedRoomIds.Remove(RoomId);
+				UE_LOG(LogTemp, Warning, TEXT("Deleted room/wall %s"), *RoomId);
+				return true;
+			}
+		}
+	}
+
+	UE_LOG(LogTemp, Error, TEXT("DeleteRoom: '%s' not found"), *RoomId);
+	return false;
+}
+
 TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 {
 	TSharedRef<FJsonObject> InteriorObject = MakeShared<FJsonObject>();

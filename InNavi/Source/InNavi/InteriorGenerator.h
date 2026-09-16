@@ -112,6 +112,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	FString PeekNextRoomId() const;
 
+	// Removes a single room/wall by id, on whichever floor it's on - destroys its actor and forgets
+	// its id (so it can be reused). Only ever removes something tracked here (a room or standalone
+	// wall); the exterior building outline is a separate actor (APolyBuilding) this never touches.
+	// Returns false if no room/wall with that id currently exists.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool DeleteRoom(const FString& RoomId);
+
 	// Nav nodes (Path Node/Elevator/Stairs) for the currently loaded building, all floors. Not yet
 	// turned into actors - representation is pending alignment with the navigation
 	// (NavMesh/NavLinks) team on what they actually need to consume.

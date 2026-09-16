@@ -17,6 +17,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildModeChanged, bool, bNewBuild
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnShapeModeChanged, bool, bNewShapeMode);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDrawRoomModeChanged, bool, bNewDrawRoomMode);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDrawWallModeChanged, bool, bNewDrawWallMode);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDeleteModeChanged, bool, bNewDeleteMode);
 // Broadcast after each footprint point is added or cleared, so UI can show a live point count.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFootprintPointCountChanged, int32, PointCount);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRoomPointCountChanged, int32, PointCount);
@@ -185,6 +186,24 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	const TArray<FVector2D>& GetPendingRoomFootprint() const { return PendingRoomFootprint; }
 
+	// Delete mode: click a room/wall on the 2D floor plan canvas to remove it entirely (the exterior
+	// building outline is a separate actor this never touches - only rooms/walls tracked by
+	// InteriorGenerator can be deleted this way). Mutually exclusive with build mode / shape test
+	// mode / draw room mode / draw wall mode. Bound to the Q key for now, not wired into UMG yet.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void ToggleDeleteMode();
+
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool IsInDeleteMode() const { return bDeleteMode; }
+
+	UPROPERTY(BlueprintAssignable, Category = "Interior")
+	FOnDeleteModeChanged OnDeleteModeChanged;
+
+	// Removes a single room/wall by id (see AInteriorGenerator::DeleteRoom) - the 2D floor plan
+	// canvas's delete-mode click handler calls this after finding which room/wall was clicked.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool DeleteRoom(const FString& RoomId);
+
 	// Draws a standalone open wall/partition line instead of a closed room - same point-clicking
 	// mechanism as draw room mode (shares OnRoomPointCountChanged for the live point count), just a
 	// separate mode/key so a UI button (or the L key, for now) can trigger it independently.
@@ -317,11 +336,17 @@ private:
 	// (FinishRoom vs FinishWall) and whether the result is a closed loop.
 	bool bDrawWallMode = false;
 
+	bool bDeleteMode = false;
+
 	// Turns off whichever of draw room mode / draw wall mode is currently active, from any path
 	// (self-toggle, or another mode taking over) - clears pending points. Clicks reaching the right
 	// floor's ground plane is handled per-section on the building itself (see
 	// APolyBuilding::SetVisibleInteriorLevel), not here.
 	void ExitDrawRoomMode();
+
+	// Turns off delete mode if it's currently active - called by every other mode's toggle (so
+	// entering build/draw-room/draw-wall/shape-test mode exits delete mode) and by OnCancelPressed.
+	void ExitDeleteMode();
 
 	// Snaps the possessed pawn to a top-down view of the given building's currently active floor -
 	// called automatically after a successful LoadInteriorForBuilding, so the interior screen shows

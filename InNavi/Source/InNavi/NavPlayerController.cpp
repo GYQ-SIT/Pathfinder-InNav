@@ -76,6 +76,7 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::X, IE_Pressed, this, &ANavPlayerController::RemoveActiveInteriorFloor);
 	InputComponent->BindKey(EKeys::P, IE_Pressed, this, &ANavPlayerController::ToggleDrawRoomMode);
 	InputComponent->BindKey(EKeys::L, IE_Pressed, this, &ANavPlayerController::ToggleDrawWallMode);
+	InputComponent->BindKey(EKeys::Q, IE_Pressed, this, &ANavPlayerController::ToggleDeleteMode);
 	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &ANavPlayerController::OnConfirmPressed);
 	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
 	InputComponent->BindKey(FInputChord(EKeys::S, /*Shift*/false, /*Ctrl*/true, /*Alt*/false, /*Cmd*/false), IE_Pressed, this, &ANavPlayerController::SaveCurrentProjectKeyHandler);
@@ -144,6 +145,7 @@ void ANavPlayerController::ToggleBuildMode()
 	{
 		ExitDrawRoomMode();
 	}
+	ExitDeleteMode();
 
 	bBuildMode = !bBuildMode;
 	OnBuildModeChanged.Broadcast(bBuildMode);
@@ -178,6 +180,7 @@ void ANavPlayerController::ToggleShapeTestMode()
 	{
 		ExitDrawRoomMode();
 	}
+	ExitDeleteMode();
 
 	bShapeTestMode = !bShapeTestMode;
 	OnShapeModeChanged.Broadcast(bShapeTestMode);
@@ -223,6 +226,7 @@ void ANavPlayerController::ToggleDrawRoomMode()
 	{
 		ExitDrawRoomMode();
 	}
+	ExitDeleteMode();
 
 	bDrawRoomMode = true;
 	OnDrawRoomModeChanged.Broadcast(true);
@@ -261,6 +265,7 @@ void ANavPlayerController::ToggleDrawWallMode()
 	{
 		ExitDrawRoomMode();
 	}
+	ExitDeleteMode();
 
 	bDrawWallMode = true;
 	OnDrawWallModeChanged.Broadcast(true);
@@ -284,6 +289,54 @@ void ANavPlayerController::ExitDrawRoomMode()
 	}
 
 	UE_LOG(LogTemp, Warning, TEXT("Draw room/wall mode OFF"));
+}
+
+void ANavPlayerController::ExitDeleteMode()
+{
+	if (bDeleteMode)
+	{
+		bDeleteMode = false;
+		OnDeleteModeChanged.Broadcast(false);
+		UE_LOG(LogTemp, Warning, TEXT("Delete mode OFF"));
+	}
+}
+
+void ANavPlayerController::ToggleDeleteMode()
+{
+	if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("Cannot enter delete mode: no building interior currently loaded"));
+		OnActionFailed.Broadcast(TEXT("Load a building's interior first, then try deleting a room/wall."));
+		return;
+	}
+
+	if (bDeleteMode)
+	{
+		ExitDeleteMode();
+		return;
+	}
+
+	if (bBuildMode)
+	{
+		// Modes are mutually exclusive - only one should interpret Enter/Esc at a time.
+		CancelBuilding();
+		bBuildMode = false;
+		OnBuildModeChanged.Broadcast(false);
+	}
+	if (bShapeTestMode)
+	{
+		bShapeTestMode = false;
+		OnShapeModeChanged.Broadcast(false);
+	}
+	if (bDrawRoomMode || bDrawWallMode)
+	{
+		ExitDrawRoomMode();
+	}
+
+	bDeleteMode = true;
+	OnDeleteModeChanged.Broadcast(true);
+
+	UE_LOG(LogTemp, Warning, TEXT("Delete mode ON (floor %d): click a room/wall on the 2D canvas to delete it, Esc/Q to exit"), InteriorGen->GetActiveFloor());
 }
 
 void ANavPlayerController::OnConfirmPressed()
@@ -325,6 +378,10 @@ void ANavPlayerController::OnCancelPressed()
 	else if (bDrawWallMode)
 	{
 		CancelWall();
+	}
+	else if (bDeleteMode)
+	{
+		ExitDeleteMode();
 	}
 }
 
@@ -448,6 +505,26 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 	OnRoomPointCountChanged.Broadcast(PendingRoomFootprint.Num());
 
 	UE_LOG(LogTemp, Warning, TEXT("Room point %d added: (%.1f, %.1f)"), PendingRoomFootprint.Num(), FootprintPoint.X, FootprintPoint.Y);
+}
+
+bool ANavPlayerController::DeleteRoom(const FString& RoomId)
+{
+	if (!InteriorGen)
+	{
+		OnActionFailed.Broadcast(TEXT("No InteriorGenerator placed in the level."));
+		return false;
+	}
+
+	const bool bSuccess = InteriorGen->DeleteRoom(RoomId);
+	if (!bSuccess)
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not delete '%s' - it may no longer exist."), *RoomId));
+	}
+	else
+	{
+		bHasUnsavedChanges = true;
+	}
+	return bSuccess;
 }
 
 AInteriorRoom* ANavPlayerController::FinishRoom(const FString& RoomId, const FString& RoomName, bool bIsPublic, bool bRequiresKey)
@@ -680,6 +757,7 @@ void ANavPlayerController::StartNewProject()
 	PendingFootprint.Reset();
 	bDrawRoomMode = false;
 	bDrawWallMode = false;
+	bDeleteMode = false;
 	PendingRoomFootprint.Reset();
 	SelectedBuilding = nullptr;
 
@@ -780,12 +858,13 @@ void ANavPlayerController::RepositionCameraToActiveFloor()
 
 void ANavPlayerController::RestoreExteriorCameraView()
 {
-	// Leaving interior editing entirely - cancel any in-progress draw room/wall mode so it doesn't
-	// keep intercepting clicks/Enter/Esc on whatever screen comes next.
+	// Leaving interior editing entirely - cancel any in-progress draw room/wall/delete mode so it
+	// doesn't keep intercepting clicks/Enter/Esc on whatever screen comes next.
 	if (bDrawRoomMode || bDrawWallMode)
 	{
 		ExitDrawRoomMode();
 	}
+	ExitDeleteMode();
 
 	if (!InteriorBuildingHiddenById.IsEmpty() && Generator)
 	{

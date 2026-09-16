@@ -9,6 +9,7 @@
 class AInteriorGenerator;
 class ABuildingGenerator;
 class ANavPlayerController;
+class AInteriorRoom;
 
 // A true 2D top-down floor plan view of the currently loaded building's active floor - draws the
 // exterior boundary and each room/wall's outline directly as 2D lines (no 3D camera or mesh
@@ -48,6 +49,11 @@ private:
 	// OutOrigin is the world-space point that maps to the widget's center;
 	// OutPixelsPerUnit is world units to screen pixels.
 	void ComputeViewTransform(FVector2D WidgetSize, FVector2D& OutOrigin, float& OutPixelsPerUnit) const;
+
+	// Delete mode: finds whichever room/wall on the active floor has an edge within a few pixels of
+	// LocalPosition, or nullptr if none does. Never matches the exterior building outline itself -
+	// that's a separate actor (APolyBuilding), not one of InteriorGenerator's rooms/walls.
+	AInteriorRoom* FindRoomNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize) const;
 
 	UPROPERTY()
 	AInteriorGenerator* InteriorGen;

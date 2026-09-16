@@ -36,12 +36,97 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 	if (PlayerController && InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 	{
 		const FVector2D LocalPosition = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+
+		if (PlayerController->IsInDeleteMode())
+		{
+			if (AInteriorRoom* Room = FindRoomNearLocalPosition(LocalPosition, InGeometry.GetLocalSize()))
+			{
+				PlayerController->DeleteRoom(Room->RoomId);
+			}
+			return FReply::Handled();
+		}
+
 		const FVector2D FootprintPoint = LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize());
 		PlayerController->AddRoomPointAtFootprintPosition(FootprintPoint);
 		return FReply::Handled();
 	}
 
 	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+}
+
+// ---- Helper: shortest distance from Point to segment AB, in whatever 2D space they're all in ----
+static float DistancePointToSegment2D(const FVector2D& Point, const FVector2D& A, const FVector2D& B)
+{
+	const FVector2D AB = B - A;
+	const float LengthSq = AB.SizeSquared();
+	if (LengthSq < KINDA_SMALL_NUMBER)
+	{
+		return FVector2D::Distance(Point, A);
+	}
+
+	const float T = FMath::Clamp(FVector2D::DotProduct(Point - A, AB) / LengthSq, 0.f, 1.f);
+	return FVector2D::Distance(Point, A + AB * T);
+}
+
+AInteriorRoom* UInteriorFloorPlanWidget::FindRoomNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize) const
+{
+	if (!InteriorGen || !Generator)
+	{
+		return nullptr;
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building)
+	{
+		return nullptr;
+	}
+
+	FVector2D Origin;
+	float PixelsPerUnit;
+	ComputeViewTransform(WidgetSize, Origin, PixelsPerUnit);
+
+	const float Scale = Generator->GetScale();
+	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
+	{
+		return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+	};
+
+	constexpr float ClickTolerancePixels = 10.f;
+
+	for (AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
+	{
+		if (!Room)
+		{
+			continue;
+		}
+
+		const TArray<FVector2D>& Footprint = Room->GetFootprint();
+		const int32 N = Footprint.Num();
+		if (N < 2)
+		{
+			continue;
+		}
+
+		TArray<FVector2D> LocalPoints;
+		LocalPoints.Reserve(N);
+		for (const FVector2D& Point : Footprint)
+		{
+			LocalPoints.Add(WorldToLocal((Point + Building->BuildingOffset) * Scale));
+		}
+
+		const int32 NumEdges = Room->IsClosedLoop() ? N : N - 1;
+		for (int32 i = 0; i < NumEdges; i++)
+		{
+			const FVector2D& A = LocalPoints[i];
+			const FVector2D& B = LocalPoints[(i + 1) % N];
+			if (DistancePointToSegment2D(LocalPosition, A, B) <= ClickTolerancePixels)
+			{
+				return Room;
+			}
+		}
+	}
+
+	return nullptr;
 }
 
 void UInteriorFloorPlanWidget::ComputeViewTransform(FVector2D WidgetSize, FVector2D& OutOrigin, float& OutPixelsPerUnit) const
