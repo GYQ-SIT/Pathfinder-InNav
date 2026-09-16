@@ -72,6 +72,20 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	FString GetLoadedBuildingId() const { return LoadedBuildingId; }
 
+	// Plan A-for-interiors: builds a room on the currently active floor of the currently loaded
+	// building from a freehand-drawn footprint (reuses the active floor's wallHeight/wallThickness;
+	// no openings - those come later from the window/void tools). RoomId/RoomName are optional -
+	// leave empty to auto-generate an id matching the {Building}-{Floor:2}-{Room:2} convention.
+	// Fails (returns nullptr) if nothing is loaded, the footprint is invalid/self-intersecting, or
+	// RoomId is already taken.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	AInteriorRoom* CreateRoomFromFootprint(const TArray<FVector2D>& Footprint, const FString& RoomId, const FString& RoomName, bool bIsPublic, bool bRequiresKey);
+
+	// The id CreateRoomFromFootprint would auto-generate right now if given an empty RoomId -
+	// exposed so UI can show it as a placeholder/default in the "Create Room" form.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	FString PeekNextRoomId() const;
+
 	// Nav nodes (Path Node/Elevator/Stairs) for the currently loaded building, all floors. Not yet
 	// turned into actors - representation is pending alignment with the navigation
 	// (NavMesh/NavLinks) team on what they actually need to consume.
@@ -99,4 +113,8 @@ private:
 	// Wall defaults per loaded floor, keyed by level - kept around after the JSON parse so
 	// AddFloor has something sensible to inherit.
 	TMap<int32, FInteriorFloorInfo> FloorInfoByLevel;
+
+	// Room ids in use for the currently loaded building, for CreateRoomFromFootprint's uniqueness
+	// check. Cleared whenever a different building is loaded.
+	TSet<FString> UsedRoomIds;
 };

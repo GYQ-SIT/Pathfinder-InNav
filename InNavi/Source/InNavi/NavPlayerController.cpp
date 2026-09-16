@@ -5,6 +5,7 @@
 #include "PolyBuilding.h"
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
+#include "InteriorRoom.h"
 #include "EngineUtils.h"
 #include "DrawDebugHelpers.h"
 #include "Misc/FileHelper.h"
@@ -20,6 +21,7 @@ ANavPlayerController::ANavPlayerController()
 	SelectedBuilding = nullptr;
 	Generator = nullptr;
 	InteriorGen = nullptr;
+	RoomDrawingBuilding = nullptr;
 }
 
 void ANavPlayerController::BeginPlay()
@@ -55,6 +57,7 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::RightBracket, IE_Pressed, this, &ANavPlayerController::CycleInteriorFloorDown);
 	InputComponent->BindKey(EKeys::F, IE_Pressed, this, &ANavPlayerController::AddInteriorFloor);
 	InputComponent->BindKey(EKeys::X, IE_Pressed, this, &ANavPlayerController::RemoveActiveInteriorFloor);
+	InputComponent->BindKey(EKeys::P, IE_Pressed, this, &ANavPlayerController::ToggleDrawRoomMode);
 	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &ANavPlayerController::OnConfirmPressed);
 	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
 }
@@ -64,6 +67,10 @@ void ANavPlayerController::OnClick()
 	if (bBuildMode)
 	{
 		AddFootprintPointUnderCursor();
+	}
+	else if (bDrawRoomMode)
+	{
+		AddRoomPointUnderCursor();
 	}
 	else
 	{
@@ -108,6 +115,10 @@ void ANavPlayerController::ToggleBuildMode()
 		bShapeTestMode = false;
 		OnShapeModeChanged.Broadcast(false);
 	}
+	if (bDrawRoomMode)
+	{
+		ExitDrawRoomMode();
+	}
 
 	bBuildMode = !bBuildMode;
 	OnBuildModeChanged.Broadcast(bBuildMode);
@@ -138,6 +149,10 @@ void ANavPlayerController::ToggleShapeTestMode()
 		bBuildMode = false;
 		OnBuildModeChanged.Broadcast(false);
 	}
+	if (bDrawRoomMode)
+	{
+		ExitDrawRoomMode();
+	}
 
 	bShapeTestMode = !bShapeTestMode;
 	OnShapeModeChanged.Broadcast(bShapeTestMode);
@@ -152,6 +167,63 @@ void ANavPlayerController::ToggleShapeTestMode()
 	}
 }
 
+void ANavPlayerController::ToggleDrawRoomMode()
+{
+	if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("Cannot enter draw room mode: no building interior currently loaded"));
+		return;
+	}
+
+	if (bDrawRoomMode)
+	{
+		ExitDrawRoomMode();
+		return;
+	}
+
+	if (bBuildMode)
+	{
+		// Modes are mutually exclusive - only one should interpret Enter/Esc at a time.
+		CancelBuilding();
+		bBuildMode = false;
+		OnBuildModeChanged.Broadcast(false);
+	}
+	if (bShapeTestMode)
+	{
+		bShapeTestMode = false;
+		OnShapeModeChanged.Broadcast(false);
+	}
+
+	bDrawRoomMode = true;
+	OnDrawRoomModeChanged.Broadcast(true);
+
+	// Temporarily disable the loaded building's collision so clicks can reach the ground plane
+	// inside its footprint - otherwise the solid exterior shell blocks the raycast before it gets
+	// there. Restored in ExitDrawRoomMode.
+	RoomDrawingBuilding = Generator ? Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()) : nullptr;
+	if (RoomDrawingBuilding)
+	{
+		RoomDrawingBuilding->SetActorEnableCollision(false);
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("Draw room mode ON (floor %d): click to add footprint points, Enter to finish, Esc to cancel"), InteriorGen->GetActiveFloor());
+}
+
+void ANavPlayerController::ExitDrawRoomMode()
+{
+	CancelRoom();
+	bDrawRoomMode = false;
+	OnDrawRoomModeChanged.Broadcast(false);
+
+	if (RoomDrawingBuilding)
+	{
+		RoomDrawingBuilding->SetActorEnableCollision(true);
+		RoomDrawingBuilding = nullptr;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("Draw room mode OFF"));
+}
+
 void ANavPlayerController::OnConfirmPressed()
 {
 	if (bBuildMode)
@@ -161,6 +233,10 @@ void ANavPlayerController::OnConfirmPressed()
 	else if (bShapeTestMode)
 	{
 		ConfirmShapeTest();
+	}
+	else if (bDrawRoomMode)
+	{
+		FinishRoom();
 	}
 }
 
@@ -175,6 +251,10 @@ void ANavPlayerController::OnCancelPressed()
 		bShapeTestMode = false;
 		OnShapeModeChanged.Broadcast(false);
 		UE_LOG(LogTemp, Warning, TEXT("Shape test mode OFF"));
+	}
+	else if (bDrawRoomMode)
+	{
+		CancelRoom();
 	}
 }
 
@@ -267,6 +347,89 @@ void ANavPlayerController::CancelBuilding()
 	FlushPersistentDebugLines(GetWorld());
 	PendingFootprint.Reset();
 	OnFootprintPointCountChanged.Broadcast(0);
+}
+
+void ANavPlayerController::AddRoomPointUnderCursor()
+{
+	if (!InteriorGen)
+	{
+		return;
+	}
+
+	FHitResult Hit;
+	GetHitResultUnderCursor(ECC_Visibility, false, Hit);
+
+	if (!Hit.bBlockingHit)
+	{
+		return;
+	}
+
+	if (Cast<APolyBuilding>(Hit.GetActor()) || Cast<AInteriorRoom>(Hit.GetActor()))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Click on the ground to add a room point, not on a building or another room"));
+		return;
+	}
+
+	// CreateRoomFromFootprint multiplies the footprint by Generator's Scale, but Hit.Location is
+	// already in final world-space units, so divide it back out before storing the point.
+	const float Scale = Generator ? Generator->GetScale() : 1.f;
+	const FVector2D NewPoint(Hit.Location.X / Scale, Hit.Location.Y / Scale);
+
+	if (PendingRoomFootprint.Num() > 0)
+	{
+		// Prev is stored unscaled (see above) - scale it back up to world space to draw it correctly.
+		const FVector2D& Prev = PendingRoomFootprint.Last();
+		const FVector PrevWorld(Prev.X * Scale, Prev.Y * Scale, Hit.Location.Z);
+		DrawDebugLine(GetWorld(), PrevWorld, Hit.Location, FColor::Cyan, true, -1.f, 0, 5.f);
+	}
+	DrawDebugSphere(GetWorld(), Hit.Location, 20.f, 8, FColor::Cyan, true);
+
+	PendingRoomFootprint.Add(NewPoint);
+	OnRoomPointCountChanged.Broadcast(PendingRoomFootprint.Num());
+
+	UE_LOG(LogTemp, Warning, TEXT("Room point %d added: (%.1f, %.1f)"), PendingRoomFootprint.Num(), NewPoint.X, NewPoint.Y);
+}
+
+AInteriorRoom* ANavPlayerController::FinishRoom(const FString& RoomId, const FString& RoomName, bool bIsPublic, bool bRequiresKey)
+{
+	if (!bDrawRoomMode)
+	{
+		return nullptr;
+	}
+
+	if (PendingRoomFootprint.Num() < 3)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Need at least 3 points to finish a room (have %d)"), PendingRoomFootprint.Num());
+		return nullptr;
+	}
+
+	if (!InteriorGen)
+	{
+		UE_LOG(LogTemp, Error, TEXT("No InteriorGenerator found in the level"));
+		return nullptr;
+	}
+
+	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(PendingRoomFootprint, RoomId, RoomName, bIsPublic, bRequiresKey);
+
+	if (!NewRoom)
+	{
+		// Spawn was rejected (e.g. self-intersecting outline, or a typed-in id that's already
+		// taken) - keep the drawn points and preview so the user can see what's there; Esc cancels.
+		UE_LOG(LogTemp, Warning, TEXT("Could not finish this room - see error above. Press Esc to discard and redraw."));
+		return nullptr;
+	}
+
+	FlushPersistentDebugLines(GetWorld());
+	PendingRoomFootprint.Reset();
+	OnRoomPointCountChanged.Broadcast(0);
+	return NewRoom;
+}
+
+void ANavPlayerController::CancelRoom()
+{
+	FlushPersistentDebugLines(GetWorld());
+	PendingRoomFootprint.Reset();
+	OnRoomPointCountChanged.Broadcast(0);
 }
 
 APolyBuilding* ANavPlayerController::CreateRectangleBuilding(const FString& Id, const FString& Name, FVector2D Position, float Width, float Depth, float RotationDegrees, int32 FloorCount, float FloorHeight)

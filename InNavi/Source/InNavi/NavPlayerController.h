@@ -9,12 +9,15 @@
 class APolyBuilding;
 class ABuildingGenerator;
 class AInteriorGenerator;
+class AInteriorRoom;
 
 // Broadcast whenever build mode turns on/off, so UI can show an indicator without polling every tick.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildModeChanged, bool, bNewBuildMode);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnShapeModeChanged, bool, bNewShapeMode);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDrawRoomModeChanged, bool, bNewDrawRoomMode);
 // Broadcast after each footprint point is added or cleared, so UI can show a live point count.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFootprintPointCountChanged, int32, PointCount);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRoomPointCountChanged, int32, PointCount);
 
 UCLASS()
 class INNAVI_API ANavPlayerController : public APlayerController
@@ -71,6 +74,32 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Building")
 	FOnShapeModeChanged OnShapeModeChanged;
 
+	// Plan A-for-interiors (Phase 3): draws a room's footprint on the currently active floor of the
+	// currently loaded building, the same way build mode draws a building's footprint. Mutually
+	// exclusive with build mode / shape test mode. Fails to turn on if no building interior is
+	// currently loaded (see InteriorGenerator::LoadInteriorForBuilding).
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void ToggleDrawRoomMode();
+
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool IsInDrawRoomMode() const { return bDrawRoomMode; }
+
+	UPROPERTY(BlueprintAssignable, Category = "Interior")
+	FOnDrawRoomModeChanged OnDrawRoomModeChanged;
+
+	// Confirm (generate from the currently drawn points) / cancel the in-progress room footprint.
+	// RoomId/RoomName/bIsPublic/bRequiresKey feed the "Create Room" prompt; leave RoomId empty to
+	// auto-generate one matching the {Building}-{Floor:2}-{Room:2} convention
+	// (InteriorGenerator::PeekNextRoomId() previews it).
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	AInteriorRoom* FinishRoom(const FString& RoomId = FString(), const FString& RoomName = FString(), bool bIsPublic = true, bool bRequiresKey = false);
+
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void CancelRoom();
+
+	UPROPERTY(BlueprintAssignable, Category = "Interior")
+	FOnRoomPointCountChanged OnRoomPointCountChanged;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
@@ -83,6 +112,10 @@ private:
 	// Build mode (Plan A): click to trace out a new building's footprint on the ground.
 	// FinishBuilding/CancelBuilding are declared public above (Blueprint-callable).
 	void AddFootprintPointUnderCursor();
+
+	// Draw room mode (Phase 3): click to trace out a new room's footprint on the ground.
+	// FinishRoom/CancelRoom are declared public above (Blueprint-callable).
+	void AddRoomPointUnderCursor();
 
 	// Shape test mode (Plan B): TEMPORARY stand-in for Padre's UI form. Reads
 	// Data/test_shape_params.json (a "shape" field picks rectangle vs regular polygon) and calls
@@ -132,4 +165,17 @@ private:
 	int32 NextNewBuildingIndex = 1;
 
 	bool bShapeTestMode = false;
+
+	bool bDrawRoomMode = false;
+	TArray<FVector2D> PendingRoomFootprint;
+
+	// Whichever building had its collision disabled to let draw-room clicks reach the ground
+	// plane inside its footprint (the solid exterior shell would otherwise block the raycast
+	// before it gets there). Restored and cleared whenever draw room mode ends.
+	UPROPERTY()
+	APolyBuilding* RoomDrawingBuilding;
+
+	// Turns draw room mode off from any path (self-toggle, or another mode taking over) -
+	// restores RoomDrawingBuilding's collision and clears pending points.
+	void ExitDrawRoomMode();
 };

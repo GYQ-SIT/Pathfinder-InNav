@@ -35,6 +35,46 @@ static EInteriorOpeningType ParseOpeningType(const FString& TypeString)
 	return EInteriorOpeningType::Door;
 }
 
+// ---- Helper: do segments AB and CD properly cross each other? (mirrors BuildingGenerator.cpp) ----
+static bool SegmentsIntersect(const FVector2D& A, const FVector2D& B, const FVector2D& C, const FVector2D& D)
+{
+	auto Cross = [](const FVector2D& O, const FVector2D& P1, const FVector2D& P2)
+	{
+		return (P1.X - O.X) * (P2.Y - O.Y) - (P1.Y - O.Y) * (P2.X - O.X);
+	};
+
+	const float d1 = Cross(C, D, A);
+	const float d2 = Cross(C, D, B);
+	const float d3 = Cross(A, B, C);
+	const float d4 = Cross(A, B, D);
+
+	return ((d1 > 0.f) != (d2 > 0.f)) && ((d3 > 0.f) != (d4 > 0.f));
+}
+
+// ---- Helper: does this polygon's outline cross itself? (non-adjacent edges only) ----
+static bool PolygonSelfIntersects(const TArray<FVector2D>& Poly)
+{
+	const int32 N = Poly.Num();
+	for (int32 i = 0; i < N; i++)
+	{
+		const int32 iNext = (i + 1) % N;
+		for (int32 j = i + 1; j < N; j++)
+		{
+			const int32 jNext = (j + 1) % N;
+			if (j == iNext || jNext == i)
+			{
+				continue;
+			}
+
+			if (SegmentsIntersect(Poly[i], Poly[iNext], Poly[j], Poly[jNext]))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 {
 	if (!Generator)
@@ -88,6 +128,7 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 	RoomsByFloor.Empty();
 	NavNodes.Empty();
 	FloorInfoByLevel.Empty();
+	UsedRoomIds.Empty();
 
 	const float Scale = Generator->GetScale();
 	const FVector2D BuildingOffset = Building->BuildingOffset;
@@ -200,6 +241,7 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 					Room->BuildWalls(Footprint, Scale, BuildingOffset, FloorBaseZ, WallHeight, WallThickness, Openings);
 
 					RoomsByFloor.FindOrAdd(Level).Rooms.Add(Room);
+					UsedRoomIds.Add(RoomId);
 					SpawnedCount++;
 				}
 			}
@@ -419,4 +461,86 @@ bool AInteriorGenerator::RemoveFloor(int32 Level)
 
 	UE_LOG(LogTemp, Warning, TEXT("Removed floor %d from %s, now %d floors"), Level, *LoadedBuildingId, NewFloorCount);
 	return true;
+}
+
+FString AInteriorGenerator::PeekNextRoomId() const
+{
+	if (LoadedBuildingId.IsEmpty())
+	{
+		return FString();
+	}
+
+	int32 NextIndex = 1;
+	if (const FInteriorRoomList* Rooms = RoomsByFloor.Find(ActiveFloor))
+	{
+		NextIndex = Rooms->Rooms.Num() + 1;
+	}
+
+	return FString::Printf(TEXT("%s-%02d-%02d"), *LoadedBuildingId, ActiveFloor, NextIndex);
+}
+
+AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2D>& Footprint, const FString& RoomId, const FString& RoomName, bool bIsPublic, bool bRequiresKey)
+{
+	if (LoadedBuildingId.IsEmpty() || !Generator)
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: no building interior currently loaded"));
+		return nullptr;
+	}
+
+	const FInteriorFloorInfo* FloorInfo = FloorInfoByLevel.Find(ActiveFloor);
+	if (!FloorInfo)
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: active floor %d doesn't exist"), ActiveFloor);
+		return nullptr;
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(LoadedBuildingId);
+	if (!Building)
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: building '%s' no longer exists"), *LoadedBuildingId);
+		return nullptr;
+	}
+
+	if (Footprint.Num() < 3)
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: needs at least 3 footprint points (has %d)"), Footprint.Num());
+		return nullptr;
+	}
+
+	if (PolygonSelfIntersects(Footprint))
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: footprint crosses itself - fix the outline before finishing"));
+		return nullptr;
+	}
+
+	const FString ResolvedId = RoomId.IsEmpty() ? PeekNextRoomId() : RoomId;
+	if (UsedRoomIds.Contains(ResolvedId))
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: room id '%s' is already in use"), *ResolvedId);
+		return nullptr;
+	}
+
+	if (!GetWorld())
+	{
+		return nullptr;
+	}
+
+	const float Scale = Generator->GetScale();
+	const float FloorBaseZ = (ActiveFloor - 1) * Building->GetFloorHeight();
+
+	AInteriorRoom* Room = GetWorld()->SpawnActor<AInteriorRoom>(FVector::ZeroVector, FRotator::ZeroRotator);
+	if (Room)
+	{
+		Room->RoomId = ResolvedId;
+		Room->RoomName = RoomName.IsEmpty() ? ResolvedId : RoomName;
+		Room->FloorLevel = ActiveFloor;
+		Room->bIsPublic = bIsPublic;
+		Room->bRequiresKey = bRequiresKey;
+		Room->BuildWalls(Footprint, Scale, Building->BuildingOffset, FloorBaseZ, FloorInfo->WallHeight, FloorInfo->WallThickness, TArray<FInteriorOpening>());
+
+		RoomsByFloor.FindOrAdd(ActiveFloor).Rooms.Add(Room);
+		UsedRoomIds.Add(ResolvedId);
+	}
+
+	return Room;
 }
