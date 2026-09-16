@@ -39,8 +39,15 @@ protected:
 
 	// Left-click anywhere on the canvas feeds the click straight into
 	// ANavPlayerController::AddRoomPointAtFootprintPosition (a no-op unless draw room/wall mode is
-	// active) - no Blueprint wiring needed for this, it's handled entirely here.
+	// active) - no Blueprint wiring needed for this, it's handled entirely here. Right-click starts
+	// panning the view (see PanOffset below).
 	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+
+	// Mouse wheel zooms in/out (see ZoomMultiplier below), centered on the current view rather than
+	// the cursor position.
+	virtual FReply NativeOnMouseWheel(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 
 private:
 	// The view is auto-framed to fit the loaded building's footprint into WidgetSize (with a
@@ -63,4 +70,16 @@ private:
 
 	UPROPERTY()
 	ANavPlayerController* PlayerController;
+
+	// Manual pan offset (world units), added on top of the auto-framed center - right-click-drag
+	// adjusts this; ComputeViewTransform folds it into the origin it returns.
+	FVector2D PanOffset = FVector2D::ZeroVector;
+
+	bool bIsPanning = false;
+	FVector2D PanStartLocalPosition = FVector2D::ZeroVector;
+	FVector2D PanStartOffset = FVector2D::ZeroVector;
+
+	// Multiplies the auto-fit pixels-per-unit from ComputeViewTransform - 1 = the auto-fit size,
+	// >1 = zoomed in, <1 = zoomed out. Adjusted by the mouse wheel.
+	float ZoomMultiplier = 1.f;
 };

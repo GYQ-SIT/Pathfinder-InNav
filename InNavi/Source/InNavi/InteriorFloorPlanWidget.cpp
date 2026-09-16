@@ -33,6 +33,14 @@ void UInteriorFloorPlanWidget::NativeConstruct()
 
 FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
+	if (InMouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
+	{
+		bIsPanning = true;
+		PanStartLocalPosition = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+		PanStartOffset = PanOffset;
+		return FReply::Handled().CaptureMouse(TakeWidget());
+	}
+
 	if (PlayerController && InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 	{
 		const FVector2D LocalPosition = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
@@ -52,6 +60,49 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 	}
 
 	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+}
+
+FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	if (InMouseEvent.GetEffectingButton() == EKeys::RightMouseButton && bIsPanning)
+	{
+		bIsPanning = false;
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+
+	return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
+}
+
+FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	if (bIsPanning)
+	{
+		float PixelsPerUnit;
+		FVector2D UnusedOrigin;
+		ComputeViewTransform(InGeometry.GetLocalSize(), UnusedOrigin, PixelsPerUnit);
+
+		if (PixelsPerUnit > KINDA_SMALL_NUMBER)
+		{
+			const FVector2D CurrentLocalPosition = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+			const FVector2D DeltaPixels = CurrentLocalPosition - PanStartLocalPosition;
+			// Dragging right should move the content right, i.e. the world point at the widget's
+			// center should move left by the same screen-space delta.
+			PanOffset = PanStartOffset - DeltaPixels / PixelsPerUnit;
+		}
+		return FReply::Handled();
+	}
+
+	return Super::NativeOnMouseMove(InGeometry, InMouseEvent);
+}
+
+FReply UInteriorFloorPlanWidget::NativeOnMouseWheel(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	constexpr float ZoomStep = 0.1f;
+	constexpr float MinZoom = 0.2f;
+	constexpr float MaxZoom = 5.f;
+
+	ZoomMultiplier = FMath::Clamp(ZoomMultiplier + InMouseEvent.GetWheelDelta() * ZoomStep, MinZoom, MaxZoom);
+	return FReply::Handled();
 }
 
 // ---- Helper: shortest distance from Point to segment AB, in whatever 2D space they're all in ----
@@ -163,13 +214,24 @@ void UInteriorFloorPlanWidget::ComputeViewTransform(FVector2D WidgetSize, FVecto
 		MaxPoint.Y = FMath::Max(MaxPoint.Y, WorldPoint.Y);
 	}
 
-	OutOrigin = (MinPoint + MaxPoint) * 0.5f;
+	OutOrigin = (MinPoint + MaxPoint) * 0.5f + PanOffset;
 
-	const float Span = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
-	const float SmallerDimension = FMath::Min(WidgetSize.X, WidgetSize.Y);
+	// Fit each axis of the footprint's bounding box into the matching axis of the widget, and use
+	// the tighter of the two - scales evenly (no stretching) while actually using the widget's full
+	// rectangle, rather than treating both the footprint and the widget as if they were square.
+	const float BoundingWidth = MaxPoint.X - MinPoint.X;
+	const float BoundingHeight = MaxPoint.Y - MinPoint.Y;
 	const float Margin = 0.85f; // leave ~15% breathing room around the footprint
 
-	OutPixelsPerUnit = (Span > KINDA_SMALL_NUMBER) ? (SmallerDimension * Margin) / Span : 1.f;
+	const float ScaleX = (BoundingWidth > KINDA_SMALL_NUMBER) ? (WidgetSize.X * Margin) / BoundingWidth : TNumericLimits<float>::Max();
+	const float ScaleY = (BoundingHeight > KINDA_SMALL_NUMBER) ? (WidgetSize.Y * Margin) / BoundingHeight : TNumericLimits<float>::Max();
+	OutPixelsPerUnit = FMath::Min(ScaleX, ScaleY);
+	if (OutPixelsPerUnit >= TNumericLimits<float>::Max())
+	{
+		OutPixelsPerUnit = 1.f;
+	}
+
+	OutPixelsPerUnit *= ZoomMultiplier;
 }
 
 FVector2D UInteriorFloorPlanWidget::LocalPositionToFootprintPoint(FVector2D LocalPosition, FVector2D WidgetSize) const
