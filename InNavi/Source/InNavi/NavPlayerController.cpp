@@ -106,6 +106,7 @@ void ANavPlayerController::ToggleBuildMode()
 	if (!Generator)
 	{
 		UE_LOG(LogTemp, Error, TEXT("Cannot enter build mode: no BuildingGenerator found in the level"));
+		OnActionFailed.Broadcast(TEXT("Cannot enter build mode: no BuildingGenerator found in the level."));
 		return;
 	}
 
@@ -172,6 +173,7 @@ void ANavPlayerController::ToggleDrawRoomMode()
 	if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
 	{
 		UE_LOG(LogTemp, Error, TEXT("Cannot enter draw room mode: no building interior currently loaded"));
+		OnActionFailed.Broadcast(TEXT("Load a building's interior first, then try drawing a room."));
 		return;
 	}
 
@@ -276,6 +278,7 @@ void ANavPlayerController::AddFootprintPointUnderCursor()
 	if (Cast<APolyBuilding>(Hit.GetActor()))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Click on the ground to add a footprint point, not on another building"));
+		OnActionFailed.Broadcast(TEXT("Click on the ground, not on another building."));
 		return;
 	}
 
@@ -309,12 +312,14 @@ void ANavPlayerController::FinishBuilding(const FString& CustomId, const FString
 	if (PendingFootprint.Num() < 3)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Need at least 3 points to finish a building (have %d)"), PendingFootprint.Num());
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Need at least 3 points to finish a building (have %d)."), PendingFootprint.Num()));
 		return;
 	}
 
 	if (!Generator)
 	{
 		UE_LOG(LogTemp, Error, TEXT("No BuildingGenerator found in the level"));
+		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."));
 		return;
 	}
 
@@ -330,6 +335,7 @@ void ANavPlayerController::FinishBuilding(const FString& CustomId, const FString
 		// Spawn was rejected (e.g. self-intersecting outline, or a typed-in id that's already taken)
 		// - keep the drawn points and preview so the user can see what's there; Esc still cancels.
 		UE_LOG(LogTemp, Warning, TEXT("Could not finish this building - see error above. Press Esc to discard and redraw."));
+		OnActionFailed.Broadcast(TEXT("Could not create the building - check that the id isn't already used and the outline doesn't cross itself."));
 		return;
 	}
 
@@ -367,6 +373,7 @@ void ANavPlayerController::AddRoomPointUnderCursor()
 	if (Cast<APolyBuilding>(Hit.GetActor()) || Cast<AInteriorRoom>(Hit.GetActor()))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Click on the ground to add a room point, not on a building or another room"));
+		OnActionFailed.Broadcast(TEXT("Click on the ground, not on a building or another room."));
 		return;
 	}
 
@@ -400,12 +407,14 @@ AInteriorRoom* ANavPlayerController::FinishRoom(const FString& RoomId, const FSt
 	if (PendingRoomFootprint.Num() < 3)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Need at least 3 points to finish a room (have %d)"), PendingRoomFootprint.Num());
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Need at least 3 points to finish a room (have %d)."), PendingRoomFootprint.Num()));
 		return nullptr;
 	}
 
 	if (!InteriorGen)
 	{
 		UE_LOG(LogTemp, Error, TEXT("No InteriorGenerator found in the level"));
+		OnActionFailed.Broadcast(TEXT("No InteriorGenerator found in the level."));
 		return nullptr;
 	}
 
@@ -416,6 +425,7 @@ AInteriorRoom* ANavPlayerController::FinishRoom(const FString& RoomId, const FSt
 		// Spawn was rejected (e.g. self-intersecting outline, or a typed-in id that's already
 		// taken) - keep the drawn points and preview so the user can see what's there; Esc cancels.
 		UE_LOG(LogTemp, Warning, TEXT("Could not finish this room - see error above. Press Esc to discard and redraw."));
+		OnActionFailed.Broadcast(TEXT("Could not create the room - check that the id isn't already used and the outline doesn't cross itself."));
 		return nullptr;
 	}
 
@@ -437,10 +447,16 @@ APolyBuilding* ANavPlayerController::CreateRectangleBuilding(const FString& Id, 
 	if (!Generator)
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateRectangleBuilding: no BuildingGenerator found in the level"));
+		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."));
 		return nullptr;
 	}
 
-	return Generator->CreateRectangleBuilding(Id, Name, Position, Width, Depth, RotationDegrees, FloorCount, FloorHeight);
+	APolyBuilding* Result = Generator->CreateRectangleBuilding(Id, Name, Position, Width, Depth, RotationDegrees, FloorCount, FloorHeight);
+	if (!Result)
+	{
+		OnActionFailed.Broadcast(TEXT("Could not create the building - check that the id isn't already used and the dimensions/floor count are valid."));
+	}
+	return Result;
 }
 
 APolyBuilding* ANavPlayerController::CreateRegularPolygonBuilding(const FString& Id, const FString& Name, FVector2D Position, int32 Sides, float Radius, float RotationDegrees, int32 FloorCount, float FloorHeight)
@@ -448,10 +464,16 @@ APolyBuilding* ANavPlayerController::CreateRegularPolygonBuilding(const FString&
 	if (!Generator)
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateRegularPolygonBuilding: no BuildingGenerator found in the level"));
+		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."));
 		return nullptr;
 	}
 
-	return Generator->CreateRegularPolygonBuilding(Id, Name, Position, Sides, Radius, RotationDegrees, FloorCount, FloorHeight);
+	APolyBuilding* Result = Generator->CreateRegularPolygonBuilding(Id, Name, Position, Sides, Radius, RotationDegrees, FloorCount, FloorHeight);
+	if (!Result)
+	{
+		OnActionFailed.Broadcast(TEXT("Could not create the building - check that the id isn't already used and the sides/radius/floor count are valid."));
+	}
+	return Result;
 }
 
 int32 ANavPlayerController::ImportBuildingDataFromFile()
@@ -459,6 +481,7 @@ int32 ANavPlayerController::ImportBuildingDataFromFile()
 	if (!Generator)
 	{
 		UE_LOG(LogTemp, Error, TEXT("ImportBuildingDataFromFile: no BuildingGenerator found in the level"));
+		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."));
 		return 0;
 	}
 
@@ -466,6 +489,7 @@ int32 ANavPlayerController::ImportBuildingDataFromFile()
 	if (!DesktopPlatform)
 	{
 		UE_LOG(LogTemp, Error, TEXT("ImportBuildingDataFromFile: desktop platform not available"));
+		OnActionFailed.Broadcast(TEXT("Could not open the file picker on this system."));
 		return 0;
 	}
 
@@ -491,71 +515,136 @@ int32 ANavPlayerController::ImportBuildingDataFromFile()
 
 	if (!bPicked || OutFiles.Num() == 0)
 	{
+		// User cancelled the dialog - not a failure, nothing to report.
 		return 0;
 	}
 
 	const int32 Count = Generator->LoadBuildingsFromFile(OutFiles[0]);
 	UE_LOG(LogTemp, Warning, TEXT("ImportBuildingDataFromFile: loaded %d buildings from %s"), Count, *OutFiles[0]);
+	if (Count == 0)
+	{
+		OnActionFailed.Broadcast(TEXT("No buildings were loaded from that file - check that it matches the expected JSON format."));
+	}
 	return Count;
 }
 
-void ANavPlayerController::LoadInteriorForSelectedBuilding()
+// ---- Permanent Interior pass-throughs (see header) ----
+
+int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 {
 	if (!InteriorGen)
 	{
-		UE_LOG(LogTemp, Error, TEXT("LoadInteriorForSelectedBuilding: no InteriorGenerator placed in the level"));
+		UE_LOG(LogTemp, Error, TEXT("LoadInteriorForBuilding: no InteriorGenerator placed in the level"));
+		OnActionFailed.Broadcast(TEXT("No InteriorGenerator placed in the level."));
+		return -1;
+	}
+
+	const int32 Result = InteriorGen->LoadInteriorForBuilding(BuildingId);
+	if (Result < 0)
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not load the interior for '%s' - check that Data/Interiors/%s.json exists and is valid."), *BuildingId, *BuildingId));
+	}
+	return Result;
+}
+
+void ANavPlayerController::SetActiveFloor(int32 Level)
+{
+	if (!InteriorGen)
+	{
+		OnActionFailed.Broadcast(TEXT("No InteriorGenerator placed in the level."));
 		return;
 	}
 
+	InteriorGen->SetActiveFloor(Level);
+}
+
+int32 ANavPlayerController::GetActiveFloor() const
+{
+	return InteriorGen ? InteriorGen->GetActiveFloor() : 0;
+}
+
+int32 ANavPlayerController::AddFloor()
+{
+	if (!InteriorGen)
+	{
+		OnActionFailed.Broadcast(TEXT("No InteriorGenerator placed in the level."));
+		return -1;
+	}
+
+	const int32 NewLevel = InteriorGen->AddFloor();
+	if (NewLevel < 0)
+	{
+		OnActionFailed.Broadcast(TEXT("Could not add a floor - load a building's interior first."));
+	}
+	return NewLevel;
+}
+
+bool ANavPlayerController::RemoveFloor(int32 Level)
+{
+	if (!InteriorGen)
+	{
+		OnActionFailed.Broadcast(TEXT("No InteriorGenerator placed in the level."));
+		return false;
+	}
+
+	const bool bSuccess = InteriorGen->RemoveFloor(Level);
+	if (!bSuccess)
+	{
+		OnActionFailed.Broadcast(TEXT("Could not remove that floor - it may not exist, or it's the last remaining floor."));
+	}
+	return bSuccess;
+}
+
+FString ANavPlayerController::GetLoadedBuildingId() const
+{
+	return InteriorGen ? InteriorGen->GetLoadedBuildingId() : FString();
+}
+
+FString ANavPlayerController::PeekNextRoomId() const
+{
+	return InteriorGen ? InteriorGen->PeekNextRoomId() : FString();
+}
+
+const TArray<FInteriorNavNode>& ANavPlayerController::GetNavNodes() const
+{
+	static const TArray<FInteriorNavNode> EmptyNavNodes;
+	return InteriorGen ? InteriorGen->GetNavNodes() : EmptyNavNodes;
+}
+
+// ---- TEST-ONLY keyboard hooks - route through the pass-throughs above ----
+
+void ANavPlayerController::LoadInteriorForSelectedBuilding()
+{
 	if (!SelectedBuilding)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("LoadInteriorForSelectedBuilding: click a building first"));
+		OnActionFailed.Broadcast(TEXT("Click a building first."));
 		return;
 	}
 
-	InteriorGen->LoadInteriorForBuilding(SelectedBuilding->BuildingId);
+	LoadInteriorForBuilding(SelectedBuilding->BuildingId);
 }
 
 void ANavPlayerController::CycleInteriorFloorUp()
 {
-	if (!InteriorGen)
-	{
-		return;
-	}
-
-	InteriorGen->SetActiveFloor(InteriorGen->GetActiveFloor() + 1);
-	UE_LOG(LogTemp, Warning, TEXT("Active interior floor: %d"), InteriorGen->GetActiveFloor());
+	SetActiveFloor(GetActiveFloor() + 1);
+	UE_LOG(LogTemp, Warning, TEXT("Active interior floor: %d"), GetActiveFloor());
 }
 
 void ANavPlayerController::CycleInteriorFloorDown()
 {
-	if (!InteriorGen)
-	{
-		return;
-	}
-
-	InteriorGen->SetActiveFloor(InteriorGen->GetActiveFloor() - 1);
-	UE_LOG(LogTemp, Warning, TEXT("Active interior floor: %d"), InteriorGen->GetActiveFloor());
+	SetActiveFloor(GetActiveFloor() - 1);
+	UE_LOG(LogTemp, Warning, TEXT("Active interior floor: %d"), GetActiveFloor());
 }
 
 void ANavPlayerController::AddInteriorFloor()
 {
-	if (!InteriorGen)
-	{
-		return;
-	}
-
-	InteriorGen->AddFloor();
+	AddFloor();
 }
 
 void ANavPlayerController::RemoveActiveInteriorFloor()
 {
-	if (!InteriorGen)
-	{
-		return;
-	}
-
-	InteriorGen->RemoveFloor(InteriorGen->GetActiveFloor());
+	RemoveFloor(GetActiveFloor());
 }
 
 void ANavPlayerController::ConfirmShapeTest()

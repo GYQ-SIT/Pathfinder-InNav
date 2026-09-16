@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "InteriorTypes.h"
 #include "NavPlayerController.generated.h"
 
 class APolyBuilding;
@@ -18,6 +19,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDrawRoomModeChanged, bool, bNewDr
 // Broadcast after each footprint point is added or cleared, so UI can show a live point count.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFootprintPointCountChanged, int32, PointCount);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRoomPointCountChanged, int32, PointCount);
+// Broadcast whenever a user-triggered action fails (a button press that did nothing), with a
+// short human-readable reason. UE_LOG still gets the detailed message for developers; this is
+// the same idea aimed at UI - bind it once to show a toast/message, since a packaged game has no
+// visible Output Log. Not exhaustive, but covers the common "why didn't anything happen" cases.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnActionFailed, FString, Reason);
 
 UCLASS()
 class INNAVI_API ANavPlayerController : public APlayerController
@@ -26,6 +32,11 @@ class INNAVI_API ANavPlayerController : public APlayerController
 
 public:
 	ANavPlayerController();
+
+	// Bind this once to catch every failed action (see FOnActionFailed above) instead of hunting
+	// through the Output Log.
+	UPROPERTY(BlueprintAssignable, Category = "Feedback")
+	FOnActionFailed OnActionFailed;
 
 	// Plan A (freehand footprint). Callable from Blueprint/UMG as well as the B key, so a UI
 	// button can drive this directly once one exists (e.g. for mobile, where there's no keyboard).
@@ -99,6 +110,32 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Interior")
 	FOnRoomPointCountChanged OnRoomPointCountChanged;
+
+	// Permanent pass-throughs to InteriorGenerator - same reasoning as the Building pass-throughs
+	// above: Padre's UI should never need a separate InteriorGenerator reference, just this one.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	int32 LoadInteriorForBuilding(const FString& BuildingId);
+
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void SetActiveFloor(int32 Level);
+
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	int32 GetActiveFloor() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	int32 AddFloor();
+
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool RemoveFloor(int32 Level);
+
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	FString GetLoadedBuildingId() const;
+
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	FString PeekNextRoomId() const;
+
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	const TArray<FInteriorNavNode>& GetNavNodes() const;
 
 protected:
 	virtual void BeginPlay() override;
