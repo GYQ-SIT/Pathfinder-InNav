@@ -505,6 +505,13 @@ private:
 	// inside interior editing. No-op if nothing is loaded.
 	void RepositionCameraToActiveFloor();
 
+	// Pulls the pawn up to a tilted overview looking down at the whole building cluster's combined
+	// footprint, instead of leaving it wherever PlayerStart put it (ground/character-eye level) -
+	// called after StartNewProject and a successful LoadBuildingDataFromPath so New/Open always land
+	// on a usable view of the site rather than standing on the ground looking at nothing. With no
+	// buildings yet (a blank new project), just raises the camera above the origin instead.
+	void FocusCameraOnAllBuildings();
+
 	FVector SavedCameraLocation = FVector::ZeroVector;
 	FRotator SavedCameraRotation = FRotator::ZeroRotator;
 	bool bHasSavedCameraView = false;

@@ -202,6 +202,13 @@ APolyBuilding* ABuildingGenerator::FindBuildingById(const FString& Id) const
 	return Found ? *Found : nullptr;
 }
 
+TArray<APolyBuilding*> ABuildingGenerator::GetAllBuildings() const
+{
+	TArray<APolyBuilding*> Result;
+	BuildingsById.GenerateValueArray(Result);
+	return Result;
+}
+
 bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath) const
 {
 	TSharedRef<FJsonObject> RootObject = MakeShared<FJsonObject>();

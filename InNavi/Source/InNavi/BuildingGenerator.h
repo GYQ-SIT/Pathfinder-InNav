@@ -59,6 +59,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	APolyBuilding* FindBuildingById(const FString& Id) const;
 
+	// Every currently-spawned building, in no particular order - e.g. for framing a camera view
+	// around the whole cluster instead of just one building.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	TArray<APolyBuilding*> GetAllBuildings() const;
+
 	// Writes every currently-spawned building back out as a buildings.json-format file (the same
 	// schema LoadBuildingsFromFile reads) - the "Save" side of the Open/New + Ctrl+S save flow
 	// (see NavPlayerController::SaveCurrentProject). Each building's stored interior data (see

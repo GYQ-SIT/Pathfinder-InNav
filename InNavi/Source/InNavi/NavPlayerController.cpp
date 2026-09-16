@@ -1090,6 +1090,7 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 		// This file is now what Ctrl+S saves back to.
 		CurrentProjectFilePath = FilePath;
 		bHasUnsavedChanges = false;
+		FocusCameraOnAllBuildings();
 	}
 	return Count;
 }
@@ -1123,6 +1124,8 @@ void ANavPlayerController::StartNewProject()
 	SelectedDoorId.Empty();
 	PendingRoomFootprint.Reset();
 	SelectedBuilding = nullptr;
+
+	FocusCameraOnAllBuildings();
 
 	UE_LOG(LogTemp, Warning, TEXT("Started a new, blank project"));
 }
@@ -1217,6 +1220,56 @@ void ANavPlayerController::RepositionCameraToActiveFloor()
 	{
 		PositionCameraForFloor(Building, InteriorGen->GetActiveFloor());
 	}
+}
+
+void ANavPlayerController::FocusCameraOnAllBuildings()
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn || !Generator)
+	{
+		return;
+	}
+
+	const TArray<APolyBuilding*> Buildings = Generator->GetAllBuildings();
+	if (Buildings.Num() == 0)
+	{
+		// Nothing to frame yet (e.g. a brand new blank project) - just pull the camera up above the
+		// origin instead of leaving it wherever PlayerStart put it.
+		const FVector DefaultLocation(0.f, 0.f, 3000.f);
+		const FRotator DefaultRotation(-50.f, 0.f, 0.f);
+		ControlledPawn->SetActorLocationAndRotation(DefaultLocation, DefaultRotation);
+		SetControlRotation(DefaultRotation);
+		return;
+	}
+
+	const float Scale = Generator->GetScale();
+	FVector2D MinPoint(TNumericLimits<float>::Max(), TNumericLimits<float>::Max());
+	FVector2D MaxPoint(-TNumericLimits<float>::Max(), -TNumericLimits<float>::Max());
+	for (const APolyBuilding* Building : Buildings)
+	{
+		if (!Building)
+		{
+			continue;
+		}
+		for (const FVector2D& Point : Building->GetFootprint())
+		{
+			const FVector2D WorldPoint = (Point + Building->BuildingOffset) * Scale;
+			MinPoint.X = FMath::Min(MinPoint.X, WorldPoint.X);
+			MinPoint.Y = FMath::Min(MinPoint.Y, WorldPoint.Y);
+			MaxPoint.X = FMath::Max(MaxPoint.X, WorldPoint.X);
+			MaxPoint.Y = FMath::Max(MaxPoint.Y, WorldPoint.Y);
+		}
+	}
+
+	const FVector2D Center = (MinPoint + MaxPoint) * 0.5f;
+	const float Span = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
+	const float ViewHeight = FMath::Max(Span * 1.2f, 2000.f);
+
+	const FVector NewLocation(Center.X, Center.Y, ViewHeight);
+	const FRotator NewRotation(-50.f, 0.f, 0.f);
+
+	ControlledPawn->SetActorLocationAndRotation(NewLocation, NewRotation);
+	SetControlRotation(NewRotation);
 }
 
 void ANavPlayerController::RestoreExteriorCameraView()
