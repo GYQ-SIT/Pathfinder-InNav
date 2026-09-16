@@ -36,6 +36,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Building")
 	float GetFloorHeight() const { return FloorHeight; }
 
+	// The footprint as originally given to BuildFromFootprint (pre-scale, pre-offset units) - what
+	// SaveBuildingsToFile writes back out, so a saved-then-reloaded building round-trips exactly.
+	UFUNCTION(BlueprintPure, Category = "Building")
+	const TArray<FVector2D>& GetFootprint() const { return CachedFootprint; }
+
 	// Highlight / unhighlight this building
 	void SetHighlighted(bool bHighlighted);
 

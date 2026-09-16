@@ -6,6 +6,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
+#include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
 
 // ---- Helper: do segments AB and CD properly cross each other? ----
@@ -193,6 +194,66 @@ APolyBuilding* ABuildingGenerator::FindBuildingById(const FString& Id) const
 {
 	APolyBuilding* const* Found = BuildingsById.Find(Id);
 	return Found ? *Found : nullptr;
+}
+
+bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath) const
+{
+	TSharedRef<FJsonObject> RootObject = MakeShared<FJsonObject>();
+	RootObject->SetNumberField(TEXT("scale"), Scale);
+	RootObject->SetNumberField(TEXT("floorHeight"), 300.f);
+
+	TArray<TSharedPtr<FJsonValue>> BuildingsArray;
+	for (const auto& Pair : BuildingsById)
+	{
+		APolyBuilding* Building = Pair.Value;
+		if (!Building)
+		{
+			continue;
+		}
+
+		TSharedRef<FJsonObject> BuildingObject = MakeShared<FJsonObject>();
+		BuildingObject->SetStringField(TEXT("id"), Building->BuildingId);
+		BuildingObject->SetStringField(TEXT("name"), Building->BuildingName);
+
+		TArray<TSharedPtr<FJsonValue>> OffsetArray;
+		OffsetArray.Add(MakeShared<FJsonValueNumber>(Building->BuildingOffset.X));
+		OffsetArray.Add(MakeShared<FJsonValueNumber>(Building->BuildingOffset.Y));
+		BuildingObject->SetArrayField(TEXT("offset"), OffsetArray);
+
+		BuildingObject->SetNumberField(TEXT("floorCount"), Building->GetFloorCount());
+		BuildingObject->SetNumberField(TEXT("floorHeight"), Building->GetFloorHeight());
+
+		TArray<TSharedPtr<FJsonValue>> FootprintArray;
+		for (const FVector2D& Point : Building->GetFootprint())
+		{
+			TArray<TSharedPtr<FJsonValue>> PointArray;
+			PointArray.Add(MakeShared<FJsonValueNumber>(Point.X));
+			PointArray.Add(MakeShared<FJsonValueNumber>(Point.Y));
+			FootprintArray.Add(MakeShared<FJsonValueArray>(PointArray));
+		}
+		BuildingObject->SetArrayField(TEXT("footprint"), FootprintArray);
+
+		BuildingsArray.Add(MakeShared<FJsonValueObject>(BuildingObject));
+	}
+
+	RootObject->SetArrayField(TEXT("buildings"), BuildingsArray);
+
+	FString OutputString;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
+	if (!FJsonSerializer::Serialize(RootObject, Writer))
+	{
+		UE_LOG(LogTemp, Error, TEXT("SaveBuildingsToFile: failed to serialize JSON"));
+		return false;
+	}
+
+	if (!FFileHelper::SaveStringToFile(OutputString, *FilePath))
+	{
+		UE_LOG(LogTemp, Error, TEXT("SaveBuildingsToFile: could not write to %s"), *FilePath);
+		return false;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("SaveBuildingsToFile: saved %d buildings to %s"), BuildingsArray.Num(), *FilePath);
+	return true;
 }
 
 APolyBuilding* ABuildingGenerator::CreateRectangleBuilding(const FString& Id, const FString& Name, FVector2D Position, float Width, float Depth, float RotationDegrees, int32 FloorCount, float FloorHeight)

@@ -54,6 +54,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	APolyBuilding* FindBuildingById(const FString& Id) const;
 
+	// Writes every currently-spawned building back out as a buildings.json-format file (the same
+	// schema LoadBuildingsFromFile reads) - the "Save" side of the Open/New + Ctrl+S save flow
+	// (see NavPlayerController::SaveCurrentProject). Returns true on success.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	bool SaveBuildingsToFile(const FString& FilePath) const;
+
 private:
 	float Scale = 1.f;
 	TSet<FString> UsedBuildingIds;

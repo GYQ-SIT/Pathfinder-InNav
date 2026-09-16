@@ -69,9 +69,21 @@ public:
 
 	// Loads a buildings.json-format file from an explicit path (typically one
 	// BrowseForBuildingDataFile just returned) the same way the startup buildings.json is loaded.
+	// On success, this also becomes the file SaveCurrentProject (Ctrl+S) writes back to.
 	// Returns how many buildings were spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingDataFromPath(const FString& FilePath);
+
+	// The file Ctrl+S / SaveCurrentProject saves to. Set automatically after a successful
+	// LoadBuildingDataFromPath (Open); empty otherwise (e.g. right after New, until a "Save As"
+	// flow gives it one - not built yet).
+	UFUNCTION(BlueprintPure, Category = "Building")
+	FString GetCurrentProjectFilePath() const { return CurrentProjectFilePath; }
+
+	// Saves every currently-spawned building back to GetCurrentProjectFilePath() (bound to Ctrl+S).
+	// Fails if there's no current project file yet. Returns true on success.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	bool SaveCurrentProject();
 
 	// Plan B: the permanent entry points Padre's parameter form should call directly (thin
 	// pass-throughs to BuildingGenerator, so UI only ever needs a reference to the PlayerController).
@@ -160,6 +172,9 @@ private:
 	// FinishRoom/CancelRoom are declared public above (Blueprint-callable).
 	void AddRoomPointUnderCursor();
 
+	// Ctrl+S handler - wraps SaveCurrentProject() because key bindings require a void() signature.
+	void SaveCurrentProjectKeyHandler();
+
 	// Shape test mode (Plan B): TEMPORARY stand-in for Padre's UI form. Reads
 	// Data/test_shape_params.json (a "shape" field picks rectangle vs regular polygon) and calls
 	// the matching Generator->Create...Building(...). Delete ConfirmShapeTest + the R-key/shape-mode
@@ -202,6 +217,10 @@ private:
 	// The single InteriorGenerator placed in the level (if any); found in BeginPlay.
 	UPROPERTY()
 	AInteriorGenerator* InteriorGen;
+
+	// See GetCurrentProjectFilePath/SaveCurrentProject above.
+	UPROPERTY()
+	FString CurrentProjectFilePath;
 
 	bool bBuildMode = false;
 	TArray<FVector2D> PendingFootprint;

@@ -60,6 +60,7 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::P, IE_Pressed, this, &ANavPlayerController::ToggleDrawRoomMode);
 	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &ANavPlayerController::OnConfirmPressed);
 	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
+	InputComponent->BindKey(FInputChord(EKeys::S, /*Shift*/false, /*Ctrl*/true, /*Alt*/false, /*Cmd*/false), IE_Pressed, this, &ANavPlayerController::SaveCurrentProjectKeyHandler);
 }
 
 void ANavPlayerController::OnClick()
@@ -536,7 +537,45 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 	{
 		OnActionFailed.Broadcast(TEXT("No buildings were loaded from that file - check that it matches the expected JSON format."));
 	}
+	else
+	{
+		// This file is now what Ctrl+S saves back to.
+		CurrentProjectFilePath = FilePath;
+	}
 	return Count;
+}
+
+bool ANavPlayerController::SaveCurrentProject()
+{
+	if (!Generator)
+	{
+		UE_LOG(LogTemp, Error, TEXT("SaveCurrentProject: no BuildingGenerator found in the level"));
+		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."));
+		return false;
+	}
+
+	if (CurrentProjectFilePath.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SaveCurrentProject: no current project file yet"));
+		OnActionFailed.Broadcast(TEXT("Nothing to save to yet - open an existing file first."));
+		return false;
+	}
+
+	const bool bSuccess = Generator->SaveBuildingsToFile(CurrentProjectFilePath);
+	if (bSuccess)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Saved to %s"), *CurrentProjectFilePath);
+	}
+	else
+	{
+		OnActionFailed.Broadcast(TEXT("Could not save - see the Output Log for details."));
+	}
+	return bSuccess;
+}
+
+void ANavPlayerController::SaveCurrentProjectKeyHandler()
+{
+	SaveCurrentProject();
 }
 
 // ---- Permanent Interior pass-throughs (see header) ----
