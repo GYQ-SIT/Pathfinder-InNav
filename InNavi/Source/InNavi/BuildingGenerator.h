@@ -17,7 +17,7 @@ public:
 	ABuildingGenerator();
 
 	// Spawns one building directly from already-parsed data. Used both by JSON loading
-	// (GenerateBuildings) and by runtime building creation (e.g. NavPlayerController's build mode).
+	// (LoadBuildingsFromFile) and by runtime building creation (e.g. NavPlayerController's build mode).
 	// Returns nullptr if Id is empty, already used, or Footprint has fewer than 3 points.
 	APolyBuilding* SpawnBuildingFromData(const FString& Id, const FString& Name, const TArray<FVector2D>& Footprint, int32 FloorCount, float FloorHeight, FVector2D Offset);
 
@@ -40,8 +40,8 @@ public:
 
 	// Parses a buildings.json-format file (same schema as Data/buildings.json - "scale",
 	// "floorHeight", "buildings": [...]) and spawns everything in it via SpawnBuildingFromData.
-	// Used both for the automatic startup load (GenerateBuildings) and for runtime import
-	// (NavPlayerController's file-dialog import). The file's top-level "scale" overwrites Scale
+	// Nothing loads automatically at BeginPlay - the start screen's Open/New choice is what decides
+	// whether (and which) building data gets loaded. The file's top-level "scale" overwrites Scale
 	// for the whole generator (affects unit conversion for anything created afterward, including
 	// Plan A/B) - already-spawned buildings keep their existing geometry either way. Importing a
 	// second file with a different scale is not something the UI should offer without a warning.
@@ -54,12 +54,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	APolyBuilding* FindBuildingById(const FString& Id) const;
 
-protected:
-	virtual void BeginPlay() override;
-
 private:
-	void GenerateBuildings();
-
 	float Scale = 1.f;
 	TSet<FString> UsedBuildingIds;
 

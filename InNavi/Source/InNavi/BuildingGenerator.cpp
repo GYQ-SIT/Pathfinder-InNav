@@ -54,20 +54,6 @@ ABuildingGenerator::ABuildingGenerator()
 	PrimaryActorTick.bCanEverTick = false;
 }
 
-void ABuildingGenerator::BeginPlay()
-{
-	Super::BeginPlay();
-
-	GenerateBuildings();
-}
-
-void ABuildingGenerator::GenerateBuildings()
-{
-	const FString FilePath = FPaths::ProjectDir() / TEXT("Data") / TEXT("buildings.json");
-	const int32 Count = LoadBuildingsFromFile(FilePath);
-	UE_LOG(LogTemp, Warning, TEXT("Generated %d buildings from JSON"), Count);
-}
-
 int32 ABuildingGenerator::LoadBuildingsFromFile(const FString& FilePath)
 {
 	FString JsonString;
