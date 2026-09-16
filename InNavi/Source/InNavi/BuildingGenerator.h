@@ -7,6 +7,7 @@
 #include "BuildingGenerator.generated.h"
 
 class APolyBuilding;
+class FJsonObject;
 
 UCLASS()
 class INNAVI_API ABuildingGenerator : public AActor
@@ -45,6 +46,10 @@ public:
 	// for the whole generator (affects unit conversion for anything created afterward, including
 	// Plan A/B) - already-spawned buildings keep their existing geometry either way. Importing a
 	// second file with a different scale is not something the UI should offer without a warning.
+	// Each building entry may carry an optional "interior" sub-object - this is stashed (not
+	// interpreted) per id for InteriorGenerator to read via GetInteriorDataForBuilding, so a
+	// building's interior is bound to the specific project file it came from, not just its id
+	// string (two different projects can safely reuse the same building ids).
 	// Returns how many buildings were successfully spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingsFromFile(const FString& FilePath);
@@ -56,9 +61,21 @@ public:
 
 	// Writes every currently-spawned building back out as a buildings.json-format file (the same
 	// schema LoadBuildingsFromFile reads) - the "Save" side of the Open/New + Ctrl+S save flow
-	// (see NavPlayerController::SaveCurrentProject). Returns true on success.
+	// (see NavPlayerController::SaveCurrentProject). Each building's stored interior data (see
+	// GetInteriorDataForBuilding) is written back out as that building's "interior" field, if any -
+	// callers editing an interior should call InteriorGenerator::SyncInteriorToBuildingGenerator()
+	// first so in-progress edits aren't lost. Returns true on success.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	bool SaveBuildingsToFile(const FString& FilePath) const;
+
+	// The raw "interior" JSON sub-object associated with a building id, as loaded from (or to be
+	// written into) the combined project file - not interpreted here, that's InteriorGenerator's
+	// schema. Returns nullptr if this building has no interior data yet.
+	TSharedPtr<FJsonObject> GetInteriorDataForBuilding(const FString& BuildingId) const;
+
+	// Stashes the interior data for a building id, overwriting whatever was there before (e.g.
+	// InteriorGenerator syncing its current in-memory state before a project save).
+	void SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData);
 
 private:
 	float Scale = 1.f;
@@ -66,4 +83,6 @@ private:
 
 	UPROPERTY()
 	TMap<FString, APolyBuilding*> BuildingsById;
+
+	TMap<FString, TSharedPtr<FJsonObject>> InteriorDataById;
 };

@@ -140,6 +140,12 @@ int32 ABuildingGenerator::LoadBuildingsFromFile(const FString& FilePath)
 		if (SpawnBuildingFromData(Id, Name, Footprint, FloorCount, FloorHeight, Offset))
 		{
 			SpawnedCount++;
+
+			const TSharedPtr<FJsonObject>* InteriorObject;
+			if (B->TryGetObjectField(TEXT("interior"), InteriorObject))
+			{
+				InteriorDataById.Add(Id, *InteriorObject);
+			}
 		}
 	}
 
@@ -233,6 +239,11 @@ bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath) const
 		}
 		BuildingObject->SetArrayField(TEXT("footprint"), FootprintArray);
 
+		if (const TSharedPtr<FJsonObject> InteriorData = GetInteriorDataForBuilding(Building->BuildingId))
+		{
+			BuildingObject->SetObjectField(TEXT("interior"), InteriorData);
+		}
+
 		BuildingsArray.Add(MakeShared<FJsonValueObject>(BuildingObject));
 	}
 
@@ -254,6 +265,17 @@ bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath) const
 
 	UE_LOG(LogTemp, Warning, TEXT("SaveBuildingsToFile: saved %d buildings to %s"), BuildingsArray.Num(), *FilePath);
 	return true;
+}
+
+TSharedPtr<FJsonObject> ABuildingGenerator::GetInteriorDataForBuilding(const FString& BuildingId) const
+{
+	const TSharedPtr<FJsonObject>* Found = InteriorDataById.Find(BuildingId);
+	return Found ? *Found : nullptr;
+}
+
+void ABuildingGenerator::SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData)
+{
+	InteriorDataById.Add(BuildingId, InteriorData);
 }
 
 APolyBuilding* ABuildingGenerator::CreateRectangleBuilding(const FString& Id, const FString& Name, FVector2D Position, float Width, float Depth, float RotationDegrees, int32 FloorCount, float FloorHeight)

@@ -6,9 +6,6 @@
 #include "BuildingGenerator.h"
 #include "PolyBuilding.h"
 #include "EngineUtils.h"
-#include "Misc/FileHelper.h"
-#include "Misc/Paths.h"
-#include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
 AInteriorGenerator::AInteriorGenerator()
@@ -33,6 +30,16 @@ static EInteriorOpeningType ParseOpeningType(const FString& TypeString)
 	if (TypeString == TEXT("window")) { return EInteriorOpeningType::Window; }
 	if (TypeString == TEXT("void")) { return EInteriorOpeningType::Void; }
 	return EInteriorOpeningType::Door;
+}
+
+static FString OpeningTypeToString(EInteriorOpeningType Type)
+{
+	switch (Type)
+	{
+	case EInteriorOpeningType::Window: return TEXT("window");
+	case EInteriorOpeningType::Void:   return TEXT("void");
+	default:                           return TEXT("door");
+	}
 }
 
 // ---- Helper: do segments AB and CD properly cross each other? (mirrors BuildingGenerator.cpp) ----
@@ -90,30 +97,6 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 		return -1;
 	}
 
-	const FString FilePath = FPaths::ProjectDir() / TEXT("Data") / TEXT("Interiors") / (BuildingId + TEXT(".json"));
-
-	FString JsonString;
-	if (!FFileHelper::LoadFileToString(JsonString, *FilePath))
-	{
-		UE_LOG(LogTemp, Error, TEXT("LoadInteriorForBuilding: could not read %s"), *FilePath);
-		return -1;
-	}
-
-	TSharedPtr<FJsonObject> RootObject;
-	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
-	if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
-	{
-		UE_LOG(LogTemp, Error, TEXT("LoadInteriorForBuilding: failed to parse %s"), *FilePath);
-		return -1;
-	}
-
-	const TArray<TSharedPtr<FJsonValue>>* FloorsArray;
-	if (!RootObject->TryGetArrayField(TEXT("floors"), FloorsArray))
-	{
-		UE_LOG(LogTemp, Error, TEXT("LoadInteriorForBuilding: no 'floors' array in %s"), *FilePath);
-		return -1;
-	}
-
 	// Clear whatever this generator had loaded before.
 	for (auto& Pair : RoomsByFloor)
 	{
@@ -129,6 +112,29 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 	NavNodes.Empty();
 	FloorInfoByLevel.Empty();
 	UsedRoomIds.Empty();
+
+	LoadedBuildingId = BuildingId;
+
+	const TSharedPtr<FJsonObject> InteriorData = Generator->GetInteriorDataForBuilding(BuildingId);
+	const TArray<TSharedPtr<FJsonValue>>* FloorsArray = nullptr;
+	if (!InteriorData.IsValid() || !InteriorData->TryGetArrayField(TEXT("floors"), FloorsArray))
+	{
+		// No interior data yet for this building in the current project - not an error, start blank.
+		// Pre-fill one empty floor slot per floor the exterior shell already claims to have, so a
+		// later AddFloor continues on from there instead of shrinking the shell back down to 1 floor.
+		const int32 ExistingFloorCount = FMath::Max(1, Building->GetFloorCount());
+		for (int32 Level = 1; Level <= ExistingFloorCount; Level++)
+		{
+			FloorInfoByLevel.Add(Level, FInteriorFloorInfo());
+			RoomsByFloor.Add(Level, FInteriorRoomList());
+		}
+
+		ActiveFloor = 1;
+		SetActiveFloor(ActiveFloor);
+
+		UE_LOG(LogTemp, Warning, TEXT("No interior data yet for %s - starting blank with %d floor(s) matching the exterior"), *BuildingId, ExistingFloorCount);
+		return 0;
+	}
 
 	const float Scale = Generator->GetScale();
 	const FVector2D BuildingOffset = Building->BuildingOffset;
@@ -261,6 +267,7 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 				FInteriorNavNode Node;
 				Node.Id = NodeObject->GetStringField(TEXT("id"));
 				NodeObject->TryGetStringField(TEXT("type"), Node.Type);
+				Node.Level = Level;
 
 				const TArray<TSharedPtr<FJsonValue>>* PositionArray;
 				if (NodeObject->TryGetArrayField(TEXT("position"), PositionArray) && PositionArray->Num() >= 2)
@@ -285,7 +292,6 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 	// Interior floor count is the source of truth for how tall the exterior shell is.
 	Building->SetFloorCount(FloorsArray->Num());
 
-	LoadedBuildingId = BuildingId;
 	ActiveFloor = 1;
 	SetActiveFloor(ActiveFloor);
 
@@ -543,4 +549,123 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2
 	}
 
 	return Room;
+}
+
+TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
+{
+	TSharedRef<FJsonObject> InteriorObject = MakeShared<FJsonObject>();
+
+	TArray<int32> Levels;
+	FloorInfoByLevel.GetKeys(Levels);
+	Levels.Sort();
+
+	TArray<TSharedPtr<FJsonValue>> FloorsArray;
+	for (int32 Level : Levels)
+	{
+		const FInteriorFloorInfo& FloorInfo = FloorInfoByLevel[Level];
+
+		TSharedRef<FJsonObject> FloorObject = MakeShared<FJsonObject>();
+		FloorObject->SetNumberField(TEXT("level"), Level);
+		FloorObject->SetNumberField(TEXT("wallHeight"), FloorInfo.WallHeight);
+		FloorObject->SetNumberField(TEXT("wallThickness"), FloorInfo.WallThickness);
+
+		TArray<TSharedPtr<FJsonValue>> RoomsArray;
+		if (const FInteriorRoomList* RoomList = RoomsByFloor.Find(Level))
+		{
+			for (const AInteriorRoom* Room : RoomList->Rooms)
+			{
+				if (!Room)
+				{
+					continue;
+				}
+
+				TSharedRef<FJsonObject> RoomObject = MakeShared<FJsonObject>();
+				RoomObject->SetStringField(TEXT("id"), Room->RoomId);
+				RoomObject->SetStringField(TEXT("name"), Room->RoomName);
+				RoomObject->SetStringField(TEXT("access"), Room->bIsPublic ? TEXT("public") : TEXT("private"));
+				RoomObject->SetBoolField(TEXT("requireKey"), Room->bRequiresKey);
+
+				TArray<TSharedPtr<FJsonValue>> FootprintArray;
+				for (const FVector2D& Point : Room->GetFootprint())
+				{
+					TArray<TSharedPtr<FJsonValue>> PointArray;
+					PointArray.Add(MakeShared<FJsonValueNumber>(Point.X));
+					PointArray.Add(MakeShared<FJsonValueNumber>(Point.Y));
+					FootprintArray.Add(MakeShared<FJsonValueArray>(PointArray));
+				}
+				RoomObject->SetArrayField(TEXT("footprint"), FootprintArray);
+
+				TArray<TSharedPtr<FJsonValue>> OpeningsArray;
+				for (const FInteriorOpening& Opening : Room->GetOpenings())
+				{
+					TSharedRef<FJsonObject> OpeningObject = MakeShared<FJsonObject>();
+					OpeningObject->SetStringField(TEXT("id"), Opening.Id);
+					OpeningObject->SetStringField(TEXT("type"), OpeningTypeToString(Opening.Type));
+					OpeningObject->SetNumberField(TEXT("edgeIndex"), Opening.EdgeIndex);
+					OpeningObject->SetNumberField(TEXT("offset"), Opening.Offset);
+					OpeningObject->SetNumberField(TEXT("width"), Opening.Width);
+					if (Opening.Type == EInteriorOpeningType::Window)
+					{
+						OpeningObject->SetNumberField(TEXT("height"), Opening.Height);
+						OpeningObject->SetNumberField(TEXT("sillHeight"), Opening.SillHeight);
+					}
+					if (Opening.Type == EInteriorOpeningType::Door && !Opening.ConnectsTo.IsEmpty())
+					{
+						OpeningObject->SetStringField(TEXT("connectsTo"), Opening.ConnectsTo);
+					}
+					OpeningsArray.Add(MakeShared<FJsonValueObject>(OpeningObject));
+				}
+				RoomObject->SetArrayField(TEXT("openings"), OpeningsArray);
+
+				RoomsArray.Add(MakeShared<FJsonValueObject>(RoomObject));
+			}
+		}
+		FloorObject->SetArrayField(TEXT("rooms"), RoomsArray);
+
+		TArray<TSharedPtr<FJsonValue>> NavNodesArray;
+		for (const FInteriorNavNode& Node : NavNodes)
+		{
+			if (Node.Level != Level)
+			{
+				continue;
+			}
+
+			TSharedRef<FJsonObject> NodeObject = MakeShared<FJsonObject>();
+			NodeObject->SetStringField(TEXT("id"), Node.Id);
+			NodeObject->SetStringField(TEXT("type"), Node.Type);
+
+			TArray<TSharedPtr<FJsonValue>> PositionArray;
+			PositionArray.Add(MakeShared<FJsonValueNumber>(Node.Position.X));
+			PositionArray.Add(MakeShared<FJsonValueNumber>(Node.Position.Y));
+			NodeObject->SetArrayField(TEXT("position"), PositionArray);
+
+			if (Node.ConnectsFloors.Num() > 0)
+			{
+				TArray<TSharedPtr<FJsonValue>> ConnectsFloorsArray;
+				for (int32 ConnectedLevel : Node.ConnectsFloors)
+				{
+					ConnectsFloorsArray.Add(MakeShared<FJsonValueNumber>(ConnectedLevel));
+				}
+				NodeObject->SetArrayField(TEXT("connectsFloors"), ConnectsFloorsArray);
+			}
+
+			NavNodesArray.Add(MakeShared<FJsonValueObject>(NodeObject));
+		}
+		FloorObject->SetArrayField(TEXT("navNodes"), NavNodesArray);
+
+		FloorsArray.Add(MakeShared<FJsonValueObject>(FloorObject));
+	}
+
+	InteriorObject->SetArrayField(TEXT("floors"), FloorsArray);
+	return InteriorObject;
+}
+
+void AInteriorGenerator::SyncInteriorToBuildingGenerator()
+{
+	if (LoadedBuildingId.IsEmpty() || !Generator)
+	{
+		return;
+	}
+
+	Generator->SetInteriorDataForBuilding(LoadedBuildingId, SerializeCurrentInterior());
 }

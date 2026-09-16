@@ -49,6 +49,12 @@ public:
 	UPROPERTY()
 	bool bRequiresKey = false;
 
+	// The footprint/openings as originally given to BuildWalls - what serializing this room back
+	// to JSON (see InteriorGenerator::SerializeCurrentInterior) reads from, so a saved-then-reloaded
+	// room round-trips exactly.
+	const TArray<FVector2D>& GetFootprint() const { return CachedFootprint; }
+	const TArray<FInteriorOpening>& GetOpenings() const { return CachedOpenings; }
+
 private:
 	// Regenerates the mesh from the cached inputs below. Called by both BuildWalls and
 	// SetFloorBaseZ.

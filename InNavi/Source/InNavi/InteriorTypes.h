@@ -62,6 +62,11 @@ struct FInteriorNavNode
 	UPROPERTY(BlueprintReadOnly)
 	FString Type;
 
+	// Which floor this node was placed on (the floor whose "navNodes" array it came from) - needed
+	// to write it back into the right floor when serializing the interior back to JSON.
+	UPROPERTY(BlueprintReadOnly)
+	int32 Level = 1;
+
 	UPROPERTY(BlueprintReadOnly)
 	FVector2D Position = FVector2D::ZeroVector;
 

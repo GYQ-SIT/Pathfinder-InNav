@@ -566,6 +566,11 @@ bool ANavPlayerController::SaveCurrentProject()
 		return SaveCurrentProjectAs(ChosenPath);
 	}
 
+	if (InteriorGen)
+	{
+		InteriorGen->SyncInteriorToBuildingGenerator();
+	}
+
 	const bool bSuccess = Generator->SaveBuildingsToFile(CurrentProjectFilePath);
 	if (bSuccess)
 	{
@@ -632,6 +637,11 @@ bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
 		return false;
 	}
 
+	if (InteriorGen)
+	{
+		InteriorGen->SyncInteriorToBuildingGenerator();
+	}
+
 	const bool bSuccess = Generator->SaveBuildingsToFile(FilePath);
 	if (bSuccess)
 	{
@@ -664,7 +674,7 @@ int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 	const int32 Result = InteriorGen->LoadInteriorForBuilding(BuildingId);
 	if (Result < 0)
 	{
-		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not load the interior for '%s' - check that Data/Interiors/%s.json exists and is valid."), *BuildingId, *BuildingId));
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not load the interior for '%s' - no building with that id exists."), *BuildingId));
 	}
 	return Result;
 }

@@ -9,6 +9,7 @@
 
 class ABuildingGenerator;
 class AInteriorRoom;
+class FJsonObject;
 
 // GC-safe wrapper so RoomsByFloor can be a TMap<int32, ...> - UHT doesn't support a TArray
 // directly as a TMap value, but a UPROPERTY TArray inside a plain USTRUCT is fine.
@@ -37,13 +38,24 @@ class INNAVI_API AInteriorGenerator : public AActor
 public:
 	AInteriorGenerator();
 
-	// Loads Data/Interiors/{BuildingId}.json and (re)generates that building's interior: destroys
-	// whatever this generator had loaded before, spawns one AInteriorRoom per room per floor, and
-	// syncs the exterior shell's floor count to match (see APolyBuilding::SetFloorCount) - the
-	// interior's floor list is the source of truth for how tall the building actually is.
-	// Returns how many rooms were spawned, or -1 if the building/file couldn't be loaded.
+	// (Re)generates a building's interior from whatever interior data is stored for it in the
+	// currently loaded project (see BuildingGenerator::GetInteriorDataForBuilding - interior data
+	// lives inside the same project file as the exterior building list, keyed to this specific
+	// building in this specific project, not just an id string shared globally). Destroys whatever
+	// this generator had loaded before, spawns one AInteriorRoom per room per floor, and syncs the
+	// exterior shell's floor count to match (see APolyBuilding::SetFloorCount).
+	// If the building has no interior data yet, this is not an error - it starts a blank interior
+	// (0 floors) ready for AddFloor, same as a brand-new building.
+	// Returns how many rooms were spawned, or -1 if the building itself doesn't exist.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	int32 LoadInteriorForBuilding(const FString& BuildingId);
+
+	// Serializes the currently loaded building's interior (all floors/rooms/openings/nav nodes) and
+	// stashes it in BuildingGenerator via SetInteriorDataForBuilding, so a following
+	// BuildingGenerator::SaveBuildingsToFile includes it. Call this before saving the project -
+	// otherwise in-progress interior edits aren't reflected in the save. No-op if nothing is loaded.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void SyncInteriorToBuildingGenerator();
 
 	// Shows only the given floor's rooms, hides the rest.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
@@ -96,6 +108,11 @@ protected:
 	virtual void BeginPlay() override;
 
 private:
+	// Builds a JSON object matching the "interior" schema (floors[].{wallHeight,wallThickness,
+	// rooms[],navNodes[]}) from the currently loaded building's live state. Used by
+	// SyncInteriorToBuildingGenerator.
+	TSharedRef<FJsonObject> SerializeCurrentInterior() const;
+
 	UPROPERTY()
 	ABuildingGenerator* Generator;
 
