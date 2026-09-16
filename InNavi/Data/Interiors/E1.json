@@ -1,0 +1,44 @@
+{
+  "buildingId": "E1",
+  "floors": [
+    {
+      "level": 1,
+      "wallHeight": 280,
+      "wallThickness": 20,
+      "rooms": [
+        {
+          "id": "E1-01-01",
+          "name": "Room 101",
+          "footprint": [[60,240],[160,240],[160,380],[60,380]],
+          "openings": [
+            { "id": "O1", "type": "door",   "edgeIndex": 0, "offset": 30, "width": 9, "connectsTo": "corridor" },
+            { "id": "O2", "type": "window", "edgeIndex": 2, "offset": 20, "width": 20, "height": 15, "sillHeight": 9 },
+            { "id": "O3", "type": "void",   "edgeIndex": 1, "offset": 40, "width": 10 }
+          ]
+        }
+      ],
+      "navNodes": [
+        { "id": "N1", "type": "pathNode", "position": [110, 260] },
+        { "id": "N2", "type": "elevator", "position": [70, 250], "connectsFloors": [1, 2] }
+      ]
+    },
+    {
+      "level": 2,
+      "wallHeight": 280,
+      "wallThickness": 20,
+      "rooms": [
+        {
+          "id": "E1-02-01",
+          "name": "Room 201",
+          "footprint": [[60,240],[160,240],[160,380],[60,380]],
+          "openings": [
+            { "id": "O4", "type": "door", "edgeIndex": 0, "offset": 30, "width": 9, "connectsTo": "corridor" }
+          ]
+        }
+      ],
+      "navNodes": [
+        { "id": "N3", "type": "elevator", "position": [70, 250], "connectsFloors": [1, 2] }
+      ]
+    }
+  ]
+}

@@ -49,6 +49,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingsFromFile(const FString& FilePath);
 
+	// Looks up an already-spawned building by id (e.g. for InteriorGenerator to find which
+	// building's shell a piece of interior data belongs to). Returns nullptr if not found.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	APolyBuilding* FindBuildingById(const FString& Id) const;
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -57,4 +62,7 @@ private:
 
 	float Scale = 1.f;
 	TSet<FString> UsedBuildingIds;
+
+	UPROPERTY()
+	TMap<FString, APolyBuilding*> BuildingsById;
 };

@@ -122,16 +122,39 @@ static void TriangulatePolygon(const TArray<FVector2D>& Poly, TArray<int32>& Out
 	}
 }
 
-void APolyBuilding::BuildFromFootprint(const TArray<FVector2D>& Footprint, float Height, float Scale, FVector2D Offset)
+void APolyBuilding::BuildFromFootprint(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, int32 InFloorCount, float InFloorHeight)
 {
-	const int32 N = Footprint.Num();
-	if (N < 3)
+	if (Footprint.Num() < 3)
 	{
 		UE_LOG(LogTemp, Error, TEXT("Footprint needs at least 3 points"));
 		return;
 	}
 
+	CachedFootprint = Footprint;
+	CachedScale = Scale;
 	BuildingOffset = Offset;
+	FloorCount = FMath::Max(1, InFloorCount);
+	FloorHeight = InFloorHeight;
+
+	RebuildMesh();
+}
+
+void APolyBuilding::SetFloorCount(int32 NewFloorCount)
+{
+	if (CachedFootprint.Num() < 3)
+	{
+		UE_LOG(LogTemp, Error, TEXT("SetFloorCount: building '%s' has no footprint yet"), *BuildingId);
+		return;
+	}
+
+	FloorCount = FMath::Max(1, NewFloorCount);
+	RebuildMesh();
+}
+
+void APolyBuilding::RebuildMesh()
+{
+	const int32 N = CachedFootprint.Num();
+	const float Height = FloorCount * FloorHeight;
 	BuildingHeight = Height;
 
 	// Build the transformed 2D footprint (offset + scale)
@@ -139,7 +162,7 @@ void APolyBuilding::BuildFromFootprint(const TArray<FVector2D>& Footprint, float
 	Poly2D.SetNum(N);
 	for (int32 i = 0; i < N; i++)
 	{
-		Poly2D[i] = FVector2D((Footprint[i].X + Offset.X) * Scale, (Footprint[i].Y + Offset.Y) * Scale);
+		Poly2D[i] = FVector2D((CachedFootprint[i].X + BuildingOffset.X) * CachedScale, (CachedFootprint[i].Y + BuildingOffset.Y) * CachedScale);
 	}
 
 	// Normalize to counter-clockwise winding so the side walls always face outward,
@@ -208,17 +231,20 @@ void APolyBuilding::BuildFromFootprint(const TArray<FVector2D>& Footprint, float
 	TArray<FColor> VertexColors;
 	MeshComp->CreateMeshSection(0, Vertices, Triangles, Normals, UV0, VertexColors, Tangents, true);
 
-	UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(
-		nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-	if (BaseMat)
+	if (!DynMaterial)
 	{
-		DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
-		MeshComp->SetMaterial(0, DynMaterial);
+		UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(
+			nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+		if (BaseMat)
+		{
+			DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
+		}
 	}
+	MeshComp->SetMaterial(0, DynMaterial);
 
 	SetHighlighted(false);
 
-	UE_LOG(LogTemp, Warning, TEXT("Built building %s: %d verts, height %f"), *BuildingId, N, Height);
+	UE_LOG(LogTemp, Warning, TEXT("Built building %s: %d floors, height %f"), *BuildingId, FloorCount, Height);
 }
 
 void APolyBuilding::SetHighlighted(bool bHighlighted)

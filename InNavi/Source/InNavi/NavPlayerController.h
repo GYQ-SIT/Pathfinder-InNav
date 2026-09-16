@@ -8,6 +8,7 @@
 
 class APolyBuilding;
 class ABuildingGenerator;
+class AInteriorGenerator;
 
 // Broadcast whenever build mode turns on/off, so UI can show an indicator without polling every tick.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildModeChanged, bool, bNewBuildMode);
@@ -94,12 +95,21 @@ private:
 	void OnConfirmPressed();
 	void OnCancelPressed();
 
+	// TEST-ONLY (Phase 0.2 verification): loads the currently selected building's interior.
+	// Delete once there's a real "enter interior edit mode" UI flow calling
+	// InteriorGen->LoadInteriorForBuilding(...) directly.
+	void LoadInteriorForSelectedBuilding();
+
 	UPROPERTY()
 	APolyBuilding* SelectedBuilding;
 
 	// The single BuildingGenerator placed in the level; found in BeginPlay.
 	UPROPERTY()
 	ABuildingGenerator* Generator;
+
+	// The single InteriorGenerator placed in the level (if any); found in BeginPlay.
+	UPROPERTY()
+	AInteriorGenerator* InteriorGen;
 
 	bool bBuildMode = false;
 	TArray<FVector2D> PendingFootprint;

@@ -4,6 +4,7 @@
 #include "NavPlayerController.h"
 #include "PolyBuilding.h"
 #include "BuildingGenerator.h"
+#include "InteriorGenerator.h"
 #include "EngineUtils.h"
 #include "DrawDebugHelpers.h"
 #include "Misc/FileHelper.h"
@@ -18,6 +19,7 @@ ANavPlayerController::ANavPlayerController()
 {
 	SelectedBuilding = nullptr;
 	Generator = nullptr;
+	InteriorGen = nullptr;
 }
 
 void ANavPlayerController::BeginPlay()
@@ -33,6 +35,12 @@ void ANavPlayerController::BeginPlay()
 		Generator = *It;
 		break;
 	}
+
+	for (TActorIterator<AInteriorGenerator> It(GetWorld()); It; ++It)
+	{
+		InteriorGen = *It;
+		break;
+	}
 }
 
 void ANavPlayerController::SetupInputComponent()
@@ -42,6 +50,7 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindAction("SelectBuilding", IE_Pressed, this, &ANavPlayerController::OnClick);
 	InputComponent->BindKey(EKeys::B, IE_Pressed, this, &ANavPlayerController::ToggleBuildMode);
 	InputComponent->BindKey(EKeys::R, IE_Pressed, this, &ANavPlayerController::ToggleShapeTestMode);
+	InputComponent->BindKey(EKeys::I, IE_Pressed, this, &ANavPlayerController::LoadInteriorForSelectedBuilding);
 	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &ANavPlayerController::OnConfirmPressed);
 	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
 }
@@ -321,6 +330,23 @@ int32 ANavPlayerController::ImportBuildingDataFromFile()
 	const int32 Count = Generator->LoadBuildingsFromFile(OutFiles[0]);
 	UE_LOG(LogTemp, Warning, TEXT("ImportBuildingDataFromFile: loaded %d buildings from %s"), Count, *OutFiles[0]);
 	return Count;
+}
+
+void ANavPlayerController::LoadInteriorForSelectedBuilding()
+{
+	if (!InteriorGen)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LoadInteriorForSelectedBuilding: no InteriorGenerator placed in the level"));
+		return;
+	}
+
+	if (!SelectedBuilding)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("LoadInteriorForSelectedBuilding: click a building first"));
+		return;
+	}
+
+	InteriorGen->LoadInteriorForBuilding(SelectedBuilding->BuildingId);
 }
 
 void ANavPlayerController::ConfirmShapeTest()

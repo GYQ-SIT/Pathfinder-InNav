@@ -190,18 +190,23 @@ APolyBuilding* ABuildingGenerator::SpawnBuildingFromData(const FString& Id, cons
 		return nullptr;
 	}
 
-	const float Height = FloorCount * FloorHeight;
-
 	APolyBuilding* NewBuilding = GetWorld()->SpawnActor<APolyBuilding>(FVector::ZeroVector, FRotator::ZeroRotator);
 	if (NewBuilding)
 	{
 		NewBuilding->BuildingId = Id;
 		NewBuilding->BuildingName = Name;
-		NewBuilding->BuildFromFootprint(Footprint, Height, Scale, Offset);
+		NewBuilding->BuildFromFootprint(Footprint, Scale, Offset, FloorCount, FloorHeight);
 		UsedBuildingIds.Add(Id);
+		BuildingsById.Add(Id, NewBuilding);
 	}
 
 	return NewBuilding;
+}
+
+APolyBuilding* ABuildingGenerator::FindBuildingById(const FString& Id) const
+{
+	APolyBuilding* const* Found = BuildingsById.Find(Id);
+	return Found ? *Found : nullptr;
 }
 
 APolyBuilding* ABuildingGenerator::CreateRectangleBuilding(const FString& Id, const FString& Name, FVector2D Position, float Width, float Depth, float RotationDegrees, int32 FloorCount, float FloorHeight)
