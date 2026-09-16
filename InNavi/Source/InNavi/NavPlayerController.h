@@ -106,6 +106,16 @@ private:
 	void CycleInteriorFloorUp();
 	void CycleInteriorFloorDown();
 
+	// TEST-ONLY (Phase 2.2 verification): adds a floor to the loaded building via
+	// InteriorGen->AddFloor(). Delete once a real "+Add floor" button calls it directly.
+	void AddInteriorFloor();
+
+	// TEST-ONLY (Phase 2.2 verification): removes the currently active floor via
+	// InteriorGen->RemoveFloor(GetActiveFloor()) - matches the UX call that deleting removes
+	// whichever floor you're currently viewing, not always the top one. Delete once a real
+	// "remove floor" button calls RemoveFloor directly.
+	void RemoveActiveInteriorFloor();
+
 	UPROPERTY()
 	APolyBuilding* SelectedBuilding;
 

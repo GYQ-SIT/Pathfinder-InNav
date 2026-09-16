@@ -87,6 +87,7 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 	}
 	RoomsByFloor.Empty();
 	NavNodes.Empty();
+	FloorInfoByLevel.Empty();
 
 	const float Scale = Generator->GetScale();
 	const FVector2D BuildingOffset = Building->BuildingOffset;
@@ -110,6 +111,8 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 
 		float WallThickness = 20.f;
 		FloorObject->TryGetNumberField(TEXT("wallThickness"), WallThickness);
+
+		FloorInfoByLevel.Add(Level, FInteriorFloorInfo{ WallHeight, WallThickness });
 
 		const float FloorBaseZ = (Level - 1) * ExteriorFloorHeight;
 
@@ -250,11 +253,31 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 
 void AInteriorGenerator::SetActiveFloor(int32 Level)
 {
-	ActiveFloor = Level;
+	if (FloorInfoByLevel.Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SetActiveFloor: no building interior is currently loaded"));
+		return;
+	}
+
+	int32 MinLevel = TNumericLimits<int32>::Max();
+	int32 MaxLevel = TNumericLimits<int32>::Min();
+	for (const auto& Pair : FloorInfoByLevel)
+	{
+		MinLevel = FMath::Min(MinLevel, Pair.Key);
+		MaxLevel = FMath::Max(MaxLevel, Pair.Key);
+	}
+
+	const int32 ClampedLevel = FMath::Clamp(Level, MinLevel, MaxLevel);
+	if (ClampedLevel != Level)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SetActiveFloor: %d is outside the loaded range [%d, %d], clamped to %d"), Level, MinLevel, MaxLevel, ClampedLevel);
+	}
+
+	ActiveFloor = ClampedLevel;
 
 	for (auto& Pair : RoomsByFloor)
 	{
-		const bool bVisible = (Pair.Key == Level);
+		const bool bVisible = (Pair.Key == ActiveFloor);
 		for (AInteriorRoom* Room : Pair.Value.Rooms)
 		{
 			if (Room)
@@ -264,4 +287,136 @@ void AInteriorGenerator::SetActiveFloor(int32 Level)
 			}
 		}
 	}
+}
+
+int32 AInteriorGenerator::AddFloor()
+{
+	if (LoadedBuildingId.IsEmpty() || !Generator)
+	{
+		UE_LOG(LogTemp, Error, TEXT("AddFloor: no building interior currently loaded"));
+		return -1;
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(LoadedBuildingId);
+	if (!Building)
+	{
+		UE_LOG(LogTemp, Error, TEXT("AddFloor: building '%s' no longer exists"), *LoadedBuildingId);
+		return -1;
+	}
+
+	int32 HighestLevel = 0;
+	for (const auto& Pair : FloorInfoByLevel)
+	{
+		HighestLevel = FMath::Max(HighestLevel, Pair.Key);
+	}
+	const int32 NewLevel = HighestLevel + 1;
+
+	FInteriorFloorInfo NewFloorInfo;
+	if (const FInteriorFloorInfo* TopFloor = FloorInfoByLevel.Find(HighestLevel))
+	{
+		NewFloorInfo = *TopFloor;
+	}
+	FloorInfoByLevel.Add(NewLevel, NewFloorInfo);
+	RoomsByFloor.Add(NewLevel, FInteriorRoomList());
+
+	// New floor count is the source of truth for how tall the exterior shell is.
+	Building->SetFloorCount(NewLevel);
+
+	SetActiveFloor(NewLevel);
+
+	UE_LOG(LogTemp, Warning, TEXT("Added floor %d to %s (wallHeight=%.0f, wallThickness=%.0f)"), NewLevel, *LoadedBuildingId, NewFloorInfo.WallHeight, NewFloorInfo.WallThickness);
+	return NewLevel;
+}
+
+bool AInteriorGenerator::RemoveFloor(int32 Level)
+{
+	if (!FloorInfoByLevel.Contains(Level))
+	{
+		UE_LOG(LogTemp, Error, TEXT("RemoveFloor: floor %d doesn't exist"), Level);
+		return false;
+	}
+
+	if (FloorInfoByLevel.Num() <= 1)
+	{
+		UE_LOG(LogTemp, Error, TEXT("RemoveFloor: can't remove the last remaining floor"));
+		return false;
+	}
+
+	if (!Generator)
+	{
+		return false;
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(LoadedBuildingId);
+	if (!Building)
+	{
+		UE_LOG(LogTemp, Error, TEXT("RemoveFloor: building '%s' no longer exists"), *LoadedBuildingId);
+		return false;
+	}
+
+	// Compute the highest floor BEFORE removing anything, so it doesn't matter whether Level
+	// itself happens to be the top floor.
+	int32 MaxLevel = 0;
+	for (const auto& Pair : FloorInfoByLevel)
+	{
+		MaxLevel = FMath::Max(MaxLevel, Pair.Key);
+	}
+
+	// Destroy the removed floor's rooms.
+	if (FInteriorRoomList* RemovedRooms = RoomsByFloor.Find(Level))
+	{
+		for (AInteriorRoom* Room : RemovedRooms->Rooms)
+		{
+			if (Room)
+			{
+				Room->Destroy();
+			}
+		}
+	}
+	RoomsByFloor.Remove(Level);
+	FloorInfoByLevel.Remove(Level);
+
+	const float ExteriorFloorHeight = Building->GetFloorHeight();
+
+	// Shift every floor above the removed one down by one level: renumber it and reposition its
+	// rooms' meshes to the new (lower) height.
+	for (int32 OldLevel = Level + 1; OldLevel <= MaxLevel; OldLevel++)
+	{
+		const int32 NewLevelNum = OldLevel - 1;
+
+		if (const FInteriorFloorInfo* Info = FloorInfoByLevel.Find(OldLevel))
+		{
+			const FInteriorFloorInfo InfoCopy = *Info;
+			FloorInfoByLevel.Remove(OldLevel);
+			FloorInfoByLevel.Add(NewLevelNum, InfoCopy);
+		}
+
+		if (const FInteriorRoomList* MovingRooms = RoomsByFloor.Find(OldLevel))
+		{
+			FInteriorRoomList RoomsCopy = *MovingRooms;
+			RoomsByFloor.Remove(OldLevel);
+
+			const float NewFloorBaseZ = (NewLevelNum - 1) * ExteriorFloorHeight;
+			for (AInteriorRoom* Room : RoomsCopy.Rooms)
+			{
+				if (Room)
+				{
+					Room->FloorLevel = NewLevelNum;
+					Room->SetFloorBaseZ(NewFloorBaseZ);
+				}
+			}
+
+			RoomsByFloor.Add(NewLevelNum, RoomsCopy);
+		}
+	}
+
+	const int32 NewFloorCount = MaxLevel - 1;
+
+	// New floor count is the source of truth for how tall the exterior shell is.
+	Building->SetFloorCount(NewFloorCount);
+
+	SetActiveFloor(FMath::Clamp(ActiveFloor, 1, NewFloorCount));
+
+	UE_LOG(LogTemp, Warning, TEXT("Removed floor %d from %s, now %d floors"), Level, *LoadedBuildingId, NewFloorCount);
+	return true;
 }

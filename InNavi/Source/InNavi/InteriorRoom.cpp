@@ -94,23 +94,49 @@ static void BuildWallSpansForEdge(float EdgeLength, float WallHeight, const TArr
 
 void AInteriorRoom::BuildWalls(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, float FloorBaseZ, float WallHeight, float WallThickness, const TArray<FInteriorOpening>& Openings)
 {
-	const int32 N = Footprint.Num();
-	if (N < 3)
+	if (Footprint.Num() < 3)
 	{
 		UE_LOG(LogTemp, Error, TEXT("AInteriorRoom::BuildWalls: room '%s' footprint needs at least 3 points"), *RoomId);
 		return;
 	}
 
+	CachedFootprint = Footprint;
+	CachedScale = Scale;
+	CachedOffset = Offset;
+	CachedFloorBaseZ = FloorBaseZ;
+	CachedWallHeight = WallHeight;
+	CachedWallThickness = WallThickness;
+	CachedOpenings = Openings;
+
+	RebuildMesh();
+}
+
+void AInteriorRoom::SetFloorBaseZ(float NewFloorBaseZ)
+{
+	if (CachedFootprint.Num() < 3)
+	{
+		UE_LOG(LogTemp, Error, TEXT("SetFloorBaseZ: room '%s' has no walls built yet"), *RoomId);
+		return;
+	}
+
+	CachedFloorBaseZ = NewFloorBaseZ;
+	RebuildMesh();
+}
+
+void AInteriorRoom::RebuildMesh()
+{
+	const int32 N = CachedFootprint.Num();
+
 	TArray<FVector2D> Poly2D;
 	Poly2D.SetNum(N);
 	for (int32 i = 0; i < N; i++)
 	{
-		Poly2D[i] = FVector2D((Footprint[i].X + Offset.X) * Scale, (Footprint[i].Y + Offset.Y) * Scale);
+		Poly2D[i] = FVector2D((CachedFootprint[i].X + CachedOffset.X) * CachedScale, (CachedFootprint[i].Y + CachedOffset.Y) * CachedScale);
 	}
 
 	TArray<FVector> Vertices;
 	TArray<int32> Triangles;
-	const float HalfThickness = WallThickness * 0.5f;
+	const float HalfThickness = CachedWallThickness * 0.5f;
 
 	for (int32 EdgeIndex = 0; EdgeIndex < N; EdgeIndex++)
 	{
@@ -127,7 +153,7 @@ void AInteriorRoom::BuildWalls(const TArray<FVector2D>& Footprint, float Scale, 
 		const FVector2D Perp(-Dir.Y, Dir.X);
 
 		TArray<const FInteriorOpening*> EdgeOpenings;
-		for (const FInteriorOpening& Opening : Openings)
+		for (const FInteriorOpening& Opening : CachedOpenings)
 		{
 			if (Opening.EdgeIndex == EdgeIndex)
 			{
@@ -137,7 +163,7 @@ void AInteriorRoom::BuildWalls(const TArray<FVector2D>& Footprint, float Scale, 
 		EdgeOpenings.Sort([](const FInteriorOpening& A, const FInteriorOpening& B) { return A.Offset < B.Offset; });
 
 		TArray<FWallSpan> Spans;
-		BuildWallSpansForEdge(EdgeLength, WallHeight, EdgeOpenings, Spans);
+		BuildWallSpansForEdge(EdgeLength, CachedWallHeight, EdgeOpenings, Spans);
 
 		for (const FWallSpan& Span : Spans)
 		{
@@ -146,8 +172,8 @@ void AInteriorRoom::BuildWalls(const TArray<FVector2D>& Footprint, float Scale, 
 			const FVector2D Outer0 = A2D + Dir * Span.XStart + Perp * HalfThickness;
 			const FVector2D Outer1 = A2D + Dir * Span.XEnd   + Perp * HalfThickness;
 
-			const float ZBottom = FloorBaseZ + Span.ZBottom;
-			const float ZTop = FloorBaseZ + Span.ZTop;
+			const float ZBottom = CachedFloorBaseZ + Span.ZBottom;
+			const float ZTop = CachedFloorBaseZ + Span.ZTop;
 
 			AddBox(Vertices, Triangles,
 				FVector(Inner0.X, Inner0.Y, ZBottom), FVector(Inner1.X, Inner1.Y, ZBottom),

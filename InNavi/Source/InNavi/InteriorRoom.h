@@ -26,6 +26,11 @@ public:
 	// (Level - 1) * building's exterior FloorHeight, so floors stack correctly.
 	void BuildWalls(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, float FloorBaseZ, float WallHeight, float WallThickness, const TArray<FInteriorOpening>& Openings);
 
+	// Repositions this room vertically and regenerates the mesh - used when removing a floor
+	// shifts every floor above it down by one level. Footprint/openings/etc. are unchanged, only
+	// FloorBaseZ moves.
+	void SetFloorBaseZ(float NewFloorBaseZ);
+
 	UPROPERTY()
 	FString RoomId;
 
@@ -45,6 +50,18 @@ public:
 	bool bRequiresKey = false;
 
 private:
+	// Regenerates the mesh from the cached inputs below. Called by both BuildWalls and
+	// SetFloorBaseZ.
+	void RebuildMesh();
+
+	TArray<FVector2D> CachedFootprint;
+	float CachedScale = 1.f;
+	FVector2D CachedOffset = FVector2D::ZeroVector;
+	float CachedFloorBaseZ = 0.f;
+	float CachedWallHeight = 280.f;
+	float CachedWallThickness = 20.f;
+	TArray<FInteriorOpening> CachedOpenings;
+
 	UPROPERTY()
 	UProceduralMeshComponent* MeshComp;
 

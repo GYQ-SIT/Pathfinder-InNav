@@ -51,8 +51,10 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::B, IE_Pressed, this, &ANavPlayerController::ToggleBuildMode);
 	InputComponent->BindKey(EKeys::R, IE_Pressed, this, &ANavPlayerController::ToggleShapeTestMode);
 	InputComponent->BindKey(EKeys::I, IE_Pressed, this, &ANavPlayerController::LoadInteriorForSelectedBuilding);
-	InputComponent->BindKey(EKeys::LeftBracket, IE_Pressed, this, &ANavPlayerController::CycleInteriorFloorDown);
-	InputComponent->BindKey(EKeys::RightBracket, IE_Pressed, this, &ANavPlayerController::CycleInteriorFloorUp);
+	InputComponent->BindKey(EKeys::LeftBracket, IE_Pressed, this, &ANavPlayerController::CycleInteriorFloorUp);
+	InputComponent->BindKey(EKeys::RightBracket, IE_Pressed, this, &ANavPlayerController::CycleInteriorFloorDown);
+	InputComponent->BindKey(EKeys::F, IE_Pressed, this, &ANavPlayerController::AddInteriorFloor);
+	InputComponent->BindKey(EKeys::X, IE_Pressed, this, &ANavPlayerController::RemoveActiveInteriorFloor);
 	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &ANavPlayerController::OnConfirmPressed);
 	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
 }
@@ -358,9 +360,8 @@ void ANavPlayerController::CycleInteriorFloorUp()
 		return;
 	}
 
-	const int32 NewFloor = InteriorGen->GetActiveFloor() + 1;
-	InteriorGen->SetActiveFloor(NewFloor);
-	UE_LOG(LogTemp, Warning, TEXT("Active interior floor: %d"), NewFloor);
+	InteriorGen->SetActiveFloor(InteriorGen->GetActiveFloor() + 1);
+	UE_LOG(LogTemp, Warning, TEXT("Active interior floor: %d"), InteriorGen->GetActiveFloor());
 }
 
 void ANavPlayerController::CycleInteriorFloorDown()
@@ -370,9 +371,28 @@ void ANavPlayerController::CycleInteriorFloorDown()
 		return;
 	}
 
-	const int32 NewFloor = InteriorGen->GetActiveFloor() - 1;
-	InteriorGen->SetActiveFloor(NewFloor);
-	UE_LOG(LogTemp, Warning, TEXT("Active interior floor: %d"), NewFloor);
+	InteriorGen->SetActiveFloor(InteriorGen->GetActiveFloor() - 1);
+	UE_LOG(LogTemp, Warning, TEXT("Active interior floor: %d"), InteriorGen->GetActiveFloor());
+}
+
+void ANavPlayerController::AddInteriorFloor()
+{
+	if (!InteriorGen)
+	{
+		return;
+	}
+
+	InteriorGen->AddFloor();
+}
+
+void ANavPlayerController::RemoveActiveInteriorFloor()
+{
+	if (!InteriorGen)
+	{
+		return;
+	}
+
+	InteriorGen->RemoveFloor(InteriorGen->GetActiveFloor());
 }
 
 void ANavPlayerController::ConfirmShapeTest()

@@ -21,6 +21,14 @@ struct FInteriorRoomList
 	TArray<AInteriorRoom*> Rooms;
 };
 
+// Per-floor settings that outlive the JSON parse - needed so AddFloor knows what defaults to
+// inherit for a brand new floor.
+struct FInteriorFloorInfo
+{
+	float WallHeight = 280.f;
+	float WallThickness = 20.f;
+};
+
 UCLASS()
 class INNAVI_API AInteriorGenerator : public AActor
 {
@@ -43,6 +51,23 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	int32 GetActiveFloor() const { return ActiveFloor; }
+
+	// Adds a new, empty floor above the highest currently-loaded floor for the currently loaded
+	// building, and grows the exterior shell to match (APolyBuilding::SetFloorCount) - the new
+	// floor has no rooms yet, Phase 3's drawing tools are what would populate it.
+	// WallHeight/WallThickness default to the topmost existing floor's values (or 280/20 if this
+	// is the first floor). Switches the active floor to the new one.
+	// Returns the new floor's level, or -1 if no building interior is currently loaded.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	int32 AddFloor();
+
+	// Removes the given floor (can be any floor, not just the top one - matches "delete whatever
+	// floor you're currently viewing"). Destroys that floor's rooms, then shifts every floor above
+	// it down by one level - renumbering them, moving their rooms' vertical position, and
+	// regenerating those rooms' meshes (see AInteriorRoom::SetFloorBaseZ). Shrinks the exterior
+	// shell to match. Refuses to remove the last remaining floor. Returns true on success.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool RemoveFloor(int32 Level);
 
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	FString GetLoadedBuildingId() const { return LoadedBuildingId; }
@@ -70,4 +95,8 @@ private:
 	TMap<int32, FInteriorRoomList> RoomsByFloor;
 
 	TArray<FInteriorNavNode> NavNodes;
+
+	// Wall defaults per loaded floor, keyed by level - kept around after the JSON parse so
+	// AddFloor has something sensible to inherit.
+	TMap<int32, FInteriorFloorInfo> FloorInfoByLevel;
 };
