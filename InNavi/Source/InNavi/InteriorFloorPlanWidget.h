@@ -68,10 +68,19 @@ private:
 
 	// Select mode: finds whichever door marker (see NativePaint) on the active floor is within a
 	// few pixels of LocalPosition, so it can be selected independently of the room/wall it belongs
-	// to. Returns false (leaving OutRoomId/OutDoorId untouched) if none is close enough. Checked
-	// before FindRoomNearLocalPosition on a select-mode click, so clicking directly on a door marker
-	// selects the door rather than the wall it's cut into.
-	bool FindDoorNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, FString& OutRoomId, FString& OutDoorId) const;
+	// to. Returns false (leaving OutRoomId/OutDoorId/OutEdgeIndex untouched) if none is close enough.
+	// Checked before FindRoomNearLocalPosition on a select-mode click, so clicking directly on a
+	// door marker selects the door rather than the wall it's cut into. OutEdgeIndex is only written
+	// when non-null - select mode doesn't need it, starting a drag does (see NativeOnMouseButtonDown).
+	bool FindDoorNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, FString& OutRoomId, FString& OutDoorId, int32* OutEdgeIndex = nullptr) const;
+
+	// While dragging an already-selected door (see NativeOnMouseButtonDown/NativeOnMouseMove),
+	// computes the Offset (world units, clamped to fit within the edge - same convention as
+	// FindRoomNearLocalPosition's OutOffsetWorldUnits) the door would have if centered under
+	// LocalPosition, projected onto RoomId's EdgeIndex edge - the same edge the door was already on
+	// (a drag doesn't re-search which edge, just slides along the known one). Returns false (leaving
+	// OutOffsetWorldUnits untouched) if the room or edge no longer exists.
+	bool ComputeDoorDragOffset(const FString& RoomId, int32 EdgeIndex, FVector2D LocalPosition, FVector2D WidgetSize, float& OutOffsetWorldUnits) const;
 
 	UPROPERTY()
 	AInteriorGenerator* InteriorGen;
@@ -89,6 +98,14 @@ private:
 	bool bIsPanning = false;
 	FVector2D PanStartLocalPosition = FVector2D::ZeroVector;
 	FVector2D PanStartOffset = FVector2D::ZeroVector;
+
+	// Set when a select-mode left-click lands on a door marker - a plain click (mouse up without
+	// moving) has no visible effect beyond the SelectDoor call already made on mouse down; if the
+	// user drags instead, NativeOnMouseMove slides the door along DraggingDoorEdgeIndex via MoveDoor.
+	bool bIsDraggingDoor = false;
+	FString DraggingDoorRoomId;
+	FString DraggingDoorId;
+	int32 DraggingDoorEdgeIndex = INDEX_NONE;
 
 	// Multiplies the auto-fit pixels-per-unit from ComputeViewTransform - 1 = the auto-fit size,
 	// >1 = zoomed in, <1 = zoomed out. Adjusted by the mouse wheel.

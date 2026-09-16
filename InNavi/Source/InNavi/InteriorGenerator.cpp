@@ -714,12 +714,34 @@ FString AInteriorGenerator::AddDoorToRoom(const FString& RoomId, int32 EdgeIndex
 				continue;
 			}
 
+			constexpr float NewDoorWidth = 90.f;
+
+			// Refuse to stack a door on top of one that's already on this edge (e.g. a stray
+			// "add door" click landing back on a door someone just dragged there) - without this,
+			// the new opening would silently coexist with the old one: NativePaint only draws the
+			// first opening it finds per edge, so the earlier door would keep rendering while the
+			// new one sat there invisible, only surfacing after the visible one got deleted.
+			for (const FInteriorOpening& Existing : Room->GetOpenings())
+			{
+				if (Existing.EdgeIndex != EdgeIndex)
+				{
+					continue;
+				}
+
+				const bool bOverlaps = OffsetWorldUnits < Existing.Offset + Existing.Width && Existing.Offset < OffsetWorldUnits + NewDoorWidth;
+				if (bOverlaps)
+				{
+					UE_LOG(LogTemp, Error, TEXT("AddDoorToRoom: '%s' edge %d already has door '%s' near that position"), *RoomId, EdgeIndex, *Existing.Id);
+					return FString();
+				}
+			}
+
 			FInteriorOpening Opening;
 			Opening.Id = FString::Printf(TEXT("%s-D%02d"), *RoomId, Room->GetOpenings().Num() + 1);
 			Opening.Type = EInteriorOpeningType::Door;
 			Opening.EdgeIndex = EdgeIndex;
 			Opening.Offset = OffsetWorldUnits;
-			Opening.Width = 90.f;
+			Opening.Width = NewDoorWidth;
 			Opening.Height = 210.f;
 			// InputId/ConnectsTo left blank on purpose - see the header comment.
 
@@ -760,6 +782,32 @@ bool AInteriorGenerator::DeleteDoor(const FString& RoomId, const FString& DoorId
 	}
 
 	UE_LOG(LogTemp, Error, TEXT("DeleteDoor: room '%s' not found"), *RoomId);
+	return false;
+}
+
+bool AInteriorGenerator::MoveDoor(const FString& RoomId, const FString& DoorId, float NewOffsetWorldUnits)
+{
+	for (auto& Pair : RoomsByFloor)
+	{
+		for (AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (!Room || Room->RoomId != RoomId)
+			{
+				continue;
+			}
+
+			for (const FInteriorOpening& Opening : Room->GetOpenings())
+			{
+				if (Opening.Id == DoorId)
+				{
+					Room->MoveOpening(DoorId, NewOffsetWorldUnits);
+					return true;
+				}
+			}
+			return false;
+		}
+	}
+
 	return false;
 }
 

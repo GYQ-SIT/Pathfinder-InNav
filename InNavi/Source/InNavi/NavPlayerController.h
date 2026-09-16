@@ -273,6 +273,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	FString AddDoorToWall(const FString& RoomId, int32 EdgeIndex, float OffsetWorldUnits);
 
+	// Slides an existing door to a new position along its edge (see AInteriorGenerator::MoveDoor) -
+	// what the 2D floor plan canvas's select-mode drag handler calls while dragging a door marker.
+	// No OnActionFailed broadcast on failure (called continuously during a drag - a stray failure
+	// mid-drag shouldn't spam the UI).
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool MoveDoor(const FString& RoomId, const FString& DoorId, float NewOffsetWorldUnits);
+
 	// Prefab room placement: 1/2/3 (for now, not wired into UMG yet) each arm a different default
 	// shape (rectangle / triangle / circle-as-many-sided-polygon) - while armed, clicking the 2D
 	// floor plan canvas places one centered on the click, at a fixed default size (no door - that's

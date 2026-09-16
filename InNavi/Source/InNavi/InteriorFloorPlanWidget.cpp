@@ -50,10 +50,18 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 		{
 			FString DoorRoomId;
 			FString DoorId;
-			if (FindDoorNearLocalPosition(LocalPosition, InGeometry.GetLocalSize(), DoorRoomId, DoorId))
+			int32 DoorEdgeIndex = INDEX_NONE;
+			if (FindDoorNearLocalPosition(LocalPosition, InGeometry.GetLocalSize(), DoorRoomId, DoorId, &DoorEdgeIndex))
 			{
 				PlayerController->SelectDoor(DoorRoomId, DoorId);
-				return FReply::Handled();
+
+				// A plain click (mouse up without moving) has no further effect; dragging slides
+				// the door along DraggingDoorEdgeIndex - see NativeOnMouseMove.
+				bIsDraggingDoor = true;
+				DraggingDoorRoomId = DoorRoomId;
+				DraggingDoorId = DoorId;
+				DraggingDoorEdgeIndex = DoorEdgeIndex;
+				return FReply::Handled().CaptureMouse(TakeWidget());
 			}
 
 			AInteriorRoom* Room = FindRoomNearLocalPosition(LocalPosition, InGeometry.GetLocalSize());
@@ -95,11 +103,36 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 		return FReply::Handled().ReleaseMouseCapture();
 	}
 
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsDraggingDoor)
+	{
+		bIsDraggingDoor = false;
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+
 	return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
 }
 
 FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
+	if (bIsDraggingDoor)
+	{
+		// Same defensive check as panning below - a mouse-up that doesn't reach this widget
+		// shouldn't leave the drag stuck on forever.
+		if (!InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+		{
+			bIsDraggingDoor = false;
+			return FReply::Handled().ReleaseMouseCapture();
+		}
+
+		const FVector2D CurrentLocalPosition = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+		float NewOffsetWorldUnits = 0.f;
+		if (PlayerController && ComputeDoorDragOffset(DraggingDoorRoomId, DraggingDoorEdgeIndex, CurrentLocalPosition, InGeometry.GetLocalSize(), NewOffsetWorldUnits))
+		{
+			PlayerController->MoveDoor(DraggingDoorRoomId, DraggingDoorId, NewOffsetWorldUnits);
+		}
+		return FReply::Handled();
+	}
+
 	if (bIsPanning)
 	{
 		// Defensive: NativeOnMouseButtonUp doesn't always reach this widget for the right button
@@ -232,7 +265,7 @@ AInteriorRoom* UInteriorFloorPlanWidget::FindRoomNearLocalPosition(FVector2D Loc
 	return nullptr;
 }
 
-bool UInteriorFloorPlanWidget::FindDoorNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, FString& OutRoomId, FString& OutDoorId) const
+bool UInteriorFloorPlanWidget::FindDoorNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, FString& OutRoomId, FString& OutDoorId, int32* OutEdgeIndex) const
 {
 	if (!InteriorGen || !Generator)
 	{
@@ -294,12 +327,76 @@ bool UInteriorFloorPlanWidget::FindDoorNearLocalPosition(FVector2D LocalPosition
 			{
 				OutRoomId = Room->RoomId;
 				OutDoorId = Opening.Id;
+				if (OutEdgeIndex)
+				{
+					*OutEdgeIndex = Opening.EdgeIndex;
+				}
 				return true;
 			}
 		}
 	}
 
 	return false;
+}
+
+bool UInteriorFloorPlanWidget::ComputeDoorDragOffset(const FString& RoomId, int32 EdgeIndex, FVector2D LocalPosition, FVector2D WidgetSize, float& OutOffsetWorldUnits) const
+{
+	if (!InteriorGen || !Generator)
+	{
+		return false;
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building)
+	{
+		return false;
+	}
+
+	AInteriorRoom* TargetRoom = nullptr;
+	for (AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
+	{
+		if (Room && Room->RoomId == RoomId)
+		{
+			TargetRoom = Room;
+			break;
+		}
+	}
+	if (!TargetRoom)
+	{
+		return false;
+	}
+
+	const TArray<FVector2D>& Footprint = TargetRoom->GetFootprint();
+	const int32 N = Footprint.Num();
+	if (!Footprint.IsValidIndex(EdgeIndex))
+	{
+		return false;
+	}
+
+	FVector2D Origin;
+	float PixelsPerUnit;
+	ComputeViewTransform(WidgetSize, Origin, PixelsPerUnit);
+
+	const float Scale = Generator->GetScale();
+	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
+	{
+		return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+	};
+
+	const FVector2D WorldA = (Footprint[EdgeIndex] + Building->BuildingOffset) * Scale;
+	const FVector2D WorldB = (Footprint[(EdgeIndex + 1) % N] + Building->BuildingOffset) * Scale;
+	const FVector2D LocalA = WorldToLocal(WorldA);
+	const FVector2D LocalB = WorldToLocal(WorldB);
+
+	const FVector2D LocalAB = LocalB - LocalA;
+	const float LocalLengthSq = LocalAB.SizeSquared();
+	const float T = (LocalLengthSq > KINDA_SMALL_NUMBER) ? FMath::Clamp(FVector2D::DotProduct(LocalPosition - LocalA, LocalAB) / LocalLengthSq, 0.f, 1.f) : 0.f;
+
+	const float EdgeLengthWorldUnits = FVector2D::Distance(WorldA, WorldB);
+	const float ClickOffsetWorldUnits = T * EdgeLengthWorldUnits;
+	constexpr float DoorWidthWorldUnits = 90.f; // matches AInteriorGenerator::AddDoorToRoom's fixed door width
+	OutOffsetWorldUnits = FMath::Clamp(ClickOffsetWorldUnits - DoorWidthWorldUnits * 0.5f, 0.f, FMath::Max(0.f, EdgeLengthWorldUnits - DoorWidthWorldUnits));
+	return true;
 }
 
 void UInteriorFloorPlanWidget::ComputeViewTransform(FVector2D WidgetSize, FVector2D& OutOrigin, float& OutPixelsPerUnit) const
@@ -471,22 +568,17 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			// (it doesn't open the wall at floor level, just higher up - not meaningful to show as
 			// a gap in a top-down plan). A door additionally gets its own marker line drawn on top
 			// of the gap (see below) so it reads as "a door" rather than just a break in the wall.
-			float GapStart = -1.f;
-			float GapEnd = -1.f;
-			const FInteriorOpening* DoorOpening = nullptr;
+			// A single edge can have more than one door/void on it (e.g. two doors on a long wall),
+			// so every matching opening is collected and drawn, not just the first one found.
+			TArray<const FInteriorOpening*> EdgeOpenings;
 			for (const FInteriorOpening& Opening : Room->GetOpenings())
 			{
 				if (Opening.EdgeIndex == EdgeIndex && (Opening.Type == EInteriorOpeningType::Door || Opening.Type == EInteriorOpeningType::Void))
 				{
-					GapStart = FMath::Clamp(Opening.Offset, 0.f, EdgeLength);
-					GapEnd = FMath::Clamp(Opening.Offset + Opening.Width, GapStart, EdgeLength);
-					if (Opening.Type == EInteriorOpeningType::Door)
-					{
-						DoorOpening = &Opening;
-					}
-					break; // only one opening per edge is drawn for now
+					EdgeOpenings.Add(&Opening);
 				}
 			}
+			EdgeOpenings.Sort([](const FInteriorOpening& A, const FInteriorOpening& B) { return A.Offset < B.Offset; });
 
 			auto DrawSegment = [&](const FVector2D& WorldSegA, const FVector2D& WorldSegB, const FLinearColor& Color, float Thickness)
 			{
@@ -496,27 +588,30 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, AllottedGeometry.ToPaintGeometry(), LinePoints, ESlateDrawEffect::None, Color, true, Thickness);
 			};
 
-			if (GapStart < 0.f)
+			float EdgeCursor = 0.f;
+			for (const FInteriorOpening* Opening : EdgeOpenings)
 			{
-				DrawSegment(WorldA, WorldB, LineColor, LineThickness);
-			}
-			else
-			{
-				if (GapStart > 0.f)
+				const float GapStart = FMath::Clamp(Opening->Offset, 0.f, EdgeLength);
+				const float GapEnd = FMath::Clamp(Opening->Offset + Opening->Width, GapStart, EdgeLength);
+
+				if (GapStart > EdgeCursor)
 				{
-					DrawSegment(WorldA, WorldA + Dir * GapStart, LineColor, LineThickness);
+					DrawSegment(WorldA + Dir * EdgeCursor, WorldA + Dir * GapStart, LineColor, LineThickness);
 				}
-				if (GapEnd < EdgeLength)
+
+				if (Opening->Type == EInteriorOpeningType::Door)
 				{
-					DrawSegment(WorldA + Dir * GapEnd, WorldB, LineColor, LineThickness);
+					const bool bIsSelectedDoor = PlayerController && PlayerController->GetSelectedDoorRoomId() == Room->RoomId && PlayerController->GetSelectedDoorId() == Opening->Id;
+					const FLinearColor DoorColor = bIsSelectedDoor ? FLinearColor(1.f, 0.15f, 0.15f, 1.f) : FLinearColor(0.f, 0.85f, 1.f, 1.f); // fluorescent blue, or red when selected
+					DrawSegment(WorldA + Dir * GapStart, WorldA + Dir * GapEnd, DoorColor, 5.f);
 				}
+
+				EdgeCursor = FMath::Max(EdgeCursor, GapEnd);
 			}
 
-			if (DoorOpening)
+			if (EdgeCursor < EdgeLength)
 			{
-				const bool bIsSelectedDoor = PlayerController && PlayerController->GetSelectedDoorRoomId() == Room->RoomId && PlayerController->GetSelectedDoorId() == DoorOpening->Id;
-				const FLinearColor DoorColor = bIsSelectedDoor ? FLinearColor(1.f, 0.15f, 0.15f, 1.f) : FLinearColor(0.f, 0.85f, 1.f, 1.f); // fluorescent blue, or red when selected
-				DrawSegment(WorldA + Dir * GapStart, WorldA + Dir * GapEnd, DoorColor, 5.f);
+				DrawSegment(WorldA + Dir * EdgeCursor, WorldB, LineColor, LineThickness);
 			}
 		}
 	}

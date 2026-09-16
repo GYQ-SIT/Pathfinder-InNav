@@ -157,6 +157,19 @@ void AInteriorRoom::RemoveOpening(const FString& OpeningId)
 	}
 }
 
+void AInteriorRoom::MoveOpening(const FString& OpeningId, float NewOffsetWorldUnits)
+{
+	for (FInteriorOpening& Opening : CachedOpenings)
+	{
+		if (Opening.Id == OpeningId)
+		{
+			Opening.Offset = NewOffsetWorldUnits;
+			RebuildMesh();
+			return;
+		}
+	}
+}
+
 void AInteriorRoom::RebuildMesh()
 {
 	const int32 N = CachedFootprint.Num();

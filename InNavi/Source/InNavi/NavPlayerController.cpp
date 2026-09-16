@@ -97,13 +97,14 @@ void ANavPlayerController::OnClick()
 	{
 		AddFootprintPointUnderCursor();
 	}
-	else if (bDrawRoomMode || bDrawWallMode)
+	else if (bDrawRoomMode || bDrawWallMode || bSelectMode || bAddDoorMode || ActivePrefabShape != 0)
 	{
-		// No-op: room/wall points come from the 2D floor plan canvas now (see
-		// UInteriorFloorPlanWidget::NativeOnMouseButtonDown -> AddRoomPointAtFootprintPosition), not
-		// a 3D-raycast click here - the input mode lets both the UI and the game world see the same
-		// click, so leaving a 3D handler here as well would double-add (and mis-add, since it's a
-		// completely different coordinate mapping) points for every click.
+		// No-op: all interior-editing interaction (drawing, selecting/dragging, adding doors,
+		// placing prefab rooms) comes from the 2D floor plan canvas now (see
+		// UInteriorFloorPlanWidget::NativeOnMouseButtonDown), not a 3D-raycast click here - the
+		// input mode lets both the UI and the game world see the same click, so leaving a 3D
+		// handler here as well would fire SelectBuildingUnderCursor() (or worse) alongside
+		// whatever the 2D canvas already did for that same click.
 	}
 	else
 	{
@@ -743,6 +744,21 @@ bool ANavPlayerController::DeleteDoor(const FString& RoomId, const FString& Door
 			SelectedDoorRoomId.Empty();
 			SelectedDoorId.Empty();
 		}
+	}
+	return bSuccess;
+}
+
+bool ANavPlayerController::MoveDoor(const FString& RoomId, const FString& DoorId, float NewOffsetWorldUnits)
+{
+	if (!InteriorGen)
+	{
+		return false;
+	}
+
+	const bool bSuccess = InteriorGen->MoveDoor(RoomId, DoorId, NewOffsetWorldUnits);
+	if (bSuccess)
+	{
+		bHasUnsavedChanges = true;
 	}
 	return bSuccess;
 }

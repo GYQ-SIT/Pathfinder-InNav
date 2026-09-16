@@ -142,6 +142,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool DeleteDoor(const FString& RoomId, const FString& DoorId);
 
+	// Slides an existing door to a new position along the same edge it's already on
+	// (NewOffsetWorldUnits, world units, matching FInteriorOpening::Offset) - the caller (dragging a
+	// door on the 2D floor plan canvas) is responsible for clamping this so it stays within the
+	// edge. Returns false if the room or the door within it doesn't exist.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool MoveDoor(const FString& RoomId, const FString& DoorId, float NewOffsetWorldUnits);
+
 	// Nav nodes (Path Node/Elevator/Stairs) for the currently loaded building, all floors. Not yet
 	// turned into actors - representation is pending alignment with the navigation
 	// (NavMesh/NavLinks) team on what they actually need to consume.

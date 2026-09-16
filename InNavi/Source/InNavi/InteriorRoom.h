@@ -51,6 +51,11 @@ public:
 	// to solid there. No-op if no opening with that id exists.
 	void RemoveOpening(const FString& OpeningId);
 
+	// Slides a single opening (by id) to a new Offset along the same edge it's already on (e.g.
+	// from dragging a door - see AInteriorGenerator::MoveDoor) and regenerates the mesh. No-op if no
+	// opening with that id exists.
+	void MoveOpening(const FString& OpeningId, float NewOffsetWorldUnits);
+
 	UPROPERTY()
 	FString RoomId;
 
