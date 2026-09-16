@@ -4,6 +4,7 @@
 #include "InteriorFloorPlanWidget.h"
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
+#include "InteriorTypes.h"
 #include "BuildingGenerator.h"
 #include "PolyBuilding.h"
 #include "NavPlayerController.h"
@@ -47,8 +48,27 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 
 		if (PlayerController->IsInSelectMode())
 		{
+			FString DoorRoomId;
+			FString DoorId;
+			if (FindDoorNearLocalPosition(LocalPosition, InGeometry.GetLocalSize(), DoorRoomId, DoorId))
+			{
+				PlayerController->SelectDoor(DoorRoomId, DoorId);
+				return FReply::Handled();
+			}
+
 			AInteriorRoom* Room = FindRoomNearLocalPosition(LocalPosition, InGeometry.GetLocalSize());
 			PlayerController->SelectRoom(Room ? Room->RoomId : FString());
+			return FReply::Handled();
+		}
+
+		if (PlayerController->IsInAddDoorMode())
+		{
+			int32 EdgeIndex = INDEX_NONE;
+			float OffsetWorldUnits = 0.f;
+			if (AInteriorRoom* Room = FindRoomNearLocalPosition(LocalPosition, InGeometry.GetLocalSize(), &EdgeIndex, &OffsetWorldUnits))
+			{
+				PlayerController->AddDoorToWall(Room->RoomId, EdgeIndex, OffsetWorldUnits);
+			}
 			return FReply::Handled();
 		}
 
@@ -134,7 +154,7 @@ static float DistancePointToSegment2D(const FVector2D& Point, const FVector2D& A
 	return FVector2D::Distance(Point, A + AB * T);
 }
 
-AInteriorRoom* UInteriorFloorPlanWidget::FindRoomNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize) const
+AInteriorRoom* UInteriorFloorPlanWidget::FindRoomNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, int32* OutEdgeIndex, float* OutOffsetWorldUnits) const
 {
 	if (!InteriorGen || !Generator)
 	{
@@ -145,6 +165,84 @@ AInteriorRoom* UInteriorFloorPlanWidget::FindRoomNearLocalPosition(FVector2D Loc
 	if (!Building)
 	{
 		return nullptr;
+	}
+
+	FVector2D Origin;
+	float PixelsPerUnit;
+	ComputeViewTransform(WidgetSize, Origin, PixelsPerUnit);
+
+	const float Scale = Generator->GetScale();
+	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
+	{
+		return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+	};
+
+	constexpr float ClickTolerancePixels = 10.f;
+	constexpr float DoorWidthWorldUnits = 90.f; // matches AInteriorGenerator::AddDoorToRoom's fixed door width
+
+	for (AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
+	{
+		if (!Room)
+		{
+			continue;
+		}
+
+		const TArray<FVector2D>& Footprint = Room->GetFootprint();
+		const int32 N = Footprint.Num();
+		if (N < 2)
+		{
+			continue;
+		}
+
+		TArray<FVector2D> WorldPoints;
+		WorldPoints.Reserve(N);
+		for (const FVector2D& Point : Footprint)
+		{
+			WorldPoints.Add((Point + Building->BuildingOffset) * Scale);
+		}
+
+		const int32 NumEdges = Room->IsClosedLoop() ? N : N - 1;
+		for (int32 i = 0; i < NumEdges; i++)
+		{
+			const FVector2D& WorldA = WorldPoints[i];
+			const FVector2D& WorldB = WorldPoints[(i + 1) % N];
+			const FVector2D A = WorldToLocal(WorldA);
+			const FVector2D B = WorldToLocal(WorldB);
+
+			if (DistancePointToSegment2D(LocalPosition, A, B) <= ClickTolerancePixels)
+			{
+				if (OutEdgeIndex)
+				{
+					*OutEdgeIndex = i;
+				}
+				if (OutOffsetWorldUnits)
+				{
+					const FVector2D LocalAB = B - A;
+					const float LocalLengthSq = LocalAB.SizeSquared();
+					const float T = (LocalLengthSq > KINDA_SMALL_NUMBER) ? FMath::Clamp(FVector2D::DotProduct(LocalPosition - A, LocalAB) / LocalLengthSq, 0.f, 1.f) : 0.f;
+					const float EdgeLengthWorldUnits = FVector2D::Distance(WorldA, WorldB);
+					const float ClickOffsetWorldUnits = T * EdgeLengthWorldUnits;
+					*OutOffsetWorldUnits = FMath::Clamp(ClickOffsetWorldUnits - DoorWidthWorldUnits * 0.5f, 0.f, FMath::Max(0.f, EdgeLengthWorldUnits - DoorWidthWorldUnits));
+				}
+				return Room;
+			}
+		}
+	}
+
+	return nullptr;
+}
+
+bool UInteriorFloorPlanWidget::FindDoorNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, FString& OutRoomId, FString& OutDoorId) const
+{
+	if (!InteriorGen || !Generator)
+	{
+		return false;
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building)
+	{
+		return false;
 	}
 
 	FVector2D Origin;
@@ -173,26 +271,35 @@ AInteriorRoom* UInteriorFloorPlanWidget::FindRoomNearLocalPosition(FVector2D Loc
 			continue;
 		}
 
-		TArray<FVector2D> LocalPoints;
-		LocalPoints.Reserve(N);
-		for (const FVector2D& Point : Footprint)
+		for (const FInteriorOpening& Opening : Room->GetOpenings())
 		{
-			LocalPoints.Add(WorldToLocal((Point + Building->BuildingOffset) * Scale));
-		}
-
-		const int32 NumEdges = Room->IsClosedLoop() ? N : N - 1;
-		for (int32 i = 0; i < NumEdges; i++)
-		{
-			const FVector2D& A = LocalPoints[i];
-			const FVector2D& B = LocalPoints[(i + 1) % N];
-			if (DistancePointToSegment2D(LocalPosition, A, B) <= ClickTolerancePixels)
+			if (Opening.Type != EInteriorOpeningType::Door || !Footprint.IsValidIndex(Opening.EdgeIndex))
 			{
-				return Room;
+				continue;
+			}
+
+			const FVector2D WorldA = (Footprint[Opening.EdgeIndex] + Building->BuildingOffset) * Scale;
+			const FVector2D WorldB = (Footprint[(Opening.EdgeIndex + 1) % N] + Building->BuildingOffset) * Scale;
+			const float EdgeLength = FVector2D::Distance(WorldA, WorldB);
+			if (EdgeLength < KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+			const FVector2D Dir = (WorldB - WorldA) / EdgeLength;
+
+			const FVector2D MarkerLocalStart = WorldToLocal(WorldA + Dir * Opening.Offset);
+			const FVector2D MarkerLocalEnd = WorldToLocal(WorldA + Dir * (Opening.Offset + Opening.Width));
+
+			if (DistancePointToSegment2D(LocalPosition, MarkerLocalStart, MarkerLocalEnd) <= ClickTolerancePixels)
+			{
+				OutRoomId = Room->RoomId;
+				OutDoorId = Opening.Id;
+				return true;
 			}
 		}
 	}
 
-	return nullptr;
+	return false;
 }
 
 void UInteriorFloorPlanWidget::ComputeViewTransform(FVector2D WidgetSize, FVector2D& OutOrigin, float& OutPixelsPerUnit) const
@@ -332,26 +439,86 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			continue;
 		}
 
-		TArray<FVector2D> LinePoints;
-		for (const FVector2D& Point : Room->GetFootprint())
-		{
-			LinePoints.Add(WorldToLocal((Point + Building->BuildingOffset) * Scale));
-		}
-		if (LinePoints.Num() < 2)
+		const TArray<FVector2D>& Footprint = Room->GetFootprint();
+		const int32 N = Footprint.Num();
+		if (N < 2)
 		{
 			continue;
 		}
 
-		if (Room->IsClosedLoop())
+		TArray<FVector2D> WorldPoints;
+		WorldPoints.Reserve(N);
+		for (const FVector2D& Point : Footprint)
 		{
-			const FVector2D FirstPoint = LinePoints[0];
-			LinePoints.Add(FirstPoint);
+			WorldPoints.Add((Point + Building->BuildingOffset) * Scale);
 		}
 
 		const bool bIsSelected = !SelectedRoomId.IsEmpty() && Room->RoomId == SelectedRoomId;
 		const FLinearColor LineColor = bIsSelected ? FLinearColor(1.f, 0.15f, 0.15f, 1.f) : FLinearColor::Black;
 		const float LineThickness = bIsSelected ? 4.f : 3.f;
-		FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, AllottedGeometry.ToPaintGeometry(), LinePoints, ESlateDrawEffect::None, LineColor, true, LineThickness);
+
+		// Draw edge by edge (rather than one continuous outline) so a door/void opening on an edge
+		// can leave a visible gap instead of a solid line straight through it.
+		const int32 NumEdges = Room->IsClosedLoop() ? N : N - 1;
+		for (int32 EdgeIndex = 0; EdgeIndex < NumEdges; EdgeIndex++)
+		{
+			const FVector2D& WorldA = WorldPoints[EdgeIndex];
+			const FVector2D& WorldB = WorldPoints[(EdgeIndex + 1) % N];
+			const float EdgeLength = FVector2D::Distance(WorldA, WorldB);
+			const FVector2D Dir = (EdgeLength > KINDA_SMALL_NUMBER) ? (WorldB - WorldA) / EdgeLength : FVector2D::ZeroVector;
+
+			// A door/void opening leaves a visible gap; a window still draws as a solid line in 2D
+			// (it doesn't open the wall at floor level, just higher up - not meaningful to show as
+			// a gap in a top-down plan). A door additionally gets its own marker line drawn on top
+			// of the gap (see below) so it reads as "a door" rather than just a break in the wall.
+			float GapStart = -1.f;
+			float GapEnd = -1.f;
+			const FInteriorOpening* DoorOpening = nullptr;
+			for (const FInteriorOpening& Opening : Room->GetOpenings())
+			{
+				if (Opening.EdgeIndex == EdgeIndex && (Opening.Type == EInteriorOpeningType::Door || Opening.Type == EInteriorOpeningType::Void))
+				{
+					GapStart = FMath::Clamp(Opening.Offset, 0.f, EdgeLength);
+					GapEnd = FMath::Clamp(Opening.Offset + Opening.Width, GapStart, EdgeLength);
+					if (Opening.Type == EInteriorOpeningType::Door)
+					{
+						DoorOpening = &Opening;
+					}
+					break; // only one opening per edge is drawn for now
+				}
+			}
+
+			auto DrawSegment = [&](const FVector2D& WorldSegA, const FVector2D& WorldSegB, const FLinearColor& Color, float Thickness)
+			{
+				TArray<FVector2D> LinePoints;
+				LinePoints.Add(WorldToLocal(WorldSegA));
+				LinePoints.Add(WorldToLocal(WorldSegB));
+				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, AllottedGeometry.ToPaintGeometry(), LinePoints, ESlateDrawEffect::None, Color, true, Thickness);
+			};
+
+			if (GapStart < 0.f)
+			{
+				DrawSegment(WorldA, WorldB, LineColor, LineThickness);
+			}
+			else
+			{
+				if (GapStart > 0.f)
+				{
+					DrawSegment(WorldA, WorldA + Dir * GapStart, LineColor, LineThickness);
+				}
+				if (GapEnd < EdgeLength)
+				{
+					DrawSegment(WorldA + Dir * GapEnd, WorldB, LineColor, LineThickness);
+				}
+			}
+
+			if (DoorOpening)
+			{
+				const bool bIsSelectedDoor = PlayerController && PlayerController->GetSelectedDoorRoomId() == Room->RoomId && PlayerController->GetSelectedDoorId() == DoorOpening->Id;
+				const FLinearColor DoorColor = bIsSelectedDoor ? FLinearColor(1.f, 0.15f, 0.15f, 1.f) : FLinearColor(0.f, 0.85f, 1.f, 1.f); // fluorescent blue, or red when selected
+				DrawSegment(WorldA + Dir * GapStart, WorldA + Dir * GapEnd, DoorColor, 5.f);
+			}
+		}
 	}
 
 	// ---- In-progress room/wall being clicked out right now (if any) - not closed into a loop even

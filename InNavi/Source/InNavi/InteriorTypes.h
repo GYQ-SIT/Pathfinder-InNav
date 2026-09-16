@@ -43,7 +43,15 @@ struct FInteriorOpening
 	UPROPERTY(BlueprintReadOnly)
 	float SillHeight = 0.f;
 
-	// Door only: the room (or "corridor"/"exterior") id on the other side, for the navigation graph.
+	// Door only, for the navigation graph: InputId is the room this door leads into (the room that
+	// owns this opening - not auto-filled from that, kept as its own explicit field in case a door
+	// ever needs to record something other than its owning room, e.g. once shared/graph-based walls
+	// exist), and ConnectsTo ("output") is the room/corridor/exterior id on the other side. Both are
+	// left blank when the "add door" tool first creates a door - filled in later via a proper UI
+	// form, not automatically.
+	UPROPERTY(BlueprintReadOnly)
+	FString InputId;
+
 	UPROPERTY(BlueprintReadOnly)
 	FString ConnectsTo;
 };

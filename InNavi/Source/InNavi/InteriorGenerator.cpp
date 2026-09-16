@@ -216,6 +216,7 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 						OpeningObject->TryGetNumberField(TEXT("width"), Opening.Width);
 						OpeningObject->TryGetNumberField(TEXT("height"), Opening.Height);
 						OpeningObject->TryGetNumberField(TEXT("sillHeight"), Opening.SillHeight);
+						OpeningObject->TryGetStringField(TEXT("inputId"), Opening.InputId);
 						OpeningObject->TryGetStringField(TEXT("connectsTo"), Opening.ConnectsTo);
 
 						Openings.Add(Opening);
@@ -702,6 +703,66 @@ bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float
 	return false;
 }
 
+FString AInteriorGenerator::AddDoorToRoom(const FString& RoomId, int32 EdgeIndex, float OffsetWorldUnits)
+{
+	for (auto& Pair : RoomsByFloor)
+	{
+		for (AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (!Room || Room->RoomId != RoomId)
+			{
+				continue;
+			}
+
+			FInteriorOpening Opening;
+			Opening.Id = FString::Printf(TEXT("%s-D%02d"), *RoomId, Room->GetOpenings().Num() + 1);
+			Opening.Type = EInteriorOpeningType::Door;
+			Opening.EdgeIndex = EdgeIndex;
+			Opening.Offset = OffsetWorldUnits;
+			Opening.Width = 90.f;
+			Opening.Height = 210.f;
+			// InputId/ConnectsTo left blank on purpose - see the header comment.
+
+			Room->AddOpening(Opening);
+			UE_LOG(LogTemp, Warning, TEXT("Added door %s to %s edge %d"), *Opening.Id, *RoomId, EdgeIndex);
+			return Opening.Id;
+		}
+	}
+
+	UE_LOG(LogTemp, Error, TEXT("AddDoorToRoom: '%s' not found"), *RoomId);
+	return FString();
+}
+
+bool AInteriorGenerator::DeleteDoor(const FString& RoomId, const FString& DoorId)
+{
+	for (auto& Pair : RoomsByFloor)
+	{
+		for (AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (!Room || Room->RoomId != RoomId)
+			{
+				continue;
+			}
+
+			for (const FInteriorOpening& Opening : Room->GetOpenings())
+			{
+				if (Opening.Id == DoorId)
+				{
+					Room->RemoveOpening(DoorId);
+					UE_LOG(LogTemp, Warning, TEXT("Deleted door %s from %s"), *DoorId, *RoomId);
+					return true;
+				}
+			}
+
+			UE_LOG(LogTemp, Error, TEXT("DeleteDoor: '%s' has no door '%s'"), *RoomId, *DoorId);
+			return false;
+		}
+	}
+
+	UE_LOG(LogTemp, Error, TEXT("DeleteDoor: room '%s' not found"), *RoomId);
+	return false;
+}
+
 TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 {
 	TSharedRef<FJsonObject> InteriorObject = MakeShared<FJsonObject>();
@@ -761,9 +822,16 @@ TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 						OpeningObject->SetNumberField(TEXT("height"), Opening.Height);
 						OpeningObject->SetNumberField(TEXT("sillHeight"), Opening.SillHeight);
 					}
-					if (Opening.Type == EInteriorOpeningType::Door && !Opening.ConnectsTo.IsEmpty())
+					if (Opening.Type == EInteriorOpeningType::Door)
 					{
-						OpeningObject->SetStringField(TEXT("connectsTo"), Opening.ConnectsTo);
+						if (!Opening.InputId.IsEmpty())
+						{
+							OpeningObject->SetStringField(TEXT("inputId"), Opening.InputId);
+						}
+						if (!Opening.ConnectsTo.IsEmpty())
+						{
+							OpeningObject->SetStringField(TEXT("connectsTo"), Opening.ConnectsTo);
+						}
 					}
 					OpeningsArray.Add(MakeShared<FJsonValueObject>(OpeningObject));
 				}

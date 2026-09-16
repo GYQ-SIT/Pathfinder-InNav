@@ -57,10 +57,21 @@ private:
 	// OutPixelsPerUnit is world units to screen pixels.
 	void ComputeViewTransform(FVector2D WidgetSize, FVector2D& OutOrigin, float& OutPixelsPerUnit) const;
 
-	// Select mode: finds whichever room/wall on the active floor has an edge within a few pixels of
-	// LocalPosition, or nullptr if none does. Never matches the exterior building outline itself -
-	// that's a separate actor (APolyBuilding), not one of InteriorGenerator's rooms/walls.
-	AInteriorRoom* FindRoomNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize) const;
+	// Select/add-door modes: finds whichever room/wall on the active floor has an edge within a few
+	// pixels of LocalPosition, or nullptr if none does. Never matches the exterior building outline
+	// itself - that's a separate actor (APolyBuilding), not one of InteriorGenerator's rooms/walls.
+	// OutEdgeIndex/OutOffsetWorldUnits are optional (pass nullptr if not needed, as select mode
+	// does) - when given, filled in with which edge matched and how far along it (world units,
+	// matching FInteriorOpening::Offset) the click falls, clamped so a fixed-width door centered
+	// there fits without poking past either end - see AddDoorToWall.
+	AInteriorRoom* FindRoomNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, int32* OutEdgeIndex = nullptr, float* OutOffsetWorldUnits = nullptr) const;
+
+	// Select mode: finds whichever door marker (see NativePaint) on the active floor is within a
+	// few pixels of LocalPosition, so it can be selected independently of the room/wall it belongs
+	// to. Returns false (leaving OutRoomId/OutDoorId untouched) if none is close enough. Checked
+	// before FindRoomNearLocalPosition on a select-mode click, so clicking directly on a door marker
+	// selects the door rather than the wall it's cut into.
+	bool FindDoorNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, FString& OutRoomId, FString& OutDoorId) const;
 
 	UPROPERTY()
 	AInteriorGenerator* InteriorGen;

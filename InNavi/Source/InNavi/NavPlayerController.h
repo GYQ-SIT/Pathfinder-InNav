@@ -208,6 +208,8 @@ public:
 	// Sets the currently-selected room/wall - the 2D floor plan canvas's select-mode click handler
 	// calls this with whichever room/wall it found near the click, or an empty string to deselect.
 	// The selection persists even after leaving select mode, so Delete/Resize keep working on it.
+	// Clears the selected-door state (see SelectDoor) - only one of a room or a door is ever
+	// selected at a time.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void SelectRoom(const FString& RoomId);
 
@@ -217,21 +219,59 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Interior")
 	FOnSelectedRoomChanged OnSelectedRoomChanged;
 
+	// Sets the currently-selected door, independently of the room it belongs to - the 2D floor plan
+	// canvas's select-mode click handler calls this when the click lands on a door marker rather
+	// than a plain wall edge. Clears whatever room was selected (see SelectRoom) - only one of the
+	// two is ever selected at a time.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void SelectDoor(const FString& RoomId, const FString& DoorId);
+
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	FString GetSelectedDoorRoomId() const { return SelectedDoorRoomId; }
+
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	FString GetSelectedDoorId() const { return SelectedDoorId; }
+
 	// Removes a single room/wall by id (see AInteriorGenerator::DeleteRoom) - general-purpose,
-	// explicit-id version. See also DeleteSelectedRoom.
+	// explicit-id version. See also DeleteSelection. Also clears the door selection if the deleted
+	// room happened to own the currently-selected door (it no longer exists either way).
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool DeleteRoom(const FString& RoomId);
 
-	// Deletes whichever room/wall is currently selected (see SelectRoom), and clears the selection.
-	// Bound to the Backspace key for now. No-op (returns false) if nothing is selected.
+	// Removes a single door by id (see AInteriorGenerator::DeleteDoor) - general-purpose, explicit-
+	// id version. See also DeleteSelection. The room itself is untouched.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
-	bool DeleteSelectedRoom();
+	bool DeleteDoor(const FString& RoomId, const FString& DoorId);
+
+	// Deletes whichever is currently selected - a door takes priority if one is selected (see
+	// SelectDoor), otherwise a selected room/wall (see SelectRoom) - and clears the corresponding
+	// selection. Bound to the Backspace key for now. No-op (returns false) if nothing is selected.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool DeleteSelection();
 
 	// Rescales a room/wall to fit new Width (X) / Depth (Y) dimensions, keeping it centered where
 	// it is (see AInteriorGenerator::ResizeRoom) - general-purpose, explicit-id version. See also
 	// GrowSelectedRoom/ShrinkSelectedRoom. Not wired into UMG yet.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth);
+
+	// Add-door mode: click a wall edge on the 2D floor plan canvas to add a fixed-size door there
+	// (centered on the click, clamped so it doesn't poke past either end of the edge) - Input/
+	// Output (ConnectsTo) ids are left blank for now, to be filled in later via a proper UI form.
+	// Mutually exclusive with every other mode. Bound to the K key for now, not wired into UMG yet.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void ToggleAddDoorMode();
+
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool IsInAddDoorMode() const { return bAddDoorMode; }
+
+	// Adds a fixed-size door to RoomId's EdgeIndex, centered at OffsetWorldUnits along that edge
+	// (see AInteriorGenerator::AddDoorToRoom) - what the 2D floor plan canvas's add-door-mode click
+	// handler calls after finding which wall edge was clicked. Selects the new door immediately
+	// (like PlacePrefabRoomAt does for rooms) so it can be deleted right away if it's wrong. Returns
+	// the new door's id, or an empty string on failure.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	FString AddDoorToWall(const FString& RoomId, int32 EdgeIndex, float OffsetWorldUnits);
 
 	// Prefab room placement: 1/2/3 (for now, not wired into UMG yet) each arm a different default
 	// shape (rectangle / triangle / circle-as-many-sided-polygon) - while armed, clicking the 2D
@@ -363,8 +403,8 @@ private:
 	void ShrinkSelectedRoom();
 	void NudgeSelectedRoomSize(float Delta);
 
-	// Backspace handler - wraps DeleteSelectedRoom() because key bindings require a void() signature.
-	void DeleteSelectedRoomKeyHandler();
+	// Backspace handler - wraps DeleteSelection() because key bindings require a void() signature.
+	void DeleteSelectionKeyHandler();
 
 	UPROPERTY()
 	APolyBuilding* SelectedBuilding;
@@ -404,9 +444,16 @@ private:
 	// id), StartNewProject, or once deleted.
 	FString SelectedRoomId;
 
+	// See SelectDoor/GetSelectedDoorRoomId/GetSelectedDoorId - same lifetime rules as
+	// SelectedRoomId, and mutually exclusive with it (selecting one clears the other).
+	FString SelectedDoorRoomId;
+	FString SelectedDoorId;
+
 	// See TogglePrefabRectangleMode/TogglePrefabTriangleMode/TogglePrefabCircleMode/
 	// IsInPrefabRoomMode. 0 = none armed; 1 = rectangle, 2 = triangle, 3 = circle.
 	int32 ActivePrefabShape = 0;
+
+	bool bAddDoorMode = false;
 
 	// Turns off whichever of draw room mode / draw wall mode is currently active, from any path
 	// (self-toggle, or another mode taking over) - clears pending points. Clicks reaching the right
@@ -426,6 +473,10 @@ private:
 	// Shared implementation behind TogglePrefabRectangleMode/TogglePrefabTriangleMode/
 	// TogglePrefabCircleMode - ShapeId matches ActivePrefabShape's convention (1/2/3).
 	void TogglePrefabRoomMode(int32 ShapeId);
+
+	// Turns off add-door mode if it's currently active - called by every other mode's toggle, same
+	// reasoning as ExitSelectMode.
+	void ExitAddDoorMode();
 
 	// Snaps the possessed pawn to a top-down view of the given building's currently active floor -
 	// called automatically after a successful LoadInteriorForBuilding, so the interior screen shows

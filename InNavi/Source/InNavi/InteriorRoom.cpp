@@ -138,6 +138,25 @@ void AInteriorRoom::ResizeFootprint(const TArray<FVector2D>& NewFootprint)
 	RebuildMesh();
 }
 
+void AInteriorRoom::AddOpening(const FInteriorOpening& Opening)
+{
+	CachedOpenings.Add(Opening);
+	RebuildMesh();
+}
+
+void AInteriorRoom::RemoveOpening(const FString& OpeningId)
+{
+	const int32 RemovedCount = CachedOpenings.RemoveAll([&OpeningId](const FInteriorOpening& Opening)
+	{
+		return Opening.Id == OpeningId;
+	});
+
+	if (RemovedCount > 0)
+	{
+		RebuildMesh();
+	}
+}
+
 void AInteriorRoom::RebuildMesh()
 {
 	const int32 N = CachedFootprint.Num();

@@ -77,7 +77,10 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::P, IE_Pressed, this, &ANavPlayerController::ToggleDrawRoomMode);
 	InputComponent->BindKey(EKeys::L, IE_Pressed, this, &ANavPlayerController::ToggleDrawWallMode);
 	InputComponent->BindKey(EKeys::Q, IE_Pressed, this, &ANavPlayerController::ToggleSelectMode);
-	InputComponent->BindKey(EKeys::BackSpace, IE_Pressed, this, &ANavPlayerController::DeleteSelectedRoomKeyHandler);
+	// Not "D" - DefaultPawn's free-fly movement already uses WASD, so "D" would double up as
+	// "strafe right" every time this mode gets toggled.
+	InputComponent->BindKey(EKeys::K, IE_Pressed, this, &ANavPlayerController::ToggleAddDoorMode);
+	InputComponent->BindKey(EKeys::BackSpace, IE_Pressed, this, &ANavPlayerController::DeleteSelectionKeyHandler);
 	InputComponent->BindKey(EKeys::One, IE_Pressed, this, &ANavPlayerController::TogglePrefabRectangleMode);
 	InputComponent->BindKey(EKeys::Two, IE_Pressed, this, &ANavPlayerController::TogglePrefabTriangleMode);
 	InputComponent->BindKey(EKeys::Three, IE_Pressed, this, &ANavPlayerController::TogglePrefabCircleMode);
@@ -153,6 +156,7 @@ void ANavPlayerController::ToggleBuildMode()
 	}
 	ExitSelectMode();
 	ExitPrefabRoomMode();
+	ExitAddDoorMode();
 
 	bBuildMode = !bBuildMode;
 	OnBuildModeChanged.Broadcast(bBuildMode);
@@ -189,6 +193,7 @@ void ANavPlayerController::ToggleShapeTestMode()
 	}
 	ExitSelectMode();
 	ExitPrefabRoomMode();
+	ExitAddDoorMode();
 
 	bShapeTestMode = !bShapeTestMode;
 	OnShapeModeChanged.Broadcast(bShapeTestMode);
@@ -236,6 +241,7 @@ void ANavPlayerController::ToggleDrawRoomMode()
 	}
 	ExitSelectMode();
 	ExitPrefabRoomMode();
+	ExitAddDoorMode();
 
 	bDrawRoomMode = true;
 	OnDrawRoomModeChanged.Broadcast(true);
@@ -276,6 +282,7 @@ void ANavPlayerController::ToggleDrawWallMode()
 	}
 	ExitSelectMode();
 	ExitPrefabRoomMode();
+	ExitAddDoorMode();
 
 	bDrawWallMode = true;
 	OnDrawWallModeChanged.Broadcast(true);
@@ -343,6 +350,7 @@ void ANavPlayerController::ToggleSelectMode()
 		ExitDrawRoomMode();
 	}
 	ExitPrefabRoomMode();
+	ExitAddDoorMode();
 
 	bSelectMode = true;
 	OnSelectModeChanged.Broadcast(true);
@@ -391,6 +399,7 @@ void ANavPlayerController::TogglePrefabRoomMode(int32 ShapeId)
 		ExitDrawRoomMode();
 	}
 	ExitSelectMode();
+	ExitAddDoorMode();
 
 	ActivePrefabShape = ShapeId;
 	UE_LOG(LogTemp, Warning, TEXT("Prefab room placement ON (shape %d): click the 2D canvas to place, press the same key again to stop"), ShapeId);
@@ -409,6 +418,76 @@ void ANavPlayerController::TogglePrefabTriangleMode()
 void ANavPlayerController::TogglePrefabCircleMode()
 {
 	TogglePrefabRoomMode(3);
+}
+
+void ANavPlayerController::ExitAddDoorMode()
+{
+	if (bAddDoorMode)
+	{
+		bAddDoorMode = false;
+		UE_LOG(LogTemp, Warning, TEXT("Add-door mode OFF"));
+	}
+}
+
+void ANavPlayerController::ToggleAddDoorMode()
+{
+	if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("Cannot enter add-door mode: no building interior currently loaded"));
+		OnActionFailed.Broadcast(TEXT("Load a building's interior first, then try adding a door."));
+		return;
+	}
+
+	if (bAddDoorMode)
+	{
+		ExitAddDoorMode();
+		return;
+	}
+
+	if (bBuildMode)
+	{
+		// Modes are mutually exclusive - only one should interpret Enter/Esc at a time.
+		CancelBuilding();
+		bBuildMode = false;
+		OnBuildModeChanged.Broadcast(false);
+	}
+	if (bShapeTestMode)
+	{
+		bShapeTestMode = false;
+		OnShapeModeChanged.Broadcast(false);
+	}
+	if (bDrawRoomMode || bDrawWallMode)
+	{
+		ExitDrawRoomMode();
+	}
+	ExitSelectMode();
+	ExitPrefabRoomMode();
+
+	bAddDoorMode = true;
+	UE_LOG(LogTemp, Warning, TEXT("Add-door mode ON (floor %d): click a wall edge on the 2D canvas to add a door, Esc/K to exit"), InteriorGen->GetActiveFloor());
+}
+
+FString ANavPlayerController::AddDoorToWall(const FString& RoomId, int32 EdgeIndex, float OffsetWorldUnits)
+{
+	if (!InteriorGen)
+	{
+		OnActionFailed.Broadcast(TEXT("No InteriorGenerator placed in the level."));
+		return FString();
+	}
+
+	const FString NewDoorId = InteriorGen->AddDoorToRoom(RoomId, EdgeIndex, OffsetWorldUnits);
+	if (NewDoorId.IsEmpty())
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not add a door to '%s'."), *RoomId));
+	}
+	else
+	{
+		bHasUnsavedChanges = true;
+		// Selected immediately, like PlacePrefabRoomAt does for rooms, so it can be deleted right
+		// away with Backspace if it's wrong.
+		SelectDoor(RoomId, NewDoorId);
+	}
+	return NewDoorId;
 }
 
 void ANavPlayerController::OnConfirmPressed()
@@ -458,6 +537,10 @@ void ANavPlayerController::OnCancelPressed()
 	else if (ActivePrefabShape != 0)
 	{
 		ExitPrefabRoomMode();
+	}
+	else if (bAddDoorMode)
+	{
+		ExitAddDoorMode();
 	}
 }
 
@@ -585,6 +668,9 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 
 void ANavPlayerController::SelectRoom(const FString& RoomId)
 {
+	SelectedDoorRoomId.Empty();
+	SelectedDoorId.Empty();
+
 	if (SelectedRoomId == RoomId)
 	{
 		return;
@@ -592,6 +678,18 @@ void ANavPlayerController::SelectRoom(const FString& RoomId)
 
 	SelectedRoomId = RoomId;
 	OnSelectedRoomChanged.Broadcast(SelectedRoomId);
+}
+
+void ANavPlayerController::SelectDoor(const FString& RoomId, const FString& DoorId)
+{
+	if (!SelectedRoomId.IsEmpty())
+	{
+		SelectedRoomId.Empty();
+		OnSelectedRoomChanged.Broadcast(FString());
+	}
+
+	SelectedDoorRoomId = RoomId;
+	SelectedDoorId = DoorId;
 }
 
 bool ANavPlayerController::DeleteRoom(const FString& RoomId)
@@ -614,12 +712,48 @@ bool ANavPlayerController::DeleteRoom(const FString& RoomId)
 		{
 			SelectRoom(FString());
 		}
+		if (SelectedDoorRoomId == RoomId)
+		{
+			// The room (and every door on it) is gone - the selected door reference is now stale.
+			SelectedDoorRoomId.Empty();
+			SelectedDoorId.Empty();
+		}
 	}
 	return bSuccess;
 }
 
-bool ANavPlayerController::DeleteSelectedRoom()
+bool ANavPlayerController::DeleteDoor(const FString& RoomId, const FString& DoorId)
 {
+	if (!InteriorGen)
+	{
+		OnActionFailed.Broadcast(TEXT("No InteriorGenerator placed in the level."));
+		return false;
+	}
+
+	const bool bSuccess = InteriorGen->DeleteDoor(RoomId, DoorId);
+	if (!bSuccess)
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not delete door '%s'."), *DoorId));
+	}
+	else
+	{
+		bHasUnsavedChanges = true;
+		if (SelectedDoorRoomId == RoomId && SelectedDoorId == DoorId)
+		{
+			SelectedDoorRoomId.Empty();
+			SelectedDoorId.Empty();
+		}
+	}
+	return bSuccess;
+}
+
+bool ANavPlayerController::DeleteSelection()
+{
+	if (!SelectedDoorId.IsEmpty())
+	{
+		return DeleteDoor(SelectedDoorRoomId, SelectedDoorId);
+	}
+
 	if (SelectedRoomId.IsEmpty())
 	{
 		return false;
@@ -628,9 +762,9 @@ bool ANavPlayerController::DeleteSelectedRoom()
 	return DeleteRoom(SelectedRoomId);
 }
 
-void ANavPlayerController::DeleteSelectedRoomKeyHandler()
+void ANavPlayerController::DeleteSelectionKeyHandler()
 {
-	DeleteSelectedRoom();
+	DeleteSelection();
 }
 
 bool ANavPlayerController::ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth)
@@ -967,7 +1101,10 @@ void ANavPlayerController::StartNewProject()
 	bDrawWallMode = false;
 	bSelectMode = false;
 	ActivePrefabShape = 0;
+	bAddDoorMode = false;
 	SelectedRoomId.Empty();
+	SelectedDoorRoomId.Empty();
+	SelectedDoorId.Empty();
 	PendingRoomFootprint.Reset();
 	SelectedBuilding = nullptr;
 
@@ -1076,6 +1213,7 @@ void ANavPlayerController::RestoreExteriorCameraView()
 	}
 	ExitSelectMode();
 	ExitPrefabRoomMode();
+	ExitAddDoorMode();
 
 	if (!InteriorBuildingHiddenById.IsEmpty() && Generator)
 	{

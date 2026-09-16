@@ -128,6 +128,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth);
 
+	// Adds a fixed-size door to RoomId's EdgeIndex, centered at OffsetWorldUnits along that edge
+	// (world units, matching FInteriorOpening::Offset - the "add door" tool on the 2D floor plan
+	// canvas already clamps this so the door fits within the edge). InputId/ConnectsTo are left
+	// blank - filled in later via a proper UI form, not here. Returns the new door's id, or an empty
+	// string if no room with that id exists.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	FString AddDoorToRoom(const FString& RoomId, int32 EdgeIndex, float OffsetWorldUnits);
+
+	// Removes a single door from RoomId by its own id (independent of DeleteRoom - the room itself
+	// is untouched, only that one opening goes away and the wall becomes solid there again). Returns
+	// false if the room or the door within it doesn't exist.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool DeleteDoor(const FString& RoomId, const FString& DoorId);
+
 	// Nav nodes (Path Node/Elevator/Stairs) for the currently loaded building, all floors. Not yet
 	// turned into actors - representation is pending alignment with the navigation
 	// (NavMesh/NavLinks) team on what they actually need to consume.

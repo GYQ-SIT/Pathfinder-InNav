@@ -41,6 +41,16 @@ public:
 	// fine for now since nothing that calls this has openings yet.
 	void ResizeFootprint(const TArray<FVector2D>& NewFootprint);
 
+	// Adds a single opening (e.g. from the "add door" tool - see AInteriorGenerator::AddDoorToRoom)
+	// to whatever openings this room already has, and regenerates the mesh. Unlike BuildWalls, this
+	// doesn't replace the footprint or any other cached input, just appends one more opening.
+	void AddOpening(const FInteriorOpening& Opening);
+
+	// Removes a single opening by id (e.g. from selecting a door and deleting it independently of
+	// its room - see AInteriorGenerator::DeleteDoor) and regenerates the mesh, so the wall goes back
+	// to solid there. No-op if no opening with that id exists.
+	void RemoveOpening(const FString& OpeningId);
+
 	UPROPERTY()
 	FString RoomId;
 
