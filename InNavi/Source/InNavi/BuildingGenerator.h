@@ -25,6 +25,19 @@ public:
 	// out of world-space coordinates (e.g. from a raycast) must divide by this first.
 	float GetScale() const { return Scale; }
 
+	// Plan B: builds an axis-aligned-then-rotated rectangle footprint and spawns it.
+	// Position/Width/Depth are world-space units (same units you'd read off in-level), matching
+	// how Plan A's click points work. This is the function Padre's UI form should call directly -
+	// it does not go through JSON.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	APolyBuilding* CreateRectangleBuilding(const FString& Id, const FString& Name, FVector2D Position, float Width, float Depth, float RotationDegrees, int32 FloorCount, float FloorHeight);
+
+	// Plan B: builds a regular N-sided polygon footprint (Sides=3 triangle, 5 pentagon, 6 hexagon,
+	// ...) and spawns it. Position/Radius are world-space units, same convention as
+	// CreateRectangleBuilding. Radius is the distance from the center to each vertex.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	APolyBuilding* CreateRegularPolygonBuilding(const FString& Id, const FString& Name, FVector2D Position, int32 Sides, float Radius, float RotationDegrees, int32 FloorCount, float FloorHeight);
+
 protected:
 	virtual void BeginPlay() override;
 

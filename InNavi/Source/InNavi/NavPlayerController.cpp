@@ -6,6 +6,10 @@
 #include "BuildingGenerator.h"
 #include "EngineUtils.h"
 #include "DrawDebugHelpers.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
 
 ANavPlayerController::ANavPlayerController()
 {
@@ -34,8 +38,9 @@ void ANavPlayerController::SetupInputComponent()
 
 	InputComponent->BindAction("SelectBuilding", IE_Pressed, this, &ANavPlayerController::OnClick);
 	InputComponent->BindKey(EKeys::B, IE_Pressed, this, &ANavPlayerController::ToggleBuildMode);
-	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &ANavPlayerController::FinishBuilding);
-	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::CancelBuilding);
+	InputComponent->BindKey(EKeys::R, IE_Pressed, this, &ANavPlayerController::ToggleShapeTestMode);
+	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &ANavPlayerController::OnConfirmPressed);
+	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
 }
 
 void ANavPlayerController::OnClick()
@@ -81,6 +86,13 @@ void ANavPlayerController::ToggleBuildMode()
 		return;
 	}
 
+	if (bShapeTestMode)
+	{
+		// Modes are mutually exclusive - only one should interpret Enter/Esc at a time.
+		bShapeTestMode = false;
+		OnShapeModeChanged.Broadcast(false);
+	}
+
 	bBuildMode = !bBuildMode;
 	OnBuildModeChanged.Broadcast(bBuildMode);
 
@@ -92,6 +104,61 @@ void ANavPlayerController::ToggleBuildMode()
 	{
 		CancelBuilding();
 		UE_LOG(LogTemp, Warning, TEXT("Build mode OFF"));
+	}
+}
+
+void ANavPlayerController::ToggleShapeTestMode()
+{
+	if (!Generator)
+	{
+		UE_LOG(LogTemp, Error, TEXT("Cannot enter shape test mode: no BuildingGenerator found in the level"));
+		return;
+	}
+
+	if (bBuildMode)
+	{
+		// Modes are mutually exclusive - only one should interpret Enter/Esc at a time.
+		CancelBuilding();
+		bBuildMode = false;
+		OnBuildModeChanged.Broadcast(false);
+	}
+
+	bShapeTestMode = !bShapeTestMode;
+	OnShapeModeChanged.Broadcast(bShapeTestMode);
+
+	if (bShapeTestMode)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Shape test mode ON: edit Data/test_shape_params.json (\"shape\": \"rectangle\" or \"polygon\"), then Enter to generate, Esc to exit"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Shape test mode OFF"));
+	}
+}
+
+void ANavPlayerController::OnConfirmPressed()
+{
+	if (bBuildMode)
+	{
+		FinishBuilding();
+	}
+	else if (bShapeTestMode)
+	{
+		ConfirmShapeTest();
+	}
+}
+
+void ANavPlayerController::OnCancelPressed()
+{
+	if (bBuildMode)
+	{
+		CancelBuilding();
+	}
+	else if (bShapeTestMode)
+	{
+		bShapeTestMode = false;
+		OnShapeModeChanged.Broadcast(false);
+		UE_LOG(LogTemp, Warning, TEXT("Shape test mode OFF"));
 	}
 }
 
@@ -131,6 +198,7 @@ void ANavPlayerController::AddFootprintPointUnderCursor()
 	DrawDebugSphere(GetWorld(), Hit.Location, 20.f, 8, FColor::Green, true);
 
 	PendingFootprint.Add(NewPoint);
+	OnFootprintPointCountChanged.Broadcast(PendingFootprint.Num());
 
 	UE_LOG(LogTemp, Warning, TEXT("Footprint point %d added: (%.1f, %.1f)"), PendingFootprint.Num(), NewPoint.X, NewPoint.Y);
 }
@@ -168,10 +236,110 @@ void ANavPlayerController::FinishBuilding()
 	NextNewBuildingIndex++;
 	FlushPersistentDebugLines(GetWorld());
 	PendingFootprint.Reset();
+	OnFootprintPointCountChanged.Broadcast(0);
 }
 
 void ANavPlayerController::CancelBuilding()
 {
 	FlushPersistentDebugLines(GetWorld());
 	PendingFootprint.Reset();
+	OnFootprintPointCountChanged.Broadcast(0);
+}
+
+APolyBuilding* ANavPlayerController::CreateRectangleBuilding(const FString& Id, const FString& Name, FVector2D Position, float Width, float Depth, float RotationDegrees, int32 FloorCount, float FloorHeight)
+{
+	if (!Generator)
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateRectangleBuilding: no BuildingGenerator found in the level"));
+		return nullptr;
+	}
+
+	return Generator->CreateRectangleBuilding(Id, Name, Position, Width, Depth, RotationDegrees, FloorCount, FloorHeight);
+}
+
+APolyBuilding* ANavPlayerController::CreateRegularPolygonBuilding(const FString& Id, const FString& Name, FVector2D Position, int32 Sides, float Radius, float RotationDegrees, int32 FloorCount, float FloorHeight)
+{
+	if (!Generator)
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateRegularPolygonBuilding: no BuildingGenerator found in the level"));
+		return nullptr;
+	}
+
+	return Generator->CreateRegularPolygonBuilding(Id, Name, Position, Sides, Radius, RotationDegrees, FloorCount, FloorHeight);
+}
+
+void ANavPlayerController::ConfirmShapeTest()
+{
+	// TEMPORARY TEST INPUT — stands in for Padre's UI form (shape dropdown + parameter fields)
+	// until it exists. Once the UI calls Generator->CreateRectangleBuilding(...) /
+	// CreateRegularPolygonBuilding(...) directly, delete this function and the R-key/shape-mode
+	// plumbing above. Those Create...Building functions themselves are the permanent part.
+	if (!Generator)
+	{
+		return;
+	}
+
+	const FString FilePath = FPaths::ProjectDir() / TEXT("Data") / TEXT("test_shape_params.json");
+
+	FString JsonString;
+	if (!FFileHelper::LoadFileToString(JsonString, *FilePath))
+	{
+		UE_LOG(LogTemp, Error, TEXT("ConfirmShapeTest: could not read %s"), *FilePath);
+		return;
+	}
+
+	TSharedPtr<FJsonObject> RootObject;
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
+	if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+	{
+		UE_LOG(LogTemp, Error, TEXT("ConfirmShapeTest: failed to parse %s"), *FilePath);
+		return;
+	}
+
+	FString Shape = TEXT("rectangle");
+	RootObject->TryGetStringField(TEXT("shape"), Shape);
+
+	const FString Id = RootObject->GetStringField(TEXT("id"));
+	const FString Name = RootObject->GetStringField(TEXT("name"));
+
+	FVector2D Position(0.f, 0.f);
+	const TArray<TSharedPtr<FJsonValue>>* PositionArray;
+	if (RootObject->TryGetArrayField(TEXT("position"), PositionArray) && PositionArray->Num() >= 2)
+	{
+		Position.X = (*PositionArray)[0]->AsNumber();
+		Position.Y = (*PositionArray)[1]->AsNumber();
+	}
+
+	float RotationDegrees = 0.f;
+	int32 FloorCount = 5;
+	float FloorHeight = 300.f;
+	RootObject->TryGetNumberField(TEXT("rotationDegrees"), RotationDegrees);
+	RootObject->TryGetNumberField(TEXT("floorCount"), FloorCount);
+	RootObject->TryGetNumberField(TEXT("floorHeight"), FloorHeight);
+
+	APolyBuilding* NewBuilding = nullptr;
+
+	if (Shape == TEXT("polygon"))
+	{
+		int32 Sides = 6;
+		float Radius = 200.f;
+		RootObject->TryGetNumberField(TEXT("sides"), Sides);
+		RootObject->TryGetNumberField(TEXT("radius"), Radius);
+
+		NewBuilding = Generator->CreateRegularPolygonBuilding(Id, Name, Position, Sides, Radius, RotationDegrees, FloorCount, FloorHeight);
+	}
+	else
+	{
+		float Width = 300.f;
+		float Depth = 300.f;
+		RootObject->TryGetNumberField(TEXT("width"), Width);
+		RootObject->TryGetNumberField(TEXT("depth"), Depth);
+
+		NewBuilding = Generator->CreateRectangleBuilding(Id, Name, Position, Width, Depth, RotationDegrees, FloorCount, FloorHeight);
+	}
+
+	if (!NewBuilding)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Could not create building - see error above. Edit the id in test_shape_params.json and try again."));
+	}
 }

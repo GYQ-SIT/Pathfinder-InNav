@@ -193,3 +193,68 @@ APolyBuilding* ABuildingGenerator::SpawnBuildingFromData(const FString& Id, cons
 
 	return NewBuilding;
 }
+
+APolyBuilding* ABuildingGenerator::CreateRectangleBuilding(const FString& Id, const FString& Name, FVector2D Position, float Width, float Depth, float RotationDegrees, int32 FloorCount, float FloorHeight)
+{
+	if (Scale == 0.f)
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateRectangleBuilding: Scale is zero"));
+		return nullptr;
+	}
+
+	// Position/Width/Depth arrive in world-space units; SpawnBuildingFromData re-multiplies by
+	// Scale, so work everything out in pre-scale ("footprint") units here, same as Plan A's build
+	// mode does with its raycast-hit points.
+	const float HalfWidth = (Width * 0.5f) / Scale;
+	const float HalfDepth = (Depth * 0.5f) / Scale;
+	const FVector2D LocalPosition = Position / Scale;
+
+	const float RadAngle = FMath::DegreesToRadians(RotationDegrees);
+	const float CosA = FMath::Cos(RadAngle);
+	const float SinA = FMath::Sin(RadAngle);
+
+	auto RotateAndPlace = [&](float LocalX, float LocalY) -> FVector2D
+	{
+		const FVector2D Rotated(LocalX * CosA - LocalY * SinA, LocalX * SinA + LocalY * CosA);
+		return Rotated + LocalPosition;
+	};
+
+	TArray<FVector2D> Footprint;
+	Footprint.Add(RotateAndPlace(-HalfWidth, -HalfDepth));
+	Footprint.Add(RotateAndPlace( HalfWidth, -HalfDepth));
+	Footprint.Add(RotateAndPlace( HalfWidth,  HalfDepth));
+	Footprint.Add(RotateAndPlace(-HalfWidth,  HalfDepth));
+
+	return SpawnBuildingFromData(Id, Name, Footprint, FloorCount, FloorHeight, FVector2D::ZeroVector);
+}
+
+APolyBuilding* ABuildingGenerator::CreateRegularPolygonBuilding(const FString& Id, const FString& Name, FVector2D Position, int32 Sides, float Radius, float RotationDegrees, int32 FloorCount, float FloorHeight)
+{
+	if (Sides < 3)
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateRegularPolygonBuilding: needs at least 3 sides (got %d)"), Sides);
+		return nullptr;
+	}
+
+	if (Scale == 0.f)
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateRegularPolygonBuilding: Scale is zero"));
+		return nullptr;
+	}
+
+	// Position/Radius arrive in world-space units; SpawnBuildingFromData re-multiplies by Scale,
+	// so work everything out in pre-scale ("footprint") units here, same as CreateRectangleBuilding.
+	const float LocalRadius = Radius / Scale;
+	const FVector2D LocalPosition = Position / Scale;
+
+	TArray<FVector2D> Footprint;
+	Footprint.Reserve(Sides);
+	for (int32 i = 0; i < Sides; i++)
+	{
+		const float AngleDegrees = RotationDegrees + (360.f * i) / Sides;
+		const float AngleRad = FMath::DegreesToRadians(AngleDegrees);
+		Footprint.Add(LocalPosition + FVector2D(LocalRadius * FMath::Cos(AngleRad), LocalRadius * FMath::Sin(AngleRad)));
+	}
+
+	return SpawnBuildingFromData(Id, Name, Footprint, FloorCount, FloorHeight, FVector2D::ZeroVector);
+}
