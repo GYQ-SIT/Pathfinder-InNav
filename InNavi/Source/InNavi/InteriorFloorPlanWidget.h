@@ -57,7 +57,7 @@ private:
 	// OutPixelsPerUnit is world units to screen pixels.
 	void ComputeViewTransform(FVector2D WidgetSize, FVector2D& OutOrigin, float& OutPixelsPerUnit) const;
 
-	// Delete mode: finds whichever room/wall on the active floor has an edge within a few pixels of
+	// Select mode: finds whichever room/wall on the active floor has an edge within a few pixels of
 	// LocalPosition, or nullptr if none does. Never matches the exterior building outline itself -
 	// that's a separate actor (APolyBuilding), not one of InteriorGenerator's rooms/walls.
 	AInteriorRoom* FindRoomNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize) const;

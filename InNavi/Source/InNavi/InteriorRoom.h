@@ -35,6 +35,12 @@ public:
 	// FloorBaseZ moves.
 	void SetFloorBaseZ(float NewFloorBaseZ);
 
+	// Replaces the footprint (e.g. after a resize - see AInteriorGenerator::ResizeRoom) while
+	// keeping every other cached input (scale/offset/floor height/wall height/thickness/openings/
+	// closed-loop) the same, and regenerates the mesh. Openings' EdgeIndex/Offset aren't remapped -
+	// fine for now since nothing that calls this has openings yet.
+	void ResizeFootprint(const TArray<FVector2D>& NewFootprint);
+
 	UPROPERTY()
 	FString RoomId;
 

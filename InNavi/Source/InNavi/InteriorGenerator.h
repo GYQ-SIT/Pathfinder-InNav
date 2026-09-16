@@ -119,6 +119,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool DeleteRoom(const FString& RoomId);
 
+	// Rescales a room/wall's existing footprint to fit new bounding-box dimensions (NewWidth along
+	// X, NewDepth along Y, same pre-scale units as everything else), keeping it centered where it
+	// currently is. Works for any room/wall regardless of how it was created (prefab or freehand) -
+	// it's a bounding-box stretch of whatever points are already there, not tied to a particular
+	// shape. Returns false if no room with that id exists, or its current bounding box is
+	// degenerate (zero width or depth - can't compute a scale factor from that).
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth);
+
 	// Nav nodes (Path Node/Elevator/Stairs) for the currently loaded building, all floors. Not yet
 	// turned into actors - representation is pending alignment with the navigation
 	// (NavMesh/NavLinks) team on what they actually need to consume.

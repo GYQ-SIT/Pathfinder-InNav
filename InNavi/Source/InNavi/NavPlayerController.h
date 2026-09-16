@@ -17,7 +17,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildModeChanged, bool, bNewBuild
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnShapeModeChanged, bool, bNewShapeMode);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDrawRoomModeChanged, bool, bNewDrawRoomMode);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDrawWallModeChanged, bool, bNewDrawWallMode);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDeleteModeChanged, bool, bNewDeleteMode);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectModeChanged, bool, bNewSelectMode);
+// Broadcast whenever the selected room/wall changes on the 2D floor plan canvas (select mode
+// picking a different one, or clicking empty space to deselect - RoomId is empty in that case).
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedRoomChanged, FString, RoomId);
 // Broadcast after each footprint point is added or cleared, so UI can show a live point count.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFootprintPointCountChanged, int32, PointCount);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRoomPointCountChanged, int32, PointCount);
@@ -186,23 +189,49 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	const TArray<FVector2D>& GetPendingRoomFootprint() const { return PendingRoomFootprint; }
 
-	// Delete mode: click a room/wall on the 2D floor plan canvas to remove it entirely (the exterior
-	// building outline is a separate actor this never touches - only rooms/walls tracked by
-	// InteriorGenerator can be deleted this way). Mutually exclusive with build mode / shape test
-	// mode / draw room mode / draw wall mode. Bound to the Q key for now, not wired into UMG yet.
+	// Select mode: click a room/wall on the 2D floor plan canvas to select it (or click empty space
+	// to deselect) - selecting doesn't do anything by itself, it just sets what
+	// DeleteSelectedRoom/GrowSelectedRoom/ShrinkSelectedRoom (and, later, a properties-editing tool)
+	// act on. The exterior building outline is a separate actor this never touches - only
+	// rooms/walls tracked by InteriorGenerator can be selected this way. Mutually exclusive with
+	// build mode / shape test mode / draw room mode / draw wall mode. Bound to the Q key for now,
+	// not wired into UMG yet.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
-	void ToggleDeleteMode();
+	void ToggleSelectMode();
 
 	UFUNCTION(BlueprintPure, Category = "Interior")
-	bool IsInDeleteMode() const { return bDeleteMode; }
+	bool IsInSelectMode() const { return bSelectMode; }
 
 	UPROPERTY(BlueprintAssignable, Category = "Interior")
-	FOnDeleteModeChanged OnDeleteModeChanged;
+	FOnSelectModeChanged OnSelectModeChanged;
 
-	// Removes a single room/wall by id (see AInteriorGenerator::DeleteRoom) - the 2D floor plan
-	// canvas's delete-mode click handler calls this after finding which room/wall was clicked.
+	// Sets the currently-selected room/wall - the 2D floor plan canvas's select-mode click handler
+	// calls this with whichever room/wall it found near the click, or an empty string to deselect.
+	// The selection persists even after leaving select mode, so Delete/Resize keep working on it.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void SelectRoom(const FString& RoomId);
+
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	FString GetSelectedRoomId() const { return SelectedRoomId; }
+
+	UPROPERTY(BlueprintAssignable, Category = "Interior")
+	FOnSelectedRoomChanged OnSelectedRoomChanged;
+
+	// Removes a single room/wall by id (see AInteriorGenerator::DeleteRoom) - general-purpose,
+	// explicit-id version. See also DeleteSelectedRoom.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool DeleteRoom(const FString& RoomId);
+
+	// Deletes whichever room/wall is currently selected (see SelectRoom), and clears the selection.
+	// Bound to the Backspace key for now. No-op (returns false) if nothing is selected.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool DeleteSelectedRoom();
+
+	// Rescales a room/wall to fit new Width (X) / Depth (Y) dimensions, keeping it centered where
+	// it is (see AInteriorGenerator::ResizeRoom) - general-purpose, explicit-id version. See also
+	// GrowSelectedRoom/ShrinkSelectedRoom. Not wired into UMG yet.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth);
 
 	// Prefab room placement: 1/2/3 (for now, not wired into UMG yet) each arm a different default
 	// shape (rectangle / triangle / circle-as-many-sided-polygon) - while armed, clicking the 2D
@@ -327,6 +356,16 @@ private:
 	// "remove floor" button calls RemoveFloor directly.
 	void RemoveActiveInteriorFloor();
 
+	// TEST-ONLY (Resize verification): grows/shrinks the currently selected room (SelectedRoomId) by
+	// 20 units each press, via ResizeRoom. Bound to =/-. Delete once a real resize UI (typed
+	// Length/Width, or drag) exists.
+	void GrowSelectedRoom();
+	void ShrinkSelectedRoom();
+	void NudgeSelectedRoomSize(float Delta);
+
+	// Backspace handler - wraps DeleteSelectedRoom() because key bindings require a void() signature.
+	void DeleteSelectedRoomKeyHandler();
+
 	UPROPERTY()
 	APolyBuilding* SelectedBuilding;
 
@@ -359,7 +398,11 @@ private:
 	// (FinishRoom vs FinishWall) and whether the result is a closed loop.
 	bool bDrawWallMode = false;
 
-	bool bDeleteMode = false;
+	bool bSelectMode = false;
+
+	// See SelectRoom/GetSelectedRoomId - persists across mode changes, cleared on deselect (empty
+	// id), StartNewProject, or once deleted.
+	FString SelectedRoomId;
 
 	// See TogglePrefabRectangleMode/TogglePrefabTriangleMode/TogglePrefabCircleMode/
 	// IsInPrefabRoomMode. 0 = none armed; 1 = rectangle, 2 = triangle, 3 = circle.
@@ -371,12 +414,13 @@ private:
 	// APolyBuilding::SetVisibleInteriorLevel), not here.
 	void ExitDrawRoomMode();
 
-	// Turns off delete mode if it's currently active - called by every other mode's toggle (so
-	// entering build/draw-room/draw-wall/shape-test mode exits delete mode) and by OnCancelPressed.
-	void ExitDeleteMode();
+	// Turns off select mode if it's currently active - called by every other mode's toggle (so
+	// entering build/draw-room/draw-wall/shape-test mode exits select mode) and by OnCancelPressed.
+	// Does NOT clear SelectedRoomId - the selection is meant to outlive select mode itself.
+	void ExitSelectMode();
 
 	// Disarms prefab room placement if a shape is currently armed - called by every other mode's
-	// toggle, same reasoning as ExitDeleteMode.
+	// toggle, same reasoning as ExitSelectMode.
 	void ExitPrefabRoomMode();
 
 	// Shared implementation behind TogglePrefabRectangleMode/TogglePrefabTriangleMode/

@@ -45,12 +45,10 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 	{
 		const FVector2D LocalPosition = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
 
-		if (PlayerController->IsInDeleteMode())
+		if (PlayerController->IsInSelectMode())
 		{
-			if (AInteriorRoom* Room = FindRoomNearLocalPosition(LocalPosition, InGeometry.GetLocalSize()))
-			{
-				PlayerController->DeleteRoom(Room->RoomId);
-			}
+			AInteriorRoom* Room = FindRoomNearLocalPosition(LocalPosition, InGeometry.GetLocalSize());
+			PlayerController->SelectRoom(Room ? Room->RoomId : FString());
 			return FReply::Handled();
 		}
 
@@ -326,6 +324,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 	}
 
 	// ---- Rooms/walls on the active floor ----
+	const FString SelectedRoomId = PlayerController ? PlayerController->GetSelectedRoomId() : FString();
 	for (const AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
 	{
 		if (!Room)
@@ -348,7 +347,11 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			const FVector2D FirstPoint = LinePoints[0];
 			LinePoints.Add(FirstPoint);
 		}
-		FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, AllottedGeometry.ToPaintGeometry(), LinePoints, ESlateDrawEffect::None, FLinearColor::Black, true, 3.f);
+
+		const bool bIsSelected = !SelectedRoomId.IsEmpty() && Room->RoomId == SelectedRoomId;
+		const FLinearColor LineColor = bIsSelected ? FLinearColor(1.f, 0.15f, 0.15f, 1.f) : FLinearColor::Black;
+		const float LineThickness = bIsSelected ? 4.f : 3.f;
+		FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, AllottedGeometry.ToPaintGeometry(), LinePoints, ESlateDrawEffect::None, LineColor, true, LineThickness);
 	}
 
 	// ---- In-progress room/wall being clicked out right now (if any) - not closed into a loop even

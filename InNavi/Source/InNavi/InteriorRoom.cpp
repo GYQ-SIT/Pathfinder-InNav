@@ -125,6 +125,19 @@ void AInteriorRoom::SetFloorBaseZ(float NewFloorBaseZ)
 	RebuildMesh();
 }
 
+void AInteriorRoom::ResizeFootprint(const TArray<FVector2D>& NewFootprint)
+{
+	const int32 MinPoints = CachedClosedLoop ? 3 : 2;
+	if (NewFootprint.Num() < MinPoints)
+	{
+		UE_LOG(LogTemp, Error, TEXT("ResizeFootprint: '%s' needs at least %d points"), *RoomId, MinPoints);
+		return;
+	}
+
+	CachedFootprint = NewFootprint;
+	RebuildMesh();
+}
+
 void AInteriorRoom::RebuildMesh()
 {
 	const int32 N = CachedFootprint.Num();

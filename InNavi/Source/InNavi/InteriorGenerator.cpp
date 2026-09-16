@@ -646,6 +646,62 @@ bool AInteriorGenerator::DeleteRoom(const FString& RoomId)
 	return false;
 }
 
+bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth)
+{
+	for (auto& Pair : RoomsByFloor)
+	{
+		for (AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (!Room || Room->RoomId != RoomId)
+			{
+				continue;
+			}
+
+			const TArray<FVector2D>& OldFootprint = Room->GetFootprint();
+			if (OldFootprint.Num() == 0)
+			{
+				return false;
+			}
+
+			FVector2D MinPoint(TNumericLimits<float>::Max(), TNumericLimits<float>::Max());
+			FVector2D MaxPoint(-TNumericLimits<float>::Max(), -TNumericLimits<float>::Max());
+			for (const FVector2D& Point : OldFootprint)
+			{
+				MinPoint.X = FMath::Min(MinPoint.X, Point.X);
+				MinPoint.Y = FMath::Min(MinPoint.Y, Point.Y);
+				MaxPoint.X = FMath::Max(MaxPoint.X, Point.X);
+				MaxPoint.Y = FMath::Max(MaxPoint.Y, Point.Y);
+			}
+
+			const float OldWidth = MaxPoint.X - MinPoint.X;
+			const float OldDepth = MaxPoint.Y - MinPoint.Y;
+			if (OldWidth < KINDA_SMALL_NUMBER || OldDepth < KINDA_SMALL_NUMBER)
+			{
+				UE_LOG(LogTemp, Error, TEXT("ResizeRoom: '%s' has a degenerate bounding box"), *RoomId);
+				return false;
+			}
+
+			const FVector2D Center = (MinPoint + MaxPoint) * 0.5f;
+			const float ScaleX = NewWidth / OldWidth;
+			const float ScaleY = NewDepth / OldDepth;
+
+			TArray<FVector2D> NewFootprint;
+			NewFootprint.Reserve(OldFootprint.Num());
+			for (const FVector2D& Point : OldFootprint)
+			{
+				NewFootprint.Add(Center + FVector2D((Point.X - Center.X) * ScaleX, (Point.Y - Center.Y) * ScaleY));
+			}
+
+			Room->ResizeFootprint(NewFootprint);
+			UE_LOG(LogTemp, Warning, TEXT("Resized %s to %.1f x %.1f"), *RoomId, NewWidth, NewDepth);
+			return true;
+		}
+	}
+
+	UE_LOG(LogTemp, Error, TEXT("ResizeRoom: '%s' not found"), *RoomId);
+	return false;
+}
+
 TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 {
 	TSharedRef<FJsonObject> InteriorObject = MakeShared<FJsonObject>();
