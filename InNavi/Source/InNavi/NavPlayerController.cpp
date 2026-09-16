@@ -51,6 +51,8 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::B, IE_Pressed, this, &ANavPlayerController::ToggleBuildMode);
 	InputComponent->BindKey(EKeys::R, IE_Pressed, this, &ANavPlayerController::ToggleShapeTestMode);
 	InputComponent->BindKey(EKeys::I, IE_Pressed, this, &ANavPlayerController::LoadInteriorForSelectedBuilding);
+	InputComponent->BindKey(EKeys::LeftBracket, IE_Pressed, this, &ANavPlayerController::CycleInteriorFloorDown);
+	InputComponent->BindKey(EKeys::RightBracket, IE_Pressed, this, &ANavPlayerController::CycleInteriorFloorUp);
 	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &ANavPlayerController::OnConfirmPressed);
 	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
 }
@@ -347,6 +349,30 @@ void ANavPlayerController::LoadInteriorForSelectedBuilding()
 	}
 
 	InteriorGen->LoadInteriorForBuilding(SelectedBuilding->BuildingId);
+}
+
+void ANavPlayerController::CycleInteriorFloorUp()
+{
+	if (!InteriorGen)
+	{
+		return;
+	}
+
+	const int32 NewFloor = InteriorGen->GetActiveFloor() + 1;
+	InteriorGen->SetActiveFloor(NewFloor);
+	UE_LOG(LogTemp, Warning, TEXT("Active interior floor: %d"), NewFloor);
+}
+
+void ANavPlayerController::CycleInteriorFloorDown()
+{
+	if (!InteriorGen)
+	{
+		return;
+	}
+
+	const int32 NewFloor = InteriorGen->GetActiveFloor() - 1;
+	InteriorGen->SetActiveFloor(NewFloor);
+	UE_LOG(LogTemp, Warning, TEXT("Active interior floor: %d"), NewFloor);
 }
 
 void ANavPlayerController::ConfirmShapeTest()

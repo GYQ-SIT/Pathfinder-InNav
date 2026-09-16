@@ -100,6 +100,12 @@ private:
 	// InteriorGen->LoadInteriorForBuilding(...) directly.
 	void LoadInteriorForSelectedBuilding();
 
+	// TEST-ONLY (Phase 2.1 verification): cycles the loaded building's active floor up/down via
+	// InteriorGen->SetActiveFloor(...). Delete once there's a real floor-switcher UI calling
+	// SetActiveFloor directly.
+	void CycleInteriorFloorUp();
+	void CycleInteriorFloorDown();
+
 	UPROPERTY()
 	APolyBuilding* SelectedBuilding;
 
