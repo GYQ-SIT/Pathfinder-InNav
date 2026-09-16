@@ -77,6 +77,16 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 {
 	if (bIsPanning)
 	{
+		// Defensive: NativeOnMouseButtonUp doesn't always reach this widget for the right button
+		// (observed on the very first right-click right after the widget is constructed - capture/
+		// routing seems to need a frame to settle) - if the button isn't actually held anymore by
+		// the time a move event arrives, stop panning here instead of getting stuck forever.
+		if (!InMouseEvent.IsMouseButtonDown(EKeys::RightMouseButton))
+		{
+			bIsPanning = false;
+			return FReply::Handled().ReleaseMouseCapture();
+		}
+
 		float PixelsPerUnit;
 		FVector2D UnusedOrigin;
 		ComputeViewTransform(InGeometry.GetLocalSize(), UnusedOrigin, PixelsPerUnit);
@@ -304,7 +314,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		{
 			const FVector2D FirstPoint = LinePoints[0];
 			LinePoints.Add(FirstPoint);
-			FSlateDrawElement::MakeLines(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(), LinePoints, ESlateDrawEffect::None, FLinearColor(0.5f, 0.5f, 0.5f, 1.f), true, 2.f);
+			FSlateDrawElement::MakeLines(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(), LinePoints, ESlateDrawEffect::None, FLinearColor::Black, true, 5.f);
 		}
 	}
 
@@ -331,7 +341,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			const FVector2D FirstPoint = LinePoints[0];
 			LinePoints.Add(FirstPoint);
 		}
-		FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, AllottedGeometry.ToPaintGeometry(), LinePoints, ESlateDrawEffect::None, FLinearColor::White, true, 3.f);
+		FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, AllottedGeometry.ToPaintGeometry(), LinePoints, ESlateDrawEffect::None, FLinearColor::Black, true, 3.f);
 	}
 
 	// ---- In-progress room/wall being clicked out right now (if any) - not closed into a loop even
