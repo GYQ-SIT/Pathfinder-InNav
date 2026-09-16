@@ -175,13 +175,29 @@ void APolyBuilding::RebuildMesh()
 		}
 	}
 
-	// Triangulate the footprint once (ear clipping, handles concave shapes) - reused for both the
-	// bottom cap (section 0) and the roof (section 1, kept separate so it can be hidden
-	// independently - see SetRoofVisible).
+	// Triangulate the footprint once (ear clipping, handles concave shapes) - reused for the bottom
+	// cap and every roof/slab section below.
 	TArray<int32> CapTris;
 	TriangulatePolygon(Poly2D, CapTris);
 
-	// ---- Section 0: side walls + bottom cap - stays visible even with the roof hidden ----
+	CachedPoly2D = Poly2D;
+	CachedCapTris = CapTris;
+
+	if (!DynMaterial)
+	{
+		UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(
+			nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+		if (BaseMat)
+		{
+			DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
+		}
+	}
+
+	// Section count changes with FloorCount (one slab section per inter-floor boundary) - clear
+	// whatever sections a previous, possibly-taller build left behind.
+	MeshComp->ClearAllMeshSections();
+
+	// ---- Section 0: side walls + ground floor cap - always visible ----
 	TArray<FVector> WallVertices;
 	TArray<int32> WallTriangles;
 
@@ -207,7 +223,7 @@ void APolyBuilding::RebuildMesh()
 		WallTriangles.Add(b1); WallTriangles.Add(t0); WallTriangles.Add(t1);
 	}
 
-	// Bottom face (bottom ring, reverse winding to face down)
+	// Ground floor face (bottom ring, reverse winding to face down)
 	for (int32 i = 0; i < CapTris.Num(); i += 3)
 	{
 		WallTriangles.Add(CapTris[i]);
@@ -223,48 +239,81 @@ void APolyBuilding::RebuildMesh()
 
 	TArray<FColor> WallVertexColors;
 	MeshComp->CreateMeshSection(0, WallVertices, WallTriangles, WallNormals, WallUV0, WallVertexColors, WallTangents, true);
-
-	// ---- Section 1: roof (top cap) only - its own section so SetRoofVisible can hide just this ----
-	TArray<FVector> RoofVertices;
-	TArray<int32> RoofTriangles;
-
-	for (int32 i = 0; i < N; i++)
-	{
-		RoofVertices.Add(FVector(Poly2D[i].X, Poly2D[i].Y, Height));
-	}
-	// CapTris is CCW (faces up); this buffer is its own 0-indexed vertex set (no +N offset needed).
-	for (int32 i = 0; i < CapTris.Num(); i += 3)
-	{
-		RoofTriangles.Add(CapTris[i]);
-		RoofTriangles.Add(CapTris[i + 2]);
-		RoofTriangles.Add(CapTris[i + 1]);
-	}
-
-	TArray<FVector> RoofNormals;
-	TArray<FVector2D> RoofUV0;
-	TArray<FProcMeshTangent> RoofTangents;
-	UKismetProceduralMeshLibrary::CalculateTangentsForMesh(
-		RoofVertices, RoofTriangles, RoofUV0, RoofNormals, RoofTangents);
-
-	TArray<FColor> RoofVertexColors;
-	MeshComp->CreateMeshSection(1, RoofVertices, RoofTriangles, RoofNormals, RoofUV0, RoofVertexColors, RoofTangents, true);
-
-	if (!DynMaterial)
-	{
-		UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(
-			nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
-		if (BaseMat)
-		{
-			DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
-		}
-	}
 	MeshComp->SetMaterial(0, DynMaterial);
-	MeshComp->SetMaterial(1, DynMaterial);
-	MeshComp->SetMeshSectionVisible(1, bRoofVisible);
 
+	// Sections 1..FloorCount (roof + inter-floor slabs) are all built by ApplySlabVisibility, which
+	// also decides which one(s) currently have no collision/visibility based on VisibleInteriorLevel
+	// - no separate "build them all visible, then hide some" step needed.
+	ApplySlabVisibility();
 	SetHighlighted(false);
 
 	UE_LOG(LogTemp, Warning, TEXT("Built building %s: %d floors, height %f"), *BuildingId, FloorCount, Height);
+}
+
+void APolyBuilding::BuildCapSection(const TArray<FVector2D>& Poly2D, const TArray<int32>& CapTris, float Z, int32 SectionIndex, bool bCreateCollision)
+{
+	TArray<FVector> Vertices;
+	Vertices.Reserve(Poly2D.Num());
+	for (const FVector2D& Point : Poly2D)
+	{
+		Vertices.Add(FVector(Point.X, Point.Y, Z));
+	}
+
+	TArray<int32> Triangles;
+	Triangles.Reserve(CapTris.Num());
+	// CapTris is CCW (faces up); swap the last two indices per triangle to keep that up-facing
+	// winding in this section's own 0-indexed vertex buffer.
+	for (int32 i = 0; i < CapTris.Num(); i += 3)
+	{
+		Triangles.Add(CapTris[i]);
+		Triangles.Add(CapTris[i + 2]);
+		Triangles.Add(CapTris[i + 1]);
+	}
+
+	TArray<FVector> Normals;
+	TArray<FVector2D> UV0;
+	TArray<FProcMeshTangent> Tangents;
+	UKismetProceduralMeshLibrary::CalculateTangentsForMesh(Vertices, Triangles, UV0, Normals, Tangents);
+
+	TArray<FColor> VertexColors;
+	MeshComp->CreateMeshSection(SectionIndex, Vertices, Triangles, Normals, UV0, VertexColors, Tangents, bCreateCollision);
+	MeshComp->SetMaterial(SectionIndex, DynMaterial);
+}
+
+void APolyBuilding::SetVisibleInteriorLevel(int32 Level)
+{
+	VisibleInteriorLevel = Level;
+	ApplySlabVisibility();
+}
+
+void APolyBuilding::ApplySlabVisibility()
+{
+	if (!MeshComp || CachedPoly2D.Num() == 0)
+	{
+		return;
+	}
+
+	for (int32 L = 1; L <= FloorCount; L++)
+	{
+		const int32 SectionIndex = (L == FloorCount) ? 1 : (1 + L);
+		const float Z = (L == FloorCount) ? (FloorCount * FloorHeight) : (L * FloorHeight);
+
+		// Hide every ceiling from the viewed floor up through the roof - the camera's framing
+		// margin puts it well above a single floor height, so it needs a clear line of sight all
+		// the way up, not just past its own ceiling. Everything at/below the viewed floor's own
+		// ceiling stays opaque (and solid) so you don't see through - or click through - into the
+		// floor below.
+		const bool bHide = (VisibleInteriorLevel > 0 && L >= VisibleInteriorLevel);
+
+		// UProceduralMeshComponent has no way to toggle an existing section's collision, so a
+		// visibility change here means recreating the section - the geometry is identical either
+		// way, only the collision flag differs. Keeping collision off in step with visibility keeps
+		// any future 3D-view interaction (see the "3D mode" toggle in the PM's mockup) consistent
+		// with what's actually visible, even though interior room/wall editing itself now happens
+		// entirely through the 2D floor plan canvas (UInteriorFloorPlanWidget), not 3D raycasts.
+		BuildCapSection(CachedPoly2D, CachedCapTris, Z, SectionIndex, /*bCreateCollision=*/!bHide);
+		MeshComp->SetMeshSectionVisible(SectionIndex, !bHide);
+	}
 }
 
 void APolyBuilding::SetHighlighted(bool bHighlighted)
@@ -281,14 +330,5 @@ void APolyBuilding::SetHighlighted(bool bHighlighted)
 	else
 	{
 		DynMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.6f, 0.6f, 0.6f));
-	}
-}
-
-void APolyBuilding::SetRoofVisible(bool bVisible)
-{
-	bRoofVisible = bVisible;
-	if (MeshComp)
-	{
-		MeshComp->SetMeshSectionVisible(1, bRoofVisible);
 	}
 }

@@ -90,9 +90,9 @@ public:
 	void StartNewProject();
 
 	// Puts the camera back where it was before LoadInteriorForBuilding snapped it to a top-down
-	// view, and shows whatever building's roof that hid (see FocusCameraOnBuilding below) - the
-	// interior screen's Back button should call this before switching back to the edit screen.
-	// No-op if the camera was never moved.
+	// view, and shows whatever building's floor/roof section that hid (see PositionCameraForFloor
+	// below) - the interior screen's Back button should call this before switching back to the edit
+	// screen. No-op if the camera was never moved.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void RestoreExteriorCameraView();
 
@@ -173,6 +173,18 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Interior")
 	FOnRoomPointCountChanged OnRoomPointCountChanged;
 
+	// Adds an explicit footprint point to the in-progress room/wall - what the 2D floor plan canvas
+	// (see UInteriorFloorPlanWidget) calls on a click, since interior room/wall drawing has no 3D
+	// raycast at all now (OnClick is a no-op in draw room/wall mode). No-op if not currently in
+	// draw room/wall mode.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void AddRoomPointAtFootprintPosition(FVector2D FootprintPoint);
+
+	// The room/wall points drawn so far in the current draw room/wall session - for the 2D floor
+	// plan canvas to draw as it's being clicked out. Empty when not drawing.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	const TArray<FVector2D>& GetPendingRoomFootprint() const { return PendingRoomFootprint; }
+
 	// Draws a standalone open wall/partition line instead of a closed room - same point-clicking
 	// mechanism as draw room mode (shares OnRoomPointCountChanged for the live point count), just a
 	// separate mode/key so a UI button (or the L key, for now) can trigger it independently.
@@ -243,10 +255,6 @@ private:
 	// FinishBuilding/CancelBuilding are declared public above (Blueprint-callable).
 	void AddFootprintPointUnderCursor();
 
-	// Draw room mode (Phase 3): click to trace out a new room's footprint on the ground.
-	// FinishRoom/CancelRoom are declared public above (Blueprint-callable).
-	void AddRoomPointUnderCursor();
-
 	// Ctrl+S handler - wraps SaveCurrentProject() because key bindings require a void() signature.
 	void SaveCurrentProjectKeyHandler();
 
@@ -304,36 +312,42 @@ private:
 	bool bDrawRoomMode = false;
 	TArray<FVector2D> PendingRoomFootprint;
 
-	// Draw wall mode shares PendingRoomFootprint/AddRoomPointUnderCursor with draw room mode -
-	// clicking the ground works identically for both, they only differ in what Finish does
+	// Draw wall mode shares PendingRoomFootprint with draw room mode - points come from the 2D
+	// floor plan canvas either way, they only differ in what Finish does
 	// (FinishRoom vs FinishWall) and whether the result is a closed loop.
 	bool bDrawWallMode = false;
 
-	// Whichever building had its collision disabled to let draw-room/draw-wall clicks reach the ground
-	// plane inside its footprint (the solid exterior shell would otherwise block the raycast
-	// before it gets there). Restored and cleared whenever draw room mode ends.
-	UPROPERTY()
-	APolyBuilding* RoomDrawingBuilding;
-
 	// Turns off whichever of draw room mode / draw wall mode is currently active, from any path
-	// (self-toggle, or another mode taking over) - restores RoomDrawingBuilding's collision and
-	// clears pending points.
+	// (self-toggle, or another mode taking over) - clears pending points. Clicks reaching the right
+	// floor's ground plane is handled per-section on the building itself (see
+	// APolyBuilding::SetVisibleInteriorLevel), not here.
 	void ExitDrawRoomMode();
 
-	// Snaps the possessed pawn to a top-down view centered on the given building, sized to fit its
-	// footprint - called automatically after a successful LoadInteriorForBuilding, so the interior
-	// screen shows a readable floor plan instead of whatever angle the exterior camera happened to
-	// be left at. Remembers the view it was at beforehand (only the first time, until
-	// RestoreExteriorCameraView is called) so that can be restored later. Also hides the building's
-	// roof (see APolyBuilding::SetRoofVisible) - the closed cap would otherwise block the top-down
-	// view of the rooms inside; the walls stay visible.
+	// Snaps the possessed pawn to a top-down view of the given building's currently active floor -
+	// called automatically after a successful LoadInteriorForBuilding, so the interior screen shows
+	// a readable floor plan instead of whatever angle the exterior camera happened to be left at.
+	// Remembers the view it was at beforehand (only the first time, until RestoreExteriorCameraView
+	// is called) so that can be restored later. The actual positioning is PositionCameraForFloor.
 	void FocusCameraOnBuilding(APolyBuilding* Building);
+
+	// Moves the camera to a tilted top-down view centered on Building's footprint, at a height just
+	// above Level's own ceiling (so it stays close to whichever floor is being edited, regardless of
+	// how many floors are above it), and hides that ceiling (see APolyBuilding::
+	// SetVisibleInteriorLevel) so the view down onto Level's rooms isn't blocked. Used both for the
+	// initial FocusCameraOnBuilding and to re-frame when the active floor changes (see
+	// RepositionCameraToActiveFloor).
+	void PositionCameraForFloor(APolyBuilding* Building, int32 Level);
+
+	// Re-runs PositionCameraForFloor for whichever building/floor is currently loaded - called after
+	// SetActiveFloor/AddFloor/RemoveFloor so the camera follows floor changes made while already
+	// inside interior editing. No-op if nothing is loaded.
+	void RepositionCameraToActiveFloor();
 
 	FVector SavedCameraLocation = FVector::ZeroVector;
 	FRotator SavedCameraRotation = FRotator::ZeroRotator;
 	bool bHasSavedCameraView = false;
 
-	// Id of the building whose roof FocusCameraOnBuilding hid (see there) - empty if no roof is
-	// currently hidden. RestoreExteriorCameraView shows it again.
+	// Id of the building currently being interior-edited (i.e. has a floor/roof section hidden via
+	// PositionCameraForFloor) - empty if none. RestoreExteriorCameraView shows everything again.
 	FString InteriorBuildingHiddenById;
 };

@@ -118,6 +118,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	const TArray<FInteriorNavNode>& GetNavNodes() const { return NavNodes; }
 
+	// The rooms/walls spawned on a given floor - read-only, for a 2D floor plan renderer to draw
+	// (see UInteriorFloorPlanWidget). Empty if that floor doesn't exist.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	const TArray<AInteriorRoom*>& GetRoomsOnFloor(int32 Level) const;
+
 protected:
 	virtual void BeginPlay() override;
 

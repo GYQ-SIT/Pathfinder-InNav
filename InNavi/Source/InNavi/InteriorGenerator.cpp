@@ -734,6 +734,13 @@ TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 	return InteriorObject;
 }
 
+const TArray<AInteriorRoom*>& AInteriorGenerator::GetRoomsOnFloor(int32 Level) const
+{
+	static const TArray<AInteriorRoom*> Empty;
+	const FInteriorRoomList* List = RoomsByFloor.Find(Level);
+	return List ? List->Rooms : Empty;
+}
+
 void AInteriorGenerator::SyncInteriorToBuildingGenerator()
 {
 	if (LoadedBuildingId.IsEmpty() || !Generator)

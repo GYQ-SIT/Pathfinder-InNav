@@ -44,11 +44,13 @@ public:
 	// Highlight / unhighlight this building
 	void SetHighlighted(bool bHighlighted);
 
-	// Shows/hides just the roof (top cap) - the rest of the shell (walls + floor) stays visible.
-	// Used while editing this building's interior: a top-down camera looking through a closed roof
-	// would otherwise just see the roof instead of the rooms below. The mesh keeps the roof as its
-	// own section (see RebuildMesh) specifically so this doesn't have to hide the whole building.
-	void SetRoofVisible(bool bVisible);
+	// Shows the given floor's plan by hiding every ceiling from that floor up through the roof
+	// (both visually and its collision, so clicks reach the floor below too) - the walls and every
+	// slab AT or BELOW the given floor stay visible/solid, so you don't see (or click) through into
+	// whatever's underneath. The mesh keeps each floor boundary as its own section (see RebuildMesh)
+	// specifically so this doesn't have to hide the whole building.
+	// Level must be between 1 and GetFloorCount(); pass 0 to show everything (exterior view).
+	void SetVisibleInteriorLevel(int32 Level);
 
 	// Data
 	UPROPERTY()
@@ -64,15 +66,36 @@ public:
 	float BuildingHeight;
 
 private:
-	// Regenerates the mesh section from the cached footprint/scale/offset and current
+	// Regenerates the mesh sections from the cached footprint/scale/offset and current
 	// FloorCount/FloorHeight. Called by both BuildFromFootprint and SetFloorCount.
 	void RebuildMesh();
+
+	// Builds (or rebuilds) one flat cap section (the triangulated footprint, facing up) at height Z,
+	// at the given mesh section index - used for the roof and every inter-floor slab, which are
+	// otherwise identical except for their Z and which section they occupy. bCreateCollision is
+	// re-specified every time because UProceduralMeshComponent has no way to toggle an existing
+	// section's collision after the fact - the only way to turn it off is to recreate the section
+	// without it (see ApplySlabVisibility).
+	void BuildCapSection(const TArray<FVector2D>& Poly2D, const TArray<int32>& CapTris, float Z, int32 SectionIndex, bool bCreateCollision);
+
+	// Rebuilds every roof/slab section (visibility AND collision together) based on
+	// VisibleInteriorLevel - called after RebuildMesh (so a floor add/remove reapplies it) and by
+	// SetVisibleInteriorLevel. Uses CachedPoly2D/CachedCapTris rather than needing RebuildMesh to
+	// re-triangulate the footprint just to hide one floor.
+	void ApplySlabVisibility();
 
 	TArray<FVector2D> CachedFootprint;
 	float CachedScale = 1.f;
 	int32 FloorCount = 1;
 	float FloorHeight = 300.f;
-	bool bRoofVisible = true;
+
+	// The current build's transformed footprint and its ear-clipped triangulation - cached so
+	// ApplySlabVisibility can rebuild roof/slab sections without redoing RebuildMesh's work.
+	TArray<FVector2D> CachedPoly2D;
+	TArray<int32> CachedCapTris;
+
+	// See SetVisibleInteriorLevel. 0 = nothing hidden (normal exterior view).
+	int32 VisibleInteriorLevel = 0;
 
 	UPROPERTY()
 	UProceduralMeshComponent* MeshComp;
