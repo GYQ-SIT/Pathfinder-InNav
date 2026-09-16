@@ -54,6 +54,13 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 			return FReply::Handled();
 		}
 
+		if (PlayerController->IsInPrefabRoomMode())
+		{
+			const FVector2D FootprintCenter = LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize());
+			PlayerController->PlacePrefabRoomAt(FootprintCenter);
+			return FReply::Handled();
+		}
+
 		const FVector2D FootprintPoint = LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize());
 		PlayerController->AddRoomPointAtFootprintPosition(FootprintPoint);
 		return FReply::Handled();

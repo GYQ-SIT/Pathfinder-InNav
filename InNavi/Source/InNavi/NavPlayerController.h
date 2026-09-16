@@ -204,6 +204,29 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool DeleteRoom(const FString& RoomId);
 
+	// Prefab room placement: 1/2/3 (for now, not wired into UMG yet) each arm a different default
+	// shape (rectangle / triangle / circle-as-many-sided-polygon) - while armed, clicking the 2D
+	// floor plan canvas places one centered on the click, at a fixed default size (no door - that's
+	// a separate tool). Mutually exclusive with every other mode; pressing the same key again, or
+	// any other mode's key, disarms it.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void TogglePrefabRectangleMode();
+
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void TogglePrefabTriangleMode();
+
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void TogglePrefabCircleMode();
+
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool IsInPrefabRoomMode() const { return ActivePrefabShape != 0; }
+
+	// Places whichever prefab shape is currently armed (see TogglePrefabRectangleMode etc.),
+	// centered on FootprintCenter - what the 2D floor plan canvas's click handler calls. No-op
+	// (returns nullptr) if no prefab shape is currently armed.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	AInteriorRoom* PlacePrefabRoomAt(FVector2D FootprintCenter);
+
 	// Draws a standalone open wall/partition line instead of a closed room - same point-clicking
 	// mechanism as draw room mode (shares OnRoomPointCountChanged for the live point count), just a
 	// separate mode/key so a UI button (or the L key, for now) can trigger it independently.
@@ -338,6 +361,10 @@ private:
 
 	bool bDeleteMode = false;
 
+	// See TogglePrefabRectangleMode/TogglePrefabTriangleMode/TogglePrefabCircleMode/
+	// IsInPrefabRoomMode. 0 = none armed; 1 = rectangle, 2 = triangle, 3 = circle.
+	int32 ActivePrefabShape = 0;
+
 	// Turns off whichever of draw room mode / draw wall mode is currently active, from any path
 	// (self-toggle, or another mode taking over) - clears pending points. Clicks reaching the right
 	// floor's ground plane is handled per-section on the building itself (see
@@ -347,6 +374,14 @@ private:
 	// Turns off delete mode if it's currently active - called by every other mode's toggle (so
 	// entering build/draw-room/draw-wall/shape-test mode exits delete mode) and by OnCancelPressed.
 	void ExitDeleteMode();
+
+	// Disarms prefab room placement if a shape is currently armed - called by every other mode's
+	// toggle, same reasoning as ExitDeleteMode.
+	void ExitPrefabRoomMode();
+
+	// Shared implementation behind TogglePrefabRectangleMode/TogglePrefabTriangleMode/
+	// TogglePrefabCircleMode - ShapeId matches ActivePrefabShape's convention (1/2/3).
+	void TogglePrefabRoomMode(int32 ShapeId);
 
 	// Snaps the possessed pawn to a top-down view of the given building's currently active floor -
 	// called automatically after a successful LoadInteriorForBuilding, so the interior screen shows

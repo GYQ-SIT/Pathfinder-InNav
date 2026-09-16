@@ -77,6 +77,9 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::P, IE_Pressed, this, &ANavPlayerController::ToggleDrawRoomMode);
 	InputComponent->BindKey(EKeys::L, IE_Pressed, this, &ANavPlayerController::ToggleDrawWallMode);
 	InputComponent->BindKey(EKeys::Q, IE_Pressed, this, &ANavPlayerController::ToggleDeleteMode);
+	InputComponent->BindKey(EKeys::One, IE_Pressed, this, &ANavPlayerController::TogglePrefabRectangleMode);
+	InputComponent->BindKey(EKeys::Two, IE_Pressed, this, &ANavPlayerController::TogglePrefabTriangleMode);
+	InputComponent->BindKey(EKeys::Three, IE_Pressed, this, &ANavPlayerController::TogglePrefabCircleMode);
 	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &ANavPlayerController::OnConfirmPressed);
 	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
 	InputComponent->BindKey(FInputChord(EKeys::S, /*Shift*/false, /*Ctrl*/true, /*Alt*/false, /*Cmd*/false), IE_Pressed, this, &ANavPlayerController::SaveCurrentProjectKeyHandler);
@@ -146,6 +149,7 @@ void ANavPlayerController::ToggleBuildMode()
 		ExitDrawRoomMode();
 	}
 	ExitDeleteMode();
+	ExitPrefabRoomMode();
 
 	bBuildMode = !bBuildMode;
 	OnBuildModeChanged.Broadcast(bBuildMode);
@@ -181,6 +185,7 @@ void ANavPlayerController::ToggleShapeTestMode()
 		ExitDrawRoomMode();
 	}
 	ExitDeleteMode();
+	ExitPrefabRoomMode();
 
 	bShapeTestMode = !bShapeTestMode;
 	OnShapeModeChanged.Broadcast(bShapeTestMode);
@@ -227,6 +232,7 @@ void ANavPlayerController::ToggleDrawRoomMode()
 		ExitDrawRoomMode();
 	}
 	ExitDeleteMode();
+	ExitPrefabRoomMode();
 
 	bDrawRoomMode = true;
 	OnDrawRoomModeChanged.Broadcast(true);
@@ -266,6 +272,7 @@ void ANavPlayerController::ToggleDrawWallMode()
 		ExitDrawRoomMode();
 	}
 	ExitDeleteMode();
+	ExitPrefabRoomMode();
 
 	bDrawWallMode = true;
 	OnDrawWallModeChanged.Broadcast(true);
@@ -332,11 +339,73 @@ void ANavPlayerController::ToggleDeleteMode()
 	{
 		ExitDrawRoomMode();
 	}
+	ExitPrefabRoomMode();
 
 	bDeleteMode = true;
 	OnDeleteModeChanged.Broadcast(true);
 
 	UE_LOG(LogTemp, Warning, TEXT("Delete mode ON (floor %d): click a room/wall on the 2D canvas to delete it, Esc/Q to exit"), InteriorGen->GetActiveFloor());
+}
+
+void ANavPlayerController::ExitPrefabRoomMode()
+{
+	if (ActivePrefabShape != 0)
+	{
+		ActivePrefabShape = 0;
+		UE_LOG(LogTemp, Warning, TEXT("Prefab room placement OFF"));
+	}
+}
+
+void ANavPlayerController::TogglePrefabRoomMode(int32 ShapeId)
+{
+	if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("Cannot place a prefab room: no building interior currently loaded"));
+		OnActionFailed.Broadcast(TEXT("Load a building's interior first, then try placing a room."));
+		return;
+	}
+
+	if (ActivePrefabShape == ShapeId)
+	{
+		ExitPrefabRoomMode();
+		return;
+	}
+
+	if (bBuildMode)
+	{
+		// Modes are mutually exclusive - only one should interpret Enter/Esc at a time.
+		CancelBuilding();
+		bBuildMode = false;
+		OnBuildModeChanged.Broadcast(false);
+	}
+	if (bShapeTestMode)
+	{
+		bShapeTestMode = false;
+		OnShapeModeChanged.Broadcast(false);
+	}
+	if (bDrawRoomMode || bDrawWallMode)
+	{
+		ExitDrawRoomMode();
+	}
+	ExitDeleteMode();
+
+	ActivePrefabShape = ShapeId;
+	UE_LOG(LogTemp, Warning, TEXT("Prefab room placement ON (shape %d): click the 2D canvas to place, press the same key again to stop"), ShapeId);
+}
+
+void ANavPlayerController::TogglePrefabRectangleMode()
+{
+	TogglePrefabRoomMode(1);
+}
+
+void ANavPlayerController::TogglePrefabTriangleMode()
+{
+	TogglePrefabRoomMode(2);
+}
+
+void ANavPlayerController::TogglePrefabCircleMode()
+{
+	TogglePrefabRoomMode(3);
 }
 
 void ANavPlayerController::OnConfirmPressed()
@@ -382,6 +451,10 @@ void ANavPlayerController::OnCancelPressed()
 	else if (bDeleteMode)
 	{
 		ExitDeleteMode();
+	}
+	else if (ActivePrefabShape != 0)
+	{
+		ExitPrefabRoomMode();
 	}
 }
 
@@ -525,6 +598,86 @@ bool ANavPlayerController::DeleteRoom(const FString& RoomId)
 		bHasUnsavedChanges = true;
 	}
 	return bSuccess;
+}
+
+AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter)
+{
+	if (ActivePrefabShape == 0)
+	{
+		return nullptr;
+	}
+
+	if (!InteriorGen)
+	{
+		OnActionFailed.Broadcast(TEXT("No InteriorGenerator placed in the level."));
+		return nullptr;
+	}
+
+	if (Generator)
+	{
+		if (APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()))
+		{
+			if (!IsPointInPolygon(FootprintCenter, Building->GetFootprint()))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("Click inside the building's outline to place a room, not outside it"));
+				OnActionFailed.Broadcast(TEXT("Click inside the building's outline, not outside it."));
+				return nullptr;
+			}
+		}
+	}
+
+	// Default sizes are fixed for now - resizing (drag or typed Length/Width) is a separate,
+	// later feature.
+	TArray<FVector2D> Footprint;
+	switch (ActivePrefabShape)
+	{
+	case 1: // Rectangle: 120 x 90, axis-aligned.
+		{
+			constexpr float HalfWidth = 60.f;
+			constexpr float HalfDepth = 45.f;
+			Footprint.Add(FootprintCenter + FVector2D(-HalfWidth, -HalfDepth));
+			Footprint.Add(FootprintCenter + FVector2D(HalfWidth, -HalfDepth));
+			Footprint.Add(FootprintCenter + FVector2D(HalfWidth, HalfDepth));
+			Footprint.Add(FootprintCenter + FVector2D(-HalfWidth, HalfDepth));
+			break;
+		}
+	case 2: // Triangle: equilateral, radius 60, pointing up.
+		{
+			constexpr float Radius = 60.f;
+			constexpr int32 Sides = 3;
+			for (int32 i = 0; i < Sides; i++)
+			{
+				const float AngleDegrees = -90.f + (360.f * i) / Sides;
+				const float AngleRad = FMath::DegreesToRadians(AngleDegrees);
+				Footprint.Add(FootprintCenter + FVector2D(Radius * FMath::Cos(AngleRad), Radius * FMath::Sin(AngleRad)));
+			}
+			break;
+		}
+	case 3: // Circle: approximated as a 24-sided regular polygon, radius 60.
+		{
+			constexpr float Radius = 60.f;
+			constexpr int32 Sides = 24;
+			for (int32 i = 0; i < Sides; i++)
+			{
+				const float AngleRad = FMath::DegreesToRadians((360.f * i) / Sides);
+				Footprint.Add(FootprintCenter + FVector2D(Radius * FMath::Cos(AngleRad), Radius * FMath::Sin(AngleRad)));
+			}
+			break;
+		}
+	default:
+		return nullptr;
+	}
+
+	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(Footprint, FString(), FString(), true, false);
+	if (!NewRoom)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Could not place the prefab room - it may overlap an existing one."));
+		OnActionFailed.Broadcast(TEXT("Could not place the room there - check that it doesn't overlap an existing one."));
+		return nullptr;
+	}
+
+	bHasUnsavedChanges = true;
+	return NewRoom;
 }
 
 AInteriorRoom* ANavPlayerController::FinishRoom(const FString& RoomId, const FString& RoomName, bool bIsPublic, bool bRequiresKey)
@@ -758,6 +911,7 @@ void ANavPlayerController::StartNewProject()
 	bDrawRoomMode = false;
 	bDrawWallMode = false;
 	bDeleteMode = false;
+	ActivePrefabShape = 0;
 	PendingRoomFootprint.Reset();
 	SelectedBuilding = nullptr;
 
@@ -858,13 +1012,14 @@ void ANavPlayerController::RepositionCameraToActiveFloor()
 
 void ANavPlayerController::RestoreExteriorCameraView()
 {
-	// Leaving interior editing entirely - cancel any in-progress draw room/wall/delete mode so it
-	// doesn't keep intercepting clicks/Enter/Esc on whatever screen comes next.
+	// Leaving interior editing entirely - cancel any in-progress draw room/wall/delete/prefab mode
+	// so it doesn't keep intercepting clicks/Enter/Esc on whatever screen comes next.
 	if (bDrawRoomMode || bDrawWallMode)
 	{
 		ExitDrawRoomMode();
 	}
 	ExitDeleteMode();
+	ExitPrefabRoomMode();
 
 	if (!InteriorBuildingHiddenById.IsEmpty() && Generator)
 	{
