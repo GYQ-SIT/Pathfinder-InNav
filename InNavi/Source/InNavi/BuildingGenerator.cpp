@@ -278,6 +278,21 @@ void ABuildingGenerator::SetInteriorDataForBuilding(const FString& BuildingId, T
 	InteriorDataById.Add(BuildingId, InteriorData);
 }
 
+void ABuildingGenerator::ClearAllBuildings()
+{
+	for (const auto& Pair : BuildingsById)
+	{
+		if (Pair.Value)
+		{
+			Pair.Value->Destroy();
+		}
+	}
+	BuildingsById.Empty();
+	UsedBuildingIds.Empty();
+	InteriorDataById.Empty();
+	Scale = 1.f;
+}
+
 APolyBuilding* ABuildingGenerator::CreateRectangleBuilding(const FString& Id, const FString& Name, FVector2D Position, float Width, float Depth, float RotationDegrees, int32 FloorCount, float FloorHeight)
 {
 	if (Scale == 0.f)

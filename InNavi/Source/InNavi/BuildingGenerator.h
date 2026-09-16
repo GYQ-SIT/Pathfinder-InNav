@@ -77,6 +77,13 @@ public:
 	// InteriorGenerator syncing its current in-memory state before a project save).
 	void SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData);
 
+	// Destroys every currently-spawned building and forgets all interior data - back to the state
+	// right after BeginPlay, nothing loaded. Call this before starting a New project or before
+	// LoadBuildingsFromFile, so leftover buildings from whatever was open before don't stick around
+	// (LoadBuildingsFromFile only adds - it never removes what's already there on its own).
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void ClearAllBuildings();
+
 private:
 	float Scale = 1.f;
 	TSet<FString> UsedBuildingIds;

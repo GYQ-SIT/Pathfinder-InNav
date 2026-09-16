@@ -97,21 +97,7 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 		return -1;
 	}
 
-	// Clear whatever this generator had loaded before.
-	for (auto& Pair : RoomsByFloor)
-	{
-		for (AInteriorRoom* Room : Pair.Value.Rooms)
-		{
-			if (Room)
-			{
-				Room->Destroy();
-			}
-		}
-	}
-	RoomsByFloor.Empty();
-	NavNodes.Empty();
-	FloorInfoByLevel.Empty();
-	UsedRoomIds.Empty();
+	ClearLoadedInterior();
 
 	LoadedBuildingId = BuildingId;
 
@@ -297,6 +283,26 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 
 	UE_LOG(LogTemp, Warning, TEXT("Loaded interior for %s: %d floors, %d rooms"), *BuildingId, FloorsArray->Num(), SpawnedCount);
 	return SpawnedCount;
+}
+
+void AInteriorGenerator::ClearLoadedInterior()
+{
+	for (auto& Pair : RoomsByFloor)
+	{
+		for (AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (Room)
+			{
+				Room->Destroy();
+			}
+		}
+	}
+	RoomsByFloor.Empty();
+	NavNodes.Empty();
+	FloorInfoByLevel.Empty();
+	UsedRoomIds.Empty();
+	LoadedBuildingId.Empty();
+	ActiveFloor = 1;
 }
 
 void AInteriorGenerator::SetActiveFloor(int32 Level)

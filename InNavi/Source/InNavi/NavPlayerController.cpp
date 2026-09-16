@@ -344,6 +344,7 @@ void ANavPlayerController::FinishBuilding(const FString& CustomId, const FString
 	{
 		NextNewBuildingIndex++;
 	}
+	bHasUnsavedChanges = true;
 	FlushPersistentDebugLines(GetWorld());
 	PendingFootprint.Reset();
 	OnFootprintPointCountChanged.Broadcast(0);
@@ -430,6 +431,7 @@ AInteriorRoom* ANavPlayerController::FinishRoom(const FString& RoomId, const FSt
 		return nullptr;
 	}
 
+	bHasUnsavedChanges = true;
 	FlushPersistentDebugLines(GetWorld());
 	PendingRoomFootprint.Reset();
 	OnRoomPointCountChanged.Broadcast(0);
@@ -457,6 +459,10 @@ APolyBuilding* ANavPlayerController::CreateRectangleBuilding(const FString& Id, 
 	{
 		OnActionFailed.Broadcast(TEXT("Could not create the building - check that the id isn't already used and the dimensions/floor count are valid."));
 	}
+	else
+	{
+		bHasUnsavedChanges = true;
+	}
 	return Result;
 }
 
@@ -473,6 +479,10 @@ APolyBuilding* ANavPlayerController::CreateRegularPolygonBuilding(const FString&
 	if (!Result)
 	{
 		OnActionFailed.Broadcast(TEXT("Could not create the building - check that the id isn't already used and the sides/radius/floor count are valid."));
+	}
+	else
+	{
+		bHasUnsavedChanges = true;
 	}
 	return Result;
 }
@@ -531,6 +541,12 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 		return 0;
 	}
 
+	if (InteriorGen)
+	{
+		InteriorGen->ClearLoadedInterior();
+	}
+	Generator->ClearAllBuildings();
+
 	const int32 Count = Generator->LoadBuildingsFromFile(FilePath);
 	UE_LOG(LogTemp, Warning, TEXT("LoadBuildingDataFromPath: loaded %d buildings from %s"), Count, *FilePath);
 	if (Count == 0)
@@ -541,8 +557,36 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 	{
 		// This file is now what Ctrl+S saves back to.
 		CurrentProjectFilePath = FilePath;
+		bHasUnsavedChanges = false;
 	}
 	return Count;
+}
+
+void ANavPlayerController::StartNewProject()
+{
+	if (InteriorGen)
+	{
+		InteriorGen->ClearLoadedInterior();
+	}
+	if (Generator)
+	{
+		Generator->ClearAllBuildings();
+	}
+
+	CurrentProjectFilePath.Empty();
+	bHasUnsavedChanges = false;
+	NextNewBuildingIndex = 1;
+
+	// Defensively reset any in-progress mode/selection state too, in case New is ever reachable
+	// mid-edit rather than only from the start screen.
+	bBuildMode = false;
+	PendingFootprint.Reset();
+	bDrawRoomMode = false;
+	PendingRoomFootprint.Reset();
+	SelectedBuilding = nullptr;
+	RoomDrawingBuilding = nullptr;
+
+	UE_LOG(LogTemp, Warning, TEXT("Started a new, blank project"));
 }
 
 bool ANavPlayerController::SaveCurrentProject()
@@ -574,6 +618,7 @@ bool ANavPlayerController::SaveCurrentProject()
 	const bool bSuccess = Generator->SaveBuildingsToFile(CurrentProjectFilePath);
 	if (bSuccess)
 	{
+		bHasUnsavedChanges = false;
 		UE_LOG(LogTemp, Warning, TEXT("Saved to %s"), *CurrentProjectFilePath);
 	}
 	else
@@ -646,6 +691,7 @@ bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
 	if (bSuccess)
 	{
 		CurrentProjectFilePath = FilePath;
+		bHasUnsavedChanges = false;
 		UE_LOG(LogTemp, Warning, TEXT("Saved to %s"), *FilePath);
 	}
 	else
@@ -708,6 +754,10 @@ int32 ANavPlayerController::AddFloor()
 	{
 		OnActionFailed.Broadcast(TEXT("Could not add a floor - load a building's interior first."));
 	}
+	else
+	{
+		bHasUnsavedChanges = true;
+	}
 	return NewLevel;
 }
 
@@ -723,6 +773,10 @@ bool ANavPlayerController::RemoveFloor(int32 Level)
 	if (!bSuccess)
 	{
 		OnActionFailed.Broadcast(TEXT("Could not remove that floor - it may not exist, or it's the last remaining floor."));
+	}
+	else
+	{
+		bHasUnsavedChanges = true;
 	}
 	return bSuccess;
 }

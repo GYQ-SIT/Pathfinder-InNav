@@ -69,15 +69,34 @@ public:
 
 	// Loads a buildings.json-format file from an explicit path (typically one
 	// BrowseForBuildingDataFile just returned) the same way the startup buildings.json is loaded.
+	// Clears out whatever was already spawned first, so buildings left over from a previous New/Open
+	// in this session don't stick around alongside the new file.
 	// On success, this also becomes the file SaveCurrentProject (Ctrl+S) writes back to.
 	// Returns how many buildings were spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingDataFromPath(const FString& FilePath);
 
+	// The "New" button should call this before switching to the edit screen: destroys every
+	// currently-spawned building/interior and resets back to a blank project (no file path, no
+	// unsaved-changes flag) - without this, buildings drawn in a previous New/Open session would
+	// still be sitting in the level.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void StartNewProject();
+
 	// The file Ctrl+S / SaveCurrentProject saves to. Set automatically after a successful
 	// LoadBuildingDataFromPath (Open) or the first SaveCurrentProject on a brand-new (New) session.
 	UFUNCTION(BlueprintPure, Category = "Building")
 	FString GetCurrentProjectFilePath() const { return CurrentProjectFilePath; }
+
+	// True if something has been created/edited since the last save (or since Open/New, if never
+	// saved yet). Set by every mutating action (FinishBuilding, CreateRectangleBuilding,
+	// CreateRegularPolygonBuilding, FinishRoom, AddFloor, RemoveFloor); cleared by a successful
+	// LoadBuildingDataFromPath, SaveCurrentProject, or SaveCurrentProjectAs. Check this before any
+	// destructive navigation (Back to the start screen, Quit) and show a confirm popup if true -
+	// UMG has no built-in "are you sure" dialog, so the UI needs to build that popup itself; this
+	// getter is what its Branch node should check.
+	UFUNCTION(BlueprintPure, Category = "Building")
+	bool HasUnsavedChanges() const { return bHasUnsavedChanges; }
 
 	// Saves every currently-spawned building (bound to Ctrl+S). If there's no current project file
 	// yet (e.g. a New session), this opens the OS "save file" dialog first (same as BrowseForSaveLocation)
@@ -233,6 +252,9 @@ private:
 	// See GetCurrentProjectFilePath/SaveCurrentProject above.
 	UPROPERTY()
 	FString CurrentProjectFilePath;
+
+	// See HasUnsavedChanges above.
+	bool bHasUnsavedChanges = false;
 
 	bool bBuildMode = false;
 	TArray<FVector2D> PendingFootprint;

@@ -57,6 +57,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void SyncInteriorToBuildingGenerator();
 
+	// Destroys every currently-spawned room and forgets all floor/nav-node state, without loading
+	// anything new - back to the state right after BeginPlay. Call this before starting a New
+	// project or before BuildingGenerator::ClearAllBuildings, so this generator doesn't keep pointing
+	// at rooms whose building actor is about to be destroyed.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void ClearLoadedInterior();
+
 	// Shows only the given floor's rooms, hides the rest.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void SetActiveFloor(int32 Level);
