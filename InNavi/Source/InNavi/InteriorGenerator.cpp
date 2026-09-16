@@ -170,6 +170,11 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 				bool bRequiresKey = false;
 				RoomObject->TryGetBoolField(TEXT("requireKey"), bRequiresKey);
 
+				// Absent means "closed" - keeps older saved interiors (no "closed" field at all,
+				// from before standalone walls existed) loading as ordinary closed rooms.
+				bool bClosedLoop = true;
+				RoomObject->TryGetBoolField(TEXT("closed"), bClosedLoop);
+
 				const TArray<TSharedPtr<FJsonValue>>* FootprintArray;
 				if (!RoomObject->TryGetArrayField(TEXT("footprint"), FootprintArray))
 				{
@@ -230,7 +235,7 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 					Room->FloorLevel = Level;
 					Room->bIsPublic = bIsPublic;
 					Room->bRequiresKey = bRequiresKey;
-					Room->BuildWalls(Footprint, Scale, BuildingOffset, FloorBaseZ, WallHeight, WallThickness, Openings);
+					Room->BuildWalls(Footprint, Scale, BuildingOffset, FloorBaseZ, WallHeight, WallThickness, Openings, bClosedLoop);
 
 					RoomsByFloor.FindOrAdd(Level).Rooms.Add(Room);
 					UsedRoomIds.Add(RoomId);
@@ -548,13 +553,75 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2
 		Room->FloorLevel = ActiveFloor;
 		Room->bIsPublic = bIsPublic;
 		Room->bRequiresKey = bRequiresKey;
-		Room->BuildWalls(Footprint, Scale, Building->BuildingOffset, FloorBaseZ, FloorInfo->WallHeight, FloorInfo->WallThickness, TArray<FInteriorOpening>());
+		Room->BuildWalls(Footprint, Scale, Building->BuildingOffset, FloorBaseZ, FloorInfo->WallHeight, FloorInfo->WallThickness, TArray<FInteriorOpening>(), /*bClosedLoop=*/true);
 
 		RoomsByFloor.FindOrAdd(ActiveFloor).Rooms.Add(Room);
 		UsedRoomIds.Add(ResolvedId);
 	}
 
 	return Room;
+}
+
+AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>& Points, const FString& WallId)
+{
+	if (LoadedBuildingId.IsEmpty() || !Generator)
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: no building interior currently loaded"));
+		return nullptr;
+	}
+
+	const FInteriorFloorInfo* FloorInfo = FloorInfoByLevel.Find(ActiveFloor);
+	if (!FloorInfo)
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: active floor %d doesn't exist"), ActiveFloor);
+		return nullptr;
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(LoadedBuildingId);
+	if (!Building)
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: building '%s' no longer exists"), *LoadedBuildingId);
+		return nullptr;
+	}
+
+	if (Points.Num() < 2)
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: needs at least 2 points (has %d)"), Points.Num());
+		return nullptr;
+	}
+
+	// Shares the room id namespace/uniqueness check and auto-numbering - a wall is just an
+	// open-loop room as far as ids/floors are concerned.
+	const FString ResolvedId = WallId.IsEmpty() ? PeekNextRoomId() : WallId;
+	if (UsedRoomIds.Contains(ResolvedId))
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: id '%s' is already in use"), *ResolvedId);
+		return nullptr;
+	}
+
+	if (!GetWorld())
+	{
+		return nullptr;
+	}
+
+	const float Scale = Generator->GetScale();
+	const float FloorBaseZ = (ActiveFloor - 1) * Building->GetFloorHeight();
+
+	AInteriorRoom* Wall = GetWorld()->SpawnActor<AInteriorRoom>(FVector::ZeroVector, FRotator::ZeroRotator);
+	if (Wall)
+	{
+		Wall->RoomId = ResolvedId;
+		Wall->RoomName = ResolvedId;
+		Wall->FloorLevel = ActiveFloor;
+		Wall->bIsPublic = true;
+		Wall->bRequiresKey = false;
+		Wall->BuildWalls(Points, Scale, Building->BuildingOffset, FloorBaseZ, FloorInfo->WallHeight, FloorInfo->WallThickness, TArray<FInteriorOpening>(), /*bClosedLoop=*/false);
+
+		RoomsByFloor.FindOrAdd(ActiveFloor).Rooms.Add(Wall);
+		UsedRoomIds.Add(ResolvedId);
+	}
+
+	return Wall;
 }
 
 TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
@@ -590,6 +657,7 @@ TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 				RoomObject->SetStringField(TEXT("name"), Room->RoomName);
 				RoomObject->SetStringField(TEXT("access"), Room->bIsPublic ? TEXT("public") : TEXT("private"));
 				RoomObject->SetBoolField(TEXT("requireKey"), Room->bRequiresKey);
+				RoomObject->SetBoolField(TEXT("closed"), Room->IsClosedLoop());
 
 				TArray<TSharedPtr<FJsonValue>> FootprintArray;
 				for (const FVector2D& Point : Room->GetFootprint())

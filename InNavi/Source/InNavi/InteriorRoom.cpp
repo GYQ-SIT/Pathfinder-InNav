@@ -92,11 +92,12 @@ static void BuildWallSpansForEdge(float EdgeLength, float WallHeight, const TArr
 	}
 }
 
-void AInteriorRoom::BuildWalls(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, float FloorBaseZ, float WallHeight, float WallThickness, const TArray<FInteriorOpening>& Openings)
+void AInteriorRoom::BuildWalls(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, float FloorBaseZ, float WallHeight, float WallThickness, const TArray<FInteriorOpening>& Openings, bool bClosedLoop)
 {
-	if (Footprint.Num() < 3)
+	const int32 MinPoints = bClosedLoop ? 3 : 2;
+	if (Footprint.Num() < MinPoints)
 	{
-		UE_LOG(LogTemp, Error, TEXT("AInteriorRoom::BuildWalls: room '%s' footprint needs at least 3 points"), *RoomId);
+		UE_LOG(LogTemp, Error, TEXT("AInteriorRoom::BuildWalls: '%s' footprint needs at least %d points"), *RoomId, MinPoints);
 		return;
 	}
 
@@ -107,6 +108,7 @@ void AInteriorRoom::BuildWalls(const TArray<FVector2D>& Footprint, float Scale, 
 	CachedWallHeight = WallHeight;
 	CachedWallThickness = WallThickness;
 	CachedOpenings = Openings;
+	CachedClosedLoop = bClosedLoop;
 
 	RebuildMesh();
 }
@@ -138,7 +140,10 @@ void AInteriorRoom::RebuildMesh()
 	TArray<int32> Triangles;
 	const float HalfThickness = CachedWallThickness * 0.5f;
 
-	for (int32 EdgeIndex = 0; EdgeIndex < N; EdgeIndex++)
+	// Closed (room): N points -> N edges, wrapping back to point 0. Open (standalone wall): N
+	// points -> N-1 edges, no closing edge.
+	const int32 NumEdges = CachedClosedLoop ? N : N - 1;
+	for (int32 EdgeIndex = 0; EdgeIndex < NumEdges; EdgeIndex++)
 	{
 		const FVector2D& A2D = Poly2D[EdgeIndex];
 		const FVector2D& B2D = Poly2D[(EdgeIndex + 1) % N];

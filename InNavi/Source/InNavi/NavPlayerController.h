@@ -16,6 +16,7 @@ class AInteriorRoom;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildModeChanged, bool, bNewBuildMode);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnShapeModeChanged, bool, bNewShapeMode);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDrawRoomModeChanged, bool, bNewDrawRoomMode);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDrawWallModeChanged, bool, bNewDrawWallMode);
 // Broadcast after each footprint point is added or cleared, so UI can show a live point count.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFootprintPointCountChanged, int32, PointCount);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRoomPointCountChanged, int32, PointCount);
@@ -87,6 +88,13 @@ public:
 	// still be sitting in the level.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void StartNewProject();
+
+	// Puts the camera back where it was before LoadInteriorForBuilding snapped it to a top-down
+	// view, and shows whatever building's roof that hid (see FocusCameraOnBuilding below) - the
+	// interior screen's Back button should call this before switching back to the edit screen.
+	// No-op if the camera was never moved.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void RestoreExteriorCameraView();
 
 	// The file Ctrl+S / SaveCurrentProject saves to. Set automatically after a successful
 	// LoadBuildingDataFromPath (Open) or the first SaveCurrentProject on a brand-new (New) session.
@@ -164,6 +172,28 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Interior")
 	FOnRoomPointCountChanged OnRoomPointCountChanged;
+
+	// Draws a standalone open wall/partition line instead of a closed room - same point-clicking
+	// mechanism as draw room mode (shares OnRoomPointCountChanged for the live point count), just a
+	// separate mode/key so a UI button (or the L key, for now) can trigger it independently.
+	// Mutually exclusive with build mode / shape test mode / draw room mode.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void ToggleDrawWallMode();
+
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool IsInDrawWallMode() const { return bDrawWallMode; }
+
+	UPROPERTY(BlueprintAssignable, Category = "Interior")
+	FOnDrawWallModeChanged OnDrawWallModeChanged;
+
+	// Confirm (generate from the currently drawn points) / cancel the in-progress wall. WallId is
+	// optional, same auto-generation convention as FinishRoom - a wall shares the room id namespace,
+	// there's no separate id scheme for it.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	AInteriorRoom* FinishWall(const FString& WallId = FString());
+
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void CancelWall();
 
 	// Permanent pass-throughs to InteriorGenerator - same reasoning as the Building pass-throughs
 	// above: Padre's UI should never need a separate InteriorGenerator reference, just this one.
@@ -274,13 +304,36 @@ private:
 	bool bDrawRoomMode = false;
 	TArray<FVector2D> PendingRoomFootprint;
 
-	// Whichever building had its collision disabled to let draw-room clicks reach the ground
+	// Draw wall mode shares PendingRoomFootprint/AddRoomPointUnderCursor with draw room mode -
+	// clicking the ground works identically for both, they only differ in what Finish does
+	// (FinishRoom vs FinishWall) and whether the result is a closed loop.
+	bool bDrawWallMode = false;
+
+	// Whichever building had its collision disabled to let draw-room/draw-wall clicks reach the ground
 	// plane inside its footprint (the solid exterior shell would otherwise block the raycast
 	// before it gets there). Restored and cleared whenever draw room mode ends.
 	UPROPERTY()
 	APolyBuilding* RoomDrawingBuilding;
 
-	// Turns draw room mode off from any path (self-toggle, or another mode taking over) -
-	// restores RoomDrawingBuilding's collision and clears pending points.
+	// Turns off whichever of draw room mode / draw wall mode is currently active, from any path
+	// (self-toggle, or another mode taking over) - restores RoomDrawingBuilding's collision and
+	// clears pending points.
 	void ExitDrawRoomMode();
+
+	// Snaps the possessed pawn to a top-down view centered on the given building, sized to fit its
+	// footprint - called automatically after a successful LoadInteriorForBuilding, so the interior
+	// screen shows a readable floor plan instead of whatever angle the exterior camera happened to
+	// be left at. Remembers the view it was at beforehand (only the first time, until
+	// RestoreExteriorCameraView is called) so that can be restored later. Also hides the building's
+	// roof (see APolyBuilding::SetRoofVisible) - the closed cap would otherwise block the top-down
+	// view of the rooms inside; the walls stay visible.
+	void FocusCameraOnBuilding(APolyBuilding* Building);
+
+	FVector SavedCameraLocation = FVector::ZeroVector;
+	FRotator SavedCameraRotation = FRotator::ZeroRotator;
+	bool bHasSavedCameraView = false;
+
+	// Id of the building whose roof FocusCameraOnBuilding hid (see there) - empty if no roof is
+	// currently hidden. RestoreExteriorCameraView shows it again.
+	FString InteriorBuildingHiddenById;
 };

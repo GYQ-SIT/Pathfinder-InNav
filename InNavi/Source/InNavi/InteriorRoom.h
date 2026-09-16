@@ -24,7 +24,11 @@ public:
 	// use the same "pre-scale units x Scale" convention as PolyBuilding. FloorBaseZ positions this
 	// floor's walls vertically relative to the building's ground level, e.g.
 	// (Level - 1) * building's exterior FloorHeight, so floors stack correctly.
-	void BuildWalls(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, float FloorBaseZ, float WallHeight, float WallThickness, const TArray<FInteriorOpening>& Openings);
+	// bClosedLoop: true wraps the last point back to the first (a closed room, N points -> N walls -
+	// the normal case); false stops after the last segment (a standalone open wall/partition line,
+	// N points -> N-1 walls, no closing edge). Footprint needs at least 3 points when closed, 2 when
+	// open.
+	void BuildWalls(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, float FloorBaseZ, float WallHeight, float WallThickness, const TArray<FInteriorOpening>& Openings, bool bClosedLoop);
 
 	// Repositions this room vertically and regenerates the mesh - used when removing a floor
 	// shifts every floor above it down by one level. Footprint/openings/etc. are unchanged, only
@@ -54,6 +58,7 @@ public:
 	// room round-trips exactly.
 	const TArray<FVector2D>& GetFootprint() const { return CachedFootprint; }
 	const TArray<FInteriorOpening>& GetOpenings() const { return CachedOpenings; }
+	bool IsClosedLoop() const { return CachedClosedLoop; }
 
 private:
 	// Regenerates the mesh from the cached inputs below. Called by both BuildWalls and
@@ -67,6 +72,7 @@ private:
 	float CachedWallHeight = 280.f;
 	float CachedWallThickness = 20.f;
 	TArray<FInteriorOpening> CachedOpenings;
+	bool CachedClosedLoop = true;
 
 	UPROPERTY()
 	UProceduralMeshComponent* MeshComp;

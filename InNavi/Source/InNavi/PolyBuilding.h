@@ -44,6 +44,12 @@ public:
 	// Highlight / unhighlight this building
 	void SetHighlighted(bool bHighlighted);
 
+	// Shows/hides just the roof (top cap) - the rest of the shell (walls + floor) stays visible.
+	// Used while editing this building's interior: a top-down camera looking through a closed roof
+	// would otherwise just see the roof instead of the rooms below. The mesh keeps the roof as its
+	// own section (see RebuildMesh) specifically so this doesn't have to hide the whole building.
+	void SetRoofVisible(bool bVisible);
+
 	// Data
 	UPROPERTY()
 	FString BuildingId;
@@ -66,6 +72,7 @@ private:
 	float CachedScale = 1.f;
 	int32 FloorCount = 1;
 	float FloorHeight = 300.f;
+	bool bRoofVisible = true;
 
 	UPROPERTY()
 	UProceduralMeshComponent* MeshComp;

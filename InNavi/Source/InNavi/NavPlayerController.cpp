@@ -2,6 +2,7 @@
 
 
 #include "NavPlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "PolyBuilding.h"
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
@@ -57,6 +58,7 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::F, IE_Pressed, this, &ANavPlayerController::AddInteriorFloor);
 	InputComponent->BindKey(EKeys::X, IE_Pressed, this, &ANavPlayerController::RemoveActiveInteriorFloor);
 	InputComponent->BindKey(EKeys::P, IE_Pressed, this, &ANavPlayerController::ToggleDrawRoomMode);
+	InputComponent->BindKey(EKeys::L, IE_Pressed, this, &ANavPlayerController::ToggleDrawWallMode);
 	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &ANavPlayerController::OnConfirmPressed);
 	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
 	InputComponent->BindKey(FInputChord(EKeys::S, /*Shift*/false, /*Ctrl*/true, /*Alt*/false, /*Cmd*/false), IE_Pressed, this, &ANavPlayerController::SaveCurrentProjectKeyHandler);
@@ -68,7 +70,7 @@ void ANavPlayerController::OnClick()
 	{
 		AddFootprintPointUnderCursor();
 	}
-	else if (bDrawRoomMode)
+	else if (bDrawRoomMode || bDrawWallMode)
 	{
 		AddRoomPointUnderCursor();
 	}
@@ -117,7 +119,7 @@ void ANavPlayerController::ToggleBuildMode()
 		bShapeTestMode = false;
 		OnShapeModeChanged.Broadcast(false);
 	}
-	if (bDrawRoomMode)
+	if (bDrawRoomMode || bDrawWallMode)
 	{
 		ExitDrawRoomMode();
 	}
@@ -151,7 +153,7 @@ void ANavPlayerController::ToggleShapeTestMode()
 		bBuildMode = false;
 		OnBuildModeChanged.Broadcast(false);
 	}
-	if (bDrawRoomMode)
+	if (bDrawRoomMode || bDrawWallMode)
 	{
 		ExitDrawRoomMode();
 	}
@@ -196,6 +198,10 @@ void ANavPlayerController::ToggleDrawRoomMode()
 		bShapeTestMode = false;
 		OnShapeModeChanged.Broadcast(false);
 	}
+	if (bDrawWallMode)
+	{
+		ExitDrawRoomMode();
+	}
 
 	bDrawRoomMode = true;
 	OnDrawRoomModeChanged.Broadcast(true);
@@ -212,11 +218,66 @@ void ANavPlayerController::ToggleDrawRoomMode()
 	UE_LOG(LogTemp, Warning, TEXT("Draw room mode ON (floor %d): click to add footprint points, Enter to finish, Esc to cancel"), InteriorGen->GetActiveFloor());
 }
 
+void ANavPlayerController::ToggleDrawWallMode()
+{
+	if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("Cannot enter draw wall mode: no building interior currently loaded"));
+		OnActionFailed.Broadcast(TEXT("Load a building's interior first, then try drawing a wall."));
+		return;
+	}
+
+	if (bDrawWallMode)
+	{
+		ExitDrawRoomMode();
+		return;
+	}
+
+	if (bBuildMode)
+	{
+		// Modes are mutually exclusive - only one should interpret Enter/Esc at a time.
+		CancelBuilding();
+		bBuildMode = false;
+		OnBuildModeChanged.Broadcast(false);
+	}
+	if (bShapeTestMode)
+	{
+		bShapeTestMode = false;
+		OnShapeModeChanged.Broadcast(false);
+	}
+	if (bDrawRoomMode)
+	{
+		ExitDrawRoomMode();
+	}
+
+	bDrawWallMode = true;
+	OnDrawWallModeChanged.Broadcast(true);
+
+	// Same reasoning as draw room mode: disable the loaded building's collision so clicks can reach
+	// the ground plane inside its footprint. Restored in ExitDrawRoomMode.
+	RoomDrawingBuilding = Generator ? Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()) : nullptr;
+	if (RoomDrawingBuilding)
+	{
+		RoomDrawingBuilding->SetActorEnableCollision(false);
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("Draw wall mode ON (floor %d): click to add points, Enter to finish, Esc to cancel"), InteriorGen->GetActiveFloor());
+}
+
 void ANavPlayerController::ExitDrawRoomMode()
 {
-	CancelRoom();
-	bDrawRoomMode = false;
-	OnDrawRoomModeChanged.Broadcast(false);
+	if (bDrawRoomMode)
+	{
+		CancelRoom();
+		bDrawRoomMode = false;
+		OnDrawRoomModeChanged.Broadcast(false);
+	}
+	if (bDrawWallMode)
+	{
+		CancelWall();
+		bDrawWallMode = false;
+		OnDrawWallModeChanged.Broadcast(false);
+	}
 
 	if (RoomDrawingBuilding)
 	{
@@ -224,7 +285,7 @@ void ANavPlayerController::ExitDrawRoomMode()
 		RoomDrawingBuilding = nullptr;
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("Draw room mode OFF"));
+	UE_LOG(LogTemp, Warning, TEXT("Draw room/wall mode OFF"));
 }
 
 void ANavPlayerController::OnConfirmPressed()
@@ -240,6 +301,10 @@ void ANavPlayerController::OnConfirmPressed()
 	else if (bDrawRoomMode)
 	{
 		FinishRoom();
+	}
+	else if (bDrawWallMode)
+	{
+		FinishWall();
 	}
 }
 
@@ -258,6 +323,10 @@ void ANavPlayerController::OnCancelPressed()
 	else if (bDrawRoomMode)
 	{
 		CancelRoom();
+	}
+	else if (bDrawWallMode)
+	{
+		CancelWall();
 	}
 }
 
@@ -445,6 +514,52 @@ void ANavPlayerController::CancelRoom()
 	OnRoomPointCountChanged.Broadcast(0);
 }
 
+AInteriorRoom* ANavPlayerController::FinishWall(const FString& WallId)
+{
+	if (!bDrawWallMode)
+	{
+		return nullptr;
+	}
+
+	if (PendingRoomFootprint.Num() < 2)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Need at least 2 points to finish a wall (have %d)"), PendingRoomFootprint.Num());
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Need at least 2 points to finish a wall (have %d)."), PendingRoomFootprint.Num()));
+		return nullptr;
+	}
+
+	if (!InteriorGen)
+	{
+		UE_LOG(LogTemp, Error, TEXT("No InteriorGenerator found in the level"));
+		OnActionFailed.Broadcast(TEXT("No InteriorGenerator found in the level."));
+		return nullptr;
+	}
+
+	AInteriorRoom* NewWall = InteriorGen->CreateWallFromPoints(PendingRoomFootprint, WallId);
+
+	if (!NewWall)
+	{
+		// Spawn was rejected (e.g. a typed-in id that's already taken) - keep the drawn points and
+		// preview so the user can see what's there; Esc cancels.
+		UE_LOG(LogTemp, Warning, TEXT("Could not finish this wall - see error above. Press Esc to discard and redraw."));
+		OnActionFailed.Broadcast(TEXT("Could not create the wall - check that the id isn't already used."));
+		return nullptr;
+	}
+
+	bHasUnsavedChanges = true;
+	FlushPersistentDebugLines(GetWorld());
+	PendingRoomFootprint.Reset();
+	OnRoomPointCountChanged.Broadcast(0);
+	return NewWall;
+}
+
+void ANavPlayerController::CancelWall()
+{
+	FlushPersistentDebugLines(GetWorld());
+	PendingRoomFootprint.Reset();
+	OnRoomPointCountChanged.Broadcast(0);
+}
+
 APolyBuilding* ANavPlayerController::CreateRectangleBuilding(const FString& Id, const FString& Name, FVector2D Position, float Width, float Depth, float RotationDegrees, int32 FloorCount, float FloorHeight)
 {
 	if (!Generator)
@@ -589,6 +704,99 @@ void ANavPlayerController::StartNewProject()
 	UE_LOG(LogTemp, Warning, TEXT("Started a new, blank project"));
 }
 
+void ANavPlayerController::FocusCameraOnBuilding(APolyBuilding* Building)
+{
+	if (!Building)
+	{
+		return;
+	}
+
+	APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn)
+	{
+		return;
+	}
+
+	if (!bHasSavedCameraView)
+	{
+		SavedCameraLocation = ControlledPawn->GetActorLocation();
+		SavedCameraRotation = GetControlRotation();
+		bHasSavedCameraView = true;
+	}
+
+	const float Scale = Generator ? Generator->GetScale() : 1.f;
+	const TArray<FVector2D>& Footprint = Building->GetFootprint();
+	if (Footprint.Num() == 0)
+	{
+		return;
+	}
+
+	FVector2D MinPoint(TNumericLimits<float>::Max(), TNumericLimits<float>::Max());
+	FVector2D MaxPoint(-TNumericLimits<float>::Max(), -TNumericLimits<float>::Max());
+	for (const FVector2D& Point : Footprint)
+	{
+		const FVector2D WorldPoint = (Point + Building->BuildingOffset) * Scale;
+		MinPoint.X = FMath::Min(MinPoint.X, WorldPoint.X);
+		MinPoint.Y = FMath::Min(MinPoint.Y, WorldPoint.Y);
+		MaxPoint.X = FMath::Max(MaxPoint.X, WorldPoint.X);
+		MaxPoint.Y = FMath::Max(MaxPoint.Y, WorldPoint.Y);
+	}
+
+	const FVector2D Center = (MinPoint + MaxPoint) * 0.5f;
+	const float Span = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
+	// High enough to fit the whole footprint in view, with some headroom above the tallest floor.
+	const float ViewHeight = FMath::Max(Span * 1.5f, 500.f) + 1000.f;
+
+	const FVector NewLocation(Center.X, Center.Y, ViewHeight);
+	// Not perfectly vertical (-90) on purpose: dead-straight-down makes vertical walls render
+	// edge-on (effectively invisible, since they'd have zero apparent width) - a slight tilt keeps
+	// them visible as a readable floor plan while still reading as "top-down".
+	const FRotator NewRotation(-80.f, 0.f, 0.f);
+
+	ControlledPawn->SetActorLocationAndRotation(NewLocation, NewRotation);
+	SetControlRotation(NewRotation);
+
+	// The roof is a closed cap - looking straight down at it from above would just show the roof,
+	// hiding every room underneath. Hide just the roof while editing the interior (the walls stay
+	// visible); RestoreExteriorCameraView brings it back.
+	Building->SetRoofVisible(false);
+	InteriorBuildingHiddenById = Building->BuildingId;
+}
+
+void ANavPlayerController::RestoreExteriorCameraView()
+{
+	if (!InteriorBuildingHiddenById.IsEmpty() && Generator)
+	{
+		if (APolyBuilding* HiddenBuilding = Generator->FindBuildingById(InteriorBuildingHiddenById))
+		{
+			HiddenBuilding->SetRoofVisible(true);
+		}
+		InteriorBuildingHiddenById.Empty();
+	}
+
+	// Leaving interior editing entirely - destroy whatever rooms were spawned for it (safe: the
+	// data itself lives in BuildingGenerator's InteriorDataById, not in these actors, so nothing is
+	// lost; LoadInteriorForBuilding respawns them fresh from that data next time this building's
+	// interior is opened).
+	if (InteriorGen)
+	{
+		InteriorGen->ClearLoadedInterior();
+	}
+
+	if (!bHasSavedCameraView)
+	{
+		return;
+	}
+
+	if (APawn* ControlledPawn = GetPawn())
+	{
+		ControlledPawn->SetActorLocationAndRotation(SavedCameraLocation, SavedCameraRotation);
+		SetControlRotation(SavedCameraRotation);
+	}
+
+	bHasSavedCameraView = false;
+}
+
 bool ANavPlayerController::SaveCurrentProject()
 {
 	if (!Generator)
@@ -721,6 +929,10 @@ int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 	if (Result < 0)
 	{
 		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not load the interior for '%s' - no building with that id exists."), *BuildingId));
+	}
+	else if (Generator)
+	{
+		FocusCameraOnBuilding(Generator->FindBuildingById(BuildingId));
 	}
 	return Result;
 }

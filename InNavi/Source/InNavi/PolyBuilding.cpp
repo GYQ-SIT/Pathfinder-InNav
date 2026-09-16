@@ -175,20 +175,26 @@ void APolyBuilding::RebuildMesh()
 		}
 	}
 
-	TArray<FVector> Vertices;
-	TArray<int32> Triangles;
+	// Triangulate the footprint once (ear clipping, handles concave shapes) - reused for both the
+	// bottom cap (section 0) and the roof (section 1, kept separate so it can be hidden
+	// independently - see SetRoofVisible).
+	TArray<int32> CapTris;
+	TriangulatePolygon(Poly2D, CapTris);
+
+	// ---- Section 0: side walls + bottom cap - stays visible even with the roof hidden ----
+	TArray<FVector> WallVertices;
+	TArray<int32> WallTriangles;
 
 	// Bottom ring: 0..N-1, Top ring: N..2N-1
 	for (int32 i = 0; i < N; i++)
 	{
-		Vertices.Add(FVector(Poly2D[i].X, Poly2D[i].Y, 0.f));
+		WallVertices.Add(FVector(Poly2D[i].X, Poly2D[i].Y, 0.f));
 	}
 	for (int32 i = 0; i < N; i++)
 	{
-		Vertices.Add(FVector(Poly2D[i].X, Poly2D[i].Y, Height));
+		WallVertices.Add(FVector(Poly2D[i].X, Poly2D[i].Y, Height));
 	}
 
-	// Side walls
 	for (int32 i = 0; i < N; i++)
 	{
 		int32 next = (i + 1) % N;
@@ -197,39 +203,51 @@ void APolyBuilding::RebuildMesh()
 		int32 t0 = i + N;
 		int32 t1 = next + N;
 
-		Triangles.Add(b0); Triangles.Add(t0); Triangles.Add(b1);
-		Triangles.Add(b1); Triangles.Add(t0); Triangles.Add(t1);
-	}
-
-	// Triangulate the cap using ear clipping (handles concave shapes)
-	TArray<int32> CapTris;
-	TriangulatePolygon(Poly2D, CapTris);
-
-	// Top face (offset indices to top ring). CapTris is CCW (faces up).
-	for (int32 i = 0; i < CapTris.Num(); i += 3)
-	{
-		Triangles.Add(CapTris[i]     + N);
-		Triangles.Add(CapTris[i + 2] + N);
-		Triangles.Add(CapTris[i + 1] + N);
+		WallTriangles.Add(b0); WallTriangles.Add(t0); WallTriangles.Add(b1);
+		WallTriangles.Add(b1); WallTriangles.Add(t0); WallTriangles.Add(t1);
 	}
 
 	// Bottom face (bottom ring, reverse winding to face down)
 	for (int32 i = 0; i < CapTris.Num(); i += 3)
 	{
-		Triangles.Add(CapTris[i]);
-		Triangles.Add(CapTris[i + 1]);
-		Triangles.Add(CapTris[i + 2]);
+		WallTriangles.Add(CapTris[i]);
+		WallTriangles.Add(CapTris[i + 1]);
+		WallTriangles.Add(CapTris[i + 2]);
 	}
 
-	TArray<FVector> Normals;
-	TArray<FVector2D> UV0;
-	TArray<FProcMeshTangent> Tangents;
-
+	TArray<FVector> WallNormals;
+	TArray<FVector2D> WallUV0;
+	TArray<FProcMeshTangent> WallTangents;
 	UKismetProceduralMeshLibrary::CalculateTangentsForMesh(
-		Vertices, Triangles, UV0, Normals, Tangents);
+		WallVertices, WallTriangles, WallUV0, WallNormals, WallTangents);
 
-	TArray<FColor> VertexColors;
-	MeshComp->CreateMeshSection(0, Vertices, Triangles, Normals, UV0, VertexColors, Tangents, true);
+	TArray<FColor> WallVertexColors;
+	MeshComp->CreateMeshSection(0, WallVertices, WallTriangles, WallNormals, WallUV0, WallVertexColors, WallTangents, true);
+
+	// ---- Section 1: roof (top cap) only - its own section so SetRoofVisible can hide just this ----
+	TArray<FVector> RoofVertices;
+	TArray<int32> RoofTriangles;
+
+	for (int32 i = 0; i < N; i++)
+	{
+		RoofVertices.Add(FVector(Poly2D[i].X, Poly2D[i].Y, Height));
+	}
+	// CapTris is CCW (faces up); this buffer is its own 0-indexed vertex set (no +N offset needed).
+	for (int32 i = 0; i < CapTris.Num(); i += 3)
+	{
+		RoofTriangles.Add(CapTris[i]);
+		RoofTriangles.Add(CapTris[i + 2]);
+		RoofTriangles.Add(CapTris[i + 1]);
+	}
+
+	TArray<FVector> RoofNormals;
+	TArray<FVector2D> RoofUV0;
+	TArray<FProcMeshTangent> RoofTangents;
+	UKismetProceduralMeshLibrary::CalculateTangentsForMesh(
+		RoofVertices, RoofTriangles, RoofUV0, RoofNormals, RoofTangents);
+
+	TArray<FColor> RoofVertexColors;
+	MeshComp->CreateMeshSection(1, RoofVertices, RoofTriangles, RoofNormals, RoofUV0, RoofVertexColors, RoofTangents, true);
 
 	if (!DynMaterial)
 	{
@@ -241,6 +259,8 @@ void APolyBuilding::RebuildMesh()
 		}
 	}
 	MeshComp->SetMaterial(0, DynMaterial);
+	MeshComp->SetMaterial(1, DynMaterial);
+	MeshComp->SetMeshSectionVisible(1, bRoofVisible);
 
 	SetHighlighted(false);
 
@@ -261,5 +281,14 @@ void APolyBuilding::SetHighlighted(bool bHighlighted)
 	else
 	{
 		DynMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.6f, 0.6f, 0.6f));
+	}
+}
+
+void APolyBuilding::SetRoofVisible(bool bVisible)
+{
+	bRoofVisible = bVisible;
+	if (MeshComp)
+	{
+		MeshComp->SetMeshSectionVisible(1, bRoofVisible);
 	}
 }

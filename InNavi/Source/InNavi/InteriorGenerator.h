@@ -100,6 +100,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	AInteriorRoom* CreateRoomFromFootprint(const TArray<FVector2D>& Footprint, const FString& RoomId, const FString& RoomName, bool bIsPublic, bool bRequiresKey);
 
+	// Builds a standalone open wall/partition line on the active floor - same id/floor rules as
+	// CreateRoomFromFootprint, but the points aren't closed into a loop (at least 2 points, not 3)
+	// and there's no name/access/key to set. Shares the same room id namespace (PeekNextRoomId/
+	// UsedRoomIds) - a wall is just an open-loop room as far as ids are concerned.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	AInteriorRoom* CreateWallFromPoints(const TArray<FVector2D>& Points, const FString& WallId);
+
 	// The id CreateRoomFromFootprint would auto-generate right now if given an empty RoomId -
 	// exposed so UI can show it as a placeholder/default in the "Create Room" form.
 	UFUNCTION(BlueprintPure, Category = "Interior")
