@@ -52,7 +52,6 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindAction("SelectBuilding", IE_Pressed, this, &ANavPlayerController::OnClick);
 	InputComponent->BindKey(EKeys::B, IE_Pressed, this, &ANavPlayerController::ToggleBuildMode);
 	InputComponent->BindKey(EKeys::R, IE_Pressed, this, &ANavPlayerController::ToggleShapeTestMode);
-	InputComponent->BindKey(EKeys::I, IE_Pressed, this, &ANavPlayerController::LoadInteriorForSelectedBuilding);
 	InputComponent->BindKey(EKeys::LeftBracket, IE_Pressed, this, &ANavPlayerController::CycleInteriorFloorUp);
 	InputComponent->BindKey(EKeys::RightBracket, IE_Pressed, this, &ANavPlayerController::CycleInteriorFloorDown);
 	InputComponent->BindKey(EKeys::F, IE_Pressed, this, &ANavPlayerController::AddInteriorFloor);
@@ -96,6 +95,7 @@ void ANavPlayerController::SelectBuildingUnderCursor()
 
 			ClickedBuilding->SetHighlighted(true);
 			SelectedBuilding = ClickedBuilding;
+			OnBuildingSelected.Broadcast(ClickedBuilding->BuildingId);
 
 			UE_LOG(LogTemp, Warning, TEXT("Selected building: %s"), *ClickedBuilding->BuildingName);
 		}
@@ -797,19 +797,12 @@ const TArray<FInteriorNavNode>& ANavPlayerController::GetNavNodes() const
 	return InteriorGen ? InteriorGen->GetNavNodes() : EmptyNavNodes;
 }
 
-// ---- TEST-ONLY keyboard hooks - route through the pass-throughs above ----
-
-void ANavPlayerController::LoadInteriorForSelectedBuilding()
+FString ANavPlayerController::GetSelectedBuildingId() const
 {
-	if (!SelectedBuilding)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("LoadInteriorForSelectedBuilding: click a building first"));
-		OnActionFailed.Broadcast(TEXT("Click a building first."));
-		return;
-	}
-
-	LoadInteriorForBuilding(SelectedBuilding->BuildingId);
+	return SelectedBuilding ? SelectedBuilding->BuildingId : FString();
 }
+
+// ---- TEST-ONLY keyboard hooks - route through the pass-throughs above ----
 
 void ANavPlayerController::CycleInteriorFloorUp()
 {

@@ -19,6 +19,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDrawRoomModeChanged, bool, bNewDr
 // Broadcast after each footprint point is added or cleared, so UI can show a live point count.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFootprintPointCountChanged, int32, PointCount);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRoomPointCountChanged, int32, PointCount);
+// Broadcast whenever a building is selected (left-click on a building outside of any draw mode -
+// including re-clicking the one already selected), with its id, so UI can show/hide an "Enter
+// Interior" button without polling every tick. Not broadcast for a deselect (clicking empty ground
+// currently leaves the selection as-is - see SelectBuildingUnderCursor).
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildingSelected, FString, BuildingId);
 // Broadcast whenever a user-triggered action fails (a button press that did nothing), with a
 // short human-readable reason. UE_LOG still gets the detailed message for developers; this is
 // the same idea aimed at UI - bind it once to show a toast/message, since a packaged game has no
@@ -186,6 +191,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	const TArray<FInteriorNavNode>& GetNavNodes() const;
 
+	// The currently-selected building's id (left-click a building to select it), or empty if
+	// nothing is selected. Feed this straight into LoadInteriorForBuilding for an "Enter Interior"
+	// button.
+	UFUNCTION(BlueprintPure, Category = "Building")
+	FString GetSelectedBuildingId() const;
+
+	UPROPERTY(BlueprintAssignable, Category = "Building")
+	FOnBuildingSelected OnBuildingSelected;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
@@ -216,11 +230,6 @@ private:
 	// Enter/Esc are shared between both modes; dispatch to whichever is active.
 	void OnConfirmPressed();
 	void OnCancelPressed();
-
-	// TEST-ONLY (Phase 0.2 verification): loads the currently selected building's interior.
-	// Delete once there's a real "enter interior edit mode" UI flow calling
-	// InteriorGen->LoadInteriorForBuilding(...) directly.
-	void LoadInteriorForSelectedBuilding();
 
 	// TEST-ONLY (Phase 2.1 verification): cycles the loaded building's active floor up/down via
 	// InteriorGen->SetActiveFloor(...). Delete once there's a real floor-switcher UI calling
