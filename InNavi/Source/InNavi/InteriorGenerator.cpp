@@ -125,6 +125,14 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 				}
 
 				const FString RoomId = RoomObject->GetStringField(TEXT("id"));
+				const FString RoomName = RoomObject->GetStringField(TEXT("name"));
+
+				FString AccessString = TEXT("public");
+				RoomObject->TryGetStringField(TEXT("access"), AccessString);
+				const bool bIsPublic = AccessString != TEXT("private");
+
+				bool bRequiresKey = false;
+				RoomObject->TryGetBoolField(TEXT("requireKey"), bRequiresKey);
 
 				const TArray<TSharedPtr<FJsonValue>>* FootprintArray;
 				if (!RoomObject->TryGetArrayField(TEXT("footprint"), FootprintArray))
@@ -182,7 +190,10 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 				if (Room)
 				{
 					Room->RoomId = RoomId;
+					Room->RoomName = RoomName;
 					Room->FloorLevel = Level;
+					Room->bIsPublic = bIsPublic;
+					Room->bRequiresKey = bRequiresKey;
 					Room->BuildWalls(Footprint, Scale, BuildingOffset, FloorBaseZ, WallHeight, WallThickness, Openings);
 
 					RoomsByFloor.FindOrAdd(Level).Rooms.Add(Room);

@@ -30,7 +30,19 @@ public:
 	FString RoomId;
 
 	UPROPERTY()
+	FString RoomName;
+
+	UPROPERTY()
 	int32 FloorLevel = 1;
+
+	// Access control, set by the "Create Room" step in the editor (public/private, key required).
+	// Not enforced by anything yet - this is just where the authored data lives; whichever system
+	// gates entry (navigation, gameplay) reads these off the room it cares about.
+	UPROPERTY()
+	bool bIsPublic = true;
+
+	UPROPERTY()
+	bool bRequiresKey = false;
 
 private:
 	UPROPERTY()

@@ -9,6 +9,8 @@
         {
           "id": "E1-01-01",
           "name": "Room 101",
+          "access": "private",
+          "requireKey": true,
           "footprint": [[60,240],[160,240],[160,380],[60,380]],
           "openings": [
             { "id": "O1", "type": "door",   "edgeIndex": 0, "offset": 30, "width": 9, "connectsTo": "corridor" },
