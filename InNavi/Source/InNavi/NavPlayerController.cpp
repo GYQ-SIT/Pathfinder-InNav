@@ -476,21 +476,14 @@ APolyBuilding* ANavPlayerController::CreateRegularPolygonBuilding(const FString&
 	return Result;
 }
 
-int32 ANavPlayerController::ImportBuildingDataFromFile()
+FString ANavPlayerController::BrowseForBuildingDataFile()
 {
-	if (!Generator)
-	{
-		UE_LOG(LogTemp, Error, TEXT("ImportBuildingDataFromFile: no BuildingGenerator found in the level"));
-		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."));
-		return 0;
-	}
-
 	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
 	if (!DesktopPlatform)
 	{
-		UE_LOG(LogTemp, Error, TEXT("ImportBuildingDataFromFile: desktop platform not available"));
+		UE_LOG(LogTemp, Error, TEXT("BrowseForBuildingDataFile: desktop platform not available"));
 		OnActionFailed.Broadcast(TEXT("Could not open the file picker on this system."));
-		return 0;
+		return FString();
 	}
 
 	const void* ParentWindowHandle = nullptr;
@@ -516,11 +509,29 @@ int32 ANavPlayerController::ImportBuildingDataFromFile()
 	if (!bPicked || OutFiles.Num() == 0)
 	{
 		// User cancelled the dialog - not a failure, nothing to report.
+		return FString();
+	}
+
+	return OutFiles[0];
+}
+
+int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
+{
+	if (!Generator)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LoadBuildingDataFromPath: no BuildingGenerator found in the level"));
+		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."));
 		return 0;
 	}
 
-	const int32 Count = Generator->LoadBuildingsFromFile(OutFiles[0]);
-	UE_LOG(LogTemp, Warning, TEXT("ImportBuildingDataFromFile: loaded %d buildings from %s"), Count, *OutFiles[0]);
+	if (FilePath.IsEmpty())
+	{
+		OnActionFailed.Broadcast(TEXT("No file selected - click Browse first."));
+		return 0;
+	}
+
+	const int32 Count = Generator->LoadBuildingsFromFile(FilePath);
+	UE_LOG(LogTemp, Warning, TEXT("LoadBuildingDataFromPath: loaded %d buildings from %s"), Count, *FilePath);
 	if (Count == 0)
 	{
 		OnActionFailed.Broadcast(TEXT("No buildings were loaded from that file - check that it matches the expected JSON format."));

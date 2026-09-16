@@ -61,11 +61,17 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Building")
 	FOnFootprintPointCountChanged OnFootprintPointCountChanged;
 
-	// Opens the OS "open file" dialog filtered to .json, and if the user picks one, loads it the
-	// same way the startup buildings.json is loaded. Returns how many buildings were spawned (0 if
-	// the user cancelled the dialog or the file failed to load).
+	// Opens the OS "open file" dialog filtered to .json and returns the path the user picked (empty
+	// string if they cancelled). Doesn't load anything - pairs with LoadBuildingDataFromPath so UI
+	// can show the picked path (e.g. in a text box) before the user commits to loading it.
 	UFUNCTION(BlueprintCallable, Category = "Building")
-	int32 ImportBuildingDataFromFile();
+	FString BrowseForBuildingDataFile();
+
+	// Loads a buildings.json-format file from an explicit path (typically one
+	// BrowseForBuildingDataFile just returned) the same way the startup buildings.json is loaded.
+	// Returns how many buildings were spawned.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	int32 LoadBuildingDataFromPath(const FString& FilePath);
 
 	// Plan B: the permanent entry points Padre's parameter form should call directly (thin
 	// pass-throughs to BuildingGenerator, so UI only ever needs a reference to the PlayerController).
