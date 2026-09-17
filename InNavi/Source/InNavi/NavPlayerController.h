@@ -263,6 +263,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool SetSelectedDoorConnectsTo(const FString& NewConnectsTo);
 
+	// The valid ConnectsTo targets for the currently-selected door, for a door properties panel to
+	// populate a dropdown with: "corridor" (the building's shared circulation space, for a door
+	// that doesn't lead into another specific room) followed by every other closed room's id on the
+	// door's own floor - excluding the door's own room (InputId), since a door can't connect to the
+	// room it's already in, and excluding open walls, since only closed rooms are valid targets.
+	// Empty if no door is selected.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	TArray<FString> GetConnectableTargetIds() const;
+
 	// Removes a single room/wall by id (see AInteriorGenerator::DeleteRoom) - general-purpose,
 	// explicit-id version. See also DeleteSelection. Also clears the door selection if the deleted
 	// room happened to own the currently-selected door (it no longer exists either way).

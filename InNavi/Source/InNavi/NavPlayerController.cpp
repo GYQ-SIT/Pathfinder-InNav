@@ -770,6 +770,27 @@ bool ANavPlayerController::SetSelectedDoorConnectsTo(const FString& NewConnectsT
 	return bSuccess;
 }
 
+TArray<FString> ANavPlayerController::GetConnectableTargetIds() const
+{
+	TArray<FString> Result;
+	if (SelectedDoorId.IsEmpty() || !InteriorGen)
+	{
+		return Result;
+	}
+
+	Result.Add(TEXT("corridor"));
+
+	for (const AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
+	{
+		if (Room && Room->IsClosedLoop() && Room->RoomId != SelectedDoorRoomId)
+		{
+			Result.Add(Room->RoomId);
+		}
+	}
+
+	return Result;
+}
+
 bool ANavPlayerController::DeleteRoom(const FString& RoomId)
 {
 	if (!InteriorGen)

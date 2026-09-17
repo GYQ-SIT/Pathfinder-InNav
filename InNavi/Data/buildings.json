@@ -93,6 +93,15 @@
 										"edgeIndex": 1,
 										"offset": 40,
 										"width": 10
+									},
+									{
+										"id": "E1-01-01-D04",
+										"type": "door",
+										"edgeIndex": 1,
+										"offset": 703.27056884765625,
+										"width": 90,
+										"inputId": "E1-01-01",
+										"connectsTo": "corridor"
 									}
 								]
 							},
@@ -179,6 +188,38 @@
 									]
 								],
 								"openings": []
+							},
+							{
+								"id": "E1-01-06",
+								"name": "E1-01-06",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										178.9023654449438,
+										363.02275365867234
+									],
+									[
+										199.07731598893452,
+										373.48382799501928
+									],
+									[
+										194.96759913185443,
+										347.70474121850356
+									]
+								],
+								"openings": [
+									{
+										"id": "E1-01-06-D01",
+										"type": "door",
+										"edgeIndex": 1,
+										"offset": 50.1785888671875,
+										"width": 90,
+										"inputId": "E1-01-06",
+										"connectsTo": "E1-01-01"
+									}
+								]
 							}
 						],
 						"navNodes": [
