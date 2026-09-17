@@ -82,6 +82,130 @@ static bool PolygonSelfIntersects(const TArray<FVector2D>& Poly)
 	return false;
 }
 
+// ---- Helper: even-odd ray-casting point-in-polygon test (mirrors NavPlayerController.cpp's copy -
+// each file that needs this keeps its own small static copy rather than sharing one across
+// translation units, same as SegmentsIntersect/PolygonSelfIntersects above). ----
+static bool IsPointInPolygon(const FVector2D& Point, const TArray<FVector2D>& Poly)
+{
+	bool bInside = false;
+	const int32 N = Poly.Num();
+	for (int32 i = 0, j = N - 1; i < N; j = i++)
+	{
+		const FVector2D& Pi = Poly[i];
+		const FVector2D& Pj = Poly[j];
+		const bool bCrosses = ((Pi.Y > Point.Y) != (Pj.Y > Point.Y)) &&
+			(Point.X < (Pj.X - Pi.X) * (Point.Y - Pi.Y) / (Pj.Y - Pi.Y) + Pi.X);
+		if (bCrosses)
+		{
+			bInside = !bInside;
+		}
+	}
+	return bInside;
+}
+
+// ---- Helper: is every point of Footprint inside Poly? (a room/wall staying within the building's
+// own outline - approximate for a concave building, since it only checks vertices, but consistent
+// with the rest of this project's schematic fidelity) ----
+static bool IsFootprintFullyInsidePolygon(const TArray<FVector2D>& Footprint, const TArray<FVector2D>& Poly)
+{
+	for (const FVector2D& Point : Footprint)
+	{
+		if (!IsPointInPolygon(Point, Poly))
+		{
+			return false;
+		}
+	}
+	return true;
+}
+
+// ---- Helper: do two rooms/walls' footprints overlap? Checks edge-edge crossings (catches partial
+// overlaps, works for open walls too) plus containment (one shape's vertex landing fully inside the
+// other's closed loop - edge crossings alone miss this when one shape sits entirely within another).
+// bBClosed only matters for the edge-count/wrap-around and the containment check - an open wall has
+// no interior to be "inside". ----
+// ---- Helper: shortest distance from Point to segment AB (mirrors InteriorFloorPlanWidget.cpp's copy) ----
+static float DistancePointToSegment2D(const FVector2D& Point, const FVector2D& A, const FVector2D& B)
+{
+	const FVector2D AB = B - A;
+	const float LengthSq = AB.SizeSquared();
+	if (LengthSq < KINDA_SMALL_NUMBER)
+	{
+		return FVector2D::Distance(Point, A);
+	}
+
+	const float T = FMath::Clamp(FVector2D::DotProduct(Point - A, AB) / LengthSq, 0.f, 1.f);
+	return FVector2D::Distance(Point, A + AB * T);
+}
+
+static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClosed, const TArray<FVector2D>& FootprintB, bool bBClosed)
+{
+	const int32 NumA = FootprintA.Num();
+	const int32 NumB = FootprintB.Num();
+	if (NumA < 2 || NumB < 2)
+	{
+		return false;
+	}
+
+	const int32 NumEdgesA = bAClosed ? NumA : NumA - 1;
+	const int32 NumEdgesB = bBClosed ? NumB : NumB - 1;
+
+	// A drag can land a room's corner just barely grazing another edge rather than cleanly crossing
+	// it (especially after a fast mouse move, which jumps several footprint units between frames) -
+	// the strict crossing test below can miss that, so anything closer than this also counts as
+	// overlapping. Small on purpose: two rooms meant to share a wall (once snapping exists) should
+	// still be allowed to sit edge-to-edge without tripping this.
+	constexpr float TouchToleranceFootprintUnits = 2.f;
+
+	for (int32 i = 0; i < NumEdgesA; i++)
+	{
+		const FVector2D& A0 = FootprintA[i];
+		const FVector2D& A1 = FootprintA[(i + 1) % NumA];
+		for (int32 j = 0; j < NumEdgesB; j++)
+		{
+			const FVector2D& B0 = FootprintB[j];
+			const FVector2D& B1 = FootprintB[(j + 1) % NumB];
+			if (SegmentsIntersect(A0, A1, B0, B1))
+			{
+				return true;
+			}
+
+			if (DistancePointToSegment2D(A0, B0, B1) < TouchToleranceFootprintUnits ||
+				DistancePointToSegment2D(A1, B0, B1) < TouchToleranceFootprintUnits ||
+				DistancePointToSegment2D(B0, A0, A1) < TouchToleranceFootprintUnits ||
+				DistancePointToSegment2D(B1, A0, A1) < TouchToleranceFootprintUnits)
+			{
+				return true;
+			}
+		}
+	}
+
+	// Checks every point, not just one representative point - a bend in an open wall (a vertex
+	// that isn't its first point) can land inside a small closed room without either wall segment
+	// either side of that vertex actually crossing the room's boundary.
+	if (bAClosed)
+	{
+		for (const FVector2D& Point : FootprintB)
+		{
+			if (IsPointInPolygon(Point, FootprintA))
+			{
+				return true;
+			}
+		}
+	}
+	if (bBClosed)
+	{
+		for (const FVector2D& Point : FootprintA)
+		{
+			if (IsPointInPolygon(Point, FootprintB))
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
 int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 {
 	if (!Generator)
@@ -531,6 +655,28 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2
 		return nullptr;
 	}
 
+	// Whole-footprint check, not just a center point (a prefab shape placed near the building's own
+	// wall can have its center inside while a corner still pokes outside it).
+	if (!IsFootprintFullyInsidePolygon(Footprint, Building->GetFootprint()))
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: footprint extends outside the building's outline"));
+		return nullptr;
+	}
+
+	// Unlike a drag (see CommitRoomMove), there's no "already had a valid spot to revert to" for a
+	// brand new room, so overlap is rejected outright here rather than allowed-then-corrected.
+	if (const FInteriorRoomList* ExistingRooms = RoomsByFloor.Find(ActiveFloor))
+	{
+		for (const AInteriorRoom* Other : ExistingRooms->Rooms)
+		{
+			if (Other && DoFootprintsOverlap(Footprint, true, Other->GetFootprint(), Other->IsClosedLoop()))
+			{
+				UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: footprint overlaps existing room/wall '%s'"), *Other->RoomId);
+				return nullptr;
+			}
+		}
+	}
+
 	const FString ResolvedId = RoomId.IsEmpty() ? PeekNextRoomId() : RoomId;
 	if (UsedRoomIds.Contains(ResolvedId))
 	{
@@ -693,6 +839,13 @@ bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float
 				NewFootprint.Add(Center + FVector2D((Point.X - Center.X) * ScaleX, (Point.Y - Center.Y) * ScaleY));
 			}
 
+			APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+			if (Building && !IsFootprintFullyInsidePolygon(NewFootprint, Building->GetFootprint()))
+			{
+				UE_LOG(LogTemp, Error, TEXT("ResizeRoom: '%s' at %.1f x %.1f would extend outside the building's outline"), *RoomId, NewWidth, NewDepth);
+				return false;
+			}
+
 			Room->ResizeFootprint(NewFootprint);
 			UE_LOG(LogTemp, Warning, TEXT("Resized %s to %.1f x %.1f"), *RoomId, NewWidth, NewDepth);
 			return true;
@@ -700,6 +853,73 @@ bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float
 	}
 
 	UE_LOG(LogTemp, Error, TEXT("ResizeRoom: '%s' not found"), *RoomId);
+	return false;
+}
+
+bool AInteriorGenerator::MoveRoom(const FString& RoomId, const TArray<FVector2D>& NewFootprint)
+{
+	for (auto& Pair : RoomsByFloor)
+	{
+		for (AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (!Room || Room->RoomId != RoomId)
+			{
+				continue;
+			}
+
+			// Enforced every call (i.e. every frame of a drag, not just when it's released) - the
+			// room should never even momentarily sit outside the building, unlike overlapping another
+			// room/wall, which is only rejected once the drag ends (see CommitRoomMove). A rejected
+			// move is simply not applied, so the room stays at its last valid position instead of
+			// following the cursor past the wall - no other feedback needed for a live drag.
+			APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+			if (Building && !IsFootprintFullyInsidePolygon(NewFootprint, Building->GetFootprint()))
+			{
+				return false;
+			}
+
+			Room->ResizeFootprint(NewFootprint);
+			return true;
+		}
+	}
+
+	return false;
+}
+
+bool AInteriorGenerator::CommitRoomMove(const FString& RoomId, const TArray<FVector2D>& FallbackFootprint)
+{
+	for (auto& Pair : RoomsByFloor)
+	{
+		TArray<AInteriorRoom*>& Rooms = Pair.Value.Rooms;
+		for (AInteriorRoom* Room : Rooms)
+		{
+			if (!Room || Room->RoomId != RoomId)
+			{
+				continue;
+			}
+
+			// Overlap is allowed while a room is being dragged around (see MoveRoom) - only checked
+			// once, here, when the drag ends. If it landed on top of another room/wall, revert to
+			// where it was before the drag started rather than leaving it overlapping.
+			for (const AInteriorRoom* Other : Rooms)
+			{
+				if (!Other || Other == Room)
+				{
+					continue;
+				}
+
+				if (DoFootprintsOverlap(Room->GetFootprint(), Room->IsClosedLoop(), Other->GetFootprint(), Other->IsClosedLoop()))
+				{
+					Room->ResizeFootprint(FallbackFootprint);
+					UE_LOG(LogTemp, Warning, TEXT("CommitRoomMove: '%s' would overlap '%s' - reverted to its position before the drag"), *RoomId, *Other->RoomId);
+					return false;
+				}
+			}
+
+			return true;
+		}
+	}
+
 	return false;
 }
 

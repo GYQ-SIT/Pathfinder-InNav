@@ -868,6 +868,37 @@ bool ANavPlayerController::ResizeRoom(const FString& RoomId, float NewWidth, flo
 	return bSuccess;
 }
 
+bool ANavPlayerController::MoveRoomTo(const FString& RoomId, const TArray<FVector2D>& NewFootprint)
+{
+	if (!InteriorGen)
+	{
+		return false;
+	}
+
+	const bool bSuccess = InteriorGen->MoveRoom(RoomId, NewFootprint);
+	if (bSuccess)
+	{
+		bHasUnsavedChanges = true;
+	}
+	return bSuccess;
+}
+
+bool ANavPlayerController::CommitRoomMove(const FString& RoomId, const TArray<FVector2D>& FallbackFootprint)
+{
+	if (!InteriorGen)
+	{
+		return false;
+	}
+
+	const bool bSuccess = InteriorGen->CommitRoomMove(RoomId, FallbackFootprint);
+	if (!bSuccess)
+	{
+		OnActionFailed.Broadcast(TEXT("Can't place a room on top of another room/wall - moved it back."));
+	}
+	bHasUnsavedChanges = true;
+	return bSuccess;
+}
+
 AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter)
 {
 	if (ActivePrefabShape == 0)
@@ -978,7 +1009,7 @@ AInteriorRoom* ANavPlayerController::FinishRoom(const FString& RoomId, const FSt
 		// Spawn was rejected (e.g. self-intersecting outline, or a typed-in id that's already
 		// taken) - keep the drawn points and preview so the user can see what's there; Esc cancels.
 		UE_LOG(LogTemp, Warning, TEXT("Could not finish this room - see error above. Press Esc to discard and redraw."));
-		OnActionFailed.Broadcast(TEXT("Could not create the room - check that the id isn't already used and the outline doesn't cross itself."));
+		OnActionFailed.Broadcast(TEXT("Could not create the room - check that it stays inside the building, doesn't overlap another room/wall, doesn't cross itself, and that the id isn't already used."));
 		return nullptr;
 	}
 

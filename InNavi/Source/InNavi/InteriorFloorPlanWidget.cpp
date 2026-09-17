@@ -65,7 +65,26 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 			}
 
 			AInteriorRoom* Room = FindRoomNearLocalPosition(LocalPosition, InGeometry.GetLocalSize());
-			PlayerController->SelectRoom(Room ? Room->RoomId : FString());
+			if (!Room)
+			{
+				Room = FindRoomContainingLocalPosition(LocalPosition, InGeometry.GetLocalSize());
+			}
+
+			if (Room)
+			{
+				PlayerController->SelectRoom(Room->RoomId);
+
+				// Same idea as the door drag above - a plain click just selects; dragging slides the
+				// whole room via MoveRoomTo, computed fresh each move from this snapshot (see
+				// NativeOnMouseMove) rather than accumulated deltas, so it doesn't drift.
+				bIsDraggingRoom = true;
+				DraggingRoomId = Room->RoomId;
+				DragStartRoomFootprint = Room->GetFootprint();
+				DragStartFootprintPosition = LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize());
+				return FReply::Handled().CaptureMouse(TakeWidget());
+			}
+
+			PlayerController->SelectRoom(FString());
 			return FReply::Handled();
 		}
 
@@ -109,6 +128,18 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 		return FReply::Handled().ReleaseMouseCapture();
 	}
 
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsDraggingRoom)
+	{
+		bIsDraggingRoom = false;
+		if (PlayerController)
+		{
+			// Overlap with another room/wall was allowed while dragging (see NativeOnMouseMove) -
+			// this is what actually enforces it, reverting to DragStartRoomFootprint if needed.
+			PlayerController->CommitRoomMove(DraggingRoomId, DragStartRoomFootprint);
+		}
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+
 	return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
 }
 
@@ -129,6 +160,33 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 		if (PlayerController && ComputeDoorDragOffset(DraggingDoorRoomId, DraggingDoorEdgeIndex, CurrentLocalPosition, InGeometry.GetLocalSize(), NewOffsetWorldUnits))
 		{
 			PlayerController->MoveDoor(DraggingDoorRoomId, DraggingDoorId, NewOffsetWorldUnits);
+		}
+		return FReply::Handled();
+	}
+
+	if (bIsDraggingRoom)
+	{
+		// Same defensive check as the door drag above.
+		if (!InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+		{
+			bIsDraggingRoom = false;
+			return FReply::Handled().ReleaseMouseCapture();
+		}
+
+		const FVector2D CurrentLocalPosition = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+		const FVector2D CurrentFootprintPosition = LocalPositionToFootprintPoint(CurrentLocalPosition, InGeometry.GetLocalSize());
+		const FVector2D Delta = CurrentFootprintPosition - DragStartFootprintPosition;
+
+		TArray<FVector2D> NewFootprint;
+		NewFootprint.Reserve(DragStartRoomFootprint.Num());
+		for (const FVector2D& Point : DragStartRoomFootprint)
+		{
+			NewFootprint.Add(Point + Delta);
+		}
+
+		if (PlayerController)
+		{
+			PlayerController->MoveRoomTo(DraggingRoomId, NewFootprint);
 		}
 		return FReply::Handled();
 	}
@@ -259,6 +317,77 @@ AInteriorRoom* UInteriorFloorPlanWidget::FindRoomNearLocalPosition(FVector2D Loc
 				}
 				return Room;
 			}
+		}
+	}
+
+	return nullptr;
+}
+
+// ---- Helper: even-odd ray-casting point-in-polygon test, in whatever 2D space Point/Poly are both in ----
+static bool IsPointInPolygon2D(const FVector2D& Point, const TArray<FVector2D>& Poly)
+{
+	bool bInside = false;
+	const int32 N = Poly.Num();
+	for (int32 i = 0, j = N - 1; i < N; j = i++)
+	{
+		const FVector2D& Pi = Poly[i];
+		const FVector2D& Pj = Poly[j];
+		const bool bCrosses = ((Pi.Y > Point.Y) != (Pj.Y > Point.Y)) &&
+			(Point.X < (Pj.X - Pi.X) * (Point.Y - Pi.Y) / (Pj.Y - Pi.Y) + Pi.X);
+		if (bCrosses)
+		{
+			bInside = !bInside;
+		}
+	}
+	return bInside;
+}
+
+AInteriorRoom* UInteriorFloorPlanWidget::FindRoomContainingLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize) const
+{
+	if (!InteriorGen || !Generator)
+	{
+		return nullptr;
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building)
+	{
+		return nullptr;
+	}
+
+	FVector2D Origin;
+	float PixelsPerUnit;
+	ComputeViewTransform(WidgetSize, Origin, PixelsPerUnit);
+
+	const float Scale = Generator->GetScale();
+	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
+	{
+		return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+	};
+
+	for (AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
+	{
+		if (!Room || !Room->IsClosedLoop())
+		{
+			continue;
+		}
+
+		const TArray<FVector2D>& Footprint = Room->GetFootprint();
+		if (Footprint.Num() < 3)
+		{
+			continue;
+		}
+
+		TArray<FVector2D> LocalPoints;
+		LocalPoints.Reserve(Footprint.Num());
+		for (const FVector2D& Point : Footprint)
+		{
+			LocalPoints.Add(WorldToLocal((Point + Building->BuildingOffset) * Scale));
+		}
+
+		if (IsPointInPolygon2D(LocalPosition, LocalPoints))
+		{
+			return Room;
 		}
 	}
 

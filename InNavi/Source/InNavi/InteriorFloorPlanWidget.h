@@ -66,6 +66,14 @@ private:
 	// there fits without poking past either end - see AddDoorToWall.
 	AInteriorRoom* FindRoomNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, int32* OutEdgeIndex = nullptr, float* OutOffsetWorldUnits = nullptr) const;
 
+	// Select mode fallback: finds whichever room/wall on the active floor's footprint CONTAINS
+	// LocalPosition (point-in-polygon, not just near an edge like FindRoomNearLocalPosition), so
+	// clicking anywhere inside a room's body - not just precisely on its outline - selects it and
+	// can start a drag (see NativeOnMouseButtonDown). Only tried when FindRoomNearLocalPosition
+	// doesn't already find an edge close enough. Never matches an open wall (no interior to speak
+	// of - see AInteriorRoom::IsClosedLoop).
+	AInteriorRoom* FindRoomContainingLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize) const;
+
 	// Select mode: finds whichever door marker (see NativePaint) on the active floor is within a
 	// few pixels of LocalPosition, so it can be selected independently of the room/wall it belongs
 	// to. Returns false (leaving OutRoomId/OutDoorId/OutEdgeIndex untouched) if none is close enough.
@@ -106,6 +114,16 @@ private:
 	FString DraggingDoorRoomId;
 	FString DraggingDoorId;
 	int32 DraggingDoorEdgeIndex = INDEX_NONE;
+
+	// Set when a select-mode left-click lands on a room/wall's edge or interior (and no door won
+	// out first) - slides the whole room via MoveRoomTo. The footprint/click position at the moment
+	// the drag started are snapshotted so each move recomputes an absolute translated footprint
+	// (current click position minus DragStartFootprintPosition, added to every point in
+	// DragStartRoomFootprint) rather than accumulating per-frame deltas, so dragging doesn't drift.
+	bool bIsDraggingRoom = false;
+	FString DraggingRoomId;
+	TArray<FVector2D> DragStartRoomFootprint;
+	FVector2D DragStartFootprintPosition = FVector2D::ZeroVector;
 
 	// Multiplies the auto-fit pixels-per-unit from ComputeViewTransform - 1 = the auto-fit size,
 	// >1 = zoomed in, <1 = zoomed out. Adjusted by the mouse wheel.

@@ -286,6 +286,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth);
 
+	// Moves a room/wall to a new footprint (see AInteriorGenerator::MoveRoom) - what the 2D floor
+	// plan canvas's select-mode drag handler calls while dragging a selected room, recomputing the
+	// whole translated footprint itself each move. No OnActionFailed broadcast on failure (called
+	// continuously during a drag - a stray failure mid-drag shouldn't spam the UI, same reasoning as
+	// MoveDoor).
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool MoveRoomTo(const FString& RoomId, const TArray<FVector2D>& NewFootprint);
+
+	// Call once when a room drag ends (see AInteriorGenerator::CommitRoomMove) - reverts the room to
+	// FallbackFootprint if it ended up overlapping another room/wall, otherwise leaves it where it
+	// was dropped. Broadcasts OnActionFailed on a revert (unlike MoveRoomTo, this only fires once
+	// per drag, so it won't spam the UI).
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool CommitRoomMove(const FString& RoomId, const TArray<FVector2D>& FallbackFootprint);
+
 	// Add-door mode: click a wall edge on the 2D floor plan canvas to add a fixed-size door there
 	// (centered on the click, clamped so it doesn't poke past either end of the edge) - InputId is
 	// set automatically to the room the door belongs to; ConnectsTo is left blank, to be filled in

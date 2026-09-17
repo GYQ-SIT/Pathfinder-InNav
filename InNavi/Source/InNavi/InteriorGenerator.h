@@ -128,6 +128,26 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth);
 
+	// Replaces a room/wall's footprint wholesale with NewFootprint (same pre-scale units as
+	// everything else, same point count/winding expected - this is a translate, not a reshape) -
+	// what dragging a selected room on the 2D floor plan canvas calls, recomputing the whole
+	// footprint fresh each move from a drag-start snapshot (see UInteriorFloorPlanWidget) rather
+	// than accumulating small per-frame deltas, so dragging doesn't drift. Rejects (returns false,
+	// leaves the room where it was) a footprint that would extend outside the building's own outline
+	// - checked on every call, so a drag simply can't push a room past the building's wall, even
+	// momentarily. Does NOT check for overlap with other rooms/walls - that's allowed while
+	// dragging, and only enforced once the drag ends (see CommitRoomMove). Returns false if no room
+	// with that id exists.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool MoveRoom(const FString& RoomId, const TArray<FVector2D>& NewFootprint);
+
+	// Call once when a room drag ends: if the room's current footprint now overlaps another
+	// room/wall on the same floor (allowed to happen transiently while dragging - see MoveRoom),
+	// reverts it to FallbackFootprint (the drag-start snapshot) and returns false; otherwise leaves
+	// it where it was dropped and returns true. Returns false if no room with that id exists.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool CommitRoomMove(const FString& RoomId, const TArray<FVector2D>& FallbackFootprint);
+
 	// Adds a fixed-size door to RoomId's EdgeIndex, centered at OffsetWorldUnits along that edge
 	// (world units, matching FInteriorOpening::Offset - the "add door" tool on the 2D floor plan
 	// canvas already clamps this so the door fits within the edge). InputId is set automatically to
