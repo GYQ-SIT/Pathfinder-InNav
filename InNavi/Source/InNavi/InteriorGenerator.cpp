@@ -714,6 +714,14 @@ FString AInteriorGenerator::AddDoorToRoom(const FString& RoomId, int32 EdgeIndex
 				continue;
 			}
 
+			// A door only makes sense on a closed room - it has no enclosed space (and so no
+			// defined size) to lead into otherwise. Refuse on an open wall.
+			if (!Room->IsClosedLoop())
+			{
+				UE_LOG(LogTemp, Error, TEXT("AddDoorToRoom: '%s' is an open wall, not a closed room - doors can only go on closed rooms"), *RoomId);
+				return FString();
+			}
+
 			constexpr float NewDoorWidth = 90.f;
 
 			// Refuse to stack a door on top of one that's already on this edge (e.g. a stray
@@ -884,6 +892,22 @@ bool AInteriorGenerator::SetRoomName(const FString& RoomId, const FString& NewNa
 
 	UE_LOG(LogTemp, Error, TEXT("SetRoomName: '%s' not found"), *RoomId);
 	return false;
+}
+
+FString AInteriorGenerator::GetRoomName(const FString& RoomId) const
+{
+	for (const auto& Pair : RoomsByFloor)
+	{
+		for (const AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (Room && Room->RoomId == RoomId)
+			{
+				return Room->RoomName;
+			}
+		}
+	}
+
+	return FString();
 }
 
 TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const

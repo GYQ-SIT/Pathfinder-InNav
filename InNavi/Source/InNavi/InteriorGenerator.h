@@ -166,6 +166,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool SetRoomName(const FString& RoomId, const FString& NewName);
 
+	// Reads a room's current human-readable name - for a room properties panel to populate its
+	// field. A plain getter with no side effects, so this is BlueprintPure (no exec pins needed).
+	// Returns an empty string if no room with that id exists.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	FString GetRoomName(const FString& RoomId) const;
+
 	// Nav nodes (Path Node/Elevator/Stairs) for the currently loaded building, all floors. Not yet
 	// turned into actors - representation is pending alignment with the navigation
 	// (NavMesh/NavLinks) team on what they actually need to consume.

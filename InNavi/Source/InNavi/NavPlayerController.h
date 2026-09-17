@@ -228,6 +228,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool SetSelectedRoomName(const FString& NewName);
 
+	// Reads the currently-selected room's current name - what a room properties panel calls to
+	// populate its field when a room gets selected. Empty if nothing is selected.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	FString GetSelectedRoomName() const;
+
 	// Sets the currently-selected door, independently of the room it belongs to - the 2D floor plan
 	// canvas's select-mode click handler calls this when the click lands on a door marker rather
 	// than a plain wall edge. Clears whatever room was selected (see SelectRoom) - only one of the

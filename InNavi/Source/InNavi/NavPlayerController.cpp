@@ -717,6 +717,16 @@ bool ANavPlayerController::SetSelectedRoomName(const FString& NewName)
 	return bSuccess;
 }
 
+FString ANavPlayerController::GetSelectedRoomName() const
+{
+	if (SelectedRoomId.IsEmpty() || !InteriorGen)
+	{
+		return FString();
+	}
+
+	return InteriorGen->GetRoomName(SelectedRoomId);
+}
+
 bool ANavPlayerController::GetSelectedDoorOpening(FInteriorOpening& OutOpening)
 {
 	if (SelectedDoorId.IsEmpty() || !InteriorGen)
