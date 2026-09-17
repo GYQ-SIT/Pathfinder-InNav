@@ -170,6 +170,18 @@ void AInteriorRoom::MoveOpening(const FString& OpeningId, float NewOffsetWorldUn
 	}
 }
 
+void AInteriorRoom::SetOpeningConnectsTo(const FString& OpeningId, const FString& NewConnectsTo)
+{
+	for (FInteriorOpening& Opening : CachedOpenings)
+	{
+		if (Opening.Id == OpeningId)
+		{
+			Opening.ConnectsTo = NewConnectsTo;
+			return;
+		}
+	}
+}
+
 void AInteriorRoom::RebuildMesh()
 {
 	const int32 N = CachedFootprint.Num();

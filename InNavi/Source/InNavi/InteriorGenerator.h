@@ -130,9 +130,10 @@ public:
 
 	// Adds a fixed-size door to RoomId's EdgeIndex, centered at OffsetWorldUnits along that edge
 	// (world units, matching FInteriorOpening::Offset - the "add door" tool on the 2D floor plan
-	// canvas already clamps this so the door fits within the edge). InputId/ConnectsTo are left
-	// blank - filled in later via a proper UI form, not here. Returns the new door's id, or an empty
-	// string if no room with that id exists.
+	// canvas already clamps this so the door fits within the edge). InputId is set automatically to
+	// RoomId (the door's own owning room - that's the "input" side by definition); ConnectsTo is
+	// left blank, filled in later via a door properties panel (see SetDoorConnectsTo). Returns the
+	// new door's id, or an empty string if no room with that id exists.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	FString AddDoorToRoom(const FString& RoomId, int32 EdgeIndex, float OffsetWorldUnits);
 
@@ -148,6 +149,22 @@ public:
 	// edge. Returns false if the room or the door within it doesn't exist.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool MoveDoor(const FString& RoomId, const FString& DoorId, float NewOffsetWorldUnits);
+
+	// Reads RoomId's DoorId opening's full data - for a door properties panel to populate its fields.
+	// Returns false (OutOpening left untouched) if the room or the door within it doesn't exist.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool GetDoorOpening(const FString& RoomId, const FString& DoorId, FInteriorOpening& OutOpening) const;
+
+	// Sets a door's ConnectsTo ("output" - the room/corridor/exterior id on the other side of the
+	// door, as opposed to InputId, which is always the room the door itself belongs to). Returns
+	// false if the room or the door within it doesn't exist.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool SetDoorConnectsTo(const FString& RoomId, const FString& DoorId, const FString& NewConnectsTo);
+
+	// Renames a room/wall (the human-readable RoomName, distinct from its auto-generated RoomId -
+	// see AInteriorRoom::RoomName). Returns false if no room with that id exists.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool SetRoomName(const FString& RoomId, const FString& NewName);
 
 	// Nav nodes (Path Node/Elevator/Stairs) for the currently loaded building, all floors. Not yet
 	// turned into actors - representation is pending alignment with the navigation

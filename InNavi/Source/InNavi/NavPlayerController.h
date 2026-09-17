@@ -21,6 +21,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectModeChanged, bool, bNewSele
 // Broadcast whenever the selected room/wall changes on the 2D floor plan canvas (select mode
 // picking a different one, or clicking empty space to deselect - RoomId is empty in that case).
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedRoomChanged, FString, RoomId);
+// Broadcast whenever the selected door changes (selecting one, selecting a different one, or
+// deselecting - both ids are empty in that case). Mirrors FOnSelectedRoomChanged for doors, since
+// the two selections are tracked and broadcast separately (see SelectRoom/SelectDoor).
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSelectedDoorChanged, FString, RoomId, FString, DoorId);
 // Broadcast after each footprint point is added or cleared, so UI can show a live point count.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFootprintPointCountChanged, int32, PointCount);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRoomPointCountChanged, int32, PointCount);
@@ -219,6 +223,11 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Interior")
 	FOnSelectedRoomChanged OnSelectedRoomChanged;
 
+	// Renames the currently-selected room/wall (see AInteriorGenerator::SetRoomName) - what a room
+	// properties panel's "apply" button should call. No-op (returns false) if nothing is selected.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool SetSelectedRoomName(const FString& NewName);
+
 	// Sets the currently-selected door, independently of the room it belongs to - the 2D floor plan
 	// canvas's select-mode click handler calls this when the click lands on a door marker rather
 	// than a plain wall edge. Clears whatever room was selected (see SelectRoom) - only one of the
@@ -231,6 +240,23 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	FString GetSelectedDoorId() const { return SelectedDoorId; }
+
+	UPROPERTY(BlueprintAssignable, Category = "Interior")
+	FOnSelectedDoorChanged OnSelectedDoorChanged;
+
+	// Reads the currently-selected door's full data (Id/EdgeIndex/Offset/InputId/ConnectsTo/...) -
+	// what a door properties panel calls to populate its fields when a door gets selected. InputId
+	// is set automatically at creation time (see AddDoorToWall) to the room the door belongs to -
+	// it's read-only, shown for context; only ConnectsTo is meant to be user-edited (see
+	// SetSelectedDoorConnectsTo). Returns false (OutOpening left untouched) if no door is selected.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool GetSelectedDoorOpening(FInteriorOpening& OutOpening);
+
+	// Sets the currently-selected door's ConnectsTo ("output" - the room/corridor/exterior id on
+	// the other side of the door) - what a door properties panel's "apply" button should call. No-op
+	// (returns false) if no door is selected.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool SetSelectedDoorConnectsTo(const FString& NewConnectsTo);
 
 	// Removes a single room/wall by id (see AInteriorGenerator::DeleteRoom) - general-purpose,
 	// explicit-id version. See also DeleteSelection. Also clears the door selection if the deleted
@@ -256,8 +282,9 @@ public:
 	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth);
 
 	// Add-door mode: click a wall edge on the 2D floor plan canvas to add a fixed-size door there
-	// (centered on the click, clamped so it doesn't poke past either end of the edge) - Input/
-	// Output (ConnectsTo) ids are left blank for now, to be filled in later via a proper UI form.
+	// (centered on the click, clamped so it doesn't poke past either end of the edge) - InputId is
+	// set automatically to the room the door belongs to; ConnectsTo is left blank, to be filled in
+	// via a door properties panel (see SetSelectedDoorConnectsTo).
 	// Mutually exclusive with every other mode. Bound to the K key for now, not wired into UMG yet.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void ToggleAddDoorMode();

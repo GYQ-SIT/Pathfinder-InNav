@@ -743,7 +743,9 @@ FString AInteriorGenerator::AddDoorToRoom(const FString& RoomId, int32 EdgeIndex
 			Opening.Offset = OffsetWorldUnits;
 			Opening.Width = NewDoorWidth;
 			Opening.Height = 210.f;
-			// InputId/ConnectsTo left blank on purpose - see the header comment.
+			// InputId is the door's own room - always known, never user-edited. ConnectsTo is left
+			// blank on purpose - see the header comment.
+			Opening.InputId = RoomId;
 
 			Room->AddOpening(Opening);
 			UE_LOG(LogTemp, Warning, TEXT("Added door %s to %s edge %d"), *Opening.Id, *RoomId, EdgeIndex);
@@ -808,6 +810,79 @@ bool AInteriorGenerator::MoveDoor(const FString& RoomId, const FString& DoorId, 
 		}
 	}
 
+	return false;
+}
+
+bool AInteriorGenerator::GetDoorOpening(const FString& RoomId, const FString& DoorId, FInteriorOpening& OutOpening) const
+{
+	for (const auto& Pair : RoomsByFloor)
+	{
+		for (const AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (!Room || Room->RoomId != RoomId)
+			{
+				continue;
+			}
+
+			for (const FInteriorOpening& Opening : Room->GetOpenings())
+			{
+				if (Opening.Id == DoorId)
+				{
+					OutOpening = Opening;
+					return true;
+				}
+			}
+			return false;
+		}
+	}
+
+	return false;
+}
+
+bool AInteriorGenerator::SetDoorConnectsTo(const FString& RoomId, const FString& DoorId, const FString& NewConnectsTo)
+{
+	for (auto& Pair : RoomsByFloor)
+	{
+		for (AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (!Room || Room->RoomId != RoomId)
+			{
+				continue;
+			}
+
+			for (const FInteriorOpening& Opening : Room->GetOpenings())
+			{
+				if (Opening.Id == DoorId)
+				{
+					Room->SetOpeningConnectsTo(DoorId, NewConnectsTo);
+					return true;
+				}
+			}
+			return false;
+		}
+	}
+
+	return false;
+}
+
+bool AInteriorGenerator::SetRoomName(const FString& RoomId, const FString& NewName)
+{
+	for (auto& Pair : RoomsByFloor)
+	{
+		for (AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (!Room || Room->RoomId != RoomId)
+			{
+				continue;
+			}
+
+			Room->RoomName = NewName;
+			UE_LOG(LogTemp, Warning, TEXT("Renamed %s to '%s'"), *RoomId, *NewName);
+			return true;
+		}
+	}
+
+	UE_LOG(LogTemp, Error, TEXT("SetRoomName: '%s' not found"), *RoomId);
 	return false;
 }
 

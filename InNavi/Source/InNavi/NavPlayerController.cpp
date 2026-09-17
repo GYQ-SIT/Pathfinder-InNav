@@ -669,8 +669,12 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 
 void ANavPlayerController::SelectRoom(const FString& RoomId)
 {
-	SelectedDoorRoomId.Empty();
-	SelectedDoorId.Empty();
+	if (!SelectedDoorId.IsEmpty())
+	{
+		SelectedDoorRoomId.Empty();
+		SelectedDoorId.Empty();
+		OnSelectedDoorChanged.Broadcast(FString(), FString());
+	}
 
 	if (SelectedRoomId == RoomId)
 	{
@@ -691,6 +695,55 @@ void ANavPlayerController::SelectDoor(const FString& RoomId, const FString& Door
 
 	SelectedDoorRoomId = RoomId;
 	SelectedDoorId = DoorId;
+	OnSelectedDoorChanged.Broadcast(SelectedDoorRoomId, SelectedDoorId);
+}
+
+bool ANavPlayerController::SetSelectedRoomName(const FString& NewName)
+{
+	if (SelectedRoomId.IsEmpty() || !InteriorGen)
+	{
+		return false;
+	}
+
+	const bool bSuccess = InteriorGen->SetRoomName(SelectedRoomId, NewName);
+	if (bSuccess)
+	{
+		bHasUnsavedChanges = true;
+	}
+	else
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not rename '%s'."), *SelectedRoomId));
+	}
+	return bSuccess;
+}
+
+bool ANavPlayerController::GetSelectedDoorOpening(FInteriorOpening& OutOpening)
+{
+	if (SelectedDoorId.IsEmpty() || !InteriorGen)
+	{
+		return false;
+	}
+
+	return InteriorGen->GetDoorOpening(SelectedDoorRoomId, SelectedDoorId, OutOpening);
+}
+
+bool ANavPlayerController::SetSelectedDoorConnectsTo(const FString& NewConnectsTo)
+{
+	if (SelectedDoorId.IsEmpty() || !InteriorGen)
+	{
+		return false;
+	}
+
+	const bool bSuccess = InteriorGen->SetDoorConnectsTo(SelectedDoorRoomId, SelectedDoorId, NewConnectsTo);
+	if (bSuccess)
+	{
+		bHasUnsavedChanges = true;
+	}
+	else
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not update door '%s'."), *SelectedDoorId));
+	}
+	return bSuccess;
 }
 
 bool ANavPlayerController::DeleteRoom(const FString& RoomId)
@@ -718,6 +771,7 @@ bool ANavPlayerController::DeleteRoom(const FString& RoomId)
 			// The room (and every door on it) is gone - the selected door reference is now stale.
 			SelectedDoorRoomId.Empty();
 			SelectedDoorId.Empty();
+			OnSelectedDoorChanged.Broadcast(FString(), FString());
 		}
 	}
 	return bSuccess;
@@ -743,6 +797,7 @@ bool ANavPlayerController::DeleteDoor(const FString& RoomId, const FString& Door
 		{
 			SelectedDoorRoomId.Empty();
 			SelectedDoorId.Empty();
+			OnSelectedDoorChanged.Broadcast(FString(), FString());
 		}
 	}
 	return bSuccess;

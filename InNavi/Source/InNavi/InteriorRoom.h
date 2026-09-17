@@ -56,6 +56,11 @@ public:
 	// opening with that id exists.
 	void MoveOpening(const FString& OpeningId, float NewOffsetWorldUnits);
 
+	// Sets a single opening's ConnectsTo field (see AInteriorGenerator::SetDoorConnectsTo) - a data-
+	// only change, no mesh rebuild needed since it doesn't affect geometry. No-op if no opening with
+	// that id exists.
+	void SetOpeningConnectsTo(const FString& OpeningId, const FString& NewConnectsTo);
+
 	UPROPERTY()
 	FString RoomId;
 
