@@ -184,8 +184,21 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 			NewFootprint.Add(Point + Delta);
 		}
 
-		if (PlayerController)
+		if (PlayerController && InteriorGen)
 		{
+			// Vertex snapping: if any corner of the room as currently dragged is close to another
+			// room/wall's corner, nudge the whole footprint so that pair lines up exactly - same
+			// tolerance/approach as P-mode's next click (see AddRoomPointAtFootprintPosition).
+			constexpr float SnapToleranceFootprintUnits = 8.f;
+			FVector2D SnapOffset;
+			if (InteriorGen->FindSnapOffset(InteriorGen->GetActiveFloor(), NewFootprint, DraggingRoomId, SnapToleranceFootprintUnits, SnapOffset))
+			{
+				for (FVector2D& Point : NewFootprint)
+				{
+					Point += SnapOffset;
+				}
+			}
+
 			PlayerController->MoveRoomTo(DraggingRoomId, NewFootprint);
 		}
 		return FReply::Handled();

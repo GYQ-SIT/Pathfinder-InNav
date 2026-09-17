@@ -148,6 +148,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool CommitRoomMove(const FString& RoomId, const TArray<FVector2D>& FallbackFootprint);
 
+	// Snapping: finds the closest point, across every edge of every OTHER room/wall on Level
+	// (RoomIdToExclude skips one room's own edges, e.g. so a room being dragged doesn't snap to
+	// itself) - not just each edge's endpoints, so this snaps to the middle of a wall as well as a
+	// corner - to any point in Footprint, within ToleranceFootprintUnits. If one exists, returns the
+	// offset that would shift Footprint so that point lands exactly on it (add it to every point in
+	// Footprint). Used both for a single point (P-mode's next click) and a whole room's footprint
+	// (dragging - see UInteriorFloorPlanWidget). Returns false (OutSnapOffset left untouched) if
+	// nothing is within tolerance.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool FindSnapOffset(int32 Level, const TArray<FVector2D>& Footprint, const FString& RoomIdToExclude, float ToleranceFootprintUnits, FVector2D& OutSnapOffset) const;
+
 	// Adds a fixed-size door to RoomId's EdgeIndex, centered at OffsetWorldUnits along that edge
 	// (world units, matching FInteriorOpening::Offset - the "add door" tool on the 2D floor plan
 	// canvas already clamps this so the door fits within the edge). InputId is set automatically to

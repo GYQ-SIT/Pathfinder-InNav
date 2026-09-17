@@ -118,25 +118,53 @@ static bool IsFootprintFullyInsidePolygon(const TArray<FVector2D>& Footprint, co
 	return true;
 }
 
-// ---- Helper: do two rooms/walls' footprints overlap? Checks edge-edge crossings (catches partial
-// overlaps, works for open walls too) plus containment (one shape's vertex landing fully inside the
-// other's closed loop - edge crossings alone miss this when one shape sits entirely within another).
-// bBClosed only matters for the edge-count/wrap-around and the containment check - an open wall has
-// no interior to be "inside". ----
-// ---- Helper: shortest distance from Point to segment AB (mirrors InteriorFloorPlanWidget.cpp's copy) ----
-static float DistancePointToSegment2D(const FVector2D& Point, const FVector2D& A, const FVector2D& B)
+// ---- Helper: the point on segment AB closest to Point (mirrors InteriorFloorPlanWidget.cpp's
+// DistancePointToSegment2D, generalized to return the point itself, not just the distance to it -
+// FindSnapOffset needs the point; DistancePointToSegment2D below is now just this plus one more step) ----
+static FVector2D ClosestPointOnSegment2D(const FVector2D& Point, const FVector2D& A, const FVector2D& B)
 {
 	const FVector2D AB = B - A;
 	const float LengthSq = AB.SizeSquared();
 	if (LengthSq < KINDA_SMALL_NUMBER)
 	{
-		return FVector2D::Distance(Point, A);
+		return A;
 	}
 
 	const float T = FMath::Clamp(FVector2D::DotProduct(Point - A, AB) / LengthSq, 0.f, 1.f);
-	return FVector2D::Distance(Point, A + AB * T);
+	return A + AB * T;
 }
 
+// ---- Helper: shortest distance from Point to segment AB ----
+static float DistancePointToSegment2D(const FVector2D& Point, const FVector2D& A, const FVector2D& B)
+{
+	return FVector2D::Distance(Point, ClosestPointOnSegment2D(Point, A, B));
+}
+
+// ---- Helper: is Point genuinely inside Poly, not just sitting on (or a hair's breadth from) its
+// boundary? Ray-casting alone is fragile right at the boundary - a point that's supposed to sit
+// exactly on an edge (e.g. two vertices snapped together - see FindSnapOffset) isn't guaranteed to
+// land at bit-identical float coordinates, and that tiny noise can flip which side the ray-cast
+// thinks it's on. Anything within BoundaryDeadZone of an edge is treated as "on the boundary,
+// therefore not inside" up front, before ever asking the ray-cast. ----
+static bool IsPointClearlyInsidePolygon(const FVector2D& Point, const TArray<FVector2D>& Poly)
+{
+	constexpr float BoundaryDeadZoneFootprintUnits = 0.5f;
+	const int32 N = Poly.Num();
+	for (int32 i = 0; i < N; i++)
+	{
+		if (DistancePointToSegment2D(Point, Poly[i], Poly[(i + 1) % N]) < BoundaryDeadZoneFootprintUnits)
+		{
+			return false;
+		}
+	}
+	return IsPointInPolygon(Point, Poly);
+}
+
+// ---- Helper: do two rooms/walls' footprints overlap? Checks edge-edge crossings (catches partial
+// overlaps, works for open walls too) plus containment (one shape's vertex landing fully inside the
+// other's closed loop - edge crossings alone miss this when one shape sits entirely within another).
+// bBClosed only matters for the edge-count/wrap-around and the containment check - an open wall has
+// no interior to be "inside". ----
 static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClosed, const TArray<FVector2D>& FootprintB, bool bBClosed)
 {
 	const int32 NumA = FootprintA.Num();
@@ -149,12 +177,24 @@ static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClos
 	const int32 NumEdgesA = bAClosed ? NumA : NumA - 1;
 	const int32 NumEdgesB = bBClosed ? NumB : NumB - 1;
 
-	// A drag can land a room's corner just barely grazing another edge rather than cleanly crossing
-	// it (especially after a fast mouse move, which jumps several footprint units between frames) -
-	// the strict crossing test below can miss that, so anything closer than this also counts as
-	// overlapping. Small on purpose: two rooms meant to share a wall (once snapping exists) should
-	// still be allowed to sit edge-to-edge without tripping this.
-	constexpr float TouchToleranceFootprintUnits = 2.f;
+	// Deliberately no "near miss" tolerance here (an earlier version had one, to catch a drag
+	// jumping several footprint units in one frame and grazing a corner without a clean crossing) -
+	// snapping (see FindSnapOffset) intentionally lands two vertices exactly on top of each other,
+	// and any tolerance greater than zero would flag that legitimate touch as an overlap. The vertex-
+	// containment check below (which checks every point, not just one) turned out to be what that
+	// original bug actually needed.
+	//
+	// When two edges share an endpoint (the normal result of snapping two shapes' corners together),
+	// SegmentsIntersect's strict cross-product signs can misfire: one of its four cross products is
+	// exactly zero because it's evaluated at that shared point, and zero doesn't cleanly fall on
+	// either side of ">0" - depending on the angle, that can spuriously read as "crossing" even
+	// though the edges only touch at the one shared corner. So a shared endpoint is checked for and
+	// excluded up front, the same way the containment check below treats it as boundary, not inside.
+	constexpr float SharedEndpointEpsilonFootprintUnits = 0.5f;
+	auto NearlySamePoint = [](const FVector2D& P, const FVector2D& Q)
+	{
+		return FVector2D::DistSquared(P, Q) < SharedEndpointEpsilonFootprintUnits * SharedEndpointEpsilonFootprintUnits;
+	};
 
 	for (int32 i = 0; i < NumEdgesA; i++)
 	{
@@ -164,15 +204,9 @@ static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClos
 		{
 			const FVector2D& B0 = FootprintB[j];
 			const FVector2D& B1 = FootprintB[(j + 1) % NumB];
-			if (SegmentsIntersect(A0, A1, B0, B1))
-			{
-				return true;
-			}
 
-			if (DistancePointToSegment2D(A0, B0, B1) < TouchToleranceFootprintUnits ||
-				DistancePointToSegment2D(A1, B0, B1) < TouchToleranceFootprintUnits ||
-				DistancePointToSegment2D(B0, A0, A1) < TouchToleranceFootprintUnits ||
-				DistancePointToSegment2D(B1, A0, A1) < TouchToleranceFootprintUnits)
+			const bool bSharesEndpoint = NearlySamePoint(A0, B0) || NearlySamePoint(A0, B1) || NearlySamePoint(A1, B0) || NearlySamePoint(A1, B1);
+			if (!bSharesEndpoint && SegmentsIntersect(A0, A1, B0, B1))
 			{
 				return true;
 			}
@@ -186,7 +220,7 @@ static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClos
 	{
 		for (const FVector2D& Point : FootprintB)
 		{
-			if (IsPointInPolygon(Point, FootprintA))
+			if (IsPointClearlyInsidePolygon(Point, FootprintA))
 			{
 				return true;
 			}
@@ -196,7 +230,7 @@ static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClos
 	{
 		for (const FVector2D& Point : FootprintA)
 		{
-			if (IsPointInPolygon(Point, FootprintB))
+			if (IsPointClearlyInsidePolygon(Point, FootprintB))
 			{
 				return true;
 			}
@@ -921,6 +955,57 @@ bool AInteriorGenerator::CommitRoomMove(const FString& RoomId, const TArray<FVec
 	}
 
 	return false;
+}
+
+bool AInteriorGenerator::FindSnapOffset(int32 Level, const TArray<FVector2D>& Footprint, const FString& RoomIdToExclude, float ToleranceFootprintUnits, FVector2D& OutSnapOffset) const
+{
+	const FInteriorRoomList* RoomList = RoomsByFloor.Find(Level);
+	if (!RoomList)
+	{
+		return false;
+	}
+
+	float BestDistSq = ToleranceFootprintUnits * ToleranceFootprintUnits;
+	bool bFound = false;
+
+	for (const AInteriorRoom* Other : RoomList->Rooms)
+	{
+		if (!Other || Other->RoomId == RoomIdToExclude)
+		{
+			continue;
+		}
+
+		const TArray<FVector2D>& OtherFootprint = Other->GetFootprint();
+		const int32 NumOther = OtherFootprint.Num();
+		if (NumOther < 2)
+		{
+			continue;
+		}
+
+		// Checking against the closest point on each edge - not just each vertex - covers snapping
+		// to the middle of a wall as well as a corner; a vertex is just the case where that closest
+		// point happens to land on an edge's own endpoint, so this subsumes the old vertex-only check.
+		const int32 NumEdgesOther = Other->IsClosedLoop() ? NumOther : NumOther - 1;
+		for (const FVector2D& MyVertex : Footprint)
+		{
+			for (int32 i = 0; i < NumEdgesOther; i++)
+			{
+				const FVector2D& EdgeA = OtherFootprint[i];
+				const FVector2D& EdgeB = OtherFootprint[(i + 1) % NumOther];
+				const FVector2D ClosestPoint = ClosestPointOnSegment2D(MyVertex, EdgeA, EdgeB);
+
+				const float DistSq = FVector2D::DistSquared(MyVertex, ClosestPoint);
+				if (DistSq < BestDistSq)
+				{
+					BestDistSq = DistSq;
+					OutSnapOffset = ClosestPoint - MyVertex;
+					bFound = true;
+				}
+			}
+		}
+	}
+
+	return bFound;
 }
 
 FString AInteriorGenerator::AddDoorToRoom(const FString& RoomId, int32 EdgeIndex, float OffsetWorldUnits)

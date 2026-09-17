@@ -661,6 +661,20 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 		}
 	}
 
+	// Vertex snapping: if this click landed close to an existing room/wall's corner, snap to it
+	// exactly instead of the raw click position - same tolerance as dragging a room (see
+	// UInteriorFloorPlanWidget), applied after the building-outline check above so snapping can't
+	// rescue a click that's genuinely outside the building.
+	if (InteriorGen)
+	{
+		constexpr float SnapToleranceFootprintUnits = 8.f;
+		FVector2D SnapOffset;
+		if (InteriorGen->FindSnapOffset(InteriorGen->GetActiveFloor(), { FootprintPoint }, FString(), SnapToleranceFootprintUnits, SnapOffset))
+		{
+			FootprintPoint += SnapOffset;
+		}
+	}
+
 	PendingRoomFootprint.Add(FootprintPoint);
 	OnRoomPointCountChanged.Broadcast(PendingRoomFootprint.Num());
 
