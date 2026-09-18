@@ -206,6 +206,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	bool IsInSelectMode() const { return bSelectMode; }
 
+	// Vertex/edge snapping (see AInteriorGenerator::FindSnapOffset) - a standing setting, not a
+	// mode, so it isn't mutually exclusive with anything and doesn't get turned off by switching
+	// modes. On by default. P-mode's next click and dragging a selected room both check this before
+	// calling FindSnapOffset. Bound to the N key for now, not wired into UMG yet.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void ToggleSnapEnabled();
+
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool IsSnapEnabled() const { return bSnapEnabled; }
+
 	UPROPERTY(BlueprintAssignable, Category = "Interior")
 	FOnSelectModeChanged OnSelectModeChanged;
 
@@ -502,6 +512,10 @@ private:
 	bool bDrawWallMode = false;
 
 	bool bSelectMode = false;
+
+	// See ToggleSnapEnabled/IsSnapEnabled - a standing setting, not a mode, so it's declared away
+	// from the mode flags above even though it's checked by some of the same code paths.
+	bool bSnapEnabled = true;
 
 	// See SelectRoom/GetSelectedRoomId - persists across mode changes, cleared on deselect (empty
 	// id), StartNewProject, or once deleted.

@@ -191,7 +191,7 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 			// tolerance/approach as P-mode's next click (see AddRoomPointAtFootprintPosition).
 			constexpr float SnapToleranceFootprintUnits = 8.f;
 			FVector2D SnapOffset;
-			if (InteriorGen->FindSnapOffset(InteriorGen->GetActiveFloor(), NewFootprint, DraggingRoomId, SnapToleranceFootprintUnits, SnapOffset))
+			if (PlayerController->IsSnapEnabled() && InteriorGen->FindSnapOffset(InteriorGen->GetActiveFloor(), NewFootprint, DraggingRoomId, SnapToleranceFootprintUnits, SnapOffset))
 			{
 				for (FVector2D& Point : NewFootprint)
 				{

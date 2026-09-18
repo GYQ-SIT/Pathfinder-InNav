@@ -88,6 +88,7 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::Hyphen, IE_Pressed, this, &ANavPlayerController::ShrinkSelectedRoom);
 	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &ANavPlayerController::OnConfirmPressed);
 	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
+	InputComponent->BindKey(EKeys::N, IE_Pressed, this, &ANavPlayerController::ToggleSnapEnabled);
 	InputComponent->BindKey(FInputChord(EKeys::S, /*Shift*/false, /*Ctrl*/true, /*Alt*/false, /*Cmd*/false), IE_Pressed, this, &ANavPlayerController::SaveCurrentProjectKeyHandler);
 }
 
@@ -357,6 +358,12 @@ void ANavPlayerController::ToggleSelectMode()
 	OnSelectModeChanged.Broadcast(true);
 
 	UE_LOG(LogTemp, Warning, TEXT("Select mode ON (floor %d): click a room/wall on the 2D canvas to select it (Backspace deletes, =/- resizes), Esc/Q to exit"), InteriorGen->GetActiveFloor());
+}
+
+void ANavPlayerController::ToggleSnapEnabled()
+{
+	bSnapEnabled = !bSnapEnabled;
+	UE_LOG(LogTemp, Warning, TEXT("Snapping %s"), bSnapEnabled ? TEXT("ON") : TEXT("OFF"));
 }
 
 void ANavPlayerController::ExitPrefabRoomMode()
@@ -665,7 +672,7 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 	// exactly instead of the raw click position - same tolerance as dragging a room (see
 	// UInteriorFloorPlanWidget), applied after the building-outline check above so snapping can't
 	// rescue a click that's genuinely outside the building.
-	if (InteriorGen)
+	if (InteriorGen && bSnapEnabled)
 	{
 		constexpr float SnapToleranceFootprintUnits = 8.f;
 		FVector2D SnapOffset;
