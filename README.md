@@ -15,7 +15,6 @@ generate a schematic interior in 3D, and navigate inside — including across fl
   - `proposal.md` — project proposal
   - `design/`
     - `product-design.md` — product design document
-    - `building-generation-ui-spec.md` — exterior building tools, C++ interface for UI
     - `interior-editor-guide.md` — **how to use the interior editor** (controls/workflow, current as of the `YQ-ui-backup` branch)
     - `ui-ux/` — wireframes, user flows, mockups
   - `architecture.md` — system architecture + tech stack

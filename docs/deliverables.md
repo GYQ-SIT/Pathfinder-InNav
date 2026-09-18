@@ -51,8 +51,7 @@ demonstrable check — not "it exists".
     tools (draw room/wall, select, add-door, place connector, etc. — see
     `docs/design/interior-editor-guide.md` for the full list) into a proper on-screen
     UMG toolbar. Everything Yongqi's side needs is already exposed
-    `BlueprintCallable` (see `docs/design/building-generation-ui-spec.md` for the
-    exterior-side integration pattern to follow for the interior tools too).
+    `BlueprintCallable`.
   - **Afiq**: user input → JSON conversion (the piece that turns raw UI input into the
     JSON format `BuildingGenerator`/`InteriorGenerator` read).
 - **Jira Epic:** `INNAVI-T02`
