@@ -26,7 +26,7 @@ and a **Navigation mode** (walking/routing through the generated building).
 |---------|--------|--------|
 | Engine | Unreal Engine | Built-in rendering, runtime ray-casting/picking, navigation (NavMesh/NavLinks), and UI (UMG) |
 | Core logic | **C++** | Performance and control for the core systems (generation, navigation) |
-| UI & interaction | **Blueprint (UMG)** | Faster to build UI and simple interactions; lets UX members contribute to implementation |
+| UI & interaction | **Blueprint (UMG)** | Faster to build UI and simple interactions; lets UX members contribute to implementation. As of 2026-09-18, screens/dialogs/property panels are UMG, but most interior-editing tools are still bound to keyboard shortcuts pending a full toolbar pass — see `docs/design/interior-editor-guide.md` |
 | Data format | **JSON** | Human-readable, easy to author, save, and reload interior layouts |
 | Target platform | **Desktop first (M1)**, mobile later | Reduces risk for an M1 with a team new to UE; mobile targeted in M2/M3 _(platform scope pending confirmation with the professor)_ |
 
@@ -102,5 +102,6 @@ navigation (T04): the generator must emit them consistently for routing to work.
 
 ## 7. Component ownership
 
-Ownership is tracked per deliverable in `deliverables.md` (owners TBD until the team
-assigns members).
+Ownership is tracked per deliverable in `deliverables.md`. As of 2026-09-18: T01–T03
+(model import/selection, data editor & JSON, procedural interior generator) are owned
+by Yongqi; T04 (indoor navigation) by ws/jh.
