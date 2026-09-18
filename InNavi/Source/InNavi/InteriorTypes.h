@@ -13,6 +13,15 @@ enum class EInteriorOpeningType : uint8
 	Void
 };
 
+UENUM(BlueprintType)
+enum class EInteriorNavNodeType : uint8
+{
+	PathNode,
+	Elevator,
+	Stairs,
+	Escalator
+};
+
 // One opening (door/window/void) cut into a specific edge of a room's wall loop.
 USTRUCT(BlueprintType)
 struct FInteriorOpening
@@ -56,8 +65,13 @@ struct FInteriorOpening
 	FString ConnectsTo;
 };
 
-// A navigation graph node parsed from a floor's interior data. Not yet turned into an actor -
-// representation is pending alignment with the navigation (NavMesh/NavLinks) team.
+// A navigation graph node - a point placed anywhere inside a building's interior (including
+// inside a room - it has no shape/walls/door of its own, unlike a room or a door). Elevator/
+// Stairs/Escalator span multiple floors: placing one creates a separate FInteriorNavNode per
+// floor it connects to (each written into that floor's own "navNodes" array, matching the JSON
+// schema, which is per-floor), all sharing the same ConnectorGroupId so they can be found and
+// kept in sync as "the same physical connector" - see AInteriorGenerator::PlaceConnectorNode/
+// SetConnectorFloors. PathNode is always a single, standalone, single-floor node.
 USTRUCT(BlueprintType)
 struct FInteriorNavNode
 {
@@ -66,9 +80,8 @@ struct FInteriorNavNode
 	UPROPERTY(BlueprintReadOnly)
 	FString Id;
 
-	// "pathNode" | "elevator" | "stairs"
 	UPROPERTY(BlueprintReadOnly)
-	FString Type;
+	EInteriorNavNodeType Type = EInteriorNavNodeType::PathNode;
 
 	// Which floor this node was placed on (the floor whose "navNodes" array it came from) - needed
 	// to write it back into the right floor when serializing the interior back to JSON.
@@ -78,7 +91,17 @@ struct FInteriorNavNode
 	UPROPERTY(BlueprintReadOnly)
 	FVector2D Position = FVector2D::ZeroVector;
 
-	// elevator/stairs only: which floor levels this node connects.
+	// Elevator/Stairs/Escalator only: which floor levels this connector leads to. An elevator
+	// defaults to every floor in the building; stairs/escalator default to just the immediately
+	// adjacent floor(s) (one at the top/bottom of the building, since there's only one side) - both
+	// are freely user-editable afterward, including down to a single floor (e.g. a staircase that
+	// dead-ends partway up the building). Empty for PathNode.
 	UPROPERTY(BlueprintReadOnly)
 	TArray<int32> ConnectsFloors;
+
+	// Elevator/Stairs/Escalator only: shared by every per-floor FInteriorNavNode instance that
+	// represents this same physical connector, so they can be explicitly identified as one group
+	// rather than inferred from matching position - see the class comment above. Empty for PathNode.
+	UPROPERTY(BlueprintReadOnly)
+	FString ConnectorGroupId;
 };

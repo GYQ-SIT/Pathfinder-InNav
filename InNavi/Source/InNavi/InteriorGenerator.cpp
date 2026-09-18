@@ -42,6 +42,25 @@ static FString OpeningTypeToString(EInteriorOpeningType Type)
 	}
 }
 
+static EInteriorNavNodeType ParseNavNodeType(const FString& TypeString)
+{
+	if (TypeString == TEXT("elevator"))  { return EInteriorNavNodeType::Elevator; }
+	if (TypeString == TEXT("stairs"))    { return EInteriorNavNodeType::Stairs; }
+	if (TypeString == TEXT("escalator")) { return EInteriorNavNodeType::Escalator; }
+	return EInteriorNavNodeType::PathNode;
+}
+
+static FString NavNodeTypeToString(EInteriorNavNodeType Type)
+{
+	switch (Type)
+	{
+	case EInteriorNavNodeType::Elevator:  return TEXT("elevator");
+	case EInteriorNavNodeType::Stairs:    return TEXT("stairs");
+	case EInteriorNavNodeType::Escalator: return TEXT("escalator");
+	default:                              return TEXT("pathNode");
+	}
+}
+
 // ---- Helper: do segments AB and CD properly cross each other? (mirrors BuildingGenerator.cpp) ----
 static bool SegmentsIntersect(const FVector2D& A, const FVector2D& B, const FVector2D& C, const FVector2D& D)
 {
@@ -416,8 +435,11 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 
 				FInteriorNavNode Node;
 				Node.Id = NodeObject->GetStringField(TEXT("id"));
-				NodeObject->TryGetStringField(TEXT("type"), Node.Type);
+				FString TypeString;
+				NodeObject->TryGetStringField(TEXT("type"), TypeString);
+				Node.Type = ParseNavNodeType(TypeString);
 				Node.Level = Level;
+				NodeObject->TryGetStringField(TEXT("connectorGroupId"), Node.ConnectorGroupId);
 
 				const TArray<TSharedPtr<FJsonValue>>* PositionArray;
 				if (NodeObject->TryGetArrayField(TEXT("position"), PositionArray) && PositionArray->Num() >= 2)
@@ -803,6 +825,99 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 	}
 
 	return Wall;
+}
+
+FString AInteriorGenerator::PlaceConnectorNode(EInteriorNavNodeType Type, FVector2D Position, const TArray<int32>& ConnectsToFloors)
+{
+	if (LoadedBuildingId.IsEmpty() || !Generator)
+	{
+		UE_LOG(LogTemp, Error, TEXT("PlaceConnectorNode: no building interior currently loaded"));
+		return FString();
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(LoadedBuildingId);
+	if (!Building)
+	{
+		UE_LOG(LogTemp, Error, TEXT("PlaceConnectorNode: building '%s' no longer exists"), *LoadedBuildingId);
+		return FString();
+	}
+
+	// A connector shaft has to be clear space all the way through the building - one blocked floor
+	// makes the whole thing unplaceable rather than silently connecting fewer floors than asked for
+	// (which would be easy to miss and would leave navigation with a connector that mysteriously
+	// doesn't reach a floor it looks like it should). So this validates every requested floor
+	// first, and only creates anything once all of them pass.
+	auto IsBlockedOnFloor = [this](FVector2D TestPosition, int32 Level, const FInteriorFloorInfo& FloorInfo) -> bool
+	{
+		const FInteriorRoomList* RoomList = RoomsByFloor.Find(Level);
+		if (!RoomList)
+		{
+			return false;
+		}
+
+		const float HalfWallThickness = FloorInfo.WallThickness * 0.5f;
+		for (const AInteriorRoom* Room : RoomList->Rooms)
+		{
+			if (!Room)
+			{
+				continue;
+			}
+
+			const TArray<FVector2D>& RoomFootprint = Room->GetFootprint();
+			const int32 NumPoints = RoomFootprint.Num();
+			const int32 NumEdges = Room->IsClosedLoop() ? NumPoints : NumPoints - 1;
+			for (int32 i = 0; i < NumEdges; i++)
+			{
+				const FVector2D& EdgeA = RoomFootprint[i];
+				const FVector2D& EdgeB = RoomFootprint[(i + 1) % NumPoints];
+				if (DistancePointToSegment2D(TestPosition, EdgeA, EdgeB) < HalfWallThickness)
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	};
+
+	for (int32 Level : ConnectsToFloors)
+	{
+		const FInteriorFloorInfo* FloorInfo = FloorInfoByLevel.Find(Level);
+		if (!FloorInfo)
+		{
+			UE_LOG(LogTemp, Error, TEXT("PlaceConnectorNode: floor %d doesn't exist - nothing placed"), Level);
+			return FString();
+		}
+
+		if (!IsPointInPolygon(Position, Building->GetFootprint()))
+		{
+			UE_LOG(LogTemp, Error, TEXT("PlaceConnectorNode: outside the building's outline on floor %d - nothing placed"), Level);
+			return FString();
+		}
+
+		// Being inside a room's open interior is fine (that's an explicitly supported placement,
+		// unlike a room or door) - only sitting inside the wall's own solid thickness is rejected.
+		if (IsBlockedOnFloor(Position, Level, *FloorInfo))
+		{
+			UE_LOG(LogTemp, Error, TEXT("PlaceConnectorNode: blocked by a wall on floor %d - nothing placed"), Level);
+			return FString();
+		}
+	}
+
+	const FString GroupId = FString::Printf(TEXT("%s-NAV-%02d"), *LoadedBuildingId, NavNodes.Num() + 1);
+	for (int32 Level : ConnectsToFloors)
+	{
+		FInteriorNavNode Node;
+		Node.Id = FString::Printf(TEXT("%s-F%02d"), *GroupId, Level);
+		Node.Type = Type;
+		Node.Level = Level;
+		Node.Position = Position;
+		Node.ConnectsFloors = ConnectsToFloors;
+		Node.ConnectorGroupId = GroupId;
+		NavNodes.Add(Node);
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("Placed connector '%s' on %d floor(s)"), *GroupId, ConnectsToFloors.Num());
+	return GroupId;
 }
 
 bool AInteriorGenerator::DeleteRoom(const FString& RoomId)
@@ -1318,7 +1433,7 @@ TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 
 			TSharedRef<FJsonObject> NodeObject = MakeShared<FJsonObject>();
 			NodeObject->SetStringField(TEXT("id"), Node.Id);
-			NodeObject->SetStringField(TEXT("type"), Node.Type);
+			NodeObject->SetStringField(TEXT("type"), NavNodeTypeToString(Node.Type));
 
 			TArray<TSharedPtr<FJsonValue>> PositionArray;
 			PositionArray.Add(MakeShared<FJsonValueNumber>(Node.Position.X));
@@ -1333,6 +1448,11 @@ TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 					ConnectsFloorsArray.Add(MakeShared<FJsonValueNumber>(ConnectedLevel));
 				}
 				NodeObject->SetArrayField(TEXT("connectsFloors"), ConnectsFloorsArray);
+			}
+
+			if (!Node.ConnectorGroupId.IsEmpty())
+			{
+				NodeObject->SetStringField(TEXT("connectorGroupId"), Node.ConnectorGroupId);
 			}
 
 			NavNodesArray.Add(MakeShared<FJsonValueObject>(NodeObject));

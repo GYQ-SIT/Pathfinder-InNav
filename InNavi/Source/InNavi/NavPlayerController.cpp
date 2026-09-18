@@ -84,6 +84,9 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::One, IE_Pressed, this, &ANavPlayerController::TogglePrefabRectangleMode);
 	InputComponent->BindKey(EKeys::Two, IE_Pressed, this, &ANavPlayerController::TogglePrefabTriangleMode);
 	InputComponent->BindKey(EKeys::Three, IE_Pressed, this, &ANavPlayerController::TogglePrefabCircleMode);
+	InputComponent->BindKey(EKeys::Four, IE_Pressed, this, &ANavPlayerController::ToggleElevatorMode);
+	InputComponent->BindKey(EKeys::Five, IE_Pressed, this, &ANavPlayerController::ToggleStairsMode);
+	InputComponent->BindKey(EKeys::Six, IE_Pressed, this, &ANavPlayerController::ToggleEscalatorMode);
 	InputComponent->BindKey(EKeys::Equals, IE_Pressed, this, &ANavPlayerController::GrowSelectedRoom);
 	InputComponent->BindKey(EKeys::Hyphen, IE_Pressed, this, &ANavPlayerController::ShrinkSelectedRoom);
 	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &ANavPlayerController::OnConfirmPressed);
@@ -98,7 +101,7 @@ void ANavPlayerController::OnClick()
 	{
 		AddFootprintPointUnderCursor();
 	}
-	else if (bDrawRoomMode || bDrawWallMode || bSelectMode || bAddDoorMode || ActivePrefabShape != 0)
+	else if (bDrawRoomMode || bDrawWallMode || bSelectMode || bAddDoorMode || ActivePrefabShape != 0 || ActiveConnectorType != 0)
 	{
 		// No-op: all interior-editing interaction (drawing, selecting/dragging, adding doors,
 		// placing prefab rooms) comes from the 2D floor plan canvas now (see
@@ -159,6 +162,7 @@ void ANavPlayerController::ToggleBuildMode()
 	ExitSelectMode();
 	ExitPrefabRoomMode();
 	ExitAddDoorMode();
+	ExitConnectorMode();
 
 	bBuildMode = !bBuildMode;
 	OnBuildModeChanged.Broadcast(bBuildMode);
@@ -196,6 +200,7 @@ void ANavPlayerController::ToggleShapeTestMode()
 	ExitSelectMode();
 	ExitPrefabRoomMode();
 	ExitAddDoorMode();
+	ExitConnectorMode();
 
 	bShapeTestMode = !bShapeTestMode;
 	OnShapeModeChanged.Broadcast(bShapeTestMode);
@@ -244,6 +249,7 @@ void ANavPlayerController::ToggleDrawRoomMode()
 	ExitSelectMode();
 	ExitPrefabRoomMode();
 	ExitAddDoorMode();
+	ExitConnectorMode();
 
 	bDrawRoomMode = true;
 	OnDrawRoomModeChanged.Broadcast(true);
@@ -285,6 +291,7 @@ void ANavPlayerController::ToggleDrawWallMode()
 	ExitSelectMode();
 	ExitPrefabRoomMode();
 	ExitAddDoorMode();
+	ExitConnectorMode();
 
 	bDrawWallMode = true;
 	OnDrawWallModeChanged.Broadcast(true);
@@ -353,6 +360,7 @@ void ANavPlayerController::ToggleSelectMode()
 	}
 	ExitPrefabRoomMode();
 	ExitAddDoorMode();
+	ExitConnectorMode();
 
 	bSelectMode = true;
 	OnSelectModeChanged.Broadcast(true);
@@ -408,6 +416,7 @@ void ANavPlayerController::TogglePrefabRoomMode(int32 ShapeId)
 	}
 	ExitSelectMode();
 	ExitAddDoorMode();
+	ExitConnectorMode();
 
 	ActivePrefabShape = ShapeId;
 	UE_LOG(LogTemp, Warning, TEXT("Prefab room placement ON (shape %d): click the 2D canvas to place, press the same key again to stop"), ShapeId);
@@ -426,6 +435,73 @@ void ANavPlayerController::TogglePrefabTriangleMode()
 void ANavPlayerController::TogglePrefabCircleMode()
 {
 	TogglePrefabRoomMode(3);
+}
+
+void ANavPlayerController::ExitConnectorMode()
+{
+	if (ActiveConnectorType != 0)
+	{
+		ActiveConnectorType = 0;
+		UE_LOG(LogTemp, Warning, TEXT("Connector placement OFF"));
+	}
+}
+
+void ANavPlayerController::ToggleConnectorMode(EInteriorNavNodeType Type)
+{
+	if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("Cannot place a connector: no building interior currently loaded"));
+		OnActionFailed.Broadcast(TEXT("Load a building's interior first, then try placing an elevator/stairs/escalator."));
+		return;
+	}
+
+	// Matches ActiveConnectorType's convention: 0 = none, otherwise the int32 value of the
+	// EInteriorNavNodeType being placed (Elevator=1/Stairs=2/Escalator=3 - PathNode=0 is never
+	// placed this way, so it never collides with "none").
+	const int32 RequestedType = static_cast<int32>(Type);
+	if (ActiveConnectorType == RequestedType)
+	{
+		ExitConnectorMode();
+		return;
+	}
+
+	if (bBuildMode)
+	{
+		// Modes are mutually exclusive - only one should interpret Enter/Esc at a time.
+		CancelBuilding();
+		bBuildMode = false;
+		OnBuildModeChanged.Broadcast(false);
+	}
+	if (bShapeTestMode)
+	{
+		bShapeTestMode = false;
+		OnShapeModeChanged.Broadcast(false);
+	}
+	if (bDrawRoomMode || bDrawWallMode)
+	{
+		ExitDrawRoomMode();
+	}
+	ExitSelectMode();
+	ExitPrefabRoomMode();
+	ExitAddDoorMode();
+
+	ActiveConnectorType = RequestedType;
+	UE_LOG(LogTemp, Warning, TEXT("Connector placement ON (type %d): click the 2D canvas to place, press the same key again to stop"), RequestedType);
+}
+
+void ANavPlayerController::ToggleElevatorMode()
+{
+	ToggleConnectorMode(EInteriorNavNodeType::Elevator);
+}
+
+void ANavPlayerController::ToggleStairsMode()
+{
+	ToggleConnectorMode(EInteriorNavNodeType::Stairs);
+}
+
+void ANavPlayerController::ToggleEscalatorMode()
+{
+	ToggleConnectorMode(EInteriorNavNodeType::Escalator);
 }
 
 void ANavPlayerController::ExitAddDoorMode()
@@ -470,6 +546,7 @@ void ANavPlayerController::ToggleAddDoorMode()
 	}
 	ExitSelectMode();
 	ExitPrefabRoomMode();
+	ExitConnectorMode();
 
 	bAddDoorMode = true;
 	UE_LOG(LogTemp, Warning, TEXT("Add-door mode ON (floor %d): click a wall edge on the 2D canvas to add a door, Esc/K to exit"), InteriorGen->GetActiveFloor());
@@ -549,6 +626,10 @@ void ANavPlayerController::OnCancelPressed()
 	else if (bAddDoorMode)
 	{
 		ExitAddDoorMode();
+	}
+	else if (ActiveConnectorType != 0)
+	{
+		ExitConnectorMode();
 	}
 }
 
@@ -1023,6 +1104,66 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter
 	return NewRoom;
 }
 
+FString ANavPlayerController::PlaceConnectorAt(FVector2D FootprintPosition)
+{
+	if (ActiveConnectorType == 0)
+	{
+		return FString();
+	}
+
+	if (!InteriorGen || !Generator)
+	{
+		OnActionFailed.Broadcast(TEXT("No InteriorGenerator/BuildingGenerator placed in the level."));
+		return FString();
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building)
+	{
+		OnActionFailed.Broadcast(TEXT("Load a building's interior first, then try placing an elevator/stairs/escalator."));
+		return FString();
+	}
+
+	const EInteriorNavNodeType Type = static_cast<EInteriorNavNodeType>(ActiveConnectorType);
+	const int32 FloorCount = Building->GetFloorCount();
+	const int32 ActiveFloorLevel = InteriorGen->GetActiveFloor();
+
+	// An elevator defaults to every floor (real elevators go direct to any floor); stairs/escalator
+	// default to just the immediately adjacent floor(s) - one side only at the top/bottom of the
+	// building. Either default is freely editable afterward (not built yet - see the connector
+	// properties panel, still to come).
+	TArray<int32> ConnectsToFloors;
+	if (Type == EInteriorNavNodeType::Elevator)
+	{
+		for (int32 Level = 1; Level <= FloorCount; Level++)
+		{
+			ConnectsToFloors.Add(Level);
+		}
+	}
+	else
+	{
+		if (ActiveFloorLevel - 1 >= 1)
+		{
+			ConnectsToFloors.Add(ActiveFloorLevel - 1);
+		}
+		ConnectsToFloors.Add(ActiveFloorLevel);
+		if (ActiveFloorLevel + 1 <= FloorCount)
+		{
+			ConnectsToFloors.Add(ActiveFloorLevel + 1);
+		}
+	}
+
+	const FString GroupId = InteriorGen->PlaceConnectorNode(Type, FootprintPosition, ConnectsToFloors);
+	if (GroupId.IsEmpty())
+	{
+		OnActionFailed.Broadcast(TEXT("Could not place a connector there - check it's inside the building and not on top of a wall."));
+		return FString();
+	}
+
+	bHasUnsavedChanges = true;
+	return GroupId;
+}
+
 AInteriorRoom* ANavPlayerController::FinishRoom(const FString& RoomId, const FString& RoomName, bool bIsPublic, bool bRequiresKey)
 {
 	if (!bDrawRoomMode)
@@ -1421,6 +1562,7 @@ void ANavPlayerController::RestoreExteriorCameraView()
 	ExitSelectMode();
 	ExitPrefabRoomMode();
 	ExitAddDoorMode();
+	ExitConnectorMode();
 
 	if (!InteriorBuildingHiddenById.IsEmpty() && Generator)
 	{

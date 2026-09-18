@@ -106,6 +106,13 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 			return FReply::Handled();
 		}
 
+		if (PlayerController->IsInConnectorMode())
+		{
+			const FVector2D FootprintPosition = LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize());
+			PlayerController->PlaceConnectorAt(FootprintPosition);
+			return FReply::Handled();
+		}
+
 		const FVector2D FootprintPoint = LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize());
 		PlayerController->AddRoomPointAtFootprintPosition(FootprintPoint);
 		return FReply::Handled();

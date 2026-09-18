@@ -204,11 +204,21 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	FString GetRoomName(const FString& RoomId) const;
 
-	// Nav nodes (Path Node/Elevator/Stairs) for the currently loaded building, all floors. Not yet
-	// turned into actors - representation is pending alignment with the navigation
-	// (NavMesh/NavLinks) team on what they actually need to consume.
+	// Nav nodes (Path Node/Elevator/Stairs/Escalator) for the currently loaded building, all
+	// floors. Data format agreed with the navigation (NavMesh/NavLinks) team - see
+	// FInteriorNavNode's own comment.
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	const TArray<FInteriorNavNode>& GetNavNodes() const { return NavNodes; }
+
+	// Places an Elevator/Stairs/Escalator connector at Position (same pre-scale footprint units as
+	// everything else), creating one FInteriorNavNode per floor listed in ConnectsToFloors, all
+	// sharing a freshly-generated ConnectorGroupId (returned). All-or-nothing: every requested floor
+	// is validated first (must exist, Position must be inside the building's outline and not inside
+	// a wall's solid thickness there - being inside a room's open interior is fine, this only
+	// rejects sitting inside the wall itself) - if any floor fails, nothing is created on any floor.
+	// Returns an empty string on that kind of total failure.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	FString PlaceConnectorNode(EInteriorNavNodeType Type, FVector2D Position, const TArray<int32>& ConnectsToFloors);
 
 	// The rooms/walls spawned on a given floor - read-only, for a 2D floor plan renderer to draw
 	// (see UInteriorFloorPlanWidget). Empty if that floor doesn't exist.

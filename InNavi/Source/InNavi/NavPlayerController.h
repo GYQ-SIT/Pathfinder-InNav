@@ -369,6 +369,31 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	AInteriorRoom* PlacePrefabRoomAt(FVector2D FootprintCenter);
 
+	// Connector (elevator/stairs/escalator) placement: 4/5/6 (for now, not wired into UMG yet) each
+	// arm a different type - while armed, clicking the 2D floor plan canvas places one there (see
+	// PlaceConnectorAt), defaulting to every floor for an elevator or just the adjacent floor(s) for
+	// stairs/escalator (see AInteriorGenerator::PlaceConnectorNode's header comment). Mutually
+	// exclusive with every other mode; pressing the same key again, or any other mode's key,
+	// disarms it.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void ToggleElevatorMode();
+
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void ToggleStairsMode();
+
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void ToggleEscalatorMode();
+
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool IsInConnectorMode() const { return ActiveConnectorType != 0; }
+
+	// Places a connector of whichever type is currently armed (see ToggleElevatorMode etc.) at
+	// FootprintPosition, on every floor it defaults to connecting - what the 2D floor plan canvas's
+	// click handler calls. Returns the new connector's shared ConnectorGroupId (empty on failure,
+	// or if no connector type is currently armed).
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	FString PlaceConnectorAt(FVector2D FootprintPosition);
+
 	// Draws a standalone open wall/partition line instead of a closed room - same point-clicking
 	// mechanism as draw room mode (shares OnRoomPointCountChanged for the live point count), just a
 	// separate mode/key so a UI button (or the L key, for now) can trigger it independently.
@@ -532,6 +557,12 @@ private:
 
 	bool bAddDoorMode = false;
 
+	// See ToggleElevatorMode/ToggleStairsMode/ToggleEscalatorMode/IsInConnectorMode. 0 = none
+	// armed, otherwise the int32 value of the EInteriorNavNodeType being placed (matches the enum's
+	// own values directly - Elevator=1/Stairs=2/Escalator=3 - so it casts straight across, see
+	// ToggleConnectorMode).
+	int32 ActiveConnectorType = 0;
+
 	// Turns off whichever of draw room mode / draw wall mode is currently active, from any path
 	// (self-toggle, or another mode taking over) - clears pending points. Clicks reaching the right
 	// floor's ground plane is handled per-section on the building itself (see
@@ -550,6 +581,13 @@ private:
 	// Shared implementation behind TogglePrefabRectangleMode/TogglePrefabTriangleMode/
 	// TogglePrefabCircleMode - ShapeId matches ActivePrefabShape's convention (1/2/3).
 	void TogglePrefabRoomMode(int32 ShapeId);
+
+	// Disarms connector placement if a type is currently armed - called by every other mode's
+	// toggle, same reasoning as ExitPrefabRoomMode.
+	void ExitConnectorMode();
+
+	// Shared implementation behind ToggleElevatorMode/ToggleStairsMode/ToggleEscalatorMode.
+	void ToggleConnectorMode(EInteriorNavNodeType Type);
 
 	// Turns off add-door mode if it's currently active - called by every other mode's toggle, same
 	// reasoning as ExitSelectMode.
