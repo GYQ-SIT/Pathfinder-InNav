@@ -36,7 +36,7 @@ demonstrable check — not "it exists".
 - **Supports:** _(building selection / interior generation — F01 TBD)_
 - **Owner:** Yongqi
 - **Jira Epic:** `INNAVI-T01`
-- **M1 target:** School model loads in UE; user can click a building and it is highlighted/selected. **✅ Done** — real SIT Punggol campus footprints (E1–E6) load from `buildings.json`; click-to-select/highlight working.
+- **M1 target:** School model loads in UE; user can click a building and it is highlighted/selected. **Done** — real SIT Punggol campus footprints (E1–E6) load from `buildings.json`; click-to-select/highlight working.
 - **M2 target:** Robust selection across all campus buildings; handle edge cases.
 - **M3 target:** Polished selection UX; integrated with final flow.
 
@@ -56,7 +56,7 @@ demonstrable check — not "it exists".
   - **Afiq**: user input → JSON conversion (the piece that turns raw UI input into the
     JSON format `BuildingGenerator`/`InteriorGenerator` read).
 - **Jira Epic:** `INNAVI-T02`
-- **M1 target:** User enters a set of interior data, saves it to JSON, and loads it back to reproduce the same data. **✅ Done (Yongqi's part)** — 2D interior floor-plan editor (rooms, walls, doors with connection properties, elevators/stairs/escalators with cross-floor data, room/door naming, snapping, boundary/overlap validation); save/load round-trips through `buildings.json`. **Still keyboard-driven, not a full UMG toolbar** — that's Padre's part of T02, status not confirmed by this pass.
+- **M1 target:** User enters a set of interior data, saves it to JSON, and loads it back to reproduce the same data. **Done (Yongqi's part)** — 2D interior floor-plan editor (rooms, walls, doors with connection properties, elevators/stairs/escalators with cross-floor data, room/door naming, snapping, boundary/overlap validation); save/load round-trips through `buildings.json`. **Still keyboard-driven, not a full UMG toolbar** — that's Padre's part of T02, status not confirmed by this pass.
 - **M2 target:** Import existing JSON; validation and error handling on bad input.
 - **M3 target:** Polished editor UX (real UMG buttons instead of keyboard shortcuts); reusable across different buildings.
 
@@ -65,7 +65,7 @@ demonstrable check — not "it exists".
 - **Supports:** _(interior generation — F03 TBD)_
 - **Owner:** Yongqi
 - **Jira Epic:** `INNAVI-T03`
-- **M1 target:** Given a JSON file, generate the corresponding rooms, corridors, and stairs for at least one multi-floor building. **✅ Done** — `AInteriorGenerator` reads the JSON and spawns real 3D procedural-mesh rooms/walls/doors per floor (tested on multi-floor buildings, e.g. a 10-floor building with rooms/doors/elevators/stairs/escalators across floors). Elevators/stairs/escalators are recorded as `FInteriorNavNode`s with a `ConnectorGroupId` tying each connector's per-floor instances together, and doors carry `InputId`/`ConnectsTo` — the input/output-node format was shared with the T04 owners (ws/jh) before implementation.
+- **M1 target:** Given a JSON file, generate the corresponding rooms, corridors, and stairs for at least one multi-floor building. **Done** — `AInteriorGenerator` reads the JSON and spawns real 3D procedural-mesh rooms/walls/doors per floor (tested on multi-floor buildings, e.g. a 10-floor building with rooms/doors/elevators/stairs/escalators across floors). Elevators/stairs/escalators are recorded as `FInteriorNavNode`s with a `ConnectorGroupId` tying each connector's per-floor instances together, and doors carry `InputId`/`ConnectsTo` — the input/output-node format was shared with the T04 owners (ws/jh) before implementation.
 - **M2 target:** More layout rules; multiple buildings; consistency guarantees for navigation.
 - **M3 target:** Optional Polish/Preview pass (stretch — e.g. a rotatable 3D view of the schematic interior, on top of the existing 2D editor); performance tuning.
 
@@ -89,9 +89,9 @@ These are standard deliverables required of all teams. Owners TBD.
 | R01 | GitHub repository & workflow (branches, PRs, clean structure) | Repo organized; PR-based workflow in use | Not reviewed this pass |
 | R02 | Jira project & backlog (Epics → Stories/Tasks with owners) | Epics for T01–T04 with stories and assignees | Not reviewed this pass |
 | R03 | Architecture v0.1 (system design + tech stack) | `docs/architecture.md` with diagram | Exists; content still broadly accurate |
-| R04 | Automated build (CI) | Build runs automatically on push | ❌ Not started. See "CI/CD" note below |
+| R04 | Automated build (CI) | Build runs automatically on push | Not started. See "CI/CD" note below |
 | R05 | Automated checks / tests | At least basic checks run in CI | Not started (blocked on R04) |
-| R06 | Reproducible dev environment | README lets a teammate clone, set up, and run | ✅ `README.md` now has real build/run steps (was "TBD") |
+| R06 | Reproducible dev environment | README lets a teammate clone, set up, and run | `README.md` now has real build/run steps (was "TBD") |
 | R07 | Working technical proof of concept | Core risks demonstrated running (see T01–T04) | T01–T03 demonstrated; T04 (navigation) unconfirmed |
 | R08 | Basic error handling | App does not crash on bad/empty input | Interior editor validates most inputs (bounds/overlap/wall-collision checks, unsaved-changes prompts) - not audited team-wide |
 | R09 | Working product demonstration | 2–3 min demo: select → input → generate → navigate | Not yet assembled (navigate step depends on T04) |
