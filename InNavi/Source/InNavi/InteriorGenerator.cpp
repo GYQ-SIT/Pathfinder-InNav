@@ -968,30 +968,25 @@ bool AInteriorGenerator::FindSnapOffset(int32 Level, const TArray<FVector2D>& Fo
 	float BestDistSq = ToleranceFootprintUnits * ToleranceFootprintUnits;
 	bool bFound = false;
 
-	for (const AInteriorRoom* Other : RoomList->Rooms)
+	// Checking against the closest point on each edge - not just each vertex - covers snapping to
+	// the middle of a wall as well as a corner; a vertex is just the case where that closest point
+	// happens to land on an edge's own endpoint, so this subsumes a vertex-only check. Shared by
+	// every candidate shape below (other rooms/walls, and the building's own outline).
+	auto CheckAgainstEdges = [&](const TArray<FVector2D>& CandidateFootprint, bool bCandidateClosed)
 	{
-		if (!Other || Other->RoomId == RoomIdToExclude)
+		const int32 NumCandidate = CandidateFootprint.Num();
+		if (NumCandidate < 2)
 		{
-			continue;
+			return;
 		}
 
-		const TArray<FVector2D>& OtherFootprint = Other->GetFootprint();
-		const int32 NumOther = OtherFootprint.Num();
-		if (NumOther < 2)
-		{
-			continue;
-		}
-
-		// Checking against the closest point on each edge - not just each vertex - covers snapping
-		// to the middle of a wall as well as a corner; a vertex is just the case where that closest
-		// point happens to land on an edge's own endpoint, so this subsumes the old vertex-only check.
-		const int32 NumEdgesOther = Other->IsClosedLoop() ? NumOther : NumOther - 1;
+		const int32 NumEdgesCandidate = bCandidateClosed ? NumCandidate : NumCandidate - 1;
 		for (const FVector2D& MyVertex : Footprint)
 		{
-			for (int32 i = 0; i < NumEdgesOther; i++)
+			for (int32 i = 0; i < NumEdgesCandidate; i++)
 			{
-				const FVector2D& EdgeA = OtherFootprint[i];
-				const FVector2D& EdgeB = OtherFootprint[(i + 1) % NumOther];
+				const FVector2D& EdgeA = CandidateFootprint[i];
+				const FVector2D& EdgeB = CandidateFootprint[(i + 1) % NumCandidate];
 				const FVector2D ClosestPoint = ClosestPointOnSegment2D(MyVertex, EdgeA, EdgeB);
 
 				const float DistSq = FVector2D::DistSquared(MyVertex, ClosestPoint);
@@ -1002,6 +997,25 @@ bool AInteriorGenerator::FindSnapOffset(int32 Level, const TArray<FVector2D>& Fo
 					bFound = true;
 				}
 			}
+		}
+	};
+
+	for (const AInteriorRoom* Other : RoomList->Rooms)
+	{
+		if (Other && Other->RoomId != RoomIdToExclude)
+		{
+			CheckAgainstEdges(Other->GetFootprint(), Other->IsClosedLoop());
+		}
+	}
+
+	// The building's own outline - always closed, and in the same pre-scale/pre-offset footprint
+	// units as everything else here (see IsPointInPolygon's callers elsewhere in this file for the
+	// same assumption).
+	if (Generator)
+	{
+		if (const APolyBuilding* Building = Generator->FindBuildingById(LoadedBuildingId))
+		{
+			CheckAgainstEdges(Building->GetFootprint(), true);
 		}
 	}
 
