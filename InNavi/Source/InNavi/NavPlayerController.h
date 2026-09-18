@@ -52,6 +52,11 @@ class INNAVI_API ANavPlayerController : public APlayerController
 public:
 	ANavPlayerController();
 
+	// Used by the 2D floor plan while a navigation endpoint is armed.
+	bool IsSelectingNavigationPoint() const;
+	void SelectNavigationPoint(FVector2D FootprintPosition, int32 Floor);
+	UNavigationPanelWidget* GetNavigationPanel() const { return NavigationPanel; }
+
 	// Bind this once to catch every failed action (see FOnActionFailed above) instead of hunting
 	// through the Output Log.
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")

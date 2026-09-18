@@ -8,6 +8,7 @@
 #include "BuildingGenerator.h"
 #include "PolyBuilding.h"
 #include "NavPlayerController.h"
+#include "NavigationPanelWidget.h"
 #include "EngineUtils.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
@@ -45,6 +46,13 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 	if (PlayerController && InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 	{
 		const FVector2D LocalPosition = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+		if (PlayerController->IsSelectingNavigationPoint())
+		{
+			PlayerController->SelectNavigationPoint(
+				LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize()),
+				InteriorGen ? InteriorGen->GetActiveFloor() : 0);
+			return FReply::Handled();
+		}
 
 		if (PlayerController->IsInSelectMode())
 		{
@@ -881,5 +889,52 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		}
 	}
 
-	return LayerId + 4;
+	// ---- Navigation route and endpoints on the currently viewed floor ----
+	if (PlayerController)
+	{
+		if (const UNavigationPanelWidget* NavigationPanel = PlayerController->GetNavigationPanel())
+		{
+			const int32 ActiveFloor = InteriorGen->GetActiveFloor();
+			const TArray<FNavigationRoutePoint>& Route = NavigationPanel->GetRoutePoints();
+			for (int32 I = 1; I < Route.Num(); ++I)
+			{
+				if (Route[I - 1].Floor != ActiveFloor || Route[I].Floor != ActiveFloor)
+				{
+					continue;
+				}
+				TArray<FVector2D> Segment;
+				Segment.Add(WorldToLocal((Route[I - 1].Position + Building->BuildingOffset) * Scale));
+				Segment.Add(WorldToLocal((Route[I].Position + Building->BuildingOffset) * Scale));
+				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 4,
+					AllottedGeometry.ToPaintGeometry(), Segment, ESlateDrawEffect::None,
+					FLinearColor(1.f, 0.55f, 0.f, 1.f), true, 6.f);
+			}
+
+			const FSlateBrush* MarkerBrush = FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox"));
+			auto DrawEndpoint = [&](const FNavigationRoutePoint& Point, const FLinearColor& Color)
+			{
+				if (Point.Floor != ActiveFloor)
+				{
+					return;
+				}
+				constexpr float MarkerSize = 12.f;
+				const FVector2D MarkerLocal = WorldToLocal((Point.Position + Building->BuildingOffset) * Scale);
+				const FPaintGeometry MarkerGeometry = AllottedGeometry.ToPaintGeometry(
+					FVector2f(MarkerSize, MarkerSize),
+					FSlateLayoutTransform(MarkerLocal - FVector2D(MarkerSize * 0.5f)));
+				FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 5,
+					MarkerGeometry, MarkerBrush, ESlateDrawEffect::None, Color);
+			};
+			if (NavigationPanel->HasStart())
+			{
+				DrawEndpoint(NavigationPanel->GetStart(), FLinearColor(0.f, 0.8f, 0.2f, 1.f));
+			}
+			if (NavigationPanel->HasDestination())
+			{
+				DrawEndpoint(NavigationPanel->GetDestination(), FLinearColor(0.9f, 0.1f, 0.1f, 1.f));
+			}
+		}
+	}
+
+	return LayerId + 6;
 }
