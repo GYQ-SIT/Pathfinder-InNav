@@ -317,6 +317,24 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool DeleteSelectedConnector();
 
+	// The currently-selected connector's type (Elevator/Stairs/Escalator) - for a connector
+	// properties panel to show read-only. PathNode if nothing is selected (never a real value for
+	// an actual connector, since only Elevator/Stairs/Escalator are ever placed this way).
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	EInteriorNavNodeType GetSelectedConnectorType() const;
+
+	// The currently-selected connector's current floor list - for a connector properties panel to
+	// initialize its floor checkboxes from. Empty if nothing is selected.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	TArray<int32> GetSelectedConnectorFloors() const;
+
+	// Changes which floors the currently-selected connector reaches (see
+	// AInteriorGenerator::SetConnectorFloors) - what a connector properties panel's "apply" button
+	// should call after reading which floor checkboxes are ticked. No-op (returns false) if no
+	// connector is selected.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool SetSelectedConnectorFloors(const TArray<int32>& NewFloors);
+
 	// Removes a single room/wall by id (see AInteriorGenerator::DeleteRoom) - general-purpose,
 	// explicit-id version. See also DeleteSelection. Also clears the door selection if the deleted
 	// room happened to own the currently-selected door (it no longer exists either way).

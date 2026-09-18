@@ -226,6 +226,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool DeleteConnectorGroup(const FString& GroupId);
 
+	// Changes which floors an existing connector (GroupId) reaches to NewConnectsToFloors - a floor
+	// newly added gets a fresh node created there (same position/type, same all-or-nothing
+	// validation as PlaceConnectorNode - if any newly-added floor fails, nothing about the connector
+	// changes), a floor dropped has its node removed, and every remaining node's ConnectsFloors is
+	// updated to the new full list. Rejects an empty NewConnectsToFloors (use DeleteConnectorGroup
+	// to remove a connector entirely instead). Returns false if no node with that ConnectorGroupId
+	// exists, or the change was rejected.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool SetConnectorFloors(const FString& GroupId, const TArray<int32>& NewConnectsToFloors);
+
 	// The rooms/walls spawned on a given floor - read-only, for a 2D floor plan renderer to draw
 	// (see UInteriorFloorPlanWidget). Empty if that floor doesn't exist.
 	UFUNCTION(BlueprintPure, Category = "Interior")
@@ -239,6 +249,12 @@ private:
 	// rooms[],navNodes[]}) from the currently loaded building's live state. Used by
 	// SyncInteriorToBuildingGenerator.
 	TSharedRef<FJsonObject> SerializeCurrentInterior() const;
+
+	// Shared validation behind PlaceConnectorNode and SetConnectorFloors: can a connector sit at
+	// Position on Level - the floor exists, Position is inside the building's outline, and Position
+	// isn't inside a wall's solid thickness there (being inside a room's open interior is fine).
+	// Logs the specific reason on failure.
+	bool CanPlaceConnectorOnFloor(FVector2D Position, int32 Level) const;
 
 	UPROPERTY()
 	ABuildingGenerator* Generator;

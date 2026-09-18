@@ -1065,6 +1065,58 @@ bool ANavPlayerController::DeleteSelectedConnector()
 	return bSuccess;
 }
 
+EInteriorNavNodeType ANavPlayerController::GetSelectedConnectorType() const
+{
+	if (!SelectedConnectorGroupId.IsEmpty() && InteriorGen)
+	{
+		for (const FInteriorNavNode& Node : InteriorGen->GetNavNodes())
+		{
+			if (Node.ConnectorGroupId == SelectedConnectorGroupId)
+			{
+				return Node.Type;
+			}
+		}
+	}
+
+	return EInteriorNavNodeType::PathNode;
+}
+
+TArray<int32> ANavPlayerController::GetSelectedConnectorFloors() const
+{
+	TArray<int32> Result;
+	if (!SelectedConnectorGroupId.IsEmpty() && InteriorGen)
+	{
+		for (const FInteriorNavNode& Node : InteriorGen->GetNavNodes())
+		{
+			if (Node.ConnectorGroupId == SelectedConnectorGroupId)
+			{
+				return Node.ConnectsFloors;
+			}
+		}
+	}
+
+	return Result;
+}
+
+bool ANavPlayerController::SetSelectedConnectorFloors(const TArray<int32>& NewFloors)
+{
+	if (SelectedConnectorGroupId.IsEmpty() || !InteriorGen)
+	{
+		return false;
+	}
+
+	const bool bSuccess = InteriorGen->SetConnectorFloors(SelectedConnectorGroupId, NewFloors);
+	if (bSuccess)
+	{
+		bHasUnsavedChanges = true;
+	}
+	else
+	{
+		OnActionFailed.Broadcast(TEXT("Could not update that connector's floors - check each newly-added floor exists, is inside the building, and isn't blocked by a wall."));
+	}
+	return bSuccess;
+}
+
 void ANavPlayerController::DeleteSelectionKeyHandler()
 {
 	DeleteSelection();
