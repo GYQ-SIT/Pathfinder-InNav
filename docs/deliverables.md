@@ -43,9 +43,20 @@ demonstrable check — not "it exists".
 ### T02 — Data Input & JSON System
 - **What it is:** Interface to enter/manage interior data (rooms, room types, floors, elevators, stairs, corridors); save and load as JSON.
 - **Supports:** _(data entry / save-load — F02 TBD)_
-- **Owner:** Yongqi
+- **Owner:** Split three ways —
+  - **Yongqi**: backend/data model (C++ room/door/connector CRUD, validation, JSON
+    save/load) and the panels/dialogs already in UMG (door/room/connector property
+    panels, unsaved-changes confirm dialog).
+  - **Padre**: the UI layer — turning the current keyboard-driven interior-editing
+    tools (draw room/wall, select, add-door, place connector, etc. — see
+    `docs/design/interior-editor-guide.md` for the full list) into a proper on-screen
+    UMG toolbar. Everything Yongqi's side needs is already exposed
+    `BlueprintCallable` (see `docs/design/building-generation-ui-spec.md` for the
+    exterior-side integration pattern to follow for the interior tools too).
+  - **Afiq**: user input → JSON conversion (the piece that turns raw UI input into the
+    JSON format `BuildingGenerator`/`InteriorGenerator` read).
 - **Jira Epic:** `INNAVI-T02`
-- **M1 target:** User enters a set of interior data, saves it to JSON, and loads it back to reproduce the same data. **✅ Done** — 2D interior floor-plan editor (rooms, walls, doors with connection properties, elevators/stairs/escalators with cross-floor data, room/door naming, snapping, boundary/overlap validation); save/load round-trips through `buildings.json`. Currently keyboard-driven, not yet a full UMG toolbar — see `docs/design/interior-editor-guide.md`.
+- **M1 target:** User enters a set of interior data, saves it to JSON, and loads it back to reproduce the same data. **✅ Done (Yongqi's part)** — 2D interior floor-plan editor (rooms, walls, doors with connection properties, elevators/stairs/escalators with cross-floor data, room/door naming, snapping, boundary/overlap validation); save/load round-trips through `buildings.json`. **Still keyboard-driven, not a full UMG toolbar** — that's Padre's part of T02, status not confirmed by this pass.
 - **M2 target:** Import existing JSON; validation and error handling on bad input.
 - **M3 target:** Polished editor UX (real UMG buttons instead of keyboard shortcuts); reusable across different buildings.
 
