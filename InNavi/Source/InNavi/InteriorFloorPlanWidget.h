@@ -82,6 +82,13 @@ private:
 	// when non-null - select mode doesn't need it, starting a drag does (see NativeOnMouseButtonDown).
 	bool FindDoorNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, FString& OutRoomId, FString& OutDoorId, int32* OutEdgeIndex = nullptr) const;
 
+	// Select mode: finds whichever connector marker (elevator/stairs/escalator - see NativePaint) on
+	// the active floor is within a few pixels of LocalPosition. Checked alongside
+	// FindDoorNearLocalPosition (before FindRoomNearLocalPosition), since a connector is often
+	// placed inside a room and should win over "select the room" the same way a door marker does.
+	// Returns false (leaving OutGroupId untouched) if none is close enough.
+	bool FindConnectorNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, FString& OutGroupId) const;
+
 	// While dragging an already-selected door (see NativeOnMouseButtonDown/NativeOnMouseMove),
 	// computes the Offset (world units, clamped to fit within the edge - same convention as
 	// FindRoomNearLocalPosition's OutOffsetWorldUnits) the door would have if centered under

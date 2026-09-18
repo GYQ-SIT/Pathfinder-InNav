@@ -64,6 +64,13 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 				return FReply::Handled().CaptureMouse(TakeWidget());
 			}
 
+			FString ConnectorGroupId;
+			if (FindConnectorNearLocalPosition(LocalPosition, InGeometry.GetLocalSize(), ConnectorGroupId))
+			{
+				PlayerController->SelectConnector(ConnectorGroupId);
+				return FReply::Handled();
+			}
+
 			AInteriorRoom* Room = FindRoomNearLocalPosition(LocalPosition, InGeometry.GetLocalSize());
 			if (!Room)
 			{
@@ -488,6 +495,50 @@ bool UInteriorFloorPlanWidget::FindDoorNearLocalPosition(FVector2D LocalPosition
 	return false;
 }
 
+bool UInteriorFloorPlanWidget::FindConnectorNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, FString& OutGroupId) const
+{
+	if (!InteriorGen || !Generator)
+	{
+		return false;
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building)
+	{
+		return false;
+	}
+
+	FVector2D Origin;
+	float PixelsPerUnit;
+	ComputeViewTransform(WidgetSize, Origin, PixelsPerUnit);
+
+	const float Scale = Generator->GetScale();
+	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
+	{
+		return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+	};
+
+	constexpr float ClickTolerancePixels = 10.f;
+	const int32 ActiveFloor = InteriorGen->GetActiveFloor();
+
+	for (const FInteriorNavNode& Node : InteriorGen->GetNavNodes())
+	{
+		if (Node.Level != ActiveFloor)
+		{
+			continue;
+		}
+
+		const FVector2D MarkerLocal = WorldToLocal((Node.Position + Building->BuildingOffset) * Scale);
+		if (FVector2D::Distance(LocalPosition, MarkerLocal) <= ClickTolerancePixels)
+		{
+			OutGroupId = Node.ConnectorGroupId;
+			return true;
+		}
+	}
+
+	return false;
+}
+
 bool UInteriorFloorPlanWidget::ComputeDoorDragOffset(const FString& RoomId, int32 EdgeIndex, FVector2D LocalPosition, FVector2D WidgetSize, float& OutOffsetWorldUnits) const
 {
 	if (!InteriorGen || !Generator)
@@ -762,6 +813,41 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			{
 				DrawSegment(WorldA + Dir * EdgeCursor, WorldB, LineColor, LineThickness);
 			}
+		}
+	}
+
+	// ---- Connectors (elevator/stairs/escalator) on the active floor ----
+	if (PlayerController)
+	{
+		// Placeholder box per type for now, distinguished only by color - swapping in real icons
+		// later only means changing what's drawn here, nothing about how nodes are found/selected.
+		const FSlateBrush* ConnectorBrush = FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox"));
+		constexpr float ConnectorSize = 14.f;
+		const FString SelectedConnectorGroupId = PlayerController->GetSelectedConnectorGroupId();
+
+		for (const FInteriorNavNode& Node : InteriorGen->GetNavNodes())
+		{
+			if (Node.Level != InteriorGen->GetActiveFloor())
+			{
+				continue;
+			}
+
+			FLinearColor NodeColor;
+			switch (Node.Type)
+			{
+			case EInteriorNavNodeType::Elevator:  NodeColor = FLinearColor(0.2f, 0.6f, 1.f, 1.f); break;
+			case EInteriorNavNodeType::Stairs:    NodeColor = FLinearColor(0.7f, 0.3f, 1.f, 1.f); break;
+			case EInteriorNavNodeType::Escalator: NodeColor = FLinearColor(0.2f, 0.85f, 0.5f, 1.f); break;
+			default:                              NodeColor = FLinearColor(0.6f, 0.6f, 0.6f, 1.f); break; // PathNode
+			}
+			if (!SelectedConnectorGroupId.IsEmpty() && Node.ConnectorGroupId == SelectedConnectorGroupId)
+			{
+				NodeColor = FLinearColor(1.f, 0.15f, 0.15f, 1.f);
+			}
+
+			const FVector2D MarkerLocal = WorldToLocal((Node.Position + Building->BuildingOffset) * Scale);
+			const FPaintGeometry MarkerGeometry = AllottedGeometry.ToPaintGeometry(FVector2f(ConnectorSize, ConnectorSize), FSlateLayoutTransform(MarkerLocal - FVector2D(ConnectorSize * 0.5f, ConnectorSize * 0.5f)));
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 2, MarkerGeometry, ConnectorBrush, ESlateDrawEffect::None, NodeColor);
 		}
 	}
 

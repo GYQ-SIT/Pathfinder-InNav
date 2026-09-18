@@ -920,6 +920,23 @@ FString AInteriorGenerator::PlaceConnectorNode(EInteriorNavNodeType Type, FVecto
 	return GroupId;
 }
 
+bool AInteriorGenerator::DeleteConnectorGroup(const FString& GroupId)
+{
+	const int32 RemovedCount = NavNodes.RemoveAll([&GroupId](const FInteriorNavNode& Node)
+	{
+		return Node.ConnectorGroupId == GroupId;
+	});
+
+	if (RemovedCount > 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Deleted connector '%s' (%d node(s))"), *GroupId, RemovedCount);
+		return true;
+	}
+
+	UE_LOG(LogTemp, Error, TEXT("DeleteConnectorGroup: '%s' not found"), *GroupId);
+	return false;
+}
+
 bool AInteriorGenerator::DeleteRoom(const FString& RoomId)
 {
 	for (auto& Pair : RoomsByFloor)

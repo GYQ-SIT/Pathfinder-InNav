@@ -25,6 +25,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedRoomChanged, FString, Roo
 // deselecting - both ids are empty in that case). Mirrors FOnSelectedRoomChanged for doors, since
 // the two selections are tracked and broadcast separately (see SelectRoom/SelectDoor).
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSelectedDoorChanged, FString, RoomId, FString, DoorId);
+// Broadcast whenever the selected connector (elevator/stairs/escalator) changes - GroupId is the
+// shared FInteriorNavNode::ConnectorGroupId, not one floor-specific node's own Id, since selecting
+// one selects the whole multi-floor connector (see SelectConnector). Empty when deselecting.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedConnectorChanged, FString, GroupId);
 // Broadcast after each footprint point is added or cleared, so UI can show a live point count.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFootprintPointCountChanged, int32, PointCount);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRoomPointCountChanged, int32, PointCount);
@@ -281,6 +285,26 @@ public:
 	// Empty if no door is selected.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	TArray<FString> GetConnectableTargetIds() const;
+
+	// Sets the currently-selected connector (elevator/stairs/escalator) by its shared
+	// ConnectorGroupId - the 2D floor plan canvas's select-mode click handler calls this when the
+	// click lands on a connector marker. Clears whatever room/door was selected (see SelectRoom/
+	// SelectDoor) - only one of the three is ever selected at a time. Selection persists across
+	// floor changes (a floor the connector doesn't reach just won't show it highlighted there).
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void SelectConnector(const FString& GroupId);
+
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	FString GetSelectedConnectorGroupId() const { return SelectedConnectorGroupId; }
+
+	UPROPERTY(BlueprintAssignable, Category = "Interior")
+	FOnSelectedConnectorChanged OnSelectedConnectorChanged;
+
+	// Removes every floor's node for the currently-selected connector (see
+	// AInteriorGenerator::DeleteConnectorGroup) and clears the selection. Bound as part of
+	// DeleteSelection (Backspace). No-op (returns false) if no connector is selected.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool DeleteSelectedConnector();
 
 	// Removes a single room/wall by id (see AInteriorGenerator::DeleteRoom) - general-purpose,
 	// explicit-id version. See also DeleteSelection. Also clears the door selection if the deleted
@@ -550,6 +574,10 @@ private:
 	// SelectedRoomId, and mutually exclusive with it (selecting one clears the other).
 	FString SelectedDoorRoomId;
 	FString SelectedDoorId;
+
+	// See SelectConnector/GetSelectedConnectorGroupId - same lifetime rules as SelectedRoomId, and
+	// mutually exclusive with both SelectedRoomId and SelectedDoorRoomId/SelectedDoorId.
+	FString SelectedConnectorGroupId;
 
 	// See TogglePrefabRectangleMode/TogglePrefabTriangleMode/TogglePrefabCircleMode/
 	// IsInPrefabRoomMode. 0 = none armed; 1 = rectangle, 2 = triangle, 3 = circle.

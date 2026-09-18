@@ -220,6 +220,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	FString PlaceConnectorNode(EInteriorNavNodeType Type, FVector2D Position, const TArray<int32>& ConnectsToFloors);
 
+	// Removes every floor's FInteriorNavNode sharing GroupId (see PlaceConnectorNode) - deleting a
+	// connector removes it everywhere it appeared, not just on the current floor. Returns false if
+	// no node with that ConnectorGroupId exists.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool DeleteConnectorGroup(const FString& GroupId);
+
 	// The rooms/walls spawned on a given floor - read-only, for a 2D floor plan renderer to draw
 	// (see UInteriorFloorPlanWidget). Empty if that floor doesn't exist.
 	UFUNCTION(BlueprintPure, Category = "Interior")

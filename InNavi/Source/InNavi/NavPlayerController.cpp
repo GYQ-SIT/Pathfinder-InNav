@@ -777,6 +777,11 @@ void ANavPlayerController::SelectRoom(const FString& RoomId)
 		SelectedDoorId.Empty();
 		OnSelectedDoorChanged.Broadcast(FString(), FString());
 	}
+	if (!SelectedConnectorGroupId.IsEmpty())
+	{
+		SelectedConnectorGroupId.Empty();
+		OnSelectedConnectorChanged.Broadcast(FString());
+	}
 
 	if (SelectedRoomId == RoomId)
 	{
@@ -794,10 +799,38 @@ void ANavPlayerController::SelectDoor(const FString& RoomId, const FString& Door
 		SelectedRoomId.Empty();
 		OnSelectedRoomChanged.Broadcast(FString());
 	}
+	if (!SelectedConnectorGroupId.IsEmpty())
+	{
+		SelectedConnectorGroupId.Empty();
+		OnSelectedConnectorChanged.Broadcast(FString());
+	}
 
 	SelectedDoorRoomId = RoomId;
 	SelectedDoorId = DoorId;
 	OnSelectedDoorChanged.Broadcast(SelectedDoorRoomId, SelectedDoorId);
+}
+
+void ANavPlayerController::SelectConnector(const FString& GroupId)
+{
+	if (!SelectedRoomId.IsEmpty())
+	{
+		SelectedRoomId.Empty();
+		OnSelectedRoomChanged.Broadcast(FString());
+	}
+	if (!SelectedDoorId.IsEmpty())
+	{
+		SelectedDoorRoomId.Empty();
+		SelectedDoorId.Empty();
+		OnSelectedDoorChanged.Broadcast(FString(), FString());
+	}
+
+	if (SelectedConnectorGroupId == GroupId)
+	{
+		return;
+	}
+
+	SelectedConnectorGroupId = GroupId;
+	OnSelectedConnectorChanged.Broadcast(SelectedConnectorGroupId);
 }
 
 bool ANavPlayerController::SetSelectedRoomName(const FString& NewName)
@@ -958,12 +991,38 @@ bool ANavPlayerController::DeleteSelection()
 		return DeleteDoor(SelectedDoorRoomId, SelectedDoorId);
 	}
 
+	if (!SelectedConnectorGroupId.IsEmpty())
+	{
+		return DeleteSelectedConnector();
+	}
+
 	if (SelectedRoomId.IsEmpty())
 	{
 		return false;
 	}
 
 	return DeleteRoom(SelectedRoomId);
+}
+
+bool ANavPlayerController::DeleteSelectedConnector()
+{
+	if (SelectedConnectorGroupId.IsEmpty() || !InteriorGen)
+	{
+		return false;
+	}
+
+	const bool bSuccess = InteriorGen->DeleteConnectorGroup(SelectedConnectorGroupId);
+	if (bSuccess)
+	{
+		bHasUnsavedChanges = true;
+		SelectedConnectorGroupId.Empty();
+		OnSelectedConnectorChanged.Broadcast(FString());
+	}
+	else
+	{
+		OnActionFailed.Broadcast(TEXT("Could not delete that connector."));
+	}
+	return bSuccess;
 }
 
 void ANavPlayerController::DeleteSelectionKeyHandler()
