@@ -872,14 +872,37 @@ bool ANavPlayerController::GetSelectedDoorOpening(FInteriorOpening& OutOpening)
 	return InteriorGen->GetDoorOpening(SelectedDoorRoomId, SelectedDoorId, OutOpening);
 }
 
-bool ANavPlayerController::SetSelectedDoorConnectsTo(const FString& NewConnectsTo)
+bool ANavPlayerController::SetSelectedDoorConnectsTo(const FString& NewConnectsToLabel)
 {
 	if (SelectedDoorId.IsEmpty() || !InteriorGen)
 	{
 		return false;
 	}
 
-	const bool bSuccess = InteriorGen->SetDoorConnectsTo(SelectedDoorRoomId, SelectedDoorId, NewConnectsTo);
+	// NewConnectsToLabel is whatever the dropdown showed (see GetConnectableTargetIds) - a room's
+	// current name, or "corridor". Resolve it back to the stable room id that actually gets stored,
+	// so a later rename doesn't silently break this door's connection.
+	FString ResolvedConnectsTo = NewConnectsToLabel;
+	if (NewConnectsToLabel != TEXT("corridor"))
+	{
+		bool bResolved = false;
+		for (const AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
+		{
+			if (Room && Room->RoomName == NewConnectsToLabel)
+			{
+				ResolvedConnectsTo = Room->RoomId;
+				bResolved = true;
+				break;
+			}
+		}
+		if (!bResolved)
+		{
+			OnActionFailed.Broadcast(FString::Printf(TEXT("Could not find a room named '%s'."), *NewConnectsToLabel));
+			return false;
+		}
+	}
+
+	const bool bSuccess = InteriorGen->SetDoorConnectsTo(SelectedDoorRoomId, SelectedDoorId, ResolvedConnectsTo);
 	if (bSuccess)
 	{
 		bHasUnsavedChanges = true;
@@ -905,11 +928,28 @@ TArray<FString> ANavPlayerController::GetConnectableTargetIds() const
 	{
 		if (Room && Room->IsClosedLoop() && Room->RoomId != SelectedDoorRoomId)
 		{
-			Result.Add(Room->RoomId);
+			// Shown (and picked from) by name, not raw id - the id is what actually gets stored (see
+			// SetSelectedDoorConnectsTo), so a later rename doesn't silently break this door's
+			// connection. RoomName is never actually empty (see CreateRoomFromFootprint), it falls
+			// back to the room's own id if never given a real name.
+			Result.Add(Room->RoomName);
 		}
 	}
 
 	return Result;
+}
+
+FString ANavPlayerController::ResolveConnectsToDisplayName(const FString& ConnectsToId) const
+{
+	if (ConnectsToId.IsEmpty() || ConnectsToId == TEXT("corridor") || !InteriorGen)
+	{
+		return ConnectsToId;
+	}
+
+	const FString RoomName = InteriorGen->GetRoomName(ConnectsToId);
+	// Falls back to the raw id if the room can't be found (e.g. it was since deleted) - better to
+	// show a stale-but-visible id than silently blank out the field.
+	return RoomName.IsEmpty() ? ConnectsToId : RoomName;
 }
 
 bool ANavPlayerController::DeleteRoom(const FString& RoomId)

@@ -275,16 +275,27 @@ public:
 	// the other side of the door) - what a door properties panel's "apply" button should call. No-op
 	// (returns false) if no door is selected.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
-	bool SetSelectedDoorConnectsTo(const FString& NewConnectsTo);
+	bool SetSelectedDoorConnectsTo(const FString& NewConnectsToLabel);
 
 	// The valid ConnectsTo targets for the currently-selected door, for a door properties panel to
 	// populate a dropdown with: "corridor" (the building's shared circulation space, for a door
-	// that doesn't lead into another specific room) followed by every other closed room's id on the
-	// door's own floor - excluding the door's own room (InputId), since a door can't connect to the
-	// room it's already in, and excluding open walls, since only closed rooms are valid targets.
-	// Empty if no door is selected.
+	// that doesn't lead into another specific room) followed by every other closed room's CURRENT
+	// NAME (not its id) on the door's own floor - excluding the door's own room (InputId), since a
+	// door can't connect to the room it's already in, and excluding open walls, since only closed
+	// rooms are valid targets. Shown/picked by name since that's what a user actually remembers a
+	// room by (it's user-editable, unlike the auto-generated id) - SetSelectedDoorConnectsTo
+	// resolves the picked name back to the room's stable id before storing it. Empty if no door is
+	// selected.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	TArray<FString> GetConnectableTargetIds() const;
+
+	// Converts a stored ConnectsTo value (a room id, or "corridor") into what the dropdown should
+	// show as currently selected - the room's current name (see GetConnectableTargetIds), or
+	// ConnectsToId unchanged if it's "corridor", empty, or the room can't be found anymore. Call
+	// this on the door's saved ConnectsTo before feeding it to the dropdown's "set selected option",
+	// since the dropdown's options are names, not ids.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	FString ResolveConnectsToDisplayName(const FString& ConnectsToId) const;
 
 	// Sets the currently-selected connector (elevator/stairs/escalator) by its shared
 	// ConnectorGroupId - the 2D floor plan canvas's select-mode click handler calls this when the
