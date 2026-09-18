@@ -25,7 +25,7 @@ public:
 
     bool FindRoute(
         const FNavigationRouteRequest& Request,
-        FNavigationRouteResult& OutResult) const;
+        FNavigationGraphRouteResult& OutResult) const;
 
     FNavigationPositionCheckResult ValidatePosition(
         const FVector2D& Position,

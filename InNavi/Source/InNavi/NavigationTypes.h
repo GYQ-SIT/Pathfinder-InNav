@@ -54,7 +54,7 @@ struct FNavigationRouteRequest
     FString DestinationNodeId;
 };
 
-struct FNavigationRouteResult
+struct FNavigationGraphRouteResult
 {
     ENavigationRouteStatus Status =
         ENavigationRouteStatus::NotReady;

@@ -110,7 +110,7 @@ void ANavigationTestActor::RunNavigationTest()
     Request.StartNodeId = TEXT("Room_F1");
     Request.DestinationNodeId = TEXT("Room_F2");
 
-    FNavigationRouteResult Result;
+    FNavigationGraphRouteResult Result;
 
     const bool bRouteFound =
         NavigationSystem.FindRoute(

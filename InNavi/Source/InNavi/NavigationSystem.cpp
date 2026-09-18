@@ -120,9 +120,9 @@ FInNaviNavigationSystem::ValidatePosition(
 
 bool FInNaviNavigationSystem::FindRoute(
     const FNavigationRouteRequest& Request,
-    FNavigationRouteResult& OutResult) const
+    FNavigationGraphRouteResult& OutResult) const
 {
-    OutResult = FNavigationRouteResult();
+    OutResult = FNavigationGraphRouteResult();
 
     if (!IsReady())
     {
