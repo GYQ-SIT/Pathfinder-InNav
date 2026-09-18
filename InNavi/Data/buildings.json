@@ -221,7 +221,109 @@
 					94,
 					160
 				]
-			]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 1,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [
+							{
+								"id": "E2-01-01",
+								"name": "E2-01-01",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										171.86660280760734,
+										91.662809185047934
+									],
+									[
+										231.86660280760734,
+										91.662809185047934
+									],
+									[
+										231.86660280760734,
+										136.66280918504793
+									],
+									[
+										171.86660280760734,
+										136.66280918504793
+									]
+								],
+								"openings": []
+							}
+						],
+						"navNodes": []
+					},
+					{
+						"level": 2,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 3,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 4,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 5,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 6,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 7,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 8,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 9,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 10,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					}
+				]
+			}
 		},
 		{
 			"id": "E3",
