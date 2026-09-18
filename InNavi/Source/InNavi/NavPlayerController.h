@@ -7,6 +7,7 @@
 #include "NavPlayerController.generated.h"
 
 class ABuilding;
+class UNavigationPanelWidget;
 
 UCLASS()
 class INNAVI_API ANavPlayerController : public APlayerController
@@ -22,6 +23,10 @@ protected:
 
 private:
 	void OnClick();
+	void CancelNavigationSelection();
+
+	UPROPERTY()
+	UNavigationPanelWidget* NavigationPanel = nullptr;
 
 	// The currently selected building (to un-highlight when a new one is picked)
 	UPROPERTY()

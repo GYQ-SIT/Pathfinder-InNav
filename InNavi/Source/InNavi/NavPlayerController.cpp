@@ -3,6 +3,9 @@
 
 #include "NavPlayerController.h"
 #include "Building.h"
+#include "NavigationPanelWidget.h"
+#include "Blueprint/UserWidget.h"
+#include "InputCoreTypes.h"
 
 ANavPlayerController::ANavPlayerController()
 {
@@ -16,6 +19,15 @@ void ANavPlayerController::BeginPlay()
 	bShowMouseCursor = true;
 	bEnableClickEvents = true;
 	bEnableMouseOverEvents = true;
+
+	NavigationPanel = CreateWidget<UNavigationPanelWidget>(this, UNavigationPanelWidget::StaticClass());
+	if (NavigationPanel)
+	{
+		NavigationPanel->AddToViewport();
+		FInputModeGameAndUI InputMode;
+		InputMode.SetHideCursorDuringCapture(false);
+		SetInputMode(InputMode);
+	}
 }
 
 void ANavPlayerController::SetupInputComponent()
@@ -23,10 +35,24 @@ void ANavPlayerController::SetupInputComponent()
 	Super::SetupInputComponent();
 
 	InputComponent->BindAction("SelectBuilding", IE_Pressed, this, &ANavPlayerController::OnClick);
+	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::CancelNavigationSelection);
+}
+
+void ANavPlayerController::CancelNavigationSelection()
+{
+	if (NavigationPanel)
+	{
+		NavigationPanel->CancelSelection();
+	}
 }
 
 void ANavPlayerController::OnClick()
 {
+	if (NavigationPanel && NavigationPanel->IsPointerOverPanel())
+	{
+		return;
+	}
+
 	FHitResult Hit;
 	GetHitResultUnderCursor(ECC_Visibility, false, Hit);
 
