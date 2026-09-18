@@ -11,6 +11,7 @@ class APolyBuilding;
 class ABuildingGenerator;
 class AInteriorGenerator;
 class AInteriorRoom;
+class UNavigationPanelWidget;
 
 // Broadcast whenever build mode turns on/off, so UI can show an indicator without polling every tick.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildModeChanged, bool, bNewBuildMode);
@@ -50,6 +51,11 @@ class INNAVI_API ANavPlayerController : public APlayerController
 
 public:
 	ANavPlayerController();
+
+	// Used by the 2D floor plan while a navigation endpoint is armed.
+	bool IsSelectingNavigationPoint() const;
+	void SelectNavigationPoint(FVector2D FootprintPosition, int32 Floor);
+	UNavigationPanelWidget* GetNavigationPanel() const { return NavigationPanel; }
 
 	// Bind this once to catch every failed action (see FOnActionFailed above) instead of hunting
 	// through the Output Log.
@@ -493,6 +499,10 @@ protected:
 private:
 	// Left-click: selects a building normally, or adds a footprint point while in build mode.
 	void OnClick();
+
+	UPROPERTY()
+	UNavigationPanelWidget* NavigationPanel = nullptr;
+
 	void SelectBuildingUnderCursor();
 
 	// Build mode (Plan A): click to trace out a new building's footprint on the ground.

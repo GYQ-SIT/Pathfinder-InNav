@@ -2,6 +2,8 @@
 
 
 #include "NavPlayerController.h"
+#include "NavigationPanelWidget.h"
+#include "Blueprint/UserWidget.h"
 #include "GameFramework/Pawn.h"
 #include "PolyBuilding.h"
 #include "BuildingGenerator.h"
@@ -50,6 +52,16 @@ void ANavPlayerController::BeginPlay()
 	bEnableClickEvents = true;
 	bEnableMouseOverEvents = true;
 
+	NavigationPanel = CreateWidget<UNavigationPanelWidget>(this, UNavigationPanelWidget::StaticClass());
+	if (NavigationPanel)
+	{
+		NavigationPanel->AddToViewport(100);
+		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
+		FInputModeGameAndUI InputMode;
+		InputMode.SetHideCursorDuringCapture(false);
+		SetInputMode(InputMode);
+	}
+
 	for (TActorIterator<ABuildingGenerator> It(GetWorld()); It; ++It)
 	{
 		Generator = *It;
@@ -60,6 +72,23 @@ void ANavPlayerController::BeginPlay()
 	{
 		InteriorGen = *It;
 		break;
+	}
+	if (NavigationPanel)
+	{
+		NavigationPanel->SetNavigationContext(Generator, InteriorGen);
+	}
+}
+
+bool ANavPlayerController::IsSelectingNavigationPoint() const
+{
+	return NavigationPanel && NavigationPanel->IsSelectingPoint();
+}
+
+void ANavPlayerController::SelectNavigationPoint(FVector2D FootprintPosition, int32 Floor)
+{
+	if (NavigationPanel)
+	{
+		NavigationPanel->SelectPoint(FootprintPosition, Floor);
 	}
 }
 
@@ -97,6 +126,28 @@ void ANavPlayerController::SetupInputComponent()
 
 void ANavPlayerController::OnClick()
 {
+	if (NavigationPanel && NavigationPanel->IsPointerOverPanel())
+	{
+		return;
+	}
+	if (IsSelectingNavigationPoint())
+	{
+		FHitResult Hit;
+		if (GetHitResultUnderCursor(ECC_Visibility, false, Hit) && Hit.bBlockingHit
+			&& (Cast<APolyBuilding>(Hit.GetActor()) || Cast<AInteriorRoom>(Hit.GetActor())))
+		{
+			APolyBuilding* Building = Generator && InteriorGen
+				? Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()) : nullptr;
+			if (Building && Generator->GetScale() > KINDA_SMALL_NUMBER)
+			{
+				const FVector2D WorldXY(Hit.ImpactPoint.X, Hit.ImpactPoint.Y);
+				SelectNavigationPoint(WorldXY / Generator->GetScale() - Building->BuildingOffset,
+					InteriorGen->GetActiveFloor());
+			}
+		}
+		return;
+	}
+
 	if (bBuildMode)
 	{
 		AddFootprintPointUnderCursor();
@@ -597,6 +648,12 @@ void ANavPlayerController::OnConfirmPressed()
 
 void ANavPlayerController::OnCancelPressed()
 {
+	if (NavigationPanel && NavigationPanel->GetSelectionMode() != ENavigationSelectionMode::None)
+	{
+		NavigationPanel->CancelSelection();
+		return;
+	}
+
 	if (bBuildMode)
 	{
 		CancelBuilding();
@@ -1450,6 +1507,11 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 		OnActionFailed.Broadcast(TEXT("No file selected - click Browse first."));
 		return 0;
 	}
+	if (NavigationPanel)
+	{
+		NavigationPanel->ClearAll();
+		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
+	}
 
 	if (InteriorGen)
 	{
@@ -1475,6 +1537,11 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 
 void ANavPlayerController::StartNewProject()
 {
+	if (NavigationPanel)
+	{
+		NavigationPanel->ClearAll();
+		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
+	}
 	if (InteriorGen)
 	{
 		InteriorGen->ClearLoadedInterior();
@@ -1652,6 +1719,11 @@ void ANavPlayerController::FocusCameraOnAllBuildings()
 
 void ANavPlayerController::RestoreExteriorCameraView()
 {
+	if (NavigationPanel)
+	{
+		NavigationPanel->ClearAll();
+		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
+	}
 	// Leaving interior editing entirely - cancel any in-progress draw room/wall/delete/prefab mode
 	// so it doesn't keep intercepting clicks/Enter/Esc on whatever screen comes next.
 	if (bDrawRoomMode || bDrawWallMode)
@@ -1833,6 +1905,11 @@ int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 	else if (Generator)
 	{
 		FocusCameraOnBuilding(Generator->FindBuildingById(BuildingId));
+		if (NavigationPanel)
+		{
+			NavigationPanel->ClearAll();
+			NavigationPanel->SetVisibility(ESlateVisibility::Visible);
+		}
 	}
 	return Result;
 }
