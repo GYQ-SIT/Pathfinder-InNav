@@ -6,6 +6,9 @@
 #include "GameFramework/Actor.h"
 #include "BuildingGenerator.generated.h"
 
+class APolyBuilding;
+class FJsonObject;
+
 UCLASS()
 class INNAVI_API ABuildingGenerator : public AActor
 {
@@ -14,10 +17,84 @@ class INNAVI_API ABuildingGenerator : public AActor
 public:
 	ABuildingGenerator();
 
-protected:
-	virtual void BeginPlay() override;
+	// Spawns one building directly from already-parsed data. Used both by JSON loading
+	// (LoadBuildingsFromFile) and by runtime building creation (e.g. NavPlayerController's build mode).
+	// Returns nullptr if Id is empty, already used, or Footprint has fewer than 3 points.
+	APolyBuilding* SpawnBuildingFromData(const FString& Id, const FString& Name, const TArray<FVector2D>& Footprint, int32 FloorCount, float FloorHeight, FVector2D Offset);
+
+	// SpawnBuildingFromData multiplies footprint+offset by this. Callers building a footprint
+	// out of world-space coordinates (e.g. from a raycast) must divide by this first.
+	float GetScale() const { return Scale; }
+
+	// Plan B: builds an axis-aligned-then-rotated rectangle footprint and spawns it.
+	// Position/Width/Depth are world-space units (same units you'd read off in-level), matching
+	// how Plan A's click points work. This is the function Padre's UI form should call directly -
+	// it does not go through JSON.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	APolyBuilding* CreateRectangleBuilding(const FString& Id, const FString& Name, FVector2D Position, float Width, float Depth, float RotationDegrees, int32 FloorCount, float FloorHeight);
+
+	// Plan B: builds a regular N-sided polygon footprint (Sides=3 triangle, 5 pentagon, 6 hexagon,
+	// ...) and spawns it. Position/Radius are world-space units, same convention as
+	// CreateRectangleBuilding. Radius is the distance from the center to each vertex.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	APolyBuilding* CreateRegularPolygonBuilding(const FString& Id, const FString& Name, FVector2D Position, int32 Sides, float Radius, float RotationDegrees, int32 FloorCount, float FloorHeight);
+
+	// Parses a buildings.json-format file (same schema as Data/buildings.json - "scale",
+	// "floorHeight", "buildings": [...]) and spawns everything in it via SpawnBuildingFromData.
+	// Nothing loads automatically at BeginPlay - the start screen's Open/New choice is what decides
+	// whether (and which) building data gets loaded. The file's top-level "scale" overwrites Scale
+	// for the whole generator (affects unit conversion for anything created afterward, including
+	// Plan A/B) - already-spawned buildings keep their existing geometry either way. Importing a
+	// second file with a different scale is not something the UI should offer without a warning.
+	// Each building entry may carry an optional "interior" sub-object - this is stashed (not
+	// interpreted) per id for InteriorGenerator to read via GetInteriorDataForBuilding, so a
+	// building's interior is bound to the specific project file it came from, not just its id
+	// string (two different projects can safely reuse the same building ids).
+	// Returns how many buildings were successfully spawned.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	int32 LoadBuildingsFromFile(const FString& FilePath);
+
+	// Looks up an already-spawned building by id (e.g. for InteriorGenerator to find which
+	// building's shell a piece of interior data belongs to). Returns nullptr if not found.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	APolyBuilding* FindBuildingById(const FString& Id) const;
+
+	// Every currently-spawned building, in no particular order - e.g. for framing a camera view
+	// around the whole cluster instead of just one building.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	TArray<APolyBuilding*> GetAllBuildings() const;
+
+	// Writes every currently-spawned building back out as a buildings.json-format file (the same
+	// schema LoadBuildingsFromFile reads) - the "Save" side of the Open/New + Ctrl+S save flow
+	// (see NavPlayerController::SaveCurrentProject). Each building's stored interior data (see
+	// GetInteriorDataForBuilding) is written back out as that building's "interior" field, if any -
+	// callers editing an interior should call InteriorGenerator::SyncInteriorToBuildingGenerator()
+	// first so in-progress edits aren't lost. Returns true on success.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	bool SaveBuildingsToFile(const FString& FilePath) const;
+
+	// The raw "interior" JSON sub-object associated with a building id, as loaded from (or to be
+	// written into) the combined project file - not interpreted here, that's InteriorGenerator's
+	// schema. Returns nullptr if this building has no interior data yet.
+	TSharedPtr<FJsonObject> GetInteriorDataForBuilding(const FString& BuildingId) const;
+
+	// Stashes the interior data for a building id, overwriting whatever was there before (e.g.
+	// InteriorGenerator syncing its current in-memory state before a project save).
+	void SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData);
+
+	// Destroys every currently-spawned building and forgets all interior data - back to the state
+	// right after BeginPlay, nothing loaded. Call this before starting a New project or before
+	// LoadBuildingsFromFile, so leftover buildings from whatever was open before don't stick around
+	// (LoadBuildingsFromFile only adds - it never removes what's already there on its own).
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void ClearAllBuildings();
 
 private:
-	// Reads buildings.json and generates one Building per entry
-	void GenerateBuildings();
+	float Scale = 1.f;
+	TSet<FString> UsedBuildingIds;
+
+	UPROPERTY()
+	TMap<FString, APolyBuilding*> BuildingsById;
+
+	TMap<FString, TSharedPtr<FJsonObject>> InteriorDataById;
 };
