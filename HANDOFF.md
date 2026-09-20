@@ -157,6 +157,12 @@ Data/behavior:
    isn't a room. T04's M1 target (`docs/deliverables.md`) is explicitly room-to-room
    routing only, so this isn't blocking M1 either way. A (non-urgent) question was sent
    to ws/jh to confirm they don't need it for M1 either - revisit if they say otherwise.
+   **Related, also deferred to M2 (decided 2026-09-20)**: connectors (elevator/stairs/
+   escalator) themselves aren't selectable navigation destinations either (`FInteriorNavNode`
+   has no `Name` field, unlike rooms) - a user can't currently "navigate to the nearest
+   elevator" as a standalone target, only pass through one automatically as part of a
+   room-to-room route. Same reasoning as PathNode: out of scope for M1's room-to-room
+   target; would need a Name field + selectability added if the product ever wants this.
 3. Everything under "Keyboard-driven for now" still needs real UMG buttons eventually.
 4. **CI/CD (rubric requirement R04/R05) - partially done as of 2026-09-20.** The team12
    DigiPen-provided OVH VM (51.79.240.111, 2 vCPU/4GB RAM, Ubuntu 24.04, shared `team12`
