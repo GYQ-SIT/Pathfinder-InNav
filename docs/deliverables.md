@@ -55,7 +55,7 @@ demonstrable check — not "it exists".
   - **Afiq**: user input → JSON conversion (the piece that turns raw UI input into the
     JSON format `BuildingGenerator`/`InteriorGenerator` read).
 - **Jira Epic:** `INNAVI-T02`
-- **M1 target:** User enters a set of interior data, saves it to JSON, and loads it back to reproduce the same data. **Done (Yongqi's part)** — 2D interior floor-plan editor (rooms, walls, doors with connection properties, elevators/stairs/escalators with cross-floor data, room/door naming, snapping, boundary/overlap validation); save/load round-trips through `buildings.json`. **Still keyboard-driven, not a full UMG toolbar** — that's Padre's part of T02, status not confirmed by this pass.
+- **M1 target:** User enters a set of interior data, saves it to JSON, and loads it back to reproduce the same data. **Done (Yongqi's part)** — 2D interior floor-plan editor (rooms, walls, doors with connection properties, elevators/stairs/escalators with cross-floor data, room/door naming, snapping, boundary/overlap validation); save/load round-trips through `buildings.json`. **Padre's part (UMG toolbar) in progress and working as of 2026-09-20** — real on-screen buttons for draw room/wall, select mode, prefab shapes (rectangle/triangle/circle), add door, and elevator/stairs/escalator modes, tested and confirmed functional; replaces the keyboard-only interim workflow.
 - **M2 target:** Import existing JSON; validation and error handling on bad input.
 - **M3 target:** Polished editor UX (real UMG buttons instead of keyboard shortcuts); reusable across different buildings.
 

@@ -26,7 +26,7 @@ and a **Navigation mode** (walking/routing through the generated building).
 |---------|--------|--------|
 | Engine | Unreal Engine | Built-in rendering, runtime ray-casting/picking, navigation (NavMesh/NavLinks), and UI (UMG) |
 | Core logic | **C++** | Performance and control for the core systems (generation, navigation) |
-| UI & interaction | **Blueprint (UMG)** | Faster to build UI and simple interactions; lets UX members contribute to implementation. As of 2026-09-18, screens/dialogs/property panels are UMG, but most interior-editing tools are still bound to keyboard shortcuts pending a full toolbar pass — see `docs/design/interior-editor-guide.md` |
+| UI & interaction | **Blueprint (UMG)** | Faster to build UI and simple interactions; lets UX members contribute to implementation. As of 2026-09-20, screens/dialogs/property panels are UMG, and a real on-screen toolbar (Padre) now covers most interior-editing tools (draw room/wall, select, prefab shapes, add door, elevator/stairs/escalator) — see `docs/design/interior-editor-guide.md` |
 | Data format | **JSON** | Human-readable, easy to author, save, and reload interior layouts |
 | Target platform | **Desktop first (M1)**, mobile later | Reduces risk for an M1 with a team new to UE; mobile targeted in M2/M3 _(platform scope pending confirmation with the professor)_ |
 
