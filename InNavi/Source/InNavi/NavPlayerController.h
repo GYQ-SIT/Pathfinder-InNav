@@ -123,6 +123,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Building")
 	bool HasUnsavedChanges() const { return bHasUnsavedChanges; }
 
+	// Clears the unsaved-changes flag without actually saving anything - what the confirm
+	// dialog's "Discard" button should call, right before it navigates away (Back to exterior,
+	// Back to start screen, etc.). Without this, HasUnsavedChanges() stayed true forever after a
+	// discard (nothing else ever clears it except an actual save/Open/New), so the very next,
+	// completely unrelated navigation - even with zero new edits - wrongly popped the confirm
+	// dialog again. This does NOT revert any in-memory changes, it only stops the nagging; the
+	// edits the user chose not to save are still sitting in memory until overwritten or the app
+	// truly reloads.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void DiscardUnsavedChanges() { bHasUnsavedChanges = false; }
+
 	// Saves every currently-spawned building (bound to Ctrl+S). If there's no current project file
 	// yet (e.g. a New session), this opens the OS "save file" dialog first (same as BrowseForSaveLocation)
 	// and remembers whatever the user picks; otherwise it saves straight to GetCurrentProjectFilePath().
