@@ -151,13 +151,24 @@ Data/behavior:
 1. Connector properties panel's 20 checkboxes aren't scoped to the building's actual
    floor count (see above).
 2. No placement tool for a plain `PathNode` (only Elevator/Stairs/Escalator have one).
+   **Decided 2026-09-20: deferred to M2, not needed for M1.** `PathNode` would mark a
+   navigable destination that isn't inside any room (e.g. a reception desk in an open
+   lobby) - useful only if ws/jh's navigation UI lets users pick a destination that
+   isn't a room. T04's M1 target (`docs/deliverables.md`) is explicitly room-to-room
+   routing only, so this isn't blocking M1 either way. A (non-urgent) question was sent
+   to ws/jh to confirm they don't need it for M1 either - revisit if they say otherwise.
 3. Everything under "Keyboard-driven for now" still needs real UMG buttons eventually.
-4. **CI/CD (rubric requirement R04)** - not started. team12 has a DigiPen-provided Ubuntu
-   24.04 VM (2 vCPU/4GB RAM) assessed as too underpowered/wrong-platform to compile this
-   UE5 Windows project - plan is a self-hosted GitHub Actions runner on a teammate's own
-   Windows PC instead, triggered on push to `main`/`YQ-ui-backup`. User deliberately
-   deprioritized this behind interior-editor feature work; **flag if the deadline is
-   getting close and this still hasn't moved**.
+4. **CI/CD (rubric requirement R04/R05) - partially done as of 2026-09-20.** The team12
+   DigiPen-provided OVH VM (51.79.240.111, 2 vCPU/4GB RAM, Ubuntu 24.04, shared `team12`
+   SSH login - see `FullStack_OVH_team12.pdf`, key-based auth now set up so no password
+   is needed) runs a registered self-hosted GitHub Actions runner (`team12-ovh-vm`,
+   installed as a systemd service). `.github/workflows/validate-json.yml` validates every
+   `InNavi/Data/*.json` file on push to `main`/`YQ-ui-backup` and is confirmed working
+   (see `docs/deliverables.md` R04/R05). **Still missing**: the actual UE5 Windows
+   build/package step - the VM can't do this (no Windows toolchain, not enough RAM even
+   if it had one) - still needs a self-hosted runner on a teammate's own Windows PC,
+   not yet set up, no owner assigned. **Flag if the deadline is getting close and this
+   still hasn't moved.**
 5. **M1 scope discussion, not yet confirmed with Kaiming/PM**: working assumption is that
    in-app pathfinding stays 2D (a computed route drawn on the existing floor-plan canvas)
    for M1, with a real 3D walkthrough/preview mode deferred to M2/M3. Don't treat as
