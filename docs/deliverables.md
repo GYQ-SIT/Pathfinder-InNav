@@ -83,13 +83,13 @@ demonstrable check — not "it exists".
 
 These are standard deliverables required of all teams. Owners TBD.
 
-| # | Deliverable | M1 evidence | Status (2026-09-18) |
+| # | Deliverable | M1 evidence | Status (2026-09-20) |
 |---|-------------|-------------|---|
 | R01 | GitHub repository & workflow (branches, PRs, clean structure) | Repo organized; PR-based workflow in use | Not reviewed this pass |
 | R02 | Jira project & backlog (Epics → Stories/Tasks with owners) | Epics for T01–T04 with stories and assignees | Not reviewed this pass |
 | R03 | Architecture v0.1 (system design + tech stack) | `docs/architecture.md` with diagram | Exists; content still broadly accurate |
-| R04 | Automated build (CI) | Build runs automatically on push | Not started. See "CI/CD" note below |
-| R05 | Automated checks / tests | At least basic checks run in CI | Not started (blocked on R04) |
+| R04 | Automated build (CI) | Build runs automatically on push | **Started** — self-hosted GitHub Actions runner (`team12-ovh-vm`) registered on the team12 OVH VM and running as a systemd service; `.github/workflows/validate-json.yml` triggers on push to `main`/`YQ-ui-backup` and runs successfully. Does not yet compile the actual UE5 Windows build (see "CI/CD" note below) |
+| R05 | Automated checks / tests | At least basic checks run in CI | **Started** — the same workflow validates every file in `InNavi/Data/*.json` parses as valid JSON on every push; no C++/UE-level checks yet |
 | R06 | Reproducible dev environment | README lets a teammate clone, set up, and run | `README.md` now has real build/run steps (was "TBD") |
 | R07 | Working technical proof of concept | Core risks demonstrated running (see T01–T04) | T01–T03 demonstrated; T04 (navigation) unconfirmed |
 | R08 | Basic error handling | App does not crash on bad/empty input | Interior editor validates most inputs (bounds/overlap/wall-collision checks, unsaved-changes prompts) - not audited team-wide |
@@ -97,11 +97,17 @@ These are standard deliverables required of all teams. Owners TBD.
 | R10 | Project documentation | `docs/` kept current | Updated this pass (`architecture.md`, `deliverables.md`, root `HANDOFF.md`, new `docs/design/interior-editor-guide.md`) |
 | R11 | Individual contribution evidence | Each member records a short (<5 min) contribution video | Not reviewed this pass |
 
-**CI/CD note:** team12 has a DigiPen-provided VM intended for a self-hosted GitHub Actions
-runner, but it's assessed as too underpowered (2 vCPU/4GB RAM, Linux) to compile this
-UE5 Windows project — plan is to use a self-hosted runner on a teammate's own capable
-Windows PC instead, triggered on push to `main`/`YQ-ui-backup`. Not yet built; needs an
-owner assigned.
+**CI/CD note (updated 2026-09-20):** the team12 DigiPen-provided VM (2 vCPU/4GB RAM,
+Ubuntu 24.04) is confirmed too underpowered/wrong-platform to compile this UE5 Windows
+project (no Windows toolchain, likely not enough RAM even if it had one) — that part of
+the plan is unchanged: a self-hosted runner on a teammate's own capable Windows PC is
+still needed for the actual build/package step, not yet set up, needs an owner assigned.
+What the VM *is* now doing: it runs a registered self-hosted Actions runner
+(`team12-ovh-vm`, installed as a systemd service so it survives reboots/disconnects) that
+handles lightweight checks not requiring UE5 - currently JSON validation
+(`.github/workflows/validate-json.yml`) on every push to `main`/`YQ-ui-backup`. Access is
+via a shared `team12` SSH login (see `FullStack_OVH_team12.pdf` - team-shared per DigiPen,
+not to be shared outside the team) using key-based auth.
 
 ---
 
