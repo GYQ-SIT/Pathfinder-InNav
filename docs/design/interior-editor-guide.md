@@ -54,9 +54,8 @@ Selecting a **door** or a **connector** pops up a small properties panel:
 - **Door panel**: shows which room it belongs to (read-only), and a dropdown to pick
   what it connects to on the other side (another room, by name, or "corridor").
 - **Connector panel**: shows its type (read-only), and a checklist of floors it should
-  reach — check/uncheck floors and hit Apply. (Currently always shows a fixed 20
-  checkboxes regardless of the building's actual floor count — ticking a
-  floor that doesn't exist just fails with an error when you Apply.)
+  reach — check/uncheck floors and hit Apply. Only shows checkboxes for floors that
+  actually exist on the loaded building (fixed 2026-09-20).
 
 Selecting a **room** pops up a panel to rename it.
 
@@ -75,8 +74,6 @@ start screen, will prompt you to save/discard/cancel if you have unsaved changes
 ## Known gaps / not built yet
 
 - No real UMG toolbar — everything above is a keyboard shortcut.
-- Connector properties panel always shows 20 floor checkboxes, not scoped to the
-  building's actual floor count.
 - No dedicated tool for a plain path node (only elevator/stairs/escalator have a
   placement tool right now).
 - No 3D preview/walkthrough mode — this is a 2D top-down authoring view only.

@@ -148,8 +148,13 @@ Data/behavior:
 
 ## Pending / explicitly deferred
 
-1. Connector properties panel's 20 checkboxes aren't scoped to the building's actual
-   floor count (see above).
+1. ~~Connector properties panel's 20 checkboxes aren't scoped to the building's actual
+   floor count.~~ **Fixed 2026-09-20**: added `ANavPlayerController::GetLoadedBuildingFloorCount()`
+   (C++ pass-through to `APolyBuilding::GetFloorCount()`) and wired it into
+   `OnConnectorSelectionChanged` in `WBP_InteriorScreen` - each of the 20 checkboxes now
+   checks `CurrentFloorCount >= N` and sets its own `Visibility` (Visible/Collapsed)
+   accordingly, alongside (not replacing) the existing checked-state logic. Compiled and
+   tested against a building with fewer than 20 floors - confirmed working.
 2. No placement tool for a plain `PathNode` (only Elevator/Stairs/Escalator have one).
    **Decided 2026-09-20: deferred to M2, not needed for M1.** `PathNode` would mark a
    navigable destination that isn't inside any room (e.g. a reception desk in an open

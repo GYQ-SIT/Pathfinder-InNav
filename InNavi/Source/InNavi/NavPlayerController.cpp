@@ -1953,6 +1953,17 @@ FString ANavPlayerController::GetLoadedBuildingId() const
 	return InteriorGen ? InteriorGen->GetLoadedBuildingId() : FString();
 }
 
+int32 ANavPlayerController::GetLoadedBuildingFloorCount() const
+{
+	if (!InteriorGen || !Generator)
+	{
+		return 0;
+	}
+
+	const APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	return Building ? Building->GetFloorCount() : 0;
+}
+
 FString ANavPlayerController::PeekNextRoomId() const
 {
 	return InteriorGen ? InteriorGen->PeekNextRoomId() : FString();

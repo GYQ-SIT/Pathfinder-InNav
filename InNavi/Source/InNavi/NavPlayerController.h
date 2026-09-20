@@ -489,6 +489,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	FString GetLoadedBuildingId() const;
 
+	// How many floors the currently-loaded building actually has - for a connector properties
+	// panel to size its floor checklist against (see SetSelectedConnectorFloors) instead of
+	// always showing a fixed set of checkboxes. Returns 0 if no building interior is loaded.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	int32 GetLoadedBuildingFloorCount() const;
+
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	FString PeekNextRoomId() const;
 

@@ -179,7 +179,8 @@ Shown when `OnSelectedConnectorChanged` fires with a non-empty `GroupId`.
 | UI element | Call / bind | Notes |
 |---|---|---|
 | Type label (read-only) | `GetSelectedConnectorType()` | Returns an `EInteriorNavNodeType` (`Elevator`/`Stairs`/`Escalator`; `PathNode` only if nothing is actually selected — never a real value for a placed connector) |
-| Floor checklist, populated on open | `GetSelectedConnectorFloors()` | Returns `TArray<int32>` — the floors this connector currently reaches. Check the matching boxes; **known gap:** the checklist currently needs to be built as a fixed set of boxes (see "Still open" below) rather than one row per actual floor, since there's no "get total floor count for dropdown sizing" call wired up on this panel yet — ping me if you want one added, it's a one-line addition (`Building->GetFloorCount()`) |
+| Floor checklist, populated on open | `GetSelectedConnectorFloors()` | Returns `TArray<int32>` — the floors this connector currently reaches. Check the matching boxes. For sizing the checklist to the building's actual floor count, see `GetLoadedBuildingFloorCount()` below (added 2026-09-20) |
+| Floor checklist, hide non-existent floors | `GetLoadedBuildingFloorCount()` | Returns the loaded building's actual floor count (`int32`, 0 if nothing loaded). My own connector panel now checks `FloorCount >= N` per checkbox and sets that checkbox's `Visibility` (Visible/Collapsed) accordingly, instead of always showing a fixed set — worth copying the same pattern for any other floor-scoped UI you build |
 | "Apply" button | `SetSelectedConnectorFloors(const TArray<int32>& NewFloors)` | Build the array from whichever boxes are checked. All-or-nothing: if any newly-checked floor is invalid (doesn't exist, position blocked by a wall, outside the building), the **whole call fails** and nothing changes — it won't partially apply. Returns `false` on failure or if nothing is selected. **Every checkbox's exec-flow branch must reconverge onto the same "add to array, then continue" path regardless of checked/unchecked** — see `HANDOFF.md`'s Collaboration Notes if you hit a "nothing happens on Apply" bug, this exact pattern bit me once already |
 | Delete button (or `Backspace`, via `DeleteSelection()`) | `DeleteSelectedConnector()` | Removes every floor's node for this connector at once (it's one logical connector, even though it's stored as several per-floor nodes internally). Returns `false` if nothing is selected |
 
@@ -244,11 +245,9 @@ function — build against `ResizeRoom` directly rather than trying to mirror th
    mode-changed event yet (only draw room/wall and select mode do) — button highlighting
    needs to poll the `Is...Mode()` getter right after calling the toggle. Let me know if
    you want events added; it's the same pattern as the existing ones.
-2. Connector properties panel has no "how many floors does this building actually have"
-   call wired up yet, so the floor checklist can't currently size itself — it needs to
-   be a fixed set of boxes for now (see `docs/design/interior-editor-guide.md`'s note
-   about this same gap). `Building->GetFloorCount()` exists internally; ping me if you
-   want it exposed as its own `BlueprintPure` call.
+2. ~~Connector properties panel has no "how many floors does this building actually
+   have" call wired up~~ — **fixed 2026-09-20**, see `GetLoadedBuildingFloorCount()`
+   in §6.3 above.
 3. No dedicated placement tool for a plain `PathNode` (only Elevator/Stairs/Escalator
    have one) — not needed for M1, flagging in case T04 (navigation) ends up wanting one.
 4. Prefab rooms have no name/public/key fields at placement time (only draw-room mode's
