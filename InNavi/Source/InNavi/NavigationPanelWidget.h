@@ -9,6 +9,8 @@ class ABuildingGenerator;
 class AInteriorGenerator;
 class UBorder;
 class UButton;
+class UCanvasPanelSlot;
+class USizeBox;
 class UTextBlock;
 
 UENUM(BlueprintType)
@@ -19,7 +21,16 @@ enum class ENavigationSelectionMode : uint8
 	Destination
 };
 
-// Phase 1 navigation controls. The selection state is independent of interior edit modes.
+enum class ENavigationMessageKind : uint8
+{
+	Instruction,
+	Success,
+	Error,
+	Warning,
+	Route
+};
+
+// Navigation controls and presentation. This state remains independent of interior edit modes.
 UCLASS()
 class INNAVI_API UNavigationPanelWidget : public UUserWidget
 {
@@ -48,6 +59,7 @@ public:
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 
 private:
@@ -59,20 +71,36 @@ private:
 
 	UFUNCTION()
 	void OnClearRouteClicked();
+
 	UFUNCTION()
 	void OnFindRouteClicked();
 
 	void SetSelectionMode(ENavigationSelectionMode NewMode);
+	void SetStatusMessage(const FString& Message, ENavigationMessageKind Kind);
 	void RefreshControls();
+	FString BuildRouteDetails() const;
+	FLinearColor GetStatusColor() const;
 
 	UPROPERTY()
 	UBorder* PanelBorder = nullptr;
 
 	UPROPERTY()
+	UCanvasPanelSlot* PanelCanvasSlot = nullptr;
+
+	UPROPERTY()
+	USizeBox* PanelSizeBox = nullptr;
+
+	UPROPERTY()
 	UButton* SetStartButton = nullptr;
 
 	UPROPERTY()
+	UTextBlock* SetStartButtonLabel = nullptr;
+
+	UPROPERTY()
 	UButton* SetDestinationButton = nullptr;
+
+	UPROPERTY()
+	UTextBlock* SetDestinationButtonLabel = nullptr;
 
 	UPROPERTY()
 	UButton* FindRouteButton = nullptr;
@@ -82,10 +110,16 @@ private:
 
 	UPROPERTY()
 	UTextBlock* StatusText = nullptr;
+
+	UPROPERTY()
+	UTextBlock* ContextText = nullptr;
+
 	UPROPERTY()
 	UTextBlock* RouteDetailsText = nullptr;
+
 	UPROPERTY()
 	ABuildingGenerator* Generator = nullptr;
+
 	UPROPERTY()
 	AInteriorGenerator* Interior = nullptr;
 
@@ -95,10 +129,14 @@ private:
 		FNavigationRoutePoint Point;
 		FString BuildingId;
 	};
+
 	FSelectedEndpoint Start;
 	FSelectedEndpoint Destination;
 	TArray<FNavigationRoutePoint> RoutePoints;
 	FString StatusMessage;
-
+	ENavigationMessageKind StatusKind = ENavigationMessageKind::Instruction;
 	ENavigationSelectionMode SelectionMode = ENavigationSelectionMode::None;
+	int32 LastDisplayedFloor = INDEX_NONE;
+	FString LastDisplayedBuildingId;
+	float LastPanelWidth = 0.f;
 };
