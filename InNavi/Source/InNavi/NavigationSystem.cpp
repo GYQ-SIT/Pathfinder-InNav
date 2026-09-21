@@ -122,182 +122,186 @@ bool FInNaviNavigationSystem::FindRoute(
     const FNavigationRouteRequest& Request,
     FNavigationGraphRouteResult& OutResult) const
 {
+    // Clear any previous route result.
     OutResult = FNavigationGraphRouteResult();
 
     if (!IsReady())
     {
-        OutResult.Status =
-            ENavigationRouteStatus::NotReady;
-
-        OutResult.Message = TEXT(
-            "Navigation system has no nodes.");
-
+        OutResult.Status = ENavigationRouteStatus::NotReady;
+        OutResult.Message =
+            TEXT("Navigation system has no nodes.");
         return false;
     }
 
-    if (!Nodes.Contains(Request.StartNodeId))
+    const FNavigationNode* StartNode =
+        Nodes.Find(Request.StartNodeId);
+
+    if (!StartNode || !StartNode->bWalkable)
     {
         OutResult.Status =
             ENavigationRouteStatus::InvalidStart;
-
-        OutResult.Message = TEXT(
-            "Start node does not exist.");
-
+        OutResult.Message =
+            TEXT("Start node does not exist or is not walkable.");
         return false;
     }
 
-    if (!Nodes.Contains(Request.DestinationNodeId))
+    const FNavigationNode* DestinationNode =
+        Nodes.Find(Request.DestinationNodeId);
+
+    if (!DestinationNode || !DestinationNode->bWalkable)
     {
         OutResult.Status =
             ENavigationRouteStatus::InvalidDestination;
-
-        OutResult.Message = TEXT(
-            "Destination node does not exist.");
-
+        OutResult.Message =
+            TEXT("Destination node does not exist or is not walkable.");
         return false;
     }
 
-    if (Request.StartNodeId ==
-        Request.DestinationNodeId)
+    if (Request.StartNodeId == Request.DestinationNodeId)
     {
-        const FNavigationNode& Node =
-            Nodes[Request.StartNodeId];
-
         OutResult.Status =
             ENavigationRouteStatus::AlreadyAtDestination;
 
-        OutResult.NodeIds.Add(Node.Id);
-        OutResult.Positions.Add(Node.Position);
-
+        OutResult.NodeIds.Add(StartNode->Id);
+        OutResult.Positions.Add(StartNode->Position);
         OutResult.Message =
             TEXT("Start and destination are the same.");
 
         return true;
     }
 
-    TQueue<FString> PendingNodes;
+    const float InfiniteCost =
+        TNumericLimits<float>::Max();
 
+    TMap<FString, float> BestCost;
+    TMap<FString, FString> PreviousNode;
     TSet<FString> VisitedNodes;
 
-    TMap<FString, FString> PreviousNode;
+    // Give every node an initially unreachable cost.
+    for (const TPair<FString, FNavigationNode>& Pair : Nodes)
+    {
+        BestCost.Add(Pair.Key, InfiniteCost);
+    }
 
-    TMap<FString, float> CostToNode;
+    // The route starts with a cost of zero.
+    BestCost.Add(Request.StartNodeId, 0.0f);
 
-    PendingNodes.Enqueue(Request.StartNodeId);
-
-    VisitedNodes.Add(Request.StartNodeId);
-
-    CostToNode.Add(
-        Request.StartNodeId,
-        0.0f);
-
-    while (!PendingNodes.IsEmpty())
+    while (true)
     {
         FString CurrentNodeId;
+        float LowestCost = InfiniteCost;
 
-        PendingNodes.Dequeue(CurrentNodeId);
+        // Find the unvisited node with the cheapest known route.
+        for (const TPair<FString, float>& Pair : BestCost)
+        {
+            if (VisitedNodes.Contains(Pair.Key))
+            {
+                continue;
+            }
 
-        if (CurrentNodeId ==
-            Request.DestinationNodeId)
+            if (Pair.Value < LowestCost)
+            {
+                LowestCost = Pair.Value;
+                CurrentNodeId = Pair.Key;
+            }
+        }
+
+        // No more reachable nodes remain.
+        if (CurrentNodeId.IsEmpty())
         {
             break;
         }
 
+        VisitedNodes.Add(CurrentNodeId);
+
+        // The cheapest route has reached the destination.
+        if (CurrentNodeId == Request.DestinationNodeId)
+        {
+            break;
+        }
+
+        const float* CurrentCost =
+            BestCost.Find(CurrentNodeId);
+
+        if (!CurrentCost)
+        {
+            continue;
+        }
+
+        // Check every connection to find neighbours of this node.
         for (const FNavigationConnection& Connection :
             Connections)
         {
             FString NeighbourNodeId;
+            bool bCanUseConnection = false;
 
-            bool bConnectionCanBeUsed = false;
-
-            if (Connection.FromNodeId ==
-                CurrentNodeId)
+            if (Connection.FromNodeId == CurrentNodeId)
             {
-                NeighbourNodeId =
-                    Connection.ToNodeId;
-
-                bConnectionCanBeUsed = true;
+                NeighbourNodeId = Connection.ToNodeId;
+                bCanUseConnection = true;
             }
             else if (
                 Connection.bBidirectional &&
-                Connection.ToNodeId ==
-                CurrentNodeId)
+                Connection.ToNodeId == CurrentNodeId)
             {
-                NeighbourNodeId =
-                    Connection.FromNodeId;
-
-                bConnectionCanBeUsed = true;
+                NeighbourNodeId = Connection.FromNodeId;
+                bCanUseConnection = true;
             }
 
-            if (!bConnectionCanBeUsed)
+            if (!bCanUseConnection ||
+                VisitedNodes.Contains(NeighbourNodeId))
             {
                 continue;
             }
 
-            if (!Nodes.Contains(NeighbourNodeId))
+            const FNavigationNode* NeighbourNode =
+                Nodes.Find(NeighbourNodeId);
+
+            if (!NeighbourNode || !NeighbourNode->bWalkable)
             {
                 continue;
             }
 
-            const FNavigationNode& NeighbourNode =
-                Nodes[NeighbourNodeId];
-
-            if (!NeighbourNode.bWalkable)
-            {
-                continue;
-            }
-
-            if (VisitedNodes.Contains(
-                NeighbourNodeId))
-            {
-                continue;
-            }
-
-            VisitedNodes.Add(NeighbourNodeId);
-
-            PreviousNode.Add(
-                NeighbourNodeId,
-                CurrentNodeId);
-
-            const float* CurrentCost =
-                CostToNode.Find(CurrentNodeId);
-
-            const float NewCost =
-                (CurrentCost ? *CurrentCost : 0.0f) +
+            // Prevent negative connection costs.
+            const float ConnectionCost =
                 FMath::Max(Connection.Cost, 0.0f);
 
-            CostToNode.Add(
-                NeighbourNodeId,
-                NewCost);
+            const float NewCost =
+                *CurrentCost + ConnectionCost;
 
-            PendingNodes.Enqueue(
-                NeighbourNodeId);
+            float* OldCost =
+                BestCost.Find(NeighbourNodeId);
+
+            // Save this route only when it is cheaper.
+            if (OldCost && NewCost < *OldCost)
+            {
+                *OldCost = NewCost;
+                PreviousNode.Add(
+                    NeighbourNodeId,
+                    CurrentNodeId);
+            }
         }
     }
 
-    if (!VisitedNodes.Contains(
-        Request.DestinationNodeId))
+    if (!VisitedNodes.Contains(Request.DestinationNodeId))
     {
         OutResult.Status =
             ENavigationRouteStatus::NoRoute;
-
-        OutResult.Message = TEXT(
-            "No route exists between the selected nodes.");
-
+        OutResult.Message =
+            TEXT("No route exists between the selected nodes.");
         return false;
     }
 
+    // Follow the previous-node links backwards.
+    // Insert each node at the front to restore start-to-destination order.
     FString CurrentNodeId =
         Request.DestinationNodeId;
 
     while (true)
     {
-        OutResult.NodeIds.Insert(
-            CurrentNodeId,
-            0);
+        OutResult.NodeIds.Insert(CurrentNodeId, 0);
 
-        if (CurrentNodeId ==
-            Request.StartNodeId)
+        if (CurrentNodeId == Request.StartNodeId)
         {
             break;
         }
@@ -309,34 +313,29 @@ bool FInNaviNavigationSystem::FindRoute(
         {
             OutResult.Status =
                 ENavigationRouteStatus::NoRoute;
-
             OutResult.NodeIds.Empty();
-
-            OutResult.Message = TEXT(
-                "Route reconstruction failed.");
-
+            OutResult.Message =
+                TEXT("Route reconstruction failed.");
             return false;
         }
 
         CurrentNodeId = *PreviousId;
     }
 
-    for (const FString& NodeId :
-        OutResult.NodeIds)
+    // Convert the node IDs into positions for drawing the route.
+    for (const FString& NodeId : OutResult.NodeIds)
     {
         const FNavigationNode* Node =
             Nodes.Find(NodeId);
 
         if (Node)
         {
-            OutResult.Positions.Add(
-                Node->Position);
+            OutResult.Positions.Add(Node->Position);
         }
     }
 
     const float* TotalCost =
-        CostToNode.Find(
-            Request.DestinationNodeId);
+        BestCost.Find(Request.DestinationNodeId);
 
     OutResult.TotalCost =
         TotalCost ? *TotalCost : 0.0f;

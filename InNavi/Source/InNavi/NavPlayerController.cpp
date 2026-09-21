@@ -126,80 +126,42 @@ void ANavPlayerController::SetupInputComponent()
 
 void ANavPlayerController::OnClick()
 {
-	if (NavigationPanel && NavigationPanel->IsPointerOverPanel())
+	// Ignore clicks that happen on the navigation panel buttons.
+	if (NavigationPanel &&
+		NavigationPanel->IsPointerOverPanel())
 	{
 		return;
 	}
+
+	// The 2D floor-plan widget handles navigation-point clicks.
+	// Returning here prevents this function from performing
+	// another 3D raycast for the same mouse click.
 	if (IsSelectingNavigationPoint())
 	{
-		if (!Generator || !InteriorGen)
-		{
-			return;
-		}
-
-		const int32 Floor = InteriorGen->GetActiveFloor();
-		APolyBuilding* Building =
-			Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
-
-		const float Scale = Generator->GetScale();
-
-		if (!Building || Scale <= KINDA_SMALL_NUMBER || Floor < 1)
-		{
-			return;
-		}
-
-		FVector RayOrigin;
-		FVector RayDirection;
-
-		if (!DeprojectMousePositionToWorld(RayOrigin, RayDirection))
-		{
-			return;
-		}
-
-		if (FMath::IsNearlyZero(RayDirection.Z))
-		{
-			return;
-		}
-
-		// Floor 1 = Z 0, Floor 2 = Z 300, etc.
-		const float FloorZ =
-			(Floor - 1) * Building->GetFloorHeight();
-
-		const float DistanceAlongRay =
-			(FloorZ - RayOrigin.Z) / RayDirection.Z;
-
-		if (DistanceAlongRay < 0.f)
-		{
-			return;
-		}
-
-		const FVector WorldPoint =
-			RayOrigin + RayDirection * DistanceAlongRay;
-
-		const FVector2D WorldXY(WorldPoint.X, WorldPoint.Y);
-
-		const FVector2D FootprintPoint =
-			WorldXY / Scale - Building->BuildingOffset;
-
-		SelectNavigationPoint(FootprintPoint, Floor);
 		return;
 	}
 
+	// Build mode uses the mouse click to add a building footprint point.
 	if (bBuildMode)
 	{
 		AddFootprintPointUnderCursor();
 	}
-	else if (bDrawRoomMode || bDrawWallMode || bSelectMode || bAddDoorMode || ActivePrefabShape != 0 || ActiveConnectorType != 0)
+	else if (
+		bDrawRoomMode ||
+		bDrawWallMode ||
+		bSelectMode ||
+		bAddDoorMode ||
+		ActivePrefabShape != 0 ||
+		ActiveConnectorType != 0)
 	{
-		// No-op: all interior-editing interaction (drawing, selecting/dragging, adding doors,
-		// placing prefab rooms) comes from the 2D floor plan canvas now (see
-		// UInteriorFloorPlanWidget::NativeOnMouseButtonDown), not a 3D-raycast click here - the
-		// input mode lets both the UI and the game world see the same click, so leaving a 3D
-		// handler here as well would fire SelectBuildingUnderCursor() (or worse) alongside
-		// whatever the 2D canvas already did for that same click.
+		// Interior-editing clicks are handled by
+		// InteriorFloorPlanWidget.
+		// Therefore, do nothing here.
 	}
 	else
 	{
+		// If no special mode is active,
+		// select a building in the 3D view.
 		SelectBuildingUnderCursor();
 	}
 }

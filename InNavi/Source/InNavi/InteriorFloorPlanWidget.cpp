@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "InteriorFloorPlanWidget.h"
@@ -48,9 +48,32 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 		const FVector2D LocalPosition = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
 		if (PlayerController->IsSelectingNavigationPoint())
 		{
+			// Make sure the interior data is loaded before selecting a point.
+			if (!InteriorGen ||
+				!Generator ||
+				InteriorGen->GetLoadedBuildingId().IsEmpty())
+			{
+				return FReply::Handled();
+			}
+
+			// A valid floor must be selected.
+			const int32 ActiveFloor = InteriorGen->GetActiveFloor();
+			if (ActiveFloor < 1)
+			{
+				return FReply::Handled();
+			}
+
+			// Convert the mouse position from the widget to the building footprint.
+			const FVector2D FootprintPosition =
+				LocalPositionToFootprintPoint(
+					LocalPosition,
+					InGeometry.GetLocalSize());
+
+			// Save the selected navigation point.
 			PlayerController->SelectNavigationPoint(
-				LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize()),
-				InteriorGen ? InteriorGen->GetActiveFloor() : 0);
+				FootprintPosition,
+				ActiveFloor);
+
 			return FReply::Handled();
 		}
 
