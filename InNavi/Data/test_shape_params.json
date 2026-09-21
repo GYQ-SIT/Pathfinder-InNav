@@ -1,0 +1,15 @@
+{
+  "shape": "polygon",
+  "id": "TEST_1",
+  "name": "Test Shape",
+  "position": [ 500, 500 ],
+  "rotationDegrees": 30,
+  "floorCount": 5,
+  "floorHeight": 300,
+
+  "width": 300,
+  "depth": 200,
+
+  "sides": 7,
+  "radius": 200
+}

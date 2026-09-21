@@ -1,0 +1,30 @@
+name: Validate data JSON
+
+on:
+  push:
+    branches: [main, YQ-ui-backup]
+    paths:
+      - 'InNavi/Data/**.json'
+      - '.github/workflows/validate-json.yml'
+  pull_request:
+    paths:
+      - 'InNavi/Data/**.json'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: [self-hosted, linux, ovh]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate every JSON file under InNavi/Data
+        run: |
+          status=0
+          for f in InNavi/Data/*.json; do
+            echo "Checking $f"
+            if ! python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$f"; then
+              echo "::error file=$f::Invalid JSON"
+              status=1
+            fi
+          done
+          exit $status
