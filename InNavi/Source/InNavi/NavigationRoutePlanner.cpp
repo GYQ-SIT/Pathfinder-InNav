@@ -1,4 +1,4 @@
-#include "NavigationRoutePlanner.h"
+﻿#include "NavigationRoutePlanner.h"
 
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
@@ -253,11 +253,29 @@ bool FNavigationRoutePlanner::IsValidPoint(const APolyBuilding& Building,
 		OutError = TEXT("Choose a floor in the loaded building.");
 		return false;
 	}
+
 	if (!InsideOrOnBoundary(Point, Building.GetFootprint()))
 	{
 		OutError = TEXT("Select a point inside the building.");
 		return false;
 	}
+	const TArray<FVector2D>& Boundary = Building.GetFootprint();
+
+	for (int32 Index = 0; Index < Boundary.Num(); ++Index)
+	{
+		const FVector2D& A = Boundary[Index];
+		const FVector2D& B = Boundary[(Index + 1) % Boundary.Num()];
+
+		const FVector2D Closest =
+			FMath::ClosestPointOnSegment2D(Point, A, B);
+
+		if (FVector2D::Distance(Point, Closest) < SelectionWallClearance)
+		{
+			OutError = TEXT("Select a point away from the building wall.");
+			return false;
+		}
+	}
+
 	const FFloorGeometry Geometry = MakeFloorGeometry(Interior, Scale, Floor);
 	for (const FSegment& Wall : Geometry.Walls)
 	{

@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "NavPlayerController.h"
@@ -132,19 +132,56 @@ void ANavPlayerController::OnClick()
 	}
 	if (IsSelectingNavigationPoint())
 	{
-		FHitResult Hit;
-		if (GetHitResultUnderCursor(ECC_Visibility, false, Hit) && Hit.bBlockingHit
-			&& (Cast<APolyBuilding>(Hit.GetActor()) || Cast<AInteriorRoom>(Hit.GetActor())))
+		if (!Generator || !InteriorGen)
 		{
-			APolyBuilding* Building = Generator && InteriorGen
-				? Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()) : nullptr;
-			if (Building && Generator->GetScale() > KINDA_SMALL_NUMBER)
-			{
-				const FVector2D WorldXY(Hit.ImpactPoint.X, Hit.ImpactPoint.Y);
-				SelectNavigationPoint(WorldXY / Generator->GetScale() - Building->BuildingOffset,
-					InteriorGen->GetActiveFloor());
-			}
+			return;
 		}
+
+		const int32 Floor = InteriorGen->GetActiveFloor();
+		APolyBuilding* Building =
+			Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+
+		const float Scale = Generator->GetScale();
+
+		if (!Building || Scale <= KINDA_SMALL_NUMBER || Floor < 1)
+		{
+			return;
+		}
+
+		FVector RayOrigin;
+		FVector RayDirection;
+
+		if (!DeprojectMousePositionToWorld(RayOrigin, RayDirection))
+		{
+			return;
+		}
+
+		if (FMath::IsNearlyZero(RayDirection.Z))
+		{
+			return;
+		}
+
+		// Floor 1 = Z 0, Floor 2 = Z 300, etc.
+		const float FloorZ =
+			(Floor - 1) * Building->GetFloorHeight();
+
+		const float DistanceAlongRay =
+			(FloorZ - RayOrigin.Z) / RayDirection.Z;
+
+		if (DistanceAlongRay < 0.f)
+		{
+			return;
+		}
+
+		const FVector WorldPoint =
+			RayOrigin + RayDirection * DistanceAlongRay;
+
+		const FVector2D WorldXY(WorldPoint.X, WorldPoint.Y);
+
+		const FVector2D FootprintPoint =
+			WorldXY / Scale - Building->BuildingOffset;
+
+		SelectNavigationPoint(FootprintPoint, Floor);
 		return;
 	}
 
