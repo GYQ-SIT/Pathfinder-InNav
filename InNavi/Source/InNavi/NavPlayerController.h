@@ -129,6 +129,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Building")
 	bool HasUnsavedChanges() const { return bHasUnsavedChanges; }
 
+	// Clears the unsaved-changes flag without actually saving anything - what the confirm
+	// dialog's "Discard" button should call, right before it navigates away (Back to exterior,
+	// Back to start screen, etc.). Without this, HasUnsavedChanges() stayed true forever after a
+	// discard (nothing else ever clears it except an actual save/Open/New), so the very next,
+	// completely unrelated navigation - even with zero new edits - wrongly popped the confirm
+	// dialog again. This does NOT revert any in-memory changes, it only stops the nagging; the
+	// edits the user chose not to save are still sitting in memory until overwritten or the app
+	// truly reloads.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void DiscardUnsavedChanges() { bHasUnsavedChanges = false; }
+
 	// Saves every currently-spawned building (bound to Ctrl+S). If there's no current project file
 	// yet (e.g. a New session), this opens the OS "save file" dialog first (same as BrowseForSaveLocation)
 	// and remembers whatever the user picks; otherwise it saves straight to GetCurrentProjectFilePath().
@@ -323,6 +334,24 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool DeleteSelectedConnector();
 
+	// The currently-selected connector's type (Elevator/Stairs/Escalator) - for a connector
+	// properties panel to show read-only. PathNode if nothing is selected (never a real value for
+	// an actual connector, since only Elevator/Stairs/Escalator are ever placed this way).
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	EInteriorNavNodeType GetSelectedConnectorType() const;
+
+	// The currently-selected connector's current floor list - for a connector properties panel to
+	// initialize its floor checkboxes from. Empty if nothing is selected.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	TArray<int32> GetSelectedConnectorFloors() const;
+
+	// Changes which floors the currently-selected connector reaches (see
+	// AInteriorGenerator::SetConnectorFloors) - what a connector properties panel's "apply" button
+	// should call after reading which floor checkboxes are ticked. No-op (returns false) if no
+	// connector is selected.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool SetSelectedConnectorFloors(const TArray<int32>& NewFloors);
+
 	// Removes a single room/wall by id (see AInteriorGenerator::DeleteRoom) - general-purpose,
 	// explicit-id version. See also DeleteSelection. Also clears the door selection if the deleted
 	// room happened to own the currently-selected door (it no longer exists either way).
@@ -476,6 +505,12 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	FString GetLoadedBuildingId() const;
+
+	// How many floors the currently-loaded building actually has - for a connector properties
+	// panel to size its floor checklist against (see SetSelectedConnectorFloors) instead of
+	// always showing a fixed set of checkboxes. Returns 0 if no building interior is loaded.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	int32 GetLoadedBuildingFloorCount() const;
 
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	FString PeekNextRoomId() const;
