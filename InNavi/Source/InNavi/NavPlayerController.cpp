@@ -3,6 +3,7 @@
 
 #include "NavPlayerController.h"
 #include "NavigationPanelWidget.h"
+#include "InteriorFloorPlanWidget.h"
 #include "Blueprint/UserWidget.h"
 #include "GameFramework/Pawn.h"
 #include "PolyBuilding.h"
@@ -18,6 +19,7 @@
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
 #include "Framework/Application/SlateApplication.h"
+#include "UObject/UObjectIterator.h"
 
 // ---- Helper: is Point inside the (possibly concave) polygon Poly? (even-odd ray-casting test) ----
 static bool IsPointInPolygon(const FVector2D& Point, const TArray<FVector2D>& Poly)
@@ -55,6 +57,7 @@ void ANavPlayerController::BeginPlay()
 	NavigationPanel = CreateWidget<UNavigationPanelWidget>(this, UNavigationPanelWidget::StaticClass());
 	if (NavigationPanel)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("[Navigation] Navigation panel created successfully"));
 		NavigationPanel->AddToViewport(100);
 		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
 		FInputModeGameAndUI InputMode;
@@ -77,6 +80,9 @@ void ANavPlayerController::BeginPlay()
 	{
 		NavigationPanel->SetNavigationContext(Generator, InteriorGen);
 	}
+	UE_LOG(LogTemp, Warning, TEXT("[Navigation] BeginPlay references: Generator=%s Interior=%s"),
+		Generator ? TEXT("valid") : TEXT("NULL"),
+		InteriorGen ? TEXT("valid") : TEXT("NULL"));
 }
 
 bool ANavPlayerController::IsSelectingNavigationPoint() const
@@ -86,6 +92,11 @@ bool ANavPlayerController::IsSelectingNavigationPoint() const
 
 void ANavPlayerController::SelectNavigationPoint(FVector2D FootprintPosition, int32 Floor)
 {
+	UE_LOG(LogTemp, Warning,
+		TEXT("[Navigation] Controller forwarding point: position=(%.2f, %.2f), floor=%d, panel=%s"),
+		FootprintPosition.X, FootprintPosition.Y, Floor,
+		NavigationPanel ? TEXT("valid") : TEXT("NULL"));
+
 	if (NavigationPanel)
 	{
 		NavigationPanel->SelectPoint(FootprintPosition, Floor);
@@ -126,19 +137,81 @@ void ANavPlayerController::SetupInputComponent()
 
 void ANavPlayerController::OnClick()
 {
+	UE_LOG(LogTemp, Warning, TEXT("[Navigation] PlayerController OnClick: selecting=%s build=%s"),
+		IsSelectingNavigationPoint() ? TEXT("true") : TEXT("false"),
+		bBuildMode ? TEXT("true") : TEXT("false"));
+
 	// Ignore clicks that happen on the navigation panel buttons.
 	if (NavigationPanel &&
 		NavigationPanel->IsPointerOverPanel())
 	{
+		UE_LOG(LogTemp, Warning, TEXT("[Navigation] PlayerController OnClick ignored: pointer is over navigation panel"));
 		return;
 	}
 
-	// The 2D floor-plan widget handles navigation-point clicks.
-	// Returning here prevents this function from performing
-	// another 3D raycast for the same mouse click.
+	// The 2D floor-plan widget normally handles navigation-point clicks. Keep
+	// the original 3D deprojection as a fallback because GameAndUI input can
+	// route the same mouse click to the PlayerController without delivering it
+	// to the custom floor-plan widget.
 	if (IsSelectingNavigationPoint())
 	{
+		// The floor plan is a 2D UMG widget, so navigation clicks must be converted
+		// using that widget's cached screen geometry. The old fallback deprojected
+		// the click through the 3D camera, which made the result depend on the camera
+		// and caused most visible floor clicks to be rejected as outside the building.
+		const FVector2D CursorScreenPosition = FSlateApplication::Get().GetCursorPos();
+		for (TObjectIterator<UInteriorFloorPlanWidget> It; It; ++It)
+		{
+			UInteriorFloorPlanWidget* FloorPlan = *It;
+			if (!FloorPlan || FloorPlan->GetWorld() != GetWorld() || !FloorPlan->IsVisible())
+			{
+				continue;
+			}
+
+			const FGeometry& FloorGeometry = FloorPlan->GetCachedGeometry();
+			if (!FloorGeometry.IsUnderLocation(CursorScreenPosition))
+			{
+				continue;
+			}
+
+			if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
+			{
+				UE_LOG(LogTemp, Error,
+					TEXT("[Navigation] 2D controller fallback rejected: interior is not loaded"));
+				return;
+			}
+
+			const int32 Floor = InteriorGen->GetActiveFloor();
+			if (Floor < 1)
+			{
+				UE_LOG(LogTemp, Error,
+					TEXT("[Navigation] 2D controller fallback rejected: active floor=%d"), Floor);
+				return;
+			}
+
+			const FVector2D LocalPosition =
+				FloorGeometry.AbsoluteToLocal(CursorScreenPosition);
+			const FVector2D FootprintPosition =
+				FloorPlan->LocalPositionToFootprintPoint(
+					LocalPosition,
+					FloorGeometry.GetLocalSize());
+
+			UE_LOG(LogTemp, Warning,
+				TEXT("[Navigation] 2D click routed by controller: local=(%.2f, %.2f) footprint=(%.2f, %.2f), floor=%d"),
+				LocalPosition.X, LocalPosition.Y,
+				FootprintPosition.X, FootprintPosition.Y, Floor);
+
+			SelectNavigationPoint(FootprintPosition, Floor);
+			return;
+		}
+
+		// Do not fall back to the 3D camera for a 2D floor-plan click. If the
+		// widget cannot be found or the cursor is outside it, report the problem
+		// instead of producing a misleading random footprint position.
+		UE_LOG(LogTemp, Error,
+			TEXT("[Navigation] Navigation click did not hit a visible 2D floor-plan widget; 3D fallback skipped"));
 		return;
+
 	}
 
 	// Build mode uses the mouse click to add a building footprint point.
@@ -1260,38 +1333,38 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter
 	switch (ActivePrefabShape)
 	{
 	case 1: // Rectangle: 60 x 45, axis-aligned.
-		{
-			constexpr float HalfWidth = 30.f;
-			constexpr float HalfDepth = 22.5f;
-			Footprint.Add(FootprintCenter + FVector2D(-HalfWidth, -HalfDepth));
-			Footprint.Add(FootprintCenter + FVector2D(HalfWidth, -HalfDepth));
-			Footprint.Add(FootprintCenter + FVector2D(HalfWidth, HalfDepth));
-			Footprint.Add(FootprintCenter + FVector2D(-HalfWidth, HalfDepth));
-			break;
-		}
+	{
+		constexpr float HalfWidth = 30.f;
+		constexpr float HalfDepth = 22.5f;
+		Footprint.Add(FootprintCenter + FVector2D(-HalfWidth, -HalfDepth));
+		Footprint.Add(FootprintCenter + FVector2D(HalfWidth, -HalfDepth));
+		Footprint.Add(FootprintCenter + FVector2D(HalfWidth, HalfDepth));
+		Footprint.Add(FootprintCenter + FVector2D(-HalfWidth, HalfDepth));
+		break;
+	}
 	case 2: // Triangle: equilateral, radius 30, pointing up.
+	{
+		constexpr float Radius = 30.f;
+		constexpr int32 Sides = 3;
+		for (int32 i = 0; i < Sides; i++)
 		{
-			constexpr float Radius = 30.f;
-			constexpr int32 Sides = 3;
-			for (int32 i = 0; i < Sides; i++)
-			{
-				const float AngleDegrees = -90.f + (360.f * i) / Sides;
-				const float AngleRad = FMath::DegreesToRadians(AngleDegrees);
-				Footprint.Add(FootprintCenter + FVector2D(Radius * FMath::Cos(AngleRad), Radius * FMath::Sin(AngleRad)));
-			}
-			break;
+			const float AngleDegrees = -90.f + (360.f * i) / Sides;
+			const float AngleRad = FMath::DegreesToRadians(AngleDegrees);
+			Footprint.Add(FootprintCenter + FVector2D(Radius * FMath::Cos(AngleRad), Radius * FMath::Sin(AngleRad)));
 		}
+		break;
+	}
 	case 3: // Circle: approximated as a 24-sided regular polygon, radius 30.
+	{
+		constexpr float Radius = 30.f;
+		constexpr int32 Sides = 24;
+		for (int32 i = 0; i < Sides; i++)
 		{
-			constexpr float Radius = 30.f;
-			constexpr int32 Sides = 24;
-			for (int32 i = 0; i < Sides; i++)
-			{
-				const float AngleRad = FMath::DegreesToRadians((360.f * i) / Sides);
-				Footprint.Add(FootprintCenter + FVector2D(Radius * FMath::Cos(AngleRad), Radius * FMath::Sin(AngleRad)));
-			}
-			break;
+			const float AngleRad = FMath::DegreesToRadians((360.f * i) / Sides);
+			Footprint.Add(FootprintCenter + FVector2D(Radius * FMath::Cos(AngleRad), Radius * FMath::Sin(AngleRad)));
 		}
+		break;
+	}
 	default:
 		return nullptr;
 	}
@@ -1960,6 +2033,9 @@ int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 		{
 			NavigationPanel->ClearAll();
 			NavigationPanel->SetVisibility(ESlateVisibility::Visible);
+			UE_LOG(LogTemp, Warning,
+				TEXT("[Navigation] Navigation panel made visible after loading interior: building=%s floor=%d"),
+				*BuildingId, InteriorGen->GetActiveFloor());
 		}
 	}
 	return Result;

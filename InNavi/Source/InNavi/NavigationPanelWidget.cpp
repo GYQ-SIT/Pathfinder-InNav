@@ -1,4 +1,4 @@
-#include "NavigationPanelWidget.h"
+﻿#include "NavigationPanelWidget.h"
 
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
@@ -60,18 +60,18 @@ TSharedRef<SWidget> UNavigationPanelWidget::RebuildWidget()
 
 		auto AddText = [this, Controls](const TCHAR* Name, const FString& Value,
 			const FLinearColor& Color, int32 FontSize) -> UTextBlock*
-		{
-			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(Name));
-			Text->SetText(FText::FromString(Value));
-			Text->SetColorAndOpacity(FSlateColor(Color));
-			Text->SetAutoWrapText(true);
-			FSlateFontInfo Font = Text->GetFont();
-			Font.Size = FontSize;
-			Text->SetFont(Font);
-			UVerticalBoxSlot* Slot = Controls->AddChildToVerticalBox(Text);
-			Slot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
-			return Text;
-		};
+			{
+				UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(Name));
+				Text->SetText(FText::FromString(Value));
+				Text->SetColorAndOpacity(FSlateColor(Color));
+				Text->SetAutoWrapText(true);
+				FSlateFontInfo Font = Text->GetFont();
+				Font.Size = FontSize;
+				Text->SetFont(Font);
+				UVerticalBoxSlot* Slot = Controls->AddChildToVerticalBox(Text);
+				Slot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+				return Text;
+			};
 
 		AddText(TEXT("Txt_NavigationTitle"), TEXT("Navigation"), FLinearColor::White, 20);
 		ContextText = AddText(TEXT("Txt_NavigationContext"), TEXT("No building loaded"),
@@ -79,20 +79,20 @@ TSharedRef<SWidget> UNavigationPanelWidget::RebuildWidget()
 
 		auto AddButton = [this, Controls](const TCHAR* ButtonName, const TCHAR* Label,
 			UTextBlock*& OutLabel) -> UButton*
-		{
-			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(ButtonName));
-			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(),
-				FName(FString(ButtonName) + TEXT("Label")));
-			Text->SetText(FText::FromString(FString(Label)));
-			Text->SetJustification(ETextJustify::Center);
-			Text->SetAutoWrapText(true);
-			Button->SetContent(Text);
-			Button->SetBackgroundColor(InactiveButtonColor);
-			UVerticalBoxSlot* Slot = Controls->AddChildToVerticalBox(Button);
-			Slot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-			OutLabel = Text;
-			return Button;
-		};
+			{
+				UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(ButtonName));
+				UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(),
+					FName(FString(ButtonName) + TEXT("Label")));
+				Text->SetText(FText::FromString(FString(Label)));
+				Text->SetJustification(ETextJustify::Center);
+				Text->SetAutoWrapText(true);
+				Button->SetContent(Text);
+				Button->SetBackgroundColor(InactiveButtonColor);
+				UVerticalBoxSlot* Slot = Controls->AddChildToVerticalBox(Button);
+				Slot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+				OutLabel = Text;
+				return Button;
+			};
 
 		UTextBlock* UnusedFindLabel = nullptr;
 		UTextBlock* UnusedClearLabel = nullptr;
@@ -114,11 +114,29 @@ void UNavigationPanelWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	if (SetStartButton && SetDestinationButton && FindRouteButton && ClearRouteButton)
+	UE_LOG(LogTemp, Warning,
+		TEXT("[Navigation] Panel constructed: Start=%s Destination=%s Find=%s Clear=%s"),
+		SetStartButton ? TEXT("valid") : TEXT("NULL"),
+		SetDestinationButton ? TEXT("valid") : TEXT("NULL"),
+		FindRouteButton ? TEXT("valid") : TEXT("NULL"),
+		ClearRouteButton ? TEXT("valid") : TEXT("NULL"));
+
+	// Bind each button independently. One missing optional control must not prevent
+	// Set Start and Set Destination from receiving their click handlers.
+	if (SetStartButton)
 	{
 		SetStartButton->OnClicked.AddUniqueDynamic(this, &UNavigationPanelWidget::OnSetStartClicked);
+	}
+	if (SetDestinationButton)
+	{
 		SetDestinationButton->OnClicked.AddUniqueDynamic(this, &UNavigationPanelWidget::OnSetDestinationClicked);
+	}
+	if (FindRouteButton)
+	{
 		FindRouteButton->OnClicked.AddUniqueDynamic(this, &UNavigationPanelWidget::OnFindRouteClicked);
+	}
+	if (ClearRouteButton)
+	{
 		ClearRouteButton->OnClicked.AddUniqueDynamic(this, &UNavigationPanelWidget::OnClearRouteClicked);
 	}
 
@@ -159,6 +177,9 @@ FReply UNavigationPanelWidget::NativeOnKeyDown(const FGeometry& InGeometry, cons
 
 void UNavigationPanelWidget::OnSetStartClicked()
 {
+	UE_LOG(LogTemp, Warning, TEXT("[Navigation] Set Start button clicked; previous mode=%d"),
+		static_cast<int32>(SelectionMode));
+
 	if (SelectionMode == ENavigationSelectionMode::Start)
 	{
 		CancelSelection();
@@ -171,6 +192,9 @@ void UNavigationPanelWidget::OnSetStartClicked()
 
 void UNavigationPanelWidget::OnSetDestinationClicked()
 {
+	UE_LOG(LogTemp, Warning, TEXT("[Navigation] Set Destination button clicked; previous mode=%d"),
+		static_cast<int32>(SelectionMode));
+
 	if (SelectionMode == ENavigationSelectionMode::Destination)
 	{
 		CancelSelection();
@@ -191,23 +215,40 @@ void UNavigationPanelWidget::SetNavigationContext(ABuildingGenerator* InGenerato
 {
 	Generator = InGenerator;
 	Interior = InInterior;
+	UE_LOG(LogTemp, Warning, TEXT("[Navigation] Context set: Generator=%s Interior=%s BuildingId=%s Floor=%d"),
+		Generator ? TEXT("valid") : TEXT("NULL"),
+		Interior ? TEXT("valid") : TEXT("NULL"),
+		Interior ? *Interior->GetLoadedBuildingId() : TEXT("<none>"),
+		Interior ? Interior->GetActiveFloor() : INDEX_NONE);
 	RefreshControls();
 }
 
 void UNavigationPanelWidget::SelectPoint(FVector2D FootprintPosition, int32 Floor)
 {
+	UE_LOG(LogTemp, Warning,
+		TEXT("[Navigation] SelectPoint called: position=(%.2f, %.2f) floor=%d mode=%d"),
+		FootprintPosition.X, FootprintPosition.Y, Floor,
+		static_cast<int32>(SelectionMode));
+
 	if (SelectionMode == ENavigationSelectionMode::None)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("[Navigation] SelectPoint ignored: no selection mode is active"));
 		return;
 	}
 	if (!Generator || !Interior || Interior->GetLoadedBuildingId().IsEmpty())
 	{
+		UE_LOG(LogTemp, Error, TEXT("[Navigation] SelectPoint rejected: Generator=%s Interior=%s BuildingId=%s"),
+			Generator ? TEXT("valid") : TEXT("NULL"),
+			Interior ? TEXT("valid") : TEXT("NULL"),
+			Interior ? *Interior->GetLoadedBuildingId() : TEXT("<none>"));
 		SetStatusMessage(TEXT("Load a building interior first."), ENavigationMessageKind::Error);
 		return;
 	}
 	APolyBuilding* Building = Generator->FindBuildingById(Interior->GetLoadedBuildingId());
 	if (!Building)
 	{
+		UE_LOG(LogTemp, Error, TEXT("[Navigation] SelectPoint rejected: building '%s' was not found"),
+			*Interior->GetLoadedBuildingId());
 		SetStatusMessage(TEXT("The selected building is unavailable."), ENavigationMessageKind::Error);
 		return;
 	}
@@ -215,6 +256,7 @@ void UNavigationPanelWidget::SelectPoint(FVector2D FootprintPosition, int32 Floo
 	if (!FNavigationRoutePlanner::IsValidPoint(*Building, *Interior, Generator->GetScale(), Floor,
 		FootprintPosition, Error))
 	{
+		UE_LOG(LogTemp, Warning, TEXT("[Navigation] SelectPoint rejected by validation: %s"), *Error);
 		SetStatusMessage(Error, ENavigationMessageKind::Error);
 		return;
 	}
@@ -225,10 +267,15 @@ void UNavigationPanelWidget::SelectPoint(FVector2D FootprintPosition, int32 Floo
 	Endpoint.Point.Floor = Floor;
 	Endpoint.BuildingId = Building->BuildingId;
 	RoutePoints.Reset();
-	const FString AcceptedMessage = SelectionMode == ENavigationSelectionMode::Start
+	const bool bWasSelectingStart = SelectionMode == ENavigationSelectionMode::Start;
+	const FString EndpointName = bWasSelectingStart ? TEXT("Start") : TEXT("Destination");
+	const FString AcceptedMessage = bWasSelectingStart
 		? FString::Printf(TEXT("Start set on Floor %d."), Floor)
 		: FString::Printf(TEXT("Destination set on Floor %d."), Floor);
 	SelectionMode = ENavigationSelectionMode::None;
+	UE_LOG(LogTemp, Warning, TEXT("[Navigation] Point accepted as %s: position=(%.2f, %.2f), floor=%d"),
+		*EndpointName,
+		FootprintPosition.X, FootprintPosition.Y, Floor);
 	SetStatusMessage(AcceptedMessage, ENavigationMessageKind::Success);
 }
 
@@ -331,7 +378,7 @@ void UNavigationPanelWidget::RefreshControls()
 	{
 		SetDestinationButtonLabel->SetText(FText::FromString(
 			SelectionMode == ENavigationSelectionMode::Destination
-				? TEXT("Click a Destination (Cancel)") : TEXT("Set Destination")));
+			? TEXT("Click a Destination (Cancel)") : TEXT("Set Destination")));
 	}
 	if (ContextText)
 	{
