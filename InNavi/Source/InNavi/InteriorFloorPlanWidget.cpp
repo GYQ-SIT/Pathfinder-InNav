@@ -917,12 +917,18 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 				{
 					return;
 				}
-				constexpr float MarkerSize = 12.f;
+				constexpr float MarkerSize = 18.f;
+				constexpr float OutlineSize = 24.f;
 				const FVector2D MarkerLocal = WorldToLocal((Point.Position + Building->BuildingOffset) * Scale);
+				const FPaintGeometry OutlineGeometry = AllottedGeometry.ToPaintGeometry(
+					FVector2f(OutlineSize, OutlineSize),
+					FSlateLayoutTransform(MarkerLocal - FVector2D(OutlineSize * 0.5f)));
+				FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 5,
+					OutlineGeometry, MarkerBrush, ESlateDrawEffect::None, FLinearColor::White);
 				const FPaintGeometry MarkerGeometry = AllottedGeometry.ToPaintGeometry(
 					FVector2f(MarkerSize, MarkerSize),
 					FSlateLayoutTransform(MarkerLocal - FVector2D(MarkerSize * 0.5f)));
-				FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 5,
+				FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 6,
 					MarkerGeometry, MarkerBrush, ESlateDrawEffect::None, Color);
 			};
 			if (NavigationPanel->HasStart())
@@ -936,5 +942,5 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		}
 	}
 
-	return LayerId + 6;
+	return LayerId + 7;
 }

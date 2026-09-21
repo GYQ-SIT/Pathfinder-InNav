@@ -132,19 +132,9 @@ void ANavPlayerController::OnClick()
 	}
 	if (IsSelectingNavigationPoint())
 	{
-		FHitResult Hit;
-		if (GetHitResultUnderCursor(ECC_Visibility, false, Hit) && Hit.bBlockingHit
-			&& (Cast<APolyBuilding>(Hit.GetActor()) || Cast<AInteriorRoom>(Hit.GetActor())))
-		{
-			APolyBuilding* Building = Generator && InteriorGen
-				? Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()) : nullptr;
-			if (Building && Generator->GetScale() > KINDA_SMALL_NUMBER)
-			{
-				const FVector2D WorldXY(Hit.ImpactPoint.X, Hit.ImpactPoint.Y);
-				SelectNavigationPoint(WorldXY / Generator->GetScale() - Building->BuildingOffset,
-					InteriorGen->GetActiveFloor());
-			}
-		}
+		// Navigation endpoints are selected exclusively by UInteriorFloorPlanWidget. Keeping one
+		// coordinate conversion path prevents this world click from submitting the same mouse press
+		// again with a different 3D hit position.
 		return;
 	}
 
