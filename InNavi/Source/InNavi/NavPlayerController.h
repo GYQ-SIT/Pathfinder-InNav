@@ -56,6 +56,73 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")
 	FOnActionFailed OnActionFailed;
 
+
+	enum class InteriorModes { 
+		None,
+		SelectMode,
+		DrawRoomMode, 
+		DrawWallMode, 
+		AddRectangleMode, 
+		AddTriangleMode, 
+		AddCircleMode,
+		AddDoorMode,
+		AddStairsMode,
+		AddEscalatorMode,
+		AddElevatorMode
+	};
+
+	InteriorModes interiorModeNum = InteriorModes::None;
+
+	void InteriorModeSelection()
+	{
+		switch (interiorModeNum) {
+		case InteriorModes::SelectMode:
+			// TODO: Add logic for selecting objects
+			break;
+
+		case InteriorModes::DrawRoomMode:
+			// TODO: Add logic for drawing a room
+			break;
+
+		case InteriorModes::DrawWallMode:
+			// TODO: Add logic for drawing walls
+			break;
+
+		case InteriorModes::AddRectangleMode:
+			// TODO: Add logic for adding a rectangle shape
+			break;
+
+		case InteriorModes::AddTriangleMode:
+			// TODO: Add logic for adding a triangle shape
+			break;
+
+		case InteriorModes::AddCircleMode:
+			// TODO: Add logic for adding a circle shape
+			break;
+
+		case InteriorModes::AddDoorMode:
+			// TODO: Add logic for placing a door
+			break;
+
+		case InteriorModes::AddStairsMode:
+			// TODO: Add logic for placing stairs
+			break;
+
+		case InteriorModes::AddEscalatorMode:
+			// TODO: Add logic for placing an escalator
+			break;
+
+		case InteriorModes::AddElevatorMode:
+			// TODO: Add logic for placing an elevator
+			break;
+
+		default:
+			// Fallback for an invalid or out-of-range integer value
+			break;
+		}
+
+	}
+
 	// Plan A (freehand footprint). Callable from Blueprint/UMG as well as the B key, so a UI
 	// button can drive this directly once one exists (e.g. for mobile, where there's no keyboard).
 	UFUNCTION(BlueprintCallable, Category = "Building")
