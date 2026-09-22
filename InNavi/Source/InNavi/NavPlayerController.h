@@ -50,7 +50,17 @@ class INNAVI_API ANavPlayerController : public APlayerController
 
 public:
 	ANavPlayerController();
+	UFUNCTION(BlueprintCallable, Category = "Interior|History")
+	void UndoInterior();
 
+	UFUNCTION(BlueprintCallable, Category = "Interior|History")
+	void RedoInterior();
+
+	UFUNCTION(BlueprintCallable, Category = "Interior|Clipboard")
+	void CopySelectedInteriorObject();
+
+	UFUNCTION(BlueprintCallable, Category = "Interior|Clipboard")
+	void PasteInteriorObject();
 	// Bind this once to catch every failed action (see FOnActionFailed above) instead of hunting
 	// through the Output Log.
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")
@@ -701,4 +711,31 @@ private:
 	// Id of the building currently being interior-edited (i.e. has a floor/roof section hidden via
 	// PositionCameraForFloor) - empty if none. RestoreExteriorCameraView shows everything again.
 	FString InteriorBuildingHiddenById;
+
+	bool bHasCopiedRoom = false;
+
+	TArray<FVector2D> CopiedRoomFootprint;
+	FString CopiedRoomName;
+	bool bCopiedRoomIsPublic = true;
+	bool bCopiedRoomRequiresKey = false;
+	bool bCopiedRoomIsClosedLoop = true;
+	// ---- Door Copy / Paste ----
+	bool bHasCopiedDoor = false;
+
+	FString CopiedDoorRoomId;
+	int32 CopiedDoorEdgeIndex = 0;
+	float CopiedDoorOffset = 0.0f;
+	FString CopiedDoorConnectsTo;
+	// ---- Connector Copy / Paste ----
+	bool bHasCopiedConnector = false;
+
+	EInteriorNavNodeType CopiedConnectorType =
+		EInteriorNavNodeType::Elevator;
+
+	FVector2D CopiedConnectorPosition =
+		FVector2D::ZeroVector;
+
+	TArray<int32> CopiedConnectorFloors;
+	// How many times the current copied object has been pasted
+	int32 PasteCount = 0;
 };

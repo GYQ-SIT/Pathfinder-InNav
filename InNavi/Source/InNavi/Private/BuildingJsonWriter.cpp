@@ -194,3 +194,138 @@ bool UBuildingJsonWriter::LoadBuildingsFromJson(
 
     return true;
 }
+bool UBuildingJsonWriter::SaveInteriorNavNodesToJson(
+    const TArray<FInteriorNavNode>& NavNodes)
+{
+    TSharedPtr<FJsonObject> RootObject = MakeShared<FJsonObject>();
+
+    TArray<TSharedPtr<FJsonValue>> NavNodesArray;
+
+    for (const FInteriorNavNode& Node : NavNodes)
+    {
+        TSharedPtr<FJsonObject> NodeObject = MakeShared<FJsonObject>();
+
+        NodeObject->SetStringField(TEXT("id"), Node.Id);
+        FString TypeString;
+
+        switch (Node.Type)
+        {
+        case EInteriorNavNodeType::PathNode:
+            TypeString = TEXT("pathNode");
+            break;
+
+        case EInteriorNavNodeType::Elevator:
+            TypeString = TEXT("elevator");
+            break;
+
+        case EInteriorNavNodeType::Stairs:
+            TypeString = TEXT("stairs");
+            break;
+
+        case EInteriorNavNodeType::Escalator:
+            TypeString = TEXT("escalator");
+            break;
+
+        default:
+            TypeString = TEXT("pathNode");
+            break;
+        }
+
+        NodeObject->SetStringField(TEXT("type"), TypeString);
+        NodeObject->SetNumberField(TEXT("level"), Node.Level);
+
+        // Position
+        TSharedPtr<FJsonObject> PositionObject = MakeShared<FJsonObject>();
+
+        PositionObject->SetNumberField(
+            TEXT("x"),
+            Node.Position.X
+        );
+
+        PositionObject->SetNumberField(
+            TEXT("y"),
+            Node.Position.Y
+        );
+
+        NodeObject->SetObjectField(
+            TEXT("position"),
+            PositionObject
+        );
+
+        // Connected floors
+        TArray<TSharedPtr<FJsonValue>> FloorsArray;
+
+        for (int32 Floor : Node.ConnectsFloors)
+        {
+            FloorsArray.Add(
+                MakeShared<FJsonValueNumber>(Floor)
+            );
+        }
+
+        NodeObject->SetArrayField(
+            TEXT("connectsFloors"),
+            FloorsArray
+        );
+
+        NodeObject->SetStringField(
+            TEXT("connectorGroupId"),
+            Node.ConnectorGroupId
+        );
+
+        NavNodesArray.Add(
+            MakeShared<FJsonValueObject>(NodeObject)
+        );
+    }
+
+    RootObject->SetArrayField(
+        TEXT("interiorNavNodes"),
+        NavNodesArray
+    );
+
+    FString OutputString;
+
+    TSharedRef<TJsonWriter<>> Writer =
+        TJsonWriterFactory<>::Create(&OutputString);
+
+    if (!FJsonSerializer::Serialize(
+        RootObject.ToSharedRef(),
+        Writer))
+    {
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("Failed to serialize interior nav nodes")
+        );
+
+        return false;
+    }
+
+    const FString FilePath =
+        FPaths::ProjectDir()
+        / TEXT("Data")
+        / TEXT("interior_nav_nodes.json");
+
+    if (!FFileHelper::SaveStringToFile(
+        OutputString,
+        *FilePath))
+    {
+        UE_LOG(
+            LogTemp,
+            Error,
+            TEXT("Failed to save interior nav nodes: %s"),
+            *FilePath
+        );
+
+        return false;
+    }
+
+    UE_LOG(
+        LogTemp,
+        Warning,
+        TEXT("Saved %d interior nav nodes to: %s"),
+        NavNodes.Num(),
+        *FilePath
+    );
+
+    return true;
+}

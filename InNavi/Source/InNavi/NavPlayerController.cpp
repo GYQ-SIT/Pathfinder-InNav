@@ -93,8 +93,304 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
 	InputComponent->BindKey(EKeys::N, IE_Pressed, this, &ANavPlayerController::ToggleSnapEnabled);
 	InputComponent->BindKey(FInputChord(EKeys::S, /*Shift*/false, /*Ctrl*/true, /*Alt*/false, /*Cmd*/false), IE_Pressed, this, &ANavPlayerController::SaveCurrentProjectKeyHandler);
+	// Ctrl + Z = Undo
+	InputComponent->BindKey(FInputChord(EKeys::Z, false, true, false, false),IE_Pressed,this,&ANavPlayerController::UndoInterior);
+
+	// Ctrl + Y = Redo
+	InputComponent->BindKey(FInputChord(EKeys::Y, false, true, false, false),IE_Pressed,this,&ANavPlayerController::RedoInterior);
+
+	// Ctrl + C = Copy selected interior object
+	InputComponent->BindKey(FInputChord(EKeys::C, false, true, false, false),IE_Pressed,this,&ANavPlayerController::CopySelectedInteriorObject);
+
+	// Ctrl + V = Paste copied interior object
+	InputComponent->BindKey(FInputChord(EKeys::V, false, true, false, false),IE_Pressed,this,&ANavPlayerController::PasteInteriorObject);
+}
+void ANavPlayerController::UndoInterior()
+{
+	if (!InteriorGen)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Undo: no InteriorGenerator found"));
+		return;
+	}
+
+	if (InteriorGen->Undo())
+	{
+		bHasUnsavedChanges = true;
+		UE_LOG(LogTemp, Warning, TEXT("Ctrl+Z: Undo successful"));
+	}
 }
 
+void ANavPlayerController::RedoInterior()
+{
+	if (!InteriorGen)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Redo: no InteriorGenerator found"));
+		return;
+	}
+
+	if (InteriorGen->Redo())
+	{
+		bHasUnsavedChanges = true;
+		UE_LOG(LogTemp, Warning, TEXT("Ctrl+Y: Redo successful"));
+	}
+}
+void ANavPlayerController::CopySelectedInteriorObject()
+{
+	if (!InteriorGen)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Copy: no InteriorGenerator found"));
+		return;
+	}
+	// Copy selected connector first
+	if (!SelectedConnectorGroupId.IsEmpty())
+	{
+		CopiedConnectorType = GetSelectedConnectorType();
+		CopiedConnectorFloors = GetSelectedConnectorFloors();
+
+		bool bFoundConnector = false;
+
+		for (const FInteriorNavNode& Node : InteriorGen->GetNavNodes())
+		{
+			if (Node.ConnectorGroupId == SelectedConnectorGroupId)
+			{
+				CopiedConnectorPosition = Node.Position;
+				bFoundConnector = true;
+				break;
+			}
+		}
+
+		if (!bFoundConnector)
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("Copy: selected connector could not be found"));
+			return;
+		}
+
+		bHasCopiedConnector = true;
+		bHasCopiedDoor = false;
+		bHasCopiedRoom = false;
+		PasteCount = 0;
+		UE_LOG(LogTemp, Warning,
+			TEXT("Copied connector: %s"),
+			*SelectedConnectorGroupId);
+
+		return;
+	}
+	// Copy selected door first
+	if (!SelectedDoorId.IsEmpty() && !SelectedDoorRoomId.IsEmpty())
+	{
+		FInteriorOpening Opening;
+
+		if (!InteriorGen->GetDoorOpening(
+			SelectedDoorRoomId,
+			SelectedDoorId,
+			Opening))
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("Copy: selected door could not be found"));
+			return;
+		}
+
+		CopiedDoorRoomId = SelectedDoorRoomId;
+		CopiedDoorEdgeIndex = Opening.EdgeIndex;
+		CopiedDoorOffset = Opening.Offset;
+		CopiedDoorConnectsTo = Opening.ConnectsTo;
+
+		bHasCopiedDoor = true;
+		bHasCopiedRoom = false;
+		bHasCopiedConnector = false;
+		PasteCount = 0;
+		UE_LOG(LogTemp, Warning,
+			TEXT("Copied door: %s"),
+			*SelectedDoorId);
+
+		return;
+	}
+	if (SelectedRoomId.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Copy: no room selected"));
+		return;
+	}
+
+	AInteriorRoom* Room = nullptr;
+
+	const TArray<AInteriorRoom*>& Rooms =
+		InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor());
+
+	for (AInteriorRoom* Candidate : Rooms)
+	{
+		if (Candidate && Candidate->RoomId == SelectedRoomId)
+		{
+			Room = Candidate;
+			break;
+		}
+	}
+
+	if (!Room)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("Copy: selected room '%s' was not found"),
+			*SelectedRoomId);
+		return;
+	}
+	CopiedRoomFootprint = Room->GetFootprint();
+	CopiedRoomName = Room->RoomName;
+	bCopiedRoomIsPublic = Room->bIsPublic;
+	bCopiedRoomRequiresKey = Room->bRequiresKey;
+	bCopiedRoomIsClosedLoop = Room->IsClosedLoop();
+
+	bHasCopiedRoom = true;
+	bHasCopiedDoor = false;
+	bHasCopiedConnector = false;
+	UE_LOG(LogTemp, Warning,
+		TEXT("Copied room: %s"),
+		*SelectedRoomId);
+}
+void ANavPlayerController::PasteInteriorObject()
+{
+	if (!InteriorGen)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Paste: no InteriorGenerator found"));
+		return;
+	}
+	// Paste copied connector
+	if (bHasCopiedConnector)
+	{
+		// Offset so the new connector does not sit directly
+		// on top of the original.
+		const FVector2D NewPosition =
+			CopiedConnectorPosition + FVector2D(50.0f, 50.0f);
+
+		const FString NewGroupId =
+			InteriorGen->PlaceConnectorNode(
+				CopiedConnectorType,
+				NewPosition,
+				CopiedConnectorFloors
+			);
+
+		if (NewGroupId.IsEmpty())
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("Paste: failed to create copied connector"));
+			return;
+		}
+
+		SelectConnector(NewGroupId);
+
+		bHasUnsavedChanges = true;
+
+		UE_LOG(LogTemp, Warning,
+			TEXT("Pasted connector as: %s"),
+			*NewGroupId);
+
+		return;
+	}
+	// Paste copied door
+	if (bHasCopiedDoor)
+	{
+		if (CopiedDoorRoomId.IsEmpty())
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("Paste: copied door has no owning room"));
+			return;
+		}
+
+		// Move the pasted door slightly along the same wall.
+		const float NewOffset = CopiedDoorOffset + 50.0f;
+
+		const FString NewDoorId = InteriorGen->AddDoorToRoom(
+			CopiedDoorRoomId,
+			CopiedDoorEdgeIndex,
+			NewOffset
+		);
+
+		if (NewDoorId.IsEmpty())
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("Paste: failed to create copied door"));
+			return;
+		}
+
+		// Preserve ConnectsTo if the copied door had one.
+		if (!CopiedDoorConnectsTo.IsEmpty())
+		{
+			InteriorGen->SetDoorConnectsTo(
+				CopiedDoorRoomId,
+				NewDoorId,
+				CopiedDoorConnectsTo
+			);
+		}
+
+		SelectDoor(CopiedDoorRoomId, NewDoorId);
+
+		bHasUnsavedChanges = true;
+
+		UE_LOG(LogTemp, Warning,
+			TEXT("Pasted door as: %s"),
+			*NewDoorId);
+
+		return;
+	}
+	if (!bHasCopiedRoom)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Paste: nothing has been copied"));
+		return;
+	}
+	// Create a copy of the footprint
+	TArray<FVector2D> PastedFootprint = CopiedRoomFootprint;
+
+	// Offset the pasted room so it does not appear directly
+	// on top of the original room.
+	PasteCount++;
+
+	TArray<FVector2D> PastedFootprint = CopiedRoomFootprint;
+
+	const FVector2D PasteOffset(300.0f, 0.0f);
+
+	for (FVector2D& Point : PastedFootprint)
+	{
+		Point += PasteOffset;
+	}
+
+	// Empty RoomId lets InteriorGenerator generate a new unique ID.
+	AInteriorRoom* NewRoom = nullptr;
+
+	if (bCopiedRoomIsClosedLoop)
+	{
+		// Paste a normal closed room
+		NewRoom = InteriorGen->CreateRoomFromFootprint(
+			PastedFootprint,
+			FString(),
+			CopiedRoomName,
+			bCopiedRoomIsPublic,
+			bCopiedRoomRequiresKey
+		);
+	}
+	else
+	{
+		// Paste a standalone open wall
+		NewRoom = InteriorGen->CreateWallFromPoints(
+			PastedFootprint,
+			FString()
+		);
+	}
+
+	if (!NewRoom)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("Paste: failed to create copied room"));
+		return;
+	}
+
+	// Select the newly pasted room.
+	SelectRoom(NewRoom->RoomId);
+
+	bHasUnsavedChanges = true;
+
+	UE_LOG(LogTemp, Warning,
+		TEXT("Pasted room as: %s"),
+		*NewRoom->RoomId);
+}
 void ANavPlayerController::OnClick()
 {
 	if (bBuildMode)

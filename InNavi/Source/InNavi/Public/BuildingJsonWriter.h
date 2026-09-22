@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
+#include "../InteriorTypes.h"
 #include "BuildingJsonWriter.generated.h"
 
 // Stores the information for ONE building
@@ -35,7 +36,6 @@ struct FBuildingData
     float FloorHeight = 100.0f;
 };
 
-
 UCLASS()
 class INNAVI_API UBuildingJsonWriter : public UObject
 {
@@ -43,15 +43,22 @@ class INNAVI_API UBuildingJsonWriter : public UObject
 
 public:
 
-    // SAVE
+    // SAVE BUILDINGS
     UFUNCTION(BlueprintCallable, Category = "Building JSON")
     static bool SaveBuildingsToJson(
         const TArray<FBuildingData>& Buildings
     );
 
-    // LOAD
+    // LOAD BUILDINGS
     UFUNCTION(BlueprintCallable, Category = "Building JSON")
     static bool LoadBuildingsFromJson(
         TArray<FBuildingData>& Buildings
+    );
+
+    // SAVE INTERIOR NAVIGATION NODES
+    // FInteriorNavNode is defined in InteriorTypes.h
+    UFUNCTION(BlueprintCallable, Category = "Building JSON")
+    static bool SaveInteriorNavNodesToJson(
+        const TArray<FInteriorNavNode>& NavNodes
     );
 };
