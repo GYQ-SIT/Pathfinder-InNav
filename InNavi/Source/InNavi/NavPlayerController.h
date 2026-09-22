@@ -11,6 +11,7 @@ class APolyBuilding;
 class ABuildingGenerator;
 class AInteriorGenerator;
 class AInteriorRoom;
+class UNavigationPanelWidget;
 
 // Broadcast whenever build mode turns on/off, so UI can show an indicator without polling every tick.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildModeChanged, bool, bNewBuildMode);
@@ -50,17 +51,12 @@ class INNAVI_API ANavPlayerController : public APlayerController
 
 public:
 	ANavPlayerController();
-	UFUNCTION(BlueprintCallable, Category = "Interior|History")
-	void UndoInterior();
 
-	UFUNCTION(BlueprintCallable, Category = "Interior|History")
-	void RedoInterior();
+	// Used by the 2D floor plan while a navigation endpoint is armed.
+	bool IsSelectingNavigationPoint() const;
+	void SelectNavigationPoint(FVector2D FootprintPosition, int32 Floor);
+	UNavigationPanelWidget* GetNavigationPanel() const { return NavigationPanel; }
 
-	UFUNCTION(BlueprintCallable, Category = "Interior|Clipboard")
-	void CopySelectedInteriorObject();
-
-	UFUNCTION(BlueprintCallable, Category = "Interior|Clipboard")
-	void PasteInteriorObject();
 	// Bind this once to catch every failed action (see FOnActionFailed above) instead of hunting
 	// through the Output Log.
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")
@@ -538,6 +534,10 @@ protected:
 private:
 	// Left-click: selects a building normally, or adds a footprint point while in build mode.
 	void OnClick();
+
+	UPROPERTY()
+	UNavigationPanelWidget* NavigationPanel = nullptr;
+
 	void SelectBuildingUnderCursor();
 
 	// Build mode (Plan A): click to trace out a new building's footprint on the ground.
@@ -711,31 +711,4 @@ private:
 	// Id of the building currently being interior-edited (i.e. has a floor/roof section hidden via
 	// PositionCameraForFloor) - empty if none. RestoreExteriorCameraView shows everything again.
 	FString InteriorBuildingHiddenById;
-
-	bool bHasCopiedRoom = false;
-
-	TArray<FVector2D> CopiedRoomFootprint;
-	FString CopiedRoomName;
-	bool bCopiedRoomIsPublic = true;
-	bool bCopiedRoomRequiresKey = false;
-	bool bCopiedRoomIsClosedLoop = true;
-	// ---- Door Copy / Paste ----
-	bool bHasCopiedDoor = false;
-
-	FString CopiedDoorRoomId;
-	int32 CopiedDoorEdgeIndex = 0;
-	float CopiedDoorOffset = 0.0f;
-	FString CopiedDoorConnectsTo;
-	// ---- Connector Copy / Paste ----
-	bool bHasCopiedConnector = false;
-
-	EInteriorNavNodeType CopiedConnectorType =
-		EInteriorNavNodeType::Elevator;
-
-	FVector2D CopiedConnectorPosition =
-		FVector2D::ZeroVector;
-
-	TArray<int32> CopiedConnectorFloors;
-	// How many times the current copied object has been pasted
-	int32 PasteCount = 0;
 };

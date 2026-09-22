@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "InteriorFloorPlanWidget.h"
@@ -8,6 +8,7 @@
 #include "BuildingGenerator.h"
 #include "PolyBuilding.h"
 #include "NavPlayerController.h"
+#include "NavigationPanelWidget.h"
 #include "EngineUtils.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
@@ -30,6 +31,14 @@ void UInteriorFloorPlanWidget::NativeConstruct()
 		}
 		PlayerController = Cast<ANavPlayerController>(World->GetFirstPlayerController());
 	}
+
+	UE_LOG(LogTemp, Warning,
+		TEXT("[Navigation] Floor-plan constructed: PlayerController=%s Generator=%s Interior=%s BuildingId=%s Floor=%d"),
+		PlayerController ? TEXT("valid") : TEXT("NULL"),
+		Generator ? TEXT("valid") : TEXT("NULL"),
+		InteriorGen ? TEXT("valid") : TEXT("NULL"),
+		InteriorGen ? *InteriorGen->GetLoadedBuildingId() : TEXT("<none>"),
+		InteriorGen ? InteriorGen->GetActiveFloor() : INDEX_NONE);
 }
 
 FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
@@ -45,6 +54,52 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 	if (PlayerController && InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 	{
 		const FVector2D LocalPosition = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+		UE_LOG(LogTemp, Warning,
+			TEXT("[Navigation] 2D left click: local=(%.2f, %.2f) size=(%.2f, %.2f) selecting=%s"),
+			LocalPosition.X, LocalPosition.Y,
+			InGeometry.GetLocalSize().X, InGeometry.GetLocalSize().Y,
+			PlayerController->IsSelectingNavigationPoint() ? TEXT("true") : TEXT("false"));
+
+		if (PlayerController->IsSelectingNavigationPoint())
+		{
+			// Make sure the interior data is loaded before selecting a point.
+			if (!InteriorGen ||
+				!Generator ||
+				InteriorGen->GetLoadedBuildingId().IsEmpty())
+			{
+				UE_LOG(LogTemp, Error,
+					TEXT("[Navigation] 2D navigation click rejected before conversion: PlayerController=%s Generator=%s Interior=%s BuildingId=%s"),
+					PlayerController ? TEXT("valid") : TEXT("NULL"),
+					Generator ? TEXT("valid") : TEXT("NULL"),
+					InteriorGen ? TEXT("valid") : TEXT("NULL"),
+					InteriorGen ? *InteriorGen->GetLoadedBuildingId() : TEXT("<none>"));
+				return FReply::Handled();
+			}
+
+			// A valid floor must be selected.
+			const int32 ActiveFloor = InteriorGen->GetActiveFloor();
+			if (ActiveFloor < 1)
+			{
+				UE_LOG(LogTemp, Error, TEXT("[Navigation] 2D navigation click rejected: active floor=%d"), ActiveFloor);
+				return FReply::Handled();
+			}
+
+			// Convert the mouse position from the widget to the building footprint.
+			const FVector2D FootprintPosition =
+				LocalPositionToFootprintPoint(
+					LocalPosition,
+					InGeometry.GetLocalSize());
+			UE_LOG(LogTemp, Warning,
+				TEXT("[Navigation] 2D click converted to footprint=(%.2f, %.2f), floor=%d"),
+				FootprintPosition.X, FootprintPosition.Y, ActiveFloor);
+
+			// Save the selected navigation point.
+			PlayerController->SelectNavigationPoint(
+				FootprintPosition,
+				ActiveFloor);
+
+			return FReply::Handled();
+		}
 
 		if (PlayerController->IsInSelectMode())
 		{
@@ -291,9 +346,9 @@ AInteriorRoom* UInteriorFloorPlanWidget::FindRoomNearLocalPosition(FVector2D Loc
 
 	const float Scale = Generator->GetScale();
 	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
-	{
-		return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
-	};
+		{
+			return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+		};
 
 	constexpr float ClickTolerancePixels = 10.f;
 	constexpr float DoorWidthWorldUnits = 90.f; // matches AInteriorGenerator::AddDoorToRoom's fixed door width
@@ -388,9 +443,9 @@ AInteriorRoom* UInteriorFloorPlanWidget::FindRoomContainingLocalPosition(FVector
 
 	const float Scale = Generator->GetScale();
 	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
-	{
-		return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
-	};
+		{
+			return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+		};
 
 	for (AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
 	{
@@ -440,9 +495,9 @@ bool UInteriorFloorPlanWidget::FindDoorNearLocalPosition(FVector2D LocalPosition
 
 	const float Scale = Generator->GetScale();
 	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
-	{
-		return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
-	};
+		{
+			return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+		};
 
 	constexpr float ClickTolerancePixels = 10.f;
 
@@ -514,9 +569,9 @@ bool UInteriorFloorPlanWidget::FindConnectorNearLocalPosition(FVector2D LocalPos
 
 	const float Scale = Generator->GetScale();
 	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
-	{
-		return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
-	};
+		{
+			return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+		};
 
 	constexpr float ClickTolerancePixels = 10.f;
 	const int32 ActiveFloor = InteriorGen->GetActiveFloor();
@@ -579,9 +634,9 @@ bool UInteriorFloorPlanWidget::ComputeDoorDragOffset(const FString& RoomId, int3
 
 	const float Scale = Generator->GetScale();
 	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
-	{
-		return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
-	};
+		{
+			return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+		};
 
 	const FVector2D WorldA = (Footprint[EdgeIndex] + Building->BuildingOffset) * Scale;
 	const FVector2D WorldB = (Footprint[(EdgeIndex + 1) % N] + Building->BuildingOffset) * Scale;
@@ -708,9 +763,9 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 	const float Scale = Generator->GetScale();
 
 	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
-	{
-		return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
-	};
+		{
+			return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+		};
 
 	// ---- Building boundary ----
 	{
@@ -781,12 +836,12 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			EdgeOpenings.Sort([](const FInteriorOpening& A, const FInteriorOpening& B) { return A.Offset < B.Offset; });
 
 			auto DrawSegment = [&](const FVector2D& WorldSegA, const FVector2D& WorldSegB, const FLinearColor& Color, float Thickness)
-			{
-				TArray<FVector2D> LinePoints;
-				LinePoints.Add(WorldToLocal(WorldSegA));
-				LinePoints.Add(WorldToLocal(WorldSegB));
-				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, AllottedGeometry.ToPaintGeometry(), LinePoints, ESlateDrawEffect::None, Color, true, Thickness);
-			};
+				{
+					TArray<FVector2D> LinePoints;
+					LinePoints.Add(WorldToLocal(WorldSegA));
+					LinePoints.Add(WorldToLocal(WorldSegB));
+					FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, AllottedGeometry.ToPaintGeometry(), LinePoints, ESlateDrawEffect::None, Color, true, Thickness);
+				};
 
 			float EdgeCursor = 0.f;
 			for (const FInteriorOpening* Opening : EdgeOpenings)
@@ -881,5 +936,58 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		}
 	}
 
-	return LayerId + 4;
+	// ---- Navigation route and endpoints on the currently viewed floor ----
+	if (PlayerController)
+	{
+		if (const UNavigationPanelWidget* NavigationPanel = PlayerController->GetNavigationPanel())
+		{
+			const int32 ActiveFloor = InteriorGen->GetActiveFloor();
+			const TArray<FNavigationRoutePoint>& Route = NavigationPanel->GetRoutePoints();
+			for (int32 I = 1; I < Route.Num(); ++I)
+			{
+				if (Route[I - 1].Floor != ActiveFloor || Route[I].Floor != ActiveFloor)
+				{
+					continue;
+				}
+				TArray<FVector2D> Segment;
+				Segment.Add(WorldToLocal((Route[I - 1].Position + Building->BuildingOffset) * Scale));
+				Segment.Add(WorldToLocal((Route[I].Position + Building->BuildingOffset) * Scale));
+				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 4,
+					AllottedGeometry.ToPaintGeometry(), Segment, ESlateDrawEffect::None,
+					FLinearColor(1.f, 0.55f, 0.f, 1.f), true, 6.f);
+			}
+
+			const FSlateBrush* MarkerBrush = FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox"));
+			auto DrawEndpoint = [&](const FNavigationRoutePoint& Point, const FLinearColor& Color)
+				{
+					if (Point.Floor != ActiveFloor)
+					{
+						return;
+					}
+					constexpr float MarkerSize = 18.f;
+					constexpr float OutlineSize = 24.f;
+					const FVector2D MarkerLocal = WorldToLocal((Point.Position + Building->BuildingOffset) * Scale);
+					const FPaintGeometry OutlineGeometry = AllottedGeometry.ToPaintGeometry(
+						FVector2f(OutlineSize, OutlineSize),
+						FSlateLayoutTransform(MarkerLocal - FVector2D(OutlineSize * 0.5f)));
+					FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 5,
+						OutlineGeometry, MarkerBrush, ESlateDrawEffect::None, FLinearColor::White);
+					const FPaintGeometry MarkerGeometry = AllottedGeometry.ToPaintGeometry(
+						FVector2f(MarkerSize, MarkerSize),
+						FSlateLayoutTransform(MarkerLocal - FVector2D(MarkerSize * 0.5f)));
+					FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 6,
+						MarkerGeometry, MarkerBrush, ESlateDrawEffect::None, Color);
+				};
+			if (NavigationPanel->HasStart())
+			{
+				DrawEndpoint(NavigationPanel->GetStart(), FLinearColor(0.f, 0.8f, 0.2f, 1.f));
+			}
+			if (NavigationPanel->HasDestination())
+			{
+				DrawEndpoint(NavigationPanel->GetDestination(), FLinearColor(0.9f, 0.1f, 0.1f, 1.f));
+			}
+		}
+	}
+
+	return LayerId + 7;
 }
