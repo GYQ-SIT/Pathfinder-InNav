@@ -10,10 +10,13 @@ generate a schematic interior in 3D, and navigate inside — including across fl
 
 - `README.md` — this file
 - `.gitignore` — UnrealEngine template
+- `InNavi/` — the Unreal Engine project (open `InNavi/InNavi.uproject`)
 - `docs/`
   - `proposal.md` — project proposal
   - `design/`
     - `product-design.md` — product design document
+    - `interior-editor-ui-spec.md` — interior editing tools, C++ interface for UI (written for Padre)
+    - `interior-editor-guide.md` — **how to use the interior editor** (controls/workflow, current as of the `YQ-ui-backup` branch)
     - `ui-ux/` — wireframes, user flows, mockups
   - `architecture.md` — system architecture + tech stack
   - `deliverables.md` — ownership + M1/M2/M3 targets
@@ -21,9 +24,9 @@ generate a schematic interior in 3D, and navigate inside — including across fl
 
 ## Prerequisites
 
-- Unreal Engine (version TBD)
+- Unreal Engine 5.8
+- Visual Studio 2022 with the "Game development with C++" workload
 - Git
-- IDE: Visual Studio / Rider / Xcode (depending on your OS)
 
 ## Getting started
 
@@ -32,7 +35,16 @@ git clone https://github.com/GYQ-SIT/Pathfinder-InNav.git
 cd Pathfinder-InNav
 ​```
 
-Build/run instructions will be added once the Unreal Engine project is set up.
+1. Right-click `InNavi/InNavi.uproject` → **Generate Visual Studio project files** (first
+   time only, or after pulling a change that adds/removes a C++ class).
+2. Open the generated `.sln` in Visual Studio and build (or just double-click the
+   `.uproject` to open directly in the Unreal Editor, which will offer to build for you).
+3. Hit **Play** in the Editor. The building/interior data it loads from lives at
+   `InNavi/Data/buildings.json`.
+
+Most of the current interior-editing functionality (rooms, doors, elevators/stairs/
+escalators, snapping, save/load) is only reachable via keyboard shortcuts right now —
+see `docs/design/interior-editor-guide.md` for the full control list and workflow.
 
 ## Supported platforms
 

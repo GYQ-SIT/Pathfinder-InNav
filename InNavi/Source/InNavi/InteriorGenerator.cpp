@@ -827,35 +827,33 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 	return Wall;
 }
 
-FString AInteriorGenerator::PlaceConnectorNode(EInteriorNavNodeType Type, FVector2D Position, const TArray<int32>& ConnectsToFloors)
+bool AInteriorGenerator::CanPlaceConnectorOnFloor(FVector2D Position, int32 Level) const
 {
-	if (LoadedBuildingId.IsEmpty() || !Generator)
+	const FInteriorFloorInfo* FloorInfo = FloorInfoByLevel.Find(Level);
+	if (!FloorInfo)
 	{
-		UE_LOG(LogTemp, Error, TEXT("PlaceConnectorNode: no building interior currently loaded"));
-		return FString();
+		UE_LOG(LogTemp, Error, TEXT("Connector placement: floor %d doesn't exist"), Level);
+		return false;
 	}
 
-	APolyBuilding* Building = Generator->FindBuildingById(LoadedBuildingId);
+	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
 	if (!Building)
 	{
-		UE_LOG(LogTemp, Error, TEXT("PlaceConnectorNode: building '%s' no longer exists"), *LoadedBuildingId);
-		return FString();
+		UE_LOG(LogTemp, Error, TEXT("Connector placement: building '%s' no longer exists"), *LoadedBuildingId);
+		return false;
 	}
 
-	// A connector shaft has to be clear space all the way through the building - one blocked floor
-	// makes the whole thing unplaceable rather than silently connecting fewer floors than asked for
-	// (which would be easy to miss and would leave navigation with a connector that mysteriously
-	// doesn't reach a floor it looks like it should). So this validates every requested floor
-	// first, and only creates anything once all of them pass.
-	auto IsBlockedOnFloor = [this](FVector2D TestPosition, int32 Level, const FInteriorFloorInfo& FloorInfo) -> bool
+	if (!IsPointInPolygon(Position, Building->GetFootprint()))
 	{
-		const FInteriorRoomList* RoomList = RoomsByFloor.Find(Level);
-		if (!RoomList)
-		{
-			return false;
-		}
+		UE_LOG(LogTemp, Error, TEXT("Connector placement: outside the building's outline on floor %d"), Level);
+		return false;
+	}
 
-		const float HalfWallThickness = FloorInfo.WallThickness * 0.5f;
+	// Being inside a room's open interior is fine (that's an explicitly supported placement, unlike
+	// a room or door) - only sitting inside a wall's own solid thickness is rejected.
+	if (const FInteriorRoomList* RoomList = RoomsByFloor.Find(Level))
+	{
+		const float HalfWallThickness = FloorInfo->WallThickness * 0.5f;
 		for (const AInteriorRoom* Room : RoomList->Rooms)
 		{
 			if (!Room)
@@ -870,35 +868,42 @@ FString AInteriorGenerator::PlaceConnectorNode(EInteriorNavNodeType Type, FVecto
 			{
 				const FVector2D& EdgeA = RoomFootprint[i];
 				const FVector2D& EdgeB = RoomFootprint[(i + 1) % NumPoints];
-				if (DistancePointToSegment2D(TestPosition, EdgeA, EdgeB) < HalfWallThickness)
+				if (DistancePointToSegment2D(Position, EdgeA, EdgeB) < HalfWallThickness)
 				{
-					return true;
+					UE_LOG(LogTemp, Error, TEXT("Connector placement: blocked by a wall on floor %d"), Level);
+					return false;
 				}
 			}
 		}
-		return false;
-	};
+	}
 
+	return true;
+}
+
+FString AInteriorGenerator::PlaceConnectorNode(EInteriorNavNodeType Type, FVector2D Position, const TArray<int32>& ConnectsToFloors)
+{
+	if (LoadedBuildingId.IsEmpty() || !Generator)
+	{
+		UE_LOG(LogTemp, Error, TEXT("PlaceConnectorNode: no building interior currently loaded"));
+		return FString();
+	}
+
+	if (!Generator->FindBuildingById(LoadedBuildingId))
+	{
+		UE_LOG(LogTemp, Error, TEXT("PlaceConnectorNode: building '%s' no longer exists"), *LoadedBuildingId);
+		return FString();
+	}
+
+	// A connector shaft has to be clear space all the way through the building - one blocked floor
+	// makes the whole thing unplaceable rather than silently connecting fewer floors than asked for
+	// (which would be easy to miss and would leave navigation with a connector that mysteriously
+	// doesn't reach a floor it looks like it should). So this validates every requested floor
+	// first, and only creates anything once all of them pass.
 	for (int32 Level : ConnectsToFloors)
 	{
-		const FInteriorFloorInfo* FloorInfo = FloorInfoByLevel.Find(Level);
-		if (!FloorInfo)
+		if (!CanPlaceConnectorOnFloor(Position, Level))
 		{
-			UE_LOG(LogTemp, Error, TEXT("PlaceConnectorNode: floor %d doesn't exist - nothing placed"), Level);
-			return FString();
-		}
-
-		if (!IsPointInPolygon(Position, Building->GetFootprint()))
-		{
-			UE_LOG(LogTemp, Error, TEXT("PlaceConnectorNode: outside the building's outline on floor %d - nothing placed"), Level);
-			return FString();
-		}
-
-		// Being inside a room's open interior is fine (that's an explicitly supported placement,
-		// unlike a room or door) - only sitting inside the wall's own solid thickness is rejected.
-		if (IsBlockedOnFloor(Position, Level, *FloorInfo))
-		{
-			UE_LOG(LogTemp, Error, TEXT("PlaceConnectorNode: blocked by a wall on floor %d - nothing placed"), Level);
+			UE_LOG(LogTemp, Error, TEXT("PlaceConnectorNode: nothing placed"));
 			return FString();
 		}
 	}
@@ -935,6 +940,81 @@ bool AInteriorGenerator::DeleteConnectorGroup(const FString& GroupId)
 
 	UE_LOG(LogTemp, Error, TEXT("DeleteConnectorGroup: '%s' not found"), *GroupId);
 	return false;
+}
+
+bool AInteriorGenerator::SetConnectorFloors(const FString& GroupId, const TArray<int32>& NewConnectsToFloors)
+{
+	if (NewConnectsToFloors.Num() == 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("SetConnectorFloors: '%s' needs at least one floor - use DeleteConnectorGroup to remove it entirely"), *GroupId);
+		return false;
+	}
+
+	EInteriorNavNodeType Type = EInteriorNavNodeType::PathNode;
+	FVector2D Position = FVector2D::ZeroVector;
+	TArray<int32> CurrentFloors;
+	for (const FInteriorNavNode& Node : NavNodes)
+	{
+		if (Node.ConnectorGroupId == GroupId)
+		{
+			Type = Node.Type;
+			Position = Node.Position;
+			CurrentFloors.Add(Node.Level);
+		}
+	}
+
+	if (CurrentFloors.Num() == 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("SetConnectorFloors: '%s' not found"), *GroupId);
+		return false;
+	}
+
+	// Same all-or-nothing reasoning as PlaceConnectorNode - only the newly-added floors need
+	// (re-)validating, a floor already in CurrentFloors already has a node sitting there.
+	for (int32 Level : NewConnectsToFloors)
+	{
+		if (!CurrentFloors.Contains(Level) && !CanPlaceConnectorOnFloor(Position, Level))
+		{
+			UE_LOG(LogTemp, Error, TEXT("SetConnectorFloors: '%s' unchanged"), *GroupId);
+			return false;
+		}
+	}
+
+	// Drop nodes for floors no longer in the list.
+	NavNodes.RemoveAll([&GroupId, &NewConnectsToFloors](const FInteriorNavNode& Node)
+	{
+		return Node.ConnectorGroupId == GroupId && !NewConnectsToFloors.Contains(Node.Level);
+	});
+
+	// Every remaining node reflects the same full floor list.
+	for (FInteriorNavNode& Node : NavNodes)
+	{
+		if (Node.ConnectorGroupId == GroupId)
+		{
+			Node.ConnectsFloors = NewConnectsToFloors;
+		}
+	}
+
+	// Add nodes for newly-added floors.
+	for (int32 Level : NewConnectsToFloors)
+	{
+		if (CurrentFloors.Contains(Level))
+		{
+			continue;
+		}
+
+		FInteriorNavNode NewNode;
+		NewNode.Id = FString::Printf(TEXT("%s-F%02d"), *GroupId, Level);
+		NewNode.Type = Type;
+		NewNode.Level = Level;
+		NewNode.Position = Position;
+		NewNode.ConnectsFloors = NewConnectsToFloors;
+		NewNode.ConnectorGroupId = GroupId;
+		NavNodes.Add(NewNode);
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("Connector '%s' now on %d floor(s)"), *GroupId, NewConnectsToFloors.Num());
+	return true;
 }
 
 bool AInteriorGenerator::DeleteRoom(const FString& RoomId)

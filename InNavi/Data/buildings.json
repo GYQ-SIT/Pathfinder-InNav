@@ -974,7 +974,7 @@
 				0,
 				0
 			],
-			"floorCount": 10,
+			"floorCount": 11,
 			"floorHeight": 300,
 			"footprint": [
 				[
@@ -1021,7 +1021,330 @@
 					298,
 					472
 				]
-			]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 1,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": [
+							{
+								"id": "E6-NAV-01-F01",
+								"type": "elevator",
+								"position": [
+									392.63073128359514,
+									379.05550170751985
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3,
+									4,
+									5,
+									6,
+									7,
+									8,
+									9
+								],
+								"connectorGroupId": "E6-NAV-01"
+							},
+							{
+								"id": "E6-NAV-11-F01",
+								"type": "stairs",
+								"position": [
+									437.8568853531616,
+									399.45163515181201
+								],
+								"connectsFloors": [
+									1,
+									2
+								],
+								"connectorGroupId": "E6-NAV-11"
+							},
+							{
+								"id": "E6-NAV-13-F01",
+								"type": "escalator",
+								"position": [
+									499.93201922453477,
+									411.86661802838671
+								],
+								"connectsFloors": [
+									1,
+									2
+								],
+								"connectorGroupId": "E6-NAV-13"
+							}
+						]
+					},
+					{
+						"level": 2,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": [
+							{
+								"id": "E6-NAV-01-F02",
+								"type": "elevator",
+								"position": [
+									392.63073128359514,
+									379.05550170751985
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3,
+									4,
+									5,
+									6,
+									7,
+									8,
+									9
+								],
+								"connectorGroupId": "E6-NAV-01"
+							},
+							{
+								"id": "E6-NAV-11-F02",
+								"type": "stairs",
+								"position": [
+									437.8568853531616,
+									399.45163515181201
+								],
+								"connectsFloors": [
+									1,
+									2
+								],
+								"connectorGroupId": "E6-NAV-11"
+							},
+							{
+								"id": "E6-NAV-13-F02",
+								"type": "escalator",
+								"position": [
+									499.93201922453477,
+									411.86661802838671
+								],
+								"connectsFloors": [
+									1,
+									2
+								],
+								"connectorGroupId": "E6-NAV-13"
+							}
+						]
+					},
+					{
+						"level": 3,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": [
+							{
+								"id": "E6-NAV-01-F03",
+								"type": "elevator",
+								"position": [
+									392.63073128359514,
+									379.05550170751985
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3,
+									4,
+									5,
+									6,
+									7,
+									8,
+									9
+								],
+								"connectorGroupId": "E6-NAV-01"
+							}
+						]
+					},
+					{
+						"level": 4,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": [
+							{
+								"id": "E6-NAV-01-F04",
+								"type": "elevator",
+								"position": [
+									392.63073128359514,
+									379.05550170751985
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3,
+									4,
+									5,
+									6,
+									7,
+									8,
+									9
+								],
+								"connectorGroupId": "E6-NAV-01"
+							}
+						]
+					},
+					{
+						"level": 5,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": [
+							{
+								"id": "E6-NAV-01-F05",
+								"type": "elevator",
+								"position": [
+									392.63073128359514,
+									379.05550170751985
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3,
+									4,
+									5,
+									6,
+									7,
+									8,
+									9
+								],
+								"connectorGroupId": "E6-NAV-01"
+							}
+						]
+					},
+					{
+						"level": 6,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": [
+							{
+								"id": "E6-NAV-01-F06",
+								"type": "elevator",
+								"position": [
+									392.63073128359514,
+									379.05550170751985
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3,
+									4,
+									5,
+									6,
+									7,
+									8,
+									9
+								],
+								"connectorGroupId": "E6-NAV-01"
+							}
+						]
+					},
+					{
+						"level": 7,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": [
+							{
+								"id": "E6-NAV-01-F07",
+								"type": "elevator",
+								"position": [
+									392.63073128359514,
+									379.05550170751985
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3,
+									4,
+									5,
+									6,
+									7,
+									8,
+									9
+								],
+								"connectorGroupId": "E6-NAV-01"
+							}
+						]
+					},
+					{
+						"level": 8,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": [
+							{
+								"id": "E6-NAV-01-F08",
+								"type": "elevator",
+								"position": [
+									392.63073128359514,
+									379.05550170751985
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3,
+									4,
+									5,
+									6,
+									7,
+									8,
+									9
+								],
+								"connectorGroupId": "E6-NAV-01"
+							}
+						]
+					},
+					{
+						"level": 9,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": [
+							{
+								"id": "E6-NAV-01-F09",
+								"type": "elevator",
+								"position": [
+									392.63073128359514,
+									379.05550170751985
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3,
+									4,
+									5,
+									6,
+									7,
+									8,
+									9
+								],
+								"connectorGroupId": "E6-NAV-01"
+							}
+						]
+					},
+					{
+						"level": 10,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 11,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					}
+				]
+			}
 		}
 	]
 }

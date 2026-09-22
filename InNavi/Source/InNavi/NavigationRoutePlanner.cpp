@@ -1,4 +1,4 @@
-#include "NavigationRoutePlanner.h"
+﻿#include "NavigationRoutePlanner.h"
 
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
@@ -224,23 +224,70 @@ namespace
 		return true;
 	}
 
-	bool SameConnector(const FVertex& A, const FVertex& B)
+	bool CanUseConnectorBetween(const FVertex& A, const FVertex& B)
 	{
-		if (A.Point.ConnectorType == EInteriorNavNodeType::PathNode
-			|| A.Point.ConnectorType != B.Point.ConnectorType
-			|| A.Point.Floor == B.Point.Floor)
+		// Both points must be connector points, not normal path points.
+		if (A.Point.ConnectorType == EInteriorNavNodeType::PathNode ||
+			B.Point.ConnectorType == EInteriorNavNodeType::PathNode)
 		{
 			return false;
 		}
-		if (!A.Point.ConnectorId.IsEmpty() && A.Point.ConnectorId == B.Point.ConnectorId)
+
+		// The two points must be on different floors.
+		if (A.Point.Floor == B.Point.Floor)
 		{
-			return true;
+			return false;
 		}
-		// Older JSON had no group id. Its per-floor copies share a type, position and floor list.
-		return A.Point.ConnectorId.IsEmpty() && B.Point.ConnectorId.IsEmpty()
-			&& A.Point.Position.Equals(B.Point.Position, 0.01)
-			&& A.ConnectsFloors.Contains(B.Point.Floor)
-			&& B.ConnectsFloors.Contains(A.Point.Floor);
+
+		// Check that both points represent the same physical connector.
+		bool bSameConnector = false;
+
+		if (!A.Point.ConnectorId.IsEmpty() &&
+			A.Point.ConnectorId == B.Point.ConnectorId)
+		{
+			// Newer data uses ConnectorGroupId.
+			bSameConnector = true;
+		}
+		else if (A.Point.ConnectorId.IsEmpty() &&
+			B.Point.ConnectorId.IsEmpty() &&
+			A.Point.ConnectorType == B.Point.ConnectorType &&
+			A.Point.Position.Equals(B.Point.Position, 0.01f))
+		{
+			// Older JSON may not have ConnectorGroupId.
+			// In that case, use the same position and connector type.
+			bSameConnector = true;
+		}
+
+		if (!bSameConnector)
+		{
+			return false;
+		}
+
+		// Check whether connector A can reach connector B's floor.
+		const auto CanReachFloor =
+			[](const FVertex& Connector, int32 TargetFloor)
+			{
+				if (Connector.ConnectsFloors.Num() > 0)
+				{
+					// Normal case: use the saved floor list.
+					return Connector.ConnectsFloors.Contains(TargetFloor);
+				}
+
+				// Fallback for older data without a floor list.
+				if (Connector.Point.ConnectorType ==
+					EInteriorNavNodeType::Elevator)
+				{
+					return true;
+				}
+
+				// Stairs and escalators normally connect adjacent floors.
+				return FMath::Abs(
+					Connector.Point.Floor - TargetFloor) == 1;
+			};
+
+		// Both connector copies must agree that the floors are connected.
+		return CanReachFloor(A, B.Point.Floor) &&
+			CanReachFloor(B, A.Point.Floor);
 	}
 }
 
@@ -253,11 +300,29 @@ bool FNavigationRoutePlanner::IsValidPoint(const APolyBuilding& Building,
 		OutError = TEXT("Choose a floor in the loaded building.");
 		return false;
 	}
+
 	if (!InsideOrOnBoundary(Point, Building.GetFootprint()))
 	{
 		OutError = TEXT("Select a point inside the building.");
 		return false;
 	}
+	const TArray<FVector2D>& Boundary = Building.GetFootprint();
+
+	for (int32 Index = 0; Index < Boundary.Num(); ++Index)
+	{
+		const FVector2D& A = Boundary[Index];
+		const FVector2D& B = Boundary[(Index + 1) % Boundary.Num()];
+
+		const FVector2D Closest =
+			FMath::ClosestPointOnSegment2D(Point, A, B);
+
+		if (FVector2D::Distance(Point, Closest) < SelectionWallClearance)
+		{
+			OutError = TEXT("Select a point away from the building wall.");
+			return false;
+		}
+	}
+
 	const FFloorGeometry Geometry = MakeFloorGeometry(Interior, Scale, Floor);
 	for (const FSegment& Wall : Geometry.Walls)
 	{
@@ -271,123 +336,372 @@ bool FNavigationRoutePlanner::IsValidPoint(const APolyBuilding& Building,
 	return true;
 }
 
-bool FNavigationRoutePlanner::FindRoute(const APolyBuilding& Building,
-	const AInteriorGenerator& Interior, float Scale, int32 StartFloor, FVector2D Start,
-	int32 DestinationFloor, FVector2D Destination, FNavigationRouteResult& OutResult)
+bool FNavigationRoutePlanner::FindRoute(
+	const APolyBuilding& Building,
+	const AInteriorGenerator& Interior,
+	float Scale,
+	int32 StartFloor,
+	FVector2D Start,
+	int32 DestinationFloor,
+	FVector2D Destination,
+	FNavigationRouteResult& OutResult)
 {
+	// Clear any old route before calculating a new one.
 	OutResult = FNavigationRouteResult();
-	if (!IsValidPoint(Building, Interior, Scale, StartFloor, Start, OutResult.Error)
-		|| !IsValidPoint(Building, Interior, Scale, DestinationFloor, Destination, OutResult.Error))
+
+	// Check that both selected points are valid.
+	if (!IsValidPoint(
+		Building,
+		Interior,
+		Scale,
+		StartFloor,
+		Start,
+		OutResult.Error))
 	{
 		return false;
 	}
 
-	TMap<int32, FFloorGeometry> Floors;
-	TArray<FVertex> Vertices;
-	Vertices.Add({ { Start, StartFloor, FString(), EInteriorNavNodeType::PathNode }, {} });
-	Vertices.Add({ { Destination, DestinationFloor, FString(), EInteriorNavNodeType::PathNode }, {} });
-	for (int32 Floor = 1; Floor <= Building.GetFloorCount(); ++Floor)
+	if (!IsValidPoint(
+		Building,
+		Interior,
+		Scale,
+		DestinationFloor,
+		Destination,
+		OutResult.Error))
 	{
-		FFloorGeometry Geometry = MakeFloorGeometry(Interior, Scale, Floor);
-		for (const FVector2D& Door : Geometry.DoorPoints)
-		{
-			Vertices.Add({ { Door, Floor, FString(), EInteriorNavNodeType::PathNode }, {} });
-		}
-		for (const FVector2D& Turn : Geometry.TurnPoints)
-		{
-			Vertices.Add({ { Turn, Floor, FString(), EInteriorNavNodeType::PathNode }, {} });
-		}
-		for (const FVector2D& Corner : Building.GetFootprint())
-		{
-			Vertices.Add({ { Corner, Floor, FString(), EInteriorNavNodeType::PathNode }, {} });
-		}
-		Floors.Add(Floor, MoveTemp(Geometry));
-	}
-	for (const FInteriorNavNode& Node : Interior.GetNavNodes())
-	{
-		if (Node.Level >= 1 && Node.Level <= Building.GetFloorCount())
-		{
-			Vertices.Add({ { Node.Position, Node.Level, Node.ConnectorGroupId, Node.Type }, Node.ConnectsFloors });
-		}
+		return false;
 	}
 
+	/*
+		The route graph contains:
+
+		- Start point
+		- Destination point
+		- Door points
+		- Room corner turning points
+		- Building boundary corners
+		- Elevators, stairs, and escalators
+	*/
+	TMap<int32, FFloorGeometry> Floors;
+	TArray<FVertex> Vertices;
+
+	// Vertex 0 is always the start point.
+	Vertices.Add(
+		{
+			{
+				Start,
+				StartFloor,
+				FString(),
+				EInteriorNavNodeType::PathNode
+			},
+			{}
+		});
+
+	// Vertex 1 is always the destination point.
+	Vertices.Add(
+		{
+			{
+				Destination,
+				DestinationFloor,
+				FString(),
+				EInteriorNavNodeType::PathNode
+			},
+			{}
+		});
+
+	// Build the geometry information for every floor.
+	for (int32 Floor = 1;
+		Floor <= Building.GetFloorCount();
+		++Floor)
+	{
+		// Get walls, doors, and possible turning points on this floor.
+		FFloorGeometry Geometry =
+			MakeFloorGeometry(Interior, Scale, Floor);
+
+		// Add every door as a possible route point.
+		for (const FVector2D& Door : Geometry.DoorPoints)
+		{
+			Vertices.Add(
+				{
+					{
+						Door,
+						Floor,
+						FString(),
+						EInteriorNavNodeType::PathNode
+					},
+					{}
+				});
+		}
+
+		// Add room corners as possible route turning points.
+		for (const FVector2D& Turn : Geometry.TurnPoints)
+		{
+			Vertices.Add(
+				{
+					{
+						Turn,
+						Floor,
+						FString(),
+						EInteriorNavNodeType::PathNode
+					},
+					{}
+				});
+		}
+
+		// Add the building boundary corners.
+		for (const FVector2D& Corner :
+			Building.GetFootprint())
+		{
+			Vertices.Add(
+				{
+					{
+						Corner,
+						Floor,
+						FString(),
+						EInteriorNavNodeType::PathNode
+					},
+					{}
+				});
+		}
+
+		// Save the geometry so it can be used later
+		// when checking whether two points can see each other.
+		Floors.Add(Floor, MoveTemp(Geometry));
+	}
+
+	// Add elevator, stairs, escalator, and path nodes.
+	for (const FInteriorNavNode& Node :
+		Interior.GetNavNodes())
+	{
+		// Ignore invalid nodes outside the building's floor range.
+		if (Node.Level < 1 ||
+			Node.Level > Building.GetFloorCount())
+		{
+			continue;
+		}
+
+		Vertices.Add(
+			{
+				{
+					Node.Position,
+					Node.Level,
+					Node.ConnectorGroupId,
+					Node.Type
+				},
+				Node.ConnectsFloors
+			});
+	}
+
+	/*
+		Create the graph connections.
+
+		Every pair of points is checked:
+
+		- Same floor:
+		  connect them only if the direct line does not cross a wall.
+
+		- Different floors:
+		  connect them only if they belong to the same connector.
+	*/
 	TArray<TArray<FRouteGraphEdge>> Graph;
 	Graph.SetNum(Vertices.Num());
-	for (int32 I = 0; I < Vertices.Num(); ++I)
+
+	for (int32 I = 0;
+		I < Vertices.Num();
+		++I)
 	{
-		for (int32 J = I + 1; J < Vertices.Num(); ++J)
+		for (int32 J = I + 1;
+			J < Vertices.Num();
+			++J)
 		{
 			const FVertex& A = Vertices[I];
 			const FVertex& B = Vertices[J];
-			float Cost = 0.f;
+
+			float Cost = 0.0f;
+
 			if (A.Point.Floor == B.Point.Floor)
 			{
-				if (!CanTravel(A.Point.Position, B.Point.Position, Building.GetFootprint(), Floors[A.Point.Floor]))
+				// Find the geometry for this floor.
+				const FFloorGeometry* FloorGeometry =
+					Floors.Find(A.Point.Floor);
+
+				if (!FloorGeometry)
 				{
 					continue;
 				}
-				Cost = FVector2D::Distance(A.Point.Position, B.Point.Position);
-			}
-			else if (SameConnector(A, B)
-				&& (A.Point.ConnectorType == EInteriorNavNodeType::Elevator
-					|| FMath::Abs(A.Point.Floor - B.Point.Floor) == 1))
-			{
-				Cost = 20.f + FMath::Abs(A.Point.Floor - B.Point.Floor) * Building.GetFloorHeight() / Scale;
+
+				// A route is allowed only when the straight line
+				// stays inside the building and avoids solid walls.
+				if (!CanTravel(
+					A.Point.Position,
+					B.Point.Position,
+					Building.GetFootprint(),
+					*FloorGeometry))
+				{
+					continue;
+				}
+
+				// The distance between the points is the movement cost.
+				Cost = FVector2D::Distance(
+					A.Point.Position,
+					B.Point.Position);
 			}
 			else
 			{
-				continue;
+				// Different floors require an elevator,
+				// stair, or escalator connector.
+				if (!CanUseConnectorBetween(A, B))
+				{
+					continue;
+				}
+
+				// Vertical movement has a small extra cost.
+				Cost =
+					20.0f +
+					FMath::Abs(
+						A.Point.Floor - B.Point.Floor) *
+					Building.GetFloorHeight() /
+					Scale;
 			}
+
+			// Add the connection in both directions.
+			// This makes the route graph bidirectional.
 			Graph[I].Add({ J, Cost });
 			Graph[J].Add({ I, Cost });
 		}
 	}
 
+	/*
+		Dijkstra's algorithm.
+
+		This searches for the cheapest route instead of simply
+		taking the first route found.
+
+		Distance:
+		Current cheapest known cost to reach each vertex.
+
+		Previous:
+		The previous vertex used to reach each vertex.
+
+		Visited:
+		Whether the cheapest route to that vertex is already confirmed.
+	*/
+	const float Infinity = TNumericLimits<float>::Max();
+
 	TArray<float> Distance;
 	TArray<int32> Previous;
 	TArray<bool> Visited;
-	Distance.Init(TNumericLimits<float>::Max(), Vertices.Num());
+
+	Distance.Init(Infinity, Vertices.Num());
 	Previous.Init(INDEX_NONE, Vertices.Num());
 	Visited.Init(false, Vertices.Num());
-	Distance[0] = 0.f;
-	for (int32 Step = 0; Step < Vertices.Num(); ++Step)
+
+	// The route starts at vertex 0.
+	Distance[0] = 0.0f;
+
+	for (int32 Step = 0;
+		Step < Vertices.Num();
+		++Step)
 	{
 		int32 Current = INDEX_NONE;
-		for (int32 I = 0; I < Vertices.Num(); ++I)
+
+		// Find the unvisited vertex with the smallest cost.
+		for (int32 I = 0;
+			I < Vertices.Num();
+			++I)
 		{
-			if (!Visited[I] && (Current == INDEX_NONE || Distance[I] < Distance[Current]))
+			if (Visited[I])
+			{
+				continue;
+			}
+
+			if (Current == INDEX_NONE ||
+				Distance[I] < Distance[Current])
 			{
 				Current = I;
 			}
 		}
-		if (Current == INDEX_NONE || Distance[Current] == TNumericLimits<float>::Max() || Current == 1)
+
+		// Stop if no more reachable vertices exist.
+		if (Current == INDEX_NONE ||
+			Distance[Current] == Infinity)
 		{
 			break;
 		}
-		Visited[Current] = true;
-		for (const FRouteGraphEdge& Edge : Graph[Current])
+
+		// Stop early when the destination is reached.
+		if (Current == 1)
 		{
-			if (Distance[Current] + Edge.Cost < Distance[Edge.To])
+			break;
+		}
+
+		Visited[Current] = true;
+
+		// Try to improve the cost of every neighbour.
+		for (const FRouteGraphEdge& Edge :
+			Graph[Current])
+		{
+			if (Visited[Edge.To])
 			{
-				Distance[Edge.To] = Distance[Current] + Edge.Cost;
+				continue;
+			}
+
+			const float NewCost =
+				Distance[Current] + Edge.Cost;
+
+			// Keep the route only if it is cheaper
+			// than the route currently stored.
+			if (NewCost < Distance[Edge.To])
+			{
+				Distance[Edge.To] = NewCost;
 				Previous[Edge.To] = Current;
 			}
 		}
 	}
 
-	if (Distance[1] == TNumericLimits<float>::Max())
+	// If the destination still has infinite cost,
+	// no valid route could be found.
+	if (Distance[1] == Infinity)
 	{
-		OutResult.Error = TEXT("No route found. Add a door or floor connector where needed.");
+		OutResult.Error =
+			TEXT("No route found. Add a door or floor connector where needed.");
+
 		return false;
 	}
-	TArray<int32> Reversed;
-	for (int32 Index = 1; Index != INDEX_NONE; Index = Previous[Index])
+
+	/*
+		Build the final route backwards.
+
+		We start at the destination and repeatedly follow
+		the Previous array until we reach the start.
+	*/
+	TArray<int32> ReversedRoute;
+
+	for (int32 Current = 1;
+		Current != INDEX_NONE;
+		Current = Previous[Current])
 	{
-		Reversed.Add(Index);
+		ReversedRoute.Add(Current);
 	}
-	for (int32 I = Reversed.Num() - 1; I >= 0; --I)
+
+	// A valid route must end at the start vertex.
+	if (ReversedRoute.IsEmpty() ||
+		ReversedRoute.Last() != 0)
 	{
-		OutResult.Points.Add(Vertices[Reversed[I]].Point);
+		OutResult.Error =
+			TEXT("Route reconstruction failed.");
+
+		return false;
 	}
+
+	// Reverse the route so it starts at the user's start point.
+	for (int32 I = ReversedRoute.Num() - 1;
+		I >= 0;
+		--I)
+	{
+		OutResult.Points.Add(
+			Vertices[ReversedRoute[I]].Point);
+	}
+
 	return true;
 }
