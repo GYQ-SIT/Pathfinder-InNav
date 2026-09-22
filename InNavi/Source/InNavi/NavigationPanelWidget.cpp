@@ -437,6 +437,9 @@ FLinearColor UNavigationPanelWidget::GetStatusColor() const
 
 bool UNavigationPanelWidget::IsPointerOverPanel() const
 {
-	return GetVisibility() == ESlateVisibility::Visible && PanelBorder && FSlateApplication::IsInitialized()
+	// The full-screen user widget is SelfHitTestInvisible so WBP_InteriorScreen remains
+	// interactive underneath it. Check general visibility rather than requiring the
+	// exact Visible enum value; only PanelBorder and its children should own pointer input.
+	return IsVisible() && PanelBorder && FSlateApplication::IsInitialized()
 		&& PanelBorder->GetCachedGeometry().IsUnderLocation(FSlateApplication::Get().GetCursorPos());
 }

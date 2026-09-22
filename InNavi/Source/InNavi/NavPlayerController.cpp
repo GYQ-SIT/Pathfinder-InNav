@@ -1898,7 +1898,14 @@ int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 		if (NavigationPanel)
 		{
 			NavigationPanel->ClearAll();
-			NavigationPanel->SetVisibility(ESlateVisibility::Visible);
+			// The navigation widget fills the viewport and sits above WBP_InteriorScreen.
+			// Keep the outer widget out of hit testing so its empty canvas does not block
+			// the room-editing controls below it. Its visible children (the navigation
+			// panel and buttons) remain hit-testable.
+			NavigationPanel->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+			UE_LOG(LogTemp, Warning,
+				TEXT("[Navigation] Navigation panel made visible after loading interior: building=%s floor=%d"),
+				*BuildingId, InteriorGen->GetActiveFloor());
 		}
 	}
 	return Result;
