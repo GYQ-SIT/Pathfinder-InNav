@@ -1406,6 +1406,21 @@ bool AInteriorGenerator::SetDoorConnectsTo(const FString& RoomId, const FString&
 
 bool AInteriorGenerator::SetRoomName(const FString& RoomId, const FString& NewName)
 {
+	// Names (not just ids) need to be unique building-wide - the door ConnectsTo dropdown and
+	// SetSelectedDoorConnectsTo resolve a room purely by its current name, so two rooms/walls
+	// sharing a name would make that lookup ambiguous.
+	for (const auto& Pair : RoomsByFloor)
+	{
+		for (const AInteriorRoom* Other : Pair.Value.Rooms)
+		{
+			if (Other && Other->RoomId != RoomId && Other->RoomName == NewName)
+			{
+				UE_LOG(LogTemp, Error, TEXT("SetRoomName: '%s' is already used by '%s'"), *NewName, *Other->RoomId);
+				return false;
+			}
+		}
+	}
+
 	for (auto& Pair : RoomsByFloor)
 	{
 		for (AInteriorRoom* Room : Pair.Value.Rooms)
@@ -1439,6 +1454,22 @@ FString AInteriorGenerator::GetRoomName(const FString& RoomId) const
 	}
 
 	return FString();
+}
+
+bool AInteriorGenerator::IsRoomClosedLoop(const FString& RoomId) const
+{
+	for (const auto& Pair : RoomsByFloor)
+	{
+		for (const AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (Room && Room->RoomId == RoomId)
+			{
+				return Room->IsClosedLoop();
+			}
+		}
+	}
+
+	return false;
 }
 
 TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const

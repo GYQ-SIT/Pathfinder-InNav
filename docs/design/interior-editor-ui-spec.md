@@ -157,8 +157,9 @@ Shown when `OnSelectedRoomChanged` fires with a non-empty `RoomId`.
 
 | UI element | Call / bind | Notes |
 |---|---|---|
+| Panel title, populated on open | `IsSelectedRoomClosedLoop()` | Returns `true` for an actual closed room, `false` for an open standalone wall (draw-wall mode) - rooms and walls share this same panel/selection, so use this to show "Room property" vs "Wall property" |
 | Name field, populated on open | `GetSelectedRoomName()` | Empty if nothing is selected |
-| "Apply" button | `SetSelectedRoomName(const FString& NewName)` | Returns `false` (no-op) if nothing is selected |
+| "Apply" button | `SetSelectedRoomName(const FString& NewName)` | Returns `false` if nothing is selected, **or if that name is already used by another room/wall in the building** (names must be unique building-wide, since the door ConnectsTo dropdown resolves a room by its current name - see §6.2). Bind `OnActionFailed` to show the rejection reason |
 
 ### 6.2 Door properties panel
 

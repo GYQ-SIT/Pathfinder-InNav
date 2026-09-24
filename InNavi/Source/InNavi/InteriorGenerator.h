@@ -204,6 +204,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	FString GetRoomName(const FString& RoomId) const;
 
+	// Whether RoomId is an actual closed room (true) or an open standalone wall (false, drawn via
+	// draw-wall mode) - rooms and walls share this same id namespace/class (see AInteriorRoom::
+	// IsClosedLoop), so a properties panel needs this to tell them apart, e.g. to show "Wall
+	// property" instead of "Room property" for a selected wall. Returns false (same as a wall) if
+	// no room with that id exists.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool IsRoomClosedLoop(const FString& RoomId) const;
+
 	// Nav nodes (Path Node/Elevator/Stairs/Escalator) for the currently loaded building, all
 	// floors. Data format agreed with the navigation (NavMesh/NavLinks) team - see
 	// FInteriorNavNode's own comment.

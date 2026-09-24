@@ -976,7 +976,7 @@ bool ANavPlayerController::SetSelectedRoomName(const FString& NewName)
 	}
 	else
 	{
-		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not rename '%s'."), *SelectedRoomId));
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not rename '%s' to '%s' - that name is already in use."), *SelectedRoomId, *NewName));
 	}
 	return bSuccess;
 }
@@ -989,6 +989,16 @@ FString ANavPlayerController::GetSelectedRoomName() const
 	}
 
 	return InteriorGen->GetRoomName(SelectedRoomId);
+}
+
+bool ANavPlayerController::IsSelectedRoomClosedLoop() const
+{
+	if (SelectedRoomId.IsEmpty() || !InteriorGen)
+	{
+		return false;
+	}
+
+	return InteriorGen->IsRoomClosedLoop(SelectedRoomId);
 }
 
 bool ANavPlayerController::GetSelectedDoorOpening(FInteriorOpening& OutOpening)

@@ -264,6 +264,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	FString GetSelectedRoomName() const;
 
+	// Whether the currently-selected room/wall is an actual closed room (true) or an open
+	// standalone wall (false) - see AInteriorGenerator::IsRoomClosedLoop. What the room properties
+	// panel should check to show "Wall property" instead of "Room property" for a selected wall.
+	// Returns false if nothing is selected.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool IsSelectedRoomClosedLoop() const;
+
 	// Sets the currently-selected door, independently of the room it belongs to - the 2D floor plan
 	// canvas's select-mode click handler calls this when the click lands on a door marker rather
 	// than a plain wall edge. Clears whatever room was selected (see SelectRoom) - only one of the
