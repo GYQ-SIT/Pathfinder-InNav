@@ -1102,6 +1102,73 @@ bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float
 	return false;
 }
 
+bool AInteriorGenerator::RotateRoom(const FString& RoomId, float DeltaDegrees)
+{
+	for (auto& Pair : RoomsByFloor)
+	{
+		for (AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (!Room || Room->RoomId != RoomId)
+			{
+				continue;
+			}
+
+			const TArray<FVector2D>& OldFootprint = Room->GetFootprint();
+			if (OldFootprint.Num() == 0)
+			{
+				return false;
+			}
+
+			FVector2D MinPoint(TNumericLimits<float>::Max(), TNumericLimits<float>::Max());
+			FVector2D MaxPoint(-TNumericLimits<float>::Max(), -TNumericLimits<float>::Max());
+			for (const FVector2D& Point : OldFootprint)
+			{
+				MinPoint.X = FMath::Min(MinPoint.X, Point.X);
+				MinPoint.Y = FMath::Min(MinPoint.Y, Point.Y);
+				MaxPoint.X = FMath::Max(MaxPoint.X, Point.X);
+				MaxPoint.Y = FMath::Max(MaxPoint.Y, Point.Y);
+			}
+			const FVector2D Center = (MinPoint + MaxPoint) * 0.5f;
+
+			const float Radians = FMath::DegreesToRadians(DeltaDegrees);
+			const float CosA = FMath::Cos(Radians);
+			const float SinA = FMath::Sin(Radians);
+
+			TArray<FVector2D> NewFootprint;
+			NewFootprint.Reserve(OldFootprint.Num());
+			for (const FVector2D& Point : OldFootprint)
+			{
+				const FVector2D Offset = Point - Center;
+				NewFootprint.Add(Center + FVector2D(
+					Offset.X * CosA - Offset.Y * SinA,
+					Offset.X * SinA + Offset.Y * CosA));
+			}
+
+			APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+			if (Building && !IsFootprintFullyInsidePolygon(NewFootprint, Building->GetFootprint()))
+			{
+				// Silently rejected, not logged as an error - this is called every tick while a
+				// rotation key is held, so hitting the building's edge shouldn't spam the log.
+				return false;
+			}
+
+			for (const AInteriorRoom* Other : Pair.Value.Rooms)
+			{
+				if (Other && Other != Room && DoFootprintsOverlap(NewFootprint, Room->IsClosedLoop(), Other->GetFootprint(), Other->IsClosedLoop()))
+				{
+					// Same "no log spam" reasoning as the containment check above.
+					return false;
+				}
+			}
+
+			Room->ResizeFootprint(NewFootprint);
+			return true;
+		}
+	}
+
+	return false;
+}
+
 bool AInteriorGenerator::MoveRoom(const FString& RoomId, const TArray<FVector2D>& NewFootprint)
 {
 	for (auto& Pair : RoomsByFloor)

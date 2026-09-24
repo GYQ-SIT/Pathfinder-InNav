@@ -129,6 +129,10 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::Six, IE_Pressed, this, &ANavPlayerController::ToggleEscalatorMode);
 	InputComponent->BindKey(EKeys::Equals, IE_Pressed, this, &ANavPlayerController::GrowSelectedRoom);
 	InputComponent->BindKey(EKeys::Hyphen, IE_Pressed, this, &ANavPlayerController::ShrinkSelectedRoom);
+	InputComponent->BindKey(EKeys::Nine, IE_Pressed, this, &ANavPlayerController::StartRotateCCW);
+	InputComponent->BindKey(EKeys::Nine, IE_Released, this, &ANavPlayerController::StopRotateCCW);
+	InputComponent->BindKey(EKeys::Zero, IE_Pressed, this, &ANavPlayerController::StartRotateCW);
+	InputComponent->BindKey(EKeys::Zero, IE_Released, this, &ANavPlayerController::StopRotateCW);
 	InputComponent->BindKey(EKeys::Enter, IE_Pressed, this, &ANavPlayerController::OnConfirmPressed);
 	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
 	InputComponent->BindKey(EKeys::N, IE_Pressed, this, &ANavPlayerController::ToggleSnapEnabled);
@@ -2214,6 +2218,33 @@ void ANavPlayerController::NudgeSelectedRoomSize(float Delta)
 		const float NewDepth = FMath::Max(10.f, (MaxPoint.Y - MinPoint.Y) + Delta);
 		ResizeRoom(SelectedRoomId, NewWidth, NewDepth);
 		return;
+	}
+}
+
+void ANavPlayerController::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	if (bRotatingCCW == bRotatingCW)
+	{
+		// Neither held, or both held at once (cancel out) - nothing to do.
+		return;
+	}
+
+	const float Direction = bRotatingCCW ? -1.f : 1.f;
+	RotateSelectedRoom(Direction * RotationDegreesPerSecond * DeltaSeconds);
+}
+
+void ANavPlayerController::RotateSelectedRoom(float DeltaDegrees)
+{
+	if (SelectedRoomId.IsEmpty() || !InteriorGen)
+	{
+		return;
+	}
+
+	if (InteriorGen->RotateRoom(SelectedRoomId, DeltaDegrees))
+	{
+		bHasUnsavedChanges = true;
 	}
 }
 

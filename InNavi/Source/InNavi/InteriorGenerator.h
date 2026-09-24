@@ -128,6 +128,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth);
 
+	// Rotates a room/wall's footprint by DeltaDegrees around its own bounding-box center (positive
+	// = counter-clockwise). Same validation level as ResizeRoom - rejects (no-op, returns false) if
+	// the rotated footprint would extend outside the building's outline; does not check overlap
+	// with other rooms/walls (consistent with ResizeRoom's existing precedent).
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool RotateRoom(const FString& RoomId, float DeltaDegrees);
+
 	// Replaces a room/wall's footprint wholesale with NewFootprint (same pre-scale units as
 	// everything else, same point count/winding expected - this is a translate, not a reshape) -
 	// what dragging a selected room on the 2D floor plan canvas calls, recomputing the whole

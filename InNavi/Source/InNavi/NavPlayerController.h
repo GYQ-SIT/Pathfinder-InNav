@@ -537,6 +537,7 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
+	virtual void Tick(float DeltaSeconds) override;
 
 private:
 	// Left-click: selects a building normally, or adds a footprint point while in build mode.
@@ -587,6 +588,20 @@ private:
 	void GrowSelectedRoom();
 	void ShrinkSelectedRoom();
 	void NudgeSelectedRoomSize(float Delta);
+
+	// Continuous rotation while 9/0 is held (degrees per second, applied in Tick - not a discrete
+	// per-press nudge like Grow/Shrink) - rotates the currently-selected room/wall around its own
+	// center via AInteriorGenerator::RotateRoom. Nine = counter-clockwise, Zero = clockwise.
+	static constexpr float RotationDegreesPerSecond = 90.f;
+	void StartRotateCCW() { bRotatingCCW = true; }
+	void StopRotateCCW() { bRotatingCCW = false; }
+	void StartRotateCW() { bRotatingCW = true; }
+	void StopRotateCW() { bRotatingCW = false; }
+	// No OnActionFailed broadcast on failure - called every tick while a rotation key is held,
+	// same reasoning as MoveRoomTo/MoveDoor.
+	void RotateSelectedRoom(float DeltaDegrees);
+	bool bRotatingCCW = false;
+	bool bRotatingCW = false;
 
 	// Backspace handler - wraps DeleteSelection() because key bindings require a void() signature.
 	void DeleteSelectionKeyHandler();

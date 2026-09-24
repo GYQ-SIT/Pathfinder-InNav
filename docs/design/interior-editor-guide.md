@@ -48,6 +48,7 @@ overlapping another room will fail, with the reason logged to the Output Log.
 | drag | Move the selected room, or slide the selected door along its wall |
 | `Backspace` | Delete whatever's selected |
 | `=` / `-` | Grow / shrink the selected room (test-only, not the final resize UX) |
+| hold `9` / `0` | Rotate the selected room/wall counter-clockwise / clockwise (around its own center, 90°/sec while held) |
 
 Selecting a **door** or a **connector** pops up a small properties panel:
 
