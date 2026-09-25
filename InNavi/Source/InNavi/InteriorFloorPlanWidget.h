@@ -4,12 +4,14 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Styling/SlateBrush.h"
 #include "InteriorFloorPlanWidget.generated.h"
 
 class AInteriorGenerator;
 class ABuildingGenerator;
 class ANavPlayerController;
 class AInteriorRoom;
+class UTexture2D;
 
 // A true 2D top-down floor plan view of the currently loaded building's active floor - draws the
 // exterior boundary and each room/wall's outline directly as 2D lines (no 3D camera or mesh
@@ -135,4 +137,19 @@ private:
 	// Multiplies the auto-fit pixels-per-unit from ComputeViewTransform - 1 = the auto-fit size,
 	// >1 = zoomed in, <1 = zoomed out. Adjusted by the mouse wheel.
 	float ZoomMultiplier = 1.f;
+
+	// Connector markers (elevator/stairs/escalator - see NativePaint) are drawn as these icons
+	// instead of a plain colored box. Loaded once in NativeConstruct from Padre's toolbar icon
+	// assets (/Game/ImageAssets/Icon_Add...) - same icon used both to add a connector and to mark
+	// one already placed. Textures are UPROPERTY to keep them from being garbage-collected; the
+	// brushes just wrap them and don't need reflection.
+	UPROPERTY()
+	TObjectPtr<UTexture2D> ElevatorIconTexture = nullptr;
+	UPROPERTY()
+	TObjectPtr<UTexture2D> StairsIconTexture = nullptr;
+	UPROPERTY()
+	TObjectPtr<UTexture2D> EscalatorIconTexture = nullptr;
+	FSlateBrush ElevatorIconBrush;
+	FSlateBrush StairsIconBrush;
+	FSlateBrush EscalatorIconBrush;
 };
