@@ -3,6 +3,7 @@
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
 #include "PolyBuilding.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -73,7 +74,7 @@ TSharedRef<SWidget> UNavigationPanelWidget::RebuildWidget()
 				return Text;
 			};
 
-		AddText(TEXT("Txt_NavigationTitle"), TEXT("Navigation"), FLinearColor::White, 20);
+		AddText(TEXT("Txt_NavigationTitle"), TEXT("Navigation (drag to move)"), FLinearColor::White, 20);
 		ContextText = AddText(TEXT("Txt_NavigationContext"), TEXT("No building loaded"),
 			FLinearColor(0.7f, 0.78f, 0.88f, 1.f), 12);
 
@@ -139,6 +140,12 @@ void UNavigationPanelWidget::NativeConstruct()
 	{
 		ClearRouteButton->OnClicked.AddUniqueDynamic(this, &UNavigationPanelWidget::OnClearRouteClicked);
 	}
+	if (PanelBorder)
+	{
+		PanelBorder->OnMouseButtonDownEvent.BindDynamic(this, &UNavigationPanelWidget::OnPanelMouseButtonDown);
+		PanelBorder->OnMouseButtonUpEvent.BindDynamic(this, &UNavigationPanelWidget::OnPanelMouseButtonUp);
+		PanelBorder->OnMouseMoveEvent.BindDynamic(this, &UNavigationPanelWidget::OnPanelMouseMove);
+	}
 
 	RefreshControls();
 }
@@ -150,11 +157,25 @@ void UNavigationPanelWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 	const int32 ActiveFloor = Interior ? Interior->GetActiveFloor() : INDEX_NONE;
 	const FString BuildingId = Interior ? Interior->GetLoadedBuildingId() : FString();
 	const FVector2D ViewportSize = UWidgetLayoutLibrary::GetViewportSize(this);
+	if (bIsDraggingPanel && FSlateApplication::IsInitialized()
+		&& !FSlateApplication::Get().GetPressedMouseButtons().Contains(EKeys::LeftMouseButton))
+	{
+		bIsDraggingPanel = false;
+	}
 	const float DesiredWidth = FMath::Clamp(ViewportSize.X * 0.28f, 260.f, 360.f);
 	if (PanelSizeBox && !FMath::IsNearlyEqual(LastPanelWidth, DesiredWidth, 1.f))
 	{
 		PanelSizeBox->SetWidthOverride(DesiredWidth);
 		LastPanelWidth = DesiredWidth;
+	}
+	if (PanelCanvasSlot && PanelBorder)
+	{
+		const FVector2D CurrentPosition = PanelCanvasSlot->GetPosition();
+		const FVector2D ClampedPosition = ClampPanelPosition(CurrentPosition, MyGeometry.GetLocalSize());
+		if (!CurrentPosition.Equals(ClampedPosition, 0.5f))
+		{
+			PanelCanvasSlot->SetPosition(ClampedPosition);
+		}
 	}
 	if (ActiveFloor != LastDisplayedFloor || BuildingId != LastDisplayedBuildingId)
 	{
@@ -162,6 +183,73 @@ void UNavigationPanelWidget::NativeTick(const FGeometry& MyGeometry, float InDel
 		LastDisplayedBuildingId = BuildingId;
 		RefreshControls();
 	}
+}
+
+FEventReply UNavigationPanelWidget::OnPanelMouseButtonDown(FGeometry MyGeometry,
+	const FPointerEvent& MouseEvent)
+{
+	if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && PanelBorder && PanelCanvasSlot)
+	{
+		const FVector2D ScreenPosition = MouseEvent.GetScreenSpacePosition();
+		if (PanelBorder->GetCachedGeometry().IsUnderLocation(ScreenPosition)
+			&& !IsScreenPositionOverButton(ScreenPosition))
+		{
+			const UPanelWidget* Parent = PanelBorder->GetParent();
+			if (!Parent)
+			{
+				return UWidgetBlueprintLibrary::Unhandled();
+			}
+			bIsDraggingPanel = true;
+			PanelDragStartMousePosition = Parent->GetCachedGeometry().AbsoluteToLocal(ScreenPosition);
+			PanelDragStartPosition = PanelCanvasSlot->GetPosition();
+			FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+			return UWidgetBlueprintLibrary::CaptureMouse(Reply, PanelBorder);
+		}
+	}
+
+	return UWidgetBlueprintLibrary::Unhandled();
+}
+
+FEventReply UNavigationPanelWidget::OnPanelMouseMove(FGeometry MyGeometry,
+	const FPointerEvent& MouseEvent)
+{
+	if (bIsDraggingPanel && PanelCanvasSlot)
+	{
+		if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+		{
+			bIsDraggingPanel = false;
+			FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+			return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
+		}
+
+		const UPanelWidget* Parent = PanelBorder ? PanelBorder->GetParent() : nullptr;
+		if (!Parent)
+		{
+			bIsDraggingPanel = false;
+			return UWidgetBlueprintLibrary::Unhandled();
+		}
+		const FGeometry& ParentGeometry = Parent->GetCachedGeometry();
+		const FVector2D CurrentMousePosition = ParentGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
+		const FVector2D NewPosition = PanelDragStartPosition
+			+ (CurrentMousePosition - PanelDragStartMousePosition);
+		PanelCanvasSlot->SetPosition(ClampPanelPosition(NewPosition, ParentGeometry.GetLocalSize()));
+		return UWidgetBlueprintLibrary::Handled();
+	}
+
+	return UWidgetBlueprintLibrary::Unhandled();
+}
+
+FEventReply UNavigationPanelWidget::OnPanelMouseButtonUp(FGeometry MyGeometry,
+	const FPointerEvent& MouseEvent)
+{
+	if (bIsDraggingPanel && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		bIsDraggingPanel = false;
+		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
+	}
+
+	return UWidgetBlueprintLibrary::Unhandled();
 }
 
 FReply UNavigationPanelWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
@@ -489,4 +577,49 @@ bool UNavigationPanelWidget::IsPointerOverPanel() const
 	// exact Visible enum value; only PanelBorder and its children should own pointer input.
 	return IsVisible() && PanelBorder && FSlateApplication::IsInitialized()
 		&& PanelBorder->GetCachedGeometry().IsUnderLocation(FSlateApplication::Get().GetCursorPos());
+}
+
+bool UNavigationPanelWidget::IsScreenPositionOverButton(const FVector2D& ScreenPosition) const
+{
+	const UButton* Buttons[] =
+	{
+		SetStartButton,
+		SetDestinationButton,
+		FindRouteButton,
+		ClearRouteButton
+	};
+
+	for (const UButton* Button : Buttons)
+	{
+		if (Button && Button->GetCachedGeometry().IsUnderLocation(ScreenPosition))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+FVector2D UNavigationPanelWidget::ClampPanelPosition(const FVector2D& Position,
+	const FVector2D& ViewportSize) const
+{
+	if (!PanelBorder)
+	{
+		return Position;
+	}
+
+	const FVector2D PanelSize = PanelBorder->GetCachedGeometry().GetLocalSize();
+	if (PanelSize.X <= 0.f || PanelSize.Y <= 0.f
+		|| ViewportSize.X <= 0.f || ViewportSize.Y <= 0.f)
+	{
+		return Position;
+	}
+
+	// The slot is anchored to the viewport's top-right corner with alignment (1, 0).
+	// X=0 places its right edge at the viewport edge; PanelSize.X-ViewportSize.X
+	// places its left edge at the opposite edge.
+	const float MinX = FMath::Min(PanelSize.X - ViewportSize.X, 0.f);
+	const float MaxY = FMath::Max(ViewportSize.Y - PanelSize.Y, 0.f);
+	return FVector2D(
+		FMath::Clamp(Position.X, MinX, 0.f),
+		FMath::Clamp(Position.Y, 0.f, MaxY));
 }

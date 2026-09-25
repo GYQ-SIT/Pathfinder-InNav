@@ -75,11 +75,22 @@ private:
 	UFUNCTION()
 	void OnFindRouteClicked();
 
+	UFUNCTION()
+	FEventReply OnPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+	UFUNCTION()
+	FEventReply OnPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+	UFUNCTION()
+	FEventReply OnPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
 	void SetSelectionMode(ENavigationSelectionMode NewMode);
 	void SetStatusMessage(const FString& Message, ENavigationMessageKind Kind);
 	void RefreshControls();
 	FString BuildRouteDetails() const;
 	FLinearColor GetStatusColor() const;
+	bool IsScreenPositionOverButton(const FVector2D& ScreenPosition) const;
+	FVector2D ClampPanelPosition(const FVector2D& Position, const FVector2D& ViewportSize) const;
 
 	UPROPERTY()
 	UBorder* PanelBorder = nullptr;
@@ -139,4 +150,7 @@ private:
 	int32 LastDisplayedFloor = INDEX_NONE;
 	FString LastDisplayedBuildingId;
 	float LastPanelWidth = 0.f;
+	bool bIsDraggingPanel = false;
+	FVector2D PanelDragStartMousePosition = FVector2D::ZeroVector;
+	FVector2D PanelDragStartPosition = FVector2D::ZeroVector;
 };
