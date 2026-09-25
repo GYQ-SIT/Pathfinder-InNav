@@ -6,8 +6,11 @@
 #include "Blueprint/UserWidget.h"
 #include "InteriorScreenWidget.generated.h"
 
+class UBorder;
 class UButton;
+class UComboBoxString;
 class UInteriorFloorPlanWidget;
+class UTextBlock;
 
 // Pure-C++ replacement for WBP_InteriorScreen, built the same way as the other converted screens.
 // This is the biggest/most complex screen in the project (mode toolbar, door/room/connector
@@ -25,6 +28,7 @@ public:
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
 
 private:
 	UFUNCTION()
@@ -60,6 +64,14 @@ private:
 	UFUNCTION()
 	void OnAddEscalatorModeClicked();
 
+	// Door properties panel - shown/populated whenever the selected door changes (see
+	// ANavPlayerController::OnSelectedDoorChanged), hidden when deselected (both ids empty).
+	UFUNCTION()
+	void HandleSelectedDoorChanged(FString RoomId, FString DoorId);
+
+	UFUNCTION()
+	void OnApplyDoorClicked();
+
 	UFUNCTION()
 	void HandleSaveAndLeave();
 
@@ -76,4 +88,16 @@ private:
 
 	UPROPERTY()
 	UButton* BackButton = nullptr;
+
+	UPROPERTY()
+	UBorder* DoorPanel = nullptr;
+
+	UPROPERTY()
+	UTextBlock* DoorRoomText = nullptr;
+
+	UPROPERTY()
+	UComboBoxString* ConnectsToComboBox = nullptr;
+
+	UPROPERTY()
+	UButton* ApplyDoorButton = nullptr;
 };

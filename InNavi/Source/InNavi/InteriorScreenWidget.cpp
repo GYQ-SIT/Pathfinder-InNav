@@ -3,12 +3,16 @@
 #include "ConfirmDialogWidget.h"
 #include "EditScreenWidget.h"
 #include "InteriorFloorPlanWidget.h"
+#include "InteriorTypes.h"
 #include "NavPlayerController.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/ComboBoxString.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -105,6 +109,58 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		BackSlot->SetPosition(FVector2D(-20.f, 20.f));
 		BackSlot->SetAutoSize(true);
 		BackSlot->SetZOrder(2);
+
+		// Door properties panel - bottom-right, hidden until a door is selected (see
+		// HandleSelectedDoorChanged). Positioned away from the mode toolbar (top-left) and
+		// Back/Navigation panel (top-right).
+		DoorPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_DoorProperties"));
+		DoorPanel->SetBrushColor(FLinearColor(0.05f, 0.05f, 0.05f, 0.9f));
+		DoorPanel->SetPadding(FMargin(12.f));
+		DoorPanel->SetVisibility(ESlateVisibility::Collapsed);
+
+		UVerticalBox* DoorStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DoorStack"));
+		DoorPanel->SetContent(DoorStack);
+
+		UTextBlock* DoorTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_DoorTitle"));
+		DoorTitle->SetText(FText::FromString(TEXT("Door property")));
+		DoorTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		UVerticalBoxSlot* DoorTitleSlot = DoorStack->AddChildToVerticalBox(DoorTitle);
+		DoorTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+
+		DoorRoomText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_DoorRoom"));
+		DoorRoomText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		UVerticalBoxSlot* DoorRoomSlot = DoorStack->AddChildToVerticalBox(DoorRoomText);
+		DoorRoomSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+
+		UHorizontalBox* ConnectsToRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ConnectsToRow"));
+		DoorStack->AddChildToVerticalBox(ConnectsToRow);
+
+		UTextBlock* ConnectsToLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_ConnectsToLabel"));
+		ConnectsToLabel->SetText(FText::FromString(TEXT("Connect to")));
+		ConnectsToLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		UHorizontalBoxSlot* ConnectsToLabelSlot = ConnectsToRow->AddChildToHorizontalBox(ConnectsToLabel);
+		ConnectsToLabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+		ConnectsToLabelSlot->SetVerticalAlignment(VAlign_Center);
+
+		ConnectsToComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cmb_ConnectsTo"));
+		ConnectsToRow->AddChildToHorizontalBox(ConnectsToComboBox);
+
+		ApplyDoorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_ApplyDoor"));
+		ApplyDoorButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+		UTextBlock* ApplyDoorText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_ApplyDoorLabel"));
+		ApplyDoorText->SetText(FText::FromString(TEXT("Apply")));
+		ApplyDoorText->SetJustification(ETextJustify::Center);
+		ApplyDoorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyDoorButton->SetContent(ApplyDoorText);
+		UVerticalBoxSlot* ApplyDoorSlot = DoorStack->AddChildToVerticalBox(ApplyDoorButton);
+		ApplyDoorSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
+
+		UCanvasPanelSlot* DoorPanelSlot = Canvas->AddChildToCanvas(DoorPanel);
+		DoorPanelSlot->SetAnchors(FAnchors(1.f, 1.f));
+		DoorPanelSlot->SetAlignment(FVector2D(1.f, 1.f));
+		DoorPanelSlot->SetPosition(FVector2D(-20.f, -20.f));
+		DoorPanelSlot->SetAutoSize(true);
+		DoorPanelSlot->SetZOrder(3);
 	}
 
 	return Super::RebuildWidget();
@@ -117,6 +173,78 @@ void UInteriorScreenWidget::NativeConstruct()
 	if (BackButton)
 	{
 		BackButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnBackClicked);
+	}
+	if (ApplyDoorButton)
+	{
+		ApplyDoorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyDoorClicked);
+	}
+
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->OnSelectedDoorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedDoorChanged);
+	}
+}
+
+void UInteriorScreenWidget::NativeDestruct()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->OnSelectedDoorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedDoorChanged);
+	}
+
+	Super::NativeDestruct();
+}
+
+void UInteriorScreenWidget::HandleSelectedDoorChanged(FString RoomId, FString DoorId)
+{
+	if (!DoorPanel)
+	{
+		return;
+	}
+
+	if (RoomId.IsEmpty() && DoorId.IsEmpty())
+	{
+		DoorPanel->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC)
+	{
+		return;
+	}
+
+	DoorPanel->SetVisibility(ESlateVisibility::Visible);
+
+	if (DoorRoomText)
+	{
+		DoorRoomText->SetText(FText::FromString(FString::Printf(TEXT("Current room: %s"), *PC->ResolveConnectsToDisplayName(RoomId))));
+	}
+
+	if (ConnectsToComboBox)
+	{
+		ConnectsToComboBox->ClearOptions();
+		for (const FString& Name : PC->GetConnectableTargetIds())
+		{
+			ConnectsToComboBox->AddOption(Name);
+		}
+
+		FInteriorOpening Opening;
+		if (PC->GetSelectedDoorOpening(Opening))
+		{
+			ConnectsToComboBox->SetSelectedOption(PC->ResolveConnectsToDisplayName(Opening.ConnectsTo));
+		}
+	}
+}
+
+void UInteriorScreenWidget::OnApplyDoorClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (ConnectsToComboBox)
+		{
+			PC->SetSelectedDoorConnectsTo(ConnectsToComboBox->GetSelectedOption());
+		}
 	}
 }
 
