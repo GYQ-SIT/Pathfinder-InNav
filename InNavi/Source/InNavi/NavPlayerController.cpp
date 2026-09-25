@@ -2193,7 +2193,11 @@ bool ANavPlayerController::SetLoadedBuildingName(const FString& NewName)
 	}
 
 	const bool bSuccess = Generator->SetBuildingName(LoadedId, NewName);
-	if (!bSuccess)
+	if (bSuccess)
+	{
+		bHasUnsavedChanges = true;
+	}
+	else
 	{
 		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not rename '%s' to '%s' - that name is already in use."), *LoadedId, *NewName));
 	}
@@ -2296,6 +2300,62 @@ void ANavPlayerController::RotateSelectedRoom(float DeltaDegrees)
 	{
 		bHasUnsavedChanges = true;
 	}
+}
+
+void ANavPlayerController::StartRotateCCW()
+{
+	BeginRotationGestureIfNeeded();
+	bRotatingCCW = true;
+}
+
+void ANavPlayerController::StopRotateCCW()
+{
+	bRotatingCCW = false;
+	EndRotationGestureIfFinished();
+}
+
+void ANavPlayerController::StartRotateCW()
+{
+	BeginRotationGestureIfNeeded();
+	bRotatingCW = true;
+}
+
+void ANavPlayerController::StopRotateCW()
+{
+	bRotatingCW = false;
+	EndRotationGestureIfFinished();
+}
+
+void ANavPlayerController::BeginRotationGestureIfNeeded()
+{
+	// Only snapshot at the true start of a gesture (neither key held yet) - if the other rotation
+	// key is already down, we're still mid-gesture and the original snapshot must be kept.
+	if (bRotatingCCW || bRotatingCW || SelectedRoomId.IsEmpty() || !InteriorGen)
+	{
+		return;
+	}
+
+	for (const AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
+	{
+		if (Room && Room->RoomId == SelectedRoomId)
+		{
+			RotationStartFootprint = Room->GetFootprint();
+			break;
+		}
+	}
+}
+
+void ANavPlayerController::EndRotationGestureIfFinished()
+{
+	// Only commit once both keys are up - releasing one while the other is still held just means
+	// switching direction mid-gesture, not the end of it.
+	if (bRotatingCCW || bRotatingCW || SelectedRoomId.IsEmpty() || !InteriorGen || RotationStartFootprint.Num() == 0)
+	{
+		return;
+	}
+
+	InteriorGen->CommitRoomRotation(SelectedRoomId, RotationStartFootprint);
+	RotationStartFootprint.Reset();
 }
 
 void ANavPlayerController::ConfirmShapeTest()

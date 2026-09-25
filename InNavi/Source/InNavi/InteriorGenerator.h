@@ -129,11 +129,20 @@ public:
 	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth);
 
 	// Rotates a room/wall's footprint by DeltaDegrees around its own bounding-box center (positive
-	// = counter-clockwise). Same validation level as ResizeRoom - rejects (no-op, returns false) if
-	// the rotated footprint would extend outside the building's outline; does not check overlap
-	// with other rooms/walls (consistent with ResizeRoom's existing precedent).
+	// = counter-clockwise). Rejects (no-op, returns false) if the rotated footprint would extend
+	// outside the building's outline or overlap another room/wall - checked every call (i.e. every
+	// tick while a rotation key is held), same as ResizeRoom/MoveRoom's boundary check. Does NOT
+	// check against connectors (elevator/stairs/escalator) - rotating through one is allowed
+	// mid-gesture; see CommitRoomRotation for the deferred check applied once the key is released.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool RotateRoom(const FString& RoomId, float DeltaDegrees);
+
+	// Call once when a rotation gesture ends (a rotation key is released) - reverts the room to
+	// FallbackFootprint if it ended up walling in a connector (elevator/stairs/escalator), the one
+	// check RotateRoom itself intentionally skips mid-gesture. Mirrors CommitRoomMove's role for a
+	// drag. Returns false (and reverts) if blocked, or if RoomId doesn't exist.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool CommitRoomRotation(const FString& RoomId, const TArray<FVector2D>& FallbackFootprint);
 
 	// Replaces a room/wall's footprint wholesale with NewFootprint (same pre-scale units as
 	// everything else, same point count/winding expected - this is a translate, not a reshape) -
@@ -270,6 +279,13 @@ private:
 	// isn't inside a wall's solid thickness there (being inside a room's open interior is fine).
 	// Logs the specific reason on failure.
 	bool CanPlaceConnectorOnFloor(FVector2D Position, int32 Level) const;
+
+	// The reverse of CanPlaceConnectorOnFloor's wall-thickness check: would this room/wall
+	// footprint's own walls end up inside a wall's solid thickness of an existing connector
+	// (elevator/stairs/escalator) on Level - i.e. would creating/moving/resizing/rotating a room
+	// to this footprint bury a connector inside a wall. Used by CreateRoomFromFootprint,
+	// CommitRoomMove, ResizeRoom, and RotateRoom's commit step.
+	bool DoesFootprintBlockConnector(const TArray<FVector2D>& Footprint, bool bClosedLoop, int32 Level) const;
 
 	UPROPERTY()
 	ABuildingGenerator* Generator;

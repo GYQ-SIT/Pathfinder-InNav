@@ -552,12 +552,9 @@ public:
 
 	// Renames the currently-loaded building - what the dropdown's little rename/pencil control
 	// should call. No-op (returns false) if nothing is loaded, or if NewName is already used by a
-	// different building (see ABuildingGenerator::SetBuildingName). Deliberately does NOT set
-	// HasUnsavedChanges() - a rename by itself doesn't need to nag the user to save/wouldn't be
-	// lost by a building switch (it lives on APolyBuilding, untouched by
-	// LoadInteriorForBuilding/DiscardUnsavedChanges) - it'll be written to disk whenever the next
-	// real save happens. Confirmed 2026-09-25: user explicitly wants renaming to feel lightweight,
-	// not trigger the unsaved-changes prompt.
+	// different building (see ABuildingGenerator::SetBuildingName). Sets HasUnsavedChanges() on
+	// success, same as every other mutating action - switching buildings (or leaving) right after
+	// a rename will prompt to save, same as any other unsaved edit.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	bool SetLoadedBuildingName(const FString& NewName);
 
@@ -620,15 +617,22 @@ private:
 	// per-press nudge like Grow/Shrink) - rotates the currently-selected room/wall around its own
 	// center via AInteriorGenerator::RotateRoom. Nine = counter-clockwise, Zero = clockwise.
 	static constexpr float RotationDegreesPerSecond = 90.f;
-	void StartRotateCCW() { bRotatingCCW = true; }
-	void StopRotateCCW() { bRotatingCCW = false; }
-	void StartRotateCW() { bRotatingCW = true; }
-	void StopRotateCW() { bRotatingCW = false; }
+	void StartRotateCCW();
+	void StopRotateCCW();
+	void StartRotateCW();
+	void StopRotateCW();
 	// No OnActionFailed broadcast on failure - called every tick while a rotation key is held,
 	// same reasoning as MoveRoomTo/MoveDoor.
 	void RotateSelectedRoom(float DeltaDegrees);
 	bool bRotatingCCW = false;
 	bool bRotatingCW = false;
+	// Snapshot of SelectedRoomId's footprint taken when a rotation gesture starts (neither key held
+	// -> one held), passed as the fallback to CommitRoomRotation when it ends (one held -> neither) -
+	// same drag-start/drag-end split as MoveRoom/CommitRoomMove, but for a key-hold gesture instead
+	// of a mouse drag.
+	TArray<FVector2D> RotationStartFootprint;
+	void BeginRotationGestureIfNeeded();
+	void EndRotationGestureIfFinished();
 
 	// Backspace handler - wraps DeleteSelection() because key bindings require a void() signature.
 	void DeleteSelectionKeyHandler();

@@ -737,6 +737,12 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2
 		}
 	}
 
+	if (DoesFootprintBlockConnector(Footprint, /*bClosedLoop=*/true, ActiveFloor))
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: footprint would wall in an elevator/stairs/escalator"));
+		return nullptr;
+	}
+
 	const FString ResolvedId = RoomId.IsEmpty() ? PeekNextRoomId() : RoomId;
 	if (UsedRoomIds.Contains(ResolvedId))
 	{
@@ -829,6 +835,39 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 	}
 
 	return Wall;
+}
+
+bool AInteriorGenerator::DoesFootprintBlockConnector(const TArray<FVector2D>& Footprint, bool bClosedLoop, int32 Level) const
+{
+	const FInteriorFloorInfo* FloorInfo = FloorInfoByLevel.Find(Level);
+	if (!FloorInfo || Footprint.Num() < 2)
+	{
+		return false;
+	}
+
+	const float HalfWallThickness = FloorInfo->WallThickness * 0.5f;
+	const int32 NumPoints = Footprint.Num();
+	const int32 NumEdges = bClosedLoop ? NumPoints : NumPoints - 1;
+
+	for (const FInteriorNavNode& Node : NavNodes)
+	{
+		if (Node.Level != Level)
+		{
+			continue;
+		}
+
+		for (int32 i = 0; i < NumEdges; i++)
+		{
+			const FVector2D& EdgeA = Footprint[i];
+			const FVector2D& EdgeB = Footprint[(i + 1) % NumPoints];
+			if (InteriorGen_DistancePointToSegment2D(Node.Position, EdgeA, EdgeB) < HalfWallThickness)
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
 }
 
 bool AInteriorGenerator::CanPlaceConnectorOnFloor(FVector2D Position, int32 Level) const
@@ -1096,6 +1135,15 @@ bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float
 				return false;
 			}
 
+			// Resize is a discrete per-press step (not a drag with its own release), so unlike
+			// CommitRoomMove there's no separate "allowed mid-gesture" phase to speak of - each step
+			// is checked and rejected immediately, same as the boundary check above.
+			if (DoesFootprintBlockConnector(NewFootprint, Room->IsClosedLoop(), Pair.Key))
+			{
+				UE_LOG(LogTemp, Error, TEXT("ResizeRoom: '%s' at %.1f x %.1f would wall in an elevator/stairs/escalator"), *RoomId, NewWidth, NewDepth);
+				return false;
+			}
+
 			Room->ResizeFootprint(NewFootprint);
 			UE_LOG(LogTemp, Warning, TEXT("Resized %s to %.1f x %.1f"), *RoomId, NewWidth, NewDepth);
 			return true;
@@ -1173,6 +1221,35 @@ bool AInteriorGenerator::RotateRoom(const FString& RoomId, float DeltaDegrees)
 	return false;
 }
 
+bool AInteriorGenerator::CommitRoomRotation(const FString& RoomId, const TArray<FVector2D>& FallbackFootprint)
+{
+	for (auto& Pair : RoomsByFloor)
+	{
+		for (AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (!Room || Room->RoomId != RoomId)
+			{
+				continue;
+			}
+
+			// Boundary and room/wall overlap are already enforced every tick by RotateRoom itself, so
+			// unlike CommitRoomMove there's nothing to re-check there. Connectors are the one thing
+			// RotateRoom intentionally allows passing through mid-gesture - checked only here, once the
+			// rotation key is released, mirroring CommitRoomMove's connector check for a drag.
+			if (DoesFootprintBlockConnector(Room->GetFootprint(), Room->IsClosedLoop(), Pair.Key))
+			{
+				Room->ResizeFootprint(FallbackFootprint);
+				UE_LOG(LogTemp, Warning, TEXT("CommitRoomRotation: '%s' would wall in an elevator/stairs/escalator - reverted to its position before the rotation"), *RoomId);
+				return false;
+			}
+
+			return true;
+		}
+	}
+
+	return false;
+}
+
 bool AInteriorGenerator::MoveRoom(const FString& RoomId, const TArray<FVector2D>& NewFootprint)
 {
 	for (auto& Pair : RoomsByFloor)
@@ -1231,6 +1308,15 @@ bool AInteriorGenerator::CommitRoomMove(const FString& RoomId, const TArray<FVec
 					UE_LOG(LogTemp, Warning, TEXT("CommitRoomMove: '%s' would overlap '%s' - reverted to its position before the drag"), *RoomId, *Other->RoomId);
 					return false;
 				}
+			}
+
+			// Same "allowed while dragging, checked only on release" treatment as the overlap check
+			// above.
+			if (DoesFootprintBlockConnector(Room->GetFootprint(), Room->IsClosedLoop(), Pair.Key))
+			{
+				Room->ResizeFootprint(FallbackFootprint);
+				UE_LOG(LogTemp, Warning, TEXT("CommitRoomMove: '%s' would wall in an elevator/stairs/escalator - reverted to its position before the drag"), *RoomId);
+				return false;
 			}
 
 			return true;
