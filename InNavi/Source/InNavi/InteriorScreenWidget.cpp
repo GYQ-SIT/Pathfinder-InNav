@@ -11,6 +11,7 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/ComboBoxString.h"
+#include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/SizeBox.h"
@@ -161,6 +162,52 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		DoorPanelSlot->SetPosition(FVector2D(-20.f, -20.f));
 		DoorPanelSlot->SetAutoSize(true);
 		DoorPanelSlot->SetZOrder(3);
+
+		// Room properties panel - same position as the door panel (room/door/connector selection
+		// is mutually exclusive, so only one of the three panels is ever visible at once).
+		RoomPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_RoomProperties"));
+		RoomPanel->SetBrushColor(FLinearColor(0.05f, 0.05f, 0.05f, 0.9f));
+		RoomPanel->SetPadding(FMargin(12.f));
+		RoomPanel->SetVisibility(ESlateVisibility::Collapsed);
+
+		UVerticalBox* RoomStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RoomStack"));
+		RoomPanel->SetContent(RoomStack);
+
+		RoomTitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_RoomTitle"));
+		RoomTitleText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		UVerticalBoxSlot* RoomTitleSlot = RoomStack->AddChildToVerticalBox(RoomTitleText);
+		RoomTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+
+		UHorizontalBox* RoomNameRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RoomNameRow"));
+		RoomStack->AddChildToVerticalBox(RoomNameRow);
+
+		UTextBlock* RoomNameLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_RoomNameLabel"));
+		RoomNameLabel->SetText(FText::FromString(TEXT("Name :")));
+		RoomNameLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		UHorizontalBoxSlot* RoomNameLabelSlot = RoomNameRow->AddChildToHorizontalBox(RoomNameLabel);
+		RoomNameLabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+		RoomNameLabelSlot->SetVerticalAlignment(VAlign_Center);
+
+		RoomNameTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_RoomName"));
+		UHorizontalBoxSlot* RoomNameBoxSlot = RoomNameRow->AddChildToHorizontalBox(RoomNameTextBox);
+		RoomNameBoxSlot->SetVerticalAlignment(VAlign_Center);
+
+		ApplyRoomButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_ApplyRoom"));
+		ApplyRoomButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+		UTextBlock* ApplyRoomText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_ApplyRoomLabel"));
+		ApplyRoomText->SetText(FText::FromString(TEXT("Apply")));
+		ApplyRoomText->SetJustification(ETextJustify::Center);
+		ApplyRoomText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyRoomButton->SetContent(ApplyRoomText);
+		UVerticalBoxSlot* ApplyRoomSlot = RoomStack->AddChildToVerticalBox(ApplyRoomButton);
+		ApplyRoomSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
+
+		UCanvasPanelSlot* RoomPanelSlot = Canvas->AddChildToCanvas(RoomPanel);
+		RoomPanelSlot->SetAnchors(FAnchors(1.f, 1.f));
+		RoomPanelSlot->SetAlignment(FVector2D(1.f, 1.f));
+		RoomPanelSlot->SetPosition(FVector2D(-20.f, -20.f));
+		RoomPanelSlot->SetAutoSize(true);
+		RoomPanelSlot->SetZOrder(3);
 	}
 
 	return Super::RebuildWidget();
@@ -178,10 +225,15 @@ void UInteriorScreenWidget::NativeConstruct()
 	{
 		ApplyDoorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyDoorClicked);
 	}
+	if (ApplyRoomButton)
+	{
+		ApplyRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyRoomClicked);
+	}
 
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->OnSelectedDoorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedDoorChanged);
+		PC->OnSelectedRoomChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedRoomChanged);
 	}
 }
 
@@ -190,6 +242,7 @@ void UInteriorScreenWidget::NativeDestruct()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->OnSelectedDoorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedDoorChanged);
+		PC->OnSelectedRoomChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedRoomChanged);
 	}
 
 	Super::NativeDestruct();
@@ -244,6 +297,48 @@ void UInteriorScreenWidget::OnApplyDoorClicked()
 		if (ConnectsToComboBox)
 		{
 			PC->SetSelectedDoorConnectsTo(ConnectsToComboBox->GetSelectedOption());
+		}
+	}
+}
+
+void UInteriorScreenWidget::HandleSelectedRoomChanged(FString RoomId)
+{
+	if (!RoomPanel)
+	{
+		return;
+	}
+
+	if (RoomId.IsEmpty())
+	{
+		RoomPanel->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC)
+	{
+		return;
+	}
+
+	RoomPanel->SetVisibility(ESlateVisibility::Visible);
+
+	if (RoomTitleText)
+	{
+		RoomTitleText->SetText(FText::FromString(PC->IsSelectedRoomClosedLoop() ? TEXT("Room property") : TEXT("Wall property")));
+	}
+	if (RoomNameTextBox)
+	{
+		RoomNameTextBox->SetText(FText::FromString(PC->GetSelectedRoomName()));
+	}
+}
+
+void UInteriorScreenWidget::OnApplyRoomClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (RoomNameTextBox)
+		{
+			PC->SetSelectedRoomName(RoomNameTextBox->GetText().ToString());
 		}
 	}
 }

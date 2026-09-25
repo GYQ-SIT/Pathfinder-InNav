@@ -9,6 +9,7 @@
 class UBorder;
 class UButton;
 class UComboBoxString;
+class UEditableTextBox;
 class UInteriorFloorPlanWidget;
 class UTextBlock;
 
@@ -72,6 +73,15 @@ private:
 	UFUNCTION()
 	void OnApplyDoorClicked();
 
+	// Room properties panel - shown/populated whenever the selected room/wall changes (see
+	// ANavPlayerController::OnSelectedRoomChanged), hidden when deselected (empty id). Title
+	// switches between "Room property"/"Wall property" via IsSelectedRoomClosedLoop().
+	UFUNCTION()
+	void HandleSelectedRoomChanged(FString RoomId);
+
+	UFUNCTION()
+	void OnApplyRoomClicked();
+
 	UFUNCTION()
 	void HandleSaveAndLeave();
 
@@ -100,4 +110,16 @@ private:
 
 	UPROPERTY()
 	UButton* ApplyDoorButton = nullptr;
+
+	UPROPERTY()
+	UBorder* RoomPanel = nullptr;
+
+	UPROPERTY()
+	UTextBlock* RoomTitleText = nullptr;
+
+	UPROPERTY()
+	UEditableTextBox* RoomNameTextBox = nullptr;
+
+	UPROPERTY()
+	UButton* ApplyRoomButton = nullptr;
 };
