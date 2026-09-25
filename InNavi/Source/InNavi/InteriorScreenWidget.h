@@ -12,7 +12,9 @@ class UCheckBox;
 class UComboBoxString;
 class UEditableTextBox;
 class UInteriorFloorPlanWidget;
+class UScrollBox;
 class UTextBlock;
+class UVerticalBox;
 
 // Pure-C++ replacement for WBP_InteriorScreen, built the same way as the other converted screens.
 // This is the biggest/most complex screen in the project (mode toolbar, door/room/connector
@@ -128,11 +130,40 @@ private:
 
 	void GoToEditScreen();
 
+	// Floor panel - lists every floor of the loaded building (top first, matching the mockup),
+	// highlighting the active one; clicking a row switches to it. "+Add floor"/"Delete floor" call
+	// straight through to ANavPlayerController::AddFloor/RemoveFloor(GetActiveFloor()), which
+	// already validate and report failure (see OnActionFailed) - this panel just re-lists afterward.
+	UFUNCTION()
+	void HandleFloorEntryClicked(int32 FloorNumber);
+
+	UFUNCTION()
+	void OnAddFloorClicked();
+
+	UFUNCTION()
+	void OnRemoveFloorClicked();
+
+	// Rebuilds FloorListBox's rows from scratch against the loaded building's current floor count
+	// and active floor - simplest way to stay in sync since both can change from several different
+	// places (this panel's own buttons, or a building switch elsewhere on this screen).
+	void RefreshFloorList();
+
 	UPROPERTY()
 	UInteriorFloorPlanWidget* FloorPlanWidget = nullptr;
 
 	UPROPERTY()
 	UButton* BackButton = nullptr;
+
+	// Scrollable (not a plain VerticalBox) and height-capped to ~3 rows in RebuildWidget - a
+	// building can have many floors, and listing them all would eat too much screen space.
+	UPROPERTY()
+	UScrollBox* FloorListBox = nullptr;
+
+	UPROPERTY()
+	UButton* AddFloorButton = nullptr;
+
+	UPROPERTY()
+	UButton* RemoveFloorButton = nullptr;
 
 	UPROPERTY()
 	UBorder* DoorPanel = nullptr;

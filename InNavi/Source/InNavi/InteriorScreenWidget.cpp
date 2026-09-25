@@ -2,6 +2,7 @@
 
 #include "ConfirmDialogWidget.h"
 #include "EditScreenWidget.h"
+#include "FloorListEntryWidget.h"
 #include "InteriorFloorPlanWidget.h"
 #include "InteriorTypes.h"
 #include "NavPlayerController.h"
@@ -15,6 +16,8 @@
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/ScrollBox.h"
+#include "Components/ScrollBoxSlot.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -113,6 +116,72 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		BackSlot->SetPosition(FVector2D(-20.f, 20.f));
 		BackSlot->SetAutoSize(true);
 		BackSlot->SetZOrder(2);
+
+		// Floor panel - top-right, below Back (the one clear spot: mode toolbar is top-left,
+		// door/room/connector panels bottom-right, building switcher bottom-left). Always visible
+		// (unlike those panels), since switching floors should be available no matter what's
+		// selected.
+		UBorder* FloorPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_Floor"));
+		FloorPanel->SetBrushColor(FLinearColor(0.05f, 0.05f, 0.05f, 0.9f));
+		FloorPanel->SetPadding(FMargin(14.f));
+
+		UVerticalBox* FloorStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("FloorStack"));
+		FloorPanel->SetContent(FloorStack);
+
+		UTextBlock* FloorTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_FloorTitle"));
+		FloorTitle->SetText(FText::FromString(TEXT("Floor")));
+		FloorTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		UVerticalBoxSlot* FloorTitleSlot = FloorStack->AddChildToVerticalBox(FloorTitle);
+		FloorTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+
+		// Every button in this panel (floor rows, Add, Delete) uses this same size, so they all
+		// visually match - see FloorListEntryWidget::RebuildWidget for the floor rows' own SizeBox.
+		constexpr float FloorButtonWidth = 150.f;
+		constexpr float FloorButtonHeight = 32.f;
+
+		FloorListBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("FloorListBox"));
+		// 3 rows tall (row height + 4px padding each, see RefreshFloorList) caps the list without
+		// hiding the scrollbar UScrollBox already shows once content overflows that.
+		USizeBox* FloorListSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("FloorListSizeBox"));
+		FloorListSizeBox->SetHeightOverride((FloorButtonHeight + 4.f) * 3.f);
+		FloorListSizeBox->SetWidthOverride(FloorButtonWidth);
+		FloorListSizeBox->SetContent(FloorListBox);
+		UVerticalBoxSlot* FloorListSlot = FloorStack->AddChildToVerticalBox(FloorListSizeBox);
+		FloorListSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+
+		AddFloorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_AddFloor"));
+		AddFloorButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+		UTextBlock* AddFloorText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_AddFloorLabel"));
+		AddFloorText->SetText(FText::FromString(TEXT("+ Add floor")));
+		AddFloorText->SetJustification(ETextJustify::Center);
+		AddFloorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		USizeBox* AddFloorSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Btn_AddFloorSize"));
+		AddFloorSizeBox->SetWidthOverride(FloorButtonWidth);
+		AddFloorSizeBox->SetHeightOverride(FloorButtonHeight);
+		AddFloorSizeBox->SetContent(AddFloorText);
+		AddFloorButton->SetContent(AddFloorSizeBox);
+		UVerticalBoxSlot* AddFloorSlot = FloorStack->AddChildToVerticalBox(AddFloorButton);
+		AddFloorSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+
+		RemoveFloorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_RemoveFloor"));
+		RemoveFloorButton->SetBackgroundColor(FLinearColor(0.6f, 0.2f, 0.2f, 1.f));
+		UTextBlock* RemoveFloorText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_RemoveFloorLabel"));
+		RemoveFloorText->SetText(FText::FromString(TEXT("Delete floor")));
+		RemoveFloorText->SetJustification(ETextJustify::Center);
+		RemoveFloorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		USizeBox* RemoveFloorSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Btn_RemoveFloorSize"));
+		RemoveFloorSizeBox->SetWidthOverride(FloorButtonWidth);
+		RemoveFloorSizeBox->SetHeightOverride(FloorButtonHeight);
+		RemoveFloorSizeBox->SetContent(RemoveFloorText);
+		RemoveFloorButton->SetContent(RemoveFloorSizeBox);
+		FloorStack->AddChildToVerticalBox(RemoveFloorButton);
+
+		UCanvasPanelSlot* FloorPanelSlot = Canvas->AddChildToCanvas(FloorPanel);
+		FloorPanelSlot->SetAnchors(FAnchors(1.f, 0.f));
+		FloorPanelSlot->SetAlignment(FVector2D(1.f, 0.f));
+		FloorPanelSlot->SetPosition(FVector2D(-20.f, 70.f));
+		FloorPanelSlot->SetAutoSize(true);
+		FloorPanelSlot->SetZOrder(2);
 
 		// Door properties panel - bottom-right, hidden until a door is selected (see
 		// HandleSelectedDoorChanged). Positioned away from the mode toolbar (top-left) and
@@ -324,6 +393,14 @@ void UInteriorScreenWidget::NativeConstruct()
 	{
 		BackButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnBackClicked);
 	}
+	if (AddFloorButton)
+	{
+		AddFloorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddFloorClicked);
+	}
+	if (RemoveFloorButton)
+	{
+		RemoveFloorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRemoveFloorClicked);
+	}
 	if (ApplyDoorButton)
 	{
 		ApplyDoorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyDoorClicked);
@@ -353,6 +430,7 @@ void UInteriorScreenWidget::NativeConstruct()
 	}
 
 	RefreshBuildingSwitcher();
+	RefreshFloorList();
 }
 
 void UInteriorScreenWidget::NativeDestruct()
@@ -540,6 +618,64 @@ void UInteriorScreenWidget::OnApplyConnectorClicked()
 	PC->SetSelectedConnectorFloors(NewFloors);
 }
 
+void UInteriorScreenWidget::RefreshFloorList()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC || !FloorListBox)
+	{
+		return;
+	}
+
+	FloorListBox->ClearChildren();
+
+	const int32 FloorCount = PC->GetLoadedBuildingFloorCount();
+	const int32 ActiveFloor = PC->GetActiveFloor();
+	// Lowest floor first (Level 1 at the top) - reversed from the original mockup per explicit
+	// request.
+	for (int32 FloorNumber = 1; FloorNumber <= FloorCount; ++FloorNumber)
+	{
+		UFloorListEntryWidget* Entry = CreateWidget<UFloorListEntryWidget>(PC, UFloorListEntryWidget::StaticClass());
+		if (!Entry)
+		{
+			continue;
+		}
+		Entry->SetFloorNumber(FloorNumber, FloorNumber == ActiveFloor);
+		Entry->OnEntryClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleFloorEntryClicked);
+
+		if (UScrollBoxSlot* EntrySlot = Cast<UScrollBoxSlot>(FloorListBox->AddChild(Entry)))
+		{
+			EntrySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+		}
+	}
+}
+
+void UInteriorScreenWidget::HandleFloorEntryClicked(int32 FloorNumber)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetActiveFloor(FloorNumber);
+	}
+	RefreshFloorList();
+}
+
+void UInteriorScreenWidget::OnAddFloorClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->AddFloor();
+	}
+	RefreshFloorList();
+}
+
+void UInteriorScreenWidget::OnRemoveFloorClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->RemoveFloor(PC->GetActiveFloor());
+	}
+	RefreshFloorList();
+}
+
 void UInteriorScreenWidget::RefreshBuildingSwitcher()
 {
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
@@ -581,6 +717,7 @@ void UInteriorScreenWidget::HandleBuildingSwitcherChanged(FString SelectedItem, 
 	{
 		PC->LoadInteriorForBuilding(NewBuildingId);
 		RefreshBuildingSwitcher();
+		RefreshFloorList();
 		return;
 	}
 
@@ -604,6 +741,7 @@ void UInteriorScreenWidget::HandleSwitchBuildingSave()
 		PC->LoadInteriorForBuilding(PendingBuildingId);
 	}
 	RefreshBuildingSwitcher();
+	RefreshFloorList();
 }
 
 void UInteriorScreenWidget::HandleSwitchBuildingDiscard()
@@ -614,6 +752,7 @@ void UInteriorScreenWidget::HandleSwitchBuildingDiscard()
 		PC->LoadInteriorForBuilding(PendingBuildingId);
 	}
 	RefreshBuildingSwitcher();
+	RefreshFloorList();
 }
 
 void UInteriorScreenWidget::HandleSwitchBuildingCancel()
