@@ -380,6 +380,7 @@ void ANavPlayerController::ToggleDrawRoomMode()
 
 	bDrawRoomMode = true;
 	OnDrawRoomModeChanged.Broadcast(true);
+	OnEditModeChanged.Broadcast();
 
 	UE_LOG(LogTemp, Warning, TEXT("Draw room mode ON (floor %d): click to add footprint points, Enter to finish, Esc to cancel"), InteriorGen->GetActiveFloor());
 }
@@ -422,6 +423,7 @@ void ANavPlayerController::ToggleDrawWallMode()
 
 	bDrawWallMode = true;
 	OnDrawWallModeChanged.Broadcast(true);
+	OnEditModeChanged.Broadcast();
 
 	UE_LOG(LogTemp, Warning, TEXT("Draw wall mode ON (floor %d): click to add points, Enter to finish, Esc to cancel"), InteriorGen->GetActiveFloor());
 }
@@ -433,12 +435,14 @@ void ANavPlayerController::ExitDrawRoomMode()
 		CancelRoom();
 		bDrawRoomMode = false;
 		OnDrawRoomModeChanged.Broadcast(false);
+		OnEditModeChanged.Broadcast();
 	}
 	if (bDrawWallMode)
 	{
 		CancelWall();
 		bDrawWallMode = false;
 		OnDrawWallModeChanged.Broadcast(false);
+		OnEditModeChanged.Broadcast();
 	}
 
 	UE_LOG(LogTemp, Warning, TEXT("Draw room/wall mode OFF"));
@@ -450,6 +454,7 @@ void ANavPlayerController::ExitSelectMode()
 	{
 		bSelectMode = false;
 		OnSelectModeChanged.Broadcast(false);
+		OnEditModeChanged.Broadcast();
 		UE_LOG(LogTemp, Warning, TEXT("Select mode OFF"));
 	}
 }
@@ -491,6 +496,7 @@ void ANavPlayerController::ToggleSelectMode()
 
 	bSelectMode = true;
 	OnSelectModeChanged.Broadcast(true);
+	OnEditModeChanged.Broadcast();
 
 	UE_LOG(LogTemp, Warning, TEXT("Select mode ON (floor %d): click a room/wall on the 2D canvas to select it (Backspace deletes, =/- resizes), Esc/Q to exit"), InteriorGen->GetActiveFloor());
 }
@@ -506,6 +512,7 @@ void ANavPlayerController::ExitPrefabRoomMode()
 	if (ActivePrefabShape != 0)
 	{
 		ActivePrefabShape = 0;
+		OnEditModeChanged.Broadcast();
 		UE_LOG(LogTemp, Warning, TEXT("Prefab room placement OFF"));
 	}
 }
@@ -546,6 +553,7 @@ void ANavPlayerController::TogglePrefabRoomMode(int32 ShapeId)
 	ExitConnectorMode();
 
 	ActivePrefabShape = ShapeId;
+	OnEditModeChanged.Broadcast();
 	UE_LOG(LogTemp, Warning, TEXT("Prefab room placement ON (shape %d): click the 2D canvas to place, press the same key again to stop"), ShapeId);
 }
 
@@ -569,6 +577,7 @@ void ANavPlayerController::ExitConnectorMode()
 	if (ActiveConnectorType != 0)
 	{
 		ActiveConnectorType = 0;
+		OnEditModeChanged.Broadcast();
 		UE_LOG(LogTemp, Warning, TEXT("Connector placement OFF"));
 	}
 }
@@ -613,6 +622,7 @@ void ANavPlayerController::ToggleConnectorMode(EInteriorNavNodeType Type)
 	ExitAddDoorMode();
 
 	ActiveConnectorType = RequestedType;
+	OnEditModeChanged.Broadcast();
 	UE_LOG(LogTemp, Warning, TEXT("Connector placement ON (type %d): click the 2D canvas to place, press the same key again to stop"), RequestedType);
 }
 
@@ -636,6 +646,7 @@ void ANavPlayerController::ExitAddDoorMode()
 	if (bAddDoorMode)
 	{
 		bAddDoorMode = false;
+		OnEditModeChanged.Broadcast();
 		UE_LOG(LogTemp, Warning, TEXT("Add-door mode OFF"));
 	}
 }
@@ -676,6 +687,7 @@ void ANavPlayerController::ToggleAddDoorMode()
 	ExitConnectorMode();
 
 	bAddDoorMode = true;
+	OnEditModeChanged.Broadcast();
 	UE_LOG(LogTemp, Warning, TEXT("Add-door mode ON (floor %d): click a wall edge on the 2D canvas to add a door, Esc/K to exit"), InteriorGen->GetActiveFloor());
 }
 

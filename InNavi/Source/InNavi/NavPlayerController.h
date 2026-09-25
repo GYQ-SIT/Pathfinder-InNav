@@ -19,6 +19,13 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnShapeModeChanged, bool, bNewShape
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDrawRoomModeChanged, bool, bNewDrawRoomMode);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDrawWallModeChanged, bool, bNewDrawWallMode);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectModeChanged, bool, bNewSelectMode);
+// Broadcast whenever ANY edit mode turns on/off/switches - draw room/wall, select, add-door, a
+// prefab shape, or a connector type (the ones above only cover draw/select/wall; add-door, prefab
+// shape, and connector don't have individual per-mode delegates). No params - a listener re-reads
+// whichever of IsInDrawRoomMode/IsInDrawWallMode/IsInSelectMode/IsInAddDoorMode/GetActivePrefabShape/
+// GetActiveConnectorType it cares about rather than being handed the new state directly, since more
+// than one of those can change in a single mode switch (the old mode turning off, the new one on).
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnEditModeChanged);
 // Broadcast whenever the selected room/wall changes on the 2D floor plan canvas (select mode
 // picking a different one, or clicking empty space to deselect - RoomId is empty in that case).
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedRoomChanged, FString, RoomId);
@@ -240,6 +247,11 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Interior")
 	FOnSelectModeChanged OnSelectModeChanged;
 
+	// See FOnEditModeChanged's own comment - covers every edit mode, including the ones without a
+	// dedicated per-mode delegate (add-door, prefab shape, connector type).
+	UPROPERTY(BlueprintAssignable, Category = "Interior")
+	FOnEditModeChanged OnEditModeChanged;
+
 	// Sets the currently-selected room/wall - the 2D floor plan canvas's select-mode click handler
 	// calls this with whichever room/wall it found near the click, or an empty string to deselect.
 	// The selection persists even after leaving select mode, so Delete/Resize keep working on it.
@@ -440,6 +452,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	bool IsInPrefabRoomMode() const { return ActivePrefabShape != 0; }
 
+	// Which shape is currently armed - 0 = none, 1 = Rectangle, 2 = Triangle, 3 = Circle (matches
+	// TogglePrefabRoomMode's ShapeId convention). For UI that needs to tell the three apart, unlike
+	// the plain on/off of IsInPrefabRoomMode.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	int32 GetActivePrefabShape() const { return ActivePrefabShape; }
+
 	// Places whichever prefab shape is currently armed (see TogglePrefabRectangleMode etc.),
 	// centered on FootprintCenter - what the 2D floor plan canvas's click handler calls. No-op
 	// (returns nullptr) if no prefab shape is currently armed.
@@ -463,6 +481,13 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	bool IsInConnectorMode() const { return ActiveConnectorType != 0; }
+
+	// Which connector type is currently armed - 0 = none, otherwise the int32 value of
+	// EInteriorNavNodeType (Elevator=1/Stairs=2/Escalator=3), matching ToggleConnectorMode's
+	// convention. For UI that needs to tell the three apart, unlike the plain on/off of
+	// IsInConnectorMode.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	int32 GetActiveConnectorType() const { return ActiveConnectorType; }
 
 	// Places a connector of whichever type is currently armed (see ToggleElevatorMode etc.) at
 	// FootprintPosition, on every floor it defaults to connecting - what the 2D floor plan canvas's

@@ -68,7 +68,22 @@ private:
 	UFUNCTION()
 	void OnAddEscalatorModeClicked();
 
-	// Door properties panel - shown/populated whenever the selected door changes (see
+	// Re-colors each of the 10 mode buttons green if its mode is currently active, gray otherwise -
+	// bound to ANavPlayerController::OnEditModeChanged (fires on every mode on/off/switch, including
+	// via hotkey, not just this screen's own buttons) so the highlight stays correct regardless of
+	// how the mode actually changed.
+	UFUNCTION()
+	void HandleEditModeChanged();
+
+	void RefreshModeButtonHighlights();
+
+	// Door/Room/Connector properties all share one PropertiesPanel (see RebuildWidget) instead of
+	// three separately-positioned panels - DoorFieldsBox/RoomFieldsBox/ConnectorFieldsBox are its
+	// three mutually-exclusive content sections, only one of which is ever visible (selection is
+	// already mutually exclusive at the PC level). PropertiesPanel itself is shown whenever any one
+	// of the three is populated, hidden when all three are empty - see RefreshPropertiesPanelVisibility.
+
+	// Shown/populated whenever the selected door changes (see
 	// ANavPlayerController::OnSelectedDoorChanged), hidden when deselected (both ids empty).
 	UFUNCTION()
 	void HandleSelectedDoorChanged(FString RoomId, FString DoorId);
@@ -76,7 +91,7 @@ private:
 	UFUNCTION()
 	void OnApplyDoorClicked();
 
-	// Room properties panel - shown/populated whenever the selected room/wall changes (see
+	// Shown/populated whenever the selected room/wall changes (see
 	// ANavPlayerController::OnSelectedRoomChanged), hidden when deselected (empty id). Title
 	// switches between "Room property"/"Wall property" via IsSelectedRoomClosedLoop().
 	UFUNCTION()
@@ -85,16 +100,21 @@ private:
 	UFUNCTION()
 	void OnApplyRoomClicked();
 
-	// Connector (elevator/stairs/escalator) properties panel - shown/populated whenever the
-	// selected connector changes (see ANavPlayerController::OnSelectedConnectorChanged), hidden
-	// when deselected (empty GroupId). The floor checklist only shows boxes for floors that
-	// actually exist on the loaded building (GetLoadedBuildingFloorCount) - a plain loop here
-	// instead of the 20 hand-wired Blueprint blocks the UMG version needed.
+	// Shown/populated whenever the selected connector (elevator/stairs/escalator) changes (see
+	// ANavPlayerController::OnSelectedConnectorChanged), hidden when deselected (empty GroupId).
+	// The floor checklist only shows boxes for floors that actually exist on the loaded building
+	// (GetLoadedBuildingFloorCount) - a plain loop here instead of the 20 hand-wired Blueprint
+	// blocks the UMG version needed.
 	UFUNCTION()
 	void HandleSelectedConnectorChanged(FString GroupId);
 
 	UFUNCTION()
 	void OnApplyConnectorClicked();
+
+	// Shows PropertiesPanel if any of Door/Room/Connector is currently selected on the PC, hides it
+	// if none are - called at the end of each HandleSelected*Changed once that handler has already
+	// shown/hidden its own fields box.
+	void RefreshPropertiesPanelVisibility();
 
 	// Building switcher - lets the user jump straight to a different building's interior without
 	// going back to the exterior first. Dropdown lists every building by name (GetAllBuildingNames)
@@ -107,6 +127,12 @@ private:
 
 	UFUNCTION()
 	void OnEditBuildingNameClicked();
+
+	// Shared by both combo boxes on this screen (building switcher, door "Connect to") - the
+	// engine's default-generated dropdown item text renders too dark to read against this screen's
+	// dark theme, so both are bound to build their own white-text item widget instead.
+	UFUNCTION()
+	UWidget* HandleGenerateComboBoxItem(FString Item);
 
 	void RefreshBuildingSwitcher();
 
@@ -154,6 +180,40 @@ private:
 	UPROPERTY()
 	UButton* BackButton = nullptr;
 
+	// The 10 mode toolbar buttons - kept so RefreshModeButtonHighlights can re-color whichever one
+	// is currently active. AddRect/Triangle/Circle share PC->GetActivePrefabShape() (1/2/3);
+	// AddElevator/Stairs/Escalator share PC->GetActiveConnectorType() (EInteriorNavNodeType's int
+	// value) - both need the specific button, not just "is some prefab/connector mode active".
+	UPROPERTY()
+	UButton* SelectModeButton = nullptr;
+
+	UPROPERTY()
+	UButton* DrawRoomModeButton = nullptr;
+
+	UPROPERTY()
+	UButton* DrawWallModeButton = nullptr;
+
+	UPROPERTY()
+	UButton* AddRectModeButton = nullptr;
+
+	UPROPERTY()
+	UButton* AddTriangleModeButton = nullptr;
+
+	UPROPERTY()
+	UButton* AddCircleModeButton = nullptr;
+
+	UPROPERTY()
+	UButton* AddDoorModeButton = nullptr;
+
+	UPROPERTY()
+	UButton* AddStairsModeButton = nullptr;
+
+	UPROPERTY()
+	UButton* AddElevatorModeButton = nullptr;
+
+	UPROPERTY()
+	UButton* AddEscalatorModeButton = nullptr;
+
 	// Scrollable (not a plain VerticalBox) and height-capped to ~3 rows in RebuildWidget - a
 	// building can have many floors, and listing them all would eat too much screen space.
 	UPROPERTY()
@@ -165,8 +225,15 @@ private:
 	UPROPERTY()
 	UButton* RemoveFloorButton = nullptr;
 
+	// Shared by Door/Room/Connector properties - see the comment above HandleSelectedDoorChanged.
 	UPROPERTY()
-	UBorder* DoorPanel = nullptr;
+	UBorder* PropertiesPanel = nullptr;
+
+	UPROPERTY()
+	UTextBlock* PropertiesTitleText = nullptr;
+
+	UPROPERTY()
+	UVerticalBox* DoorFieldsBox = nullptr;
 
 	UPROPERTY()
 	UTextBlock* DoorRoomText = nullptr;
@@ -178,10 +245,7 @@ private:
 	UButton* ApplyDoorButton = nullptr;
 
 	UPROPERTY()
-	UBorder* RoomPanel = nullptr;
-
-	UPROPERTY()
-	UTextBlock* RoomTitleText = nullptr;
+	UVerticalBox* RoomFieldsBox = nullptr;
 
 	UPROPERTY()
 	UEditableTextBox* RoomNameTextBox = nullptr;
@@ -190,7 +254,7 @@ private:
 	UButton* ApplyRoomButton = nullptr;
 
 	UPROPERTY()
-	UBorder* ConnectorPanel = nullptr;
+	UVerticalBox* ConnectorFieldsBox = nullptr;
 
 	UPROPERTY()
 	UTextBlock* ConnectorTypeText = nullptr;

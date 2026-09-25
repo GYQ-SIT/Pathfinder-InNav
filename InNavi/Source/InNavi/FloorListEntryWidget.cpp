@@ -21,12 +21,15 @@ TSharedRef<SWidget> UFloorListEntryWidget::RebuildWidget()
 		Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_FloorEntryLabel"));
 		Label->SetJustification(ETextJustify::Center);
 		Label->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		Label->SetAutoWrapText(true);
 
-		// Matches Add/Delete floor buttons' size exactly (UInteriorScreenWidget::RebuildWidget) so
-		// every button in the Floor panel is visually the same size.
+		// Matches every other button on this screen's standard size exactly
+		// (UInteriorScreenWidget::RebuildWidget's StandardButtonWidth/Height) - kept in sync by hand
+		// since this widget is built in its own file. No font override here either, same as those -
+		// this renders at the same default size as the rest of the screen.
 		USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("SizeBox_FloorEntry"));
-		SizeBox->SetWidthOverride(150.f);
-		SizeBox->SetHeightOverride(32.f);
+		SizeBox->SetWidthOverride(200.f);
+		SizeBox->SetMinDesiredHeight(44.f);
 		SizeBox->SetContent(Label);
 		Button->SetContent(SizeBox);
 
