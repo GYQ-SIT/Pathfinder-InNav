@@ -73,7 +73,7 @@ demonstrable check — not "it exists".
 - **Supports:** _(navigation / routing — F04 TBD)_
 - **Owner:** ws / jh
 - **Jira Epic:** `INNAVI-T04`
-- **M1 target:** Compute and display a route from one room to another, including at least one cross-floor path (e.g. Level 1 → elevator → Level 8 → target room). **Status unconfirmed as of 2026-09-18** — last known update was prototyping independently on test boxes; not yet confirmed whether it consumes the real `FInteriorNavNode`/room/door data from T02/T03. Needs a check-in with ws/jh.
+- **M1 target:** Compute and display a route from one room to another, including at least one cross-floor path (e.g. Level 1 → elevator → Level 8 → target room). **Confirmed working as of 2026-09-25** — `NavigationRoutePlanner` (merged to `main`) builds a visibility graph (walls, doors, room-corner turn points, building boundary, plus every `FInteriorNavNode`) directly from the real `AInteriorGenerator`/`APolyBuilding` data - not a test/placeholder graph - and runs Dijkstra's over it. Cross-floor routing works via matching elevator/stairs/escalator connector pairs (`ConnectorGroupId`). Start/destination aren't limited to room centers - any valid point inside the building, away from walls, works as an endpoint, so this already covers point-to-point navigation, not just room-to-room (no separate "PathNode" tool needed for that - see `HANDOFF.md`). Navigation UI (`NavigationPanelWidget`) is hand-built in C++ rather than UMG, picking start/destination by clicking the 2D floor plan - there's no "pick a room by name" dropdown yet.
 - **M2 target:** Multiple destinations; more reliable cross-floor logic; clearer route visualization.
 - **M3 target:** Polished navigation UX; (stretch) mobile navigation experience.
 
@@ -91,7 +91,7 @@ These are standard deliverables required of all teams. Owners TBD.
 | R04 | Automated build (CI) | Build runs automatically on push | **Started** — self-hosted GitHub Actions runner (`team12-ovh-vm`) registered on the team12 OVH VM and running as a systemd service; `.github/workflows/validate-json.yml` triggers on push to `main`/`YQ-ui-backup` and runs successfully. Does not yet compile the actual UE5 Windows build (see "CI/CD" note below) |
 | R05 | Automated checks / tests | At least basic checks run in CI | **Started** — the same workflow validates every file in `InNavi/Data/*.json` parses as valid JSON on every push; no C++/UE-level checks yet |
 | R06 | Reproducible dev environment | README lets a teammate clone, set up, and run | `README.md` now has real build/run steps (was "TBD") |
-| R07 | Working technical proof of concept | Core risks demonstrated running (see T01–T04) | T01–T03 demonstrated; T04 (navigation) unconfirmed |
+| R07 | Working technical proof of concept | Core risks demonstrated running (see T01–T04) | T01–T04 all demonstrated (T04 confirmed 2026-09-25) |
 | R08 | Basic error handling | App does not crash on bad/empty input | Interior editor validates most inputs (bounds/overlap/wall-collision checks, unsaved-changes prompts) - not audited team-wide |
 | R09 | Working product demonstration | 2–3 min demo: select → input → generate → navigate | Not yet assembled (navigate step depends on T04) |
 | R10 | Project documentation | `docs/` kept current | Updated this pass (`architecture.md`, `deliverables.md`, root `HANDOFF.md`, new `docs/design/interior-editor-guide.md`) |

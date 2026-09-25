@@ -534,6 +534,28 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Building")
 	FOnBuildingSelected OnBuildingSelected;
 
+	// Every building's current display name - for a building-switcher dropdown (see
+	// WBP_InteriorScreen) to list. Populate the dropdown with this, then resolve the picked
+	// option back to an id via FindBuildingIdByName before calling LoadInteriorForBuilding.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	TArray<FString> GetAllBuildingNames() const;
+
+	// Resolves a building name (as shown in the dropdown above) back to its stable id. Empty if no
+	// building currently has that name.
+	UFUNCTION(BlueprintPure, Category = "Building")
+	FString FindBuildingIdByName(const FString& Name) const;
+
+	// The currently-loaded building's display name (see LoadInteriorForBuilding) - for a
+	// building-switcher dropdown to show as its initial selection. Empty if nothing is loaded.
+	UFUNCTION(BlueprintPure, Category = "Building")
+	FString GetLoadedBuildingName() const;
+
+	// Renames the currently-loaded building - what the dropdown's little rename/pencil control
+	// should call. No-op (returns false) if nothing is loaded, or if NewName is already used by a
+	// different building (see ABuildingGenerator::SetBuildingName).
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	bool SetLoadedBuildingName(const FString& NewName);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
