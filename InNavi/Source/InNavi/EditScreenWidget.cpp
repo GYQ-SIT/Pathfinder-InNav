@@ -1,6 +1,7 @@
 #include "EditScreenWidget.h"
 
 #include "ConfirmDialogWidget.h"
+#include "InteriorScreenWidget.h"
 #include "NavPlayerController.h"
 #include "StartScreenWidget.h"
 #include "Blueprint/WidgetTree.h"
@@ -15,11 +16,6 @@
 UEditScreenWidget::UEditScreenWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
-	static ConstructorHelpers::FClassFinder<UUserWidget> InteriorScreenFinder(TEXT("/Game/WBP_InteriorScreen"));
-	if (InteriorScreenFinder.Succeeded())
-	{
-		InteriorScreenClass = InteriorScreenFinder.Class;
-	}
 }
 
 TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
@@ -109,14 +105,14 @@ void UEditScreenWidget::HandleBuildingSelected(FString BuildingId)
 void UEditScreenWidget::OnEnterInteriorClicked()
 {
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
-	if (!PC || !InteriorScreenClass)
+	if (!PC)
 	{
 		return;
 	}
 
 	PC->LoadInteriorForBuilding(PC->GetSelectedBuildingId());
 
-	if (UUserWidget* InteriorScreen = CreateWidget<UUserWidget>(PC, InteriorScreenClass))
+	if (UInteriorScreenWidget* InteriorScreen = CreateWidget<UInteriorScreenWidget>(PC, UInteriorScreenWidget::StaticClass()))
 	{
 		InteriorScreen->AddToViewport();
 		RemoveFromParent();

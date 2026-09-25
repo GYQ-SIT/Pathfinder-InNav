@@ -62,7 +62,7 @@ static FString NavNodeTypeToString(EInteriorNavNodeType Type)
 }
 
 // ---- Helper: do segments AB and CD properly cross each other? (mirrors BuildingGenerator.cpp) ----
-static bool SegmentsIntersect(const FVector2D& A, const FVector2D& B, const FVector2D& C, const FVector2D& D)
+static bool InteriorGen_SegmentsIntersect(const FVector2D& A, const FVector2D& B, const FVector2D& C, const FVector2D& D)
 {
 	auto Cross = [](const FVector2D& O, const FVector2D& P1, const FVector2D& P2)
 	{
@@ -78,7 +78,7 @@ static bool SegmentsIntersect(const FVector2D& A, const FVector2D& B, const FVec
 }
 
 // ---- Helper: does this polygon's outline cross itself? (non-adjacent edges only) ----
-static bool PolygonSelfIntersects(const TArray<FVector2D>& Poly)
+static bool InteriorGen_PolygonSelfIntersects(const TArray<FVector2D>& Poly)
 {
 	const int32 N = Poly.Num();
 	for (int32 i = 0; i < N; i++)
@@ -92,7 +92,7 @@ static bool PolygonSelfIntersects(const TArray<FVector2D>& Poly)
 				continue;
 			}
 
-			if (SegmentsIntersect(Poly[i], Poly[iNext], Poly[j], Poly[jNext]))
+			if (InteriorGen_SegmentsIntersect(Poly[i], Poly[iNext], Poly[j], Poly[jNext]))
 			{
 				return true;
 			}
@@ -103,8 +103,12 @@ static bool PolygonSelfIntersects(const TArray<FVector2D>& Poly)
 
 // ---- Helper: even-odd ray-casting point-in-polygon test (mirrors NavPlayerController.cpp's copy -
 // each file that needs this keeps its own small static copy rather than sharing one across
-// translation units, same as SegmentsIntersect/PolygonSelfIntersects above). ----
-static bool IsPointInPolygon(const FVector2D& Point, const TArray<FVector2D>& Poly)
+// translation units. Prefixed InteriorGen_ (same for the two helpers above) because Unreal's Unity
+// Build occasionally groups two of these files into the same translation unit depending on how
+// many .cpp files the project has - a same-named static in both then collides at compile time
+// (hit this in practice once a new .cpp file shifted the Unity batching). Keep this prefix
+// convention for any future per-file copy of a same-purpose helper. ----
+static bool InteriorGen_IsPointInPolygon(const FVector2D& Point, const TArray<FVector2D>& Poly)
 {
 	bool bInside = false;
 	const int32 N = Poly.Num();
@@ -129,7 +133,7 @@ static bool IsFootprintFullyInsidePolygon(const TArray<FVector2D>& Footprint, co
 {
 	for (const FVector2D& Point : Footprint)
 	{
-		if (!IsPointInPolygon(Point, Poly))
+		if (!InteriorGen_IsPointInPolygon(Point, Poly))
 		{
 			return false;
 		}
@@ -138,8 +142,8 @@ static bool IsFootprintFullyInsidePolygon(const TArray<FVector2D>& Footprint, co
 }
 
 // ---- Helper: the point on segment AB closest to Point (mirrors InteriorFloorPlanWidget.cpp's
-// DistancePointToSegment2D, generalized to return the point itself, not just the distance to it -
-// FindSnapOffset needs the point; DistancePointToSegment2D below is now just this plus one more step) ----
+// InteriorGen_DistancePointToSegment2D, generalized to return the point itself, not just the distance to it -
+// FindSnapOffset needs the point; InteriorGen_DistancePointToSegment2D below is now just this plus one more step) ----
 static FVector2D ClosestPointOnSegment2D(const FVector2D& Point, const FVector2D& A, const FVector2D& B)
 {
 	const FVector2D AB = B - A;
@@ -154,7 +158,7 @@ static FVector2D ClosestPointOnSegment2D(const FVector2D& Point, const FVector2D
 }
 
 // ---- Helper: shortest distance from Point to segment AB ----
-static float DistancePointToSegment2D(const FVector2D& Point, const FVector2D& A, const FVector2D& B)
+static float InteriorGen_DistancePointToSegment2D(const FVector2D& Point, const FVector2D& A, const FVector2D& B)
 {
 	return FVector2D::Distance(Point, ClosestPointOnSegment2D(Point, A, B));
 }
@@ -171,12 +175,12 @@ static bool IsPointClearlyInsidePolygon(const FVector2D& Point, const TArray<FVe
 	const int32 N = Poly.Num();
 	for (int32 i = 0; i < N; i++)
 	{
-		if (DistancePointToSegment2D(Point, Poly[i], Poly[(i + 1) % N]) < BoundaryDeadZoneFootprintUnits)
+		if (InteriorGen_DistancePointToSegment2D(Point, Poly[i], Poly[(i + 1) % N]) < BoundaryDeadZoneFootprintUnits)
 		{
 			return false;
 		}
 	}
-	return IsPointInPolygon(Point, Poly);
+	return InteriorGen_IsPointInPolygon(Point, Poly);
 }
 
 // ---- Helper: do two rooms/walls' footprints overlap? Checks edge-edge crossings (catches partial
@@ -204,7 +208,7 @@ static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClos
 	// original bug actually needed.
 	//
 	// When two edges share an endpoint (the normal result of snapping two shapes' corners together),
-	// SegmentsIntersect's strict cross-product signs can misfire: one of its four cross products is
+	// InteriorGen_SegmentsIntersect's strict cross-product signs can misfire: one of its four cross products is
 	// exactly zero because it's evaluated at that shared point, and zero doesn't cleanly fall on
 	// either side of ">0" - depending on the angle, that can spuriously read as "crossing" even
 	// though the edges only touch at the one shared corner. So a shared endpoint is checked for and
@@ -225,7 +229,7 @@ static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClos
 			const FVector2D& B1 = FootprintB[(j + 1) % NumB];
 
 			const bool bSharesEndpoint = NearlySamePoint(A0, B0) || NearlySamePoint(A0, B1) || NearlySamePoint(A1, B0) || NearlySamePoint(A1, B1);
-			if (!bSharesEndpoint && SegmentsIntersect(A0, A1, B0, B1))
+			if (!bSharesEndpoint && InteriorGen_SegmentsIntersect(A0, A1, B0, B1))
 			{
 				return true;
 			}
@@ -705,7 +709,7 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2
 		return nullptr;
 	}
 
-	if (PolygonSelfIntersects(Footprint))
+	if (InteriorGen_PolygonSelfIntersects(Footprint))
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: footprint crosses itself - fix the outline before finishing"));
 		return nullptr;
@@ -843,7 +847,7 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(FVector2D Position, int32 Leve
 		return false;
 	}
 
-	if (!IsPointInPolygon(Position, Building->GetFootprint()))
+	if (!InteriorGen_IsPointInPolygon(Position, Building->GetFootprint()))
 	{
 		UE_LOG(LogTemp, Error, TEXT("Connector placement: outside the building's outline on floor %d"), Level);
 		return false;
@@ -868,7 +872,7 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(FVector2D Position, int32 Leve
 			{
 				const FVector2D& EdgeA = RoomFootprint[i];
 				const FVector2D& EdgeB = RoomFootprint[(i + 1) % NumPoints];
-				if (DistancePointToSegment2D(Position, EdgeA, EdgeB) < HalfWallThickness)
+				if (InteriorGen_DistancePointToSegment2D(Position, EdgeA, EdgeB) < HalfWallThickness)
 				{
 					UE_LOG(LogTemp, Error, TEXT("Connector placement: blocked by a wall on floor %d"), Level);
 					return false;
@@ -1288,7 +1292,7 @@ bool AInteriorGenerator::FindSnapOffset(int32 Level, const TArray<FVector2D>& Fo
 	}
 
 	// The building's own outline - always closed, and in the same pre-scale/pre-offset footprint
-	// units as everything else here (see IsPointInPolygon's callers elsewhere in this file for the
+	// units as everything else here (see InteriorGen_IsPointInPolygon's callers elsewhere in this file for the
 	// same assumption).
 	if (Generator)
 	{

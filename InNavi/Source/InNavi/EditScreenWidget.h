@@ -57,9 +57,4 @@ private:
 
 	UPROPERTY()
 	UButton* EnterInteriorButton = nullptr;
-
-	// WBP_InteriorScreen stays a UMG Blueprint for now, so it's referenced by asset path like
-	// StartScreenWidget did for WBP_EditScreen before this conversion.
-	UPROPERTY()
-	TSubclassOf<UUserWidget> InteriorScreenClass;
 };
