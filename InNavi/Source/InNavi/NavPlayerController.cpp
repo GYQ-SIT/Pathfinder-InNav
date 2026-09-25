@@ -2150,6 +2150,60 @@ FString ANavPlayerController::GetSelectedBuildingId() const
 	return SelectedBuilding ? SelectedBuilding->BuildingId : FString();
 }
 
+TArray<FString> ANavPlayerController::GetAllBuildingNames() const
+{
+	TArray<FString> Names;
+	if (!Generator)
+	{
+		return Names;
+	}
+
+	for (const FString& Id : Generator->GetAllBuildingIds())
+	{
+		Names.Add(Generator->GetBuildingName(Id));
+	}
+	return Names;
+}
+
+FString ANavPlayerController::FindBuildingIdByName(const FString& Name) const
+{
+	return Generator ? Generator->FindBuildingIdByName(Name) : FString();
+}
+
+FString ANavPlayerController::GetLoadedBuildingName() const
+{
+	if (!InteriorGen || !Generator)
+	{
+		return FString();
+	}
+	return Generator->GetBuildingName(InteriorGen->GetLoadedBuildingId());
+}
+
+bool ANavPlayerController::SetLoadedBuildingName(const FString& NewName)
+{
+	if (!InteriorGen || !Generator)
+	{
+		return false;
+	}
+
+	const FString LoadedId = InteriorGen->GetLoadedBuildingId();
+	if (LoadedId.IsEmpty())
+	{
+		return false;
+	}
+
+	const bool bSuccess = Generator->SetBuildingName(LoadedId, NewName);
+	if (bSuccess)
+	{
+		bHasUnsavedChanges = true;
+	}
+	else
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not rename '%s' to '%s' - that name is already in use."), *LoadedId, *NewName));
+	}
+	return bSuccess;
+}
+
 // ---- TEST-ONLY keyboard hooks - route through the pass-throughs above ----
 
 void ANavPlayerController::CycleInteriorFloorUp()

@@ -209,6 +209,53 @@ TArray<APolyBuilding*> ABuildingGenerator::GetAllBuildings() const
 	return Result;
 }
 
+TArray<FString> ABuildingGenerator::GetAllBuildingIds() const
+{
+	TArray<FString> Result;
+	BuildingsById.GenerateKeyArray(Result);
+	return Result;
+}
+
+FString ABuildingGenerator::GetBuildingName(const FString& BuildingId) const
+{
+	const APolyBuilding* const* Found = BuildingsById.Find(BuildingId);
+	return Found && *Found ? (*Found)->BuildingName : FString();
+}
+
+bool ABuildingGenerator::SetBuildingName(const FString& BuildingId, const FString& NewName)
+{
+	APolyBuilding* const* Found = BuildingsById.Find(BuildingId);
+	if (!Found || !*Found)
+	{
+		UE_LOG(LogTemp, Error, TEXT("SetBuildingName: '%s' not found"), *BuildingId);
+		return false;
+	}
+
+	for (const auto& Pair : BuildingsById)
+	{
+		if (Pair.Key != BuildingId && Pair.Value && Pair.Value->BuildingName == NewName)
+		{
+			UE_LOG(LogTemp, Error, TEXT("SetBuildingName: '%s' is already used by '%s'"), *NewName, *Pair.Key);
+			return false;
+		}
+	}
+
+	(*Found)->BuildingName = NewName;
+	return true;
+}
+
+FString ABuildingGenerator::FindBuildingIdByName(const FString& Name) const
+{
+	for (const auto& Pair : BuildingsById)
+	{
+		if (Pair.Value && Pair.Value->BuildingName == Name)
+		{
+			return Pair.Key;
+		}
+	}
+	return FString();
+}
+
 bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath) const
 {
 	TSharedRef<FJsonObject> RootObject = MakeShared<FJsonObject>();
