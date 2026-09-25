@@ -10,6 +10,7 @@
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/CheckBox.h"
 #include "Components/ComboBoxString.h"
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
@@ -18,6 +19,8 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Components/WrapBox.h"
+#include "Components/WrapBoxSlot.h"
 
 UInteriorScreenWidget::UInteriorScreenWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -208,6 +211,75 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		RoomPanelSlot->SetPosition(FVector2D(-20.f, -20.f));
 		RoomPanelSlot->SetAutoSize(true);
 		RoomPanelSlot->SetZOrder(3);
+
+		// Connector (elevator/stairs/escalator) properties panel - same position as the other two
+		// (mutually exclusive selection).
+		ConnectorPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_ConnectorProperties"));
+		ConnectorPanel->SetBrushColor(FLinearColor(0.05f, 0.05f, 0.05f, 0.9f));
+		ConnectorPanel->SetPadding(FMargin(12.f));
+		ConnectorPanel->SetVisibility(ESlateVisibility::Collapsed);
+
+		UVerticalBox* ConnectorStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ConnectorStack"));
+		ConnectorPanel->SetContent(ConnectorStack);
+
+		UTextBlock* ConnectorTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_ConnectorTitle"));
+		ConnectorTitle->SetText(FText::FromString(TEXT("Connector property")));
+		ConnectorTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		UVerticalBoxSlot* ConnectorTitleSlot = ConnectorStack->AddChildToVerticalBox(ConnectorTitle);
+		ConnectorTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+
+		ConnectorTypeText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_ConnectorType"));
+		ConnectorTypeText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		UVerticalBoxSlot* ConnectorTypeSlot = ConnectorStack->AddChildToVerticalBox(ConnectorTypeText);
+		ConnectorTypeSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+
+		UTextBlock* FloorsLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_FloorsLabel"));
+		FloorsLabel->SetText(FText::FromString(TEXT("Floors :")));
+		FloorsLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		UVerticalBoxSlot* FloorsLabelSlot = ConnectorStack->AddChildToVerticalBox(FloorsLabel);
+		FloorsLabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+
+		UWrapBox* FloorsWrap = WidgetTree->ConstructWidget<UWrapBox>(UWrapBox::StaticClass(), TEXT("FloorsWrap"));
+		FloorsWrap->SetInnerSlotPadding(FVector2D(4.f, 2.f));
+		UVerticalBoxSlot* FloorsWrapSlot = ConnectorStack->AddChildToVerticalBox(FloorsWrap);
+		FloorsWrapSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+
+		FloorCheckboxes.Reserve(20);
+		for (int32 FloorNumber = 1; FloorNumber <= 20; ++FloorNumber)
+		{
+			UHorizontalBox* FloorEntry = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), FName(*FString::Printf(TEXT("FloorEntry%02d"), FloorNumber)));
+
+			UCheckBox* CheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), FName(*FString::Printf(TEXT("Chk_Floor%d"), FloorNumber)));
+			UHorizontalBoxSlot* CheckBoxSlot = FloorEntry->AddChildToHorizontalBox(CheckBox);
+			CheckBoxSlot->SetVerticalAlignment(VAlign_Center);
+
+			UTextBlock* FloorLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(*FString::Printf(TEXT("Txt_Floor%dLabel"), FloorNumber)));
+			FloorLabel->SetText(FText::AsNumber(FloorNumber));
+			FloorLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			UHorizontalBoxSlot* FloorLabelSlot = FloorEntry->AddChildToHorizontalBox(FloorLabel);
+			FloorLabelSlot->SetPadding(FMargin(2.f, 0.f, 0.f, 0.f));
+			FloorLabelSlot->SetVerticalAlignment(VAlign_Center);
+
+			FloorsWrap->AddChildToWrapBox(FloorEntry);
+			FloorCheckboxes.Add(CheckBox);
+		}
+
+		ApplyConnectorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_ApplyConnector"));
+		ApplyConnectorButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+		UTextBlock* ApplyConnectorText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_ApplyConnectorLabel"));
+		ApplyConnectorText->SetText(FText::FromString(TEXT("Apply")));
+		ApplyConnectorText->SetJustification(ETextJustify::Center);
+		ApplyConnectorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyConnectorButton->SetContent(ApplyConnectorText);
+		UVerticalBoxSlot* ApplyConnectorSlot = ConnectorStack->AddChildToVerticalBox(ApplyConnectorButton);
+		ApplyConnectorSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
+
+		UCanvasPanelSlot* ConnectorPanelSlot = Canvas->AddChildToCanvas(ConnectorPanel);
+		ConnectorPanelSlot->SetAnchors(FAnchors(1.f, 1.f));
+		ConnectorPanelSlot->SetAlignment(FVector2D(1.f, 1.f));
+		ConnectorPanelSlot->SetPosition(FVector2D(-20.f, -20.f));
+		ConnectorPanelSlot->SetAutoSize(true);
+		ConnectorPanelSlot->SetZOrder(3);
 	}
 
 	return Super::RebuildWidget();
@@ -229,11 +301,16 @@ void UInteriorScreenWidget::NativeConstruct()
 	{
 		ApplyRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyRoomClicked);
 	}
+	if (ApplyConnectorButton)
+	{
+		ApplyConnectorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyConnectorClicked);
+	}
 
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->OnSelectedDoorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedDoorChanged);
 		PC->OnSelectedRoomChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedRoomChanged);
+		PC->OnSelectedConnectorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedConnectorChanged);
 	}
 }
 
@@ -243,6 +320,7 @@ void UInteriorScreenWidget::NativeDestruct()
 	{
 		PC->OnSelectedDoorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedDoorChanged);
 		PC->OnSelectedRoomChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedRoomChanged);
+		PC->OnSelectedConnectorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedConnectorChanged);
 	}
 
 	Super::NativeDestruct();
@@ -341,6 +419,84 @@ void UInteriorScreenWidget::OnApplyRoomClicked()
 			PC->SetSelectedRoomName(RoomNameTextBox->GetText().ToString());
 		}
 	}
+}
+
+void UInteriorScreenWidget::HandleSelectedConnectorChanged(FString GroupId)
+{
+	if (!ConnectorPanel)
+	{
+		return;
+	}
+
+	if (GroupId.IsEmpty())
+	{
+		ConnectorPanel->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC)
+	{
+		return;
+	}
+
+	ConnectorPanel->SetVisibility(ESlateVisibility::Visible);
+
+	if (ConnectorTypeText)
+	{
+		FString TypeName;
+		switch (PC->GetSelectedConnectorType())
+		{
+		case EInteriorNavNodeType::Elevator:  TypeName = TEXT("Elevator");  break;
+		case EInteriorNavNodeType::Stairs:    TypeName = TEXT("Stairs");    break;
+		case EInteriorNavNodeType::Escalator: TypeName = TEXT("Escalator"); break;
+		default:                              TypeName = TEXT("-");        break;
+		}
+		ConnectorTypeText->SetText(FText::FromString(FString::Printf(TEXT("Type: %s"), *TypeName)));
+	}
+
+	const TArray<int32> CurrentFloors = PC->GetSelectedConnectorFloors();
+	const int32 FloorCount = PC->GetLoadedBuildingFloorCount();
+	for (int32 Index = 0; Index < FloorCheckboxes.Num(); ++Index)
+	{
+		UCheckBox* CheckBox = FloorCheckboxes[Index];
+		if (!CheckBox)
+		{
+			continue;
+		}
+
+		const int32 FloorNumber = Index + 1;
+		if (FloorNumber <= FloorCount)
+		{
+			CheckBox->SetVisibility(ESlateVisibility::Visible);
+			CheckBox->SetIsChecked(CurrentFloors.Contains(FloorNumber));
+		}
+		else
+		{
+			CheckBox->SetVisibility(ESlateVisibility::Collapsed);
+		}
+	}
+}
+
+void UInteriorScreenWidget::OnApplyConnectorClicked()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC)
+	{
+		return;
+	}
+
+	TArray<int32> NewFloors;
+	for (int32 Index = 0; Index < FloorCheckboxes.Num(); ++Index)
+	{
+		const UCheckBox* CheckBox = FloorCheckboxes[Index];
+		if (CheckBox && CheckBox->GetVisibility() != ESlateVisibility::Collapsed && CheckBox->IsChecked())
+		{
+			NewFloors.Add(Index + 1);
+		}
+	}
+
+	PC->SetSelectedConnectorFloors(NewFloors);
 }
 
 void UInteriorScreenWidget::OnDrawRoomModeClicked()

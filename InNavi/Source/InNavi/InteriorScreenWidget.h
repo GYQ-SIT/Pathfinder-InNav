@@ -8,6 +8,7 @@
 
 class UBorder;
 class UButton;
+class UCheckBox;
 class UComboBoxString;
 class UEditableTextBox;
 class UInteriorFloorPlanWidget;
@@ -82,6 +83,17 @@ private:
 	UFUNCTION()
 	void OnApplyRoomClicked();
 
+	// Connector (elevator/stairs/escalator) properties panel - shown/populated whenever the
+	// selected connector changes (see ANavPlayerController::OnSelectedConnectorChanged), hidden
+	// when deselected (empty GroupId). The floor checklist only shows boxes for floors that
+	// actually exist on the loaded building (GetLoadedBuildingFloorCount) - a plain loop here
+	// instead of the 20 hand-wired Blueprint blocks the UMG version needed.
+	UFUNCTION()
+	void HandleSelectedConnectorChanged(FString GroupId);
+
+	UFUNCTION()
+	void OnApplyConnectorClicked();
+
 	UFUNCTION()
 	void HandleSaveAndLeave();
 
@@ -122,4 +134,18 @@ private:
 
 	UPROPERTY()
 	UButton* ApplyRoomButton = nullptr;
+
+	UPROPERTY()
+	UBorder* ConnectorPanel = nullptr;
+
+	UPROPERTY()
+	UTextBlock* ConnectorTypeText = nullptr;
+
+	// Index i = floor (i + 1). Fixed at 20 entries (the building's actual floor count is applied
+	// via per-entry Visibility, not by changing the array size).
+	UPROPERTY()
+	TArray<UCheckBox*> FloorCheckboxes;
+
+	UPROPERTY()
+	UButton* ApplyConnectorButton = nullptr;
 };
