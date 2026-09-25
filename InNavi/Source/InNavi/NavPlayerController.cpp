@@ -2193,11 +2193,7 @@ bool ANavPlayerController::SetLoadedBuildingName(const FString& NewName)
 	}
 
 	const bool bSuccess = Generator->SetBuildingName(LoadedId, NewName);
-	if (bSuccess)
-	{
-		bHasUnsavedChanges = true;
-	}
-	else
+	if (!bSuccess)
 	{
 		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not rename '%s' to '%s' - that name is already in use."), *LoadedId, *NewName));
 	}

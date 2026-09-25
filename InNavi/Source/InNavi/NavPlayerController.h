@@ -552,7 +552,12 @@ public:
 
 	// Renames the currently-loaded building - what the dropdown's little rename/pencil control
 	// should call. No-op (returns false) if nothing is loaded, or if NewName is already used by a
-	// different building (see ABuildingGenerator::SetBuildingName).
+	// different building (see ABuildingGenerator::SetBuildingName). Deliberately does NOT set
+	// HasUnsavedChanges() - a rename by itself doesn't need to nag the user to save/wouldn't be
+	// lost by a building switch (it lives on APolyBuilding, untouched by
+	// LoadInteriorForBuilding/DiscardUnsavedChanges) - it'll be written to disk whenever the next
+	// real save happens. Confirmed 2026-09-25: user explicitly wants renaming to feel lightweight,
+	// not trigger the unsaved-changes prompt.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	bool SetLoadedBuildingName(const FString& NewName);
 

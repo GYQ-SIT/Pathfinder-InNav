@@ -280,6 +280,37 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		ConnectorPanelSlot->SetPosition(FVector2D(-20.f, -20.f));
 		ConnectorPanelSlot->SetAutoSize(true);
 		ConnectorPanelSlot->SetZOrder(3);
+
+		// Building switcher - bottom-left, the one clear corner (mode toolbar is top-left,
+		// door/room/connector panels bottom-right, Back/Navigation panel top-right).
+		UHorizontalBox* SwitcherRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BuildingSwitcherRow"));
+
+		BuildingSwitcherComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_BuildingSwitcher"));
+		UHorizontalBoxSlot* SwitcherComboSlot = SwitcherRow->AddChildToHorizontalBox(BuildingSwitcherComboBox);
+		SwitcherComboSlot->SetVerticalAlignment(VAlign_Center);
+		SwitcherComboSlot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
+
+		BuildingNameTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_BuildingName"));
+		BuildingNameTextBox->SetVisibility(ESlateVisibility::Collapsed);
+		UHorizontalBoxSlot* SwitcherTextSlot = SwitcherRow->AddChildToHorizontalBox(BuildingNameTextBox);
+		SwitcherTextSlot->SetVerticalAlignment(VAlign_Center);
+		SwitcherTextSlot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
+
+		EditBuildingNameButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_EditBuildingName"));
+		EditBuildingNameButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+		EditBuildingNameButtonText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_EditBuildingNameLabel"));
+		EditBuildingNameButtonText->SetText(FText::FromString(TEXT("\x270E"))); // pencil
+		EditBuildingNameButtonText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		EditBuildingNameButton->SetContent(EditBuildingNameButtonText);
+		UHorizontalBoxSlot* SwitcherButtonSlot = SwitcherRow->AddChildToHorizontalBox(EditBuildingNameButton);
+		SwitcherButtonSlot->SetVerticalAlignment(VAlign_Center);
+
+		UCanvasPanelSlot* SwitcherRowSlot = Canvas->AddChildToCanvas(SwitcherRow);
+		SwitcherRowSlot->SetAnchors(FAnchors(0.f, 1.f));
+		SwitcherRowSlot->SetAlignment(FVector2D(0.f, 1.f));
+		SwitcherRowSlot->SetPosition(FVector2D(10.f, -10.f));
+		SwitcherRowSlot->SetAutoSize(true);
+		SwitcherRowSlot->SetZOrder(2);
 	}
 
 	return Super::RebuildWidget();
@@ -305,6 +336,14 @@ void UInteriorScreenWidget::NativeConstruct()
 	{
 		ApplyConnectorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyConnectorClicked);
 	}
+	if (EditBuildingNameButton)
+	{
+		EditBuildingNameButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnEditBuildingNameClicked);
+	}
+	if (BuildingSwitcherComboBox)
+	{
+		BuildingSwitcherComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleBuildingSwitcherChanged);
+	}
 
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
@@ -312,6 +351,8 @@ void UInteriorScreenWidget::NativeConstruct()
 		PC->OnSelectedRoomChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedRoomChanged);
 		PC->OnSelectedConnectorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedConnectorChanged);
 	}
+
+	RefreshBuildingSwitcher();
 }
 
 void UInteriorScreenWidget::NativeDestruct()
@@ -497,6 +538,117 @@ void UInteriorScreenWidget::OnApplyConnectorClicked()
 	}
 
 	PC->SetSelectedConnectorFloors(NewFloors);
+}
+
+void UInteriorScreenWidget::RefreshBuildingSwitcher()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC || !BuildingSwitcherComboBox)
+	{
+		return;
+	}
+
+	BuildingSwitcherComboBox->ClearOptions();
+	for (const FString& Name : PC->GetAllBuildingNames())
+	{
+		BuildingSwitcherComboBox->AddOption(Name);
+	}
+	BuildingSwitcherComboBox->SetSelectedOption(PC->GetLoadedBuildingName());
+}
+
+void UInteriorScreenWidget::HandleBuildingSwitcherChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
+{
+	if (SelectionType == ESelectInfo::Direct)
+	{
+		// Our own code set this (RefreshBuildingSwitcher, or reverting on Cancel below) - not a
+		// real user pick, ignore it.
+		return;
+	}
+
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC)
+	{
+		return;
+	}
+
+	const FString NewBuildingId = PC->FindBuildingIdByName(SelectedItem);
+	if (NewBuildingId.IsEmpty() || NewBuildingId == PC->GetLoadedBuildingId())
+	{
+		return;
+	}
+
+	if (!PC->HasUnsavedChanges())
+	{
+		PC->LoadInteriorForBuilding(NewBuildingId);
+		RefreshBuildingSwitcher();
+		return;
+	}
+
+	PendingBuildingId = NewBuildingId;
+	PreviousBuildingName = PC->GetLoadedBuildingName();
+
+	if (UConfirmDialogWidget* Dialog = CreateWidget<UConfirmDialogWidget>(PC, UConfirmDialogWidget::StaticClass()))
+	{
+		Dialog->AddToViewport();
+		Dialog->OnSaveAndLeave.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSwitchBuildingSave);
+		Dialog->OnDiscardAndLeave.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSwitchBuildingDiscard);
+		Dialog->OnCancel.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSwitchBuildingCancel);
+	}
+}
+
+void UInteriorScreenWidget::HandleSwitchBuildingSave()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SaveCurrentProject();
+		PC->LoadInteriorForBuilding(PendingBuildingId);
+	}
+	RefreshBuildingSwitcher();
+}
+
+void UInteriorScreenWidget::HandleSwitchBuildingDiscard()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->DiscardUnsavedChanges();
+		PC->LoadInteriorForBuilding(PendingBuildingId);
+	}
+	RefreshBuildingSwitcher();
+}
+
+void UInteriorScreenWidget::HandleSwitchBuildingCancel()
+{
+	if (BuildingSwitcherComboBox)
+	{
+		BuildingSwitcherComboBox->SetSelectedOption(PreviousBuildingName);
+	}
+}
+
+void UInteriorScreenWidget::OnEditBuildingNameClicked()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC || !BuildingNameTextBox || !BuildingSwitcherComboBox || !EditBuildingNameButtonText)
+	{
+		return;
+	}
+
+	if (!bIsEditingBuildingName)
+	{
+		bIsEditingBuildingName = true;
+		BuildingNameTextBox->SetText(FText::FromString(PC->GetLoadedBuildingName()));
+		BuildingNameTextBox->SetVisibility(ESlateVisibility::Visible);
+		BuildingSwitcherComboBox->SetVisibility(ESlateVisibility::Collapsed);
+		EditBuildingNameButtonText->SetText(FText::FromString(TEXT("\x2713"))); // checkmark
+		return;
+	}
+
+	PC->SetLoadedBuildingName(BuildingNameTextBox->GetText().ToString());
+
+	bIsEditingBuildingName = false;
+	BuildingNameTextBox->SetVisibility(ESlateVisibility::Collapsed);
+	BuildingSwitcherComboBox->SetVisibility(ESlateVisibility::Visible);
+	EditBuildingNameButtonText->SetText(FText::FromString(TEXT("\x270E"))); // pencil
+	RefreshBuildingSwitcher();
 }
 
 void UInteriorScreenWidget::OnDrawRoomModeClicked()

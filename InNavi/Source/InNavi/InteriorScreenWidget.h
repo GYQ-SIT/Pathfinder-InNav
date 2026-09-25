@@ -94,6 +94,29 @@ private:
 	UFUNCTION()
 	void OnApplyConnectorClicked();
 
+	// Building switcher - lets the user jump straight to a different building's interior without
+	// going back to the exterior first. Dropdown lists every building by name (GetAllBuildingNames)
+	// and defaults to the loaded one; picking a different one goes through the same
+	// unsaved-changes guard as Back. "Direct" selections (our own code calling SetSelectedOption,
+	// e.g. to populate the initial value or revert on Cancel) are ignored - only a real user pick
+	// should trigger a switch.
+	UFUNCTION()
+	void HandleBuildingSwitcherChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+	UFUNCTION()
+	void OnEditBuildingNameClicked();
+
+	void RefreshBuildingSwitcher();
+
+	UFUNCTION()
+	void HandleSwitchBuildingSave();
+
+	UFUNCTION()
+	void HandleSwitchBuildingDiscard();
+
+	UFUNCTION()
+	void HandleSwitchBuildingCancel();
+
 	UFUNCTION()
 	void HandleSaveAndLeave();
 
@@ -148,4 +171,26 @@ private:
 
 	UPROPERTY()
 	UButton* ApplyConnectorButton = nullptr;
+
+	UPROPERTY()
+	UComboBoxString* BuildingSwitcherComboBox = nullptr;
+
+	UPROPERTY()
+	UEditableTextBox* BuildingNameTextBox = nullptr;
+
+	UPROPERTY()
+	UButton* EditBuildingNameButton = nullptr;
+
+	UPROPERTY()
+	UTextBlock* EditBuildingNameButtonText = nullptr;
+
+	bool bIsEditingBuildingName = false;
+
+	// Set right before showing the unsaved-changes confirm dialog for a building switch; read by
+	// HandleSwitchBuildingSave/Discard once the user picks a choice.
+	FString PendingBuildingId;
+
+	// Set right before showing the dialog - what HandleSwitchBuildingCancel reverts the dropdown
+	// selection back to.
+	FString PreviousBuildingName;
 };
