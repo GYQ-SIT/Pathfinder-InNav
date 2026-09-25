@@ -6,6 +6,7 @@
 #include "InteriorFloorPlanWidget.h"
 #include "InteriorTypes.h"
 #include "NavPlayerController.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
@@ -65,9 +66,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// Both side bars stretch to the full height of the screen (anchored top AND bottom, like an
 		// editor dock panel - e.g. the engine's own Details panel, which stays full-height and shows
 		// empty content rather than shrinking away when nothing is selected) instead of shrink-
-		// wrapping to their own content.
-		constexpr float SidebarBarWidth = 260.f;
-		constexpr float SidebarBottomMargin = 10.f;
+		// wrapping to their own content. Width is live/resizable (LeftSidebarWidth/RightSidebarWidth,
+		// see OnLeftSidebarResizeMouseButtonDown) rather than fixed, starting at SidebarMinWidth.
 
 		// Every button on this screen (mode toolbar, Back, floor list rows, Add/Delete floor, Apply)
 		// shares this exact size, so nothing looks bigger/smaller than anything else. None of them
@@ -102,11 +102,25 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// anchored 0..1). For a stretched axis, SetOffsets' corresponding pair means margin-from-edge
 		// (Top/Bottom here) rather than position/size - for the point axis (X here), Left/Right still
 		// mean position/width, same as a normal point-anchored slot.
-		UCanvasPanelSlot* LeftSidebarSlot = Canvas->AddChildToCanvas(LeftSidebarBar);
-		LeftSidebarSlot->SetAnchors(FAnchors(0.f, 0.f, 0.f, 1.f));
-		LeftSidebarSlot->SetAlignment(FVector2D(0.f, 0.f));
-		LeftSidebarSlot->SetOffsets(FMargin(10.f, 10.f, SidebarBarWidth, SidebarBottomMargin));
-		LeftSidebarSlot->SetZOrder(2);
+		LeftSidebarCanvasSlot = Canvas->AddChildToCanvas(LeftSidebarBar);
+		LeftSidebarCanvasSlot->SetAnchors(FAnchors(0.f, 0.f, 0.f, 1.f));
+		LeftSidebarCanvasSlot->SetAlignment(FVector2D(0.f, 0.f));
+		LeftSidebarCanvasSlot->SetOffsets(FMargin(10.f, SidebarTopMargin, LeftSidebarWidth, SidebarBottomMargin));
+
+		// Drag handle glued to the bar's right edge (see OnLeftSidebarResizeMouseButtonDown) - same
+		// mixed anchor as the bar itself, positioned just past its current width.
+		LeftSidebarResizeHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_LeftSidebarResizeHandle"));
+		LeftSidebarResizeHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
+		LeftSidebarResizeHandle->SetCursor(EMouseCursor::ResizeLeftRight);
+		LeftSidebarResizeHandle->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnLeftSidebarResizeMouseButtonDown);
+		LeftSidebarResizeHandle->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnLeftSidebarResizeMouseMove);
+		LeftSidebarResizeHandle->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnLeftSidebarResizeMouseButtonUp);
+		LeftSidebarResizeHandleSlot = Canvas->AddChildToCanvas(LeftSidebarResizeHandle);
+		LeftSidebarResizeHandleSlot->SetAnchors(FAnchors(0.f, 0.f, 0.f, 1.f));
+		LeftSidebarResizeHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
+		LeftSidebarResizeHandleSlot->SetOffsets(FMargin(10.f + LeftSidebarWidth, SidebarTopMargin, SidebarResizeHandleWidth, SidebarBottomMargin));
+		LeftSidebarResizeHandleSlot->SetZOrder(3);
+		LeftSidebarCanvasSlot->SetZOrder(2);
 
 		// Building switcher - lets the user jump straight to a different building's interior
 		// without going back to the exterior first.
@@ -115,10 +129,12 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		BuildingSwitcherComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_BuildingSwitcher"));
 		BuildingSwitcherComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
 		// Fixed width so a long building name can't push this row past LeftSidebarBar's edge (its
-		// content area is SidebarBarWidth minus the bar's own 10px-a-side padding); the combo button
-		// clips its own text at this width rather than growing to fit it.
+		// content area is LeftSidebarWidth minus the bar's own 10px-a-side padding) - the combo
+		// button clips its own text at this width rather than growing to fit it. Kept in sync with
+		// LeftSidebarWidth as the bar is dragged by RefreshSidebarContentWidths, which recomputes
+		// this exact formula - keep the two in sync by hand if this one changes.
 		USizeBox* BuildingSwitcherSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		BuildingSwitcherSizeBox->SetWidthOverride(SidebarBarWidth - 20.f - 50.f); // leaves ~50px for the edit-name button beside it
+		BuildingSwitcherSizeBox->SetWidthOverride(LeftSidebarWidth - 20.f - 100.f); // leaves ~100px for the edit-name button beside it, with slack
 		BuildingSwitcherSizeBox->SetContent(BuildingSwitcherComboBox);
 		UHorizontalBoxSlot* SwitcherComboSlot = SwitcherRow->AddChildToHorizontalBox(BuildingSwitcherSizeBox);
 		SwitcherComboSlot->SetVerticalAlignment(VAlign_Center);
@@ -134,8 +150,29 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		EditBuildingNameButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
 		EditBuildingNameButtonText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_EditBuildingNameLabel"));
 		EditBuildingNameButtonText->SetText(FText::FromString(TEXT("\x270E"))); // pencil
+		EditBuildingNameButtonText->SetJustification(ETextJustify::Center);
 		EditBuildingNameButtonText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		EditBuildingNameButton->SetContent(EditBuildingNameButtonText);
+		// The 32x32 box below stops the button from pushing the row wider, but doesn't clip - at the
+		// default (larger) font, the glyph itself still rendered a few px wider than the box, poking
+		// out evenly on both sides. Shrinking the glyph itself is what actually keeps it inside.
+		{
+			FSlateFontInfo EditIconFont = EditBuildingNameButtonText->GetFont();
+			EditIconFont.Size = 14;
+			EditBuildingNameButtonText->SetFont(EditIconFont);
+		}
+		// Never had a size constraint before - the pencil glyph's own natural width (with the
+		// button's default padding on top) turned out to be wider than the ~46px the building
+		// switcher's width formula budgeted for it, so it always overflowed past the bar's edge by
+		// that fixed difference, independent of LeftSidebarWidth (i.e. resizing never helped).
+		USizeBox* EditButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		EditButtonSizeBox->SetWidthOverride(32.f);
+		EditButtonSizeBox->SetHeightOverride(32.f);
+		if (USizeBoxSlot* EditButtonTextSlot = Cast<USizeBoxSlot>(EditButtonSizeBox->SetContent(EditBuildingNameButtonText)))
+		{
+			EditButtonTextSlot->SetHorizontalAlignment(HAlign_Center);
+			EditButtonTextSlot->SetVerticalAlignment(VAlign_Center);
+		}
+		EditBuildingNameButton->SetContent(EditButtonSizeBox);
 		UHorizontalBoxSlot* SwitcherButtonSlot = SwitcherRow->AddChildToHorizontalBox(EditBuildingNameButton);
 		SwitcherButtonSlot->SetVerticalAlignment(VAlign_Center);
 
@@ -282,7 +319,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// Floor panel - added below, under RightSidebar, below Back. Always visible
 		// (unlike the Properties panel next to it), since switching floors should be available no
 		// matter what's selected.
-		UBorder* FloorPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_Floor"));
+		FloorPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_Floor"));
 		FloorPanel->SetBrushColor(FLinearColor(0.05f, 0.05f, 0.05f, 0.9f));
 		FloorPanel->SetPadding(FMargin(14.f));
 
@@ -369,11 +406,27 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UVerticalBox* RightSidebar = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RightSidebar"));
 		RightSidebarBar->SetContent(RightSidebar);
 
-		UCanvasPanelSlot* RightSidebarSlot = Canvas->AddChildToCanvas(RightSidebarBar);
-		RightSidebarSlot->SetAnchors(FAnchors(1.f, 0.f, 1.f, 1.f));
-		RightSidebarSlot->SetAlignment(FVector2D(1.f, 0.f));
-		RightSidebarSlot->SetOffsets(FMargin(-20.f, 10.f, SidebarBarWidth, SidebarBottomMargin));
-		RightSidebarSlot->SetZOrder(2);
+		RightSidebarCanvasSlot = Canvas->AddChildToCanvas(RightSidebarBar);
+		RightSidebarCanvasSlot->SetAnchors(FAnchors(1.f, 0.f, 1.f, 1.f));
+		RightSidebarCanvasSlot->SetAlignment(FVector2D(1.f, 0.f));
+		RightSidebarCanvasSlot->SetOffsets(FMargin(-20.f, SidebarTopMargin, RightSidebarWidth, SidebarBottomMargin));
+		RightSidebarCanvasSlot->SetZOrder(2);
+
+		// Drag handle glued to the bar's left edge - mirrors LeftSidebarResizeHandle, but this bar is
+		// anchored/aligned to the viewport's right edge, so the handle's own Offsets.Left has to sit
+		// (20 + RightSidebarWidth) to the left of that same anchor point to end up touching the bar's
+		// left edge.
+		RightSidebarResizeHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_RightSidebarResizeHandle"));
+		RightSidebarResizeHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
+		RightSidebarResizeHandle->SetCursor(EMouseCursor::ResizeLeftRight);
+		RightSidebarResizeHandle->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnRightSidebarResizeMouseButtonDown);
+		RightSidebarResizeHandle->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnRightSidebarResizeMouseMove);
+		RightSidebarResizeHandle->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnRightSidebarResizeMouseButtonUp);
+		RightSidebarResizeHandleSlot = Canvas->AddChildToCanvas(RightSidebarResizeHandle);
+		RightSidebarResizeHandleSlot->SetAnchors(FAnchors(1.f, 0.f, 1.f, 1.f));
+		RightSidebarResizeHandleSlot->SetAlignment(FVector2D(1.f, 0.f));
+		RightSidebarResizeHandleSlot->SetOffsets(FMargin(-20.f - RightSidebarWidth, SidebarTopMargin, SidebarResizeHandleWidth, SidebarBottomMargin));
+		RightSidebarResizeHandleSlot->SetZOrder(3);
 
 		// Back - first row of the right sidebar (was a separate floating button above the bar).
 		BackButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Back"));
@@ -425,7 +478,14 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		DoorRoomSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
 
 		UHorizontalBox* ConnectsToRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ConnectsToRow"));
-		DoorFieldsBox->AddChildToVerticalBox(ConnectsToRow);
+		// Neither this row nor RoomNameRow below had any width constraint before - at a narrow panel
+		// width, the dropdown/text box's own natural size could push past the panel's edge instead of
+		// shrinking with it. Wrapped in a SizeBox (tracked in RefreshSidebarContentWidths the same as
+		// everything else) with the combo box itself set to Fill so it's what actually shrinks, not
+		// the "Connect to" label.
+		ConnectsToRowSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		ConnectsToRowSizeBox->SetContent(ConnectsToRow);
+		DoorFieldsBox->AddChildToVerticalBox(ConnectsToRowSizeBox);
 
 		UTextBlock* ConnectsToLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_ConnectsToLabel"));
 		ConnectsToLabel->SetText(FText::FromString(TEXT("Connect to")));
@@ -436,7 +496,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		ConnectsToComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cmb_ConnectsTo"));
 		ConnectsToComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
-		ConnectsToRow->AddChildToHorizontalBox(ConnectsToComboBox);
+		UHorizontalBoxSlot* ConnectsToComboSlot = ConnectsToRow->AddChildToHorizontalBox(ConnectsToComboBox);
+		ConnectsToComboSlot->SetHorizontalAlignment(HAlign_Fill);
+		ConnectsToComboSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 
 		ApplyDoorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_ApplyDoor"));
 		ApplyDoorButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
@@ -459,7 +521,10 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		PropertiesStack->AddChildToVerticalBox(RoomFieldsBox);
 
 		UHorizontalBox* RoomNameRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RoomNameRow"));
-		RoomFieldsBox->AddChildToVerticalBox(RoomNameRow);
+		// See ConnectsToRow's comment above - same missing-width-constraint issue.
+		RoomNameRowSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		RoomNameRowSizeBox->SetContent(RoomNameRow);
+		RoomFieldsBox->AddChildToVerticalBox(RoomNameRowSizeBox);
 
 		UTextBlock* RoomNameLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_RoomNameLabel"));
 		RoomNameLabel->SetText(FText::FromString(TEXT("Name :")));
@@ -469,8 +534,14 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		RoomNameLabelSlot->SetVerticalAlignment(VAlign_Center);
 
 		RoomNameTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_RoomName"));
+		// Back to Fill (matches ConnectsToComboBox) so this still tracks the panel width like
+		// everything else, instead of sitting at a fixed size - readability at a narrow width is
+		// handled by raising SidebarMinWidth instead (see its own comment) so there's just always
+		// enough room, rather than exempting this one element from the "everything is linked" rule.
 		UHorizontalBoxSlot* RoomNameBoxSlot = RoomNameRow->AddChildToHorizontalBox(RoomNameTextBox);
 		RoomNameBoxSlot->SetVerticalAlignment(VAlign_Center);
+		RoomNameBoxSlot->SetHorizontalAlignment(HAlign_Fill);
+		RoomNameBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 
 		ApplyRoomButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_ApplyRoom"));
 		ApplyRoomButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
@@ -509,7 +580,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// padding) so the floor checkboxes wrap onto more lines instead of pushing the panel wider
 		// than FloorPanel above it - a WrapBox with nothing constraining its width just grows to fit
 		// everything on one line.
-		USizeBox* FloorsWrapSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("FloorsWrapSizeBox"));
+		FloorsWrapSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("FloorsWrapSizeBox"));
 		FloorsWrapSizeBox->SetWidthOverride(SidebarContentWidth);
 		FloorsWrapSizeBox->SetContent(FloorsWrap);
 		UVerticalBoxSlot* FloorsWrapSlot = ConnectorFieldsBox->AddChildToVerticalBox(FloorsWrapSizeBox);
@@ -607,6 +678,10 @@ void UInteriorScreenWidget::NativeConstruct()
 	RefreshBuildingSwitcher();
 	RefreshFloorList();
 	RefreshModeButtonHighlights();
+	// Construction hard-codes each SizeBox's initial width using the same layout numbers this
+	// formula would compute at the default LeftSidebarWidth/RightSidebarWidth anyway - this just
+	// makes that explicit/guaranteed instead of two copies of the same math staying in sync by luck.
+	RefreshSidebarContentWidths();
 }
 
 void UInteriorScreenWidget::NativeDestruct()
@@ -622,9 +697,216 @@ void UInteriorScreenWidget::NativeDestruct()
 	Super::NativeDestruct();
 }
 
+FEventReply UInteriorScreenWidget::OnLeftSidebarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+{
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !LeftSidebarResizeHandle)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	bIsResizingLeftSidebar = true;
+	LeftSidebarResizeStartMouseX = MouseEvent.GetScreenSpacePosition().X;
+	LeftSidebarResizeStartWidth = LeftSidebarWidth;
+	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+	return UWidgetBlueprintLibrary::CaptureMouse(Reply, LeftSidebarResizeHandle);
+}
+
+FEventReply UInteriorScreenWidget::OnLeftSidebarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+{
+	if (!bIsResizingLeftSidebar)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+	{
+		bIsResizingLeftSidebar = false;
+		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
+	}
+
+	const float DeltaX = MouseEvent.GetScreenSpacePosition().X - LeftSidebarResizeStartMouseX;
+	LeftSidebarWidth = FMath::Clamp(LeftSidebarResizeStartWidth + DeltaX, SidebarMinWidth, SidebarMaxWidth);
+
+	if (LeftSidebarCanvasSlot)
+	{
+		LeftSidebarCanvasSlot->SetOffsets(FMargin(10.f, SidebarTopMargin, LeftSidebarWidth, SidebarBottomMargin));
+	}
+	if (LeftSidebarResizeHandleSlot)
+	{
+		LeftSidebarResizeHandleSlot->SetOffsets(FMargin(10.f + LeftSidebarWidth, SidebarTopMargin, SidebarResizeHandleWidth, SidebarBottomMargin));
+	}
+	RefreshSidebarContentWidths();
+
+	return UWidgetBlueprintLibrary::Handled();
+}
+
+FEventReply UInteriorScreenWidget::OnLeftSidebarResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+{
+	if (bIsResizingLeftSidebar && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		bIsResizingLeftSidebar = false;
+		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
+	}
+
+	return UWidgetBlueprintLibrary::Unhandled();
+}
+
+FEventReply UInteriorScreenWidget::OnRightSidebarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+{
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !RightSidebarResizeHandle)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	bIsResizingRightSidebar = true;
+	RightSidebarResizeStartMouseX = MouseEvent.GetScreenSpacePosition().X;
+	RightSidebarResizeStartWidth = RightSidebarWidth;
+	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+	return UWidgetBlueprintLibrary::CaptureMouse(Reply, RightSidebarResizeHandle);
+}
+
+FEventReply UInteriorScreenWidget::OnRightSidebarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+{
+	if (!bIsResizingRightSidebar)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+	{
+		bIsResizingRightSidebar = false;
+		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
+	}
+
+	// This bar is anchored/aligned to the right edge, so moving the mouse LEFT (negative delta)
+	// grows it, the opposite of the left sidebar.
+	const float DeltaX = MouseEvent.GetScreenSpacePosition().X - RightSidebarResizeStartMouseX;
+	RightSidebarWidth = FMath::Clamp(RightSidebarResizeStartWidth - DeltaX, SidebarMinWidth, SidebarMaxWidth);
+
+	if (RightSidebarCanvasSlot)
+	{
+		RightSidebarCanvasSlot->SetOffsets(FMargin(-20.f, SidebarTopMargin, RightSidebarWidth, SidebarBottomMargin));
+	}
+	if (RightSidebarResizeHandleSlot)
+	{
+		RightSidebarResizeHandleSlot->SetOffsets(FMargin(-20.f - RightSidebarWidth, SidebarTopMargin, SidebarResizeHandleWidth, SidebarBottomMargin));
+	}
+	RefreshSidebarContentWidths();
+
+	return UWidgetBlueprintLibrary::Handled();
+}
+
+FEventReply UInteriorScreenWidget::OnRightSidebarResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+{
+	if (bIsResizingRightSidebar && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		bIsResizingRightSidebar = false;
+		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
+	}
+
+	return UWidgetBlueprintLibrary::Unhandled();
+}
+
 void UInteriorScreenWidget::HandleEditModeChanged()
 {
 	RefreshModeButtonHighlights();
+}
+
+void UInteriorScreenWidget::RefreshSidebarContentWidths()
+{
+	// Left: building switcher combo box tracks the bar (minus its own 10px-a-side padding and the
+	// edit-name button beside it). Mode-toolbar icons deliberately stay fixed 48x48 - stretching a
+	// square icon into a rectangle would just look broken.
+	if (BuildingSwitcherComboBox)
+	{
+		if (USizeBox* ComboSizeBox = Cast<USizeBox>(BuildingSwitcherComboBox->GetParent()))
+		{
+			ComboSizeBox->SetWidthOverride(FMath::Max(80.f, LeftSidebarWidth - 85.f));
+		}
+	}
+
+	// Right: Floor/Properties panel borders track the bar (minus its own 10px-a-side padding);
+	// everything inside them tracks the panel in turn (minus ITS 14px-a-side padding) - see
+	// ComputeRightSidebarButtonWidth.
+	const float RightPanelWidth = FMath::Max(80.f, RightSidebarWidth - 20.f);
+	const float RightButtonWidth = ComputeRightSidebarButtonWidth();
+
+	auto ResizePanel = [RightPanelWidth](UWidget* PanelContent)
+	{
+		if (PanelContent)
+		{
+			if (USizeBox* SizeBox = Cast<USizeBox>(PanelContent->GetParent()))
+			{
+				SizeBox->SetWidthOverride(RightPanelWidth);
+			}
+		}
+	};
+	ResizePanel(FloorPanel);
+	ResizePanel(PropertiesPanel);
+
+	auto ResizeButton = [RightButtonWidth](UButton* Button)
+	{
+		if (Button)
+		{
+			if (USizeBox* SizeBox = Cast<USizeBox>(Button->GetContent()))
+			{
+				SizeBox->SetWidthOverride(RightButtonWidth);
+			}
+		}
+	};
+	ResizeButton(BackButton);
+	ResizeButton(AddFloorButton);
+	ResizeButton(RemoveFloorButton);
+	ResizeButton(ApplyDoorButton);
+	ResizeButton(ApplyRoomButton);
+	ResizeButton(ApplyConnectorButton);
+
+	auto ResizeLabelWrap = [RightButtonWidth](UTextBlock* TextBlock)
+	{
+		if (TextBlock)
+		{
+			if (USizeBox* SizeBox = Cast<USizeBox>(TextBlock->GetParent()))
+			{
+				SizeBox->SetWidthOverride(RightButtonWidth);
+			}
+		}
+	};
+	ResizeLabelWrap(PropertiesTitleText);
+	ResizeLabelWrap(DoorRoomText);
+	ResizeLabelWrap(ConnectorTypeText);
+
+	if (ConnectsToRowSizeBox)
+	{
+		ConnectsToRowSizeBox->SetWidthOverride(RightButtonWidth);
+	}
+	if (RoomNameRowSizeBox)
+	{
+		RoomNameRowSizeBox->SetWidthOverride(RightButtonWidth);
+	}
+
+	if (FloorsWrapSizeBox)
+	{
+		FloorsWrapSizeBox->SetWidthOverride(RightButtonWidth);
+	}
+
+	if (FloorListBox)
+	{
+		if (USizeBox* SizeBox = Cast<USizeBox>(FloorListBox->GetParent()))
+		{
+			SizeBox->SetWidthOverride(RightButtonWidth);
+		}
+		for (int32 Index = 0; Index < FloorListBox->GetChildrenCount(); ++Index)
+		{
+			if (UFloorListEntryWidget* Entry = Cast<UFloorListEntryWidget>(FloorListBox->GetChildAt(Index)))
+			{
+				Entry->SetWidth(RightButtonWidth);
+			}
+		}
+	}
 }
 
 void UInteriorScreenWidget::RefreshModeButtonHighlights()
@@ -904,6 +1186,7 @@ void UInteriorScreenWidget::RefreshFloorList()
 			continue;
 		}
 		Entry->SetFloorNumber(FloorNumber, FloorNumber == ActiveFloor);
+		Entry->SetWidth(ComputeRightSidebarButtonWidth());
 		Entry->OnEntryClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleFloorEntryClicked);
 
 		if (UScrollBoxSlot* EntrySlot = Cast<UScrollBoxSlot>(FloorListBox->AddChild(Entry)))

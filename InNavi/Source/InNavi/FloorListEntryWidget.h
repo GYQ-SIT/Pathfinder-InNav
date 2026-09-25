@@ -7,6 +7,7 @@
 #include "FloorListEntryWidget.generated.h"
 
 class UButton;
+class USizeBox;
 class UTextBlock;
 
 // Broadcast with the floor number this row represents - UButton::OnClicked itself carries no
@@ -26,6 +27,11 @@ public:
 	UFloorListEntryWidget(const FObjectInitializer& ObjectInitializer);
 
 	void SetFloorNumber(int32 InFloorNumber, bool bInIsActive);
+
+	// Lets UInteriorScreenWidget::RefreshSidebarContentWidths keep this row's width in sync with the
+	// right sidebar bar as it's dragged - same "not realized yet" caveat as SetFloorNumber, so this
+	// is also safe to call before RebuildWidget has run.
+	void SetWidth(float NewWidth);
 
 	UPROPERTY(BlueprintAssignable, Category = "FloorListEntry")
 	FOnFloorEntryClicked OnEntryClicked;
@@ -50,6 +56,10 @@ private:
 	UPROPERTY()
 	UTextBlock* Label = nullptr;
 
+	UPROPERTY()
+	USizeBox* SizeBox = nullptr;
+
 	int32 FloorNumber = 0;
 	bool bIsActive = false;
+	float Width = 200.f;
 };

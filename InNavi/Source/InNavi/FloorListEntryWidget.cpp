@@ -23,12 +23,10 @@ TSharedRef<SWidget> UFloorListEntryWidget::RebuildWidget()
 		Label->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		Label->SetAutoWrapText(true);
 
-		// Matches every other button on this screen's standard size exactly
-		// (UInteriorScreenWidget::RebuildWidget's StandardButtonWidth/Height) - kept in sync by hand
-		// since this widget is built in its own file. No font override here either, same as those -
-		// this renders at the same default size as the rest of the screen.
-		USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("SizeBox_FloorEntry"));
-		SizeBox->SetWidthOverride(200.f);
+		// Width starts at whatever SetWidth was last called with (or the 200 default if never
+		// called - matches every other button's old fixed size). No font override here either, same
+		// as the other buttons - this renders at the same default size as the rest of the screen.
+		SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("SizeBox_FloorEntry"));
 		SizeBox->SetMinDesiredHeight(44.f);
 		SizeBox->SetContent(Label);
 		Button->SetContent(SizeBox);
@@ -47,6 +45,15 @@ void UFloorListEntryWidget::SetFloorNumber(int32 InFloorNumber, bool bInIsActive
 	ApplyVisuals();
 }
 
+void UFloorListEntryWidget::SetWidth(float NewWidth)
+{
+	Width = NewWidth;
+	if (SizeBox)
+	{
+		SizeBox->SetWidthOverride(Width);
+	}
+}
+
 void UFloorListEntryWidget::ApplyVisuals()
 {
 	if (Label)
@@ -57,6 +64,10 @@ void UFloorListEntryWidget::ApplyVisuals()
 	{
 		// Light purple when active, matching the hand-drawn mockup's highlight on the current floor.
 		Button->SetBackgroundColor(bIsActive ? FLinearColor(0.75f, 0.68f, 0.95f, 1.f) : FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+	}
+	if (SizeBox)
+	{
+		SizeBox->SetWidthOverride(Width);
 	}
 }
 

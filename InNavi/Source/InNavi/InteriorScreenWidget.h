@@ -8,11 +8,13 @@
 
 class UBorder;
 class UButton;
+class UCanvasPanelSlot;
 class UCheckBox;
 class UComboBoxString;
 class UEditableTextBox;
 class UInteriorFloorPlanWidget;
 class UScrollBox;
+class USizeBox;
 class UTextBlock;
 class UVerticalBox;
 
@@ -174,6 +176,43 @@ private:
 	// places (this panel's own buttons, or a building switch elsewhere on this screen).
 	void RefreshFloorList();
 
+	// Drag-to-resize for the left/right sidebar bars - each has its own thin handle at its inner
+	// edge (LeftSidebarResizeHandle on the left bar's right edge, RightSidebarResizeHandle on the
+	// right bar's left edge). MouseButtonDown on a handle starts the drag and captures the mouse;
+	// MouseMove (while captured) recomputes that bar's width from how far the mouse has moved since
+	// the drag started, clamped to [SidebarMinWidth, SidebarMaxWidth], repositions the handle to stay
+	// glued to the bar's new edge, and calls RefreshSidebarContentWidths so the content inside
+	// actually tracks the resize instead of just the bar's background; MouseButtonUp ends it.
+	UFUNCTION()
+	FEventReply OnLeftSidebarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+	UFUNCTION()
+	FEventReply OnLeftSidebarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+	UFUNCTION()
+	FEventReply OnLeftSidebarResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+	UFUNCTION()
+	FEventReply OnRightSidebarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+	UFUNCTION()
+	FEventReply OnRightSidebarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+	UFUNCTION()
+	FEventReply OnRightSidebarResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+	// Re-applies every content width derived from LeftSidebarWidth/RightSidebarWidth - the
+	// building-switcher combo box, both panel borders (via their wrapping SizeBox, found through
+	// GetParent() rather than a separate stored pointer per element), every button inside them (via
+	// GetContent()), the wrapped text labels (via GetParent()), and the floor-list rows (each one
+	// individually, via UFloorListEntryWidget::SetWidth). Called after every resize step and once
+	// from NativeConstruct so construction-time widths already match the live formula.
+	void RefreshSidebarContentWidths();
+
+	// Shared by RefreshSidebarContentWidths and RefreshFloorList (new rows need the current width
+	// at creation time too, not just existing ones on the next resize).
+	float ComputeRightSidebarButtonWidth() const { return FMath::Max(80.f, RightSidebarWidth - 48.f); }
+
 	UPROPERTY()
 	UInteriorFloorPlanWidget* FloorPlanWidget = nullptr;
 
@@ -214,6 +253,11 @@ private:
 	UPROPERTY()
 	UButton* AddEscalatorModeButton = nullptr;
 
+	// The panel border itself - RefreshSidebarContentWidths reaches its wrapping SizeBox via
+	// FloorPanel->GetParent() rather than storing that SizeBox separately.
+	UPROPERTY()
+	UBorder* FloorPanel = nullptr;
+
 	// Scrollable (not a plain VerticalBox) and height-capped to ~3 rows in RebuildWidget - a
 	// building can have many floors, and listing them all would eat too much screen space.
 	UPROPERTY()
@@ -241,11 +285,22 @@ private:
 	UPROPERTY()
 	UComboBoxString* ConnectsToComboBox = nullptr;
 
+	// Wraps ConnectsToRow (RefreshSidebarContentWidths keeps this in sync with the panel width) -
+	// stored directly rather than reached via ConnectsToComboBox->GetParent()->GetParent(), since
+	// that chain breaks silently the moment another wrapper is inserted between them (as happened
+	// with RoomNameRowSizeBox/RoomNameTextBoxMinSize below).
+	UPROPERTY()
+	USizeBox* ConnectsToRowSizeBox = nullptr;
+
 	UPROPERTY()
 	UButton* ApplyDoorButton = nullptr;
 
 	UPROPERTY()
 	UVerticalBox* RoomFieldsBox = nullptr;
+
+	// See the comment above ConnectsToRowSizeBox.
+	UPROPERTY()
+	USizeBox* RoomNameRowSizeBox = nullptr;
 
 	UPROPERTY()
 	UEditableTextBox* RoomNameTextBox = nullptr;
@@ -258,6 +313,12 @@ private:
 
 	UPROPERTY()
 	UTextBlock* ConnectorTypeText = nullptr;
+
+	// Wraps the floor checkboxes (RefreshSidebarContentWidths keeps this in sync with the panel
+	// width) - no other stored widget sits close enough in the tree to reach it via GetParent(), so
+	// this is stored directly instead.
+	UPROPERTY()
+	USizeBox* FloorsWrapSizeBox = nullptr;
 
 	// Index i = floor (i + 1). Fixed at 20 entries (the building's actual floor count is applied
 	// via per-entry Visibility, not by changing the array size).
@@ -288,4 +349,43 @@ private:
 	// Set right before showing the dialog - what HandleSwitchBuildingCancel reverts the dropdown
 	// selection back to.
 	FString PreviousBuildingName;
+
+	// See the comment above OnLeftSidebarResizeMouseButtonDown. Also used by RebuildWidget for the
+	// bars' initial layout, so both bars' construction and their resize handlers agree on these.
+	// Raised from 260 - at 260, RightButtonWidth (RightSidebarWidth - 48) bottoms out at 212, which
+	// wasn't enough room for "Name :" plus a typical room id to both stay readable in a Fill row.
+	static constexpr float SidebarMinWidth = 340.f;
+	static constexpr float SidebarMaxWidth = 600.f;
+	static constexpr float SidebarTopMargin = 10.f;
+	static constexpr float SidebarBottomMargin = 10.f;
+	static constexpr float SidebarResizeHandleWidth = 8.f;
+
+	UPROPERTY()
+	UCanvasPanelSlot* LeftSidebarCanvasSlot = nullptr;
+
+	UPROPERTY()
+	UCanvasPanelSlot* RightSidebarCanvasSlot = nullptr;
+
+	UPROPERTY()
+	UCanvasPanelSlot* LeftSidebarResizeHandleSlot = nullptr;
+
+	UPROPERTY()
+	UCanvasPanelSlot* RightSidebarResizeHandleSlot = nullptr;
+
+	UPROPERTY()
+	UBorder* LeftSidebarResizeHandle = nullptr;
+
+	UPROPERTY()
+	UBorder* RightSidebarResizeHandle = nullptr;
+
+	float LeftSidebarWidth = SidebarMinWidth;
+	float RightSidebarWidth = SidebarMinWidth;
+
+	bool bIsResizingLeftSidebar = false;
+	float LeftSidebarResizeStartMouseX = 0.f;
+	float LeftSidebarResizeStartWidth = 0.f;
+
+	bool bIsResizingRightSidebar = false;
+	float RightSidebarResizeStartMouseX = 0.f;
+	float RightSidebarResizeStartWidth = 0.f;
 };
