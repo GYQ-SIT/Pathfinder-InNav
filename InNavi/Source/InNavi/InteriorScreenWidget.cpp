@@ -739,8 +739,6 @@ void UInteriorScreenWidget::OnBackClicked()
 		return;
 	}
 
-	PC->RestoreExteriorCameraView();
-
 	if (!PC->HasUnsavedChanges())
 	{
 		GoToEditScreen();
@@ -781,11 +779,18 @@ void UInteriorScreenWidget::HandleCancel()
 
 void UInteriorScreenWidget::GoToEditScreen()
 {
-	APlayerController* PC = GetOwningPlayer();
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
 	if (!PC)
 	{
 		return;
 	}
+
+	// Only reached once we've actually decided to leave (no unsaved changes to begin with, or the
+	// user chose Save/Discard) - this destroys the currently-spawned interior actors
+	// (InteriorGen->ClearLoadedInterior), which is only safe once there's nothing unsaved left to
+	// lose. Calling this any earlier (e.g. before the confirm dialog is even shown) would destroy
+	// in-progress edits even if the user then picks Cancel.
+	PC->RestoreExteriorCameraView();
 
 	if (UEditScreenWidget* EditScreen = CreateWidget<UEditScreenWidget>(PC, UEditScreenWidget::StaticClass()))
 	{
