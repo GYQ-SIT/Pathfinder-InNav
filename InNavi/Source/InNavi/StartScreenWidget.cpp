@@ -1,5 +1,6 @@
 #include "StartScreenWidget.h"
 
+#include "EditScreenWidget.h"
 #include "NavPlayerController.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -14,11 +15,6 @@
 UStartScreenWidget::UStartScreenWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
-	static ConstructorHelpers::FClassFinder<UUserWidget> EditScreenFinder(TEXT("/Game/WBP_EditScreen"));
-	if (EditScreenFinder.Succeeded())
-	{
-		EditScreenClass = EditScreenFinder.Class;
-	}
 }
 
 TSharedRef<SWidget> UStartScreenWidget::RebuildWidget()
@@ -133,14 +129,12 @@ void UStartScreenWidget::OnOpenClicked()
 void UStartScreenWidget::GoToEditScreen()
 {
 	APlayerController* PC = GetOwningPlayer();
-	if (!PC || !EditScreenClass)
+	if (!PC)
 	{
-		UE_LOG(LogTemp, Error, TEXT("StartScreenWidget: cannot open the edit screen - %s"),
-			EditScreenClass ? TEXT("no owning player") : TEXT("WBP_EditScreen class not found"));
 		return;
 	}
 
-	if (UUserWidget* EditScreen = CreateWidget<UUserWidget>(PC, EditScreenClass))
+	if (UEditScreenWidget* EditScreen = CreateWidget<UEditScreenWidget>(PC, UEditScreenWidget::StaticClass()))
 	{
 		EditScreen->AddToViewport();
 		RemoveFromParent();

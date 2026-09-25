@@ -40,10 +40,4 @@ private:
 
 	UPROPERTY()
 	UButton* OpenButton = nullptr;
-
-	// Resolved once in the constructor via its asset path (WBP_EditScreen stays a UMG Blueprint for
-	// now - only this screen is being converted). If that asset is ever renamed/moved, this needs
-	// updating to match.
-	UPROPERTY()
-	TSubclassOf<UUserWidget> EditScreenClass;
 };
