@@ -392,30 +392,41 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		AddEscalatorModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddEscalatorModeClicked);
 
 		AddToolGroupLabel(TEXT("Txt_GroupGizmos"), TEXT("Gizmos"));
-		// Text placeholders for now (arrow glyphs, same Unicode-glyph trick as Back/the pencil icon) -
-		// real icons are pending from UX; swap the glyph args below for AddModeButton's icon-asset
-		// style once they land. Grow/Shrink and Rotate CW/CCW mirror PC's existing =/- and 9/0 keys
-		// exactly (see OnGrowRoomClicked etc.) rather than introducing any new interaction - small
-		// square buttons, two per row, per the hand-drawn layout.
+		// One icon asset each, reused for both buttons in its row rather than needing 4 separate
+		// images: Icon_GizmoMove is drawn at two different sizes (Grow full-size, Shrink shrunk down)
+		// so the icon's own size mirrors what the button does; Icon_GizmoRotate is drawn at two
+		// different rotations (CW as-authored, CCW rotated 180) so the two read as opposite
+		// directions. Grow/Shrink and Rotate CW/CCW mirror PC's existing =/- and 9/0 keys exactly (see
+		// OnGrowRoomClicked etc.) rather than introducing any new interaction - small square buttons,
+		// two per row, per the hand-drawn layout.
 		constexpr float GizmoButtonSize = 32.f;
-		auto AddGizmoButton = [this, MakeToolTipWidget, GizmoButtonSize](UHorizontalBox* Row, const TCHAR* Name, const TCHAR* Glyph, const TCHAR* TooltipLabel) -> UButton*
+		constexpr float GizmoIconSizeLarge = 22.f;
+		constexpr float GizmoIconSizeSmall = 14.f; // Shrink reuses Icon_GizmoMove at this smaller size instead of its own asset
+		auto AddGizmoIconButton = [this, MakeToolTipWidget, GizmoButtonSize](UHorizontalBox* Row, const TCHAR* Name, const TCHAR* IconAssetName, float IconSize, float IconRotationDegrees, const TCHAR* TooltipLabel) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
 			Button->SetToolTip(MakeToolTipWidget(TooltipLabel));
 
-			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
-			Text->SetText(FText::FromString(FString(Glyph)));
-			Text->SetJustification(ETextJustify::Center);
-			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			UImage* Icon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), FName(FString(Name) + TEXT("Icon")));
+			const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), IconAssetName, IconAssetName);
+			if (UTexture2D* IconTexture = LoadObject<UTexture2D>(nullptr, *IconPath))
+			{
+				Icon->SetBrushFromTexture(IconTexture, false);
+				Icon->SetDesiredSizeOverride(FVector2D(IconSize, IconSize));
+			}
+			if (!FMath::IsNearlyZero(IconRotationDegrees))
+			{
+				Icon->SetRenderTransformAngle(IconRotationDegrees);
+			}
 
 			USizeBox* GizmoSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
 			GizmoSizeBox->SetWidthOverride(GizmoButtonSize);
 			GizmoSizeBox->SetHeightOverride(GizmoButtonSize);
-			if (USizeBoxSlot* GizmoTextSlot = Cast<USizeBoxSlot>(GizmoSizeBox->SetContent(Text)))
+			if (USizeBoxSlot* GizmoIconSlot = Cast<USizeBoxSlot>(GizmoSizeBox->SetContent(Icon)))
 			{
-				GizmoTextSlot->SetHorizontalAlignment(HAlign_Center);
-				GizmoTextSlot->SetVerticalAlignment(VAlign_Center);
+				GizmoIconSlot->SetHorizontalAlignment(HAlign_Center);
+				GizmoIconSlot->SetVerticalAlignment(VAlign_Center);
 			}
 			Button->SetContent(GizmoSizeBox);
 
@@ -427,17 +438,24 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UHorizontalBox* GizmoScaleRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("GizmoScaleRow"));
 		UVerticalBoxSlot* GizmoScaleRowSlot = LeftSidebar->AddChildToVerticalBox(GizmoScaleRow);
 		GizmoScaleRowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-		GrowRoomButton = AddGizmoButton(GizmoScaleRow, TEXT("Btn_GrowRoom"), TEXT("\x25B2"), TEXT("Grow (increase the selected room's size - same as pressing +)"));
+		// The row only takes up as much width as its 2 small buttons, not the panel's full width - by
+		// default a VerticalBoxSlot stretches/left-aligns it, leaving it hugging the left edge. Center
+		// it instead, matching the hand-drawn layout.
+		GizmoScaleRowSlot->SetHorizontalAlignment(HAlign_Center);
+		GrowRoomButton = AddGizmoIconButton(GizmoScaleRow, TEXT("Btn_GrowRoom"), TEXT("Icon_GizmoMove"), GizmoIconSizeLarge, 0.f, TEXT("Grow (increase the selected room's size)"));
 		GrowRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnGrowRoomClicked);
-		ShrinkRoomButton = AddGizmoButton(GizmoScaleRow, TEXT("Btn_ShrinkRoom"), TEXT("\x25BC"), TEXT("Shrink (decrease the selected room's size - same as pressing -)"));
+		ShrinkRoomButton = AddGizmoIconButton(GizmoScaleRow, TEXT("Btn_ShrinkRoom"), TEXT("Icon_GizmoMove"), GizmoIconSizeSmall, 0.f, TEXT("Shrink (decrease the selected room's size)"));
 		ShrinkRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnShrinkRoomClicked);
 
 		UHorizontalBox* GizmoRotateRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("GizmoRotateRow"));
-		LeftSidebar->AddChildToVerticalBox(GizmoRotateRow);
-		RotateCCWButton = AddGizmoButton(GizmoRotateRow, TEXT("Btn_RotateCCW"), TEXT("\x25C4"), TEXT("Rotate Left (hold to keep rotating the selected room counter-clockwise - same as holding 9)"));
+		if (UVerticalBoxSlot* GizmoRotateRowSlot = LeftSidebar->AddChildToVerticalBox(GizmoRotateRow))
+		{
+			GizmoRotateRowSlot->SetHorizontalAlignment(HAlign_Center);
+		}
+		RotateCCWButton = AddGizmoIconButton(GizmoRotateRow, TEXT("Btn_RotateCCW"), TEXT("Icon_GizmoRotate"), GizmoIconSizeLarge, 180.f, TEXT("Rotate Left (hold to keep rotating the selected room counter-clockwise)"));
 		RotateCCWButton->OnPressed.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCCWPressed);
 		RotateCCWButton->OnReleased.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCCWReleased);
-		RotateCWButton = AddGizmoButton(GizmoRotateRow, TEXT("Btn_RotateCW"), TEXT("\x25BA"), TEXT("Rotate Right (hold to keep rotating the selected room clockwise - same as holding 0)"));
+		RotateCWButton = AddGizmoIconButton(GizmoRotateRow, TEXT("Btn_RotateCW"), TEXT("Icon_GizmoRotate"), GizmoIconSizeLarge, 0.f, TEXT("Rotate Right (hold to keep rotating the selected room clockwise)"));
 		RotateCWButton->OnPressed.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCWPressed);
 		RotateCWButton->OnReleased.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCWReleased);
 
