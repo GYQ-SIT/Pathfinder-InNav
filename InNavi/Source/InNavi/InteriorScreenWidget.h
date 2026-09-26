@@ -41,6 +41,16 @@ protected:
 	virtual void NativeDestruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
+	// Swallows the scroll wheel whenever it's hovering any dock panel (Toolbar/Floor/Properties/
+	// Layers/Navigation), so it can't fall through to the game viewport and trigger PC's own
+	// MouseScrollUp/Down-bound 3D preview zoom - UBorder (what dock panels are built from) has no
+	// OnMouseWheelEvent of its own to bind for this, unlike its OnMouseButtonDown/Up/Move, so this is
+	// handled at the screen root instead, where every panel's hover state can just be checked directly.
+	// A wheel over the FloorListBox/LayersScrollBox themselves scrolls those first (Slate bubbles
+	// events from the deepest hit-tested widget up to its parents) - this only catches what those
+	// don't consume, e.g. hovering a panel's padding or its buttons.
+	virtual FReply NativeOnMouseWheel(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+
 private:
 	UFUNCTION()
 	void OnBackClicked();

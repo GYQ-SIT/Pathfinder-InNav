@@ -139,6 +139,14 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(FInputChord(EKeys::S, /*Shift*/false, /*Ctrl*/true, /*Alt*/false, /*Cmd*/false), IE_Pressed, this, &ANavPlayerController::SaveCurrentProjectKeyHandler);
 	InputComponent->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &ANavPlayerController::ZoomIn3DPreview);
 	InputComponent->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &ANavPlayerController::ZoomOut3DPreview);
+	InputComponent->BindKey(EKeys::RightMouseButton, IE_Pressed, this, &ANavPlayerController::OnRightMouseDown);
+	InputComponent->BindKey(EKeys::RightMouseButton, IE_Released, this, &ANavPlayerController::OnRightMouseUp);
+	// MouseX/MouseY are the engine's own built-in axis mappings (Mouse X/Mouse Y raw input) - always
+	// present, unlike the project's custom-configured "MoveForward"-style axes, so no project input
+	// settings changes are needed for these. Both handlers early-out unless bIsOrbiting3DPreview, so
+	// they're harmless no-ops outside a right-drag in 3D preview.
+	InputComponent->BindAxis(TEXT("MouseX"), this, &ANavPlayerController::OnOrbit3DPreviewYaw);
+	InputComponent->BindAxis(TEXT("MouseY"), this, &ANavPlayerController::OnOrbit3DPreviewPitch);
 }
 
 void ANavPlayerController::OnClick()
@@ -255,26 +263,42 @@ void ANavPlayerController::OnClick()
 
 void ANavPlayerController::SelectBuildingUnderCursor()
 {
+	// The yellow "selected building" highlight only makes sense when browsing the exterior building
+	// cluster - not while previewing one specific building's interior in 3D, where the same click
+	// would otherwise land on that building's own (now visible, collidable) exterior wall.
+	if (bIsIn3DPreviewMode)
+	{
+		return;
+	}
+
 	FHitResult Hit;
 	GetHitResultUnderCursor(ECC_Visibility, false, Hit);
 
-	if (Hit.bBlockingHit)
+	APolyBuilding* ClickedBuilding = Hit.bBlockingHit ? Cast<APolyBuilding>(Hit.GetActor()) : nullptr;
+
+	// Clicking empty space, or re-clicking the already-selected building, deselects it - previously
+	// this only ever added or switched a selection, with no way to clear it once nothing new was hit.
+	if (!ClickedBuilding || ClickedBuilding == SelectedBuilding)
 	{
-		APolyBuilding* ClickedBuilding = Cast<APolyBuilding>(Hit.GetActor());
-		if (ClickedBuilding)
+		if (SelectedBuilding)
 		{
-			if (SelectedBuilding && SelectedBuilding != ClickedBuilding)
-			{
-				SelectedBuilding->SetHighlighted(false);
-			}
-
-			ClickedBuilding->SetHighlighted(true);
-			SelectedBuilding = ClickedBuilding;
-			OnBuildingSelected.Broadcast(ClickedBuilding->BuildingId);
-
-			UE_LOG(LogTemp, Warning, TEXT("Selected building: %s"), *ClickedBuilding->BuildingName);
+			SelectedBuilding->SetHighlighted(false);
+			SelectedBuilding = nullptr;
+			OnBuildingSelected.Broadcast(FString());
 		}
+		return;
 	}
+
+	if (SelectedBuilding)
+	{
+		SelectedBuilding->SetHighlighted(false);
+	}
+
+	ClickedBuilding->SetHighlighted(true);
+	SelectedBuilding = ClickedBuilding;
+	OnBuildingSelected.Broadcast(ClickedBuilding->BuildingId);
+
+	UE_LOG(LogTemp, Warning, TEXT("Selected building: %s"), *ClickedBuilding->BuildingName);
 }
 
 void ANavPlayerController::ToggleBuildMode()
@@ -1794,6 +1818,63 @@ void ANavPlayerController::GetBuildingFootprintBounds(APolyBuilding* Building, F
 	OutSpan = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
 }
 
+void ANavPlayerController::GetFloorFramingBounds(APolyBuilding* Building, int32 Level, FVector2D& OutCenter, float& OutSpan) const
+{
+	OutCenter = FVector2D::ZeroVector;
+	OutSpan = 0.f;
+
+	if (InteriorGen)
+	{
+		FVector2D MinPoint(TNumericLimits<float>::Max(), TNumericLimits<float>::Max());
+		FVector2D MaxPoint(-TNumericLimits<float>::Max(), -TNumericLimits<float>::Max());
+		bool bAnyRoom = false;
+
+		// Rooms are spawned at the world origin with their footprint baked straight into the mesh's
+		// own vertex positions (see AInteriorRoom::RebuildMesh), so the actor's own world-space bounds
+		// already give exactly the room's world footprint - no need to reach into its private
+		// CachedScale/CachedOffset to redo that transform here.
+		for (AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(Level))
+		{
+			if (!Room)
+			{
+				continue;
+			}
+			FVector Origin, BoxExtent;
+			Room->GetActorBounds(false, Origin, BoxExtent);
+			if (BoxExtent.IsNearlyZero())
+			{
+				continue;
+			}
+			MinPoint.X = FMath::Min(MinPoint.X, Origin.X - BoxExtent.X);
+			MinPoint.Y = FMath::Min(MinPoint.Y, Origin.Y - BoxExtent.Y);
+			MaxPoint.X = FMath::Max(MaxPoint.X, Origin.X + BoxExtent.X);
+			MaxPoint.Y = FMath::Max(MaxPoint.Y, Origin.Y + BoxExtent.Y);
+			bAnyRoom = true;
+		}
+
+		if (bAnyRoom)
+		{
+			OutCenter = (MinPoint + MaxPoint) * 0.5f;
+			OutSpan = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
+			return;
+		}
+	}
+
+	// No rooms drawn on this floor yet - fall back to the whole building's own outer footprint so
+	// there's still something sensible to frame.
+	GetBuildingFootprintBounds(Building, OutCenter, OutSpan);
+}
+
+void ANavPlayerController::ResetFloorFraming(APolyBuilding* Building, int32 Level)
+{
+	FVector2D Center;
+	float Span;
+	GetFloorFramingBounds(Building, Level, Center, Span);
+	ThreeDPreviewCameraDistance = FMath::Clamp(Span * 1.8f, ThreeDPreviewMinCameraDistance, ThreeDPreviewMaxCameraDistance);
+	ThreeDPreviewYaw = ThreeDPreviewDefaultYaw;
+	ThreeDPreviewPitch = ThreeDPreviewDefaultPitch;
+}
+
 void ANavPlayerController::PositionCameraForFloor(APolyBuilding* Building, int32 Level)
 {
 	if (!Building)
@@ -1851,7 +1932,7 @@ void ANavPlayerController::PositionCameraFor3DPreview(APolyBuilding* Building, i
 
 	FVector2D Center;
 	float Span;
-	GetBuildingFootprintBounds(Building, Center, Span);
+	GetFloorFramingBounds(Building, Level, Center, Span);
 	if (Span <= 0.f && Center.IsZero())
 	{
 		return;
@@ -1863,9 +1944,11 @@ void ANavPlayerController::PositionCameraFor3DPreview(APolyBuilding* Building, i
 	const float TargetZ = (Level - 1) * FloorHeight + FloorHeight * 0.5f;
 	const FVector Target(Center.X, Center.Y, TargetZ);
 
-	// Fixed oblique/dimetric angle - not user-adjustable in this pass (see the plan's own scope
-	// note), just the distance (ThreeDPreviewCameraDistance, adjusted by Zoom In/Out3DPreview).
-	const FRotator NewRotation(-35.f, -45.f, 0.f);
+	// Oblique/dimetric angle - ThreeDPreviewYaw/Pitch are persistent state, reset to the default pose
+	// by ResetFloorFraming and nudged live by the right-mouse-drag orbit (OnOrbit3DPreviewYaw/Pitch);
+	// this function just reads whatever they currently are. Distance is ThreeDPreviewCameraDistance,
+	// same story (ResetFloorFraming / ZoomIn/Out3DPreview).
+	const FRotator NewRotation(ThreeDPreviewPitch, ThreeDPreviewYaw, 0.f);
 	const FVector NewLocation = Target - NewRotation.Vector() * ThreeDPreviewCameraDistance;
 
 	ControlledPawn->SetActorLocationAndRotation(NewLocation, NewRotation);
@@ -1923,6 +2006,49 @@ void ANavPlayerController::ZoomOut3DPreview()
 	}
 }
 
+void ANavPlayerController::OnRightMouseDown()
+{
+	if (bIsIn3DPreviewMode)
+	{
+		bIsOrbiting3DPreview = true;
+	}
+}
+
+void ANavPlayerController::OnRightMouseUp()
+{
+	bIsOrbiting3DPreview = false;
+}
+
+void ANavPlayerController::OnOrbit3DPreviewYaw(float Value)
+{
+	if (!bIsOrbiting3DPreview || !bIsIn3DPreviewMode || FMath::IsNearlyZero(Value) || !Generator || !InteriorGen)
+	{
+		return;
+	}
+	ThreeDPreviewYaw += Value * ThreeDPreviewOrbitSensitivity;
+	if (APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()))
+	{
+		PositionCameraFor3DPreview(Building, InteriorGen->GetActiveFloor());
+	}
+}
+
+void ANavPlayerController::OnOrbit3DPreviewPitch(float Value)
+{
+	if (!bIsOrbiting3DPreview || !bIsIn3DPreviewMode || FMath::IsNearlyZero(Value) || !Generator || !InteriorGen)
+	{
+		return;
+	}
+	// MouseY's raw axis value increases when the mouse moves DOWN on screen; subtracting (rather than
+	// adding, as OnOrbit3DPreviewYaw does for MouseX) keeps "drag up" pitching the camera up, matching
+	// how the disabled default mouse-look used to feel.
+	ThreeDPreviewPitch = FMath::Clamp(ThreeDPreviewPitch - Value * ThreeDPreviewOrbitSensitivity,
+		ThreeDPreviewMinPitch, ThreeDPreviewMaxPitch);
+	if (APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()))
+	{
+		PositionCameraFor3DPreview(Building, InteriorGen->GetActiveFloor());
+	}
+}
+
 void ANavPlayerController::SetIn3DPreviewMode(bool bEnable)
 {
 	if (bEnable == bIsIn3DPreviewMode || !Generator || !InteriorGen)
@@ -1939,22 +2065,23 @@ void ANavPlayerController::SetIn3DPreviewMode(bool bEnable)
 	bIsIn3DPreviewMode = bEnable;
 	if (bEnable)
 	{
-		FVector2D Center;
-		float Span;
-		GetBuildingFootprintBounds(Building, Center, Span);
-		ThreeDPreviewCameraDistance = FMath::Clamp(Span * 1.8f, ThreeDPreviewMinCameraDistance, ThreeDPreviewMaxCameraDistance);
+		ResetFloorFraming(Building, InteriorGen->GetActiveFloor());
 		PositionCameraFor3DPreview(Building, InteriorGen->GetActiveFloor());
 		SetOtherBuildingsHidden(true);
 		// Building itself stays visible - PositionCameraFor3DPreview's own SetVisibleInteriorLevel call
 		// (see APolyBuilding::ApplySlabVisibility) now hides every OTHER floor's own wall ring and
 		// ceiling/roof cap, leaving only the viewed floor's own exterior wall + floor slab showing.
-		// TEMP: free WASD/mouse-look re-enabled (SetIgnoreMoveInput/SetIgnoreLookInput calls removed)
-		// so the actual wall geometry can be inspected from any angle while debugging why it reads as
-		// "incomplete" from the fixed framing - re-lock these once that's confirmed fixed, per the
-		// approved plan's "fixed angle, zoom only" scope.
+		// WASD and free mouse-look are both blocked - the only way to change the viewing angle is the
+		// right-mouse-drag orbit (see OnRightMouseDown/OnOrbit3DPreviewYaw/Pitch), which doesn't go
+		// through AddMovementInput/AddYawInput/AddPitchInput at all, so it's unaffected by these.
+		SetIgnoreMoveInput(true);
+		SetIgnoreLookInput(true);
 	}
 	else
 	{
+		SetIgnoreMoveInput(false);
+		SetIgnoreLookInput(false);
+		bIsOrbiting3DPreview = false;
 		SetOtherBuildingsHidden(false);
 		RepositionCameraToActiveFloor();
 	}
@@ -1973,6 +2100,10 @@ void ANavPlayerController::RepositionCameraToActiveFloor()
 	{
 		if (bIsIn3DPreviewMode)
 		{
+			// Floor switch: reset to that floor's own best-fit distance/angle (see ResetFloorFraming)
+			// rather than keeping whatever the previous floor's zoom/orbit left behind, so each floor
+			// gets its own "best view" as requested.
+			ResetFloorFraming(Building, InteriorGen->GetActiveFloor());
 			PositionCameraFor3DPreview(Building, InteriorGen->GetActiveFloor());
 		}
 		else
@@ -2023,10 +2154,16 @@ void ANavPlayerController::FocusCameraOnAllBuildings()
 
 	const FVector2D Center = (MinPoint + MaxPoint) * 0.5f;
 	const float Span = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
-	const float ViewHeight = FMath::Max(Span * 1.2f, 2000.f);
+	const float ViewDistance = FMath::Max(Span * 1.2f, 2000.f);
 
-	const FVector NewLocation(Center.X, Center.Y, ViewHeight);
+	// Pull the camera back-and-up along the pitch's own forward vector (same "Target -
+	// Rotation.Vector() * Distance" pattern PositionCameraForFloor/PositionCameraFor3DPreview use) so
+	// the -50 deg pitch actually looks DOWN AT Center - placing it directly above Center with the same
+	// rotation (the old code) points the view down-and-forward from directly overhead, past the
+	// buildings entirely, which reads as "not tilted down" even though the pitch value is right.
+	const FVector Target(Center.X, Center.Y, 0.f);
 	const FRotator NewRotation(-50.f, 0.f, 0.f);
+	const FVector NewLocation = Target - NewRotation.Vector() * ViewDistance;
 
 	ControlledPawn->SetActorLocationAndRotation(NewLocation, NewRotation);
 	SetControlRotation(NewRotation);
@@ -2034,6 +2171,18 @@ void ANavPlayerController::FocusCameraOnAllBuildings()
 
 void ANavPlayerController::RestoreExteriorCameraView()
 {
+	// Leaving interior editing entirely (any Back path) needs to unwind 3D preview mode first if it
+	// was left active - otherwise SetOtherBuildingsHidden(true)'s hide never gets undone (every other
+	// building stays hidden even back on the exterior cluster view) and SetIgnoreMoveInput/
+	// SetIgnoreLookInput stay latched forever (the PlayerController outlives this screen, so a later
+	// reload would come up with the camera still locked). Must run before InteriorGen->
+	// ClearLoadedInterior() below, since SetIn3DPreviewMode(false) still needs to look up the
+	// currently-loaded building.
+	if (bIsIn3DPreviewMode)
+	{
+		SetIn3DPreviewMode(false);
+	}
+
 	if (NavigationPanel)
 	{
 		NavigationPanel->ClearAll();
@@ -2212,6 +2361,16 @@ int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 		UE_LOG(LogTemp, Error, TEXT("LoadInteriorForBuilding: no InteriorGenerator placed in the level"));
 		OnActionFailed.Broadcast(TEXT("No InteriorGenerator placed in the level."));
 		return -1;
+	}
+
+	// Switching straight to a different building's interior (e.g. via the building switcher) while
+	// still in 3D preview mode for the PREVIOUS building would otherwise leave that previous building
+	// hidden forever (SetOtherBuildingsHidden's hide never gets undone) and move/look input still
+	// ignored - unwind it first, same reasoning as RestoreExteriorCameraView. Must run before
+	// InteriorGen->LoadInteriorForBuilding below overwrites which building is "loaded".
+	if (bIsIn3DPreviewMode)
+	{
+		SetIn3DPreviewMode(false);
 	}
 
 	const int32 Result = InteriorGen->LoadInteriorForBuilding(BuildingId);

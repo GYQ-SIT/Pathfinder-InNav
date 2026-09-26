@@ -96,9 +96,12 @@ void UEditScreenWidget::NativeDestruct()
 
 void UEditScreenWidget::HandleBuildingSelected(FString BuildingId)
 {
+	// An empty BuildingId means the selection was cleared (see ANavPlayerController::
+	// SelectBuildingUnderCursor - clicking empty space, or re-clicking the already-selected building,
+	// now deselects instead of only ever adding/switching a selection).
 	if (EnterInteriorButton)
 	{
-		EnterInteriorButton->SetVisibility(ESlateVisibility::Visible);
+		EnterInteriorButton->SetVisibility(BuildingId.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 	}
 }
 

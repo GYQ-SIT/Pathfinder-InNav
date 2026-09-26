@@ -1310,6 +1310,26 @@ void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 	}
 }
 
+FReply UInteriorScreenWidget::NativeOnMouseWheel(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	const bool bOverAnyPanel =
+		(ToolbarPanel && ToolbarPanel->IsHovered()) ||
+		(FloorPanel && FloorPanel->IsHovered()) ||
+		(PropertiesPanel && PropertiesPanel->IsHovered()) ||
+		(LayersPanel && LayersPanel->IsHovered()) ||
+		(NavigationPanel && NavigationPanel->IsHovered());
+
+	if (bOverAnyPanel)
+	{
+		// Scrollable children (FloorListBox, the Layers list) already got first crack at this via
+		// Slate's normal event bubbling, before it reached here - this just stops whatever they didn't
+		// consume from falling through to the game viewport and triggering PC's 3D preview zoom.
+		return FReply::Handled();
+	}
+
+	return Super::NativeOnMouseWheel(InGeometry, InMouseEvent);
+}
+
 // ---------------------------------------------------------------------------
 // Docking system
 // ---------------------------------------------------------------------------
