@@ -124,6 +124,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void SetIn3DPreviewMode(bool bEnable);
 
+	// Snaps the camera back to the current floor's default best-fit framing (see ResetFloorFraming) -
+	// the free-fly WASD/mouse-look this mode leaves enabled (see SetIn3DPreviewMode) makes it easy to
+	// wander off to an awkward angle or position, so this is the "un-lose yourself" button rather than
+	// a locked/orbit-only camera. No-op outside 3D preview mode.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void ResetCamera3DPreview();
+
+	// Adjusts the free-fly pawn's own WASD move speed (its UFloatingPawnMovement's MaxSpeed) within a
+	// fixed min/max - only meaningful in 3D preview, where WASD is actually enabled. No-op outside it.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void IncreaseMoveSpeed3DPreview();
+
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void DecreaseMoveSpeed3DPreview();
+
 	// Plan A (freehand footprint). Callable from Blueprint/UMG as well as the B key, so a UI
 	// button can drive this directly once one exists (e.g. for mobile, where there's no keyboard).
 	UFUNCTION(BlueprintCallable, Category = "Building")
@@ -933,27 +948,23 @@ private:
 	// footprint-bounds-to-world-space Center/Span computation, just for different camera poses.
 	void GetBuildingFootprintBounds(APolyBuilding* Building, FVector2D& OutCenter, float& OutSpan) const;
 
-	// Same Center/Span role as GetBuildingFootprintBounds, but scoped to whatever rooms are actually
-	// drawn on Level (via InteriorGen->GetRoomsOnFloor), not the building's own outer shell - a floor
-	// with only one small room gets a tight, close-up "best view" of just that room instead of the
-	// whole (possibly much larger) building footprint. Falls back to GetBuildingFootprintBounds when
-	// Level has no rooms yet (a blank floor still needs *some* framing).
-	void GetFloorFramingBounds(APolyBuilding* Building, int32 Level, FVector2D& OutCenter, float& OutSpan) const;
-
-	// Recomputes ThreeDPreviewCameraDistance from Level's own framing bounds (see
-	// GetFloorFramingBounds) and resets the orbit angle back to the default oblique pose - i.e. "best
-	// fit" for Level. Called on entering 3D preview and on every floor switch while already in it, so
-	// each floor gets its own distance/orientation instead of inheriting whatever an earlier floor (or
-	// the user's own zoom/orbit) left behind. Does NOT reposition the camera itself - callers still
-	// need their own PositionCameraFor3DPreview afterward.
-	void ResetFloorFraming(APolyBuilding* Building, int32 Level);
+	// Recomputes ThreeDPreviewCameraDistance from the building's own footprint (see
+	// GetBuildingFootprintBounds - deliberately not scoped to the current floor's own rooms, so every
+	// floor of a given building frames at the same distance instead of a sparsely-drawn floor zooming
+	// in tight) and resets the pose back to the default oblique angle - i.e. "best fit" for Building.
+	// Called on entering 3D preview, on every floor switch while already in it, and by
+	// ResetCamera3DPreview, so switching buildings picks up that building's own footprint instead of
+	// inheriting whatever the previous building (or the user's own free-fly) left behind. Does NOT
+	// reposition the camera itself - callers still need their own PositionCameraFor3DPreview afterward.
+	void ResetFloorFraming(APolyBuilding* Building);
 
 	// A genuine oblique/isometric camera pose over Building's Level (as opposed to
-	// PositionCameraForFloor's near-top-down `-80°` floor-plan pose), aimed at Level's own framing
-	// center (see GetFloorFramingBounds) from ThreeDPreviewYaw/Pitch at ThreeDPreviewCameraDistance -
-	// all three are separate persistent state (see ResetFloorFraming, ZoomIn/Out3DPreview,
-	// OnOrbit3DPreviewYaw/Pitch) so this function itself never changes them, only reads them. Also
-	// hides Building's ceiling above Level, same reasoning as PositionCameraForFloor.
+	// PositionCameraForFloor's near-top-down `-80°` floor-plan pose), aimed at Building's own footprint
+	// center (see GetBuildingFootprintBounds) from ThreeDPreviewYaw/Pitch at ThreeDPreviewCameraDistance
+	// - all three are set by ResetFloorFraming/ZoomIn/Out3DPreview, this function just reads whatever
+	// they currently are. Also hides Building's ceiling above Level, same reasoning as
+	// PositionCameraForFloor. WASD/mouse-look then freely move the camera away from this pose until
+	// the next floor switch or ResetCamera3DPreview snaps it back.
 	void PositionCameraFor3DPreview(APolyBuilding* Building, int32 Level);
 
 	// Hides (or restores) every loaded building except the one currently being edited - only
@@ -966,23 +977,7 @@ private:
 	void ZoomIn3DPreview();
 	void ZoomOut3DPreview();
 
-	// Right-mouse-drag orbit - the only way to change viewing angle while previewing (WASD/mouse-look
-	// are ignored, see SetIn3DPreviewMode). Press/release just toggle bIsOrbiting3DPreview;
-	// OnOrbit3DPreviewYaw/Pitch (bound to the engine's built-in MouseX/MouseY axes, so they fire on
-	// every mouse move regardless of button state) early-out unless it's set and this is in 3D preview,
-	// then nudge ThreeDPreviewYaw/Pitch and reposition. Pitch is clamped so the camera can't flip past
-	// looking straight down or up past the horizon.
-	UFUNCTION()
-	void OnRightMouseDown();
-
-	UFUNCTION()
-	void OnRightMouseUp();
-
-	void OnOrbit3DPreviewYaw(float Value);
-	void OnOrbit3DPreviewPitch(float Value);
-
 	bool bIsIn3DPreviewMode = false;
-	bool bIsOrbiting3DPreview = false;
 	float ThreeDPreviewCameraDistance = 0.f;
 	float ThreeDPreviewYaw = -45.f;
 	float ThreeDPreviewPitch = -35.f;
@@ -991,9 +986,9 @@ private:
 	static constexpr float ThreeDPreviewZoomStep = 200.f;
 	static constexpr float ThreeDPreviewDefaultYaw = -45.f;
 	static constexpr float ThreeDPreviewDefaultPitch = -35.f;
-	static constexpr float ThreeDPreviewMinPitch = -85.f;
-	static constexpr float ThreeDPreviewMaxPitch = -10.f;
-	static constexpr float ThreeDPreviewOrbitSensitivity = 0.3f;
+	static constexpr float ThreeDPreviewMoveSpeedStep = 300.f;
+	static constexpr float ThreeDPreviewMinMoveSpeed = 200.f;
+	static constexpr float ThreeDPreviewMaxMoveSpeed = 5000.f;
 
 	FVector SavedCameraLocation = FVector::ZeroVector;
 	FRotator SavedCameraRotation = FRotator::ZeroRotator;

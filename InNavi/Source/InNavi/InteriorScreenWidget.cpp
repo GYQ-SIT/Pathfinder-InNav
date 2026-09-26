@@ -624,17 +624,6 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		WindowMenuButton = AddMenuButton(TEXT("Btn_WindowMenu"), TEXT("Window"));
 		WindowMenuButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowMenuClicked);
 
-		// 2D/3D toggle - a small gap after Window, then the two buttons side by side with no gap
-		// between them so they read as one segmented control rather than two separate menu items.
-		USpacer* PreviewToggleGapSpacer = WidgetTree->ConstructWidget<USpacer>(USpacer::StaticClass());
-		PreviewToggleGapSpacer->SetSize(FVector2D(16.f, 1.f));
-		MenuBarRow->AddChildToHorizontalBox(PreviewToggleGapSpacer);
-
-		Switch2DButton = AddMenuButton(TEXT("Btn_Switch2D"), TEXT("2D"));
-		Switch2DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSwitch2DClicked);
-		Switch3DButton = AddMenuButton(TEXT("Btn_Switch3D"), TEXT("3D"));
-		Switch3DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSwitch3DClicked);
-
 		// Eats all remaining row width so Back (added right after it) lands flush against the bar's
 		// right edge instead of sitting right beside Window.
 		USpacer* MenuBarSpacer = WidgetTree->ConstructWidget<USpacer>(USpacer::StaticClass());
@@ -643,30 +632,24 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			SpacerSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		}
 
-		// Icon-only, same trick as EditBuildingNameButton's pencil glyph further down (a Unicode
-		// Dingbats-range character instead of an imported texture) - an arrow "exiting" the bar reads
-		// reasonably as a leave/back action without needing new art assets.
+		// A plain text label, not the arrow-glyph icon this used to be - tried the icon-only look, but
+		// after actually using it a text label reads faster/clearer than the arrow, so back to this.
 		BackButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Back"));
 		BackButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-		UTextBlock* BackIconText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_BackIcon"));
-		BackIconText->SetText(FText::FromString(TEXT("\x27A1"))); // black rightwards arrow
-		BackIconText->SetJustification(ETextJustify::Center);
-		BackIconText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		UTextBlock* BackText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_BackLabel"));
+		BackText->SetText(FText::FromString(TEXT("Back")));
+		BackText->SetJustification(ETextJustify::Center);
+		BackText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(BackText);
+		USizeBox* BackSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		BackSizeBox->SetWidthOverride(60.f);
+		BackSizeBox->SetHeightOverride(28.f); // shorter than MenuBarHeight so it visibly sits inside the bar once centered, not flush top/bottom
+		if (USizeBoxSlot* BackTextSlot = Cast<USizeBoxSlot>(BackSizeBox->SetContent(BackText)))
 		{
-			FSlateFontInfo BackIconFont = BackIconText->GetFont();
-			BackIconFont.Size = 16;
-			BackIconText->SetFont(BackIconFont);
+			BackTextSlot->SetHorizontalAlignment(HAlign_Center);
+			BackTextSlot->SetVerticalAlignment(VAlign_Center);
 		}
-		USizeBox* BackIconSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		BackIconSizeBox->SetWidthOverride(32.f);
-		BackIconSizeBox->SetHeightOverride(28.f); // shorter than MenuBarHeight so it visibly sits inside the bar once centered, not flush top/bottom
-		if (USizeBoxSlot* BackIconSlot = Cast<USizeBoxSlot>(BackIconSizeBox->SetContent(BackIconText)))
-		{
-			BackIconSlot->SetHorizontalAlignment(HAlign_Center);
-			BackIconSlot->SetVerticalAlignment(VAlign_Center);
-		}
-		BackButton->SetContent(BackIconSizeBox);
-		BackButton->SetToolTipText(FText::FromString(TEXT("Back"))); // no more text label on the button itself, so a tooltip keeps it discoverable
+		BackButton->SetContent(BackSizeBox);
 		if (UHorizontalBoxSlot* BackRowSlot = Cast<UHorizontalBoxSlot>(MenuBarRow->AddChildToHorizontalBox(BackButton)))
 		{
 			BackRowSlot->SetVerticalAlignment(VAlign_Center);
@@ -827,6 +810,55 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		EditBuildingNameButton->SetContent(EditButtonSizeBox);
 		UHorizontalBoxSlot* SwitcherButtonSlot = SwitcherRow->AddChildToHorizontalBox(EditBuildingNameButton);
 		SwitcherButtonSlot->SetVerticalAlignment(VAlign_Center);
+
+		// 2D/3D toggle + "Reset View"/move-speed +/-, same row as EditBuildingNameButton - see the
+		// comment on Switch2DButton in the header for why these live here instead of the menu bar.
+		constexpr float SwitcherButtonWidth = 44.f;
+		constexpr float SwitcherButtonHeight = 32.f;
+		auto AddSwitcherButton = [this, SwitcherRow, SwitcherButtonWidth, SwitcherButtonHeight](const TCHAR* Name, const TCHAR* Label) -> UButton*
+		{
+			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+			Text->SetText(FText::FromString(FString(Label)));
+			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			Text->SetJustification(ETextJustify::Center);
+			ApplyStandardFont(Text);
+			USizeBox* ButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+			ButtonSizeBox->SetWidthOverride(SwitcherButtonWidth);
+			ButtonSizeBox->SetHeightOverride(SwitcherButtonHeight);
+			if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(ButtonSizeBox->SetContent(Text)))
+			{
+				TextSlot->SetHorizontalAlignment(HAlign_Center);
+				TextSlot->SetVerticalAlignment(VAlign_Center);
+			}
+			Button->SetContent(ButtonSizeBox);
+			UHorizontalBoxSlot* RowSlot = SwitcherRow->AddChildToHorizontalBox(Button);
+			RowSlot->SetVerticalAlignment(VAlign_Center);
+			RowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
+			return Button;
+		};
+
+		Switch2DButton = AddSwitcherButton(TEXT("Btn_Switch2D"), TEXT("2D"));
+		Switch2DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSwitch2DClicked);
+		Switch3DButton = AddSwitcherButton(TEXT("Btn_Switch3D"), TEXT("3D"));
+		Switch3DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSwitch3DClicked);
+
+		// Only shown while in 3D preview (see HandlePreviewModeChanged).
+		ResetView3DButton = AddSwitcherButton(TEXT("Btn_ResetView3D"), TEXT("Reset"));
+		ResetView3DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnResetView3DClicked);
+		ResetView3DButton->SetToolTipText(FText::FromString(TEXT("Reset View")));
+		ResetView3DButton->SetVisibility(ESlateVisibility::Collapsed);
+
+		DecreaseSpeedButton = AddSwitcherButton(TEXT("Btn_DecreaseSpeed"), TEXT("-"));
+		DecreaseSpeedButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnDecreaseSpeedClicked);
+		DecreaseSpeedButton->SetToolTipText(FText::FromString(TEXT("Decrease Move Speed")));
+		DecreaseSpeedButton->SetVisibility(ESlateVisibility::Collapsed);
+
+		IncreaseSpeedButton = AddSwitcherButton(TEXT("Btn_IncreaseSpeed"), TEXT("+"));
+		IncreaseSpeedButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnIncreaseSpeedClicked);
+		IncreaseSpeedButton->SetToolTipText(FText::FromString(TEXT("Increase Move Speed")));
+		IncreaseSpeedButton->SetVisibility(ESlateVisibility::Collapsed);
 
 		// Thin separator lines at the seam between the menu bar and the switcher bar, and again below
 		// the switcher bar - both bars (and the panels below) share the same dark background color, so
@@ -2536,6 +2568,18 @@ void UInteriorScreenWidget::HandlePreviewModeChanged(bool bIsActive)
 	{
 		Switch3DButton->SetBackgroundColor(bIsActive ? ActiveColor : InactiveColor);
 	}
+	if (ResetView3DButton)
+	{
+		ResetView3DButton->SetVisibility(bIsActive ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (DecreaseSpeedButton)
+	{
+		DecreaseSpeedButton->SetVisibility(bIsActive ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (IncreaseSpeedButton)
+	{
+		IncreaseSpeedButton->SetVisibility(bIsActive ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
 }
 
 void UInteriorScreenWidget::RefreshDockPanelContentWidths()
@@ -3733,6 +3777,30 @@ void UInteriorScreenWidget::OnSwitch3DClicked()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->SetIn3DPreviewMode(true);
+	}
+}
+
+void UInteriorScreenWidget::OnResetView3DClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->ResetCamera3DPreview();
+	}
+}
+
+void UInteriorScreenWidget::OnDecreaseSpeedClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->DecreaseMoveSpeed3DPreview();
+	}
+}
+
+void UInteriorScreenWidget::OnIncreaseSpeedClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->IncreaseMoveSpeed3DPreview();
 	}
 }
 

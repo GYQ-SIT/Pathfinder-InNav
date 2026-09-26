@@ -7,6 +7,7 @@
 #include "Blueprint/UserWidget.h"
 #include "GameFramework/Pawn.h"
 #include "PolyBuilding.h"
+#include "GameFramework/FloatingPawnMovement.h"
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
@@ -139,14 +140,6 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(FInputChord(EKeys::S, /*Shift*/false, /*Ctrl*/true, /*Alt*/false, /*Cmd*/false), IE_Pressed, this, &ANavPlayerController::SaveCurrentProjectKeyHandler);
 	InputComponent->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &ANavPlayerController::ZoomIn3DPreview);
 	InputComponent->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &ANavPlayerController::ZoomOut3DPreview);
-	InputComponent->BindKey(EKeys::RightMouseButton, IE_Pressed, this, &ANavPlayerController::OnRightMouseDown);
-	InputComponent->BindKey(EKeys::RightMouseButton, IE_Released, this, &ANavPlayerController::OnRightMouseUp);
-	// MouseX/MouseY are the engine's own built-in axis mappings (Mouse X/Mouse Y raw input) - always
-	// present, unlike the project's custom-configured "MoveForward"-style axes, so no project input
-	// settings changes are needed for these. Both handlers early-out unless bIsOrbiting3DPreview, so
-	// they're harmless no-ops outside a right-drag in 3D preview.
-	InputComponent->BindAxis(TEXT("MouseX"), this, &ANavPlayerController::OnOrbit3DPreviewYaw);
-	InputComponent->BindAxis(TEXT("MouseY"), this, &ANavPlayerController::OnOrbit3DPreviewPitch);
 }
 
 void ANavPlayerController::OnClick()
@@ -1818,58 +1811,16 @@ void ANavPlayerController::GetBuildingFootprintBounds(APolyBuilding* Building, F
 	OutSpan = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
 }
 
-void ANavPlayerController::GetFloorFramingBounds(APolyBuilding* Building, int32 Level, FVector2D& OutCenter, float& OutSpan) const
+void ANavPlayerController::ResetFloorFraming(APolyBuilding* Building)
 {
-	OutCenter = FVector2D::ZeroVector;
-	OutSpan = 0.f;
-
-	if (InteriorGen)
-	{
-		FVector2D MinPoint(TNumericLimits<float>::Max(), TNumericLimits<float>::Max());
-		FVector2D MaxPoint(-TNumericLimits<float>::Max(), -TNumericLimits<float>::Max());
-		bool bAnyRoom = false;
-
-		// Rooms are spawned at the world origin with their footprint baked straight into the mesh's
-		// own vertex positions (see AInteriorRoom::RebuildMesh), so the actor's own world-space bounds
-		// already give exactly the room's world footprint - no need to reach into its private
-		// CachedScale/CachedOffset to redo that transform here.
-		for (AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(Level))
-		{
-			if (!Room)
-			{
-				continue;
-			}
-			FVector Origin, BoxExtent;
-			Room->GetActorBounds(false, Origin, BoxExtent);
-			if (BoxExtent.IsNearlyZero())
-			{
-				continue;
-			}
-			MinPoint.X = FMath::Min(MinPoint.X, Origin.X - BoxExtent.X);
-			MinPoint.Y = FMath::Min(MinPoint.Y, Origin.Y - BoxExtent.Y);
-			MaxPoint.X = FMath::Max(MaxPoint.X, Origin.X + BoxExtent.X);
-			MaxPoint.Y = FMath::Max(MaxPoint.Y, Origin.Y + BoxExtent.Y);
-			bAnyRoom = true;
-		}
-
-		if (bAnyRoom)
-		{
-			OutCenter = (MinPoint + MaxPoint) * 0.5f;
-			OutSpan = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
-			return;
-		}
-	}
-
-	// No rooms drawn on this floor yet - fall back to the whole building's own outer footprint so
-	// there's still something sensible to frame.
-	GetBuildingFootprintBounds(Building, OutCenter, OutSpan);
-}
-
-void ANavPlayerController::ResetFloorFraming(APolyBuilding* Building, int32 Level)
-{
+	// Always framed from the whole building's own outer footprint, not the current floor's own rooms -
+	// framing tightly around whatever's drawn on just this floor meant a sparsely-drawn floor (or one
+	// with a single small room) zoomed in dramatically tighter than its neighbors, which felt jarring
+	// switching floor to floor. GetBuildingFootprintBounds doesn't vary with Level at all, so this
+	// (deliberately) gives every floor of a given building the same distance/center.
 	FVector2D Center;
 	float Span;
-	GetFloorFramingBounds(Building, Level, Center, Span);
+	GetBuildingFootprintBounds(Building, Center, Span);
 	ThreeDPreviewCameraDistance = FMath::Clamp(Span * 1.8f, ThreeDPreviewMinCameraDistance, ThreeDPreviewMaxCameraDistance);
 	ThreeDPreviewYaw = ThreeDPreviewDefaultYaw;
 	ThreeDPreviewPitch = ThreeDPreviewDefaultPitch;
@@ -1932,7 +1883,7 @@ void ANavPlayerController::PositionCameraFor3DPreview(APolyBuilding* Building, i
 
 	FVector2D Center;
 	float Span;
-	GetFloorFramingBounds(Building, Level, Center, Span);
+	GetBuildingFootprintBounds(Building, Center, Span);
 	if (Span <= 0.f && Center.IsZero())
 	{
 		return;
@@ -1944,10 +1895,10 @@ void ANavPlayerController::PositionCameraFor3DPreview(APolyBuilding* Building, i
 	const float TargetZ = (Level - 1) * FloorHeight + FloorHeight * 0.5f;
 	const FVector Target(Center.X, Center.Y, TargetZ);
 
-	// Oblique/dimetric angle - ThreeDPreviewYaw/Pitch are persistent state, reset to the default pose
-	// by ResetFloorFraming and nudged live by the right-mouse-drag orbit (OnOrbit3DPreviewYaw/Pitch);
-	// this function just reads whatever they currently are. Distance is ThreeDPreviewCameraDistance,
-	// same story (ResetFloorFraming / ZoomIn/Out3DPreview).
+	// Oblique/dimetric angle - ThreeDPreviewYaw/Pitch/CameraDistance are persistent state, set by
+	// ResetFloorFraming (and Distance also by ZoomIn/Out3DPreview) - this function just reads whatever
+	// they currently are. Free WASD/mouse-look then move the actual pawn away from this pose until the
+	// next reset (floor switch, or the ResetCamera3DPreview button).
 	const FRotator NewRotation(ThreeDPreviewPitch, ThreeDPreviewYaw, 0.f);
 	const FVector NewLocation = Target - NewRotation.Vector() * ThreeDPreviewCameraDistance;
 
@@ -1980,72 +1931,77 @@ void ANavPlayerController::SetOtherBuildingsHidden(bool bNewHidden)
 
 void ANavPlayerController::ZoomIn3DPreview()
 {
-	if (!bIsIn3DPreviewMode || !Generator || !InteriorGen)
+	// Dollies the pawn along whatever direction it's CURRENTLY facing, rather than recomputing the
+	// whole pose from ThreeDPreviewYaw/Pitch/the framing center (what PositionCameraFor3DPreview does)
+	// - free WASD/mouse-look (see SetIn3DPreviewMode) can leave those stale the moment the user moves,
+	// so calling PositionCameraFor3DPreview here would snap the camera back to the original framing on
+	// every scroll tick instead of just zooming from wherever it actually is.
+	if (!bIsIn3DPreviewMode)
 	{
 		return;
 	}
-	ThreeDPreviewCameraDistance = FMath::Clamp(ThreeDPreviewCameraDistance - ThreeDPreviewZoomStep,
-		ThreeDPreviewMinCameraDistance, ThreeDPreviewMaxCameraDistance);
-	if (APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()))
+	if (APawn* ControlledPawn = GetPawn())
 	{
-		PositionCameraFor3DPreview(Building, InteriorGen->GetActiveFloor());
+		ControlledPawn->AddActorWorldOffset(GetControlRotation().Vector() * ThreeDPreviewZoomStep);
 	}
 }
 
 void ANavPlayerController::ZoomOut3DPreview()
 {
+	if (!bIsIn3DPreviewMode)
+	{
+		return;
+	}
+	if (APawn* ControlledPawn = GetPawn())
+	{
+		ControlledPawn->AddActorWorldOffset(-GetControlRotation().Vector() * ThreeDPreviewZoomStep);
+	}
+}
+
+void ANavPlayerController::ResetCamera3DPreview()
+{
 	if (!bIsIn3DPreviewMode || !Generator || !InteriorGen)
 	{
 		return;
 	}
-	ThreeDPreviewCameraDistance = FMath::Clamp(ThreeDPreviewCameraDistance + ThreeDPreviewZoomStep,
-		ThreeDPreviewMinCameraDistance, ThreeDPreviewMaxCameraDistance);
+
 	if (APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()))
 	{
-		PositionCameraFor3DPreview(Building, InteriorGen->GetActiveFloor());
+		const int32 Level = InteriorGen->GetActiveFloor();
+		ResetFloorFraming(Building);
+		PositionCameraFor3DPreview(Building, Level);
 	}
 }
 
-void ANavPlayerController::OnRightMouseDown()
+void ANavPlayerController::IncreaseMoveSpeed3DPreview()
 {
-	if (bIsIn3DPreviewMode)
-	{
-		bIsOrbiting3DPreview = true;
-	}
-}
-
-void ANavPlayerController::OnRightMouseUp()
-{
-	bIsOrbiting3DPreview = false;
-}
-
-void ANavPlayerController::OnOrbit3DPreviewYaw(float Value)
-{
-	if (!bIsOrbiting3DPreview || !bIsIn3DPreviewMode || FMath::IsNearlyZero(Value) || !Generator || !InteriorGen)
+	if (!bIsIn3DPreviewMode)
 	{
 		return;
 	}
-	ThreeDPreviewYaw += Value * ThreeDPreviewOrbitSensitivity;
-	if (APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()))
+	if (APawn* ControlledPawn = GetPawn())
 	{
-		PositionCameraFor3DPreview(Building, InteriorGen->GetActiveFloor());
+		if (UFloatingPawnMovement* Movement = Cast<UFloatingPawnMovement>(ControlledPawn->GetMovementComponent()))
+		{
+			Movement->MaxSpeed = FMath::Clamp(Movement->MaxSpeed + ThreeDPreviewMoveSpeedStep,
+				ThreeDPreviewMinMoveSpeed, ThreeDPreviewMaxMoveSpeed);
+		}
 	}
 }
 
-void ANavPlayerController::OnOrbit3DPreviewPitch(float Value)
+void ANavPlayerController::DecreaseMoveSpeed3DPreview()
 {
-	if (!bIsOrbiting3DPreview || !bIsIn3DPreviewMode || FMath::IsNearlyZero(Value) || !Generator || !InteriorGen)
+	if (!bIsIn3DPreviewMode)
 	{
 		return;
 	}
-	// MouseY's raw axis value increases when the mouse moves DOWN on screen; subtracting (rather than
-	// adding, as OnOrbit3DPreviewYaw does for MouseX) keeps "drag up" pitching the camera up, matching
-	// how the disabled default mouse-look used to feel.
-	ThreeDPreviewPitch = FMath::Clamp(ThreeDPreviewPitch - Value * ThreeDPreviewOrbitSensitivity,
-		ThreeDPreviewMinPitch, ThreeDPreviewMaxPitch);
-	if (APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()))
+	if (APawn* ControlledPawn = GetPawn())
 	{
-		PositionCameraFor3DPreview(Building, InteriorGen->GetActiveFloor());
+		if (UFloatingPawnMovement* Movement = Cast<UFloatingPawnMovement>(ControlledPawn->GetMovementComponent()))
+		{
+			Movement->MaxSpeed = FMath::Clamp(Movement->MaxSpeed - ThreeDPreviewMoveSpeedStep,
+				ThreeDPreviewMinMoveSpeed, ThreeDPreviewMaxMoveSpeed);
+		}
 	}
 }
 
@@ -2065,23 +2021,18 @@ void ANavPlayerController::SetIn3DPreviewMode(bool bEnable)
 	bIsIn3DPreviewMode = bEnable;
 	if (bEnable)
 	{
-		ResetFloorFraming(Building, InteriorGen->GetActiveFloor());
+		ResetFloorFraming(Building);
 		PositionCameraFor3DPreview(Building, InteriorGen->GetActiveFloor());
 		SetOtherBuildingsHidden(true);
 		// Building itself stays visible - PositionCameraFor3DPreview's own SetVisibleInteriorLevel call
 		// (see APolyBuilding::ApplySlabVisibility) now hides every OTHER floor's own wall ring and
 		// ceiling/roof cap, leaving only the viewed floor's own exterior wall + floor slab showing.
-		// WASD and free mouse-look are both blocked - the only way to change the viewing angle is the
-		// right-mouse-drag orbit (see OnRightMouseDown/OnOrbit3DPreviewYaw/Pitch), which doesn't go
-		// through AddMovementInput/AddYawInput/AddPitchInput at all, so it's unaffected by these.
-		SetIgnoreMoveInput(true);
-		SetIgnoreLookInput(true);
+		// WASD/mouse-look stay enabled (the pawn's own default free-fly, unchanged) rather than being
+		// locked to a fixed angle - ResetCamera3DPreview (a UI button) snaps back to the default
+		// best-fit pose if the user wanders off, instead of constraining movement in the first place.
 	}
 	else
 	{
-		SetIgnoreMoveInput(false);
-		SetIgnoreLookInput(false);
-		bIsOrbiting3DPreview = false;
 		SetOtherBuildingsHidden(false);
 		RepositionCameraToActiveFloor();
 	}
@@ -2100,10 +2051,11 @@ void ANavPlayerController::RepositionCameraToActiveFloor()
 	{
 		if (bIsIn3DPreviewMode)
 		{
-			// Floor switch: reset to that floor's own best-fit distance/angle (see ResetFloorFraming)
-			// rather than keeping whatever the previous floor's zoom/orbit left behind, so each floor
-			// gets its own "best view" as requested.
-			ResetFloorFraming(Building, InteriorGen->GetActiveFloor());
+			// Floor switch: reset back to the building's own default distance/angle (see
+			// ResetFloorFraming) rather than keeping whatever free-fly/zoom the user left the camera at
+			// - PositionCameraFor3DPreview's own Level then aims it at that floor's own vertical middle
+			// and hides its ceiling, same framing horizontally, just looking at a different floor.
+			ResetFloorFraming(Building);
 			PositionCameraFor3DPreview(Building, InteriorGen->GetActiveFloor());
 		}
 		else
@@ -2199,14 +2151,22 @@ void ANavPlayerController::RestoreExteriorCameraView()
 	ExitAddDoorMode();
 	ExitConnectorMode();
 
-	if (!InteriorBuildingHiddenById.IsEmpty() && Generator)
+	// Reset EVERY building's VisibleInteriorLevel, not just InteriorBuildingHiddenById (whichever one
+	// was interior-edited most recently) - switching which building is being edited mid-session (the
+	// building switcher, or entering/leaving 3D preview for a different building) can leave an EARLIER
+	// building's VisibleInteriorLevel stuck non-zero too, since only the latest one ever got tracked.
+	// Harmless to call on a building that's already fully visible.
+	if (Generator)
 	{
-		if (APolyBuilding* HiddenBuilding = Generator->FindBuildingById(InteriorBuildingHiddenById))
+		for (APolyBuilding* Building : Generator->GetAllBuildings())
 		{
-			HiddenBuilding->SetVisibleInteriorLevel(0);
+			if (Building)
+			{
+				Building->SetVisibleInteriorLevel(0);
+			}
 		}
-		InteriorBuildingHiddenById.Empty();
 	}
+	InteriorBuildingHiddenById.Empty();
 
 	// Leaving interior editing entirely - destroy whatever rooms were spawned for it (safe: the
 	// data itself lives in BuildingGenerator's InteriorDataById, not in these actors, so nothing is
