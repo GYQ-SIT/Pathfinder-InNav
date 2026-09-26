@@ -50,6 +50,13 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildingSelected, FString, Buildi
 // the same idea aimed at UI - bind it once to show a toast/message, since a packaged game has no
 // visible Output Log. Not exhaustive, but covers the common "why didn't anything happen" cases.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnActionFailed, FString, Reason);
+// Broadcast whenever a project save actually succeeds - both from SaveCurrentProject (Ctrl+S, or
+// any UI button that calls it) and SaveCurrentProjectAs (Save As, or the very first save of a
+// brand-new project that had no file yet). No params - a listener just needs to know "a save just
+// happened," not the path. Added so UI-only state that isn't part of bHasUnsavedChanges at all
+// (e.g. InteriorScreenWidget's own panel layout) can still piggyback on the same save action
+// instead of needing its own separate save trigger the user has to remember.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnProjectSaved);
 
 UCLASS()
 class INNAVI_API ANavPlayerController : public APlayerController
@@ -68,6 +75,10 @@ public:
 	// through the Output Log.
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")
 	FOnActionFailed OnActionFailed;
+
+	// See FOnProjectSaved above.
+	UPROPERTY(BlueprintAssignable, Category = "Feedback")
+	FOnProjectSaved OnProjectSaved;
 
 	// Plan A (freehand footprint). Callable from Blueprint/UMG as well as the B key, so a UI
 	// button can drive this directly once one exists (e.g. for mobile, where there's no keyboard).

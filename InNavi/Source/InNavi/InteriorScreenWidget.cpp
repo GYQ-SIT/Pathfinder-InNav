@@ -7,6 +7,7 @@
 #include "InteriorTypes.h"
 #include "NavPlayerController.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
@@ -20,6 +21,7 @@
 #include "Components/Image.h"
 #include "Components/Overlay.h"
 #include "Components/OverlaySlot.h"
+#include "Components/PanelWidget.h"
 #include "Components/ScrollBox.h"
 #include "Components/ScrollBoxSlot.h"
 #include "Components/SizeBox.h"
@@ -30,10 +32,48 @@
 #include "Components/WrapBox.h"
 #include "Components/WrapBoxSlot.h"
 #include "Engine/Texture2D.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonWriter.h"
+#include "Serialization/JsonSerializer.h"
 
 UInteriorScreenWidget::UInteriorScreenWidget(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
+	InitializeDockRuntimeArrays();
+}
+
+void UInteriorScreenWidget::InitializeDockRuntimeArrays()
+{
+	DockPanelBorders.Init(nullptr, NumDockPanels);
+	DockPanelCanvasSlots.Init(nullptr, NumDockPanels);
+	DockResizeHandles.Init(nullptr, NumDockPanels);
+	DockResizeHandleSlots.Init(nullptr, NumDockPanels);
+	DockLeftResizeHandles.Init(nullptr, NumDockPanels);
+	DockLeftResizeHandleSlots.Init(nullptr, NumDockPanels);
+	SplitterHandles.Init(nullptr, MaxDockSplitters);
+	SplitterCanvasSlots.Init(nullptr, MaxDockSplitters);
+
+	DockPanelWidths.Init(SidebarMinWidth, NumDockPanels);
+	DockPanelColumnIndex.Init(INDEX_NONE, NumDockPanels);
+	bDockPanelIsDraggingMove.Init(false, NumDockPanels);
+	DockPanelMoveDragStartMouse.Init(FVector2D::ZeroVector, NumDockPanels);
+	DockPanelMoveDragStartPosition.Init(FVector2D::ZeroVector, NumDockPanels);
+	bDockPanelIsResizingWidth.Init(false, NumDockPanels);
+	DockPanelResizeStartMouseX.Init(0.f, NumDockPanels);
+	DockPanelResizeStartWidth.Init(0.f, NumDockPanels);
+
+	bDockPanelIsResizingLeftWidth.Init(false, NumDockPanels);
+	DockPanelLeftResizeStartMouseX.Init(0.f, NumDockPanels);
+	DockPanelLeftResizeStartWidth.Init(0.f, NumDockPanels);
+	DockPanelLeftResizeStartPanelX.Init(0.f, NumDockPanels);
+
+	SplitterColumnIndex.Init(INDEX_NONE, MaxDockSplitters);
+	SplitterUpperIndexInColumn.Init(INDEX_NONE, MaxDockSplitters);
+	bSplitterIsDragging.Init(false, MaxDockSplitters);
+	SplitterDragStartMouseY.Init(0.f, MaxDockSplitters);
+	SplitterDragStartFractions.Init(TArray<float>(), MaxDockSplitters);
 }
 
 TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
@@ -43,6 +83,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UCanvasPanel* Canvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("InteriorScreenCanvas"));
 		Canvas->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 		WidgetTree->RootWidget = Canvas;
+		RootCanvas = Canvas;
 
 		// Blocks the 3D scene behind, same purpose as the original Img_CanvasBackground - makes the
 		// 2D floor plan easier to read.
@@ -63,12 +104,6 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		FloorPlanSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
 		FloorPlanSlot->SetOffsets(FMargin(0.f));
 
-		// Both side bars stretch to the full height of the screen (anchored top AND bottom, like an
-		// editor dock panel - e.g. the engine's own Details panel, which stays full-height and shows
-		// empty content rather than shrinking away when nothing is selected) instead of shrink-
-		// wrapping to their own content. Width is live/resizable (LeftSidebarWidth/RightSidebarWidth,
-		// see OnLeftSidebarResizeMouseButtonDown) rather than fixed, starting at SidebarMinWidth.
-
 		// Every button on this screen (mode toolbar, Back, floor list rows, Add/Delete floor, Apply)
 		// shares this exact size, so nothing looks bigger/smaller than anything else. None of them
 		// override font size - they render at the same default size as everything else on this
@@ -86,41 +121,122 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			TextBlock->SetAutoWrapText(true);
 		};
 
-		// Left sidebar: building switcher on top, then the mode toolbar grouped into Default/Draw/
-		// Navigate sections (matching the hand-drawn layout) - one VerticalBox so everything
-		// auto-stacks instead of each piece needing its own guessed Y position. Wrapped in a visible
-		// background bar (LeftSidebarBar) so the whole column reads as one distinct panel instead of
-		// buttons floating loose over the 3D scene.
-		UBorder* LeftSidebarBar = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_LeftSidebarBar"));
-		LeftSidebarBar->SetBrushColor(FLinearColor(0.02f, 0.02f, 0.02f, 0.85f));
-		LeftSidebarBar->SetPadding(FMargin(10.f));
+		// Each of the 3 dockable panels (Toolbar/Floor/Properties) is a UBorder wrapped in a
+		// USizeBox, added DIRECTLY to Canvas (no shared bar/VerticalBox) - the SizeBox is what
+		// actually gets the CanvasPanelSlot, so it alone controls the panel's rendered width/height
+		// (width always via WidthOverride; height via HeightOverride while docked in a column, or
+		// left auto/natural via ClearHeightOverride while floating - see RefreshDockLayout). A
+		// drag-to-resize handle (width only) sits glued to each panel's own right edge, same
+		// SetCursor/CaptureMouse pattern as before, just per-panel instead of per-bar. All layout
+		// math (position/size/handle placement) happens later in RefreshDockLayout - this just
+		// constructs the widgets and gives them a starting Canvas slot; InitializeDefaultDockLayout
+		// (called once from NativeConstruct) positions everything for the first time.
+		auto ConstructDockPanel = [this, Canvas](EDockPanelId Id, const TCHAR* BorderName, const FLinearColor& BrushColor, float BorderPadding) -> UBorder*
+		{
+			const int32 Index = (int32)Id;
+
+			UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(BorderName));
+			Border->SetBrushColor(BrushColor);
+			Border->SetPadding(FMargin(BorderPadding));
+			// BindDynamic is a macro that stringifies its function-pointer argument at compile time
+			// (to look up the UFUNCTION by name for reflection-based invocation) - it can't take a
+			// ternary/runtime-selected pointer, only a literal &Class::Method token. So this lambda
+			// only constructs the widgets; each panel's actual event bindings are 3 tiny literal
+			// BindDynamic calls right after its ConstructDockPanel call site below.
+			DockPanelBorders[Index] = Border;
+
+			USizeBox* Wrapper = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(BorderName) + TEXT("SizeBox")));
+			Wrapper->SetWidthOverride(DockPanelWidths[Index]);
+			Wrapper->SetContent(Border);
+
+			UCanvasPanelSlot* PanelCanvasSlot = Canvas->AddChildToCanvas(Wrapper);
+			PanelCanvasSlot->SetAnchors(FAnchors(0.f, 0.f));
+			PanelCanvasSlot->SetAlignment(FVector2D(0.f, 0.f));
+			PanelCanvasSlot->SetAutoSize(true);
+			PanelCanvasSlot->SetZOrder(2);
+			DockPanelCanvasSlots[Index] = PanelCanvasSlot;
+
+			UBorder* Handle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(BorderName) + TEXT("ResizeHandle")));
+			Handle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
+			Handle->SetCursor(EMouseCursor::ResizeLeftRight);
+			// Same reasoning as Border above - bound with literal calls at each call site instead.
+			DockResizeHandles[Index] = Handle;
+
+			UCanvasPanelSlot* HandleSlot = Canvas->AddChildToCanvas(Handle);
+			HandleSlot->SetAnchors(FAnchors(0.f, 0.f));
+			HandleSlot->SetAlignment(FVector2D(0.f, 0.f));
+			HandleSlot->SetZOrder(3);
+			DockResizeHandleSlots[Index] = HandleSlot;
+
+			// A second handle on the panel's LEFT edge too - free-floating panels can end up
+			// anywhere on screen, and a panel sitting near the right edge of the viewport can have
+			// its own right edge crowded right up against it (or past it), making the right handle
+			// awkward or impossible to grab. Dragging this one keeps the panel's RIGHT edge fixed
+			// and grows/shrinks it from the left instead (see HandleLeftResizeMouseMove).
+			UBorder* LeftHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(BorderName) + TEXT("LeftResizeHandle")));
+			LeftHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
+			LeftHandle->SetCursor(EMouseCursor::ResizeLeftRight);
+			DockLeftResizeHandles[Index] = LeftHandle;
+
+			UCanvasPanelSlot* LeftHandleSlot = Canvas->AddChildToCanvas(LeftHandle);
+			LeftHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
+			LeftHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
+			LeftHandleSlot->SetZOrder(3);
+			DockLeftResizeHandleSlots[Index] = LeftHandleSlot;
+
+			return Border;
+		};
+
+		// Two splitter handles - the most that can ever be needed at once (3 panels docked together
+		// in one column has 2 internal boundaries). RefreshSplitterLayout shows/hides and repositions
+		// these to match whichever columns actually exist right now.
+		for (int32 SplitterIndex = 0; SplitterIndex < MaxDockSplitters; ++SplitterIndex)
+		{
+			UBorder* Splitter = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(*FString::Printf(TEXT("DockSplitter%d"), SplitterIndex)));
+			Splitter->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
+			Splitter->SetCursor(EMouseCursor::ResizeUpDown);
+			Splitter->SetVisibility(ESlateVisibility::Collapsed);
+			if (SplitterIndex == 0)
+			{
+				Splitter->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter0MouseButtonDown);
+				Splitter->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter0MouseMove);
+				Splitter->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter0MouseButtonUp);
+			}
+			else
+			{
+				Splitter->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter1MouseButtonDown);
+				Splitter->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter1MouseMove);
+				Splitter->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter1MouseButtonUp);
+			}
+			SplitterHandles[SplitterIndex] = Splitter;
+
+			UCanvasPanelSlot* SplitterSlot = Canvas->AddChildToCanvas(Splitter);
+			SplitterSlot->SetAnchors(FAnchors(0.f, 0.f));
+			SplitterSlot->SetAlignment(FVector2D(0.f, 0.f));
+			SplitterSlot->SetZOrder(4);
+			SplitterCanvasSlots[SplitterIndex] = SplitterSlot;
+		}
+
+		// Panels flush against each other in a column should read as one continuous surface, not
+		// three separate boxes with visible seams - so all 3 share this exact background color.
+		const FLinearColor DockPanelColor(0.03f, 0.03f, 0.03f, 0.88f);
+
+		// -- Toolbar panel: building switcher on top, then the mode toolbar grouped into Default/
+		// Draw/Navigate sections (matching the hand-drawn layout) - one VerticalBox so everything
+		// auto-stacks instead of each piece needing its own guessed Y position.
+		ToolbarPanel = ConstructDockPanel(EDockPanelId::Toolbar, TEXT("Pnl_Toolbar"), DockPanelColor, 10.f);
+		ToolbarPanel->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarPanelMouseButtonDown);
+		ToolbarPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarPanelMouseMove);
+		ToolbarPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarPanelMouseButtonUp);
+		DockResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarResizeMouseButtonDown);
+		DockResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarResizeMouseMove);
+		DockResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarResizeMouseButtonUp);
+		DockLeftResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarLeftResizeMouseButtonDown);
+		DockLeftResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarLeftResizeMouseMove);
+		DockLeftResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarLeftResizeMouseButtonUp);
 
 		UVerticalBox* LeftSidebar = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LeftSidebar"));
-		LeftSidebarBar->SetContent(LeftSidebar);
-
-		// Anchors(0,0,0,1): fixed to the left edge (X point-anchored), stretched top-to-bottom (Y
-		// anchored 0..1). For a stretched axis, SetOffsets' corresponding pair means margin-from-edge
-		// (Top/Bottom here) rather than position/size - for the point axis (X here), Left/Right still
-		// mean position/width, same as a normal point-anchored slot.
-		LeftSidebarCanvasSlot = Canvas->AddChildToCanvas(LeftSidebarBar);
-		LeftSidebarCanvasSlot->SetAnchors(FAnchors(0.f, 0.f, 0.f, 1.f));
-		LeftSidebarCanvasSlot->SetAlignment(FVector2D(0.f, 0.f));
-		LeftSidebarCanvasSlot->SetOffsets(FMargin(10.f, SidebarTopMargin, LeftSidebarWidth, SidebarBottomMargin));
-
-		// Drag handle glued to the bar's right edge (see OnLeftSidebarResizeMouseButtonDown) - same
-		// mixed anchor as the bar itself, positioned just past its current width.
-		LeftSidebarResizeHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_LeftSidebarResizeHandle"));
-		LeftSidebarResizeHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
-		LeftSidebarResizeHandle->SetCursor(EMouseCursor::ResizeLeftRight);
-		LeftSidebarResizeHandle->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnLeftSidebarResizeMouseButtonDown);
-		LeftSidebarResizeHandle->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnLeftSidebarResizeMouseMove);
-		LeftSidebarResizeHandle->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnLeftSidebarResizeMouseButtonUp);
-		LeftSidebarResizeHandleSlot = Canvas->AddChildToCanvas(LeftSidebarResizeHandle);
-		LeftSidebarResizeHandleSlot->SetAnchors(FAnchors(0.f, 0.f, 0.f, 1.f));
-		LeftSidebarResizeHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
-		LeftSidebarResizeHandleSlot->SetOffsets(FMargin(10.f + LeftSidebarWidth, SidebarTopMargin, SidebarResizeHandleWidth, SidebarBottomMargin));
-		LeftSidebarResizeHandleSlot->SetZOrder(3);
-		LeftSidebarCanvasSlot->SetZOrder(2);
+		ToolbarPanel->SetContent(LeftSidebar);
 
 		// Building switcher - lets the user jump straight to a different building's interior
 		// without going back to the exterior first.
@@ -128,13 +244,12 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		BuildingSwitcherComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_BuildingSwitcher"));
 		BuildingSwitcherComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
-		// Fixed width so a long building name can't push this row past LeftSidebarBar's edge (its
-		// content area is LeftSidebarWidth minus the bar's own 10px-a-side padding) - the combo
-		// button clips its own text at this width rather than growing to fit it. Kept in sync with
-		// LeftSidebarWidth as the bar is dragged by RefreshSidebarContentWidths, which recomputes
-		// this exact formula - keep the two in sync by hand if this one changes.
+		// Fixed width so a long building name can't push this row past the Toolbar panel's edge -
+		// the combo button clips its own text at this width rather than growing to fit it. Kept in
+		// sync with the panel's width as it's dragged by RefreshDockPanelContentWidths, which
+		// recomputes this exact formula - keep the two in sync by hand if this one changes.
 		USizeBox* BuildingSwitcherSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		BuildingSwitcherSizeBox->SetWidthOverride(LeftSidebarWidth - 20.f - 100.f); // leaves ~100px for the edit-name button beside it, with slack
+		BuildingSwitcherSizeBox->SetWidthOverride(DockPanelWidths[(int32)EDockPanelId::Toolbar] - 20.f - 100.f); // leaves ~100px for the edit-name button beside it, with slack
 		BuildingSwitcherSizeBox->SetContent(BuildingSwitcherComboBox);
 		UHorizontalBoxSlot* SwitcherComboSlot = SwitcherRow->AddChildToHorizontalBox(BuildingSwitcherSizeBox);
 		SwitcherComboSlot->SetVerticalAlignment(VAlign_Center);
@@ -162,8 +277,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		}
 		// Never had a size constraint before - the pencil glyph's own natural width (with the
 		// button's default padding on top) turned out to be wider than the ~46px the building
-		// switcher's width formula budgeted for it, so it always overflowed past the bar's edge by
-		// that fixed difference, independent of LeftSidebarWidth (i.e. resizing never helped).
+		// switcher's width formula budgeted for it, so it always overflowed past the panel's edge by
+		// that fixed difference, independent of the panel's width (i.e. resizing never helped).
 		USizeBox* EditButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 		EditButtonSizeBox->SetWidthOverride(32.f);
 		EditButtonSizeBox->SetHeightOverride(32.f);
@@ -184,8 +299,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			UTextBlock* GroupLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(Name));
 			GroupLabel->SetText(FText::FromString(FString(Label)));
 			GroupLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.75f, 0.75f, 1.f)));
-			UVerticalBoxSlot* Slot = LeftSidebar->AddChildToVerticalBox(GroupLabel);
-			Slot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+			UVerticalBoxSlot* GroupLabelSlot = LeftSidebar->AddChildToVerticalBox(GroupLabel);
+			GroupLabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
 		};
 
 		// Icon-only now instead of a text label - sidesteps the font-size/overflow fight entirely
@@ -281,8 +396,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			}
 			Button->SetContent(SizeBox);
 
-			UVerticalBoxSlot* Slot = LeftSidebar->AddChildToVerticalBox(Button);
-			Slot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+			UVerticalBoxSlot* ButtonSlot = LeftSidebar->AddChildToVerticalBox(Button);
+			ButtonSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 			return Button;
 		};
 
@@ -316,12 +431,17 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		AddEscalatorModeButton = AddModeButton(TEXT("Add_Escalator_Button"), TEXT("Icon_AddEscalator"), TEXT("Add Escalator Mode (click a point to place an escalator, connecting the floor above and below by default)"));
 		AddEscalatorModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddEscalatorModeClicked);
 
-		// Floor panel - added below, under RightSidebar, below Back. Always visible
-		// (unlike the Properties panel next to it), since switching floors should be available no
-		// matter what's selected.
-		FloorPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_Floor"));
-		FloorPanel->SetBrushColor(FLinearColor(0.05f, 0.05f, 0.05f, 0.9f));
-		FloorPanel->SetPadding(FMargin(14.f));
+		// -- Floor panel --
+		FloorPanel = ConstructDockPanel(EDockPanelId::Floor, TEXT("Pnl_Floor"), DockPanelColor, 14.f);
+		FloorPanel->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorPanelMouseButtonDown);
+		FloorPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorPanelMouseMove);
+		FloorPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorPanelMouseButtonUp);
+		DockResizeHandles[(int32)EDockPanelId::Floor]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorResizeMouseButtonDown);
+		DockResizeHandles[(int32)EDockPanelId::Floor]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorResizeMouseMove);
+		DockResizeHandles[(int32)EDockPanelId::Floor]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorResizeMouseButtonUp);
+		DockLeftResizeHandles[(int32)EDockPanelId::Floor]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorLeftResizeMouseButtonDown);
+		DockLeftResizeHandles[(int32)EDockPanelId::Floor]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorLeftResizeMouseMove);
+		DockLeftResizeHandles[(int32)EDockPanelId::Floor]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorLeftResizeMouseButtonUp);
 
 		UVerticalBox* FloorStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("FloorStack"));
 		FloorPanel->SetContent(FloorStack);
@@ -371,20 +491,14 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		RemoveFloorButton->SetContent(RemoveFloorSizeBox);
 		FloorStack->AddChildToVerticalBox(RemoveFloorButton);
 
-		// Right sidebar: Floor panel + merged Properties panel, stacked in one auto-sizing column
-		// below Back. Wrapped in a visible background bar (RightSidebarBar), same reasoning and
-		// full-height stretch as LeftSidebarBar. Both FloorPanel and PropertiesPanel are forced to
-		// the same explicit width (SidebarPanelWidth) via their own SizeBox, so they always line up
-		// exactly instead of each auto-sizing to its own content (the connector floor checklist in
-		// particular could otherwise grow wider than Floor panel).
-		constexpr float SidebarPanelWidth = 240.f;
 		// PropertiesPanel/FloorPanel's own SetPadding(14.f) eats 14px on each side - this is what's
 		// actually left for their content, and is what any text inside them (that isn't already
 		// inside its own fixed-width button) needs to be hard-wrapped to. A SizeBox's WidthOverride
 		// only constrains layout size, it doesn't clip - text wider than that still painted straight
 		// through it and past the panel's edge until it was also given SetAutoWrapText(true) at this
-		// same width.
-		constexpr float SidebarContentWidth = SidebarPanelWidth - 28.f;
+		// same width. Computed from Floor's width (both panels always share a width once docked
+		// together, and start out that way - see InitializeDefaultDockLayout).
+		const float SidebarContentWidth = DockPanelWidths[(int32)EDockPanelId::Floor] - 28.f;
 
 		// For a standalone label (its own full-width row, not sharing a HorizontalBox with an input),
 		// hard-wraps it to SidebarContentWidth the same way FloorsWrapSizeBox does - covers
@@ -399,36 +513,10 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			return SizeBox;
 		};
 
-		UBorder* RightSidebarBar = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_RightSidebarBar"));
-		RightSidebarBar->SetBrushColor(FLinearColor(0.02f, 0.02f, 0.02f, 0.85f));
-		RightSidebarBar->SetPadding(FMargin(10.f));
-
-		UVerticalBox* RightSidebar = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RightSidebar"));
-		RightSidebarBar->SetContent(RightSidebar);
-
-		RightSidebarCanvasSlot = Canvas->AddChildToCanvas(RightSidebarBar);
-		RightSidebarCanvasSlot->SetAnchors(FAnchors(1.f, 0.f, 1.f, 1.f));
-		RightSidebarCanvasSlot->SetAlignment(FVector2D(1.f, 0.f));
-		RightSidebarCanvasSlot->SetOffsets(FMargin(-20.f, SidebarTopMargin, RightSidebarWidth, SidebarBottomMargin));
-		RightSidebarCanvasSlot->SetZOrder(2);
-
-		// Drag handle glued to the bar's left edge - mirrors LeftSidebarResizeHandle, but this bar is
-		// anchored/aligned to the viewport's right edge, so the handle's own Offsets.Left has to sit
-		// (20 + RightSidebarWidth) to the left of that same anchor point to end up touching the bar's
-		// left edge.
-		RightSidebarResizeHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_RightSidebarResizeHandle"));
-		RightSidebarResizeHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
-		RightSidebarResizeHandle->SetCursor(EMouseCursor::ResizeLeftRight);
-		RightSidebarResizeHandle->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnRightSidebarResizeMouseButtonDown);
-		RightSidebarResizeHandle->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnRightSidebarResizeMouseMove);
-		RightSidebarResizeHandle->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnRightSidebarResizeMouseButtonUp);
-		RightSidebarResizeHandleSlot = Canvas->AddChildToCanvas(RightSidebarResizeHandle);
-		RightSidebarResizeHandleSlot->SetAnchors(FAnchors(1.f, 0.f, 1.f, 1.f));
-		RightSidebarResizeHandleSlot->SetAlignment(FVector2D(1.f, 0.f));
-		RightSidebarResizeHandleSlot->SetOffsets(FMargin(-20.f - RightSidebarWidth, SidebarTopMargin, SidebarResizeHandleWidth, SidebarBottomMargin));
-		RightSidebarResizeHandleSlot->SetZOrder(3);
-
-		// Back - first row of the right sidebar (was a separate floating button above the bar).
+		// Back - fixed chrome pinned to the top-right corner, NOT part of the docking system (always
+		// stays put, like a permanent close/back button in most editors) - point-anchored the same
+		// way UNavigationPanelWidget's own floating panel is (FAnchors(1,0) + Alignment(1,0) +
+		// SetAutoSize(true) = free position measured from the viewport's top-right corner).
 		BackButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Back"));
 		BackButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
 		UTextBlock* BackText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_BackLabel"));
@@ -441,23 +529,27 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		BackSizeBox->SetMinDesiredHeight(StandardButtonHeight);
 		BackSizeBox->SetContent(BackText);
 		BackButton->SetContent(BackSizeBox);
-		UVerticalBoxSlot* BackSlot = RightSidebar->AddChildToVerticalBox(BackButton);
-		BackSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
+		UCanvasPanelSlot* BackSlot = Canvas->AddChildToCanvas(BackButton);
+		BackSlot->SetAnchors(FAnchors(1.f, 0.f));
+		BackSlot->SetAlignment(FVector2D(1.f, 0.f));
+		BackSlot->SetPosition(FVector2D(-20.f, SidebarTopMargin));
+		BackSlot->SetAutoSize(true);
+		BackSlot->SetZOrder(5);
 
-		USizeBox* FloorPanelSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("FloorPanelSizeBox"));
-		FloorPanelSizeBox->SetWidthOverride(SidebarPanelWidth);
-		FloorPanelSizeBox->SetContent(FloorPanel);
-		UVerticalBoxSlot* FloorPanelSlot = RightSidebar->AddChildToVerticalBox(FloorPanelSizeBox);
-		FloorPanelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f));
-
-		// Properties panel - merges what used to be three separately-positioned Door/Room/Connector
-		// panels into one (selection between them is already mutually exclusive at the PC level);
-		// only one of DoorFieldsBox/RoomFieldsBox/ConnectorFieldsBox is ever visible at a time - see
-		// HandleSelectedDoorChanged/HandleSelectedRoomChanged/HandleSelectedConnectorChanged.
-		PropertiesPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_Properties"));
-		PropertiesPanel->SetBrushColor(FLinearColor(0.05f, 0.05f, 0.05f, 0.9f));
-		PropertiesPanel->SetPadding(FMargin(14.f));
-		PropertiesPanel->SetVisibility(ESlateVisibility::Collapsed);
+		// -- Properties panel: merges what used to be three separately-positioned Door/Room/
+		// Connector panels into one (selection between them is already mutually exclusive at the PC
+		// level); only one of DoorFieldsBox/RoomFieldsBox/ConnectorFieldsBox is ever visible at a
+		// time - see HandleSelectedDoorChanged/HandleSelectedRoomChanged/HandleSelectedConnectorChanged.
+		PropertiesPanel = ConstructDockPanel(EDockPanelId::Properties, TEXT("Pnl_Properties"), DockPanelColor, 14.f);
+		PropertiesPanel->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesPanelMouseButtonDown);
+		PropertiesPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesPanelMouseMove);
+		PropertiesPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesPanelMouseButtonUp);
+		DockResizeHandles[(int32)EDockPanelId::Properties]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesResizeMouseButtonDown);
+		DockResizeHandles[(int32)EDockPanelId::Properties]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesResizeMouseMove);
+		DockResizeHandles[(int32)EDockPanelId::Properties]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesResizeMouseButtonUp);
+		DockLeftResizeHandles[(int32)EDockPanelId::Properties]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesLeftResizeMouseButtonDown);
+		DockLeftResizeHandles[(int32)EDockPanelId::Properties]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesLeftResizeMouseMove);
+		DockLeftResizeHandles[(int32)EDockPanelId::Properties]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesLeftResizeMouseButtonUp);
 
 		UVerticalBox* PropertiesStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("PropertiesStack"));
 		PropertiesPanel->SetContent(PropertiesStack);
@@ -480,9 +572,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UHorizontalBox* ConnectsToRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ConnectsToRow"));
 		// Neither this row nor RoomNameRow below had any width constraint before - at a narrow panel
 		// width, the dropdown/text box's own natural size could push past the panel's edge instead of
-		// shrinking with it. Wrapped in a SizeBox (tracked in RefreshSidebarContentWidths the same as
-		// everything else) with the combo box itself set to Fill so it's what actually shrinks, not
-		// the "Connect to" label.
+		// shrinking with it. Wrapped in a SizeBox (tracked in RefreshDockPanelContentWidths the same
+		// as everything else) with the combo box itself set to Fill so it's what actually shrinks,
+		// not the "Connect to" label.
 		ConnectsToRowSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 		ConnectsToRowSizeBox->SetContent(ConnectsToRow);
 		DoorFieldsBox->AddChildToVerticalBox(ConnectsToRowSizeBox);
@@ -534,10 +626,10 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		RoomNameLabelSlot->SetVerticalAlignment(VAlign_Center);
 
 		RoomNameTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_RoomName"));
-		// Back to Fill (matches ConnectsToComboBox) so this still tracks the panel width like
-		// everything else, instead of sitting at a fixed size - readability at a narrow width is
-		// handled by raising SidebarMinWidth instead (see its own comment) so there's just always
-		// enough room, rather than exempting this one element from the "everything is linked" rule.
+		// Fill (matches ConnectsToComboBox) so this still tracks the panel width like everything
+		// else, instead of sitting at a fixed size - readability at a narrow width is handled by
+		// raising SidebarMinWidth instead (see its own comment) so there's just always enough room,
+		// rather than exempting this one element from the "everything is linked" rule.
 		UHorizontalBoxSlot* RoomNameBoxSlot = RoomNameRow->AddChildToHorizontalBox(RoomNameTextBox);
 		RoomNameBoxSlot->SetVerticalAlignment(VAlign_Center);
 		RoomNameBoxSlot->SetHorizontalAlignment(HAlign_Fill);
@@ -576,9 +668,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		UWrapBox* FloorsWrap = WidgetTree->ConstructWidget<UWrapBox>(UWrapBox::StaticClass(), TEXT("FloorsWrap"));
 		FloorsWrap->SetInnerSlotPadding(FVector2D(4.f, 2.f));
-		// Hard-capped to PropertiesPanel's content width (SidebarPanelWidth minus its own 14px-a-side
+		// Hard-capped to PropertiesPanel's content width (panel width minus its own 14px-a-side
 		// padding) so the floor checkboxes wrap onto more lines instead of pushing the panel wider
-		// than FloorPanel above it - a WrapBox with nothing constraining its width just grows to fit
+		// than Floor above it - a WrapBox with nothing constraining its width just grows to fit
 		// everything on one line.
 		FloorsWrapSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("FloorsWrapSizeBox"));
 		FloorsWrapSizeBox->SetWidthOverride(SidebarContentWidth);
@@ -621,10 +713,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UVerticalBoxSlot* ApplyConnectorSlot = ConnectorFieldsBox->AddChildToVerticalBox(ApplyConnectorButton);
 		ApplyConnectorSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
 
-		USizeBox* PropertiesPanelSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("PropertiesPanelSizeBox"));
-		PropertiesPanelSizeBox->SetWidthOverride(SidebarPanelWidth);
-		PropertiesPanelSizeBox->SetContent(PropertiesPanel);
-		RightSidebar->AddChildToVerticalBox(PropertiesPanelSizeBox);
+		PropertiesPanel->SetVisibility(ESlateVisibility::Collapsed);
 	}
 
 	return Super::RebuildWidget();
@@ -673,15 +762,18 @@ void UInteriorScreenWidget::NativeConstruct()
 		PC->OnSelectedRoomChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedRoomChanged);
 		PC->OnSelectedConnectorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedConnectorChanged);
 		PC->OnEditModeChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleEditModeChanged);
+		// Ctrl+S (or any other trigger of PC->SaveCurrentProject/SaveCurrentProjectAs) doesn't go
+		// through this widget at all - this is what lets the dock layout still get saved when the
+		// user saves that way instead of through Back's own confirm dialog.
+		PC->OnProjectSaved.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
 	}
 
 	RefreshBuildingSwitcher();
 	RefreshFloorList();
 	RefreshModeButtonHighlights();
-	// Construction hard-codes each SizeBox's initial width using the same layout numbers this
-	// formula would compute at the default LeftSidebarWidth/RightSidebarWidth anyway - this just
-	// makes that explicit/guaranteed instead of two copies of the same math staying in sync by luck.
-	RefreshSidebarContentWidths();
+	// Places every dock panel for the first time (Toolbar floating top-left, Floor+Properties
+	// pre-docked top-right) - guarded internally so a later NativeConstruct call (if any) is a no-op.
+	InitializeDefaultDockLayout();
 }
 
 void UInteriorScreenWidget::NativeDestruct()
@@ -692,60 +784,833 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnSelectedRoomChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedRoomChanged);
 		PC->OnSelectedConnectorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedConnectorChanged);
 		PC->OnEditModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleEditModeChanged);
+		PC->OnProjectSaved.RemoveDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
 	}
 
 	Super::NativeDestruct();
 }
 
-FEventReply UInteriorScreenWidget::OnLeftSidebarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
-	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !LeftSidebarResizeHandle)
+	Super::NativeTick(MyGeometry, InDeltaTime);
+
+	if (bNeedsPostConstructLayoutRefresh)
 	{
-		return UWidgetBlueprintLibrary::Unhandled();
+		bNeedsPostConstructLayoutRefresh = false;
+		RefreshDockLayout();
 	}
 
-	bIsResizingLeftSidebar = true;
-	LeftSidebarResizeStartMouseX = MouseEvent.GetScreenSpacePosition().X;
-	LeftSidebarResizeStartWidth = LeftSidebarWidth;
-	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
-	return UWidgetBlueprintLibrary::CaptureMouse(Reply, LeftSidebarResizeHandle);
+	if (bPropertiesAutoDockPending)
+	{
+		bPropertiesAutoDockPending = false;
+		bPropertiesAutoDockAttempted = true;
+		AutoDockPropertiesBelowFloor();
+	}
+	else if (PropertiesFractionRecalcFramesRemaining > 0)
+	{
+		--PropertiesFractionRecalcFramesRemaining;
+		RecomputeColumnFractionsFromNaturalSizes(DockPanelColumnIndex[(int32)EDockPanelId::Properties]);
+		RefreshDockLayout();
+	}
 }
 
-FEventReply UInteriorScreenWidget::OnLeftSidebarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+// ---------------------------------------------------------------------------
+// Docking system
+// ---------------------------------------------------------------------------
+
+FVector2D UInteriorScreenWidget::GetCanvasSize() const
 {
-	if (!bIsResizingLeftSidebar)
+	if (RootCanvas)
+	{
+		const FVector2D LocalSize = RootCanvas->GetCachedGeometry().GetLocalSize();
+		if (LocalSize.X > 0.f && LocalSize.Y > 0.f)
+		{
+			return LocalSize;
+		}
+	}
+	return UWidgetLayoutLibrary::GetViewportSize(this);
+}
+
+void UInteriorScreenWidget::InitializeDefaultDockLayout()
+{
+	if (bDockLayoutInitialized)
+	{
+		return;
+	}
+	bDockLayoutInitialized = true;
+
+	// A previously-saved layout (see SaveDockLayoutToDisk) takes over entirely if one exists - it
+	// already positions every panel and rebuilds DockColumns itself, so there's nothing left for the
+	// default placement below to do.
+	if (LoadDockLayoutFromDisk())
+	{
+		bNeedsPostConstructLayoutRefresh = true;
+		return;
+	}
+
+	const FVector2D ViewportSize = GetCanvasSize();
+
+	// Toolbar starts floating at the top-left, matching today's left bar position.
+	if (UCanvasPanelSlot* ToolbarSlot = DockPanelCanvasSlots[(int32)EDockPanelId::Toolbar])
+	{
+		ToolbarSlot->SetPosition(FVector2D(10.f, SidebarTopMargin));
+	}
+
+	// Floor starts alone, floating at the top-right - Properties stays collapsed (nothing selected
+	// yet) and isn't docked with it yet either; AutoDockPropertiesBelowFloor slots it in underneath
+	// Floor the first time it's actually shown (see RefreshPropertiesPanelVisibility).
+	const float FloorX = FMath::Max(10.f, ViewportSize.X - DockPanelWidths[(int32)EDockPanelId::Floor] - 20.f);
+	if (UCanvasPanelSlot* FloorSlot = DockPanelCanvasSlots[(int32)EDockPanelId::Floor])
+	{
+		FloorSlot->SetPosition(FVector2D(FloorX, SidebarTopMargin));
+	}
+	if (UCanvasPanelSlot* PropertiesSlot = DockPanelCanvasSlots[(int32)EDockPanelId::Properties])
+	{
+		PropertiesSlot->SetPosition(FVector2D(FloorX, SidebarTopMargin));
+	}
+
+	RefreshDockPanelContentWidths();
+	RefreshDockLayout();
+
+	// This all just ran before the widget's had even one real Slate layout/paint pass, which can
+	// leave a docked panel's background border a frame stale (see NativeTick) - queue one more pass
+	// for the first real tick, once everything has actually settled.
+	bNeedsPostConstructLayoutRefresh = true;
+}
+
+FVector2D UInteriorScreenWidget::GetPanelPosition(EDockPanelId Id) const
+{
+	const UCanvasPanelSlot* PanelSlot = DockPanelCanvasSlots[(int32)Id];
+	return PanelSlot ? PanelSlot->GetPosition() : FVector2D::ZeroVector;
+}
+
+FVector2D UInteriorScreenWidget::GetPanelSize(EDockPanelId Id) const
+{
+	const UBorder* Border = DockPanelBorders[(int32)Id];
+	return Border ? Border->GetCachedGeometry().GetLocalSize() : FVector2D::ZeroVector;
+}
+
+bool UInteriorScreenWidget::IsScreenPositionOverPanelButton(EDockPanelId Id, const FVector2D& ScreenPosition) const
+{
+	TArray<UWidget*> Widgets;
+	switch (Id)
+	{
+	case EDockPanelId::Toolbar:
+		Widgets = { BuildingSwitcherComboBox, BuildingNameTextBox, EditBuildingNameButton,
+			SelectModeButton, DrawRoomModeButton, DrawWallModeButton, AddRectModeButton,
+			AddTriangleModeButton, AddCircleModeButton, AddDoorModeButton, AddStairsModeButton,
+			AddElevatorModeButton, AddEscalatorModeButton };
+		break;
+	case EDockPanelId::Floor:
+		Widgets = { AddFloorButton, RemoveFloorButton, FloorListBox };
+		break;
+	case EDockPanelId::Properties:
+		Widgets = { ConnectsToComboBox, ApplyDoorButton, RoomNameTextBox, ApplyRoomButton, ApplyConnectorButton };
+		for (UCheckBox* CheckBox : FloorCheckboxes)
+		{
+			Widgets.Add(CheckBox);
+		}
+		break;
+	}
+
+	for (const UWidget* Widget : Widgets)
+	{
+		if (Widget && Widget->GetCachedGeometry().IsUnderLocation(ScreenPosition))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void UInteriorScreenWidget::SetPanelWidth(EDockPanelId Id, float NewWidth)
+{
+	const int32 Index = (int32)Id;
+	DockPanelWidths[Index] = NewWidth;
+
+	// A docked column always stays a uniform width, like a real docked group - dragging any one
+	// member's handle resizes every sibling in the same column too.
+	const int32 ColumnIdx = DockPanelColumnIndex[Index];
+	if (DockColumns.IsValidIndex(ColumnIdx))
+	{
+		for (EDockPanelId Sibling : DockColumns[ColumnIdx].Panels)
+		{
+			DockPanelWidths[(int32)Sibling] = NewWidth;
+		}
+	}
+
+	RefreshDockPanelContentWidths();
+	RefreshDockLayout();
+}
+
+void UInteriorScreenWidget::RemovePanelFromColumn(EDockPanelId Id)
+{
+	const int32 Index = (int32)Id;
+	const int32 ColumnIdx = DockPanelColumnIndex[Index];
+	if (!DockColumns.IsValidIndex(ColumnIdx))
+	{
+		return;
+	}
+
+	FDockColumn& Column = DockColumns[ColumnIdx];
+	const int32 PosInColumn = Column.Panels.IndexOfByKey(Id);
+	if (PosInColumn == INDEX_NONE)
+	{
+		return;
+	}
+
+	const float FreedFraction = Column.HeightFractions[PosInColumn];
+	Column.Panels.RemoveAt(PosInColumn);
+	Column.HeightFractions.RemoveAt(PosInColumn);
+	if (Column.HeightFractions.Num() > 0)
+	{
+		// Give the freed share to whichever panel was sharing a boundary with the one that left.
+		const int32 GiveTo = FMath::Min(PosInColumn, Column.HeightFractions.Num() - 1);
+		Column.HeightFractions[GiveTo] += FreedFraction;
+	}
+
+	DockPanelColumnIndex[Index] = INDEX_NONE;
+
+	if (Column.Panels.Num() <= 1)
+	{
+		// A column of 1 isn't a column anymore - dissolve it, its last member goes back to floating.
+		if (Column.Panels.Num() == 1)
+		{
+			DockPanelColumnIndex[(int32)Column.Panels[0]] = INDEX_NONE;
+		}
+		DockColumns.RemoveAt(ColumnIdx);
+		for (int32& Stored : DockPanelColumnIndex)
+		{
+			if (Stored > ColumnIdx)
+			{
+				--Stored;
+			}
+		}
+	}
+}
+
+void UInteriorScreenWidget::TrySnapPanel(EDockPanelId Id)
+{
+	const FVector2D DraggedPos = GetPanelPosition(Id);
+	const FVector2D DraggedSize = GetPanelSize(Id);
+	const float DraggedLeft = DraggedPos.X;
+	const float DraggedRight = DraggedPos.X + DraggedSize.X;
+	const float DraggedTop = DraggedPos.Y;
+	const float DraggedBottom = DraggedPos.Y + DraggedSize.Y;
+
+	for (int32 OtherIndex = 0; OtherIndex < NumDockPanels; ++OtherIndex)
+	{
+		const EDockPanelId OtherId = (EDockPanelId)OtherIndex;
+		if (OtherId == Id)
+		{
+			continue;
+		}
+
+		const FVector2D OtherPos = GetPanelPosition(OtherId);
+		const FVector2D OtherSize = GetPanelSize(OtherId);
+		const float OtherLeft = OtherPos.X;
+		const float OtherRight = OtherPos.X + OtherSize.X;
+		const float OtherTop = OtherPos.Y;
+		const float OtherBottom = OtherPos.Y + OtherSize.Y;
+
+		const bool bXOverlaps = DraggedLeft < OtherRight && OtherLeft < DraggedRight;
+		if (!bXOverlaps)
+		{
+			continue;
+		}
+
+		const bool bSnapBelow = FMath::Abs(DraggedTop - OtherBottom) <= DockSnapThresholdPx;
+		const bool bSnapAbove = FMath::Abs(DraggedBottom - OtherTop) <= DockSnapThresholdPx;
+		if (!bSnapBelow && !bSnapAbove)
+		{
+			continue;
+		}
+
+		// Join Other's column (creating one if it doesn't have one yet).
+		int32 ColumnIdx = DockPanelColumnIndex[OtherIndex];
+		if (!DockColumns.IsValidIndex(ColumnIdx))
+		{
+			FDockColumn NewColumn;
+			NewColumn.Panels = { OtherId };
+			NewColumn.HeightFractions = { 1.f };
+			NewColumn.X = OtherPos.X;
+			ColumnIdx = DockColumns.Add(NewColumn);
+			DockPanelColumnIndex[OtherIndex] = ColumnIdx;
+		}
+
+		FDockColumn& Column = DockColumns[ColumnIdx];
+		const int32 OtherPosInColumn = Column.Panels.IndexOfByKey(OtherId);
+		const int32 InsertAt = bSnapBelow ? OtherPosInColumn + 1 : OtherPosInColumn;
+
+		// The new panel's share comes out of Other's own share specifically (not spread evenly
+		// across every column member), split proportionally to their current actual content heights
+		// (DraggedSize/OtherSize, both reliable here - real geometry from painted, in-progress-or-
+		// just-finished drag, not a stale first-frame guess) rather than always an equal 1/N split.
+		// An even split left a lot of empty space below a short panel's content (e.g. Floor next to
+		// a taller Properties), or squeezed a tall one (Toolbar's 10 mode buttons) into less height
+		// than it actually needs, spilling its own content into the panel below it.
+		const float NewPanelHeight = FMath::Max(DraggedSize.Y, DockPanelMinHeight);
+		const float OtherPanelHeight = FMath::Max(OtherSize.Y, DockPanelMinHeight);
+		const float OtherOldFraction = Column.HeightFractions[OtherPosInColumn];
+		const float NewFraction = OtherOldFraction * NewPanelHeight / (NewPanelHeight + OtherPanelHeight);
+		Column.HeightFractions[OtherPosInColumn] = OtherOldFraction - NewFraction;
+		Column.Panels.Insert(Id, InsertAt);
+		Column.HeightFractions.Insert(NewFraction, InsertAt);
+		Column.X = OtherPos.X;
+
+		DockPanelColumnIndex[(int32)Id] = ColumnIdx;
+		SetPanelWidth(Id, DockPanelWidths[OtherIndex]); // also refreshes content widths + layout
+		return;
+	}
+
+	// No snap - stays floating exactly where it was dropped.
+	RefreshDockLayout();
+}
+
+void UInteriorScreenWidget::RefreshDockLayout()
+{
+	const FVector2D ViewportSize = GetCanvasSize();
+	const float ColumnTotalHeight = FMath::Max(1.f, ViewportSize.Y - SidebarTopMargin - SidebarBottomMargin);
+
+	for (FDockColumn& Column : DockColumns)
+	{
+		// A hidden panel (Properties, while nothing is selected) keeps its stored HeightFractions
+		// entry so a later splitter drag still has something meaningful to resume from, but must not
+		// actually consume column space while hidden.
+		int32 VisibleCount = 0;
+		float VisibleFractionSum = 0.f;
+		for (int32 i = 0; i < Column.Panels.Num(); ++i)
+		{
+			const UBorder* Border = DockPanelBorders[(int32)Column.Panels[i]];
+			if (Border && Border->GetVisibility() != ESlateVisibility::Collapsed)
+			{
+				++VisibleCount;
+				VisibleFractionSum += Column.HeightFractions[i];
+			}
+		}
+		if (VisibleFractionSum <= 0.f)
+		{
+			VisibleFractionSum = 1.f; // every member hidden (shouldn't normally happen) - fall back to raw fractions
+		}
+
+		// Splitting the column's height only makes sense once 2+ of its members are actually visible
+		// at once and genuinely competing for the same space (that's what the splitter is for). With
+		// just one currently shown - its docked sibling collapsed, e.g. Properties with nothing
+		// selected - stretching that lone panel to the FULL column height left a huge empty gap below
+		// its own content; it should just size to fit itself instead, exactly like a floating panel.
+		const bool bSplitColumn = VisibleCount >= 2;
+
+		float RunningY = SidebarTopMargin;
+		for (int32 i = 0; i < Column.Panels.Num(); ++i)
+		{
+			const EDockPanelId PanelId = Column.Panels[i];
+			const int32 Index = (int32)PanelId;
+			UBorder* Border = DockPanelBorders[Index];
+			const bool bPanelVisible = Border && Border->GetVisibility() != ESlateVisibility::Collapsed;
+
+			float PanelHeight = 0.f;
+			if (bPanelVisible)
+			{
+				PanelHeight = bSplitColumn
+					? FMath::Max(DockPanelMinHeight, ColumnTotalHeight * Column.HeightFractions[i] / VisibleFractionSum)
+					: FMath::Max(DockPanelMinHeight, GetPanelSize(PanelId).Y);
+			}
+
+			if (Border)
+			{
+				if (USizeBox* Wrapper = Cast<USizeBox>(Border->GetParent()))
+				{
+					Wrapper->SetWidthOverride(DockPanelWidths[Index]);
+					if (bPanelVisible && bSplitColumn)
+					{
+						Wrapper->SetHeightOverride(PanelHeight);
+					}
+					else
+					{
+						// Not actually sharing the column with another visible panel right now - let
+						// it size to its own natural content height instead of a forced value.
+						Wrapper->ClearHeightOverride();
+					}
+				}
+			}
+			if (UCanvasPanelSlot* PanelSlot = DockPanelCanvasSlots[Index])
+			{
+				PanelSlot->SetPosition(FVector2D(Column.X, RunningY));
+			}
+
+			// A hidden panel's own width handle has nothing visible to resize and would otherwise
+			// show up as a stray draggable bar floating wherever its now-zero-height slice landed.
+			if (UBorder* Handle = DockResizeHandles[Index])
+			{
+				Handle->SetVisibility(bPanelVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+			}
+			if (UCanvasPanelSlot* HandleSlot = DockResizeHandleSlots[Index])
+			{
+				HandleSlot->SetAutoSize(false);
+				HandleSlot->SetSize(FVector2D(SidebarResizeHandleWidth, PanelHeight));
+				HandleSlot->SetPosition(FVector2D(Column.X + DockPanelWidths[Index], RunningY));
+			}
+			if (UBorder* LeftHandle = DockLeftResizeHandles[Index])
+			{
+				LeftHandle->SetVisibility(bPanelVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+			}
+			if (UCanvasPanelSlot* LeftHandleSlot = DockLeftResizeHandleSlots[Index])
+			{
+				LeftHandleSlot->SetAutoSize(false);
+				LeftHandleSlot->SetSize(FVector2D(SidebarResizeHandleWidth, PanelHeight));
+				LeftHandleSlot->SetPosition(FVector2D(Column.X - SidebarResizeHandleWidth, RunningY));
+			}
+
+			RunningY += PanelHeight;
+		}
+	}
+
+	// Floating panels just keep their own auto height - only width and the handle need (re)applying.
+	for (int32 Index = 0; Index < NumDockPanels; ++Index)
+	{
+		if (DockPanelColumnIndex[Index] != INDEX_NONE)
+		{
+			continue;
+		}
+
+		UBorder* Border = DockPanelBorders[Index];
+		if (Border)
+		{
+			if (USizeBox* Wrapper = Cast<USizeBox>(Border->GetParent()))
+			{
+				Wrapper->SetWidthOverride(DockPanelWidths[Index]);
+				Wrapper->ClearHeightOverride();
+			}
+		}
+
+		// Same reasoning as the docked branch above - Properties starts out floating AND hidden
+		// (nothing selected yet), and a hidden panel's Collapsed geometry reads as 0 height, which
+		// clamped to DockPanelMinHeight and rendered as a small floor-height gray bar sitting right
+		// on top of wherever Properties' initial position happened to coincide with another panel's.
+		const bool bPanelVisible = Border && Border->GetVisibility() != ESlateVisibility::Collapsed;
+		if (UBorder* Handle = DockResizeHandles[Index])
+		{
+			Handle->SetVisibility(bPanelVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		}
+		const FVector2D PanelPos = GetPanelPosition((EDockPanelId)Index);
+		const FVector2D PanelSize = GetPanelSize((EDockPanelId)Index);
+		const float HandleHeight = FMath::Max(PanelSize.Y, DockPanelMinHeight);
+		if (UCanvasPanelSlot* HandleSlot = DockResizeHandleSlots[Index])
+		{
+			HandleSlot->SetAutoSize(false);
+			HandleSlot->SetSize(FVector2D(SidebarResizeHandleWidth, HandleHeight));
+			HandleSlot->SetPosition(FVector2D(PanelPos.X + DockPanelWidths[Index], PanelPos.Y));
+		}
+		if (UBorder* LeftHandle = DockLeftResizeHandles[Index])
+		{
+			LeftHandle->SetVisibility(bPanelVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		}
+		if (UCanvasPanelSlot* LeftHandleSlot = DockLeftResizeHandleSlots[Index])
+		{
+			LeftHandleSlot->SetAutoSize(false);
+			LeftHandleSlot->SetSize(FVector2D(SidebarResizeHandleWidth, HandleHeight));
+			LeftHandleSlot->SetPosition(FVector2D(PanelPos.X - SidebarResizeHandleWidth, PanelPos.Y));
+		}
+	}
+
+	RefreshSplitterLayout();
+}
+
+void UInteriorScreenWidget::RefreshSplitterLayout()
+{
+	int32 SplitterSlotsUsed = 0;
+	for (int32 ColumnIdx = 0; ColumnIdx < DockColumns.Num() && SplitterSlotsUsed < MaxDockSplitters; ++ColumnIdx)
+	{
+		const FDockColumn& Column = DockColumns[ColumnIdx];
+		for (int32 i = 0; i + 1 < Column.Panels.Num() && SplitterSlotsUsed < MaxDockSplitters; ++i)
+		{
+			const EDockPanelId UpperId = Column.Panels[i];
+			const EDockPanelId LowerId = Column.Panels[i + 1];
+
+			// Properties is only shown while something is selected (see
+			// RefreshPropertiesPanelVisibility) - RefreshDockLayout gives a hidden panel 0 height, but
+			// a splitter drawn at the boundary with one has nothing real to divide either way, and
+			// would just sit collapsed onto its visible neighbour's edge. Skip it until both sides are
+			// actually showing.
+			const UBorder* UpperBorder = DockPanelBorders[(int32)UpperId];
+			const UBorder* LowerBorder = DockPanelBorders[(int32)LowerId];
+			if (!UpperBorder || !LowerBorder
+				|| UpperBorder->GetVisibility() == ESlateVisibility::Collapsed
+				|| LowerBorder->GetVisibility() == ESlateVisibility::Collapsed)
+			{
+				continue;
+			}
+
+			const int32 SplitterIdx = SplitterSlotsUsed;
+			++SplitterSlotsUsed;
+			SplitterColumnIndex[SplitterIdx] = ColumnIdx;
+			SplitterUpperIndexInColumn[SplitterIdx] = i;
+			const FVector2D UpperPos = GetPanelPosition(UpperId);
+			const FVector2D UpperSize = GetPanelSize(UpperId);
+
+			if (UBorder* Handle = SplitterHandles[SplitterIdx])
+			{
+				Handle->SetVisibility(ESlateVisibility::Visible);
+			}
+			if (UCanvasPanelSlot* SplitterSlot = SplitterCanvasSlots[SplitterIdx])
+			{
+				SplitterSlot->SetAutoSize(false);
+				SplitterSlot->SetPosition(FVector2D(Column.X, UpperPos.Y + UpperSize.Y - SplitterHeight * 0.5f));
+				SplitterSlot->SetSize(FVector2D(DockPanelWidths[(int32)UpperId], SplitterHeight));
+			}
+		}
+	}
+
+	for (int32 SplitterIdx = SplitterSlotsUsed; SplitterIdx < MaxDockSplitters; ++SplitterIdx)
+	{
+		SplitterColumnIndex[SplitterIdx] = INDEX_NONE;
+		if (UBorder* Handle = SplitterHandles[SplitterIdx])
+		{
+			Handle->SetVisibility(ESlateVisibility::Collapsed);
+		}
+	}
+}
+
+void UInteriorScreenWidget::RecomputeColumnFractionsFromNaturalSizes(int32 ColumnIndex)
+{
+	if (!DockColumns.IsValidIndex(ColumnIndex))
+	{
+		return;
+	}
+
+	FDockColumn& Column = DockColumns[ColumnIndex];
+
+	TArray<float> NaturalHeights;
+	NaturalHeights.Reserve(Column.Panels.Num());
+	float TotalHeight = 0.f;
+	for (EDockPanelId PanelId : Column.Panels)
+	{
+		const UBorder* Border = DockPanelBorders[(int32)PanelId];
+		const bool bPanelVisible = Border && Border->GetVisibility() != ESlateVisibility::Collapsed;
+		// A currently-hidden member's own content size means nothing right now - just keep it at the
+		// floor so it doesn't distort the visible members' split, and so it isn't literally zero
+		// (dividing TotalHeight by zero members would be worse) if it's the only one in the column.
+		const float Height = bPanelVisible ? FMath::Max(GetPanelSize(PanelId).Y, DockPanelMinHeight) : DockPanelMinHeight;
+		NaturalHeights.Add(Height);
+		TotalHeight += Height;
+	}
+
+	if (TotalHeight <= 0.f)
+	{
+		return;
+	}
+	for (int32 i = 0; i < Column.Panels.Num(); ++i)
+	{
+		Column.HeightFractions[i] = NaturalHeights[i] / TotalHeight;
+	}
+}
+
+void UInteriorScreenWidget::AutoDockPropertiesBelowFloor()
+{
+	if (DockPanelColumnIndex[(int32)EDockPanelId::Properties] != INDEX_NONE)
+	{
+		return; // already docked somewhere (the user got there first) - leave it alone
+	}
+
+	const FVector2D FloorPos = GetPanelPosition(EDockPanelId::Floor);
+	const FVector2D FloorSize = GetPanelSize(EDockPanelId::Floor);
+	if (UCanvasPanelSlot* PropertiesSlot = DockPanelCanvasSlots[(int32)EDockPanelId::Properties])
+	{
+		// Directly under Floor's current bottom edge, well within TrySnapPanel's own snap threshold -
+		// this reuses its exact join/proportional-split logic instead of duplicating it here.
+		PropertiesSlot->SetPosition(FVector2D(FloorPos.X, FloorPos.Y + FloorSize.Y));
+	}
+	TrySnapPanel(EDockPanelId::Properties);
+}
+
+const TCHAR* UInteriorScreenWidget::GetDockPanelName(EDockPanelId Id)
+{
+	switch (Id)
+	{
+	case EDockPanelId::Toolbar:    return TEXT("Toolbar");
+	case EDockPanelId::Floor:      return TEXT("Floor");
+	case EDockPanelId::Properties: return TEXT("Properties");
+	default:                       return TEXT("");
+	}
+}
+
+bool UInteriorScreenWidget::FindDockPanelIdByName(const FString& Name, EDockPanelId& OutId)
+{
+	for (int32 Index = 0; Index < NumDockPanels; ++Index)
+	{
+		if (Name == GetDockPanelName((EDockPanelId)Index))
+		{
+			OutId = (EDockPanelId)Index;
+			return true;
+		}
+	}
+	return false;
+}
+
+TSharedPtr<FJsonObject> UInteriorScreenWidget::BuildLayoutSaveData() const
+{
+	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+
+	TSharedPtr<FJsonObject> PanelsObject = MakeShared<FJsonObject>();
+	for (int32 Index = 0; Index < NumDockPanels; ++Index)
+	{
+		const FVector2D Position = GetPanelPosition((EDockPanelId)Index);
+		TSharedPtr<FJsonObject> PanelObject = MakeShared<FJsonObject>();
+		PanelObject->SetNumberField(TEXT("x"), Position.X);
+		PanelObject->SetNumberField(TEXT("y"), Position.Y);
+		PanelObject->SetNumberField(TEXT("width"), DockPanelWidths[Index]);
+		PanelsObject->SetObjectField(GetDockPanelName((EDockPanelId)Index), PanelObject);
+	}
+	Root->SetObjectField(TEXT("panels"), PanelsObject);
+
+	TArray<TSharedPtr<FJsonValue>> ColumnsArray;
+	for (const FDockColumn& Column : DockColumns)
+	{
+		TArray<TSharedPtr<FJsonValue>> PanelNameArray;
+		TArray<TSharedPtr<FJsonValue>> FractionArray;
+		for (int32 i = 0; i < Column.Panels.Num(); ++i)
+		{
+			PanelNameArray.Add(MakeShared<FJsonValueString>(GetDockPanelName(Column.Panels[i])));
+			FractionArray.Add(MakeShared<FJsonValueNumber>(Column.HeightFractions[i]));
+		}
+
+		TSharedPtr<FJsonObject> ColumnObject = MakeShared<FJsonObject>();
+		ColumnObject->SetArrayField(TEXT("panels"), PanelNameArray);
+		ColumnObject->SetArrayField(TEXT("fractions"), FractionArray);
+		ColumnObject->SetNumberField(TEXT("x"), Column.X);
+		ColumnsArray.Add(MakeShared<FJsonValueObject>(ColumnObject));
+	}
+	Root->SetArrayField(TEXT("columns"), ColumnsArray);
+
+	return Root;
+}
+
+void UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& Root)
+{
+	if (!Root.IsValid())
+	{
+		return;
+	}
+
+	const TSharedPtr<FJsonObject>* PanelsObject = nullptr;
+	if (Root->TryGetObjectField(TEXT("panels"), PanelsObject))
+	{
+		for (int32 Index = 0; Index < NumDockPanels; ++Index)
+		{
+			const TSharedPtr<FJsonObject>* PanelObject = nullptr;
+			if (!(*PanelsObject)->TryGetObjectField(GetDockPanelName((EDockPanelId)Index), PanelObject))
+			{
+				continue;
+			}
+
+			double X = 0.0, Y = 0.0, Width = SidebarMinWidth;
+			(*PanelObject)->TryGetNumberField(TEXT("x"), X);
+			(*PanelObject)->TryGetNumberField(TEXT("y"), Y);
+			(*PanelObject)->TryGetNumberField(TEXT("width"), Width);
+
+			if (UCanvasPanelSlot* PanelSlot = DockPanelCanvasSlots[Index])
+			{
+				PanelSlot->SetPosition(FVector2D((float)X, (float)Y));
+			}
+			DockPanelWidths[Index] = FMath::Clamp((float)Width, SidebarMinWidth, SidebarMaxWidth);
+		}
+	}
+
+	DockColumns.Reset();
+	for (int32 Index = 0; Index < NumDockPanels; ++Index)
+	{
+		DockPanelColumnIndex[Index] = INDEX_NONE;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* ColumnsArray = nullptr;
+	if (Root->TryGetArrayField(TEXT("columns"), ColumnsArray))
+	{
+		for (const TSharedPtr<FJsonValue>& ColumnValue : *ColumnsArray)
+		{
+			// FJsonValue::TryGetObject has both a const and non-const overload; called through
+			// operator-> on a TSharedPtr (which doesn't propagate const to its pointee), this binds
+			// to the non-const one, which needs a non-const TSharedPtr<FJsonObject>* to write into.
+			TSharedPtr<FJsonObject>* ColumnObject = nullptr;
+			if (!ColumnValue.IsValid() || !ColumnValue->TryGetObject(ColumnObject))
+			{
+				continue;
+			}
+
+			const TArray<TSharedPtr<FJsonValue>>* PanelNameArray = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* FractionArray = nullptr;
+			if (!(*ColumnObject)->TryGetArrayField(TEXT("panels"), PanelNameArray)
+				|| !(*ColumnObject)->TryGetArrayField(TEXT("fractions"), FractionArray))
+			{
+				continue;
+			}
+
+			FDockColumn NewColumn;
+			for (int32 i = 0; i < PanelNameArray->Num(); ++i)
+			{
+				EDockPanelId PanelId = EDockPanelId::Toolbar;
+				if (!FindDockPanelIdByName((*PanelNameArray)[i]->AsString(), PanelId))
+				{
+					continue;
+				}
+				NewColumn.Panels.Add(PanelId);
+				const double Fraction = FractionArray->IsValidIndex(i) ? (*FractionArray)[i]->AsNumber() : (1.0 / PanelNameArray->Num());
+				NewColumn.HeightFractions.Add((float)Fraction);
+			}
+			if (NewColumn.Panels.Num() == 0)
+			{
+				continue;
+			}
+
+			double ColumnX = 0.0;
+			(*ColumnObject)->TryGetNumberField(TEXT("x"), ColumnX);
+			NewColumn.X = (float)ColumnX;
+
+			const int32 NewColumnIndex = DockColumns.Add(NewColumn);
+			for (EDockPanelId PanelId : NewColumn.Panels)
+			{
+				DockPanelColumnIndex[(int32)PanelId] = NewColumnIndex;
+			}
+		}
+	}
+
+	// This is a deliberately-restored layout, not the freshly-constructed default - respect
+	// wherever it left Properties (docked or floating) instead of auto-docking it under Floor the
+	// first time it's shown.
+	bPropertiesAutoDockAttempted = true;
+
+	RefreshDockPanelContentWidths();
+	RefreshDockLayout();
+}
+
+void UInteriorScreenWidget::SaveDockLayoutToDisk() const
+{
+	const TSharedPtr<FJsonObject> Root = BuildLayoutSaveData();
+
+	FString OutputString;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
+	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
+
+	FFileHelper::SaveStringToFile(OutputString, *(FPaths::ProjectSavedDir() / TEXT("InteriorEditorLayout.json")));
+}
+
+bool UInteriorScreenWidget::LoadDockLayoutFromDisk()
+{
+	FString FileContents;
+	if (!FFileHelper::LoadFileToString(FileContents, *(FPaths::ProjectSavedDir() / TEXT("InteriorEditorLayout.json"))))
+	{
+		return false; // nothing saved yet
+	}
+
+	TSharedPtr<FJsonObject> Root;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(FileContents);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		return false;
+	}
+
+	ApplyLayoutSaveData(Root);
+	return true;
+}
+
+FEventReply UInteriorScreenWidget::HandlePanelMouseButtonDown(EDockPanelId Id, const FPointerEvent& MouseEvent)
+{
+	const int32 Index = (int32)Id;
+	UBorder* Border = DockPanelBorders[Index];
+	UCanvasPanelSlot* PanelSlot = DockPanelCanvasSlots[Index];
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !Border || !PanelSlot)
 	{
 		return UWidgetBlueprintLibrary::Unhandled();
 	}
 
-	if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+	const FVector2D ScreenPosition = MouseEvent.GetScreenSpacePosition();
+	if (!Border->GetCachedGeometry().IsUnderLocation(ScreenPosition) || IsScreenPositionOverPanelButton(Id, ScreenPosition))
 	{
-		bIsResizingLeftSidebar = false;
-		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
-		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
+		return UWidgetBlueprintLibrary::Unhandled();
 	}
 
-	const float DeltaX = MouseEvent.GetScreenSpacePosition().X - LeftSidebarResizeStartMouseX;
-	LeftSidebarWidth = FMath::Clamp(LeftSidebarResizeStartWidth + DeltaX, SidebarMinWidth, SidebarMaxWidth);
+	USizeBox* Wrapper = Cast<USizeBox>(Border->GetParent());
+	UPanelWidget* CanvasParent = Wrapper ? Wrapper->GetParent() : nullptr;
+	if (!CanvasParent)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
 
-	if (LeftSidebarCanvasSlot)
+	bDockPanelIsDraggingMove[Index] = true;
+	DockPanelMoveDragStartMouse[Index] = CanvasParent->GetCachedGeometry().AbsoluteToLocal(ScreenPosition);
+	DockPanelMoveDragStartPosition[Index] = PanelSlot->GetPosition();
+
+	// The drag itself always behaves like a floating panel - TrySnapPanel (on drag end) re-evaluates
+	// whether it should re-dock.
+	RemovePanelFromColumn(Id);
+	RefreshDockLayout();
+
+	// Undocking just now changed this panel's own height (docked -> auto), but its cached geometry
+	// won't reflect that until the next paint - sizing the handle off it right now would use the
+	// stale (still-docked) height for one frame, showing as a gray sliver poking out past the
+	// panel's real new edge. Simplest fix: just hide this panel's own handle for the drag's
+	// duration - HandlePanelMouseButtonUp restores it once the drop has settled.
+	if (UBorder* Handle = DockResizeHandles[Index])
 	{
-		LeftSidebarCanvasSlot->SetOffsets(FMargin(10.f, SidebarTopMargin, LeftSidebarWidth, SidebarBottomMargin));
+		Handle->SetVisibility(ESlateVisibility::Collapsed);
 	}
-	if (LeftSidebarResizeHandleSlot)
+
+	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+	return UWidgetBlueprintLibrary::CaptureMouse(Reply, Border);
+}
+
+FEventReply UInteriorScreenWidget::HandlePanelMouseMove(EDockPanelId Id, const FPointerEvent& MouseEvent)
+{
+	const int32 Index = (int32)Id;
+	if (!bDockPanelIsDraggingMove[Index])
 	{
-		LeftSidebarResizeHandleSlot->SetOffsets(FMargin(10.f + LeftSidebarWidth, SidebarTopMargin, SidebarResizeHandleWidth, SidebarBottomMargin));
+		return UWidgetBlueprintLibrary::Unhandled();
 	}
-	RefreshSidebarContentWidths();
+
+	UBorder* Border = DockPanelBorders[Index];
+	UCanvasPanelSlot* PanelSlot = DockPanelCanvasSlots[Index];
+	USizeBox* Wrapper = Border ? Cast<USizeBox>(Border->GetParent()) : nullptr;
+	UPanelWidget* CanvasParent = Wrapper ? Wrapper->GetParent() : nullptr;
+	if (!PanelSlot || !CanvasParent)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	const FGeometry& ParentGeometry = CanvasParent->GetCachedGeometry();
+	const FVector2D CurrentMousePosition = ParentGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
+	const FVector2D NewPosition = DockPanelMoveDragStartPosition[Index] + (CurrentMousePosition - DockPanelMoveDragStartMouse[Index]);
+
+	// ParentGeometry (the canvas' own geometry, already fetched above) rather than
+	// UWidgetLayoutLibrary::GetViewportSize - that returns the platform's raw pixel resolution,
+	// which only matches this Slate-local coordinate space at DPI scale 1; using it here clamped
+	// dragging into a box visibly smaller than the real screen whenever the two didn't match.
+	const FVector2D ViewportSize = ParentGeometry.GetLocalSize();
+	const FVector2D CurrentPanelSize = GetPanelSize(Id);
+	const float ClampedX = FMath::Clamp(NewPosition.X, 0.f, FMath::Max(0.f, ViewportSize.X - CurrentPanelSize.X));
+	const float ClampedY = FMath::Clamp(NewPosition.Y, 0.f, FMath::Max(0.f, ViewportSize.Y - CurrentPanelSize.Y));
+	PanelSlot->SetPosition(FVector2D(ClampedX, ClampedY));
+
+	if (UCanvasPanelSlot* HandleSlot = DockResizeHandleSlots[Index])
+	{
+		HandleSlot->SetPosition(FVector2D(ClampedX + DockPanelWidths[Index], ClampedY));
+	}
 
 	return UWidgetBlueprintLibrary::Handled();
 }
 
-FEventReply UInteriorScreenWidget::OnLeftSidebarResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+FEventReply UInteriorScreenWidget::HandlePanelMouseButtonUp(EDockPanelId Id, const FPointerEvent& MouseEvent)
 {
-	if (bIsResizingLeftSidebar && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	const int32 Index = (int32)Id;
+	if (bDockPanelIsDraggingMove[Index] && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 	{
-		bIsResizingLeftSidebar = false;
+		bDockPanelIsDraggingMove[Index] = false;
+		TrySnapPanel(Id);
+		// Restore the handle HandlePanelMouseButtonDown hid for the drag - TrySnapPanel already
+		// refreshed layout above, so by the next paint it'll be sized/positioned for wherever the
+		// panel actually ended up (docked or still floating).
+		if (UBorder* Handle = DockResizeHandles[Index])
+		{
+			Handle->SetVisibility(ESlateVisibility::Visible);
+		}
 		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
 		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
 	}
@@ -753,157 +1618,317 @@ FEventReply UInteriorScreenWidget::OnLeftSidebarResizeMouseButtonUp(FGeometry My
 	return UWidgetBlueprintLibrary::Unhandled();
 }
 
-FEventReply UInteriorScreenWidget::OnRightSidebarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+FEventReply UInteriorScreenWidget::HandleResizeMouseButtonDown(EDockPanelId Id, const FPointerEvent& MouseEvent)
 {
-	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !RightSidebarResizeHandle)
+	const int32 Index = (int32)Id;
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !DockResizeHandles[Index])
 	{
 		return UWidgetBlueprintLibrary::Unhandled();
 	}
 
-	bIsResizingRightSidebar = true;
-	RightSidebarResizeStartMouseX = MouseEvent.GetScreenSpacePosition().X;
-	RightSidebarResizeStartWidth = RightSidebarWidth;
+	bDockPanelIsResizingWidth[Index] = true;
+	DockPanelResizeStartMouseX[Index] = MouseEvent.GetScreenSpacePosition().X;
+	DockPanelResizeStartWidth[Index] = DockPanelWidths[Index];
 	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
-	return UWidgetBlueprintLibrary::CaptureMouse(Reply, RightSidebarResizeHandle);
+	return UWidgetBlueprintLibrary::CaptureMouse(Reply, DockResizeHandles[Index]);
 }
 
-FEventReply UInteriorScreenWidget::OnRightSidebarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+FEventReply UInteriorScreenWidget::HandleResizeMouseMove(EDockPanelId Id, const FPointerEvent& MouseEvent)
 {
-	if (!bIsResizingRightSidebar)
+	const int32 Index = (int32)Id;
+	if (!bDockPanelIsResizingWidth[Index])
 	{
 		return UWidgetBlueprintLibrary::Unhandled();
 	}
 
 	if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
 	{
-		bIsResizingRightSidebar = false;
+		bDockPanelIsResizingWidth[Index] = false;
 		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
 		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
 	}
 
-	// This bar is anchored/aligned to the right edge, so moving the mouse LEFT (negative delta)
-	// grows it, the opposite of the left sidebar.
-	const float DeltaX = MouseEvent.GetScreenSpacePosition().X - RightSidebarResizeStartMouseX;
-	RightSidebarWidth = FMath::Clamp(RightSidebarResizeStartWidth - DeltaX, SidebarMinWidth, SidebarMaxWidth);
-
-	if (RightSidebarCanvasSlot)
-	{
-		RightSidebarCanvasSlot->SetOffsets(FMargin(-20.f, SidebarTopMargin, RightSidebarWidth, SidebarBottomMargin));
-	}
-	if (RightSidebarResizeHandleSlot)
-	{
-		RightSidebarResizeHandleSlot->SetOffsets(FMargin(-20.f - RightSidebarWidth, SidebarTopMargin, SidebarResizeHandleWidth, SidebarBottomMargin));
-	}
-	RefreshSidebarContentWidths();
+	const float DeltaX = MouseEvent.GetScreenSpacePosition().X - DockPanelResizeStartMouseX[Index];
+	const float NewWidth = FMath::Clamp(DockPanelResizeStartWidth[Index] + DeltaX, SidebarMinWidth, SidebarMaxWidth);
+	SetPanelWidth(Id, NewWidth);
 
 	return UWidgetBlueprintLibrary::Handled();
 }
 
-FEventReply UInteriorScreenWidget::OnRightSidebarResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+FEventReply UInteriorScreenWidget::HandleResizeMouseButtonUp(EDockPanelId Id, const FPointerEvent& MouseEvent)
 {
-	if (bIsResizingRightSidebar && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	const int32 Index = (int32)Id;
+	if (bDockPanelIsResizingWidth[Index] && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 	{
-		bIsResizingRightSidebar = false;
+		bDockPanelIsResizingWidth[Index] = false;
 		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
 		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
 	}
 
 	return UWidgetBlueprintLibrary::Unhandled();
 }
+
+FEventReply UInteriorScreenWidget::HandleLeftResizeMouseButtonDown(EDockPanelId Id, const FPointerEvent& MouseEvent)
+{
+	const int32 Index = (int32)Id;
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !DockLeftResizeHandles[Index])
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	bDockPanelIsResizingLeftWidth[Index] = true;
+	DockPanelLeftResizeStartMouseX[Index] = MouseEvent.GetScreenSpacePosition().X;
+	DockPanelLeftResizeStartWidth[Index] = DockPanelWidths[Index];
+	DockPanelLeftResizeStartPanelX[Index] = GetPanelPosition(Id).X;
+	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+	return UWidgetBlueprintLibrary::CaptureMouse(Reply, DockLeftResizeHandles[Index]);
+}
+
+FEventReply UInteriorScreenWidget::HandleLeftResizeMouseMove(EDockPanelId Id, const FPointerEvent& MouseEvent)
+{
+	const int32 Index = (int32)Id;
+	if (!bDockPanelIsResizingLeftWidth[Index])
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+	{
+		bDockPanelIsResizingLeftWidth[Index] = false;
+		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
+	}
+
+	// Dragging the LEFT edge to the left (negative DeltaX) GROWS the panel - opposite sign from the
+	// right handle, since width is now measured from this edge instead.
+	const float DeltaX = MouseEvent.GetScreenSpacePosition().X - DockPanelLeftResizeStartMouseX[Index];
+	const float NewWidth = FMath::Clamp(DockPanelLeftResizeStartWidth[Index] - DeltaX, SidebarMinWidth, SidebarMaxWidth);
+	const float ActualWidthDelta = NewWidth - DockPanelLeftResizeStartWidth[Index];
+	const float NewX = DockPanelLeftResizeStartPanelX[Index] - ActualWidthDelta; // keeps the RIGHT edge fixed in place
+
+	const int32 ColumnIdx = DockPanelColumnIndex[Index];
+	if (DockColumns.IsValidIndex(ColumnIdx))
+	{
+		// Column members all share one X - shift the whole column, not just this panel, or it'd
+		// drift out of alignment with its docked sibling(s).
+		DockColumns[ColumnIdx].X = NewX;
+	}
+	else if (UCanvasPanelSlot* PanelSlot = DockPanelCanvasSlots[Index])
+	{
+		PanelSlot->SetPosition(FVector2D(NewX, PanelSlot->GetPosition().Y));
+	}
+
+	SetPanelWidth(Id, NewWidth); // syncs width across column siblings, refreshes content widths + layout
+
+	return UWidgetBlueprintLibrary::Handled();
+}
+
+FEventReply UInteriorScreenWidget::HandleLeftResizeMouseButtonUp(EDockPanelId Id, const FPointerEvent& MouseEvent)
+{
+	const int32 Index = (int32)Id;
+	if (bDockPanelIsResizingLeftWidth[Index] && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		bDockPanelIsResizingLeftWidth[Index] = false;
+		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
+	}
+
+	return UWidgetBlueprintLibrary::Unhandled();
+}
+
+FEventReply UInteriorScreenWidget::HandleSplitterMouseButtonDown(int32 SplitterIndex, const FPointerEvent& MouseEvent)
+{
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !SplitterHandles.IsValidIndex(SplitterIndex)
+		|| !SplitterHandles[SplitterIndex] || SplitterColumnIndex[SplitterIndex] == INDEX_NONE)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	bSplitterIsDragging[SplitterIndex] = true;
+	SplitterDragStartMouseY[SplitterIndex] = MouseEvent.GetScreenSpacePosition().Y;
+	SplitterDragStartFractions[SplitterIndex] = DockColumns[SplitterColumnIndex[SplitterIndex]].HeightFractions;
+	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+	return UWidgetBlueprintLibrary::CaptureMouse(Reply, SplitterHandles[SplitterIndex]);
+}
+
+FEventReply UInteriorScreenWidget::HandleSplitterMouseMove(int32 SplitterIndex, const FPointerEvent& MouseEvent)
+{
+	if (!bSplitterIsDragging.IsValidIndex(SplitterIndex) || !bSplitterIsDragging[SplitterIndex])
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+	{
+		bSplitterIsDragging[SplitterIndex] = false;
+		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
+	}
+
+	const int32 ColumnIdx = SplitterColumnIndex[SplitterIndex];
+	if (!DockColumns.IsValidIndex(ColumnIdx))
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	FDockColumn& Column = DockColumns[ColumnIdx];
+	const int32 Upper = SplitterUpperIndexInColumn[SplitterIndex];
+	const int32 Lower = Upper + 1;
+	if (!Column.HeightFractions.IsValidIndex(Upper) || !Column.HeightFractions.IsValidIndex(Lower)
+		|| !SplitterDragStartFractions[SplitterIndex].IsValidIndex(Upper) || !SplitterDragStartFractions[SplitterIndex].IsValidIndex(Lower))
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	const FVector2D ViewportSize = GetCanvasSize();
+	const float ColumnTotalHeight = FMath::Max(1.f, ViewportSize.Y - SidebarTopMargin - SidebarBottomMargin);
+	const float DeltaY = MouseEvent.GetScreenSpacePosition().Y - SplitterDragStartMouseY[SplitterIndex];
+	const float DeltaFraction = DeltaY / ColumnTotalHeight;
+
+	const float MinFraction = DockPanelMinHeight / ColumnTotalHeight;
+	const float StartUpper = SplitterDragStartFractions[SplitterIndex][Upper];
+	const float StartLower = SplitterDragStartFractions[SplitterIndex][Lower];
+	const float PairTotal = StartUpper + StartLower;
+
+	const float NewUpper = FMath::Clamp(StartUpper + DeltaFraction, MinFraction, FMath::Max(MinFraction, PairTotal - MinFraction));
+	Column.HeightFractions[Upper] = NewUpper;
+	Column.HeightFractions[Lower] = PairTotal - NewUpper;
+
+	RefreshDockLayout();
+	return UWidgetBlueprintLibrary::Handled();
+}
+
+FEventReply UInteriorScreenWidget::HandleSplitterMouseButtonUp(int32 SplitterIndex, const FPointerEvent& MouseEvent)
+{
+	if (bSplitterIsDragging.IsValidIndex(SplitterIndex) && bSplitterIsDragging[SplitterIndex] && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		bSplitterIsDragging[SplitterIndex] = false;
+		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
+	}
+
+	return UWidgetBlueprintLibrary::Unhandled();
+}
+
+FEventReply UInteriorScreenWidget::OnToolbarPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnToolbarPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseMove(EDockPanelId::Toolbar, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnToolbarPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonUp(EDockPanelId::Toolbar, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnFloorPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonDown(EDockPanelId::Floor, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnFloorPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseMove(EDockPanelId::Floor, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnFloorPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonUp(EDockPanelId::Floor, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnPropertiesPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonDown(EDockPanelId::Properties, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnPropertiesPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseMove(EDockPanelId::Properties, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnPropertiesPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonUp(EDockPanelId::Properties, MouseEvent); }
+
+FEventReply UInteriorScreenWidget::OnToolbarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnToolbarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnToolbarResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Toolbar, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnFloorResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Floor, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnFloorResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Floor, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnFloorResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Floor, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnPropertiesResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Properties, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnPropertiesResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Properties, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnPropertiesResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Properties, MouseEvent); }
+
+FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Toolbar, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnFloorLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Floor, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnFloorLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Floor, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnFloorLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Floor, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnPropertiesLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Properties, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnPropertiesLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Properties, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnPropertiesLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Properties, MouseEvent); }
+
+FEventReply UInteriorScreenWidget::OnSplitter0MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonDown(0, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnSplitter0MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseMove(0, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnSplitter0MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonUp(0, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnSplitter1MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonDown(1, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnSplitter1MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseMove(1, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnSplitter1MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonUp(1, MouseEvent); }
 
 void UInteriorScreenWidget::HandleEditModeChanged()
 {
 	RefreshModeButtonHighlights();
 }
 
-void UInteriorScreenWidget::RefreshSidebarContentWidths()
+void UInteriorScreenWidget::HandleProjectSaved()
 {
-	// Left: building switcher combo box tracks the bar (minus its own 10px-a-side padding and the
-	// edit-name button beside it). Mode-toolbar icons deliberately stay fixed 48x48 - stretching a
-	// square icon into a rectangle would just look broken.
+	SaveDockLayoutToDisk();
+}
+
+void UInteriorScreenWidget::RefreshDockPanelContentWidths()
+{
+	// Toolbar: building switcher combo box tracks the panel (minus its own 10px-a-side padding and
+	// the edit-name button beside it). Mode-toolbar icons deliberately stay fixed 48x48 - stretching
+	// a square icon into a rectangle would just look broken.
 	if (BuildingSwitcherComboBox)
 	{
 		if (USizeBox* ComboSizeBox = Cast<USizeBox>(BuildingSwitcherComboBox->GetParent()))
 		{
-			ComboSizeBox->SetWidthOverride(FMath::Max(80.f, LeftSidebarWidth - 85.f));
+			ComboSizeBox->SetWidthOverride(FMath::Max(80.f, DockPanelWidths[(int32)EDockPanelId::Toolbar] - 85.f));
 		}
 	}
 
-	// Right: Floor/Properties panel borders track the bar (minus its own 10px-a-side padding);
-	// everything inside them tracks the panel in turn (minus ITS 14px-a-side padding) - see
-	// ComputeRightSidebarButtonWidth.
-	const float RightPanelWidth = FMath::Max(80.f, RightSidebarWidth - 20.f);
-	const float RightButtonWidth = ComputeRightSidebarButtonWidth();
+	// Floor/Properties: everything inside them tracks their own panel width in turn (minus ITS 14px-
+	// a-side padding) - see ComputePanelButtonWidth.
+	const float FloorButtonWidth = ComputePanelButtonWidth(EDockPanelId::Floor);
+	const float PropertiesButtonWidth = ComputePanelButtonWidth(EDockPanelId::Properties);
 
-	auto ResizePanel = [RightPanelWidth](UWidget* PanelContent)
-	{
-		if (PanelContent)
-		{
-			if (USizeBox* SizeBox = Cast<USizeBox>(PanelContent->GetParent()))
-			{
-				SizeBox->SetWidthOverride(RightPanelWidth);
-			}
-		}
-	};
-	ResizePanel(FloorPanel);
-	ResizePanel(PropertiesPanel);
-
-	auto ResizeButton = [RightButtonWidth](UButton* Button)
+	auto ResizeButton = [](UButton* Button, float Width)
 	{
 		if (Button)
 		{
 			if (USizeBox* SizeBox = Cast<USizeBox>(Button->GetContent()))
 			{
-				SizeBox->SetWidthOverride(RightButtonWidth);
+				SizeBox->SetWidthOverride(Width);
 			}
 		}
 	};
-	ResizeButton(BackButton);
-	ResizeButton(AddFloorButton);
-	ResizeButton(RemoveFloorButton);
-	ResizeButton(ApplyDoorButton);
-	ResizeButton(ApplyRoomButton);
-	ResizeButton(ApplyConnectorButton);
+	ResizeButton(AddFloorButton, FloorButtonWidth);
+	ResizeButton(RemoveFloorButton, FloorButtonWidth);
+	ResizeButton(ApplyDoorButton, PropertiesButtonWidth);
+	ResizeButton(ApplyRoomButton, PropertiesButtonWidth);
+	ResizeButton(ApplyConnectorButton, PropertiesButtonWidth);
 
-	auto ResizeLabelWrap = [RightButtonWidth](UTextBlock* TextBlock)
+	auto ResizeLabelWrap = [](UTextBlock* TextBlock, float Width)
 	{
 		if (TextBlock)
 		{
 			if (USizeBox* SizeBox = Cast<USizeBox>(TextBlock->GetParent()))
 			{
-				SizeBox->SetWidthOverride(RightButtonWidth);
+				SizeBox->SetWidthOverride(Width);
 			}
 		}
 	};
-	ResizeLabelWrap(PropertiesTitleText);
-	ResizeLabelWrap(DoorRoomText);
-	ResizeLabelWrap(ConnectorTypeText);
+	ResizeLabelWrap(PropertiesTitleText, PropertiesButtonWidth);
+	ResizeLabelWrap(DoorRoomText, PropertiesButtonWidth);
+	ResizeLabelWrap(ConnectorTypeText, PropertiesButtonWidth);
 
 	if (ConnectsToRowSizeBox)
 	{
-		ConnectsToRowSizeBox->SetWidthOverride(RightButtonWidth);
+		ConnectsToRowSizeBox->SetWidthOverride(PropertiesButtonWidth);
 	}
 	if (RoomNameRowSizeBox)
 	{
-		RoomNameRowSizeBox->SetWidthOverride(RightButtonWidth);
+		RoomNameRowSizeBox->SetWidthOverride(PropertiesButtonWidth);
 	}
-
 	if (FloorsWrapSizeBox)
 	{
-		FloorsWrapSizeBox->SetWidthOverride(RightButtonWidth);
+		FloorsWrapSizeBox->SetWidthOverride(PropertiesButtonWidth);
 	}
 
 	if (FloorListBox)
 	{
 		if (USizeBox* SizeBox = Cast<USizeBox>(FloorListBox->GetParent()))
 		{
-			SizeBox->SetWidthOverride(RightButtonWidth);
+			SizeBox->SetWidthOverride(FloorButtonWidth);
 		}
 		for (int32 Index = 0; Index < FloorListBox->GetChildrenCount(); ++Index)
 		{
 			if (UFloorListEntryWidget* Entry = Cast<UFloorListEntryWidget>(FloorListBox->GetChildAt(Index)))
 			{
-				Entry->SetWidth(RightButtonWidth);
+				Entry->SetWidth(FloorButtonWidth);
 			}
 		}
 	}
@@ -1138,9 +2163,34 @@ void UInteriorScreenWidget::RefreshPropertiesPanelVisibility()
 		return;
 	}
 
+	const bool bWasVisible = PropertiesPanel->GetVisibility() != ESlateVisibility::Collapsed;
+
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
 	const bool bAnySelected = PC && (!PC->GetSelectedRoomId().IsEmpty() || !PC->GetSelectedDoorId().IsEmpty() || !PC->GetSelectedConnectorGroupId().IsEmpty());
 	PropertiesPanel->SetVisibility(bAnySelected ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+
+	// Freshly shown (not just still-visible-from-before) and with its real content in it now, unlike
+	// at construction. The very first time this ever happens, dock it in under Floor by default
+	// instead of leaving it floating wherever InitializeDefaultDockLayout left it (see
+	// AutoDockPropertiesBelowFloor); every time after that, it's already somewhere (either from that
+	// auto-dock, a restored save, or the user dragging it themselves), so just re-split its column's
+	// height to match its actual content instead. Both are deferred - see
+	// PropertiesFractionRecalcFramesRemaining's comment for why more than one tick.
+	if (bAnySelected && !bWasVisible)
+	{
+		if (!bPropertiesAutoDockAttempted)
+		{
+			bPropertiesAutoDockPending = true;
+		}
+		else
+		{
+			PropertiesFractionRecalcFramesRemaining = PropertiesFractionRecalcFrameCount;
+		}
+	}
+
+	// A splitter at the boundary with Properties needs to appear/disappear along with it - see the
+	// comment in RefreshSplitterLayout.
+	RefreshSplitterLayout();
 }
 
 void UInteriorScreenWidget::OnApplyConnectorClicked()
@@ -1186,7 +2236,7 @@ void UInteriorScreenWidget::RefreshFloorList()
 			continue;
 		}
 		Entry->SetFloorNumber(FloorNumber, FloorNumber == ActiveFloor);
-		Entry->SetWidth(ComputeRightSidebarButtonWidth());
+		Entry->SetWidth(ComputePanelButtonWidth(EDockPanelId::Floor));
 		Entry->OnEntryClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleFloorEntryClicked);
 
 		if (UScrollBoxSlot* EntrySlot = Cast<UScrollBoxSlot>(FloorListBox->AddChild(Entry)))
@@ -1262,6 +2312,9 @@ void UInteriorScreenWidget::HandleBuildingSwitcherChanged(FString SelectedItem, 
 
 	if (!PC->HasUnsavedChanges())
 	{
+		// Same reasoning as GoToEditScreen - the dock layout is a local preference, not project
+		// data, so it's saved regardless of whether there was any actual building content to save.
+		SaveDockLayoutToDisk();
 		PC->LoadInteriorForBuilding(NewBuildingId);
 		RefreshBuildingSwitcher();
 		RefreshFloorList();
@@ -1282,6 +2335,7 @@ void UInteriorScreenWidget::HandleBuildingSwitcherChanged(FString SelectedItem, 
 
 void UInteriorScreenWidget::HandleSwitchBuildingSave()
 {
+	SaveDockLayoutToDisk();
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->SaveCurrentProject();
@@ -1293,6 +2347,9 @@ void UInteriorScreenWidget::HandleSwitchBuildingSave()
 
 void UInteriorScreenWidget::HandleSwitchBuildingDiscard()
 {
+	// Discarding the building's own content edits shouldn't also lose the panel layout - see
+	// GoToEditScreen's comment.
+	SaveDockLayoutToDisk();
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->DiscardUnsavedChanges();
@@ -1450,6 +2507,7 @@ void UInteriorScreenWidget::OnBackClicked()
 
 void UInteriorScreenWidget::HandleSaveAndLeave()
 {
+	// GoToEditScreen (below) already saves the dock layout unconditionally on every exit.
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->SaveCurrentProject();
@@ -1478,6 +2536,12 @@ void UInteriorScreenWidget::GoToEditScreen()
 	{
 		return;
 	}
+
+	// The dock layout is a harmless local preference, not project data, so it's saved unconditionally
+	// on every real exit from this screen - unlike PC->SaveCurrentProject(), it doesn't need gating
+	// behind PC->HasUnsavedChanges() (rearranging panels alone doesn't set that flag, so relying on
+	// it here would silently drop a layout-only change whenever Back skips the save dialog entirely).
+	SaveDockLayoutToDisk();
 
 	// Only reached once we've actually decided to leave (no unsaved changes to begin with, or the
 	// user chose Save/Discard) - this destroys the currently-spawned interior actors

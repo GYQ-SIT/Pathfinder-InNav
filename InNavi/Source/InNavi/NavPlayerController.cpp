@@ -1950,6 +1950,7 @@ bool ANavPlayerController::SaveCurrentProject()
 	{
 		bHasUnsavedChanges = false;
 		UE_LOG(LogTemp, Warning, TEXT("Saved to %s"), *CurrentProjectFilePath);
+		OnProjectSaved.Broadcast();
 	}
 	else
 	{
@@ -2023,6 +2024,7 @@ bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
 		CurrentProjectFilePath = FilePath;
 		bHasUnsavedChanges = false;
 		UE_LOG(LogTemp, Warning, TEXT("Saved to %s"), *FilePath);
+		OnProjectSaved.Broadcast();
 	}
 	else
 	{
