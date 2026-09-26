@@ -66,7 +66,7 @@ demonstrable check — not "it exists".
 - **Jira Epic:** `INNAVI-T03`
 - **M1 target:** Given a JSON file, generate the corresponding rooms, corridors, and stairs for at least one multi-floor building. **Done** — `AInteriorGenerator` reads the JSON and spawns real 3D procedural-mesh rooms/walls/doors per floor (tested on multi-floor buildings, e.g. a 10-floor building with rooms/doors/elevators/stairs/escalators across floors). Elevators/stairs/escalators are recorded as `FInteriorNavNode`s with a `ConnectorGroupId` tying each connector's per-floor instances together, and doors carry `InputId`/`ConnectsTo` — the input/output-node format was shared with the T04 owners (ws/jh) before implementation.
 - **M2 target:** More layout rules; multiple buildings; consistency guarantees for navigation.
-- **M3 target:** Optional Polish/Preview pass (stretch — e.g. a rotatable 3D view of the schematic interior, on top of the existing 2D editor); performance tuning.
+- **M3 target:** Optional Polish/Preview pass (stretch — e.g. a rotatable 3D view of the schematic interior, on top of the existing 2D editor); performance tuning. **Stretch goal substantially delivered already, as of 2026-09-26** — a "2D/3D" toggle in the interior editor switches from the 2D floor plan to a free-fly 3D view of the current floor's actual generated geometry (current building only, current floor's own exterior wall + floor slab, other floors/buildings hidden). WASD + mouse-look move the camera, scroll zooms, and Reset View/move-speed buttons compensate for it being unlocked rather than orbit-constrained. View-only for this pass (no editing in 3D) — see `docs/design/interior-editor-guide.md`.
 
 ### T04 — Indoor Navigation System
 - **What it is:** Runtime navigation over the generated interior, including cross-floor routing via elevators/stairs as abstract connectors (runtime NavMesh + NavLinks).
@@ -94,7 +94,7 @@ These are standard deliverables required of all teams. Owners TBD.
 | R07 | Working technical proof of concept | Core risks demonstrated running (see T01–T04) | T01–T04 all demonstrated (T04 confirmed 2026-09-25) |
 | R08 | Basic error handling | App does not crash on bad/empty input | Interior editor validates most inputs (bounds/overlap/wall-collision checks, unsaved-changes prompts) - not audited team-wide |
 | R09 | Working product demonstration | 2–3 min demo: select → input → generate → navigate | Not yet assembled (navigate step depends on T04) |
-| R10 | Project documentation | `docs/` kept current | Updated 2026-09-26 (`deliverables.md`, `docs/design/interior-editor-guide.md` — rewritten to cover the menu bar, building switcher, dockable panels, and Gizmos) |
+| R10 | Project documentation | `docs/` kept current | Updated 2026-09-26 (`deliverables.md`, `docs/design/interior-editor-guide.md` — covers the menu bar, building switcher, dockable panels, Gizmos, and the new 2D/3D preview toggle) |
 | R11 | Individual contribution evidence | Each member records a short (<5 min) contribution video | Not reviewed this pass |
 
 **CI/CD note (updated 2026-09-20):** the team12 DigiPen-provided VM (2 vCPU/4GB RAM,
