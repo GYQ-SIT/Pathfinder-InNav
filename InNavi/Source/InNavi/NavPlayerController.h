@@ -673,6 +673,25 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	bool SetLoadedBuildingName(const FString& NewName);
 
+	// Grow/shrink the currently selected room by a fixed 20-unit nudge (see NudgeSelectedRoomSize) -
+	// bound to =/- and called directly by the Toolbar panel's Gizmos Grow/Shrink buttons.
+	UFUNCTION(BlueprintCallable, Category = "Room")
+	void GrowSelectedRoom();
+	UFUNCTION(BlueprintCallable, Category = "Room")
+	void ShrinkSelectedRoom();
+
+	// Continuous rotation of the currently selected room while held (RotationDegreesPerSecond,
+	// applied in Tick) - bound to 9/0 and called directly by the Toolbar panel's Gizmos Rotate
+	// buttons' OnPressed/OnReleased. CCW = counter-clockwise, CW = clockwise.
+	UFUNCTION(BlueprintCallable, Category = "Room")
+	void StartRotateCCW();
+	UFUNCTION(BlueprintCallable, Category = "Room")
+	void StopRotateCCW();
+	UFUNCTION(BlueprintCallable, Category = "Room")
+	void StartRotateCW();
+	UFUNCTION(BlueprintCallable, Category = "Room")
+	void StopRotateCW();
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
@@ -721,21 +740,12 @@ private:
 	// "remove floor" button calls RemoveFloor directly.
 	void RemoveActiveInteriorFloor();
 
-	// TEST-ONLY (Resize verification): grows/shrinks the currently selected room (SelectedRoomId) by
-	// 20 units each press, via ResizeRoom. Bound to =/-. Delete once a real resize UI (typed
-	// Length/Width, or drag) exists.
-	void GrowSelectedRoom();
-	void ShrinkSelectedRoom();
+	// Bound to =/-, and called directly by the Toolbar panel's Gizmos Grow/Shrink buttons - see
+	// NudgeSelectedRoomSize. GrowSelectedRoom/ShrinkSelectedRoom themselves are declared public above
+	// (Blueprint/UMG-callable); this is just their shared implementation.
 	void NudgeSelectedRoomSize(float Delta);
 
-	// Continuous rotation while 9/0 is held (degrees per second, applied in Tick - not a discrete
-	// per-press nudge like Grow/Shrink) - rotates the currently-selected room/wall around its own
-	// center via AInteriorGenerator::RotateRoom. Nine = counter-clockwise, Zero = clockwise.
 	static constexpr float RotationDegreesPerSecond = 90.f;
-	void StartRotateCCW();
-	void StopRotateCCW();
-	void StartRotateCW();
-	void StopRotateCW();
 	// No OnActionFailed broadcast on failure - called every tick while a rotation key is held,
 	// same reasoning as MoveRoomTo/MoveDoor.
 	void RotateSelectedRoom(float DeltaDegrees);

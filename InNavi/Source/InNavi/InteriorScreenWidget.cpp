@@ -27,6 +27,7 @@
 #include "Components/ScrollBoxSlot.h"
 #include "Components/SizeBox.h"
 #include "Components/SizeBoxSlot.h"
+#include "Components/Spacer.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
@@ -140,6 +141,11 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(BorderName));
 			Border->SetBrushColor(BrushColor);
 			Border->SetPadding(FMargin(BorderPadding));
+			// A SizeBox's height/width override only constrains LAYOUT size, not paint size - content
+			// taller than a squeezed-down panel (e.g. Properties' fields when a splitter drag or the
+			// screen's own edge leaves it little room) would otherwise paint straight past the panel's
+			// own border, potentially off the visible screen entirely. Clip it to its own bounds instead.
+			Border->SetClipping(EWidgetClipping::ClipToBoundsAlways);
 			// BindDynamic is a macro that stringifies its function-pointer argument at compile time
 			// (to look up the UFUNCTION by name for reflection-based invocation) - it can't take a
 			// ternary/runtime-selected pointer, only a literal &Class::Method token. So this lambda
@@ -229,9 +235,11 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// separate boxes with visible seams - so all 4 share this exact background color.
 		const FLinearColor DockPanelColor(0.03f, 0.03f, 0.03f, 0.88f);
 
-		// -- Toolbar panel: building switcher on top, then the mode toolbar grouped into Default/
-		// Draw/Navigate sections (matching the hand-drawn layout) - one VerticalBox so everything
-		// auto-stacks instead of each piece needing its own guessed Y position.
+		// -- Toolbar panel: the mode toolbar grouped into Default/Draw/Navigate sections (matching the
+		// hand-drawn layout) - one VerticalBox so everything auto-stacks instead of each piece needing
+		// its own guessed Y position. The building switcher used to live at the top of this panel; it's
+		// now its own fixed bar below the menu bar instead (see BuildingSwitcherBarBackground further
+		// down) so it stays put regardless of how this panel gets dragged/resized/hidden.
 		ToolbarPanel = ConstructDockPanel(EDockPanelId::Toolbar, TEXT("Pnl_Toolbar"), DockPanelColor, 10.f);
 		ToolbarPanel->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarPanelMouseButtonDown);
 		ToolbarPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarPanelMouseMove);
@@ -245,62 +253,6 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		UVerticalBox* LeftSidebar = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LeftSidebar"));
 		ToolbarPanel->SetContent(LeftSidebar);
-
-		// Building switcher - lets the user jump straight to a different building's interior
-		// without going back to the exterior first.
-		UHorizontalBox* SwitcherRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BuildingSwitcherRow"));
-
-		BuildingSwitcherComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_BuildingSwitcher"));
-		BuildingSwitcherComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
-		// Fixed width so a long building name can't push this row past the Toolbar panel's edge -
-		// the combo button clips its own text at this width rather than growing to fit it. Kept in
-		// sync with the panel's width as it's dragged by RefreshDockPanelContentWidths, which
-		// recomputes this exact formula - keep the two in sync by hand if this one changes.
-		USizeBox* BuildingSwitcherSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		BuildingSwitcherSizeBox->SetWidthOverride(DockPanelWidths[(int32)EDockPanelId::Toolbar] - 20.f - 100.f); // leaves ~100px for the edit-name button beside it, with slack
-		BuildingSwitcherSizeBox->SetContent(BuildingSwitcherComboBox);
-		UHorizontalBoxSlot* SwitcherComboSlot = SwitcherRow->AddChildToHorizontalBox(BuildingSwitcherSizeBox);
-		SwitcherComboSlot->SetVerticalAlignment(VAlign_Center);
-		SwitcherComboSlot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
-
-		BuildingNameTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_BuildingName"));
-		BuildingNameTextBox->SetVisibility(ESlateVisibility::Collapsed);
-		UHorizontalBoxSlot* SwitcherTextSlot = SwitcherRow->AddChildToHorizontalBox(BuildingNameTextBox);
-		SwitcherTextSlot->SetVerticalAlignment(VAlign_Center);
-		SwitcherTextSlot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
-
-		EditBuildingNameButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_EditBuildingName"));
-		EditBuildingNameButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-		EditBuildingNameButtonText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_EditBuildingNameLabel"));
-		EditBuildingNameButtonText->SetText(FText::FromString(TEXT("\x270E"))); // pencil
-		EditBuildingNameButtonText->SetJustification(ETextJustify::Center);
-		EditBuildingNameButtonText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		// The 32x32 box below stops the button from pushing the row wider, but doesn't clip - at the
-		// default (larger) font, the glyph itself still rendered a few px wider than the box, poking
-		// out evenly on both sides. Shrinking the glyph itself is what actually keeps it inside.
-		{
-			FSlateFontInfo EditIconFont = EditBuildingNameButtonText->GetFont();
-			EditIconFont.Size = 14;
-			EditBuildingNameButtonText->SetFont(EditIconFont);
-		}
-		// Never had a size constraint before - the pencil glyph's own natural width (with the
-		// button's default padding on top) turned out to be wider than the ~46px the building
-		// switcher's width formula budgeted for it, so it always overflowed past the panel's edge by
-		// that fixed difference, independent of the panel's width (i.e. resizing never helped).
-		USizeBox* EditButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		EditButtonSizeBox->SetWidthOverride(32.f);
-		EditButtonSizeBox->SetHeightOverride(32.f);
-		if (USizeBoxSlot* EditButtonTextSlot = Cast<USizeBoxSlot>(EditButtonSizeBox->SetContent(EditBuildingNameButtonText)))
-		{
-			EditButtonTextSlot->SetHorizontalAlignment(HAlign_Center);
-			EditButtonTextSlot->SetVerticalAlignment(VAlign_Center);
-		}
-		EditBuildingNameButton->SetContent(EditButtonSizeBox);
-		UHorizontalBoxSlot* SwitcherButtonSlot = SwitcherRow->AddChildToHorizontalBox(EditBuildingNameButton);
-		SwitcherButtonSlot->SetVerticalAlignment(VAlign_Center);
-
-		UVerticalBoxSlot* SwitcherRowSlot = LeftSidebar->AddChildToVerticalBox(SwitcherRow);
-		SwitcherRowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 12.f));
 
 		auto AddToolGroupLabel = [this, LeftSidebar](const TCHAR* Name, const TCHAR* Label)
 		{
@@ -439,6 +391,56 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		AddEscalatorModeButton = AddModeButton(TEXT("Add_Escalator_Button"), TEXT("Icon_AddEscalator"), TEXT("Add Escalator Mode (click a point to place an escalator, connecting the floor above and below by default)"));
 		AddEscalatorModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddEscalatorModeClicked);
 
+		AddToolGroupLabel(TEXT("Txt_GroupGizmos"), TEXT("Gizmos"));
+		// Text placeholders for now (arrow glyphs, same Unicode-glyph trick as Back/the pencil icon) -
+		// real icons are pending from UX; swap the glyph args below for AddModeButton's icon-asset
+		// style once they land. Grow/Shrink and Rotate CW/CCW mirror PC's existing =/- and 9/0 keys
+		// exactly (see OnGrowRoomClicked etc.) rather than introducing any new interaction - small
+		// square buttons, two per row, per the hand-drawn layout.
+		constexpr float GizmoButtonSize = 32.f;
+		auto AddGizmoButton = [this, MakeToolTipWidget, GizmoButtonSize](UHorizontalBox* Row, const TCHAR* Name, const TCHAR* Glyph, const TCHAR* TooltipLabel) -> UButton*
+		{
+			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+			Button->SetToolTip(MakeToolTipWidget(TooltipLabel));
+
+			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
+			Text->SetText(FText::FromString(FString(Glyph)));
+			Text->SetJustification(ETextJustify::Center);
+			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+
+			USizeBox* GizmoSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
+			GizmoSizeBox->SetWidthOverride(GizmoButtonSize);
+			GizmoSizeBox->SetHeightOverride(GizmoButtonSize);
+			if (USizeBoxSlot* GizmoTextSlot = Cast<USizeBoxSlot>(GizmoSizeBox->SetContent(Text)))
+			{
+				GizmoTextSlot->SetHorizontalAlignment(HAlign_Center);
+				GizmoTextSlot->SetVerticalAlignment(VAlign_Center);
+			}
+			Button->SetContent(GizmoSizeBox);
+
+			UHorizontalBoxSlot* GizmoRowSlot = Row->AddChildToHorizontalBox(Button);
+			GizmoRowSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
+			return Button;
+		};
+
+		UHorizontalBox* GizmoScaleRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("GizmoScaleRow"));
+		UVerticalBoxSlot* GizmoScaleRowSlot = LeftSidebar->AddChildToVerticalBox(GizmoScaleRow);
+		GizmoScaleRowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+		GrowRoomButton = AddGizmoButton(GizmoScaleRow, TEXT("Btn_GrowRoom"), TEXT("\x25B2"), TEXT("Grow (increase the selected room's size - same as pressing +)"));
+		GrowRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnGrowRoomClicked);
+		ShrinkRoomButton = AddGizmoButton(GizmoScaleRow, TEXT("Btn_ShrinkRoom"), TEXT("\x25BC"), TEXT("Shrink (decrease the selected room's size - same as pressing -)"));
+		ShrinkRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnShrinkRoomClicked);
+
+		UHorizontalBox* GizmoRotateRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("GizmoRotateRow"));
+		LeftSidebar->AddChildToVerticalBox(GizmoRotateRow);
+		RotateCCWButton = AddGizmoButton(GizmoRotateRow, TEXT("Btn_RotateCCW"), TEXT("\x25C4"), TEXT("Rotate Left (hold to keep rotating the selected room counter-clockwise - same as holding 9)"));
+		RotateCCWButton->OnPressed.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCCWPressed);
+		RotateCCWButton->OnReleased.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCCWReleased);
+		RotateCWButton = AddGizmoButton(GizmoRotateRow, TEXT("Btn_RotateCW"), TEXT("\x25BA"), TEXT("Rotate Right (hold to keep rotating the selected room clockwise - same as holding 0)"));
+		RotateCWButton->OnPressed.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCWPressed);
+		RotateCWButton->OnReleased.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCWReleased);
+
 		// -- Floor panel --
 		FloorPanel = ConstructDockPanel(EDockPanelId::Floor, TEXT("Pnl_Floor"), DockPanelColor, 14.f);
 		FloorPanel->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorPanelMouseButtonDown);
@@ -521,40 +523,23 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			return SizeBox;
 		};
 
-		// Back - fixed chrome pinned to the top-right corner, NOT part of the docking system (always
-		// stays put, like a permanent close/back button in most editors) - point-anchored the same
-		// way UNavigationPanelWidget's own floating panel is (FAnchors(1,0) + Alignment(1,0) +
-		// SetAutoSize(true) = free position measured from the viewport's top-right corner).
-		BackButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Back"));
-		BackButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-		UTextBlock* BackText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_BackLabel"));
-		BackText->SetText(FText::FromString(TEXT("Back")));
-		BackText->SetJustification(ETextJustify::Center);
-		BackText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardTextWrap(BackText);
-		USizeBox* BackSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Btn_BackSize"));
-		BackSizeBox->SetWidthOverride(StandardButtonWidth);
-		BackSizeBox->SetMinDesiredHeight(StandardButtonHeight);
-		BackSizeBox->SetContent(BackText);
-		BackButton->SetContent(BackSizeBox);
-		UCanvasPanelSlot* BackSlot = Canvas->AddChildToCanvas(BackButton);
-		BackSlot->SetAnchors(FAnchors(1.f, 0.f));
-		BackSlot->SetAlignment(FVector2D(1.f, 0.f));
-		BackSlot->SetPosition(FVector2D(-20.f, SidebarTopMargin));
-		BackSlot->SetAutoSize(true);
-		BackSlot->SetZOrder(5);
-
-		// -- Top menu bar (File/Window) - fixed chrome, same reasoning as Back above, not part of
-		// the docking system. A thin full-width background strip holding two menu buttons; each
-		// button's own dropdown is a separate Canvas child positioned at a fixed offset directly
-		// below it (both button widths are fixed, so their X positions are known up front - simpler
-		// than querying a HorizontalBox child's live position) rather than nested inside the same
-		// layout flow, so opening one never resizes the bar itself.
+		// -- Top menu bar (File/Window/Back) - fixed chrome, NOT part of the docking system (always
+		// stays put, like a permanent menu bar in most editors). A thin full-width background strip
+		// holding the File/Window menu buttons on the left and Back pinned to the right (a Fill-sized
+		// Spacer between them pushes Back to the far edge, same trick a real toolbar uses); each menu
+		// button's own dropdown is a separate Canvas child positioned at a fixed offset directly below
+		// it (both button widths are fixed, so their X positions are known up front - simpler than
+		// querying a HorizontalBox child's live position) rather than nested inside the same layout
+		// flow, so opening one never resizes the bar itself.
 		constexpr float MenuButtonWidth = 70.f;
 		constexpr float MenuBarLeftMargin = 10.f;
 
 		UBorder* MenuBarBackground = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_MenuBar"));
 		MenuBarBackground->SetBrushColor(DockPanelColor);
+		// Left margin so "File" doesn't sit flush against the screen's own left edge - File/Window's
+		// own MenuButtonSizeBox already matches MenuBarHeight exactly, so the taller bar (see
+		// MenuBarHeight's own comment) gives their text vertical breathing room on its own.
+		MenuBarBackground->SetPadding(FMargin(MenuBarLeftMargin, 0.f, 0.f, 0.f));
 		UCanvasPanelSlot* MenuBarSlot = Canvas->AddChildToCanvas(MenuBarBackground);
 		MenuBarSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
 		MenuBarSlot->SetAlignment(FVector2D(0.f, 0.f));
@@ -590,6 +575,44 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		WindowMenuButton = AddMenuButton(TEXT("Btn_WindowMenu"), TEXT("Window"));
 		WindowMenuButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowMenuClicked);
 
+		// Eats all remaining row width so Back (added right after it) lands flush against the bar's
+		// right edge instead of sitting right beside Window.
+		USpacer* MenuBarSpacer = WidgetTree->ConstructWidget<USpacer>(USpacer::StaticClass());
+		if (UHorizontalBoxSlot* SpacerSlot = Cast<UHorizontalBoxSlot>(MenuBarRow->AddChildToHorizontalBox(MenuBarSpacer)))
+		{
+			SpacerSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		}
+
+		// Icon-only, same trick as EditBuildingNameButton's pencil glyph further down (a Unicode
+		// Dingbats-range character instead of an imported texture) - an arrow "exiting" the bar reads
+		// reasonably as a leave/back action without needing new art assets.
+		BackButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Back"));
+		BackButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+		UTextBlock* BackIconText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_BackIcon"));
+		BackIconText->SetText(FText::FromString(TEXT("\x27A1"))); // black rightwards arrow
+		BackIconText->SetJustification(ETextJustify::Center);
+		BackIconText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		{
+			FSlateFontInfo BackIconFont = BackIconText->GetFont();
+			BackIconFont.Size = 16;
+			BackIconText->SetFont(BackIconFont);
+		}
+		USizeBox* BackIconSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		BackIconSizeBox->SetWidthOverride(32.f);
+		BackIconSizeBox->SetHeightOverride(28.f); // shorter than MenuBarHeight so it visibly sits inside the bar once centered, not flush top/bottom
+		if (USizeBoxSlot* BackIconSlot = Cast<USizeBoxSlot>(BackIconSizeBox->SetContent(BackIconText)))
+		{
+			BackIconSlot->SetHorizontalAlignment(HAlign_Center);
+			BackIconSlot->SetVerticalAlignment(VAlign_Center);
+		}
+		BackButton->SetContent(BackIconSizeBox);
+		BackButton->SetToolTipText(FText::FromString(TEXT("Back"))); // no more text label on the button itself, so a tooltip keeps it discoverable
+		if (UHorizontalBoxSlot* BackRowSlot = Cast<UHorizontalBoxSlot>(MenuBarRow->AddChildToHorizontalBox(BackButton)))
+		{
+			BackRowSlot->SetVerticalAlignment(VAlign_Center);
+			BackRowSlot->SetPadding(FMargin(0.f, 0.f, 10.f, 0.f));
+		}
+
 		// Returns the dropdown's own Border - callers reach its UVerticalBox content back out via
 		// Cast<UVerticalBox>(Dropdown->GetContent()), same "reach a child through the widget tree
 		// instead of returning/storing every intermediate" convention already used throughout this
@@ -605,7 +628,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			UCanvasPanelSlot* DropdownSlot = Canvas->AddChildToCanvas(Dropdown);
 			DropdownSlot->SetAnchors(FAnchors(0.f, 0.f));
 			DropdownSlot->SetAlignment(FVector2D(0.f, 0.f));
-			DropdownSlot->SetPosition(FVector2D(PositionX, MenuBarHeight + 4.f));
+			// Below BOTH fixed bars (menu bar + building switcher bar), not just the menu bar - otherwise
+			// an open dropdown would visually sit on top of the switcher bar instead of below it.
+			DropdownSlot->SetPosition(FVector2D(PositionX, SidebarTopMargin + 4.f));
 			DropdownSlot->SetAutoSize(true);
 			DropdownSlot->SetZOrder(7);
 			return Dropdown;
@@ -664,6 +689,82 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		WindowPropertiesCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowPropertiesCheckChanged);
 		WindowLayersCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowLayers"), TEXT("Layers"));
 		WindowLayersCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowLayersCheckChanged);
+
+		// -- Building switcher bar: fixed chrome directly under the menu bar, spanning the full width
+		// like it does - holds the building switcher combo box (+ its edit-name button), pulled out of
+		// the Toolbar panel so it stays visible regardless of how that panel gets dragged, resized, or
+		// hidden. Content stays left-aligned; the rest of the bar's width is just empty background.
+		UBorder* BuildingSwitcherBarBackground = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_BuildingSwitcherBar"));
+		BuildingSwitcherBarBackground->SetBrushColor(DockPanelColor);
+		BuildingSwitcherBarBackground->SetPadding(FMargin(10.f, 8.f));
+		BuildingSwitcherBarBackground->SetHorizontalAlignment(HAlign_Left);
+		BuildingSwitcherBarBackground->SetVerticalAlignment(VAlign_Center);
+		UCanvasPanelSlot* BuildingSwitcherBarSlot = Canvas->AddChildToCanvas(BuildingSwitcherBarBackground);
+		BuildingSwitcherBarSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
+		BuildingSwitcherBarSlot->SetAlignment(FVector2D(0.f, 0.f));
+		BuildingSwitcherBarSlot->SetOffsets(FMargin(0.f, MenuBarHeight, 0.f, BuildingSwitcherBarHeight));
+		BuildingSwitcherBarSlot->SetZOrder(6);
+
+		UHorizontalBox* SwitcherRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BuildingSwitcherRow"));
+		BuildingSwitcherBarBackground->SetContent(SwitcherRow);
+
+		BuildingSwitcherComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_BuildingSwitcher"));
+		BuildingSwitcherComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
+		USizeBox* BuildingSwitcherSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		BuildingSwitcherSizeBox->SetWidthOverride(260.f); // fixed now - this bar no longer resizes with any dock panel
+		BuildingSwitcherSizeBox->SetContent(BuildingSwitcherComboBox);
+		UHorizontalBoxSlot* SwitcherComboSlot = SwitcherRow->AddChildToHorizontalBox(BuildingSwitcherSizeBox);
+		SwitcherComboSlot->SetVerticalAlignment(VAlign_Center);
+		SwitcherComboSlot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
+
+		BuildingNameTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_BuildingName"));
+		BuildingNameTextBox->SetVisibility(ESlateVisibility::Collapsed);
+		UHorizontalBoxSlot* SwitcherTextSlot = SwitcherRow->AddChildToHorizontalBox(BuildingNameTextBox);
+		SwitcherTextSlot->SetVerticalAlignment(VAlign_Center);
+		SwitcherTextSlot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
+
+		EditBuildingNameButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_EditBuildingName"));
+		EditBuildingNameButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+		EditBuildingNameButtonText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_EditBuildingNameLabel"));
+		EditBuildingNameButtonText->SetText(FText::FromString(TEXT("\x270E"))); // pencil
+		EditBuildingNameButtonText->SetJustification(ETextJustify::Center);
+		EditBuildingNameButtonText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		// The 32x32 box below stops the button from pushing the row wider, but doesn't clip - at the
+		// default (larger) font, the glyph itself still rendered a few px wider than the box, poking
+		// out evenly on both sides. Shrinking the glyph itself is what actually keeps it inside.
+		{
+			FSlateFontInfo EditIconFont = EditBuildingNameButtonText->GetFont();
+			EditIconFont.Size = 14;
+			EditBuildingNameButtonText->SetFont(EditIconFont);
+		}
+		USizeBox* EditButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		EditButtonSizeBox->SetWidthOverride(32.f);
+		EditButtonSizeBox->SetHeightOverride(32.f);
+		if (USizeBoxSlot* EditButtonTextSlot = Cast<USizeBoxSlot>(EditButtonSizeBox->SetContent(EditBuildingNameButtonText)))
+		{
+			EditButtonTextSlot->SetHorizontalAlignment(HAlign_Center);
+			EditButtonTextSlot->SetVerticalAlignment(VAlign_Center);
+		}
+		EditBuildingNameButton->SetContent(EditButtonSizeBox);
+		UHorizontalBoxSlot* SwitcherButtonSlot = SwitcherRow->AddChildToHorizontalBox(EditBuildingNameButton);
+		SwitcherButtonSlot->SetVerticalAlignment(VAlign_Center);
+
+		// Thin separator lines at the seam between the menu bar and the switcher bar, and again below
+		// the switcher bar - both bars (and the panels below) share the same dark background color, so
+		// without these the eye can't tell where one ends and the next begins.
+		constexpr float SeparatorLineHeight = 2.f;
+		auto AddHorizontalSeparator = [this, Canvas, SeparatorLineHeight](float PositionY)
+		{
+			UBorder* Separator = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+			Separator->SetBrushColor(FLinearColor(1.f, 1.f, 1.f, 0.5f));
+			UCanvasPanelSlot* SeparatorSlot = Canvas->AddChildToCanvas(Separator);
+			SeparatorSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
+			SeparatorSlot->SetAlignment(FVector2D(0.f, 0.f));
+			SeparatorSlot->SetOffsets(FMargin(0.f, PositionY, 0.f, SeparatorLineHeight));
+			SeparatorSlot->SetZOrder(6);
+		};
+		AddHorizontalSeparator(MenuBarHeight - SeparatorLineHeight);
+		AddHorizontalSeparator(SidebarTopMargin - SeparatorLineHeight);
 
 		// -- Properties panel: merges what used to be three separately-positioned Door/Room/
 		// Connector panels into one (selection between them is already mutually exclusive at the PC
@@ -1087,10 +1188,12 @@ bool UInteriorScreenWidget::IsScreenPositionOverPanelButton(EDockPanelId Id, con
 	switch (Id)
 	{
 	case EDockPanelId::Toolbar:
-		Widgets = { BuildingSwitcherComboBox, BuildingNameTextBox, EditBuildingNameButton,
-			SelectModeButton, DrawRoomModeButton, DrawWallModeButton, AddRectModeButton,
+		// The building switcher used to be part of this panel's own hit-test list - it's now its own
+		// fixed bar outside the dock system entirely, so it's no longer relevant here.
+		Widgets = { SelectModeButton, DrawRoomModeButton, DrawWallModeButton, AddRectModeButton,
 			AddTriangleModeButton, AddCircleModeButton, AddDoorModeButton, AddStairsModeButton,
-			AddElevatorModeButton, AddEscalatorModeButton };
+			AddElevatorModeButton, AddEscalatorModeButton, GrowRoomButton, ShrinkRoomButton,
+			RotateCCWButton, RotateCWButton };
 		break;
 	case EDockPanelId::Floor:
 		Widgets = { AddFloorButton, RemoveFloorButton, FloorListBox };
@@ -1313,6 +1416,38 @@ void UInteriorScreenWidget::RefreshDockLayout()
 		// its own content; it should just size to fit itself instead, exactly like a floating panel.
 		const bool bSplitColumn = VisibleCount >= 2;
 
+		// Each panel's own DockPanelMinHeight floor is applied per-panel below, independent of the
+		// others - if a splitter drag (or the viewport itself shrinking after fractions were set)
+		// leaves several panels below their proportional share at once, every one of them gets pushed
+		// up to its own floor and their SUM can exceed what the column actually has room for, pushing
+		// the column's later panels past the bottom of the visible screen. Compute the raw heights
+		// first and shrink them all proportionally if that happened, so a merged column always stays
+		// fully on-screen even when there isn't room for every member's own minimum at once.
+		TArray<float> PanelHeights;
+		PanelHeights.SetNumZeroed(Column.Panels.Num());
+		float TotalPanelHeight = 0.f;
+		for (int32 i = 0; i < Column.Panels.Num(); ++i)
+		{
+			const EDockPanelId PanelId = Column.Panels[i];
+			const UBorder* VisBorder = DockPanelBorders[(int32)PanelId];
+			if (!VisBorder || VisBorder->GetVisibility() == ESlateVisibility::Collapsed)
+			{
+				continue;
+			}
+			PanelHeights[i] = bSplitColumn
+				? FMath::Max(DockPanelMinHeight, ColumnTotalHeight * Column.HeightFractions[i] / VisibleFractionSum)
+				: FMath::Max(DockPanelMinHeight, GetPanelSize(PanelId).Y);
+			TotalPanelHeight += PanelHeights[i];
+		}
+		if (bSplitColumn && TotalPanelHeight > ColumnTotalHeight)
+		{
+			const float ShrinkFactor = ColumnTotalHeight / TotalPanelHeight;
+			for (float& Height : PanelHeights)
+			{
+				Height *= ShrinkFactor;
+			}
+		}
+
 		float RunningY = SidebarTopMargin;
 		for (int32 i = 0; i < Column.Panels.Num(); ++i)
 		{
@@ -1320,14 +1455,7 @@ void UInteriorScreenWidget::RefreshDockLayout()
 			const int32 Index = (int32)PanelId;
 			UBorder* Border = DockPanelBorders[Index];
 			const bool bPanelVisible = Border && Border->GetVisibility() != ESlateVisibility::Collapsed;
-
-			float PanelHeight = 0.f;
-			if (bPanelVisible)
-			{
-				PanelHeight = bSplitColumn
-					? FMath::Max(DockPanelMinHeight, ColumnTotalHeight * Column.HeightFractions[i] / VisibleFractionSum)
-					: FMath::Max(DockPanelMinHeight, GetPanelSize(PanelId).Y);
-			}
+			const float PanelHeight = PanelHeights[i];
 
 			if (Border)
 			{
@@ -2112,16 +2240,10 @@ void UInteriorScreenWidget::HandleActiveFloorChanged()
 
 void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 {
-	// Toolbar: building switcher combo box tracks the panel (minus its own 10px-a-side padding and
-	// the edit-name button beside it). Mode-toolbar icons deliberately stay fixed 48x48 - stretching
-	// a square icon into a rectangle would just look broken.
-	if (BuildingSwitcherComboBox)
-	{
-		if (USizeBox* ComboSizeBox = Cast<USizeBox>(BuildingSwitcherComboBox->GetParent()))
-		{
-			ComboSizeBox->SetWidthOverride(FMath::Max(80.f, DockPanelWidths[(int32)EDockPanelId::Toolbar] - 85.f));
-		}
-	}
+	// Toolbar: the building switcher used to live in this panel and tracked its width here - it's now
+	// its own fixed-width bar outside the dock system (see RebuildWidget), so there's nothing left to
+	// sync for it. Mode-toolbar icons deliberately stay fixed 48x48 - stretching a square icon into a
+	// rectangle would just look broken.
 
 	// Floor/Properties: everything inside them tracks their own panel width in turn (minus ITS 14px-
 	// a-side padding) - see ComputePanelButtonWidth.
@@ -2998,6 +3120,54 @@ void UInteriorScreenWidget::OnAddEscalatorModeClicked()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->ToggleEscalatorMode();
+	}
+}
+
+void UInteriorScreenWidget::OnGrowRoomClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->GrowSelectedRoom();
+	}
+}
+
+void UInteriorScreenWidget::OnShrinkRoomClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->ShrinkSelectedRoom();
+	}
+}
+
+void UInteriorScreenWidget::OnRotateCCWPressed()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->StartRotateCCW();
+	}
+}
+
+void UInteriorScreenWidget::OnRotateCCWReleased()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->StopRotateCCW();
+	}
+}
+
+void UInteriorScreenWidget::OnRotateCWPressed()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->StartRotateCW();
+	}
+}
+
+void UInteriorScreenWidget::OnRotateCWReleased()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->StopRotateCW();
 	}
 }
 

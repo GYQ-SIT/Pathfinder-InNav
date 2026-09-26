@@ -75,6 +75,22 @@ private:
 	UFUNCTION()
 	void OnAddEscalatorModeClicked();
 
+	// Gizmos group: Grow/Shrink are one-shot nudges (mirrors PC's own =/- keys), Rotate CW/CCW are
+	// hold-to-rotate (mirrors 9/0) - OnPressed/OnReleased on the button itself, not OnClicked, so
+	// holding the mouse down keeps rotating exactly like holding the key does.
+	UFUNCTION()
+	void OnGrowRoomClicked();
+	UFUNCTION()
+	void OnShrinkRoomClicked();
+	UFUNCTION()
+	void OnRotateCCWPressed();
+	UFUNCTION()
+	void OnRotateCCWReleased();
+	UFUNCTION()
+	void OnRotateCWPressed();
+	UFUNCTION()
+	void OnRotateCWReleased();
+
 	// Re-colors each of the 10 mode buttons green if its mode is currently active, gray otherwise -
 	// bound to ANavPlayerController::OnEditModeChanged (fires on every mode on/off/switch, including
 	// via hotkey, not just this screen's own buttons) so the highlight stays correct regardless of
@@ -508,7 +524,19 @@ private:
 	UPROPERTY()
 	UButton* AddEscalatorModeButton = nullptr;
 
-	// The Toolbar panel's own root border (building switcher + mode toolbar) - was LeftSidebarBar.
+	UPROPERTY()
+	UButton* GrowRoomButton = nullptr;
+
+	UPROPERTY()
+	UButton* ShrinkRoomButton = nullptr;
+
+	UPROPERTY()
+	UButton* RotateCCWButton = nullptr;
+
+	UPROPERTY()
+	UButton* RotateCWButton = nullptr;
+
+	// The Toolbar panel's own root border (mode toolbar) - was LeftSidebarBar.
 	UPROPERTY()
 	UBorder* ToolbarPanel = nullptr;
 
@@ -665,11 +693,13 @@ private:
 	// room id to both stay readable in a Fill row.
 	static constexpr float SidebarMinWidth = 340.f;
 	static constexpr float SidebarMaxWidth = 600.f;
-	// Height of the fixed File/Window menu bar pinned across the top of the canvas - dock panels'
-	// top boundary (SidebarTopMargin, below) sits flush against it, same as every panel's left/right
-	// edges already sit flush against the screen's own edges.
-	static constexpr float MenuBarHeight = 32.f;
-	static constexpr float SidebarTopMargin = MenuBarHeight;
+	// Heights of the two fixed bars pinned across the top of the canvas (File/Window menu, then the
+	// building switcher bar directly below it) - dock panels' top boundary (SidebarTopMargin, below)
+	// sits flush under both, same as every panel's left/right edges already sit flush against the
+	// screen's own edges.
+	static constexpr float MenuBarHeight = 40.f;
+	static constexpr float BuildingSwitcherBarHeight = 48.f;
+	static constexpr float SidebarTopMargin = MenuBarHeight + BuildingSwitcherBarHeight;
 	static constexpr float SidebarBottomMargin = 10.f;
 	static constexpr float SidebarResizeHandleWidth = 8.f;
 	static constexpr float DockSnapThresholdPx = 20.f;
