@@ -8,6 +8,7 @@
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
@@ -20,61 +21,105 @@ TSharedRef<SWidget> UConfirmDialogWidget::RebuildWidget()
 		Canvas->SetVisibility(ESlateVisibility::Visible);
 		WidgetTree->RootWidget = Canvas;
 
-		// Full-screen opaque backdrop - blocks clicks to whatever's behind it, same as the
-		// original dialog being a modal.
+		// Same font size and dark near-black panel color as the rest of the app's chrome (see
+		// UInteriorScreenWidget::StandardFontSize/DockPanelColor) - this dialog predates that pass and
+		// was left at UMG's 24pt default with plain white/black boxes, which is why button labels like
+		// "Discard changes and leave" overflowed their own button at that size.
+		constexpr int32 DialogFontSize = 15;
+		const FLinearColor PanelColor(0.03f, 0.03f, 0.03f, 0.95f);
+
+		// Dims whatever's behind instead of blacking it out entirely - still blocks clicks through to
+		// it (same modal purpose as before), but reads as a dialog over the app rather than a jarring
+		// full-screen wipe to solid black.
 		UBorder* Backdrop = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Backdrop"));
-		Backdrop->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 1.f));
+		Backdrop->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.6f));
 		UCanvasPanelSlot* BackdropSlot = Canvas->AddChildToCanvas(Backdrop);
 		BackdropSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
 		BackdropSlot->SetOffsets(FMargin(0.f));
 
-		UVerticalBox* Stack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ConfirmStack"));
-		UCanvasPanelSlot* StackSlot = Canvas->AddChildToCanvas(Stack);
-		StackSlot->SetAnchors(FAnchors(0.5f, 0.5f));
-		StackSlot->SetAlignment(FVector2D(0.5f, 0.5f));
-		StackSlot->SetAutoSize(true);
+		// The dialog card itself - one dark panel holding the message and button row together, instead
+		// of a separate white message box floating above an unrelated button row.
+		UBorder* Card = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Card"));
+		Card->SetBrushColor(PanelColor);
+		Card->SetPadding(FMargin(20.f));
+		UCanvasPanelSlot* CardSlot = Canvas->AddChildToCanvas(Card);
+		CardSlot->SetAnchors(FAnchors(0.5f, 0.5f));
+		CardSlot->SetAlignment(FVector2D(0.5f, 0.5f));
+		CardSlot->SetAutoSize(true);
 
-		UBorder* MessageBackground = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("MessageBackground"));
-		MessageBackground->SetBrushColor(FLinearColor::White);
-		MessageBackground->SetPadding(FMargin(4.f));
+		UVerticalBox* Stack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ConfirmStack"));
+		Card->SetContent(Stack);
+
+		// Capped width + word wrap, rather than assuming the message is always one short sentence -
+		// keeps the card a sensible size even for a longer message later.
+		USizeBox* MessageSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		MessageSizeBox->SetMaxDesiredWidth(360.f);
 
 		UTextBlock* MessageText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_Message"));
 		MessageText->SetText(FText::FromString(TEXT("You have unsaved changes. Do you want to save them?")));
-		MessageText->SetColorAndOpacity(FSlateColor(FLinearColor::Black));
-		MessageBackground->SetContent(MessageText);
+		MessageText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		MessageText->SetJustification(ETextJustify::Center);
+		MessageText->SetAutoWrapText(true);
+		{
+			FSlateFontInfo MessageFont = MessageText->GetFont();
+			MessageFont.Size = DialogFontSize;
+			MessageText->SetFont(MessageFont);
+		}
+		MessageSizeBox->SetContent(MessageText);
 
-		UVerticalBoxSlot* MessageSlot = Stack->AddChildToVerticalBox(MessageBackground);
+		UVerticalBoxSlot* MessageSlot = Stack->AddChildToVerticalBox(MessageSizeBox);
 		MessageSlot->SetHorizontalAlignment(HAlign_Center);
-		MessageSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+		MessageSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 16.f));
 
 		UHorizontalBox* ButtonRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ButtonRow"));
-		Stack->AddChildToVerticalBox(ButtonRow);
+		UVerticalBoxSlot* ButtonRowSlot = Stack->AddChildToVerticalBox(ButtonRow);
+		ButtonRowSlot->SetHorizontalAlignment(HAlign_Center);
 
-		auto AddButton = [this, ButtonRow](const TCHAR* Name, const TCHAR* Label, float Width) -> UButton*
+		// Width is sized to comfortably fit each label at DialogFontSize on one line (no more wrapping
+		// needed once the font shrank from UMG's 24pt default) - a shared per-button color instead of
+		// the button's own uniform gray, so Discard (a destructive/leave-without-saving action) reads
+		// differently from Save/Cancel at a glance.
+		auto AddButton = [this, ButtonRow, DialogFontSize](const TCHAR* Name, const TCHAR* Label, float Width, const FLinearColor& Color) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+			Button->SetBackgroundColor(Color);
 
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
 			Text->SetText(FText::FromString(FString(Label)));
 			Text->SetJustification(ETextJustify::Center);
-			Text->SetAutoWrapText(true);
 			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			{
+				FSlateFontInfo ButtonFont = Text->GetFont();
+				ButtonFont.Size = DialogFontSize;
+				Text->SetFont(ButtonFont);
+			}
 
 			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
 			SizeBox->SetWidthOverride(Width);
-			SizeBox->SetHeightOverride(40.f);
-			SizeBox->SetContent(Text);
+			SizeBox->SetHeightOverride(36.f);
+			if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(SizeBox->SetContent(Text)))
+			{
+				TextSlot->SetHorizontalAlignment(HAlign_Center);
+				TextSlot->SetVerticalAlignment(VAlign_Center);
+			}
 			Button->SetContent(SizeBox);
 
-			UHorizontalBoxSlot* Slot = ButtonRow->AddChildToHorizontalBox(Button);
-			Slot->SetPadding(FMargin(0.f, 0.f, 2.f, 0.f));
+			UHorizontalBoxSlot* ButtonSlot = ButtonRow->AddChildToHorizontalBox(Button);
+			ButtonSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
 			return Button;
 		};
 
-		SaveAndLeaveButton = AddButton(TEXT("Btn_SaveAndLeave"), TEXT("Save and Exit"), 150.f);
-		DiscardAndLeaveButton = AddButton(TEXT("Btn_DiscardAndLeave"), TEXT("Discard changes and leave"), 220.f);
-		CancelButton = AddButton(TEXT("Btn_Cancel"), TEXT("Cancel"), 110.f);
+		const FLinearColor NeutralColor(0.35f, 0.35f, 0.35f, 1.f);
+		const FLinearColor DestructiveColor(0.55f, 0.2f, 0.2f, 1.f);
+
+		SaveAndLeaveButton = AddButton(TEXT("Btn_SaveAndLeave"), TEXT("Save and Exit"), 140.f, NeutralColor);
+		DiscardAndLeaveButton = AddButton(TEXT("Btn_DiscardAndLeave"), TEXT("Discard and Leave"), 150.f, DestructiveColor);
+		CancelButton = AddButton(TEXT("Btn_Cancel"), TEXT("Cancel"), 90.f, NeutralColor);
+		// Last button in the row - no trailing gap needed.
+		if (UHorizontalBoxSlot* CancelSlot = Cast<UHorizontalBoxSlot>(CancelButton->Slot))
+		{
+			CancelSlot->SetPadding(FMargin(0.f));
+		}
 	}
 
 	return Super::RebuildWidget();

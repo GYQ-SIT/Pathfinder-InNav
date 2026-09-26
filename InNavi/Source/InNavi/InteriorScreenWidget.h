@@ -236,6 +236,18 @@ private:
 	UFUNCTION()
 	void OnSwitch3DClicked();
 
+	// Calls PC->ResetCamera3DPreview() - only shown while in 3D preview (see ResetView3DButton).
+	UFUNCTION()
+	void OnResetView3DClicked();
+
+	// Calls PC->Increase/DecreaseMoveSpeed3DPreview() - only shown while in 3D preview (see
+	// DecreaseSpeedButton/IncreaseSpeedButton).
+	UFUNCTION()
+	void OnDecreaseSpeedClicked();
+
+	UFUNCTION()
+	void OnIncreaseSpeedClicked();
+
 	// Shared by OnFileMenuClicked/OnWindowMenuClicked (open one, implicitly closing the other) and
 	// MenuClickCatcher (close whichever is open) - also shows/hides MenuClickCatcher in step, so it's
 	// only ever hit-testable while a dropdown genuinely has something to dismiss.
@@ -796,6 +808,28 @@ private:
 	UPROPERTY()
 	UTextBlock* EditBuildingNameButtonText = nullptr;
 
+	// 2D/3D toggle + "Reset View"/move-speed +/- - see the comment above OnSwitch2DClicked. Live on
+	// the building switcher bar (same row as EditBuildingNameButton), not the menu bar above it.
+	UPROPERTY()
+	UButton* Switch2DButton = nullptr;
+
+	UPROPERTY()
+	UButton* Switch3DButton = nullptr;
+
+	// Only shown while in 3D preview (see HandlePreviewModeChanged). 3D preview leaves WASD/mouse-look
+	// free rather than locked to a fixed angle, so this is the "un-lose yourself" button - see
+	// PC->ResetCamera3DPreview's own comment.
+	UPROPERTY()
+	UButton* ResetView3DButton = nullptr;
+
+	// Adjust the free-fly pawn's WASD move speed - see PC->IncreaseMoveSpeed3DPreview's own comment.
+	// Shown/hidden together with ResetView3DButton.
+	UPROPERTY()
+	UButton* DecreaseSpeedButton = nullptr;
+
+	UPROPERTY()
+	UButton* IncreaseSpeedButton = nullptr;
+
 	bool bIsEditingBuildingName = false;
 
 	// Set right before showing the unsaved-changes confirm dialog for a building switch; read by
@@ -824,13 +858,6 @@ private:
 
 	UPROPERTY()
 	UButton* WindowMenuButton = nullptr;
-
-	// 2D/3D toggle - see the comment above OnSwitch2DClicked.
-	UPROPERTY()
-	UButton* Switch2DButton = nullptr;
-
-	UPROPERTY()
-	UButton* Switch3DButton = nullptr;
 
 	UPROPERTY()
 	UBorder* WindowMenuDropdown = nullptr;

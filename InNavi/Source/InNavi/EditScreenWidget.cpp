@@ -9,6 +9,7 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
@@ -33,7 +34,11 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		StackSlot->SetPosition(FVector2D(-20.f, 20.f));
 		StackSlot->SetAutoSize(true);
 
-		auto AddButton = [this, ButtonStack](const TCHAR* Name, const TCHAR* Label) -> UButton*
+		// 15pt, matching the rest of the app's UI text (see UInteriorScreenWidget::StandardFontSize) -
+		// this widget predates that pass and was left at UMG's 24pt default, which is why "Enter
+		// Interior" overflowed its own 150px-wide button.
+		constexpr int32 ButtonFontSize = 15;
+		auto AddButton = [this, ButtonStack, ButtonFontSize](const TCHAR* Name, const TCHAR* Label) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
@@ -42,16 +47,25 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			Text->SetText(FText::FromString(FString(Label)));
 			Text->SetJustification(ETextJustify::Center);
 			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			{
+				FSlateFontInfo ButtonFont = Text->GetFont();
+				ButtonFont.Size = ButtonFontSize;
+				Text->SetFont(ButtonFont);
+			}
 
 			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
 			SizeBox->SetWidthOverride(150.f);
 			SizeBox->SetHeightOverride(36.f);
-			SizeBox->SetContent(Text);
+			if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(SizeBox->SetContent(Text)))
+			{
+				TextSlot->SetHorizontalAlignment(HAlign_Center);
+				TextSlot->SetVerticalAlignment(VAlign_Center);
+			}
 			Button->SetContent(SizeBox);
 
-			UVerticalBoxSlot* Slot = ButtonStack->AddChildToVerticalBox(Button);
-			Slot->SetHorizontalAlignment(HAlign_Right);
-			Slot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+			UVerticalBoxSlot* ButtonSlot = ButtonStack->AddChildToVerticalBox(Button);
+			ButtonSlot->SetHorizontalAlignment(HAlign_Right);
+			ButtonSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
 			return Button;
 		};
 
