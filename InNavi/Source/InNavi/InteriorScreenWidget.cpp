@@ -80,6 +80,28 @@ void UInteriorScreenWidget::InitializeDockRuntimeArrays()
 	SplitterDragStartFractions.Init(TArray<float>(), MaxDockSplitters);
 }
 
+void UInteriorScreenWidget::ApplyStandardFont(UTextBlock* TextBlock)
+{
+	if (!TextBlock)
+	{
+		return;
+	}
+	FSlateFontInfo Font = TextBlock->GetFont();
+	Font.Size = StandardFontSize;
+	TextBlock->SetFont(Font);
+}
+
+void UInteriorScreenWidget::ApplyStandardFont(UEditableTextBox* TextBox)
+{
+	if (!TextBox)
+	{
+		return;
+	}
+	FEditableTextBoxStyle Style = TextBox->GetWidgetStyle();
+	Style.TextStyle.Font.Size = StandardFontSize;
+	TextBox->SetWidgetStyle(Style);
+}
+
 TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 {
 	if (WidgetTree && !WidgetTree->RootWidget)
@@ -109,20 +131,19 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		FloorPlanSlot->SetOffsets(FMargin(0.f));
 
 		// Every button on this screen (mode toolbar, Back, floor list rows, Add/Delete floor, Apply)
-		// shares this exact size, so nothing looks bigger/smaller than anything else. None of them
-		// override font size - they render at the same default size as everything else on this
-		// screen (e.g. the building switcher's "Block E6"), just sized generously enough to fit that
-		// default size without the text spilling past the button. Floor list rows are the one
-		// exception built elsewhere (see FloorListEntryWidget::RebuildWidget) - keep that in sync
-		// with these values by hand.
-		constexpr float StandardButtonWidth = 200.f;
-		constexpr float StandardButtonHeight = 44.f;
+		// shares this exact size, so nothing looks bigger/smaller than anything else - sized to
+		// comfortably fit StandardFontSize text without the label spilling past the button. Floor
+		// list rows are the one exception built elsewhere (see FloorListEntryWidget::RebuildWidget) -
+		// keep that in sync with these values by hand.
+		constexpr float StandardButtonWidth = 150.f;
+		constexpr float StandardButtonHeight = 32.f;
 
 		// Safety net, not the primary fix - wraps to a second line instead of spilling past the
 		// button on the rare label that's still too wide for StandardButtonWidth at default font size.
 		auto ApplyStandardTextWrap = [](UTextBlock* TextBlock)
 		{
 			TextBlock->SetAutoWrapText(true);
+			ApplyStandardFont(TextBlock);
 		};
 
 		// Each of the 3 dockable panels (Toolbar/Floor/Properties) is a UBorder wrapped in a
@@ -266,6 +287,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			UTextBlock* GroupLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(Name));
 			GroupLabel->SetText(FText::FromString(FString(Label)));
 			GroupLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.75f, 0.75f, 1.f)));
+			ApplyStandardFont(GroupLabel);
 			UVerticalBoxSlot* GroupLabelSlot = LeftSidebar->AddChildToVerticalBox(GroupLabel);
 			GroupLabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
 		};
@@ -276,7 +298,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// toolbar icons under /Game/ImageAssets (Icon_AddDoor, Icon_DrawRoom, ...), previously
 		// unreferenced in C++ (same asset pack already reused for the floor-plan connector markers
 		// in InteriorFloorPlanWidget).
-		constexpr float ModeButtonSize = 48.f;
+		constexpr float ModeButtonSize = 36.f;
 
 		// SetToolTipText's default tooltip renders at the engine's small default font size with no
 		// way to resize just that text. SetToolTip(Widget) takes over the whole tooltip instead, but
@@ -350,7 +372,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 				// button itself). DesiredSizeOverride forces every icon to render at the same size
 				// regardless of its source image's actual resolution.
 				Icon->SetBrushFromTexture(IconTexture, false);
-				Icon->SetDesiredSizeOverride(FVector2D(28.f, 28.f));
+				Icon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
 			}
 
 			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
@@ -406,9 +428,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// directions. Grow/Shrink and Rotate CW/CCW mirror PC's existing =/- and 9/0 keys exactly (see
 		// OnGrowRoomClicked etc.) rather than introducing any new interaction - small square buttons,
 		// two per row, per the hand-drawn layout.
-		constexpr float GizmoButtonSize = 32.f;
-		constexpr float GizmoIconSizeLarge = 22.f;
-		constexpr float GizmoIconSizeSmall = 14.f; // Shrink reuses Icon_GizmoMove at this smaller size instead of its own asset
+		constexpr float GizmoButtonSize = 26.f;
+		constexpr float GizmoIconSizeLarge = 18.f;
+		constexpr float GizmoIconSizeSmall = 11.f; // Shrink reuses Icon_GizmoMove at this smaller size instead of its own asset
 		auto AddGizmoIconButton = [this, MakeToolTipWidget, GizmoButtonSize](UHorizontalBox* Row, const TCHAR* Name, const TCHAR* IconAssetName, float IconSize, float IconRotationDegrees, const TCHAR* TooltipLabel) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
@@ -484,6 +506,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UTextBlock* FloorTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_FloorTitle"));
 		FloorTitle->SetText(FText::FromString(TEXT("Floor")));
 		FloorTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(FloorTitle);
 		UVerticalBoxSlot* FloorTitleSlot = FloorStack->AddChildToVerticalBox(FloorTitle);
 		FloorTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 
@@ -556,7 +579,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// it (both button widths are fixed, so their X positions are known up front - simpler than
 		// querying a HorizontalBox child's live position) rather than nested inside the same layout
 		// flow, so opening one never resizes the bar itself.
-		constexpr float MenuButtonWidth = 70.f;
+		constexpr float MenuButtonWidth = 50.f;
 		constexpr float MenuBarLeftMargin = 10.f;
 
 		UBorder* MenuBarBackground = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_MenuBar"));
@@ -582,6 +605,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			Text->SetText(FText::FromString(FString(Label)));
 			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 			Text->SetJustification(ETextJustify::Center);
+			ApplyStandardFont(Text);
 			USizeBox* MenuButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 			MenuButtonSizeBox->SetWidthOverride(MenuButtonWidth);
 			MenuButtonSizeBox->SetHeightOverride(MenuBarHeight);
@@ -669,9 +693,10 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			Text->SetText(FText::FromString(FString(Label)));
 			Text->SetJustification(ETextJustify::Center);
 			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			ApplyStandardFont(Text);
 			USizeBox* RowSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-			RowSizeBox->SetWidthOverride(120.f);
-			RowSizeBox->SetMinDesiredHeight(30.f);
+			RowSizeBox->SetWidthOverride(90.f);
+			RowSizeBox->SetMinDesiredHeight(24.f);
 			RowSizeBox->SetContent(Text);
 			Button->SetContent(RowSizeBox);
 			UVerticalBoxSlot* RowSlot = Stack->AddChildToVerticalBox(Button);
@@ -689,6 +714,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 			Text->SetText(FText::FromString(FString(Label)));
 			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			ApplyStandardFont(Text);
 			UHorizontalBoxSlot* TextSlot = Row->AddChildToHorizontalBox(Text);
 			TextSlot->SetPadding(FMargin(4.f, 0.f, 0.f, 0.f));
 			TextSlot->SetVerticalAlignment(VAlign_Center);
@@ -716,6 +742,20 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		WindowLayersCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowLayersCheckChanged);
 		WindowNavigationCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowNavigation"), TEXT("Navigation"));
 		WindowNavigationCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowNavigationCheckChanged);
+
+		// Full-screen, fully transparent, Collapsed by default - see the comment on
+		// OnMenuClickCatcherMouseButtonDown for why this is how "click elsewhere closes the dropdown"
+		// works. Z=5 sits above every dock panel/handle/splitter (2-4) but below the menu bar and
+		// dropdowns themselves (6-7), so File/Window and the open dropdown's own content stay
+		// clickable while anything else on screen closes it first instead of acting through.
+		MenuClickCatcher = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("MenuClickCatcher"));
+		MenuClickCatcher->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
+		MenuClickCatcher->SetVisibility(ESlateVisibility::Collapsed);
+		MenuClickCatcher->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnMenuClickCatcherMouseButtonDown);
+		UCanvasPanelSlot* MenuClickCatcherSlot = Canvas->AddChildToCanvas(MenuClickCatcher);
+		MenuClickCatcherSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
+		MenuClickCatcherSlot->SetOffsets(FMargin(0.f));
+		MenuClickCatcherSlot->SetZOrder(5);
 
 		// -- Building switcher bar: fixed chrome directly under the menu bar, spanning the full width
 		// like it does - holds the building switcher combo box (+ its edit-name button), pulled out of
@@ -746,6 +786,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		BuildingNameTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_BuildingName"));
 		BuildingNameTextBox->SetVisibility(ESlateVisibility::Collapsed);
+		ApplyStandardFont(BuildingNameTextBox);
 		UHorizontalBoxSlot* SwitcherTextSlot = SwitcherRow->AddChildToHorizontalBox(BuildingNameTextBox);
 		SwitcherTextSlot->SetVerticalAlignment(VAlign_Center);
 		SwitcherTextSlot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
@@ -813,6 +854,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		PropertiesTitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_PropertiesTitle"));
 		PropertiesTitleText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(PropertiesTitleText);
 		UVerticalBoxSlot* PropertiesTitleSlot = PropertiesStack->AddChildToVerticalBox(WrapLabelToPanelWidth(PropertiesTitleText, TEXT("Txt_PropertiesTitleSize")));
 		PropertiesTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 
@@ -823,6 +865,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		DoorRoomText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_DoorRoom"));
 		DoorRoomText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(DoorRoomText);
 		UVerticalBoxSlot* DoorRoomSlot = DoorFieldsBox->AddChildToVerticalBox(WrapLabelToPanelWidth(DoorRoomText, TEXT("Txt_DoorRoomSize")));
 		DoorRoomSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
 
@@ -839,6 +882,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UTextBlock* ConnectsToLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_ConnectsToLabel"));
 		ConnectsToLabel->SetText(FText::FromString(TEXT("Connect to")));
 		ConnectsToLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(ConnectsToLabel);
 		UHorizontalBoxSlot* ConnectsToLabelSlot = ConnectsToRow->AddChildToHorizontalBox(ConnectsToLabel);
 		ConnectsToLabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
 		ConnectsToLabelSlot->SetVerticalAlignment(VAlign_Center);
@@ -878,11 +922,13 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UTextBlock* RoomNameLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_RoomNameLabel"));
 		RoomNameLabel->SetText(FText::FromString(TEXT("Name :")));
 		RoomNameLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(RoomNameLabel);
 		UHorizontalBoxSlot* RoomNameLabelSlot = RoomNameRow->AddChildToHorizontalBox(RoomNameLabel);
 		RoomNameLabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
 		RoomNameLabelSlot->SetVerticalAlignment(VAlign_Center);
 
 		RoomNameTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_RoomName"));
+		ApplyStandardFont(RoomNameTextBox);
 		// Fill (matches ConnectsToComboBox) so this still tracks the panel width like everything
 		// else, instead of sitting at a fixed size - readability at a narrow width is handled by
 		// raising SidebarMinWidth instead (see its own comment) so there's just always enough room,
@@ -914,12 +960,14 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		ConnectorTypeText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_ConnectorType"));
 		ConnectorTypeText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(ConnectorTypeText);
 		UVerticalBoxSlot* ConnectorTypeSlot = ConnectorFieldsBox->AddChildToVerticalBox(WrapLabelToPanelWidth(ConnectorTypeText, TEXT("Txt_ConnectorTypeSize")));
 		ConnectorTypeSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
 
 		UTextBlock* FloorsLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_FloorsLabel"));
 		FloorsLabel->SetText(FText::FromString(TEXT("Floors :")));
 		FloorsLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(FloorsLabel);
 		UVerticalBoxSlot* FloorsLabelSlot = ConnectorFieldsBox->AddChildToVerticalBox(FloorsLabel);
 		FloorsLabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
 
@@ -947,6 +995,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			UTextBlock* FloorLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(*FString::Printf(TEXT("Txt_Floor%dLabel"), FloorNumber)));
 			FloorLabel->SetText(FText::AsNumber(FloorNumber));
 			FloorLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			ApplyStandardFont(FloorLabel);
 			UHorizontalBoxSlot* FloorLabelSlot = FloorEntry->AddChildToHorizontalBox(FloorLabel);
 			FloorLabelSlot->SetPadding(FMargin(2.f, 0.f, 0.f, 0.f));
 			FloorLabelSlot->SetVerticalAlignment(VAlign_Center);
@@ -997,11 +1046,13 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UTextBlock* LayersTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_LayersTitle"));
 		LayersTitle->SetText(FText::FromString(TEXT("Layers")));
 		LayersTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(LayersTitle);
 		UVerticalBoxSlot* LayersTitleSlot = LayersStack->AddChildToVerticalBox(LayersTitle);
 		LayersTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 
 		LayersSearchBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_LayersSearch"));
 		LayersSearchBox->SetHintText(FText::FromString(TEXT("Search")));
+		ApplyStandardFont(LayersSearchBox);
 		LayersSearchBox->OnTextChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleLayersSearchTextChanged);
 		USizeBox* LayersSearchSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Txt_LayersSearchSize"));
 		LayersSearchSizeBox->SetWidthOverride(StandardButtonWidth);
@@ -1041,6 +1092,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UTextBlock* NavTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_NavTitle"));
 		NavTitle->SetText(FText::FromString(TEXT("Navigation")));
 		NavTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(NavTitle);
 		UVerticalBoxSlot* NavTitleSlot = NavStack->AddChildToVerticalBox(NavTitle);
 		NavTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 
@@ -1049,6 +1101,33 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		ApplyStandardTextWrap(NavContextText);
 		UVerticalBoxSlot* NavContextSlot = NavStack->AddChildToVerticalBox(NavContextText);
 		NavContextSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+
+		// Room dropdowns - an alternative to clicking a point on the floor plan (see the comment
+		// above HandleNavStartRoomChanged). Populated with every real room across every floor, so
+		// picking one can jump straight to a room on a different floor than the one currently shown.
+		auto AddNavRoomDropdown = [this, NavStack](const TCHAR* Name, const TCHAR* LabelText) -> UComboBoxString*
+		{
+			UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
+			Label->SetText(FText::FromString(FString(LabelText)));
+			Label->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			ApplyStandardFont(Label);
+			UVerticalBoxSlot* LabelSlot = NavStack->AddChildToVerticalBox(Label);
+			LabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+
+			UComboBoxString* ComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), FName(Name));
+			ComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
+			USizeBox* ComboSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
+			ComboSizeBox->SetWidthOverride(StandardButtonWidth);
+			ComboSizeBox->SetContent(ComboBox);
+			UVerticalBoxSlot* ComboSlot = NavStack->AddChildToVerticalBox(ComboSizeBox);
+			ComboSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+			return ComboBox;
+		};
+
+		NavStartRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavStartRoom"), TEXT("Start Room"));
+		NavStartRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavStartRoomChanged);
+		NavDestinationRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavDestinationRoom"), TEXT("Destination Room"));
+		NavDestinationRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavDestinationRoomChanged);
 
 		auto AddNavButton = [this, NavStack, ApplyStandardTextWrap](const TCHAR* Name, const TCHAR* Label, UTextBlock*& OutLabel) -> UButton*
 		{
@@ -1145,6 +1224,9 @@ void UInteriorScreenWidget::NativeConstruct()
 		// Same reasoning - the [/]/F/X floor keyboard shortcuts change the active floor without ever
 		// going through this screen's own Floor panel handlers.
 		PC->OnActiveFloorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
+		// Rooms are created/deleted/renamed via floor-plan clicks and the Properties panel, neither of
+		// which goes through this screen's own handlers either.
+		PC->OnInteriorContentChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleInteriorContentChanged);
 
 		// Navigation panel: hand ws/jh's UNavigationPanelWidget this screen's own Navigation Border to
 		// hit-test against (see SetPanelBorderForHitTest's own comment) and subscribe to its
@@ -1161,6 +1243,7 @@ void UInteriorScreenWidget::NativeConstruct()
 	RefreshFloorList();
 	RefreshLayersList();
 	RefreshNavigationPanelDisplay();
+	RefreshNavRoomDropdowns();
 	RefreshModeButtonHighlights();
 	// Syncs Properties' placeholder title/visibility against PC's actual current selection state
 	// (normally nothing yet, but defensive either way) before panels get positioned below.
@@ -1180,6 +1263,7 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnEditModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleEditModeChanged);
 		PC->OnProjectSaved.RemoveDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
 		PC->OnActiveFloorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
+		PC->OnInteriorContentChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleInteriorContentChanged);
 
 		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
 		{
@@ -1329,7 +1413,8 @@ bool UInteriorScreenWidget::IsScreenPositionOverPanelButton(EDockPanelId Id, con
 		Widgets = { LayersSearchBox, LayersListBox };
 		break;
 	case EDockPanelId::Navigation:
-		Widgets = { NavSetStartButton, NavSetDestinationButton, NavFindRouteButton, NavClearRouteButton };
+		Widgets = { NavSetStartButton, NavSetDestinationButton, NavFindRouteButton, NavClearRouteButton,
+			NavStartRoomComboBox, NavDestinationRoomComboBox };
 		break;
 	}
 
@@ -2387,6 +2472,12 @@ void UInteriorScreenWidget::HandleActiveFloorChanged()
 	RefreshNavigationPanelDisplay();
 }
 
+void UInteriorScreenWidget::HandleInteriorContentChanged()
+{
+	RefreshLayersList();
+	RefreshNavRoomDropdowns();
+}
+
 void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 {
 	// Toolbar: the building switcher used to live in this panel and tracked its width here - it's now
@@ -2491,6 +2582,20 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 	ResizeButton(NavSetDestinationButton, NavigationButtonWidth);
 	ResizeButton(NavFindRouteButton, NavigationButtonWidth);
 	ResizeButton(NavClearRouteButton, NavigationButtonWidth);
+	if (NavStartRoomComboBox)
+	{
+		if (USizeBox* SizeBox = Cast<USizeBox>(NavStartRoomComboBox->GetParent()))
+		{
+			SizeBox->SetWidthOverride(NavigationButtonWidth);
+		}
+	}
+	if (NavDestinationRoomComboBox)
+	{
+		if (USizeBox* SizeBox = Cast<USizeBox>(NavDestinationRoomComboBox->GetParent()))
+		{
+			SizeBox->SetWidthOverride(NavigationButtonWidth);
+		}
+	}
 }
 
 void UInteriorScreenWidget::RefreshModeButtonHighlights()
@@ -3059,6 +3164,7 @@ void UInteriorScreenWidget::OnAddFloorClicked()
 	RefreshFloorList();
 	RefreshLayersList();
 	RefreshNavigationPanelDisplay();
+	RefreshNavRoomDropdowns();
 }
 
 void UInteriorScreenWidget::OnRemoveFloorClicked()
@@ -3070,6 +3176,7 @@ void UInteriorScreenWidget::OnRemoveFloorClicked()
 	RefreshFloorList();
 	RefreshLayersList();
 	RefreshNavigationPanelDisplay();
+	RefreshNavRoomDropdowns();
 }
 
 void UInteriorScreenWidget::OnNavSetStartClicked()
@@ -3198,6 +3305,62 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 	}
 }
 
+void UInteriorScreenWidget::HandleNavStartRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
+{
+	// Same reasoning as HandleBuildingSwitcherChanged - only react to the user's own pick, not this
+	// function's own SetSelectedOption calls (RefreshNavRoomDropdowns doesn't currently make any,
+	// but matching the established guard here costs nothing and avoids a future footgun).
+	if (SelectionType == ESelectInfo::Direct)
+	{
+		return;
+	}
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->SetStartToRoom(SelectedItem);
+		}
+	}
+}
+
+void UInteriorScreenWidget::HandleNavDestinationRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
+{
+	if (SelectionType == ESelectInfo::Direct)
+	{
+		return;
+	}
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->SetDestinationToRoom(SelectedItem);
+		}
+	}
+}
+
+void UInteriorScreenWidget::RefreshNavRoomDropdowns()
+{
+	if (!NavStartRoomComboBox || !NavDestinationRoomComboBox)
+	{
+		return;
+	}
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	UNavigationPanelWidget* Nav = PC ? PC->GetNavigationPanel() : nullptr;
+	if (!Nav)
+	{
+		return;
+	}
+
+	NavStartRoomComboBox->ClearOptions();
+	NavDestinationRoomComboBox->ClearOptions();
+	for (const UNavigationPanelWidget::FNavigationRoomOption& Option : Nav->GetSelectableRooms())
+	{
+		const FString Label = Option.GetDisplayLabel();
+		NavStartRoomComboBox->AddOption(Label);
+		NavDestinationRoomComboBox->AddOption(Label);
+	}
+}
+
 void UInteriorScreenWidget::RefreshBuildingSwitcher()
 {
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
@@ -3245,6 +3408,7 @@ void UInteriorScreenWidget::HandleBuildingSwitcherChanged(FString SelectedItem, 
 		RefreshFloorList();
 		RefreshLayersList();
 		RefreshNavigationPanelDisplay();
+		RefreshNavRoomDropdowns();
 		return;
 	}
 
@@ -3272,6 +3436,7 @@ void UInteriorScreenWidget::HandleSwitchBuildingSave()
 	RefreshFloorList();
 	RefreshLayersList();
 	RefreshNavigationPanelDisplay();
+	RefreshNavRoomDropdowns();
 }
 
 void UInteriorScreenWidget::HandleSwitchBuildingDiscard()
@@ -3288,6 +3453,7 @@ void UInteriorScreenWidget::HandleSwitchBuildingDiscard()
 	RefreshFloorList();
 	RefreshLayersList();
 	RefreshNavigationPanelDisplay();
+	RefreshNavRoomDropdowns();
 }
 
 void UInteriorScreenWidget::HandleSwitchBuildingCancel()
@@ -3330,6 +3496,7 @@ UWidget* UInteriorScreenWidget::HandleGenerateComboBoxItem(FString Item)
 	UTextBlock* ItemText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 	ItemText->SetText(FText::FromString(Item));
 	ItemText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	ApplyStandardFont(ItemText);
 	return ItemText;
 }
 
@@ -3467,13 +3634,14 @@ void UInteriorScreenWidget::OnFileMenuClicked()
 	{
 		return;
 	}
-
-	const bool bWasOpen = FileMenuDropdown->GetVisibility() != ESlateVisibility::Collapsed;
-	if (WindowMenuDropdown)
+	if (FileMenuDropdown->GetVisibility() != ESlateVisibility::Collapsed)
 	{
-		WindowMenuDropdown->SetVisibility(ESlateVisibility::Collapsed);
+		CloseMenuDropdowns();
 	}
-	FileMenuDropdown->SetVisibility(bWasOpen ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	else
+	{
+		OpenMenuDropdown(FileMenuDropdown);
+	}
 }
 
 void UInteriorScreenWidget::OnWindowMenuClicked()
@@ -3482,21 +3650,57 @@ void UInteriorScreenWidget::OnWindowMenuClicked()
 	{
 		return;
 	}
-
-	const bool bWasOpen = WindowMenuDropdown->GetVisibility() != ESlateVisibility::Collapsed;
-	if (FileMenuDropdown)
+	if (WindowMenuDropdown->GetVisibility() != ESlateVisibility::Collapsed)
 	{
-		FileMenuDropdown->SetVisibility(ESlateVisibility::Collapsed);
+		CloseMenuDropdowns();
 	}
-	WindowMenuDropdown->SetVisibility(bWasOpen ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	else
+	{
+		OpenMenuDropdown(WindowMenuDropdown);
+	}
 }
 
-void UInteriorScreenWidget::OnFileNewClicked()
+void UInteriorScreenWidget::OpenMenuDropdown(UBorder* Dropdown)
+{
+	if (FileMenuDropdown)
+	{
+		FileMenuDropdown->SetVisibility(Dropdown == FileMenuDropdown ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (WindowMenuDropdown)
+	{
+		WindowMenuDropdown->SetVisibility(Dropdown == WindowMenuDropdown ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (MenuClickCatcher)
+	{
+		MenuClickCatcher->SetVisibility(ESlateVisibility::Visible);
+	}
+}
+
+void UInteriorScreenWidget::CloseMenuDropdowns()
 {
 	if (FileMenuDropdown)
 	{
 		FileMenuDropdown->SetVisibility(ESlateVisibility::Collapsed);
 	}
+	if (WindowMenuDropdown)
+	{
+		WindowMenuDropdown->SetVisibility(ESlateVisibility::Collapsed);
+	}
+	if (MenuClickCatcher)
+	{
+		MenuClickCatcher->SetVisibility(ESlateVisibility::Collapsed);
+	}
+}
+
+FEventReply UInteriorScreenWidget::OnMenuClickCatcherMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+{
+	CloseMenuDropdowns();
+	return UWidgetBlueprintLibrary::Handled();
+}
+
+void UInteriorScreenWidget::OnFileNewClicked()
+{
+	CloseMenuDropdowns();
 
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
 	if (!PC)
@@ -3554,10 +3758,7 @@ void UInteriorScreenWidget::HandleFileNewCancel()
 
 void UInteriorScreenWidget::OnFileLoadClicked()
 {
-	if (FileMenuDropdown)
-	{
-		FileMenuDropdown->SetVisibility(ESlateVisibility::Collapsed);
-	}
+	CloseMenuDropdowns();
 
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
 	if (!PC)

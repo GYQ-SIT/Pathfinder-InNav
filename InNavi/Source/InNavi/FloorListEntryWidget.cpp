@@ -22,12 +22,18 @@ TSharedRef<SWidget> UFloorListEntryWidget::RebuildWidget()
 		Label->SetJustification(ETextJustify::Center);
 		Label->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		Label->SetAutoWrapText(true);
+		{
+			// Matches UInteriorScreenWidget::StandardFontSize - keep the two in sync by hand if that
+			// one changes, same reasoning as the width default below.
+			FSlateFontInfo LabelFont = Label->GetFont();
+			LabelFont.Size = 15;
+			Label->SetFont(LabelFont);
+		}
 
 		// Width starts at whatever SetWidth was last called with (or the 200 default if never
-		// called - matches every other button's old fixed size). No font override here either, same
-		// as the other buttons - this renders at the same default size as the rest of the screen.
+		// called - matches every other button's old fixed size).
 		SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("SizeBox_FloorEntry"));
-		SizeBox->SetMinDesiredHeight(44.f);
+		SizeBox->SetMinDesiredHeight(32.f);
 		SizeBox->SetContent(Label);
 		Button->SetContent(SizeBox);
 

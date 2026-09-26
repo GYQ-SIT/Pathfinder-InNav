@@ -110,6 +110,14 @@ private:
 	UFUNCTION()
 	void HandleActiveFloorChanged();
 
+	// Bound to ANavPlayerController::OnInteriorContentChanged - see the comment on that delegate.
+	// Rooms are created/deleted/renamed via floor-plan clicks and the Properties panel, none of which
+	// go through this screen's own Floor/Navigation handlers, so without this the Layers list and the
+	// Navigation panel's room dropdowns would silently go stale until some unrelated refresh happened
+	// to also run.
+	UFUNCTION()
+	void HandleInteriorContentChanged();
+
 	void RefreshModeButtonHighlights();
 
 	// Door/Room/Connector properties all share one PropertiesPanel (see RebuildWidget) instead of
@@ -199,6 +207,22 @@ private:
 
 	UFUNCTION()
 	void OnWindowMenuClicked();
+
+	// Shared by OnFileMenuClicked/OnWindowMenuClicked (open one, implicitly closing the other) and
+	// MenuClickCatcher (close whichever is open) - also shows/hides MenuClickCatcher in step, so it's
+	// only ever hit-testable while a dropdown genuinely has something to dismiss.
+	void OpenMenuDropdown(UBorder* Dropdown);
+	void CloseMenuDropdowns();
+
+	// MenuClickCatcher is a full-screen, fully transparent Border sitting above every dock panel but
+	// below the dropdowns/menu bar themselves (see RebuildWidget) - the standard way to get "click
+	// anywhere else closes the dropdown" in UMG, since a raw OnMouseButtonDownEvent bound to one
+	// specific widget (e.g. the background) only fires when THAT widget is what's actually under the
+	// cursor, not for clicks that land on some other widget instead (a dock panel, a button, ...).
+	// Swallows the click that closes it (Handled) rather than also letting it act on whatever's
+	// underneath - the same first-click-just-dismisses convention most UIs use for this.
+	UFUNCTION()
+	FEventReply OnMenuClickCatcherMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	// File > New / File > Load - the exact same actions as UStartScreenWidget's own two buttons
 	// (PC->StartNewProject / PC->BrowseForBuildingDataFile + PC->LoadBuildingDataFromPath), reached
@@ -319,6 +343,20 @@ private:
 
 	void RefreshNavigationPanelDisplay();
 
+	// Start/Destination room dropdowns - an alternative to clicking a point on the floor plan.
+	// Populated from UNavigationPanelWidget::GetSelectableRooms() (real rooms only, across every
+	// floor); picking one calls straight through to SetStartToRoom/SetDestinationToRoom, which sets
+	// the room's own centroid as the point (see that function's own comment for why a centroid, not
+	// a door). Only repopulated when the room list could actually have changed (building/floor
+	// structure), not on every click - see the RefreshNavRoomDropdowns call sites.
+	UFUNCTION()
+	void HandleNavStartRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+	UFUNCTION()
+	void HandleNavDestinationRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+	void RefreshNavRoomDropdowns();
+
 	// --- Docking system for the Toolbar/Floor/Properties/Layers/Navigation panels ---
 	// Each of the 5 panels below is an independently draggable UBorder placed directly on the root
 	// canvas (not nested in a shared bar/VerticalBox like the old Left/Right sidebar bars). Dragging
@@ -415,6 +453,15 @@ private:
 	// DockPanelWidths entry, now tracked per-panel instead of per-bar.
 	void RefreshDockPanelContentWidths();
 	float ComputePanelButtonWidth(EDockPanelId Id) const { return FMath::Max(80.f, DockPanelWidths[(int32)Id] - 48.f); }
+
+	// Sets TextBlock's font size to StandardFontSize, leaving every other font property (typeface,
+	// style) as whatever it already was. A plain member function rather than a RebuildWidget-local
+	// lambda since HandleGenerateComboBoxItem (a combo box's per-item text, used by the building
+	// switcher and the Navigation room dropdowns) needs it too, outside RebuildWidget's own scope.
+	static void ApplyStandardFont(UTextBlock* TextBlock);
+	// Same, for a UEditableTextBox (the building name field, room name field, Layers search box) -
+	// its font lives on its WidgetStyle.TextStyle rather than being a direct SetFont() call.
+	static void ApplyStandardFont(UEditableTextBox* TextBox);
 
 	FVector2D GetPanelPosition(EDockPanelId Id) const;
 	FVector2D GetPanelSize(EDockPanelId Id) const;
@@ -680,6 +727,12 @@ private:
 	UTextBlock* NavContextText = nullptr;
 
 	UPROPERTY()
+	UComboBoxString* NavStartRoomComboBox = nullptr;
+
+	UPROPERTY()
+	UComboBoxString* NavDestinationRoomComboBox = nullptr;
+
+	UPROPERTY()
 	UButton* NavSetStartButton = nullptr;
 
 	UPROPERTY()
@@ -743,6 +796,9 @@ private:
 	UBorder* WindowMenuDropdown = nullptr;
 
 	UPROPERTY()
+	UBorder* MenuClickCatcher = nullptr;
+
+	UPROPERTY()
 	UCheckBox* WindowToolbarCheckbox = nullptr;
 
 	UPROPERTY()
@@ -762,17 +818,25 @@ private:
 	TArray<bool> bDockPanelUserHidden;
 
 	// Shared width bounds for every dock panel, and the snap/splitter tuning constants - also used
-	// by RebuildWidget for the panels' initial width. Raised from 260 - at 260, a panel's button
-	// width (Width - 48) bottoms out at 212, which wasn't enough room for "Name :" plus a typical
-	// room id to both stay readable in a Fill row.
-	static constexpr float SidebarMinWidth = 340.f;
+	// by RebuildWidget for the panels' initial width. Originally 340 (raised from 260, which wasn't
+	// enough room for "Name :" plus a typical room id to both stay readable in a Fill row - but that
+	// was back when every panel's text rendered at UTextBlock's 24pt default). Now that text renders
+	// at StandardFontSize instead, the same content needs meaningfully less width, so this has come
+	// back down further still. Toolbar in particular never needed anywhere near 340 - its buttons are
+	// a fixed 48x48 regardless of panel width.
+	static constexpr float SidebarMinWidth = 100.f;
+	// Every panel's own text (titles, button labels, status/context/detail text, dropdown items) is
+	// set to this instead of leaving UTextBlock's own default (24pt) - applied via ApplyStandardFont
+	// at each text's construction site, since UMG has no single "default style" to override once for
+	// every independently-constructed UTextBlock.
+	static constexpr int32 StandardFontSize = 15;
 	static constexpr float SidebarMaxWidth = 600.f;
 	// Heights of the two fixed bars pinned across the top of the canvas (File/Window menu, then the
 	// building switcher bar directly below it) - dock panels' top boundary (SidebarTopMargin, below)
 	// sits flush under both, same as every panel's left/right edges already sit flush against the
 	// screen's own edges.
-	static constexpr float MenuBarHeight = 40.f;
-	static constexpr float BuildingSwitcherBarHeight = 48.f;
+	static constexpr float MenuBarHeight = 32.f;
+	static constexpr float BuildingSwitcherBarHeight = 40.f;
 	static constexpr float SidebarTopMargin = MenuBarHeight + BuildingSwitcherBarHeight;
 	static constexpr float SidebarBottomMargin = 10.f;
 	static constexpr float SidebarResizeHandleWidth = 8.f;

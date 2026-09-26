@@ -2,6 +2,7 @@
 
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
+#include "InteriorRoom.h"
 #include "PolyBuilding.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -20,6 +21,56 @@ namespace
 		case EInteriorNavNodeType::Escalator: return TEXT("escalator");
 		default: return TEXT("connector");
 		}
+	}
+
+	// Area-weighted centroid ("center of mass") of a simple polygon - the standard formula, correct
+	// for any convex OR concave shape, not just a vertex average or bounding-box center (either of
+	// which can land badly off-center, or even outside the shape entirely, on an irregular room).
+	// Falls back to a plain vertex average only for a degenerate footprint (fewer than 3 points, or
+	// zero signed area) where the area formula can't be used at all.
+	FVector2D ComputePolygonCentroid(const TArray<FVector2D>& Footprint)
+	{
+		if (Footprint.Num() == 0)
+		{
+			return FVector2D::ZeroVector;
+		}
+
+		auto VertexAverage = [&Footprint]() -> FVector2D
+		{
+			FVector2D Sum = FVector2D::ZeroVector;
+			for (const FVector2D& Point : Footprint)
+			{
+				Sum += Point;
+			}
+			return Sum / Footprint.Num();
+		};
+
+		if (Footprint.Num() < 3)
+		{
+			return VertexAverage();
+		}
+
+		double SignedArea = 0.0;
+		double Cx = 0.0;
+		double Cy = 0.0;
+		for (int32 Index = 0; Index < Footprint.Num(); ++Index)
+		{
+			const FVector2D& P0 = Footprint[Index];
+			const FVector2D& P1 = Footprint[(Index + 1) % Footprint.Num()];
+			const double Cross = (double)P0.X * P1.Y - (double)P1.X * P0.Y;
+			SignedArea += Cross;
+			Cx += (P0.X + P1.X) * Cross;
+			Cy += (P0.Y + P1.Y) * Cross;
+		}
+		SignedArea *= 0.5;
+		if (FMath::IsNearlyZero(SignedArea))
+		{
+			return VertexAverage();
+		}
+
+		Cx /= (6.0 * SignedArea);
+		Cy /= (6.0 * SignedArea);
+		return FVector2D((float)Cx, (float)Cy);
 	}
 }
 
@@ -152,6 +203,89 @@ void UNavigationPanelWidget::SelectPoint(FVector2D FootprintPosition, int32 Floo
 		*EndpointName,
 		FootprintPosition.X, FootprintPosition.Y, Floor);
 	SetStatusMessage(AcceptedMessage, ENavigationMessageKind::Success);
+}
+
+TArray<UNavigationPanelWidget::FNavigationRoomOption> UNavigationPanelWidget::GetSelectableRooms() const
+{
+	TArray<FNavigationRoomOption> Options;
+	if (!Generator || !Interior || Interior->GetLoadedBuildingId().IsEmpty())
+	{
+		return Options;
+	}
+	APolyBuilding* Building = Generator->FindBuildingById(Interior->GetLoadedBuildingId());
+	if (!Building)
+	{
+		return Options;
+	}
+
+	for (int32 Floor = 1; Floor <= Building->GetFloorCount(); ++Floor)
+	{
+		for (AInteriorRoom* Room : Interior->GetRoomsOnFloor(Floor))
+		{
+			// Walls/standalone partitions share the same class and id namespace as real rooms (see
+			// AInteriorRoom::IsClosedLoop) - only closed-loop ones are actual rooms a person can
+			// stand in.
+			if (!Room || !Room->IsClosedLoop())
+			{
+				continue;
+			}
+			FNavigationRoomOption Option;
+			Option.RoomName = Room->RoomName.IsEmpty() ? Room->RoomId : Room->RoomName;
+			Option.Floor = Floor;
+			Option.Centroid = ComputePolygonCentroid(Room->GetFootprint());
+			Options.Add(Option);
+		}
+	}
+	return Options;
+}
+
+bool UNavigationPanelWidget::SetStartToRoom(const FString& RoomOptionLabel)
+{
+	return SetEndpointToRoom(RoomOptionLabel, true);
+}
+
+bool UNavigationPanelWidget::SetDestinationToRoom(const FString& RoomOptionLabel)
+{
+	return SetEndpointToRoom(RoomOptionLabel, false);
+}
+
+bool UNavigationPanelWidget::SetEndpointToRoom(const FString& RoomOptionLabel, bool bIsStart)
+{
+	const TArray<FNavigationRoomOption> Options = GetSelectableRooms();
+	const FNavigationRoomOption* Found = Options.FindByPredicate([&RoomOptionLabel](const FNavigationRoomOption& Option)
+	{
+		return Option.GetDisplayLabel() == RoomOptionLabel;
+	});
+	if (!Found)
+	{
+		SetStatusMessage(TEXT("Could not find that room."), ENavigationMessageKind::Error);
+		return false;
+	}
+
+	APolyBuilding* Building = Generator ? Generator->FindBuildingById(Interior->GetLoadedBuildingId()) : nullptr;
+	FString Error;
+	if (!Building || !FNavigationRoutePlanner::IsValidPoint(*Building, *Interior, Generator->GetScale(),
+		Found->Floor, Found->Centroid, Error))
+	{
+		SetStatusMessage(FString::Printf(TEXT("'%s''s center isn't reachable (%s) - try clicking a point inside it instead."),
+			*Found->RoomName, *Error), ENavigationMessageKind::Error);
+		return false;
+	}
+
+	// A dropdown pick is a direct, immediate set - cancel any in-progress click-to-pick rather than
+	// leaving it dangling.
+	SelectionMode = ENavigationSelectionMode::None;
+
+	FSelectedEndpoint& Endpoint = bIsStart ? Start : Destination;
+	Endpoint.bValid = true;
+	Endpoint.Point.Position = Found->Centroid;
+	Endpoint.Point.Floor = Found->Floor;
+	Endpoint.BuildingId = Building->BuildingId;
+	RoutePoints.Reset();
+	bLastFindRouteFailed = false;
+	SetStatusMessage(FString::Printf(TEXT("%s set to '%s'."), bIsStart ? TEXT("Start") : TEXT("Destination"), *Found->RoomName),
+		ENavigationMessageKind::Success);
+	return true;
 }
 
 void UNavigationPanelWidget::RequestFindRoute()

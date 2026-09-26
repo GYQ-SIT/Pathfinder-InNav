@@ -61,5 +61,5 @@ private:
 
 	int32 FloorNumber = 0;
 	bool bIsActive = false;
-	float Width = 200.f;
+	float Width = 150.f;
 };

@@ -989,6 +989,7 @@ bool ANavPlayerController::SetSelectedRoomName(const FString& NewName)
 	if (bSuccess)
 	{
 		bHasUnsavedChanges = true;
+		OnInteriorContentChanged.Broadcast();
 	}
 	else
 	{
@@ -1134,6 +1135,7 @@ bool ANavPlayerController::DeleteRoom(const FString& RoomId)
 			SelectedDoorId.Empty();
 			OnSelectedDoorChanged.Broadcast(FString(), FString());
 		}
+		OnInteriorContentChanged.Broadcast();
 	}
 	return bSuccess;
 }
@@ -1407,6 +1409,7 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter
 	// Selecting it immediately means =/- (or a future resize UI) can act on it right away without
 	// an extra click.
 	SelectRoom(NewRoom->RoomId);
+	OnInteriorContentChanged.Broadcast();
 	return NewRoom;
 }
 
@@ -1506,6 +1509,7 @@ AInteriorRoom* ANavPlayerController::FinishRoom(const FString& RoomId, const FSt
 	FlushPersistentDebugLines(GetWorld());
 	PendingRoomFootprint.Reset();
 	OnRoomPointCountChanged.Broadcast(0);
+	OnInteriorContentChanged.Broadcast();
 	return NewRoom;
 }
 

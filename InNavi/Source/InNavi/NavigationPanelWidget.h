@@ -82,6 +82,36 @@ public:
 	// success, ClearAll, or picking a new Start/Destination point (the old attempt no longer applies).
 	bool DidLastFindRouteFail() const { return bLastFindRouteFailed; }
 
+	// One selectable entry for the Start/Destination room dropdowns - Centroid is the room's own
+	// area-weighted center (see ComputePolygonCentroid in the .cpp), not a door or a corner, since a
+	// room can have more than one door and no single door is "the" point that represents it.
+	struct FNavigationRoomOption
+	{
+		FString RoomName;
+		int32 Floor = 1;
+		FVector2D Centroid = FVector2D::ZeroVector;
+
+		// Shared by both the dropdown's own population (UInteriorScreenWidget) and matching a
+		// selection back to its option (SetStartToRoom/SetDestinationToRoom) - one format, so they
+		// can never drift out of sync with each other. Always includes the floor, not just when
+		// names collide, so the format never has to change and pick a room genuinely still isn't
+		// ambiguous when two floors happen to reuse the same room name.
+		FString GetDisplayLabel() const { return FString::Printf(TEXT("%s (Floor %d)"), *RoomName, Floor); }
+	};
+
+	// Every closed-loop room (walls/standalone partitions are excluded - see AInteriorRoom::
+	// IsClosedLoop) across every floor of the currently loaded building. Empty if nothing's loaded.
+	TArray<FNavigationRoomOption> GetSelectableRooms() const;
+
+	// Sets Start/Destination directly to the named room's centroid, bypassing the click-to-pick flow
+	// (and cancelling one if it was in progress) - what the Navigation panel's room dropdowns call.
+	// RoomOptionLabel is an FNavigationRoomOption::GetDisplayLabel() string, as populated into the
+	// dropdown. Returns false (with a status message explaining why) if no such room exists, or its
+	// centroid isn't actually a reachable point (e.g. an extremely irregular room shape whose area
+	// centroid falls outside its own footprint).
+	bool SetStartToRoom(const FString& RoomOptionLabel);
+	bool SetDestinationToRoom(const FString& RoomOptionLabel);
+
 	// Hit-tests against this instead of a widget of its own now - UInteriorScreenWidget
 	// hands it the Border of its own Navigation dock panel (see SetPanelBorderForHitTest)
 	// so ANavPlayerController::OnClick's existing IsPointerOverPanel() guard (skip
@@ -104,6 +134,7 @@ private:
 	void SetSelectionMode(ENavigationSelectionMode NewMode);
 	void SetStatusMessage(const FString& Message, ENavigationMessageKind Kind);
 	void BroadcastStateChanged();
+	bool SetEndpointToRoom(const FString& RoomOptionLabel, bool bIsStart);
 
 	UPROPERTY()
 	UBorder* HitTestBorder = nullptr;

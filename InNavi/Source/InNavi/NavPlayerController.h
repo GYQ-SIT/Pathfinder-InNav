@@ -66,6 +66,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnActionFailed, FString, Reason);
 // (e.g. InteriorScreenWidget's own panel layout) can still piggyback on the same save action
 // instead of needing its own separate save trigger the user has to remember.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnProjectSaved);
+// Broadcast whenever a room is created, deleted, or renamed (PlacePrefabRoomAt/FinishRoom on
+// success, DeleteRoom on success, SetSelectedRoomName on success) - anything that could make a
+// room-name list (the Layers panel, the Navigation panel's Start/Destination room dropdowns) go
+// stale. Deliberately not folded into OnActiveFloorChanged - that one means "the active floor
+// itself changed", this means "room data changed", and they fire from mostly-disjoint call sites.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnInteriorContentChanged);
 
 UCLASS()
 class INNAVI_API ANavPlayerController : public APlayerController
@@ -88,6 +94,10 @@ public:
 	// See FOnProjectSaved above.
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")
 	FOnProjectSaved OnProjectSaved;
+
+	// See FOnInteriorContentChanged above.
+	UPROPERTY(BlueprintAssignable, Category = "Feedback")
+	FOnInteriorContentChanged OnInteriorContentChanged;
 
 	// Plan A (freehand footprint). Callable from Blueprint/UMG as well as the B key, so a UI
 	// button can drive this directly once one exists (e.g. for mobile, where there's no keyboard).

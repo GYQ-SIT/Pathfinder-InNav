@@ -51,6 +51,13 @@ TSharedRef<SWidget> ULayerRowWidget::RebuildWidget()
 		Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_LayerRowLabel"));
 		Label->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		Label->SetAutoWrapText(true);
+		{
+			// Matches UInteriorScreenWidget::StandardFontSize - keep the two in sync by hand if that
+			// one changes.
+			FSlateFontInfo LabelFont = Label->GetFont();
+			LabelFont.Size = 15;
+			Label->SetFont(LabelFont);
+		}
 		UHorizontalBoxSlot* LabelSlot = Row->AddChildToHorizontalBox(Label);
 		LabelSlot->SetVerticalAlignment(VAlign_Center);
 		LabelSlot->SetHorizontalAlignment(HAlign_Fill);
