@@ -245,6 +245,9 @@ private:
 	UFUNCTION()
 	void OnWindowLayersCheckChanged(bool bIsChecked);
 
+	UFUNCTION()
+	void OnWindowNavigationCheckChanged(bool bIsChecked);
+
 	// Floor panel - lists every floor of the loaded building (top first, matching the mockup),
 	// highlighting the active one; clicking a row switches to it. "+Add floor"/"Delete floor" call
 	// straight through to ANavPlayerController::AddFloor/RemoveFloor(GetActiveFloor()), which
@@ -293,8 +296,31 @@ private:
 	// restoring LayersListDefaultHeight instead. Called from RefreshDockLayout, both branches.
 	void ResizeLayersListToFit(float AvailablePanelHeight);
 
-	// --- Docking system for the Toolbar/Floor/Properties/Layers panels ---
-	// Each of the 4 panels below is an independently draggable UBorder placed directly on the root
+	// Navigation panel - presentation layer for ws/jh's UNavigationPanelWidget (route selection/
+	// planning logic), restyled to match this screen's own panels instead of its original bespoke
+	// draggable-overlay look. Each handler just forwards to ANavPlayerController::GetNavigationPanel()'s
+	// public request methods; HandleNavigationStateChanged (bound to NavigationPanel's own
+	// OnStateChanged) is what actually repaints this panel's text/button state - see
+	// RefreshNavigationPanelDisplay.
+	UFUNCTION()
+	void OnNavSetStartClicked();
+
+	UFUNCTION()
+	void OnNavSetDestinationClicked();
+
+	UFUNCTION()
+	void OnNavFindRouteClicked();
+
+	UFUNCTION()
+	void OnNavClearRouteClicked();
+
+	UFUNCTION()
+	void HandleNavigationStateChanged();
+
+	void RefreshNavigationPanelDisplay();
+
+	// --- Docking system for the Toolbar/Floor/Properties/Layers/Navigation panels ---
+	// Each of the 5 panels below is an independently draggable UBorder placed directly on the root
 	// canvas (not nested in a shared bar/VerticalBox like the old Left/Right sidebar bars). Dragging
 	// a panel by its own background (not one of its buttons - see IsScreenPositionOverPanelButton)
 	// moves it freely; releasing it with an edge close to another panel's edge (TrySnapPanel) snaps
@@ -302,9 +328,9 @@ private:
 	// height among the column's members (adjustable per-boundary via a splitter handle, mirrors
 	// dragging the divider between two stacked panels in a real editor). Back is deliberately NOT
 	// part of this system (see RebuildWidget) - it's fixed chrome, not a dockable panel.
-	enum class EDockPanelId : uint8 { Toolbar, Floor, Properties, Layers };
-	static constexpr int32 NumDockPanels = 4;
-	static constexpr int32 MaxDockSplitters = NumDockPanels - 1; // worst case: all 4 panels in one column
+	enum class EDockPanelId : uint8 { Toolbar, Floor, Properties, Layers, Navigation };
+	static constexpr int32 NumDockPanels = 5;
+	static constexpr int32 MaxDockSplitters = NumDockPanels - 1; // worst case: all 5 panels in one column
 
 	struct FDockColumn
 	{
@@ -443,6 +469,9 @@ private:
 	UFUNCTION() FEventReply OnLayersPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnLayersPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnLayersPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnNavigationPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnNavigationPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnNavigationPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnToolbarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -456,6 +485,9 @@ private:
 	UFUNCTION() FEventReply OnLayersResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnLayersResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnLayersResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnNavigationResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnNavigationResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnNavigationResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -469,6 +501,9 @@ private:
 	UFUNCTION() FEventReply OnLayersLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnLayersLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnLayersLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnNavigationLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnNavigationLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnNavigationLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnSplitter0MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter0MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -479,6 +514,9 @@ private:
 	UFUNCTION() FEventReply OnSplitter2MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter2MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter2MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnSplitter3MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnSplitter3MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnSplitter3MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	// The root canvas every dock panel is a direct child of - see GetCanvasSize.
 	UPROPERTY()
@@ -632,6 +670,39 @@ private:
 	// as every other widget's expand/collapse state here already does).
 	TSet<FString> ExpandedLayerCategories;
 
+	// Navigation panel - see the comment above OnNavSetStartClicked. NavigationPanel here is this
+	// screen's own dock panel Border, distinct from ANavPlayerController::NavigationPanel (the
+	// UNavigationPanelWidget instance holding the actual selection/route state this panel displays).
+	UPROPERTY()
+	UBorder* NavigationPanel = nullptr;
+
+	UPROPERTY()
+	UTextBlock* NavContextText = nullptr;
+
+	UPROPERTY()
+	UButton* NavSetStartButton = nullptr;
+
+	UPROPERTY()
+	UTextBlock* NavSetStartButtonLabel = nullptr;
+
+	UPROPERTY()
+	UButton* NavSetDestinationButton = nullptr;
+
+	UPROPERTY()
+	UTextBlock* NavSetDestinationButtonLabel = nullptr;
+
+	UPROPERTY()
+	UButton* NavFindRouteButton = nullptr;
+
+	UPROPERTY()
+	UButton* NavClearRouteButton = nullptr;
+
+	UPROPERTY()
+	UTextBlock* NavStatusText = nullptr;
+
+	UPROPERTY()
+	UTextBlock* NavRouteDetailsText = nullptr;
+
 	UPROPERTY()
 	UComboBoxString* BuildingSwitcherComboBox = nullptr;
 
@@ -682,6 +753,9 @@ private:
 
 	UPROPERTY()
 	UCheckBox* WindowLayersCheckbox = nullptr;
+
+	UPROPERTY()
+	UCheckBox* WindowNavigationCheckbox = nullptr;
 
 	// Parallel to EDockPanelId, sized NumDockPanels - see SetDockPanelUserHidden. All false by
 	// default (every panel visible), set from the Window menu's checkboxes.

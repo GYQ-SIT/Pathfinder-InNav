@@ -6,6 +6,7 @@
 #include "InteriorFloorPlanWidget.h"
 #include "InteriorTypes.h"
 #include "LayerRowWidget.h"
+#include "NavigationPanelWidget.h"
 #include "NavPlayerController.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
@@ -195,8 +196,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			return Border;
 		};
 
-		// Two splitter handles - the most that can ever be needed at once (3 panels docked together
-		// in one column has 2 internal boundaries). RefreshSplitterLayout shows/hides and repositions
+		// 4 splitter handles - the most that can ever be needed at once (all 5 panels docked together
+		// in one column has 4 internal boundaries). RefreshSplitterLayout shows/hides and repositions
 		// these to match whichever columns actually exist right now.
 		for (int32 SplitterIndex = 0; SplitterIndex < MaxDockSplitters; ++SplitterIndex)
 		{
@@ -216,11 +217,17 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 				Splitter->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter1MouseMove);
 				Splitter->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter1MouseButtonUp);
 			}
-			else
+			else if (SplitterIndex == 2)
 			{
 				Splitter->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter2MouseButtonDown);
 				Splitter->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter2MouseMove);
 				Splitter->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter2MouseButtonUp);
+			}
+			else
+			{
+				Splitter->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter3MouseButtonDown);
+				Splitter->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter3MouseMove);
+				Splitter->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter3MouseButtonUp);
 			}
 			SplitterHandles[SplitterIndex] = Splitter;
 
@@ -707,6 +714,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		WindowPropertiesCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowPropertiesCheckChanged);
 		WindowLayersCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowLayers"), TEXT("Layers"));
 		WindowLayersCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowLayersCheckChanged);
+		WindowNavigationCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowNavigation"), TEXT("Navigation"));
+		WindowNavigationCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowNavigationCheckChanged);
 
 		// -- Building switcher bar: fixed chrome directly under the menu bar, spanning the full width
 		// like it does - holds the building switcher combo box (+ its edit-name button), pulled out of
@@ -1009,6 +1018,78 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		LayersListSizeBox->SetWidthOverride(StandardButtonWidth);
 		LayersListSizeBox->SetContent(LayersListBox);
 		LayersStack->AddChildToVerticalBox(LayersListSizeBox);
+
+		// -- Navigation panel: presentation layer for ws/jh's UNavigationPanelWidget (route selection/
+		// planning logic lives there, reached via ANavPlayerController::GetNavigationPanel() - see the
+		// comment above OnNavSetStartClicked). Styled to match this screen's own panels instead of its
+		// original bespoke draggable-overlay look; RefreshNavigationPanelDisplay fills in the dynamic
+		// bits (button colors/labels/enablement, status/route text) once NativeConstruct hooks it up.
+		NavigationPanel = ConstructDockPanel(EDockPanelId::Navigation, TEXT("Pnl_Navigation"), DockPanelColor, 14.f);
+		NavigationPanel->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationPanelMouseButtonDown);
+		NavigationPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationPanelMouseMove);
+		NavigationPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationPanelMouseButtonUp);
+		DockResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationResizeMouseButtonDown);
+		DockResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationResizeMouseMove);
+		DockResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationResizeMouseButtonUp);
+		DockLeftResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationLeftResizeMouseButtonDown);
+		DockLeftResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationLeftResizeMouseMove);
+		DockLeftResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationLeftResizeMouseButtonUp);
+
+		UVerticalBox* NavStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("NavStack"));
+		NavigationPanel->SetContent(NavStack);
+
+		UTextBlock* NavTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_NavTitle"));
+		NavTitle->SetText(FText::FromString(TEXT("Navigation")));
+		NavTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		UVerticalBoxSlot* NavTitleSlot = NavStack->AddChildToVerticalBox(NavTitle);
+		NavTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+
+		NavContextText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_NavContext"));
+		NavContextText->SetColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.78f, 0.88f, 1.f)));
+		ApplyStandardTextWrap(NavContextText);
+		UVerticalBoxSlot* NavContextSlot = NavStack->AddChildToVerticalBox(NavContextText);
+		NavContextSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+
+		auto AddNavButton = [this, NavStack, ApplyStandardTextWrap](const TCHAR* Name, const TCHAR* Label, UTextBlock*& OutLabel) -> UButton*
+		{
+			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
+			Text->SetText(FText::FromString(FString(Label)));
+			Text->SetJustification(ETextJustify::Center);
+			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			ApplyStandardTextWrap(Text);
+			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
+			SizeBox->SetWidthOverride(StandardButtonWidth);
+			SizeBox->SetMinDesiredHeight(StandardButtonHeight);
+			SizeBox->SetContent(Text);
+			Button->SetContent(SizeBox);
+			UVerticalBoxSlot* ButtonSlot = NavStack->AddChildToVerticalBox(Button);
+			ButtonSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+			OutLabel = Text;
+			return Button;
+		};
+
+		UTextBlock* UnusedFindRouteLabel = nullptr;
+		UTextBlock* UnusedClearRouteLabel = nullptr;
+		NavSetStartButton = AddNavButton(TEXT("Btn_NavSetStart"), TEXT("Set Start"), NavSetStartButtonLabel);
+		NavSetStartButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavSetStartClicked);
+		NavSetDestinationButton = AddNavButton(TEXT("Btn_NavSetDestination"), TEXT("Set Destination"), NavSetDestinationButtonLabel);
+		NavSetDestinationButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavSetDestinationClicked);
+		NavFindRouteButton = AddNavButton(TEXT("Btn_NavFindRoute"), TEXT("Find Route"), UnusedFindRouteLabel);
+		NavFindRouteButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavFindRouteClicked);
+		NavClearRouteButton = AddNavButton(TEXT("Btn_NavClearRoute"), TEXT("Clear Route"), UnusedClearRouteLabel);
+		NavClearRouteButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavClearRouteClicked);
+
+		NavStatusText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_NavStatus"));
+		ApplyStandardTextWrap(NavStatusText);
+		UVerticalBoxSlot* NavStatusSlot = NavStack->AddChildToVerticalBox(NavStatusText);
+		NavStatusSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+
+		NavRouteDetailsText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_NavRouteDetails"));
+		NavRouteDetailsText->SetColorAndOpacity(FSlateColor(FLinearColor(0.45f, 0.92f, 1.f, 1.f)));
+		ApplyStandardTextWrap(NavRouteDetailsText);
+		NavStack->AddChildToVerticalBox(NavRouteDetailsText);
 	}
 
 	return Super::RebuildWidget();
@@ -1064,11 +1145,22 @@ void UInteriorScreenWidget::NativeConstruct()
 		// Same reasoning - the [/]/F/X floor keyboard shortcuts change the active floor without ever
 		// going through this screen's own Floor panel handlers.
 		PC->OnActiveFloorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
+
+		// Navigation panel: hand ws/jh's UNavigationPanelWidget this screen's own Navigation Border to
+		// hit-test against (see SetPanelBorderForHitTest's own comment) and subscribe to its
+		// OnStateChanged so RefreshNavigationPanelDisplay repaints whenever selection/route state
+		// changes, from any trigger (this panel's own buttons, or a floor-plan click).
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->SetPanelBorderForHitTest(NavigationPanel);
+			Nav->OnStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavigationStateChanged);
+		}
 	}
 
 	RefreshBuildingSwitcher();
 	RefreshFloorList();
 	RefreshLayersList();
+	RefreshNavigationPanelDisplay();
 	RefreshModeButtonHighlights();
 	// Syncs Properties' placeholder title/visibility against PC's actual current selection state
 	// (normally nothing yet, but defensive either way) before panels get positioned below.
@@ -1088,6 +1180,12 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnEditModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleEditModeChanged);
 		PC->OnProjectSaved.RemoveDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
 		PC->OnActiveFloorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
+
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->OnStateChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleNavigationStateChanged);
+			Nav->SetPanelBorderForHitTest(nullptr);
+		}
 	}
 
 	Super::NativeDestruct();
@@ -1142,6 +1240,10 @@ FVector2D UInteriorScreenWidget::GetDefaultPanelPosition(EDockPanelId Id, const 
 		// Left side, vertically centered - clear of Toolbar (top-left) and Floor/Properties
 		// (top-right) in most window sizes without needing to know either's actual height.
 		return FVector2D(10.f, ViewportSize.Y * 0.5f);
+	case EDockPanelId::Navigation:
+		// Right side, lower than Floor/Properties' own top-right default spot, so a fresh install
+		// doesn't start all 3 stacked on top of each other.
+		return FVector2D(FMath::Max(10.f, ViewportSize.X - DockPanelWidths[(int32)EDockPanelId::Navigation] - 20.f), ViewportSize.Y * 0.55f);
 	default:
 		return FVector2D(10.f, SidebarTopMargin);
 	}
@@ -1225,6 +1327,9 @@ bool UInteriorScreenWidget::IsScreenPositionOverPanelButton(EDockPanelId Id, con
 		break;
 	case EDockPanelId::Layers:
 		Widgets = { LayersSearchBox, LayersListBox };
+		break;
+	case EDockPanelId::Navigation:
+		Widgets = { NavSetStartButton, NavSetDestinationButton, NavFindRouteButton, NavClearRouteButton };
 		break;
 	}
 
@@ -1701,6 +1806,7 @@ const TCHAR* UInteriorScreenWidget::GetDockPanelName(EDockPanelId Id)
 	case EDockPanelId::Floor:      return TEXT("Floor");
 	case EDockPanelId::Properties: return TEXT("Properties");
 	case EDockPanelId::Layers:     return TEXT("Layers");
+	case EDockPanelId::Navigation: return TEXT("Navigation");
 	default:                       return TEXT("");
 	}
 }
@@ -1928,11 +2034,15 @@ FEventReply UInteriorScreenWidget::HandlePanelMouseButtonDown(EDockPanelId Id, c
 	// Undocking just now changed this panel's own height (docked -> auto), but its cached geometry
 	// won't reflect that until the next paint - sizing the handle off it right now would use the
 	// stale (still-docked) height for one frame, showing as a gray sliver poking out past the
-	// panel's real new edge. Simplest fix: just hide this panel's own handle for the drag's
-	// duration - HandlePanelMouseButtonUp restores it once the drop has settled.
+	// panel's real new edge. Simplest fix: just hide this panel's own handles for the drag's
+	// duration - HandlePanelMouseButtonUp restores them once the drop has settled.
 	if (UBorder* Handle = DockResizeHandles[Index])
 	{
 		Handle->SetVisibility(ESlateVisibility::Collapsed);
+	}
+	if (UBorder* LeftHandle = DockLeftResizeHandles[Index])
+	{
+		LeftHandle->SetVisibility(ESlateVisibility::Collapsed);
 	}
 
 	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
@@ -1974,6 +2084,10 @@ FEventReply UInteriorScreenWidget::HandlePanelMouseMove(EDockPanelId Id, const F
 	{
 		HandleSlot->SetPosition(FVector2D(ClampedX + DockPanelWidths[Index], ClampedY));
 	}
+	if (UCanvasPanelSlot* LeftHandleSlot = DockLeftResizeHandleSlots[Index])
+	{
+		LeftHandleSlot->SetPosition(FVector2D(ClampedX - SidebarResizeHandleWidth, ClampedY));
+	}
 
 	return UWidgetBlueprintLibrary::Handled();
 }
@@ -1985,12 +2099,16 @@ FEventReply UInteriorScreenWidget::HandlePanelMouseButtonUp(EDockPanelId Id, con
 	{
 		bDockPanelIsDraggingMove[Index] = false;
 		TrySnapPanel(Id);
-		// Restore the handle HandlePanelMouseButtonDown hid for the drag - TrySnapPanel already
-		// refreshed layout above, so by the next paint it'll be sized/positioned for wherever the
+		// Restore the handles HandlePanelMouseButtonDown hid for the drag - TrySnapPanel already
+		// refreshed layout above, so by the next paint they'll be sized/positioned for wherever the
 		// panel actually ended up (docked or still floating).
 		if (UBorder* Handle = DockResizeHandles[Index])
 		{
 			Handle->SetVisibility(ESlateVisibility::Visible);
+		}
+		if (UBorder* LeftHandle = DockLeftResizeHandles[Index])
+		{
+			LeftHandle->SetVisibility(ESlateVisibility::Visible);
 		}
 		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
 		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
@@ -2203,6 +2321,9 @@ FEventReply UInteriorScreenWidget::OnPropertiesPanelMouseButtonUp(FGeometry MyGe
 FEventReply UInteriorScreenWidget::OnLayersPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonDown(EDockPanelId::Layers, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnLayersPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseMove(EDockPanelId::Layers, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnLayersPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonUp(EDockPanelId::Layers, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnNavigationPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonDown(EDockPanelId::Navigation, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnNavigationPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseMove(EDockPanelId::Navigation, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnNavigationPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonUp(EDockPanelId::Navigation, MouseEvent); }
 
 FEventReply UInteriorScreenWidget::OnToolbarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
@@ -2216,6 +2337,9 @@ FEventReply UInteriorScreenWidget::OnPropertiesResizeMouseButtonUp(FGeometry MyG
 FEventReply UInteriorScreenWidget::OnLayersResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Layers, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnLayersResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Layers, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnLayersResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Layers, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnNavigationResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Navigation, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnNavigationResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Navigation, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnNavigationResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Navigation, MouseEvent); }
 
 FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
@@ -2229,6 +2353,9 @@ FEventReply UInteriorScreenWidget::OnPropertiesLeftResizeMouseButtonUp(FGeometry
 FEventReply UInteriorScreenWidget::OnLayersLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Layers, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnLayersLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Layers, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnLayersLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Layers, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnNavigationLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Navigation, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnNavigationLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Navigation, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnNavigationLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Navigation, MouseEvent); }
 
 FEventReply UInteriorScreenWidget::OnSplitter0MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonDown(0, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnSplitter0MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseMove(0, MouseEvent); }
@@ -2239,6 +2366,9 @@ FEventReply UInteriorScreenWidget::OnSplitter1MouseButtonUp(FGeometry MyGeometry
 FEventReply UInteriorScreenWidget::OnSplitter2MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonDown(2, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnSplitter2MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseMove(2, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnSplitter2MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonUp(2, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnSplitter3MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonDown(3, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnSplitter3MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseMove(3, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnSplitter3MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonUp(3, MouseEvent); }
 
 void UInteriorScreenWidget::HandleEditModeChanged()
 {
@@ -2254,6 +2384,7 @@ void UInteriorScreenWidget::HandleActiveFloorChanged()
 {
 	RefreshFloorList();
 	RefreshLayersList();
+	RefreshNavigationPanelDisplay();
 }
 
 void UInteriorScreenWidget::RefreshDockPanelContentWidths()
@@ -2351,6 +2482,15 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 			}
 		}
 	}
+
+	// Navigation: buttons track the panel width the same way as everything above. Context/status/
+	// route-details text aren't wrapped in their own SizeBox (same as Layers' own title text isn't
+	// either) - they stretch to the panel's width naturally as VerticalBox children instead.
+	const float NavigationButtonWidth = ComputePanelButtonWidth(EDockPanelId::Navigation);
+	ResizeButton(NavSetStartButton, NavigationButtonWidth);
+	ResizeButton(NavSetDestinationButton, NavigationButtonWidth);
+	ResizeButton(NavFindRouteButton, NavigationButtonWidth);
+	ResizeButton(NavClearRouteButton, NavigationButtonWidth);
 }
 
 void UInteriorScreenWidget::RefreshModeButtonHighlights()
@@ -2907,6 +3047,7 @@ void UInteriorScreenWidget::HandleFloorEntryClicked(int32 FloorNumber)
 	}
 	RefreshFloorList();
 	RefreshLayersList();
+	RefreshNavigationPanelDisplay();
 }
 
 void UInteriorScreenWidget::OnAddFloorClicked()
@@ -2917,6 +3058,7 @@ void UInteriorScreenWidget::OnAddFloorClicked()
 	}
 	RefreshFloorList();
 	RefreshLayersList();
+	RefreshNavigationPanelDisplay();
 }
 
 void UInteriorScreenWidget::OnRemoveFloorClicked()
@@ -2927,6 +3069,133 @@ void UInteriorScreenWidget::OnRemoveFloorClicked()
 	}
 	RefreshFloorList();
 	RefreshLayersList();
+	RefreshNavigationPanelDisplay();
+}
+
+void UInteriorScreenWidget::OnNavSetStartClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->ToggleSelectStart();
+		}
+	}
+}
+
+void UInteriorScreenWidget::OnNavSetDestinationClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->ToggleSelectDestination();
+		}
+	}
+}
+
+void UInteriorScreenWidget::OnNavFindRouteClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->RequestFindRoute();
+		}
+	}
+}
+
+void UInteriorScreenWidget::OnNavClearRouteClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->RequestClearRoute();
+		}
+	}
+}
+
+void UInteriorScreenWidget::HandleNavigationStateChanged()
+{
+	RefreshNavigationPanelDisplay();
+}
+
+void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	UNavigationPanelWidget* Nav = PC ? PC->GetNavigationPanel() : nullptr;
+	if (!Nav)
+	{
+		return;
+	}
+
+	const ENavigationSelectionMode Mode = Nav->GetSelectionMode();
+	static const FLinearColor InactiveButtonColor(0.6f, 0.6f, 0.6f, 1.f);
+	static const FLinearColor ActiveStartColor(0.08f, 0.55f, 0.22f, 1.f);
+	static const FLinearColor ActiveDestinationColor(0.72f, 0.12f, 0.12f, 1.f);
+
+	if (NavSetStartButton)
+	{
+		// Green while actively picking a start point, and stays green afterward too (once one's
+		// actually set) rather than reverting to gray the instant the point is accepted.
+		const bool bShowSet = Mode == ENavigationSelectionMode::Start || Nav->HasStart();
+		NavSetStartButton->SetBackgroundColor(bShowSet ? ActiveStartColor : InactiveButtonColor);
+	}
+	if (NavSetStartButtonLabel)
+	{
+		NavSetStartButtonLabel->SetText(FText::FromString(Mode == ENavigationSelectionMode::Start
+			? TEXT("Click a Start Location (Cancel)") : TEXT("Set Start")));
+	}
+	if (NavSetDestinationButton)
+	{
+		// Red while actively picking (unchanged), but green (not red) once a destination is actually
+		// set - both buttons read as "green = set" once their own point is in place.
+		const FLinearColor SetColor = Mode == ENavigationSelectionMode::Destination ? ActiveDestinationColor : ActiveStartColor;
+		const bool bShowSet = Mode == ENavigationSelectionMode::Destination || Nav->HasDestination();
+		NavSetDestinationButton->SetBackgroundColor(bShowSet ? SetColor : InactiveButtonColor);
+	}
+	if (NavSetDestinationButtonLabel)
+	{
+		NavSetDestinationButtonLabel->SetText(FText::FromString(Mode == ENavigationSelectionMode::Destination
+			? TEXT("Click a Destination (Cancel)") : TEXT("Set Destination")));
+	}
+	if (NavFindRouteButton)
+	{
+		NavFindRouteButton->SetIsEnabled(Nav->CanFindRoute());
+		// Green once a route's actually been found, red if the last attempt came back empty-handed,
+		// gray otherwise (never tried, or cleared since).
+		FLinearColor FindRouteColor = InactiveButtonColor;
+		if (!Nav->GetRoutePoints().IsEmpty())
+		{
+			FindRouteColor = ActiveStartColor;
+		}
+		else if (Nav->DidLastFindRouteFail())
+		{
+			FindRouteColor = ActiveDestinationColor;
+		}
+		NavFindRouteButton->SetBackgroundColor(FindRouteColor);
+	}
+	if (NavClearRouteButton)
+	{
+		NavClearRouteButton->SetIsEnabled(Nav->CanClearRoute());
+	}
+	if (NavContextText)
+	{
+		const FString BuildingId = PC->GetLoadedBuildingId();
+		NavContextText->SetText(FText::FromString(BuildingId.IsEmpty()
+			? TEXT("No building loaded")
+			: FString::Printf(TEXT("Building: %s  |  Viewing Floor: %d"), *BuildingId, PC->GetActiveFloor())));
+	}
+	if (NavStatusText)
+	{
+		NavStatusText->SetText(FText::FromString(Nav->GetDisplayStatusMessage()));
+		NavStatusText->SetColorAndOpacity(FSlateColor(Nav->GetStatusColor()));
+	}
+	if (NavRouteDetailsText)
+	{
+		NavRouteDetailsText->SetText(FText::FromString(Nav->BuildRouteDetails()));
+	}
 }
 
 void UInteriorScreenWidget::RefreshBuildingSwitcher()
@@ -2975,6 +3244,7 @@ void UInteriorScreenWidget::HandleBuildingSwitcherChanged(FString SelectedItem, 
 		RefreshBuildingSwitcher();
 		RefreshFloorList();
 		RefreshLayersList();
+		RefreshNavigationPanelDisplay();
 		return;
 	}
 
@@ -3001,6 +3271,7 @@ void UInteriorScreenWidget::HandleSwitchBuildingSave()
 	RefreshBuildingSwitcher();
 	RefreshFloorList();
 	RefreshLayersList();
+	RefreshNavigationPanelDisplay();
 }
 
 void UInteriorScreenWidget::HandleSwitchBuildingDiscard()
@@ -3016,6 +3287,7 @@ void UInteriorScreenWidget::HandleSwitchBuildingDiscard()
 	RefreshBuildingSwitcher();
 	RefreshFloorList();
 	RefreshLayersList();
+	RefreshNavigationPanelDisplay();
 }
 
 void UInteriorScreenWidget::HandleSwitchBuildingCancel()
@@ -3364,6 +3636,11 @@ void UInteriorScreenWidget::OnWindowPropertiesCheckChanged(bool bIsChecked)
 void UInteriorScreenWidget::OnWindowLayersCheckChanged(bool bIsChecked)
 {
 	SetDockPanelUserHidden(EDockPanelId::Layers, !bIsChecked);
+}
+
+void UInteriorScreenWidget::OnWindowNavigationCheckChanged(bool bIsChecked)
+{
+	SetDockPanelUserHidden(EDockPanelId::Navigation, !bIsChecked);
 }
 
 void UInteriorScreenWidget::SetDockPanelUserHidden(EDockPanelId Id, bool bHidden)
