@@ -55,9 +55,9 @@ demonstrable check — not "it exists".
   - **Afiq**: user input → JSON conversion (the piece that turns raw UI input into the
     JSON format `BuildingGenerator`/`InteriorGenerator` read).
 - **Jira Epic:** `INNAVI-T02`
-- **M1 target:** User enters a set of interior data, saves it to JSON, and loads it back to reproduce the same data. **Done (Yongqi's part)** — 2D interior floor-plan editor (rooms, walls, doors with connection properties, elevators/stairs/escalators with cross-floor data, room/door naming, snapping, boundary/overlap validation); save/load round-trips through `buildings.json`. **Padre's part (UMG toolbar) in progress and working as of 2026-09-20** — real on-screen buttons for draw room/wall, select mode, prefab shapes (rectangle/triangle/circle), add door, and elevator/stairs/escalator modes, tested and confirmed functional; replaces the keyboard-only interim workflow.
+- **M1 target:** User enters a set of interior data, saves it to JSON, and loads it back to reproduce the same data. **Done (Yongqi's part)** — 2D interior floor-plan editor (rooms, walls, doors with connection properties, elevators/stairs/escalators with cross-floor data, room/door naming, snapping, boundary/overlap validation); save/load round-trips through `buildings.json`. **Padre's part (UMG toolbar) in progress and working as of 2026-09-26** — real on-screen buttons for draw room/wall, select mode, prefab shapes (rectangle/triangle/circle), add door, elevator/stairs/escalator modes, and grow/shrink/rotate gizmos, tested and confirmed functional; replaces the keyboard-only interim workflow. Now also has a top menu bar (File new/load with unsaved-changes checks; Window panel-visibility toggles), a building switcher, and four independently movable/resizable/dockable panels (Toolbar/Floor/Properties/Layers, with an Outliner-style Layers panel and search) whose layout persists across sessions — see `docs/design/interior-editor-guide.md`.
 - **M2 target:** Import existing JSON; validation and error handling on bad input.
-- **M3 target:** Polished editor UX (real UMG buttons instead of keyboard shortcuts); reusable across different buildings.
+- **M3 target:** Polished editor UX (real UMG buttons instead of keyboard shortcuts — largely achieved already at M1); reusable across different buildings.
 
 ### T03 — Procedural Interior Generator
 - **What it is:** Read JSON and spawn a schematic interior at runtime from a modular kit (walls, windows, doors, corridors, stairs, elevators). Elevators/doors recorded as input/output nodes.
@@ -94,7 +94,7 @@ These are standard deliverables required of all teams. Owners TBD.
 | R07 | Working technical proof of concept | Core risks demonstrated running (see T01–T04) | T01–T04 all demonstrated (T04 confirmed 2026-09-25) |
 | R08 | Basic error handling | App does not crash on bad/empty input | Interior editor validates most inputs (bounds/overlap/wall-collision checks, unsaved-changes prompts) - not audited team-wide |
 | R09 | Working product demonstration | 2–3 min demo: select → input → generate → navigate | Not yet assembled (navigate step depends on T04) |
-| R10 | Project documentation | `docs/` kept current | Updated this pass (`architecture.md`, `deliverables.md`, root `HANDOFF.md`, new `docs/design/interior-editor-guide.md`) |
+| R10 | Project documentation | `docs/` kept current | Updated 2026-09-26 (`deliverables.md`, `docs/design/interior-editor-guide.md` — rewritten to cover the menu bar, building switcher, dockable panels, and Gizmos) |
 | R11 | Individual contribution evidence | Each member records a short (<5 min) contribution video | Not reviewed this pass |
 
 **CI/CD note (updated 2026-09-20):** the team12 DigiPen-provided VM (2 vCPU/4GB RAM,

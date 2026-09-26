@@ -1,9 +1,8 @@
 # Interior Editor — How to Use It
 
-> Current state as of 2026-09-18, branch `YQ-ui-backup`. Everything below is
-> keyboard-driven for now (real UMG buttons/toolbar are a later pass — this is the
-> functional layer underneath them). If you just want to click around and see what's
-> been built, this is the doc to read.
+> Current state as of 2026-09-26, branch `YQ_CUI`. The editor now has a real UMG UI
+> (menu bar, dockable panels, buttons) - every action below also still has a keyboard
+> shortcut, and both do the same thing under the hood.
 
 ## Getting to the interior editor
 
@@ -13,52 +12,87 @@
 3. You're now in the 2D floor-plan editor — a flat top-down view of the building's
    currently active floor, not a 3D camera trick. Right-click-drag to pan, mouse wheel
    to zoom.
-4. **Back** button returns to the exterior view (will prompt to save if you have
-   unsaved changes).
+4. The exit-door icon at the right end of the top menu bar returns to the exterior view
+   (will prompt to save if you have unsaved changes).
 
-## Floors
+## Top menu bar
 
-| Key | Action |
-|---|---|
-| `[` / `]` | Cycle active floor down / up |
-| `F` | Add a floor |
-| `X` | Remove the active floor |
+Pinned across the very top of the screen.
 
-## Drawing / placing things
+- **File** — **New** clears everything and starts a blank project; **Load** opens the
+  OS file picker for an existing `buildings.json`. Both check for unsaved changes first
+  and prompt to save/discard/cancel, exactly like leaving to the exterior does.
+- **Window** — a checklist of the four dockable panels (Toolbar/Floor/Properties/
+  Layers, see below). Unchecking one hides it; re-checking shows it again.
+- The exit-door icon on the right — same as described above.
 
-Only one of these can be active at a time — turning one on turns any other off.
+## Building switcher bar
 
-| Key | Mode |
-|---|---|
-| `P` | Draw a custom room (click points, `Enter` to close the shape, `Esc` to cancel) |
-| `L` | Draw a standalone wall (same click mechanic, stays open — not a room, can't take a door) |
-| `1` / `2` / `3` | Place a prefab room (rectangle / triangle / circle) centered on the next click |
-| `K` | Add-door mode — click a wall edge to cut a fixed-size door into it |
-| `4` / `5` / `6` | Place a connector (elevator / stairs / escalator) at the next click — an elevator defaults to every floor in the building, stairs/escalator default to the floor above and below |
+The bar directly under the menu bar. A dropdown lists every building in the currently
+loaded project — pick one to jump straight into its interior without going back to the
+exterior first. The pencil icon next to it lets you rename the currently-loaded
+building in place.
+
+## Dockable panels
+
+Four panels — **Toolbar**, **Floor**, **Properties**, **Layers** — can each be:
+
+- **Moved**: drag by the panel's own background (not one of its buttons).
+- **Resized**: drag either its left or right edge.
+- **Docked together**: drop one near another's edge and they snap into a shared column,
+  filling the screen height end to end; drag the thin splitter bar between two docked
+  panels to adjust how much height each gets.
+- **Hidden/shown**: via the Window menu (above), or Properties auto-hides its own
+  content but stays visible as an empty placeholder when nothing's selected.
+
+Panel positions/sizes/docking are saved automatically (one global layout, not per
+project) whenever you save the project or leave the interior editor, and restored the
+next time you open it.
+
+### Toolbar panel
+
+Grouped into four sections:
+
+- **Default** — select tool (also `Q`): click a room (anywhere in its body, not just
+  the outline), a door marker, or a connector marker to select it; drag to move it;
+  `Backspace` to delete.
+- **Draw** — draw a custom room (`P`, click points then `Enter`, `Esc` cancels), draw a
+  standalone wall (`L`, same mechanic), or place a prefab rectangle/triangle/circle
+  room (`1`/`2`/`3`) centered on the next click.
+- **Navigate** — add-door mode (`K`, click a wall edge to cut a fixed-size door into
+  it), or place a stairs/elevator/escalator connector (`4`/`5`/`6`) at the next click;
+  an elevator defaults to every floor in the building, stairs/escalator default to the
+  floor above and below.
+- **Gizmos** — grow/shrink the selected room (same as `=`/`-`), and hold to rotate it
+  counter-clockwise/clockwise around its own center (same as holding `9`/`0`).
 
 Clicking inside the building's outline but on top of a wall, outside the outline, or
 overlapping another room will fail, with the reason logged to the Output Log.
 
-## Select mode
+### Floor panel
 
-| Key | Action |
-|---|---|
-| `Q` | Toggle select mode |
-| *(in select mode)* click | Select a room (anywhere in its body, not just the outline), a door marker, or a connector marker |
-| drag | Move the selected room, or slide the selected door along its wall |
-| `Backspace` | Delete whatever's selected |
-| `=` / `-` | Grow / shrink the selected room (test-only, not the final resize UX) |
-| hold `9` / `0` | Rotate the selected room/wall counter-clockwise / clockwise (around its own center, 90°/sec while held) |
+Lists every floor in the building; click one to switch to it (same as `[`/`]` to cycle
+up/down). **+ Add floor** / **- Remove floor** buttons do the same as `F`/`X`.
 
-Selecting a **door** or a **connector** pops up a small properties panel:
+### Properties panel
 
-- **Door panel**: shows which room it belongs to (read-only), and a dropdown to pick
-  what it connects to on the other side (another room, by name, or "corridor").
-- **Connector panel**: shows its type (read-only), and a checklist of floors it should
-  reach — check/uncheck floors and hit Apply. Only shows checkboxes for floors that
-  actually exist on the loaded building (fixed 2026-09-20).
+Always visible. Shows an empty "Properties" placeholder when nothing's selected;
+selecting a room, door, or connector fills it in:
 
-Selecting a **room** pops up a panel to rename it.
+- **Room**: a field to rename it.
+- **Door**: which room it belongs to (read-only), and a dropdown to pick what it
+  connects to on the other side (another room, by name, or "corridor").
+- **Connector**: its type (read-only), and a checklist of floors it should reach —
+  check/uncheck floors and hit Apply. Only shows checkboxes for floors that actually
+  exist on the loaded building.
+
+### Layers panel
+
+An Outliner-style view of everything on the current floor, with a search box at the
+top to filter by name. Five categories — **Boundary**, **Rooms**, **Walls**, **Path
+Nodes**, **I/O Nodes** — each expandable (arrow) to list its individual items. The eye
+icon on a category or an individual item toggles its visibility on the floor plan;
+toggling a category affects everything in it at once.
 
 ## Snapping
 
@@ -68,13 +102,15 @@ small tolerance. Press `N` to toggle it off/on.
 
 ## Saving
 
-`Ctrl+S` saves the current project. If there's no file yet (a New session), it opens
-the OS save dialog first. Leaving the interior back to the exterior, or exiting to the
-start screen, will prompt you to save/discard/cancel if you have unsaved changes.
+`Ctrl+S` saves the current project (and the current panel layout). If there's no file
+yet (a New session), it opens the OS save dialog first. Leaving the interior back to
+the exterior, or exiting to the start screen, will prompt you to save/discard/cancel if
+you have unsaved changes.
 
 ## Known gaps / not built yet
 
-- No real UMG toolbar — everything above is a keyboard shortcut.
+- Grow/Shrink is still a fixed 20-unit nudge, not a typed Length/Width or drag-to-resize
+  interaction.
 - No dedicated tool for a plain path node (only elevator/stairs/escalator have a
   placement tool right now).
 - No 3D preview/walkthrough mode — this is a 2D top-down authoring view only.
