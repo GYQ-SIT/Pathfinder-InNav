@@ -118,6 +118,13 @@ private:
 	UFUNCTION()
 	void HandleInteriorContentChanged();
 
+	// Bound to ANavPlayerController::OnPreviewModeChanged - hides/shows Background+FloorPlanWidget
+	// opposite bIsActive (the 3D preview scene sits behind Background, already there, just normally
+	// hidden) and updates the 2D/3D toggle buttons' highlight. The 5 dock panels are untouched, so
+	// Floor/Layers/Navigation stay usable while previewing.
+	UFUNCTION()
+	void HandlePreviewModeChanged(bool bIsActive);
+
 	void RefreshModeButtonHighlights();
 
 	// Door/Room/Connector properties all share one PropertiesPanel (see RebuildWidget) instead of
@@ -207,6 +214,17 @@ private:
 
 	UFUNCTION()
 	void OnWindowMenuClicked();
+
+	// 2D/3D toggle, next to File/Window - calls PC->SetIn3DPreviewMode(false)/(true). The resulting
+	// UI change (hiding/showing Background+FloorPlanWidget, button highlight) happens in
+	// HandlePreviewModeChanged instead of here, since PC->OnPreviewModeChanged needs to be able to
+	// drive the same UI change from other triggers too (defensive symmetry, matching every other
+	// PC-state delegate in this file).
+	UFUNCTION()
+	void OnSwitch2DClicked();
+
+	UFUNCTION()
+	void OnSwitch3DClicked();
 
 	// Shared by OnFileMenuClicked/OnWindowMenuClicked (open one, implicitly closing the other) and
 	// MenuClickCatcher (close whichever is open) - also shows/hides MenuClickCatcher in step, so it's
@@ -782,6 +800,11 @@ private:
 	// HandleFileLoadSave/Discard once the user picks a choice - same role as PendingBuildingId above.
 	FString PendingLoadFilePath;
 
+	// Blocks the 3D scene behind the 2D floor-plan overlay - promoted from a RebuildWidget local so
+	// HandlePreviewModeChanged can hide it (Collapsed) while 3D preview mode is active.
+	UPROPERTY()
+	UBorder* Background = nullptr;
+
 	// Top menu bar widgets - see the comment above OnFileMenuClicked/OnWindowToolbarCheckChanged.
 	UPROPERTY()
 	UButton* FileMenuButton = nullptr;
@@ -791,6 +814,13 @@ private:
 
 	UPROPERTY()
 	UButton* WindowMenuButton = nullptr;
+
+	// 2D/3D toggle - see the comment above OnSwitch2DClicked.
+	UPROPERTY()
+	UButton* Switch2DButton = nullptr;
+
+	UPROPERTY()
+	UButton* Switch3DButton = nullptr;
 
 	UPROPERTY()
 	UBorder* WindowMenuDropdown = nullptr;

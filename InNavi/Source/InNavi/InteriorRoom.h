@@ -105,4 +105,10 @@ private:
 
 	UPROPERTY()
 	UMaterialInstanceDynamic* DynMaterial;
+
+	// Separate material for the floor slab (section 1, see RebuildMesh) - a distinct, plain tint
+	// from the walls' own DynMaterial rather than sharing it, so the floor and walls read as
+	// different surfaces once the 3D preview mode can actually see both at once.
+	UPROPERTY()
+	UMaterialInstanceDynamic* FloorDynMaterial;
 };

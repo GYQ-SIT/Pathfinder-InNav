@@ -113,7 +113,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		// Blocks the 3D scene behind, same purpose as the original Img_CanvasBackground - makes the
 		// 2D floor plan easier to read.
-		UBorder* Background = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Background"));
+		Background = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Background"));
 		Background->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 1.f));
 		UCanvasPanelSlot* BackgroundSlot = Canvas->AddChildToCanvas(Background);
 		BackgroundSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
@@ -623,6 +623,17 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		FileMenuButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileMenuClicked);
 		WindowMenuButton = AddMenuButton(TEXT("Btn_WindowMenu"), TEXT("Window"));
 		WindowMenuButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowMenuClicked);
+
+		// 2D/3D toggle - a small gap after Window, then the two buttons side by side with no gap
+		// between them so they read as one segmented control rather than two separate menu items.
+		USpacer* PreviewToggleGapSpacer = WidgetTree->ConstructWidget<USpacer>(USpacer::StaticClass());
+		PreviewToggleGapSpacer->SetSize(FVector2D(16.f, 1.f));
+		MenuBarRow->AddChildToHorizontalBox(PreviewToggleGapSpacer);
+
+		Switch2DButton = AddMenuButton(TEXT("Btn_Switch2D"), TEXT("2D"));
+		Switch2DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSwitch2DClicked);
+		Switch3DButton = AddMenuButton(TEXT("Btn_Switch3D"), TEXT("3D"));
+		Switch3DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSwitch3DClicked);
 
 		// Eats all remaining row width so Back (added right after it) lands flush against the bar's
 		// right edge instead of sitting right beside Window.
@@ -1227,6 +1238,11 @@ void UInteriorScreenWidget::NativeConstruct()
 		// Rooms are created/deleted/renamed via floor-plan clicks and the Properties panel, neither of
 		// which goes through this screen's own handlers either.
 		PC->OnInteriorContentChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleInteriorContentChanged);
+		// 3D preview mode can in principle be left/entered from something other than this screen's own
+		// Switch2D/3D buttons (defensive symmetry, matching every other PC-state delegate above) - keep
+		// Background/FloorPlanWidget/the toggle buttons in sync regardless of the trigger.
+		PC->OnPreviewModeChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandlePreviewModeChanged);
+		HandlePreviewModeChanged(PC->IsIn3DPreviewMode());
 
 		// Navigation panel: hand ws/jh's UNavigationPanelWidget this screen's own Navigation Border to
 		// hit-test against (see SetPanelBorderForHitTest's own comment) and subscribe to its
@@ -1264,6 +1280,7 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnProjectSaved.RemoveDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
 		PC->OnActiveFloorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
 		PC->OnInteriorContentChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleInteriorContentChanged);
+		PC->OnPreviewModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandlePreviewModeChanged);
 
 		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
 		{
@@ -2478,6 +2495,29 @@ void UInteriorScreenWidget::HandleInteriorContentChanged()
 	RefreshNavRoomDropdowns();
 }
 
+void UInteriorScreenWidget::HandlePreviewModeChanged(bool bIsActive)
+{
+	if (Background)
+	{
+		Background->SetVisibility(bIsActive ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	}
+	if (FloorPlanWidget)
+	{
+		FloorPlanWidget->SetVisibility(bIsActive ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	}
+
+	const FLinearColor ActiveColor(0.2f, 0.75f, 0.3f, 1.f);
+	const FLinearColor InactiveColor(0.6f, 0.6f, 0.6f, 1.f);
+	if (Switch2DButton)
+	{
+		Switch2DButton->SetBackgroundColor(bIsActive ? InactiveColor : ActiveColor);
+	}
+	if (Switch3DButton)
+	{
+		Switch3DButton->SetBackgroundColor(bIsActive ? ActiveColor : InactiveColor);
+	}
+}
+
 void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 {
 	// Toolbar: the building switcher used to live in this panel and tracked its width here - it's now
@@ -3657,6 +3697,22 @@ void UInteriorScreenWidget::OnWindowMenuClicked()
 	else
 	{
 		OpenMenuDropdown(WindowMenuDropdown);
+	}
+}
+
+void UInteriorScreenWidget::OnSwitch2DClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetIn3DPreviewMode(false);
+	}
+}
+
+void UInteriorScreenWidget::OnSwitch3DClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetIn3DPreviewMode(true);
 	}
 }
 

@@ -72,6 +72,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnProjectSaved);
 // stale. Deliberately not folded into OnActiveFloorChanged - that one means "the active floor
 // itself changed", this means "room data changed", and they fire from mostly-disjoint call sites.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnInteriorContentChanged);
+// Broadcast whenever 3D preview mode is entered/left (see SetIn3DPreviewMode) - bIsActive is the
+// new state. UInteriorScreenWidget listens to hide/show its 2D floor-plan overlay and update its
+// own 2D/3D toggle buttons' highlight, since the mode can also be left from other triggers than
+// its own buttons in principle (defensive symmetry with every other PC-state delegate here).
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOn3DPreviewModeChanged, bool, bIsActive);
 
 UCLASS()
 class INNAVI_API ANavPlayerController : public APlayerController
@@ -98,6 +103,26 @@ public:
 	// See FOnInteriorContentChanged above.
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")
 	FOnInteriorContentChanged OnInteriorContentChanged;
+
+	// See FOn3DPreviewModeChanged above.
+	UPROPERTY(BlueprintAssignable, Category = "Feedback")
+	FOn3DPreviewModeChanged OnPreviewModeChanged;
+
+	// Whether the interior editor is currently showing the 3D preview (an oblique view of the real
+	// spawned geometry, current building/floor only) instead of the 2D floor-plan overlay. View-only
+	// - no room/wall/door editing happens while this is active (see the OnClick() guard near
+	// IsSelectingNavigationPoint, and UInteriorFloorPlanWidget being hidden entirely while active).
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool IsIn3DPreviewMode() const { return bIsIn3DPreviewMode; }
+
+	// Enters/leaves 3D preview mode: positions the camera at a fixed oblique angle over the current
+	// floor (see PositionCameraFor3DPreview), hides every other loaded building
+	// (SetOtherBuildingsHidden), and broadcasts OnPreviewModeChanged so
+	// UInteriorScreenWidget can hide/show its 2D overlay in step. Leaving restores the normal 2D
+	// top-down camera pose via the existing RepositionCameraToActiveFloor. No-op if there's no
+	// building/floor currently loaded.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void SetIn3DPreviewMode(bool bEnable);
 
 	// Plan A (freehand footprint). Callable from Blueprint/UMG as well as the B key, so a UI
 	// button can drive this directly once one exists (e.g. for mobile, where there's no keyboard).
@@ -903,6 +928,33 @@ private:
 	// on a usable view of the site rather than standing on the ground looking at nothing. With no
 	// buildings yet (a blank new project), just raises the camera above the origin instead.
 	void FocusCameraOnAllBuildings();
+
+	// Shared by PositionCameraForFloor and PositionCameraFor3DPreview - both need the same
+	// footprint-bounds-to-world-space Center/Span computation, just for different camera poses.
+	void GetBuildingFootprintBounds(APolyBuilding* Building, FVector2D& OutCenter, float& OutSpan) const;
+
+	// A genuine oblique/isometric camera pose over Building's Level (as opposed to
+	// PositionCameraForFloor's near-top-down `-80°` floor-plan pose) - fixed rotation, distance driven
+	// by ThreeDPreviewCameraDistance (set fresh on entering 3D preview mode, adjusted by
+	// ZoomIn3DPreview/ZoomOut3DPreview afterward). Also hides Building's ceiling above Level, same
+	// reasoning as PositionCameraForFloor.
+	void PositionCameraFor3DPreview(APolyBuilding* Building, int32 Level);
+
+	// Hides (or restores) every loaded building except the one currently being edited - only
+	// meaningful while 3D preview mode is active; 2D mode leaves every building visible (just out of
+	// frame) same as it always has.
+	void SetOtherBuildingsHidden(bool bNewHidden);
+
+	// Bound to mouse wheel (see SetupInputComponent) - no-ops unless bIsIn3DPreviewMode. Adjusts
+	// ThreeDPreviewCameraDistance within a fixed min/max and re-runs PositionCameraFor3DPreview.
+	void ZoomIn3DPreview();
+	void ZoomOut3DPreview();
+
+	bool bIsIn3DPreviewMode = false;
+	float ThreeDPreviewCameraDistance = 0.f;
+	static constexpr float ThreeDPreviewMinCameraDistance = 300.f;
+	static constexpr float ThreeDPreviewMaxCameraDistance = 6000.f;
+	static constexpr float ThreeDPreviewZoomStep = 200.f;
 
 	FVector SavedCameraLocation = FVector::ZeroVector;
 	FRotator SavedCameraRotation = FRotator::ZeroRotator;

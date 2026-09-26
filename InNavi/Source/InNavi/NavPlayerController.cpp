@@ -137,6 +137,8 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
 	InputComponent->BindKey(EKeys::N, IE_Pressed, this, &ANavPlayerController::ToggleSnapEnabled);
 	InputComponent->BindKey(FInputChord(EKeys::S, /*Shift*/false, /*Ctrl*/true, /*Alt*/false, /*Cmd*/false), IE_Pressed, this, &ANavPlayerController::SaveCurrentProjectKeyHandler);
+	InputComponent->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &ANavPlayerController::ZoomIn3DPreview);
+	InputComponent->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &ANavPlayerController::ZoomOut3DPreview);
 }
 
 void ANavPlayerController::OnClick()
@@ -159,6 +161,14 @@ void ANavPlayerController::OnClick()
 	// to the custom floor-plan widget.
 	if (IsSelectingNavigationPoint())
 	{
+		// 3D preview mode is view-only - InteriorFloorPlanWidget is Collapsed (and so already
+		// un-clickable) while it's active, but this fallback path bypasses that widget entirely, so
+		// it needs its own explicit guard.
+		if (bIsIn3DPreviewMode)
+		{
+			return;
+		}
+
 		// The floor plan is a 2D UMG widget, so navigation clicks must be converted
 		// using that widget's cached screen geometry. The old fallback deprojected
 		// the click through the 3D camera, which made the result depend on the camera
@@ -1753,15 +1763,11 @@ void ANavPlayerController::FocusCameraOnBuilding(APolyBuilding* Building)
 	PositionCameraForFloor(Building, Level);
 }
 
-void ANavPlayerController::PositionCameraForFloor(APolyBuilding* Building, int32 Level)
+void ANavPlayerController::GetBuildingFootprintBounds(APolyBuilding* Building, FVector2D& OutCenter, float& OutSpan) const
 {
+	OutCenter = FVector2D::ZeroVector;
+	OutSpan = 0.f;
 	if (!Building)
-	{
-		return;
-	}
-
-	APawn* ControlledPawn = GetPawn();
-	if (!ControlledPawn)
 	{
 		return;
 	}
@@ -1784,8 +1790,30 @@ void ANavPlayerController::PositionCameraForFloor(APolyBuilding* Building, int32
 		MaxPoint.Y = FMath::Max(MaxPoint.Y, WorldPoint.Y);
 	}
 
-	const FVector2D Center = (MinPoint + MaxPoint) * 0.5f;
-	const float Span = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
+	OutCenter = (MinPoint + MaxPoint) * 0.5f;
+	OutSpan = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
+}
+
+void ANavPlayerController::PositionCameraForFloor(APolyBuilding* Building, int32 Level)
+{
+	if (!Building)
+	{
+		return;
+	}
+
+	APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn)
+	{
+		return;
+	}
+
+	FVector2D Center;
+	float Span;
+	GetBuildingFootprintBounds(Building, Center, Span);
+	if (Span <= 0.f && Center.IsZero())
+	{
+		return;
+	}
 
 	// Just above the selected floor's own ceiling (where its now-hidden slab would be), not above
 	// the whole building - keeps a consistent close-up framing no matter how many floors sit above
@@ -1808,6 +1836,132 @@ void ANavPlayerController::PositionCameraForFloor(APolyBuilding* Building, int32
 	InteriorBuildingHiddenById = Building->BuildingId;
 }
 
+void ANavPlayerController::PositionCameraFor3DPreview(APolyBuilding* Building, int32 Level)
+{
+	if (!Building)
+	{
+		return;
+	}
+
+	APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn)
+	{
+		return;
+	}
+
+	FVector2D Center;
+	float Span;
+	GetBuildingFootprintBounds(Building, Center, Span);
+	if (Span <= 0.f && Center.IsZero())
+	{
+		return;
+	}
+
+	// Look at the floor's own vertical middle, not its ceiling - a proper 3D view of the floor
+	// itself, unlike PositionCameraForFloor's near-top-down floor-plan pose.
+	const float FloorHeight = Building->GetFloorHeight();
+	const float TargetZ = (Level - 1) * FloorHeight + FloorHeight * 0.5f;
+	const FVector Target(Center.X, Center.Y, TargetZ);
+
+	// Fixed oblique/dimetric angle - not user-adjustable in this pass (see the plan's own scope
+	// note), just the distance (ThreeDPreviewCameraDistance, adjusted by Zoom In/Out3DPreview).
+	const FRotator NewRotation(-35.f, -45.f, 0.f);
+	const FVector NewLocation = Target - NewRotation.Vector() * ThreeDPreviewCameraDistance;
+
+	ControlledPawn->SetActorLocationAndRotation(NewLocation, NewRotation);
+	SetControlRotation(NewRotation);
+
+	// Same reasoning as PositionCameraForFloor - hide the viewed floor's own ceiling (and everything
+	// above it) so the oblique view down isn't blocked.
+	Building->SetVisibleInteriorLevel(Level);
+	InteriorBuildingHiddenById = Building->BuildingId;
+}
+
+void ANavPlayerController::SetOtherBuildingsHidden(bool bNewHidden)
+{
+	if (!Generator || !InteriorGen)
+	{
+		return;
+	}
+
+	const FString LoadedId = InteriorGen->GetLoadedBuildingId();
+	for (APolyBuilding* Building : Generator->GetAllBuildings())
+	{
+		if (Building && Building->BuildingId != LoadedId)
+		{
+			Building->SetActorHiddenInGame(bNewHidden);
+			Building->SetActorEnableCollision(!bNewHidden);
+		}
+	}
+}
+
+void ANavPlayerController::ZoomIn3DPreview()
+{
+	if (!bIsIn3DPreviewMode || !Generator || !InteriorGen)
+	{
+		return;
+	}
+	ThreeDPreviewCameraDistance = FMath::Clamp(ThreeDPreviewCameraDistance - ThreeDPreviewZoomStep,
+		ThreeDPreviewMinCameraDistance, ThreeDPreviewMaxCameraDistance);
+	if (APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()))
+	{
+		PositionCameraFor3DPreview(Building, InteriorGen->GetActiveFloor());
+	}
+}
+
+void ANavPlayerController::ZoomOut3DPreview()
+{
+	if (!bIsIn3DPreviewMode || !Generator || !InteriorGen)
+	{
+		return;
+	}
+	ThreeDPreviewCameraDistance = FMath::Clamp(ThreeDPreviewCameraDistance + ThreeDPreviewZoomStep,
+		ThreeDPreviewMinCameraDistance, ThreeDPreviewMaxCameraDistance);
+	if (APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()))
+	{
+		PositionCameraFor3DPreview(Building, InteriorGen->GetActiveFloor());
+	}
+}
+
+void ANavPlayerController::SetIn3DPreviewMode(bool bEnable)
+{
+	if (bEnable == bIsIn3DPreviewMode || !Generator || !InteriorGen)
+	{
+		return;
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building)
+	{
+		return;
+	}
+
+	bIsIn3DPreviewMode = bEnable;
+	if (bEnable)
+	{
+		FVector2D Center;
+		float Span;
+		GetBuildingFootprintBounds(Building, Center, Span);
+		ThreeDPreviewCameraDistance = FMath::Clamp(Span * 1.8f, ThreeDPreviewMinCameraDistance, ThreeDPreviewMaxCameraDistance);
+		PositionCameraFor3DPreview(Building, InteriorGen->GetActiveFloor());
+		SetOtherBuildingsHidden(true);
+		// Building itself stays visible - PositionCameraFor3DPreview's own SetVisibleInteriorLevel call
+		// (see APolyBuilding::ApplySlabVisibility) now hides every OTHER floor's own wall ring and
+		// ceiling/roof cap, leaving only the viewed floor's own exterior wall + floor slab showing.
+		// TEMP: free WASD/mouse-look re-enabled (SetIgnoreMoveInput/SetIgnoreLookInput calls removed)
+		// so the actual wall geometry can be inspected from any angle while debugging why it reads as
+		// "incomplete" from the fixed framing - re-lock these once that's confirmed fixed, per the
+		// approved plan's "fixed angle, zoom only" scope.
+	}
+	else
+	{
+		SetOtherBuildingsHidden(false);
+		RepositionCameraToActiveFloor();
+	}
+
+	OnPreviewModeChanged.Broadcast(bIsIn3DPreviewMode);
+}
+
 void ANavPlayerController::RepositionCameraToActiveFloor()
 {
 	if (!InteriorGen || !Generator)
@@ -1817,7 +1971,14 @@ void ANavPlayerController::RepositionCameraToActiveFloor()
 
 	if (APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()))
 	{
-		PositionCameraForFloor(Building, InteriorGen->GetActiveFloor());
+		if (bIsIn3DPreviewMode)
+		{
+			PositionCameraFor3DPreview(Building, InteriorGen->GetActiveFloor());
+		}
+		else
+		{
+			PositionCameraForFloor(Building, InteriorGen->GetActiveFloor());
+		}
 	}
 }
 
