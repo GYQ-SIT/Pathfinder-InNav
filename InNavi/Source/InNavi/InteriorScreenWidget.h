@@ -15,6 +15,7 @@ class UComboBoxString;
 class UEditableTextBox;
 class FJsonObject;
 class UInteriorFloorPlanWidget;
+class ULayerRowWidget;
 class UPanelWidget;
 class UScrollBox;
 class USizeBox;
@@ -86,6 +87,12 @@ private:
 	// widget's own Back/building-switch handlers.
 	UFUNCTION()
 	void HandleProjectSaved();
+
+	// Bound to ANavPlayerController::OnActiveFloorChanged - see the comment on that delegate. Covers
+	// the [/]/F/X keyboard shortcuts (and anything else that changes the active floor or its content)
+	// on top of this screen's own Floor panel button handlers, which already call these directly.
+	UFUNCTION()
+	void HandleActiveFloorChanged();
 
 	void RefreshModeButtonHighlights();
 
@@ -186,8 +193,38 @@ private:
 	// places (this panel's own buttons, or a building switch elsewhere on this screen).
 	void RefreshFloorList();
 
-	// --- Docking system for the Toolbar/Floor/Properties panels ---
-	// Each of the 3 panels below is an independently draggable UBorder placed directly on the root
+	// Layers panel - a Hierarchy/Outliner-style tree over the 2D floor plan's own content, grouped
+	// into the 4 categories InteriorFloorPlanWidget::NativePaint actually draws (Boundary/Walls/
+	// Path Nodes/I/O Nodes - see ANavPlayerController's IsBoundaryVisible/AreWallsVisible/
+	// ArePathNodesVisible/AreIONodesVisible and the per-item IsXHidden pairs, which NativePaint reads
+	// to decide what to draw). Each row's own eye toggles its visibility there; the search box
+	// filters which item rows are listed (never hides a category header itself).
+	UFUNCTION()
+	void HandleLayerRowExpandClicked(FString RowKey);
+
+	UFUNCTION()
+	void HandleLayerRowVisibilityClicked(FString RowKey);
+
+	// UEditableTextBox::OnTextChanged's own signature is (const FText&), not (FString) like most
+	// other UFUNCTION handlers on this screen - AddUniqueDynamic needs an exact match.
+	UFUNCTION()
+	void HandleLayersSearchTextChanged(const FText& NewText);
+
+	// Rebuilds LayersListBox's rows from scratch against the loaded building's current floor
+	// content, ExpandedLayerCategories, and the search box's current text - called from
+	// NativeConstruct, from the 3 handlers above, and anywhere else the active floor's content
+	// could have changed (floor switch/add/remove, building switch).
+	void RefreshLayersList();
+
+	// Shrinks LayersListSizeBox (found via LayersListBox->GetParent(), same reasoning as
+	// ConnectsToRowSizeBox etc.) to fit within AvailablePanelHeight when Layers is actually docked
+	// into a column smaller than its own fixed default (see LayersListDefaultHeight); pass a
+	// negative value to mean "not forced" (floating, or the sole visible member of its column),
+	// restoring LayersListDefaultHeight instead. Called from RefreshDockLayout, both branches.
+	void ResizeLayersListToFit(float AvailablePanelHeight);
+
+	// --- Docking system for the Toolbar/Floor/Properties/Layers panels ---
+	// Each of the 4 panels below is an independently draggable UBorder placed directly on the root
 	// canvas (not nested in a shared bar/VerticalBox like the old Left/Right sidebar bars). Dragging
 	// a panel by its own background (not one of its buttons - see IsScreenPositionOverPanelButton)
 	// moves it freely; releasing it with an edge close to another panel's edge (TrySnapPanel) snaps
@@ -195,9 +232,9 @@ private:
 	// height among the column's members (adjustable per-boundary via a splitter handle, mirrors
 	// dragging the divider between two stacked panels in a real editor). Back is deliberately NOT
 	// part of this system (see RebuildWidget) - it's fixed chrome, not a dockable panel.
-	enum class EDockPanelId : uint8 { Toolbar, Floor, Properties };
-	static constexpr int32 NumDockPanels = 3;
-	static constexpr int32 MaxDockSplitters = NumDockPanels - 1; // worst case: all 3 panels in one column
+	enum class EDockPanelId : uint8 { Toolbar, Floor, Properties, Layers };
+	static constexpr int32 NumDockPanels = 4;
+	static constexpr int32 MaxDockSplitters = NumDockPanels - 1; // worst case: all 4 panels in one column
 
 	struct FDockColumn
 	{
@@ -221,6 +258,13 @@ private:
 	// different until the user actually drags something).
 	void InitializeDefaultDockLayout();
 
+	// The floating position InitializeDefaultDockLayout gives Id on a fresh install - also used by
+	// ApplyLayoutSaveData as a per-panel fallback, since a layout file saved before Id existed as a
+	// panel (e.g. an existing save from before the Layers panel was added) won't have an entry for
+	// it, and would otherwise leave it wherever its CanvasSlot's own uninitialized default position
+	// is (the canvas's top-left corner).
+	FVector2D GetDefaultPanelPosition(EDockPanelId Id, const FVector2D& ViewportSize) const;
+
 	// Recomputes every panel's position/size and every splitter's position/visibility from the
 	// current DockPanelWidths/DockColumns state. Called after any drag (move, width-resize, or
 	// splitter) changes that state.
@@ -235,11 +279,10 @@ private:
 	// repeated over several ticks) rather than called inline from RefreshPropertiesPanelVisibility.
 	void RecomputeColumnFractionsFromNaturalSizes(int32 ColumnIndex);
 
-	// Docks Properties in directly underneath Floor, the first time Properties is ever actually
-	// shown (see bPropertiesAutoDockPending) - so a door/room/connector selection lands somewhere
-	// sensible by default instead of appearing as a lone floating panel wherever
-	// InitializeDefaultDockLayout happened to leave it. A no-op if Properties already belongs to a
-	// column by then (the user dragged it there themselves first). Reuses TrySnapPanel's own
+	// Docks Properties in directly underneath Floor - called once from InitializeDefaultDockLayout on
+	// a fresh install (no saved layout yet) so it lands somewhere sensible by default instead of
+	// appearing as a lone floating panel wherever GetDefaultPanelPosition happened to leave it. A
+	// no-op if Properties already belongs to a column by then. Reuses TrySnapPanel's own
 	// proportional-split logic by placing Properties directly below Floor's current bottom edge
 	// first, then snapping exactly as if the user had dragged it there.
 	void AutoDockPropertiesBelowFloor();
@@ -320,6 +363,9 @@ private:
 	UFUNCTION() FEventReply OnPropertiesPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnPropertiesPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnPropertiesPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnLayersPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnLayersPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnLayersPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnToolbarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -330,6 +376,9 @@ private:
 	UFUNCTION() FEventReply OnPropertiesResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnPropertiesResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnPropertiesResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnLayersResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnLayersResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnLayersResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -340,6 +389,9 @@ private:
 	UFUNCTION() FEventReply OnPropertiesLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnPropertiesLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnPropertiesLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnLayersLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnLayersLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnLayersLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnSplitter0MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter0MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -347,6 +399,9 @@ private:
 	UFUNCTION() FEventReply OnSplitter1MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter1MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter1MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnSplitter2MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnSplitter2MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnSplitter2MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	// The root canvas every dock panel is a direct child of - see GetCanvasSize.
 	UPROPERTY()
@@ -471,6 +526,23 @@ private:
 	UPROPERTY()
 	UButton* ApplyConnectorButton = nullptr;
 
+	// Layers panel - see the comment above HandleLayerRowExpandClicked.
+	UPROPERTY()
+	UBorder* LayersPanel = nullptr;
+
+	UPROPERTY()
+	UEditableTextBox* LayersSearchBox = nullptr;
+
+	// Scrollable, same reasoning as FloorListBox - a building can have many rooms/walls/nodes, and
+	// the fully-expanded tree could easily run past the panel's own height.
+	UPROPERTY()
+	UScrollBox* LayersListBox = nullptr;
+
+	// Which category rows are currently expanded (RowKey category strings, e.g. "category:Walls") -
+	// UI-only presentation state, not persisted (resets each time the interior screen reopens, same
+	// as every other widget's expand/collapse state here already does).
+	TSet<FString> ExpandedLayerCategories;
+
 	UPROPERTY()
 	UComboBoxString* BuildingSwitcherComboBox = nullptr;
 
@@ -505,6 +577,18 @@ private:
 	static constexpr float DockSnapThresholdPx = 20.f;
 	static constexpr float SplitterHeight = 8.f;
 	static constexpr float DockPanelMinHeight = 80.f; // floor for a docked panel's height share
+
+	// LayersListBox's own wrapping SizeBox is given a fixed height at construction (see RebuildWidget
+	// - 8 rows, matches StandardButtonHeight=44/row-padding=4 there, kept in sync with these by hand)
+	// so a building with many rooms/nodes doesn't make the panel absurdly tall while floating - it
+	// scrolls internally past that instead. But a docked panel's OUTER height can be forced smaller
+	// than that fixed 8-row amount (a crowded column), and since neither the panel's Border nor its
+	// SizeBox clip, the list's still-384px content just painted straight through the panel's own
+	// forced-smaller edge into whatever was below it. RefreshDockLayout shrinks LayersListSizeBox to
+	// fit whenever Layers is actually docked, and restores this default whenever it's floating again.
+	static constexpr float LayersListDefaultHeight = (44.f + 4.f) * 8.f;
+	static constexpr float LayersListMinHeight = 44.f + 4.f; // at least 1 row
+	static constexpr float LayersListNonListOverhead = 90.f; // title + search box + panel/row padding, generously rounded up
 
 	// --- Widget pointers (UPROPERTY - GC-safe TArrays, same as FloorCheckboxes above), parallel to
 	// EDockPanelId (size NumDockPanels) / splitter index (size MaxDockSplitters). ---
@@ -571,8 +655,9 @@ private:
 	// real NativeTick to re-run RefreshDockLayout once everything has actually settled.
 	bool bNeedsPostConstructLayoutRefresh = false;
 
-	// Set by RefreshPropertiesPanelVisibility whenever Properties transitions from hidden to shown
-	// (now with real content in it, unlike at construction) - counts down over the next several
+	// Set by RefreshPropertiesPanelVisibility on every selection change (Properties is a permanent
+	// panel now - its content, not its own visibility, is what changes: Door/Room/Connector fields
+	// vs the empty placeholder, each a different natural height) - counts down over the next several
 	// NativeTicks, calling RecomputeColumnFractionsFromNaturalSizes + RefreshDockLayout on each one,
 	// so its share (and its docked sibling's) ends up matching actual content instead of the
 	// arbitrary split left over from whenever the column was first formed. More than one frame is
@@ -583,16 +668,4 @@ private:
 	// past its box and off the bottom of the screen.
 	int32 PropertiesFractionRecalcFramesRemaining = 0;
 	static constexpr int32 PropertiesFractionRecalcFrameCount = 6;
-
-	// Set by RefreshPropertiesPanelVisibility on the very first hidden->shown transition Properties
-	// ever makes (and only that one - see bPropertiesAutoDockAttempted) - consumed by the next
-	// NativeTick to call AutoDockPropertiesBelowFloor once geometry has settled enough for its
-	// proportional split (via TrySnapPanel) to mean anything.
-	bool bPropertiesAutoDockPending = false;
-
-	// Sticks at true forever once the one-shot auto-dock above has been attempted (successful or
-	// not - e.g. skipped because the user had already manually docked Properties somewhere before
-	// ever selecting anything) so it never fires again, even if the user later drags Properties back
-	// out to floating and selects something else.
-	bool bPropertiesAutoDockAttempted = false;
 };

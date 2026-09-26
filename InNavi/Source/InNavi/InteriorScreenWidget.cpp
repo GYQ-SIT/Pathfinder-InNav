@@ -5,6 +5,7 @@
 #include "FloorListEntryWidget.h"
 #include "InteriorFloorPlanWidget.h"
 #include "InteriorTypes.h"
+#include "LayerRowWidget.h"
 #include "NavPlayerController.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
@@ -202,11 +203,17 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 				Splitter->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter0MouseMove);
 				Splitter->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter0MouseButtonUp);
 			}
-			else
+			else if (SplitterIndex == 1)
 			{
 				Splitter->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter1MouseButtonDown);
 				Splitter->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter1MouseMove);
 				Splitter->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter1MouseButtonUp);
+			}
+			else
+			{
+				Splitter->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter2MouseButtonDown);
+				Splitter->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter2MouseMove);
+				Splitter->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter2MouseButtonUp);
 			}
 			SplitterHandles[SplitterIndex] = Splitter;
 
@@ -218,7 +225,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		}
 
 		// Panels flush against each other in a column should read as one continuous surface, not
-		// three separate boxes with visible seams - so all 3 share this exact background color.
+		// separate boxes with visible seams - so all 4 share this exact background color.
 		const FLinearColor DockPanelColor(0.03f, 0.03f, 0.03f, 0.88f);
 
 		// -- Toolbar panel: building switcher on top, then the mode toolbar grouped into Default/
@@ -713,7 +720,54 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UVerticalBoxSlot* ApplyConnectorSlot = ConnectorFieldsBox->AddChildToVerticalBox(ApplyConnectorButton);
 		ApplyConnectorSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
 
-		PropertiesPanel->SetVisibility(ESlateVisibility::Collapsed);
+		// Permanent panel, like Floor/Toolbar/Layers - always shown; RefreshPropertiesPanelVisibility
+		// keeps its title as this neutral placeholder while nothing's selected instead of collapsing
+		// the whole panel away.
+		PropertiesPanel->SetVisibility(ESlateVisibility::Visible);
+		PropertiesTitleText->SetText(FText::FromString(TEXT("Properties")));
+
+		// -- Layers panel: a Hierarchy/Outliner-style tree over what the 2D floor plan actually
+		// draws (Boundary/Walls/Path Nodes/I/O Nodes) - see the comment above
+		// HandleLayerRowExpandClicked. Rows are ULayerRowWidget instances, built fresh each time by
+		// RefreshLayersList rather than laid out here (same reasoning as FloorListBox's rows).
+		LayersPanel = ConstructDockPanel(EDockPanelId::Layers, TEXT("Pnl_Layers"), DockPanelColor, 14.f);
+		LayersPanel->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersPanelMouseButtonDown);
+		LayersPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersPanelMouseMove);
+		LayersPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersPanelMouseButtonUp);
+		DockResizeHandles[(int32)EDockPanelId::Layers]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersResizeMouseButtonDown);
+		DockResizeHandles[(int32)EDockPanelId::Layers]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersResizeMouseMove);
+		DockResizeHandles[(int32)EDockPanelId::Layers]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersResizeMouseButtonUp);
+		DockLeftResizeHandles[(int32)EDockPanelId::Layers]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersLeftResizeMouseButtonDown);
+		DockLeftResizeHandles[(int32)EDockPanelId::Layers]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersLeftResizeMouseMove);
+		DockLeftResizeHandles[(int32)EDockPanelId::Layers]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersLeftResizeMouseButtonUp);
+
+		UVerticalBox* LayersStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LayersStack"));
+		LayersPanel->SetContent(LayersStack);
+
+		UTextBlock* LayersTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_LayersTitle"));
+		LayersTitle->SetText(FText::FromString(TEXT("Layers")));
+		LayersTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		UVerticalBoxSlot* LayersTitleSlot = LayersStack->AddChildToVerticalBox(LayersTitle);
+		LayersTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+
+		LayersSearchBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_LayersSearch"));
+		LayersSearchBox->SetHintText(FText::FromString(TEXT("Search")));
+		LayersSearchBox->OnTextChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleLayersSearchTextChanged);
+		USizeBox* LayersSearchSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Txt_LayersSearchSize"));
+		LayersSearchSizeBox->SetWidthOverride(StandardButtonWidth);
+		LayersSearchSizeBox->SetContent(LayersSearchBox);
+		UVerticalBoxSlot* LayersSearchSlot = LayersStack->AddChildToVerticalBox(LayersSearchSizeBox);
+		LayersSearchSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+
+		LayersListBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("LayersListBox"));
+		// 8 rows tall by default - scrollable beyond that via UScrollBox's own scrollbar, same
+		// reasoning as FloorListBox. Shrunk to fit whenever Layers is actually docked into a column
+		// smaller than this - see LayersListDefaultHeight's own comment.
+		USizeBox* LayersListSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("LayersListSizeBox"));
+		LayersListSizeBox->SetHeightOverride(LayersListDefaultHeight);
+		LayersListSizeBox->SetWidthOverride(StandardButtonWidth);
+		LayersListSizeBox->SetContent(LayersListBox);
+		LayersStack->AddChildToVerticalBox(LayersListSizeBox);
 	}
 
 	return Super::RebuildWidget();
@@ -766,11 +820,18 @@ void UInteriorScreenWidget::NativeConstruct()
 		// through this widget at all - this is what lets the dock layout still get saved when the
 		// user saves that way instead of through Back's own confirm dialog.
 		PC->OnProjectSaved.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
+		// Same reasoning - the [/]/F/X floor keyboard shortcuts change the active floor without ever
+		// going through this screen's own Floor panel handlers.
+		PC->OnActiveFloorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
 	}
 
 	RefreshBuildingSwitcher();
 	RefreshFloorList();
+	RefreshLayersList();
 	RefreshModeButtonHighlights();
+	// Syncs Properties' placeholder title/visibility against PC's actual current selection state
+	// (normally nothing yet, but defensive either way) before panels get positioned below.
+	RefreshPropertiesPanelVisibility();
 	// Places every dock panel for the first time (Toolbar floating top-left, Floor+Properties
 	// pre-docked top-right) - guarded internally so a later NativeConstruct call (if any) is a no-op.
 	InitializeDefaultDockLayout();
@@ -785,6 +846,7 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnSelectedConnectorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedConnectorChanged);
 		PC->OnEditModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleEditModeChanged);
 		PC->OnProjectSaved.RemoveDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
+		PC->OnActiveFloorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
 	}
 
 	Super::NativeDestruct();
@@ -800,13 +862,7 @@ void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 		RefreshDockLayout();
 	}
 
-	if (bPropertiesAutoDockPending)
-	{
-		bPropertiesAutoDockPending = false;
-		bPropertiesAutoDockAttempted = true;
-		AutoDockPropertiesBelowFloor();
-	}
-	else if (PropertiesFractionRecalcFramesRemaining > 0)
+	if (PropertiesFractionRecalcFramesRemaining > 0)
 	{
 		--PropertiesFractionRecalcFramesRemaining;
 		RecomputeColumnFractionsFromNaturalSizes(DockPanelColumnIndex[(int32)EDockPanelId::Properties]);
@@ -831,6 +887,25 @@ FVector2D UInteriorScreenWidget::GetCanvasSize() const
 	return UWidgetLayoutLibrary::GetViewportSize(this);
 }
 
+FVector2D UInteriorScreenWidget::GetDefaultPanelPosition(EDockPanelId Id, const FVector2D& ViewportSize) const
+{
+	switch (Id)
+	{
+	case EDockPanelId::Toolbar:
+		return FVector2D(10.f, SidebarTopMargin);
+	case EDockPanelId::Floor:
+	case EDockPanelId::Properties:
+		// Same spot for both - see InitializeDefaultDockLayout's own comment.
+		return FVector2D(FMath::Max(10.f, ViewportSize.X - DockPanelWidths[(int32)EDockPanelId::Floor] - 20.f), SidebarTopMargin);
+	case EDockPanelId::Layers:
+		// Left side, vertically centered - clear of Toolbar (top-left) and Floor/Properties
+		// (top-right) in most window sizes without needing to know either's actual height.
+		return FVector2D(10.f, ViewportSize.Y * 0.5f);
+	default:
+		return FVector2D(10.f, SidebarTopMargin);
+	}
+}
+
 void UInteriorScreenWidget::InitializeDefaultDockLayout()
 {
 	if (bDockLayoutInitialized)
@@ -850,27 +925,21 @@ void UInteriorScreenWidget::InitializeDefaultDockLayout()
 
 	const FVector2D ViewportSize = GetCanvasSize();
 
-	// Toolbar starts floating at the top-left, matching today's left bar position.
-	if (UCanvasPanelSlot* ToolbarSlot = DockPanelCanvasSlots[(int32)EDockPanelId::Toolbar])
+	for (int32 Index = 0; Index < NumDockPanels; ++Index)
 	{
-		ToolbarSlot->SetPosition(FVector2D(10.f, SidebarTopMargin));
-	}
-
-	// Floor starts alone, floating at the top-right - Properties stays collapsed (nothing selected
-	// yet) and isn't docked with it yet either; AutoDockPropertiesBelowFloor slots it in underneath
-	// Floor the first time it's actually shown (see RefreshPropertiesPanelVisibility).
-	const float FloorX = FMath::Max(10.f, ViewportSize.X - DockPanelWidths[(int32)EDockPanelId::Floor] - 20.f);
-	if (UCanvasPanelSlot* FloorSlot = DockPanelCanvasSlots[(int32)EDockPanelId::Floor])
-	{
-		FloorSlot->SetPosition(FVector2D(FloorX, SidebarTopMargin));
-	}
-	if (UCanvasPanelSlot* PropertiesSlot = DockPanelCanvasSlots[(int32)EDockPanelId::Properties])
-	{
-		PropertiesSlot->SetPosition(FVector2D(FloorX, SidebarTopMargin));
+		if (UCanvasPanelSlot* PanelSlot = DockPanelCanvasSlots[Index])
+		{
+			PanelSlot->SetPosition(GetDefaultPanelPosition((EDockPanelId)Index, ViewportSize));
+		}
 	}
 
 	RefreshDockPanelContentWidths();
 	RefreshDockLayout();
+
+	// Properties is a permanent panel (always visible, just empty with nothing selected - see
+	// RefreshPropertiesPanelVisibility) - dock it in under Floor by default right away instead of
+	// leaving it floating at its own default spot.
+	AutoDockPropertiesBelowFloor();
 
 	// This all just ran before the widget's had even one real Slate layout/paint pass, which can
 	// leave a docked panel's background border a frame stale (see NativeTick) - queue one more pass
@@ -910,6 +979,9 @@ bool UInteriorScreenWidget::IsScreenPositionOverPanelButton(EDockPanelId Id, con
 		{
 			Widgets.Add(CheckBox);
 		}
+		break;
+	case EDockPanelId::Layers:
+		Widgets = { LayersSearchBox, LayersListBox };
 		break;
 	}
 
@@ -1019,11 +1091,30 @@ void UInteriorScreenWidget::TrySnapPanel(EDockPanelId Id)
 			continue;
 		}
 
-		const bool bSnapBelow = FMath::Abs(DraggedTop - OtherBottom) <= DockSnapThresholdPx;
-		const bool bSnapAbove = FMath::Abs(DraggedBottom - OtherTop) <= DockSnapThresholdPx;
+		bool bSnapBelow = FMath::Abs(DraggedTop - OtherBottom) <= DockSnapThresholdPx;
+		bool bSnapAbove = FMath::Abs(DraggedBottom - OtherTop) <= DockSnapThresholdPx;
 		if (!bSnapBelow && !bSnapAbove)
 		{
-			continue;
+			// Not edge-adjacent, but the two panels' rects genuinely overlap (e.g. dropped right on
+			// top of another panel rather than nudged against its edge) - a real editor never lets
+			// two panels just sit on top of each other unglued reading as garbled overlapping text,
+			// so this resolves the same way an edge-snap would: dock against whichever side needs to
+			// move the least, based on their centers.
+			const bool bYOverlaps = DraggedTop < OtherBottom && OtherTop < DraggedBottom;
+			if (!bYOverlaps)
+			{
+				continue;
+			}
+			const float DraggedCenterY = (DraggedTop + DraggedBottom) * 0.5f;
+			const float OtherCenterY = (OtherTop + OtherBottom) * 0.5f;
+			if (DraggedCenterY >= OtherCenterY)
+			{
+				bSnapBelow = true;
+			}
+			else
+			{
+				bSnapAbove = true;
+			}
 		}
 
 		// Join Other's column (creating one if it doesn't have one yet).
@@ -1133,6 +1224,13 @@ void UInteriorScreenWidget::RefreshDockLayout()
 					}
 				}
 			}
+			if (PanelId == EDockPanelId::Layers)
+			{
+				// See LayersListDefaultHeight's own comment - the list's own fixed-height wrapper
+				// needs to shrink to fit whenever this panel's OUTER height was just forced smaller
+				// than that fixed default, or its content paints straight through the panel's edge.
+				ResizeLayersListToFit(bPanelVisible && bSplitColumn ? PanelHeight : -1.f);
+			}
 			if (UCanvasPanelSlot* PanelSlot = DockPanelCanvasSlots[Index])
 			{
 				PanelSlot->SetPosition(FVector2D(Column.X, RunningY));
@@ -1181,6 +1279,10 @@ void UInteriorScreenWidget::RefreshDockLayout()
 				Wrapper->SetWidthOverride(DockPanelWidths[Index]);
 				Wrapper->ClearHeightOverride();
 			}
+		}
+		if ((EDockPanelId)Index == EDockPanelId::Layers)
+		{
+			ResizeLayersListToFit(-1.f); // floating - not forced, back to its own fixed default cap
 		}
 
 		// Same reasoning as the docked branch above - Properties starts out floating AND hidden
@@ -1330,6 +1432,7 @@ const TCHAR* UInteriorScreenWidget::GetDockPanelName(EDockPanelId Id)
 	case EDockPanelId::Toolbar:    return TEXT("Toolbar");
 	case EDockPanelId::Floor:      return TEXT("Floor");
 	case EDockPanelId::Properties: return TEXT("Properties");
+	case EDockPanelId::Layers:     return TEXT("Layers");
 	default:                       return TEXT("");
 	}
 }
@@ -1392,28 +1495,35 @@ void UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 		return;
 	}
 
+	const FVector2D ViewportSize = GetCanvasSize();
 	const TSharedPtr<FJsonObject>* PanelsObject = nullptr;
-	if (Root->TryGetObjectField(TEXT("panels"), PanelsObject))
+	const bool bHasPanelsObject = Root->TryGetObjectField(TEXT("panels"), PanelsObject);
+	for (int32 Index = 0; Index < NumDockPanels; ++Index)
 	{
-		for (int32 Index = 0; Index < NumDockPanels; ++Index)
+		const EDockPanelId Id = (EDockPanelId)Index;
+		const TSharedPtr<FJsonObject>* PanelObject = nullptr;
+		if (!bHasPanelsObject || !(*PanelsObject)->TryGetObjectField(GetDockPanelName(Id), PanelObject))
 		{
-			const TSharedPtr<FJsonObject>* PanelObject = nullptr;
-			if (!(*PanelsObject)->TryGetObjectField(GetDockPanelName((EDockPanelId)Index), PanelObject))
-			{
-				continue;
-			}
-
-			double X = 0.0, Y = 0.0, Width = SidebarMinWidth;
-			(*PanelObject)->TryGetNumberField(TEXT("x"), X);
-			(*PanelObject)->TryGetNumberField(TEXT("y"), Y);
-			(*PanelObject)->TryGetNumberField(TEXT("width"), Width);
-
+			// A layout file saved before Id existed as a panel (e.g. an existing save from before
+			// the Layers panel was added) has no entry for it - fall back to its normal default
+			// spot instead of leaving it at its CanvasSlot's own uninitialized position.
 			if (UCanvasPanelSlot* PanelSlot = DockPanelCanvasSlots[Index])
 			{
-				PanelSlot->SetPosition(FVector2D((float)X, (float)Y));
+				PanelSlot->SetPosition(GetDefaultPanelPosition(Id, ViewportSize));
 			}
-			DockPanelWidths[Index] = FMath::Clamp((float)Width, SidebarMinWidth, SidebarMaxWidth);
+			continue;
 		}
+
+		double X = 0.0, Y = 0.0, Width = SidebarMinWidth;
+		(*PanelObject)->TryGetNumberField(TEXT("x"), X);
+		(*PanelObject)->TryGetNumberField(TEXT("y"), Y);
+		(*PanelObject)->TryGetNumberField(TEXT("width"), Width);
+
+		if (UCanvasPanelSlot* PanelSlot = DockPanelCanvasSlots[Index])
+		{
+			PanelSlot->SetPosition(FVector2D((float)X, (float)Y));
+		}
+		DockPanelWidths[Index] = FMath::Clamp((float)Width, SidebarMinWidth, SidebarMaxWidth);
 	}
 
 	DockColumns.Reset();
@@ -1473,10 +1583,9 @@ void UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 		}
 	}
 
-	// This is a deliberately-restored layout, not the freshly-constructed default - respect
-	// wherever it left Properties (docked or floating) instead of auto-docking it under Floor the
-	// first time it's shown.
-	bPropertiesAutoDockAttempted = true;
+	// This is a deliberately-restored layout, not the freshly-constructed default - InitializeDefaultDockLayout
+	// only calls AutoDockPropertiesBelowFloor on the path that DOESN'T load a saved layout, so
+	// Properties is left wherever this restore put it (docked or floating) either way.
 
 	RefreshDockPanelContentWidths();
 	RefreshDockLayout();
@@ -1819,6 +1928,9 @@ FEventReply UInteriorScreenWidget::OnFloorPanelMouseButtonUp(FGeometry MyGeometr
 FEventReply UInteriorScreenWidget::OnPropertiesPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonDown(EDockPanelId::Properties, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnPropertiesPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseMove(EDockPanelId::Properties, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnPropertiesPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonUp(EDockPanelId::Properties, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnLayersPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonDown(EDockPanelId::Layers, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnLayersPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseMove(EDockPanelId::Layers, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnLayersPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonUp(EDockPanelId::Layers, MouseEvent); }
 
 FEventReply UInteriorScreenWidget::OnToolbarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
@@ -1829,6 +1941,9 @@ FEventReply UInteriorScreenWidget::OnFloorResizeMouseButtonUp(FGeometry MyGeomet
 FEventReply UInteriorScreenWidget::OnPropertiesResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Properties, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnPropertiesResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Properties, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnPropertiesResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Properties, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnLayersResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Layers, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnLayersResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Layers, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnLayersResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Layers, MouseEvent); }
 
 FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
@@ -1839,6 +1954,9 @@ FEventReply UInteriorScreenWidget::OnFloorLeftResizeMouseButtonUp(FGeometry MyGe
 FEventReply UInteriorScreenWidget::OnPropertiesLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Properties, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnPropertiesLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Properties, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnPropertiesLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Properties, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnLayersLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Layers, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnLayersLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Layers, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnLayersLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Layers, MouseEvent); }
 
 FEventReply UInteriorScreenWidget::OnSplitter0MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonDown(0, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnSplitter0MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseMove(0, MouseEvent); }
@@ -1846,6 +1964,9 @@ FEventReply UInteriorScreenWidget::OnSplitter0MouseButtonUp(FGeometry MyGeometry
 FEventReply UInteriorScreenWidget::OnSplitter1MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonDown(1, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnSplitter1MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseMove(1, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnSplitter1MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonUp(1, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnSplitter2MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonDown(2, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnSplitter2MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseMove(2, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnSplitter2MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonUp(2, MouseEvent); }
 
 void UInteriorScreenWidget::HandleEditModeChanged()
 {
@@ -1855,6 +1976,12 @@ void UInteriorScreenWidget::HandleEditModeChanged()
 void UInteriorScreenWidget::HandleProjectSaved()
 {
 	SaveDockLayoutToDisk();
+}
+
+void UInteriorScreenWidget::HandleActiveFloorChanged()
+{
+	RefreshFloorList();
+	RefreshLayersList();
 }
 
 void UInteriorScreenWidget::RefreshDockPanelContentWidths()
@@ -1929,6 +2056,32 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 			if (UFloorListEntryWidget* Entry = Cast<UFloorListEntryWidget>(FloorListBox->GetChildAt(Index)))
 			{
 				Entry->SetWidth(FloorButtonWidth);
+			}
+		}
+	}
+
+	// Layers: search box and the list's own width track the panel the same way as everything above;
+	// existing rows are updated directly (same reasoning as FloorListBox's entries) rather than
+	// waiting for the next RefreshLayersList to happen to be called for some other reason.
+	const float LayersButtonWidth = ComputePanelButtonWidth(EDockPanelId::Layers);
+	if (LayersSearchBox)
+	{
+		if (USizeBox* SizeBox = Cast<USizeBox>(LayersSearchBox->GetParent()))
+		{
+			SizeBox->SetWidthOverride(LayersButtonWidth);
+		}
+	}
+	if (LayersListBox)
+	{
+		if (USizeBox* SizeBox = Cast<USizeBox>(LayersListBox->GetParent()))
+		{
+			SizeBox->SetWidthOverride(LayersButtonWidth);
+		}
+		for (int32 Index = 0; Index < LayersListBox->GetChildrenCount(); ++Index)
+		{
+			if (ULayerRowWidget* Row = Cast<ULayerRowWidget>(LayersListBox->GetChildAt(Index)))
+			{
+				Row->SetWidth(LayersButtonWidth);
 			}
 		}
 	}
@@ -2163,33 +2316,25 @@ void UInteriorScreenWidget::RefreshPropertiesPanelVisibility()
 		return;
 	}
 
-	const bool bWasVisible = PropertiesPanel->GetVisibility() != ESlateVisibility::Collapsed;
+	// Properties is a permanent panel now, same as Floor/Toolbar/Layers - it never collapses away
+	// entirely; with nothing selected it just shows an empty "Properties" placeholder instead of
+	// disappearing, matching a real editor's Details/Properties panel (see AutoDockPropertiesBelowFloor,
+	// called once at construction instead of waiting for a first selection to dock it under Floor).
+	PropertiesPanel->SetVisibility(ESlateVisibility::Visible);
 
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
 	const bool bAnySelected = PC && (!PC->GetSelectedRoomId().IsEmpty() || !PC->GetSelectedDoorId().IsEmpty() || !PC->GetSelectedConnectorGroupId().IsEmpty());
-	PropertiesPanel->SetVisibility(bAnySelected ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-
-	// Freshly shown (not just still-visible-from-before) and with its real content in it now, unlike
-	// at construction. The very first time this ever happens, dock it in under Floor by default
-	// instead of leaving it floating wherever InitializeDefaultDockLayout left it (see
-	// AutoDockPropertiesBelowFloor); every time after that, it's already somewhere (either from that
-	// auto-dock, a restored save, or the user dragging it themselves), so just re-split its column's
-	// height to match its actual content instead. Both are deferred - see
-	// PropertiesFractionRecalcFramesRemaining's comment for why more than one tick.
-	if (bAnySelected && !bWasVisible)
+	if (!bAnySelected && PropertiesTitleText)
 	{
-		if (!bPropertiesAutoDockAttempted)
-		{
-			bPropertiesAutoDockPending = true;
-		}
-		else
-		{
-			PropertiesFractionRecalcFramesRemaining = PropertiesFractionRecalcFrameCount;
-		}
+		PropertiesTitleText->SetText(FText::FromString(TEXT("Properties")));
 	}
 
-	// A splitter at the boundary with Properties needs to appear/disappear along with it - see the
-	// comment in RefreshSplitterLayout.
+	// Its natural content height changes meaningfully with every selection change (Door/Room/
+	// Connector fields are different heights, and the empty placeholder above is shorter than any of
+	// them) - queue a re-split of its column once geometry actually reflects the new content. See
+	// PropertiesFractionRecalcFramesRemaining's own comment for why more than one tick is needed.
+	PropertiesFractionRecalcFramesRemaining = PropertiesFractionRecalcFrameCount;
+
 	RefreshSplitterLayout();
 }
 
@@ -2246,6 +2391,244 @@ void UInteriorScreenWidget::RefreshFloorList()
 	}
 }
 
+void UInteriorScreenWidget::ResizeLayersListToFit(float AvailablePanelHeight)
+{
+	if (!LayersListBox)
+	{
+		return;
+	}
+	USizeBox* SizeBox = Cast<USizeBox>(LayersListBox->GetParent());
+	if (!SizeBox)
+	{
+		return;
+	}
+
+	if (AvailablePanelHeight < 0.f)
+	{
+		SizeBox->SetHeightOverride(LayersListDefaultHeight);
+		return;
+	}
+
+	const float FittedHeight = FMath::Clamp(AvailablePanelHeight - LayersListNonListOverhead, LayersListMinHeight, LayersListDefaultHeight);
+	SizeBox->SetHeightOverride(FittedHeight);
+}
+
+void UInteriorScreenWidget::RefreshLayersList()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC || !LayersListBox)
+	{
+		return;
+	}
+
+	LayersListBox->ClearChildren();
+
+	const FString SearchFilter = LayersSearchBox ? LayersSearchBox->GetText().ToString() : FString();
+	const float RowWidth = ComputePanelButtonWidth(EDockPanelId::Layers);
+	constexpr float ItemIndent = 20.f;
+
+	// Category headers are never filtered out by search (only their children are) - if they were,
+	// searching for an item would also hide the very row you'd expand to find more like it.
+	auto AddRow = [this, PC, RowWidth](const FString& RowKey, const FString& Label, float IndentPx, bool bShowExpandArrow, bool bIsExpanded, bool bIsVisible)
+	{
+		ULayerRowWidget* Row = CreateWidget<ULayerRowWidget>(PC, ULayerRowWidget::StaticClass());
+		if (!Row)
+		{
+			return;
+		}
+		Row->Setup(RowKey, Label, IndentPx, bShowExpandArrow, bIsExpanded, bIsVisible);
+		Row->SetWidth(RowWidth);
+		Row->OnExpandClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleLayerRowExpandClicked);
+		Row->OnVisibilityClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleLayerRowVisibilityClicked);
+		if (UScrollBoxSlot* RowSlot = Cast<UScrollBoxSlot>(LayersListBox->AddChild(Row)))
+		{
+			RowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+		}
+	};
+
+	const int32 ActiveFloor = PC->GetActiveFloor();
+
+	// -- Boundary -- exactly one item, the loaded building itself.
+	{
+		const bool bExpanded = ExpandedLayerCategories.Contains(TEXT("category:Boundary"));
+		AddRow(TEXT("category:Boundary"), TEXT("Boundary"), 0.f, true, bExpanded, PC->IsBoundaryVisible());
+		if (bExpanded)
+		{
+			const FString BuildingName = PC->GetLoadedBuildingName();
+			const FString ItemLabel = BuildingName.IsEmpty() ? TEXT("Building outline") : BuildingName;
+			if (SearchFilter.IsEmpty() || ItemLabel.Contains(SearchFilter))
+			{
+				AddRow(TEXT("item:Boundary:building"), ItemLabel, ItemIndent, false, false, PC->IsBoundaryVisible());
+			}
+		}
+	}
+
+	// -- Rooms -- and -- Walls -- both come from GetRoomIdsOnFloor(), split by IsRoomClosedLoop (see
+	// InteriorFloorPlanWidget::NativePaint, which draws them the same way - AInteriorRoom covers
+	// both closed rooms and open standalone walls, sharing the same id/class).
+	{
+		const bool bExpanded = ExpandedLayerCategories.Contains(TEXT("category:Rooms"));
+		AddRow(TEXT("category:Rooms"), TEXT("Rooms"), 0.f, true, bExpanded, PC->AreRoomsVisible());
+		if (bExpanded)
+		{
+			for (const FString& RoomId : PC->GetRoomIdsOnFloor(ActiveFloor))
+			{
+				if (!PC->IsRoomClosedLoop(RoomId))
+				{
+					continue;
+				}
+				const FString RoomName = PC->GetRoomName(RoomId);
+				const FString ItemLabel = RoomName.IsEmpty() ? RoomId : RoomName;
+				if (!SearchFilter.IsEmpty() && !ItemLabel.Contains(SearchFilter))
+				{
+					continue;
+				}
+				AddRow(FString::Printf(TEXT("item:Rooms:%s"), *RoomId), ItemLabel, ItemIndent, false, false, !PC->IsRoomHidden(RoomId));
+			}
+		}
+	}
+
+	{
+		const bool bExpanded = ExpandedLayerCategories.Contains(TEXT("category:Walls"));
+		AddRow(TEXT("category:Walls"), TEXT("Walls"), 0.f, true, bExpanded, PC->AreWallsVisible());
+		if (bExpanded)
+		{
+			for (const FString& RoomId : PC->GetRoomIdsOnFloor(ActiveFloor))
+			{
+				if (PC->IsRoomClosedLoop(RoomId))
+				{
+					continue;
+				}
+				const FString RoomName = PC->GetRoomName(RoomId);
+				const FString ItemLabel = RoomName.IsEmpty() ? RoomId : RoomName;
+				if (!SearchFilter.IsEmpty() && !ItemLabel.Contains(SearchFilter))
+				{
+					continue;
+				}
+				AddRow(FString::Printf(TEXT("item:Walls:%s"), *RoomId), ItemLabel, ItemIndent, false, false, !PC->IsRoomHidden(RoomId));
+			}
+		}
+	}
+
+	// -- Path Nodes -- and -- I/O Nodes (elevator/stairs/escalator) -- both come from GetNavNodes(),
+	// split by type (see InteriorFloorPlanWidget::NativePaint, which draws them the same way).
+	{
+		const bool bExpanded = ExpandedLayerCategories.Contains(TEXT("category:PathNodes"));
+		AddRow(TEXT("category:PathNodes"), TEXT("Path Nodes"), 0.f, true, bExpanded, PC->ArePathNodesVisible());
+		if (bExpanded)
+		{
+			for (const FInteriorNavNode& Node : PC->GetNavNodes())
+			{
+				if (Node.Level != ActiveFloor || Node.Type != EInteriorNavNodeType::PathNode)
+				{
+					continue;
+				}
+				const FString ItemLabel = FString::Printf(TEXT("Path Node - %s"), *Node.Id);
+				if (!SearchFilter.IsEmpty() && !ItemLabel.Contains(SearchFilter))
+				{
+					continue;
+				}
+				AddRow(FString::Printf(TEXT("item:PathNodes:%s"), *Node.Id), ItemLabel, ItemIndent, false, false, !PC->IsPathNodeHidden(Node.Id));
+			}
+		}
+	}
+
+	{
+		const bool bExpanded = ExpandedLayerCategories.Contains(TEXT("category:IONodes"));
+		AddRow(TEXT("category:IONodes"), TEXT("I/O Nodes"), 0.f, true, bExpanded, PC->AreIONodesVisible());
+		if (bExpanded)
+		{
+			for (const FInteriorNavNode& Node : PC->GetNavNodes())
+			{
+				if (Node.Level != ActiveFloor || Node.Type == EInteriorNavNodeType::PathNode)
+				{
+					continue;
+				}
+
+				FString TypeName;
+				switch (Node.Type)
+				{
+				case EInteriorNavNodeType::Elevator:  TypeName = TEXT("Elevator");  break;
+				case EInteriorNavNodeType::Stairs:    TypeName = TEXT("Stairs");    break;
+				case EInteriorNavNodeType::Escalator: TypeName = TEXT("Escalator"); break;
+				default: break;
+				}
+				const FString ItemLabel = FString::Printf(TEXT("%s - %s"), *TypeName, *Node.Id);
+				if (!SearchFilter.IsEmpty() && !ItemLabel.Contains(SearchFilter))
+				{
+					continue;
+				}
+				AddRow(FString::Printf(TEXT("item:IONodes:%s"), *Node.Id), ItemLabel, ItemIndent, false, false, !PC->IsIONodeHidden(Node.Id));
+			}
+		}
+	}
+}
+
+void UInteriorScreenWidget::HandleLayerRowExpandClicked(FString RowKey)
+{
+	if (ExpandedLayerCategories.Contains(RowKey))
+	{
+		ExpandedLayerCategories.Remove(RowKey);
+	}
+	else
+	{
+		ExpandedLayerCategories.Add(RowKey);
+	}
+	RefreshLayersList();
+}
+
+void UInteriorScreenWidget::HandleLayerRowVisibilityClicked(FString RowKey)
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC)
+	{
+		return;
+	}
+
+	// RowKey is either "category:<Name>" or "item:<Category>:<Id>" (see the comment on
+	// FOnLayerRowKeyClicked) - split on ':' to figure out which PC setter to call.
+	TArray<FString> Parts;
+	RowKey.ParseIntoArray(Parts, TEXT(":"), false);
+	if (Parts.Num() < 2)
+	{
+		return;
+	}
+
+	if (Parts[0] == TEXT("category"))
+	{
+		const FString& Category = Parts[1];
+		if (Category == TEXT("Boundary"))       { PC->SetBoundaryVisible(!PC->IsBoundaryVisible()); }
+		else if (Category == TEXT("Rooms"))     { PC->SetRoomsVisible(!PC->AreRoomsVisible()); }
+		else if (Category == TEXT("Walls"))     { PC->SetWallsVisible(!PC->AreWallsVisible()); }
+		else if (Category == TEXT("PathNodes")) { PC->SetPathNodesVisible(!PC->ArePathNodesVisible()); }
+		else if (Category == TEXT("IONodes"))   { PC->SetIONodesVisible(!PC->AreIONodesVisible()); }
+	}
+	else if (Parts[0] == TEXT("item") && Parts.Num() >= 3)
+	{
+		const FString& Category = Parts[1];
+		// The id itself may contain ':' (unlikely, but ids are otherwise free-form) - rejoin
+		// everything after the category so it isn't truncated at the first one.
+		FString Id = Parts[2];
+		for (int32 i = 3; i < Parts.Num(); ++i)
+		{
+			Id += TEXT(":") + Parts[i];
+		}
+
+		if (Category == TEXT("Boundary"))       { /* single item, nothing more specific to toggle than the category itself */ PC->SetBoundaryVisible(!PC->IsBoundaryVisible()); }
+		else if (Category == TEXT("Rooms"))     { PC->SetRoomHidden(Id, !PC->IsRoomHidden(Id)); }
+		else if (Category == TEXT("Walls"))     { PC->SetRoomHidden(Id, !PC->IsRoomHidden(Id)); }
+		else if (Category == TEXT("PathNodes")) { PC->SetPathNodeHidden(Id, !PC->IsPathNodeHidden(Id)); }
+		else if (Category == TEXT("IONodes"))   { PC->SetIONodeHidden(Id, !PC->IsIONodeHidden(Id)); }
+	}
+
+	RefreshLayersList();
+}
+
+void UInteriorScreenWidget::HandleLayersSearchTextChanged(const FText& NewText)
+{
+	RefreshLayersList();
+}
+
 void UInteriorScreenWidget::HandleFloorEntryClicked(int32 FloorNumber)
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
@@ -2253,6 +2636,7 @@ void UInteriorScreenWidget::HandleFloorEntryClicked(int32 FloorNumber)
 		PC->SetActiveFloor(FloorNumber);
 	}
 	RefreshFloorList();
+	RefreshLayersList();
 }
 
 void UInteriorScreenWidget::OnAddFloorClicked()
@@ -2262,6 +2646,7 @@ void UInteriorScreenWidget::OnAddFloorClicked()
 		PC->AddFloor();
 	}
 	RefreshFloorList();
+	RefreshLayersList();
 }
 
 void UInteriorScreenWidget::OnRemoveFloorClicked()
@@ -2271,6 +2656,7 @@ void UInteriorScreenWidget::OnRemoveFloorClicked()
 		PC->RemoveFloor(PC->GetActiveFloor());
 	}
 	RefreshFloorList();
+	RefreshLayersList();
 }
 
 void UInteriorScreenWidget::RefreshBuildingSwitcher()
@@ -2318,6 +2704,7 @@ void UInteriorScreenWidget::HandleBuildingSwitcherChanged(FString SelectedItem, 
 		PC->LoadInteriorForBuilding(NewBuildingId);
 		RefreshBuildingSwitcher();
 		RefreshFloorList();
+		RefreshLayersList();
 		return;
 	}
 
@@ -2343,6 +2730,7 @@ void UInteriorScreenWidget::HandleSwitchBuildingSave()
 	}
 	RefreshBuildingSwitcher();
 	RefreshFloorList();
+	RefreshLayersList();
 }
 
 void UInteriorScreenWidget::HandleSwitchBuildingDiscard()
@@ -2357,6 +2745,7 @@ void UInteriorScreenWidget::HandleSwitchBuildingDiscard()
 	}
 	RefreshBuildingSwitcher();
 	RefreshFloorList();
+	RefreshLayersList();
 }
 
 void UInteriorScreenWidget::HandleSwitchBuildingCancel()

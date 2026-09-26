@@ -783,6 +783,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		};
 
 	// ---- Building boundary ----
+	if (!PlayerController || PlayerController->IsBoundaryVisible())
 	{
 		TArray<FVector2D> LinePoints;
 		for (const FVector2D& Point : Building->GetFootprint())
@@ -804,6 +805,20 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		if (!Room)
 		{
 			continue;
+		}
+
+		// Layers panel per-category/per-item visibility (see ANavPlayerController::AreRoomsVisible/
+		// AreWallsVisible/IsRoomHidden) - Rooms and Walls are separate categories despite sharing this
+		// one loop, split by IsClosedLoop() same as everywhere else that distinguishes them. A hidden
+		// room's door(s) are drawn as part of this same loop iteration, so skipping the room here
+		// already hides them too, no separate check needed.
+		if (PlayerController)
+		{
+			const bool bCategoryVisible = Room->IsClosedLoop() ? PlayerController->AreRoomsVisible() : PlayerController->AreWallsVisible();
+			if (!bCategoryVisible || PlayerController->IsRoomHidden(Room->RoomId))
+			{
+				continue;
+			}
 		}
 
 		const TArray<FVector2D>& Footprint = Room->GetFootprint();
@@ -896,6 +911,16 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		for (const FInteriorNavNode& Node : InteriorGen->GetNavNodes())
 		{
 			if (Node.Level != InteriorGen->GetActiveFloor())
+			{
+				continue;
+			}
+
+			// Layers panel per-category/per-item visibility - Path Nodes and I/O Nodes (elevator/
+			// stairs/escalator) are separate categories despite sharing this one loop/array.
+			const bool bIsPathNode = Node.Type == EInteriorNavNodeType::PathNode;
+			if (bIsPathNode
+				? (!PlayerController->ArePathNodesVisible() || PlayerController->IsPathNodeHidden(Node.Id))
+				: (!PlayerController->AreIONodesVisible() || PlayerController->IsIONodeHidden(Node.Id)))
 			{
 				continue;
 			}

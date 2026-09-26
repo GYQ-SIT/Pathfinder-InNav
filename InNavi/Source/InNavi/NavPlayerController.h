@@ -45,6 +45,15 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRoomPointCountChanged, int32, Poi
 // Interior" button without polling every tick. Not broadcast for a deselect (clicking empty ground
 // currently leaves the selection as-is - see SelectBuildingUnderCursor).
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildingSelected, FString, BuildingId);
+// Broadcast whenever the active interior floor actually changes - from SetActiveFloor directly
+// (the Floor panel's own row clicks, but also the [ and ] keyboard shortcuts, which call it via
+// CycleInteriorFloorUp/Down without going through any UI widget at all), and from AddFloor/
+// RemoveFloor on success (F/X keys, or a real "+Add floor"/"Delete floor" button, both of which can
+// shift which floor ends up active, or just change what exists on floors that were already active).
+// No params - a listener re-reads GetActiveFloor()/whatever floor-scoped data it cares about,
+// rather than being handed the new floor number directly, so it works the same regardless of
+// which of these actually triggered it.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnActiveFloorChanged);
 // Broadcast whenever a user-triggered action fails (a button press that did nothing), with a
 // short human-readable reason. UE_LOG still gets the detailed message for developers; this is
 // the same idea aimed at UI - bind it once to show a toast/message, since a packaged game has no
@@ -561,6 +570,72 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	const TArray<FInteriorNavNode>& GetNavNodes() const;
 
+	// Every room/wall id on Level (AInteriorRoom::RoomId, both closed rooms and open standalone
+	// walls) - for a Layers panel to list without needing to touch AInteriorRoom* directly (same
+	// id/string-only convention every other UI-facing accessor here already follows).
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	TArray<FString> GetRoomIdsOnFloor(int32 Level) const;
+
+	// Any room/wall's current name by id (unlike GetSelectedRoomName, which only reads whichever one
+	// is currently selected) - what a Layers panel calls to label each Rooms/Walls row. Empty if no
+	// room with that id exists.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	FString GetRoomName(const FString& RoomId) const;
+
+	// Any room/wall's current closed-loop state by id (unlike IsSelectedRoomClosedLoop, which only
+	// reads whichever one is currently selected) - what a Layers panel calls to sort each id from
+	// GetRoomIdsOnFloor into its Rooms or Walls category. False if no room with that id exists.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool IsRoomClosedLoop(const FString& RoomId) const;
+
+	// Per-category and per-item visibility on the 2D floor plan (see InteriorFloorPlanWidget's
+	// NativePaint, which reads these to decide what to actually draw) - driven by the interior
+	// editor's Layers panel. Two-level model, like a real Outliner: a category switch that hides
+	// everything in it at once, plus per-item overrides underneath (so turning the category back on
+	// doesn't undo an individual item's own hidden state). All default visible.
+	UFUNCTION(BlueprintPure, Category = "Interior|Layers")
+	bool IsBoundaryVisible() const { return bBoundaryVisible; }
+	UFUNCTION(BlueprintCallable, Category = "Interior|Layers")
+	void SetBoundaryVisible(bool bVisible) { bBoundaryVisible = bVisible; }
+
+	// Closed rooms and open standalone walls (AInteriorRoom::IsClosedLoop - see IsRoomClosedLoop
+	// above) are separate Layers categories despite sharing the same underlying id/class - Rooms
+	// covers the closed ones, Walls the open ones.
+	UFUNCTION(BlueprintPure, Category = "Interior|Layers")
+	bool AreRoomsVisible() const { return bRoomsVisible; }
+	UFUNCTION(BlueprintCallable, Category = "Interior|Layers")
+	void SetRoomsVisible(bool bVisible) { bRoomsVisible = bVisible; }
+
+	UFUNCTION(BlueprintPure, Category = "Interior|Layers")
+	bool AreWallsVisible() const { return bWallsVisible; }
+	UFUNCTION(BlueprintCallable, Category = "Interior|Layers")
+	void SetWallsVisible(bool bVisible) { bWallsVisible = bVisible; }
+
+	UFUNCTION(BlueprintPure, Category = "Interior|Layers")
+	bool ArePathNodesVisible() const { return bPathNodesVisible; }
+	UFUNCTION(BlueprintCallable, Category = "Interior|Layers")
+	void SetPathNodesVisible(bool bVisible) { bPathNodesVisible = bVisible; }
+
+	UFUNCTION(BlueprintPure, Category = "Interior|Layers")
+	bool AreIONodesVisible() const { return bIONodesVisible; }
+	UFUNCTION(BlueprintCallable, Category = "Interior|Layers")
+	void SetIONodesVisible(bool bVisible) { bIONodesVisible = bVisible; }
+
+	UFUNCTION(BlueprintPure, Category = "Interior|Layers")
+	bool IsRoomHidden(const FString& RoomId) const { return HiddenRoomIds.Contains(RoomId); }
+	UFUNCTION(BlueprintCallable, Category = "Interior|Layers")
+	void SetRoomHidden(const FString& RoomId, bool bNewHidden);
+
+	UFUNCTION(BlueprintPure, Category = "Interior|Layers")
+	bool IsPathNodeHidden(const FString& NodeId) const { return HiddenPathNodeIds.Contains(NodeId); }
+	UFUNCTION(BlueprintCallable, Category = "Interior|Layers")
+	void SetPathNodeHidden(const FString& NodeId, bool bNewHidden);
+
+	UFUNCTION(BlueprintPure, Category = "Interior|Layers")
+	bool IsIONodeHidden(const FString& NodeId) const { return HiddenIONodeIds.Contains(NodeId); }
+	UFUNCTION(BlueprintCallable, Category = "Interior|Layers")
+	void SetIONodeHidden(const FString& NodeId, bool bNewHidden);
+
 	// The currently-selected building's id (left-click a building to select it), or empty if
 	// nothing is selected. Feed this straight into LoadInteriorForBuilding for an "Enter Interior"
 	// button.
@@ -569,6 +644,10 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Building")
 	FOnBuildingSelected OnBuildingSelected;
+
+	// See FOnActiveFloorChanged above.
+	UPROPERTY(BlueprintAssignable, Category = "Interior")
+	FOnActiveFloorChanged OnActiveFloorChanged;
 
 	// Every building's current display name - for a building-switcher dropdown (see
 	// WBP_InteriorScreen) to list. Populate the dropdown with this, then resolve the picked
@@ -723,6 +802,18 @@ private:
 	// See SelectConnector/GetSelectedConnectorGroupId - same lifetime rules as SelectedRoomId, and
 	// mutually exclusive with both SelectedRoomId and SelectedDoorRoomId/SelectedDoorId.
 	FString SelectedConnectorGroupId;
+
+	// See IsBoundaryVisible/AreWallsVisible/ArePathNodesVisible/AreIONodesVisible and the
+	// IsXHidden/SetXHidden pairs above - driven by the interior editor's Layers panel, read by
+	// InteriorFloorPlanWidget::NativePaint to decide what to actually draw.
+	bool bBoundaryVisible = true;
+	bool bRoomsVisible = true;
+	bool bWallsVisible = true;
+	bool bPathNodesVisible = true;
+	bool bIONodesVisible = true;
+	TSet<FString> HiddenRoomIds;
+	TSet<FString> HiddenPathNodeIds;
+	TSet<FString> HiddenIONodeIds;
 
 	// See TogglePrefabRectangleMode/TogglePrefabTriangleMode/TogglePrefabCircleMode/
 	// IsInPrefabRoomMode. 0 = none armed; 1 = rectangle, 2 = triangle, 3 = circle.

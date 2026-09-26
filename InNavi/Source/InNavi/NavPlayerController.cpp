@@ -2083,6 +2083,7 @@ void ANavPlayerController::SetActiveFloor(int32 Level)
 
 	InteriorGen->SetActiveFloor(Level);
 	RepositionCameraToActiveFloor();
+	OnActiveFloorChanged.Broadcast();
 }
 
 int32 ANavPlayerController::GetActiveFloor() const
@@ -2107,6 +2108,7 @@ int32 ANavPlayerController::AddFloor()
 	{
 		bHasUnsavedChanges = true;
 		RepositionCameraToActiveFloor();
+		OnActiveFloorChanged.Broadcast();
 	}
 	return NewLevel;
 }
@@ -2128,6 +2130,7 @@ bool ANavPlayerController::RemoveFloor(int32 Level)
 	{
 		bHasUnsavedChanges = true;
 		RepositionCameraToActiveFloor();
+		OnActiveFloorChanged.Broadcast();
 	}
 	return bSuccess;
 }
@@ -2157,6 +2160,71 @@ const TArray<FInteriorNavNode>& ANavPlayerController::GetNavNodes() const
 {
 	static const TArray<FInteriorNavNode> EmptyNavNodes;
 	return InteriorGen ? InteriorGen->GetNavNodes() : EmptyNavNodes;
+}
+
+TArray<FString> ANavPlayerController::GetRoomIdsOnFloor(int32 Level) const
+{
+	TArray<FString> RoomIds;
+	if (!InteriorGen)
+	{
+		return RoomIds;
+	}
+
+	RoomIds.Reserve(InteriorGen->GetRoomsOnFloor(Level).Num());
+	for (const AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(Level))
+	{
+		if (Room)
+		{
+			RoomIds.Add(Room->RoomId);
+		}
+	}
+	return RoomIds;
+}
+
+FString ANavPlayerController::GetRoomName(const FString& RoomId) const
+{
+	return InteriorGen ? InteriorGen->GetRoomName(RoomId) : FString();
+}
+
+bool ANavPlayerController::IsRoomClosedLoop(const FString& RoomId) const
+{
+	return InteriorGen && InteriorGen->IsRoomClosedLoop(RoomId);
+}
+
+void ANavPlayerController::SetRoomHidden(const FString& RoomId, bool bNewHidden)
+{
+	if (bNewHidden)
+	{
+		HiddenRoomIds.Add(RoomId);
+	}
+	else
+	{
+		HiddenRoomIds.Remove(RoomId);
+	}
+}
+
+void ANavPlayerController::SetPathNodeHidden(const FString& NodeId, bool bNewHidden)
+{
+	if (bNewHidden)
+	{
+		HiddenPathNodeIds.Add(NodeId);
+	}
+	else
+	{
+		HiddenPathNodeIds.Remove(NodeId);
+	}
+}
+
+void ANavPlayerController::SetIONodeHidden(const FString& NodeId, bool bNewHidden)
+{
+	if (bNewHidden)
+	{
+		HiddenIONodeIds.Add(NodeId);
+	}
+	else
+	{
+		HiddenIONodeIds.Remove(NodeId);
+	}
 }
 
 FString ANavPlayerController::GetSelectedBuildingId() const
