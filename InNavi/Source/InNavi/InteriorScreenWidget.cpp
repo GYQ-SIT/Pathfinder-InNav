@@ -58,6 +58,7 @@ void UInteriorScreenWidget::InitializeDockRuntimeArrays()
 
 	DockPanelWidths.Init(SidebarMinWidth, NumDockPanels);
 	DockPanelColumnIndex.Init(INDEX_NONE, NumDockPanels);
+	bDockPanelUserHidden.Init(false, NumDockPanels);
 	bDockPanelIsDraggingMove.Init(false, NumDockPanels);
 	DockPanelMoveDragStartMouse.Init(FVector2D::ZeroVector, NumDockPanels);
 	DockPanelMoveDragStartPosition.Init(FVector2D::ZeroVector, NumDockPanels);
@@ -542,6 +543,127 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		BackSlot->SetPosition(FVector2D(-20.f, SidebarTopMargin));
 		BackSlot->SetAutoSize(true);
 		BackSlot->SetZOrder(5);
+
+		// -- Top menu bar (File/Window) - fixed chrome, same reasoning as Back above, not part of
+		// the docking system. A thin full-width background strip holding two menu buttons; each
+		// button's own dropdown is a separate Canvas child positioned at a fixed offset directly
+		// below it (both button widths are fixed, so their X positions are known up front - simpler
+		// than querying a HorizontalBox child's live position) rather than nested inside the same
+		// layout flow, so opening one never resizes the bar itself.
+		constexpr float MenuButtonWidth = 70.f;
+		constexpr float MenuBarLeftMargin = 10.f;
+
+		UBorder* MenuBarBackground = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_MenuBar"));
+		MenuBarBackground->SetBrushColor(DockPanelColor);
+		UCanvasPanelSlot* MenuBarSlot = Canvas->AddChildToCanvas(MenuBarBackground);
+		MenuBarSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
+		MenuBarSlot->SetAlignment(FVector2D(0.f, 0.f));
+		MenuBarSlot->SetOffsets(FMargin(0.f, 0.f, 0.f, MenuBarHeight));
+		MenuBarSlot->SetZOrder(6);
+
+		UHorizontalBox* MenuBarRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("MenuBarRow"));
+		MenuBarBackground->SetContent(MenuBarRow);
+
+		auto AddMenuButton = [this, MenuBarRow, MenuButtonWidth](const TCHAR* Name, const TCHAR* Label) -> UButton*
+		{
+			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+			Button->SetBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.f)); // transparent - just the bar's own background shows through
+			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+			Text->SetText(FText::FromString(FString(Label)));
+			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			Text->SetJustification(ETextJustify::Center);
+			USizeBox* MenuButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+			MenuButtonSizeBox->SetWidthOverride(MenuButtonWidth);
+			MenuButtonSizeBox->SetHeightOverride(MenuBarHeight);
+			if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(MenuButtonSizeBox->SetContent(Text)))
+			{
+				TextSlot->SetHorizontalAlignment(HAlign_Center);
+				TextSlot->SetVerticalAlignment(VAlign_Center);
+			}
+			Button->SetContent(MenuButtonSizeBox);
+			MenuBarRow->AddChildToHorizontalBox(Button);
+			return Button;
+		};
+
+		FileMenuButton = AddMenuButton(TEXT("Btn_FileMenu"), TEXT("File"));
+		FileMenuButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileMenuClicked);
+		WindowMenuButton = AddMenuButton(TEXT("Btn_WindowMenu"), TEXT("Window"));
+		WindowMenuButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowMenuClicked);
+
+		// Returns the dropdown's own Border - callers reach its UVerticalBox content back out via
+		// Cast<UVerticalBox>(Dropdown->GetContent()), same "reach a child through the widget tree
+		// instead of returning/storing every intermediate" convention already used throughout this
+		// function (e.g. ConstructDockPanel's own resize handles).
+		auto ConstructDropdown = [this, Canvas, DockPanelColor](const TCHAR* Name, float PositionX) -> UBorder*
+		{
+			UVerticalBox* Stack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), FName(FString(Name) + TEXT("Stack")));
+			UBorder* Dropdown = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(Name));
+			Dropdown->SetBrushColor(DockPanelColor);
+			Dropdown->SetPadding(FMargin(4.f));
+			Dropdown->SetContent(Stack);
+			Dropdown->SetVisibility(ESlateVisibility::Collapsed);
+			UCanvasPanelSlot* DropdownSlot = Canvas->AddChildToCanvas(Dropdown);
+			DropdownSlot->SetAnchors(FAnchors(0.f, 0.f));
+			DropdownSlot->SetAlignment(FVector2D(0.f, 0.f));
+			DropdownSlot->SetPosition(FVector2D(PositionX, MenuBarHeight + 4.f));
+			DropdownSlot->SetAutoSize(true);
+			DropdownSlot->SetZOrder(7);
+			return Dropdown;
+		};
+
+		auto AddDropdownButtonRow = [this](UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label) -> UButton*
+		{
+			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+			Text->SetText(FText::FromString(FString(Label)));
+			Text->SetJustification(ETextJustify::Center);
+			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			USizeBox* RowSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+			RowSizeBox->SetWidthOverride(120.f);
+			RowSizeBox->SetMinDesiredHeight(30.f);
+			RowSizeBox->SetContent(Text);
+			Button->SetContent(RowSizeBox);
+			UVerticalBoxSlot* RowSlot = Stack->AddChildToVerticalBox(Button);
+			RowSlot->SetPadding(FMargin(2.f));
+			return Button;
+		};
+
+		auto AddDropdownCheckRow = [this](UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label) -> UCheckBox*
+		{
+			UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+			UCheckBox* CheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), FName(Name));
+			CheckBox->SetIsChecked(true);
+			UHorizontalBoxSlot* CheckSlot = Row->AddChildToHorizontalBox(CheckBox);
+			CheckSlot->SetVerticalAlignment(VAlign_Center);
+			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+			Text->SetText(FText::FromString(FString(Label)));
+			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			UHorizontalBoxSlot* TextSlot = Row->AddChildToHorizontalBox(Text);
+			TextSlot->SetPadding(FMargin(4.f, 0.f, 0.f, 0.f));
+			TextSlot->SetVerticalAlignment(VAlign_Center);
+			UVerticalBoxSlot* RowSlot = Stack->AddChildToVerticalBox(Row);
+			RowSlot->SetPadding(FMargin(2.f));
+			return CheckBox;
+		};
+
+		FileMenuDropdown = ConstructDropdown(TEXT("Pnl_FileDropdown"), MenuBarLeftMargin);
+		UVerticalBox* FileDropdownStack = Cast<UVerticalBox>(FileMenuDropdown->GetContent());
+		UButton* FileNewButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileNew"), TEXT("New"));
+		FileNewButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileNewClicked);
+		UButton* FileLoadButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileLoad"), TEXT("Load"));
+		FileLoadButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileLoadClicked);
+
+		WindowMenuDropdown = ConstructDropdown(TEXT("Pnl_WindowDropdown"), MenuBarLeftMargin + MenuButtonWidth + 10.f);
+		UVerticalBox* WindowDropdownStack = Cast<UVerticalBox>(WindowMenuDropdown->GetContent());
+		WindowToolbarCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowToolbar"), TEXT("Toolbar"));
+		WindowToolbarCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowToolbarCheckChanged);
+		WindowFloorCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowFloor"), TEXT("Floor"));
+		WindowFloorCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowFloorCheckChanged);
+		WindowPropertiesCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowProperties"), TEXT("Properties"));
+		WindowPropertiesCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowPropertiesCheckChanged);
+		WindowLayersCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowLayers"), TEXT("Layers"));
+		WindowLayersCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowLayersCheckChanged);
 
 		// -- Properties panel: merges what used to be three separately-positioned Door/Room/
 		// Connector panels into one (selection between them is already mutually exclusive at the PC
@@ -1521,7 +1643,11 @@ void UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 
 		if (UCanvasPanelSlot* PanelSlot = DockPanelCanvasSlots[Index])
 		{
-			PanelSlot->SetPosition(FVector2D((float)X, (float)Y));
+			// A layout saved before the menu bar existed can have a Y above it but under the bar's
+			// current height (e.g. the old default of 10px) - clamp so a floating panel from an old
+			// save never loads in underneath the bar. Docked panels get repositioned by RefreshDockLayout
+			// right after this anyway, so this only actually matters for floating ones.
+			PanelSlot->SetPosition(FVector2D((float)X, FMath::Max((float)Y, SidebarTopMargin)));
 		}
 		DockPanelWidths[Index] = FMath::Clamp((float)Width, SidebarMinWidth, SidebarMaxWidth);
 	}
@@ -1695,7 +1821,7 @@ FEventReply UInteriorScreenWidget::HandlePanelMouseMove(EDockPanelId Id, const F
 	const FVector2D ViewportSize = ParentGeometry.GetLocalSize();
 	const FVector2D CurrentPanelSize = GetPanelSize(Id);
 	const float ClampedX = FMath::Clamp(NewPosition.X, 0.f, FMath::Max(0.f, ViewportSize.X - CurrentPanelSize.X));
-	const float ClampedY = FMath::Clamp(NewPosition.Y, 0.f, FMath::Max(0.f, ViewportSize.Y - CurrentPanelSize.Y));
+	const float ClampedY = FMath::Clamp(NewPosition.Y, SidebarTopMargin, FMath::Max(SidebarTopMargin, ViewportSize.Y - CurrentPanelSize.Y));
 	PanelSlot->SetPosition(FVector2D(ClampedX, ClampedY));
 
 	if (UCanvasPanelSlot* HandleSlot = DockResizeHandleSlots[Index])
@@ -2317,10 +2443,14 @@ void UInteriorScreenWidget::RefreshPropertiesPanelVisibility()
 	}
 
 	// Properties is a permanent panel now, same as Floor/Toolbar/Layers - it never collapses away
-	// entirely; with nothing selected it just shows an empty "Properties" placeholder instead of
-	// disappearing, matching a real editor's Details/Properties panel (see AutoDockPropertiesBelowFloor,
-	// called once at construction instead of waiting for a first selection to dock it under Floor).
-	PropertiesPanel->SetVisibility(ESlateVisibility::Visible);
+	// entirely just because nothing's selected; with nothing selected it just shows an empty
+	// "Properties" placeholder instead of disappearing, matching a real editor's Details/Properties
+	// panel (see AutoDockPropertiesBelowFloor, called once at construction instead of waiting for a
+	// first selection to dock it under Floor). The Window menu's own checkbox can still hide it -
+	// that user choice takes priority over this panel's usual always-visible behavior.
+	const bool bUserHidden = bDockPanelUserHidden.IsValidIndex((int32)EDockPanelId::Properties)
+		&& bDockPanelUserHidden[(int32)EDockPanelId::Properties];
+	PropertiesPanel->SetVisibility(bUserHidden ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
 	const bool bAnySelected = PC && (!PC->GetSelectedRoomId().IsEmpty() || !PC->GetSelectedDoorId().IsEmpty() || !PC->GetSelectedConnectorGroupId().IsEmpty());
@@ -2869,6 +2999,207 @@ void UInteriorScreenWidget::OnAddEscalatorModeClicked()
 	{
 		PC->ToggleEscalatorMode();
 	}
+}
+
+void UInteriorScreenWidget::OnFileMenuClicked()
+{
+	if (!FileMenuDropdown)
+	{
+		return;
+	}
+
+	const bool bWasOpen = FileMenuDropdown->GetVisibility() != ESlateVisibility::Collapsed;
+	if (WindowMenuDropdown)
+	{
+		WindowMenuDropdown->SetVisibility(ESlateVisibility::Collapsed);
+	}
+	FileMenuDropdown->SetVisibility(bWasOpen ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+}
+
+void UInteriorScreenWidget::OnWindowMenuClicked()
+{
+	if (!WindowMenuDropdown)
+	{
+		return;
+	}
+
+	const bool bWasOpen = WindowMenuDropdown->GetVisibility() != ESlateVisibility::Collapsed;
+	if (FileMenuDropdown)
+	{
+		FileMenuDropdown->SetVisibility(ESlateVisibility::Collapsed);
+	}
+	WindowMenuDropdown->SetVisibility(bWasOpen ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+}
+
+void UInteriorScreenWidget::OnFileNewClicked()
+{
+	if (FileMenuDropdown)
+	{
+		FileMenuDropdown->SetVisibility(ESlateVisibility::Collapsed);
+	}
+
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC)
+	{
+		return;
+	}
+
+	if (!PC->HasUnsavedChanges())
+	{
+		// RestoreExteriorCameraView clears interior-editing state (selection, in-progress draw
+		// modes, spawned interior actors) before StartNewProject wipes everything else - and, if
+		// there's a saved exterior camera position, restores it too, but that's immediately
+		// superseded by StartNewProject's own FocusCameraOnAllBuildings, called after it.
+		PC->RestoreExteriorCameraView();
+		PC->StartNewProject();
+		GoToEditScreen();
+		return;
+	}
+
+	if (UConfirmDialogWidget* Dialog = CreateWidget<UConfirmDialogWidget>(PC, UConfirmDialogWidget::StaticClass()))
+	{
+		Dialog->AddToViewport();
+		Dialog->OnSaveAndLeave.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleFileNewSave);
+		Dialog->OnDiscardAndLeave.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleFileNewDiscard);
+		Dialog->OnCancel.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleFileNewCancel);
+	}
+}
+
+void UInteriorScreenWidget::HandleFileNewSave()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SaveCurrentProject();
+		PC->RestoreExteriorCameraView();
+		PC->StartNewProject();
+	}
+	GoToEditScreen();
+}
+
+void UInteriorScreenWidget::HandleFileNewDiscard()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->DiscardUnsavedChanges();
+		PC->RestoreExteriorCameraView();
+		PC->StartNewProject();
+	}
+	GoToEditScreen();
+}
+
+void UInteriorScreenWidget::HandleFileNewCancel()
+{
+	// Nothing to do - the dialog already removed itself.
+}
+
+void UInteriorScreenWidget::OnFileLoadClicked()
+{
+	if (FileMenuDropdown)
+	{
+		FileMenuDropdown->SetVisibility(ESlateVisibility::Collapsed);
+	}
+
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC)
+	{
+		return;
+	}
+
+	// Browse first, before checking for unsaved changes - so cancelling the picker never triggers an
+	// unnecessary save prompt.
+	const FString FilePath = PC->BrowseForBuildingDataFile();
+	if (FilePath.IsEmpty())
+	{
+		return;
+	}
+
+	if (!PC->HasUnsavedChanges())
+	{
+		PC->RestoreExteriorCameraView();
+		PC->LoadBuildingDataFromPath(FilePath);
+		GoToEditScreen();
+		return;
+	}
+
+	PendingLoadFilePath = FilePath;
+	if (UConfirmDialogWidget* Dialog = CreateWidget<UConfirmDialogWidget>(PC, UConfirmDialogWidget::StaticClass()))
+	{
+		Dialog->AddToViewport();
+		Dialog->OnSaveAndLeave.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleFileLoadSave);
+		Dialog->OnDiscardAndLeave.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleFileLoadDiscard);
+		Dialog->OnCancel.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleFileLoadCancel);
+	}
+}
+
+void UInteriorScreenWidget::HandleFileLoadSave()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SaveCurrentProject();
+		PC->RestoreExteriorCameraView();
+		PC->LoadBuildingDataFromPath(PendingLoadFilePath);
+	}
+	GoToEditScreen();
+}
+
+void UInteriorScreenWidget::HandleFileLoadDiscard()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->DiscardUnsavedChanges();
+		PC->RestoreExteriorCameraView();
+		PC->LoadBuildingDataFromPath(PendingLoadFilePath);
+	}
+	GoToEditScreen();
+}
+
+void UInteriorScreenWidget::HandleFileLoadCancel()
+{
+	// Nothing to do - the dialog already removed itself.
+}
+
+void UInteriorScreenWidget::OnWindowToolbarCheckChanged(bool bIsChecked)
+{
+	SetDockPanelUserHidden(EDockPanelId::Toolbar, !bIsChecked);
+}
+
+void UInteriorScreenWidget::OnWindowFloorCheckChanged(bool bIsChecked)
+{
+	SetDockPanelUserHidden(EDockPanelId::Floor, !bIsChecked);
+}
+
+void UInteriorScreenWidget::OnWindowPropertiesCheckChanged(bool bIsChecked)
+{
+	SetDockPanelUserHidden(EDockPanelId::Properties, !bIsChecked);
+}
+
+void UInteriorScreenWidget::OnWindowLayersCheckChanged(bool bIsChecked)
+{
+	SetDockPanelUserHidden(EDockPanelId::Layers, !bIsChecked);
+}
+
+void UInteriorScreenWidget::SetDockPanelUserHidden(EDockPanelId Id, bool bHidden)
+{
+	const int32 Index = (int32)Id;
+	if (!bDockPanelUserHidden.IsValidIndex(Index))
+	{
+		return;
+	}
+	bDockPanelUserHidden[Index] = bHidden;
+
+	if (Id == EDockPanelId::Properties)
+	{
+		// Properties' own visibility already has other logic fighting over it (shown/hidden by
+		// selection state) - RefreshPropertiesPanelVisibility is the single source of truth for it,
+		// and now reads this same flag to override that.
+		RefreshPropertiesPanelVisibility();
+	}
+	else if (UBorder* Border = DockPanelBorders[Index])
+	{
+		Border->SetVisibility(bHidden ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	}
+
+	RefreshDockLayout();
 }
 
 void UInteriorScreenWidget::OnBackClicked()

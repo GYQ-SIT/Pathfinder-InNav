@@ -175,6 +175,60 @@ private:
 
 	void GoToEditScreen();
 
+	// Top menu bar (File/Window) - fixed chrome, same reasoning as Back (see RebuildWidget), not
+	// part of the dock system. File and Window each toggle their own dropdown open/closed via these,
+	// closing the other one's dropdown at the same time (only one open at a time).
+	UFUNCTION()
+	void OnFileMenuClicked();
+
+	UFUNCTION()
+	void OnWindowMenuClicked();
+
+	// File > New / File > Load - the exact same actions as UStartScreenWidget's own two buttons
+	// (PC->StartNewProject / PC->BrowseForBuildingDataFile + PC->LoadBuildingDataFromPath), reached
+	// from inside the interior editor instead - so unlike the start screen (which can never have
+	// unsaved changes), these check PC->HasUnsavedChanges() first and go through the same
+	// UConfirmDialogWidget Save/Discard/Cancel flow already used for Back and the building switcher.
+	UFUNCTION()
+	void OnFileNewClicked();
+
+	UFUNCTION()
+	void OnFileLoadClicked();
+
+	UFUNCTION()
+	void HandleFileNewSave();
+
+	UFUNCTION()
+	void HandleFileNewDiscard();
+
+	UFUNCTION()
+	void HandleFileNewCancel();
+
+	UFUNCTION()
+	void HandleFileLoadSave();
+
+	UFUNCTION()
+	void HandleFileLoadDiscard();
+
+	UFUNCTION()
+	void HandleFileLoadCancel();
+
+	// Window menu - one checkbox per dock panel (Toolbar/Floor/Properties/Layers), all checked by
+	// default; unchecking one hides that whole panel, like Unreal's own Window menu. Each checkbox
+	// needs its own tiny UFUNCTION wrapper (OnCheckStateChanged carries no per-instance identity),
+	// same reasoning as the panel-drag/resize handler trios.
+	UFUNCTION()
+	void OnWindowToolbarCheckChanged(bool bIsChecked);
+
+	UFUNCTION()
+	void OnWindowFloorCheckChanged(bool bIsChecked);
+
+	UFUNCTION()
+	void OnWindowPropertiesCheckChanged(bool bIsChecked);
+
+	UFUNCTION()
+	void OnWindowLayersCheckChanged(bool bIsChecked);
+
 	// Floor panel - lists every floor of the loaded building (top first, matching the mockup),
 	// highlighting the active one; clicking a row switches to it. "+Add floor"/"Delete floor" call
 	// straight through to ANavPlayerController::AddFloor/RemoveFloor(GetActiveFloor()), which
@@ -286,6 +340,13 @@ private:
 	// proportional-split logic by placing Properties directly below Floor's current bottom edge
 	// first, then snapping exactly as if the user had dragged it there.
 	void AutoDockPropertiesBelowFloor();
+
+	// Sets/clears bDockPanelUserHidden[Id] (see the Window-menu comment above
+	// OnWindowToolbarCheckChanged), applies it (Properties routes through
+	// RefreshPropertiesPanelVisibility, which respects the flag instead of always forcing Visible;
+	// the other 3 have nothing else fighting over their own visibility, so their Border is set
+	// directly), and refreshes the dock layout so its dock-mates reflow into the freed space.
+	void SetDockPanelUserHidden(EDockPanelId Id, bool bHidden);
 
 	// Persists the dock layout (every panel's position/width, which columns exist, their member
 	// order and height split) to one global JSON file under Saved/ - a per-machine UI preference,
@@ -565,13 +626,50 @@ private:
 	// selection back to.
 	FString PreviousBuildingName;
 
+	// Set right before showing the unsaved-changes confirm dialog for File > Load; read by
+	// HandleFileLoadSave/Discard once the user picks a choice - same role as PendingBuildingId above.
+	FString PendingLoadFilePath;
+
+	// Top menu bar widgets - see the comment above OnFileMenuClicked/OnWindowToolbarCheckChanged.
+	UPROPERTY()
+	UButton* FileMenuButton = nullptr;
+
+	UPROPERTY()
+	UBorder* FileMenuDropdown = nullptr;
+
+	UPROPERTY()
+	UButton* WindowMenuButton = nullptr;
+
+	UPROPERTY()
+	UBorder* WindowMenuDropdown = nullptr;
+
+	UPROPERTY()
+	UCheckBox* WindowToolbarCheckbox = nullptr;
+
+	UPROPERTY()
+	UCheckBox* WindowFloorCheckbox = nullptr;
+
+	UPROPERTY()
+	UCheckBox* WindowPropertiesCheckbox = nullptr;
+
+	UPROPERTY()
+	UCheckBox* WindowLayersCheckbox = nullptr;
+
+	// Parallel to EDockPanelId, sized NumDockPanels - see SetDockPanelUserHidden. All false by
+	// default (every panel visible), set from the Window menu's checkboxes.
+	TArray<bool> bDockPanelUserHidden;
+
 	// Shared width bounds for every dock panel, and the snap/splitter tuning constants - also used
 	// by RebuildWidget for the panels' initial width. Raised from 260 - at 260, a panel's button
 	// width (Width - 48) bottoms out at 212, which wasn't enough room for "Name :" plus a typical
 	// room id to both stay readable in a Fill row.
 	static constexpr float SidebarMinWidth = 340.f;
 	static constexpr float SidebarMaxWidth = 600.f;
-	static constexpr float SidebarTopMargin = 10.f;
+	// Height of the fixed File/Window menu bar pinned across the top of the canvas - dock panels'
+	// top boundary (SidebarTopMargin, below) sits flush against it, same as every panel's left/right
+	// edges already sit flush against the screen's own edges.
+	static constexpr float MenuBarHeight = 32.f;
+	static constexpr float SidebarTopMargin = MenuBarHeight;
 	static constexpr float SidebarBottomMargin = 10.f;
 	static constexpr float SidebarResizeHandleWidth = 8.f;
 	static constexpr float DockSnapThresholdPx = 20.f;
