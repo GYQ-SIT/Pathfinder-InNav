@@ -135,6 +135,11 @@ private:
 	UFUNCTION()
 	void HandlePreviewModeChanged(bool bIsActive);
 
+	// Bound to ANavPlayerController::OnEdit3DModeChanged - updates Edit3DModeToggleButton's label
+	// ("View"/"Edit") and color (yellow/green).
+	UFUNCTION()
+	void HandleEdit3DModeChanged(bool bIsEditMode);
+
 	void RefreshModeButtonHighlights();
 
 	// Door/Room/Connector properties all share one PropertiesPanel (see RebuildWidget) instead of
@@ -247,6 +252,11 @@ private:
 
 	UFUNCTION()
 	void OnIncreaseSpeedClicked();
+
+	// Toggles PC's View/Edit sub-mode (PC->SetIn3DEditMode(!PC->IsIn3DEditMode())) - only shown while
+	// in 3D preview (see Edit3DModeToggleButton).
+	UFUNCTION()
+	void OnEdit3DModeToggleClicked();
 
 	// Shared by OnFileMenuClicked/OnWindowMenuClicked (open one, implicitly closing the other) and
 	// MenuClickCatcher (close whichever is open) - also shows/hides MenuClickCatcher in step, so it's
@@ -829,6 +839,15 @@ private:
 
 	UPROPERTY()
 	UButton* IncreaseSpeedButton = nullptr;
+
+	// Toggles 3D preview's View/Edit sub-mode (see PC->SetIn3DEditMode) - "View" in yellow by default,
+	// "Edit" in green once toggled. Shown/hidden together with ResetView3DButton; always shows "View"
+	// again the next time 3D preview is entered (see HandleEdit3DModeChanged/HandlePreviewModeChanged).
+	UPROPERTY()
+	UButton* Edit3DModeToggleButton = nullptr;
+
+	UPROPERTY()
+	UTextBlock* Edit3DModeToggleButtonText = nullptr;
 
 	bool bIsEditingBuildingName = false;
 

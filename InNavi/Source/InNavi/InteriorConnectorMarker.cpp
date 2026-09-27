@@ -152,8 +152,9 @@ void AInteriorConnectorMarker::BuildElevatorShaft(const FVector2D& WorldCenter, 
 		nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	if (BaseMat)
 	{
+		NormalColor = FLinearColor(0.55f, 0.58f, 0.62f);
 		DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
-		DynMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.55f, 0.58f, 0.62f));
+		DynMaterial->SetVectorParameterValue(TEXT("Color"), NormalColor);
 		MeshComp->SetMaterial(0, DynMaterial);
 	}
 }
@@ -207,11 +208,21 @@ void AInteriorConnectorMarker::BuildStairsSteps(const FVector2D& WorldCenter, fl
 		nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	if (BaseMat)
 	{
-		DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
 		// Stairs: warm tan. Escalator: same shape, a cooler steel-blue tint instead, so the two read
 		// as different connectors at a glance despite sharing geometry.
-		DynMaterial->SetVectorParameterValue(TEXT("Color"),
-			bIsEscalator ? FLinearColor(0.45f, 0.55f, 0.62f) : FLinearColor(0.68f, 0.58f, 0.42f));
+		NormalColor = bIsEscalator ? FLinearColor(0.45f, 0.55f, 0.62f) : FLinearColor(0.68f, 0.58f, 0.42f);
+		DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
+		DynMaterial->SetVectorParameterValue(TEXT("Color"), NormalColor);
 		MeshComp->SetMaterial(0, DynMaterial);
 	}
+}
+
+void AInteriorConnectorMarker::SetHighlighted(bool bHighlighted)
+{
+	if (!DynMaterial)
+	{
+		return;
+	}
+
+	DynMaterial->SetVectorParameterValue(TEXT("Color"), bHighlighted ? FLinearColor(0.55f, 1.0f, 0.6f) : NormalColor);
 }

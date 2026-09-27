@@ -860,6 +860,20 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		IncreaseSpeedButton->SetToolTipText(FText::FromString(TEXT("Increase Move Speed")));
 		IncreaseSpeedButton->SetVisibility(ESlateVisibility::Collapsed);
 
+		// "View"/"Edit" toggle - starts as "View" (yellow), matching PC's own default (see
+		// ANavPlayerController::bIsIn3DEditMode). AddSwitcherButton doesn't hand back its inner
+		// UTextBlock (every other button built with it has a fixed label), so this one reaches it back
+		// out through the widget tree instead, same "don't return every intermediate" convention used
+		// elsewhere in this function (e.g. the File/Window dropdowns).
+		Edit3DModeToggleButton = AddSwitcherButton(TEXT("Btn_Edit3DModeToggle"), TEXT("View"));
+		Edit3DModeToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnEdit3DModeToggleClicked);
+		Edit3DModeToggleButton->SetBackgroundColor(FLinearColor(0.8f, 0.7f, 0.1f, 1.f));
+		Edit3DModeToggleButton->SetVisibility(ESlateVisibility::Collapsed);
+		if (USizeBox* Edit3DModeSizeBox = Cast<USizeBox>(Edit3DModeToggleButton->GetContent()))
+		{
+			Edit3DModeToggleButtonText = Cast<UTextBlock>(Edit3DModeSizeBox->GetContent());
+		}
+
 		// Thin separator lines at the seam between the menu bar and the switcher bar, and again below
 		// the switcher bar - both bars (and the panels below) share the same dark background color, so
 		// without these the eye can't tell where one ends and the next begins.
@@ -1275,6 +1289,8 @@ void UInteriorScreenWidget::NativeConstruct()
 		// Background/FloorPlanWidget/the toggle buttons in sync regardless of the trigger.
 		PC->OnPreviewModeChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandlePreviewModeChanged);
 		HandlePreviewModeChanged(PC->IsIn3DPreviewMode());
+		PC->OnEdit3DModeChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleEdit3DModeChanged);
+		HandleEdit3DModeChanged(PC->IsIn3DEditMode());
 
 		// Navigation panel: hand ws/jh's UNavigationPanelWidget this screen's own Navigation Border to
 		// hit-test against (see SetPanelBorderForHitTest's own comment) and subscribe to its
@@ -1313,6 +1329,7 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnActiveFloorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
 		PC->OnInteriorContentChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleInteriorContentChanged);
 		PC->OnPreviewModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandlePreviewModeChanged);
+		PC->OnEdit3DModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleEdit3DModeChanged);
 
 		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
 		{
@@ -2580,6 +2597,36 @@ void UInteriorScreenWidget::HandlePreviewModeChanged(bool bIsActive)
 	{
 		IncreaseSpeedButton->SetVisibility(bIsActive ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
+	if (Edit3DModeToggleButton)
+	{
+		Edit3DModeToggleButton->SetVisibility(bIsActive ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+
+	// Entering 3D preview always starts fresh in View mode (see ANavPlayerController::
+	// SetIn3DPreviewMode - the disable path always resets bIsIn3DEditMode back to false, so it's
+	// already false by the time this fires with bIsActive true). SetIn3DPreviewMode's enable path
+	// doesn't broadcast OnEdit3DModeChanged itself, so without this the button could still be showing
+	// a stale "Edit"/green look left over from a PREVIOUS 3D session (e.g. switched to a different
+	// building while in Edit mode, which silently resets the flag with no broadcast) even though the
+	// state underneath is genuinely View again.
+	if (bIsActive)
+	{
+		HandleEdit3DModeChanged(false);
+	}
+}
+
+void UInteriorScreenWidget::HandleEdit3DModeChanged(bool bIsEditMode)
+{
+	if (Edit3DModeToggleButtonText)
+	{
+		Edit3DModeToggleButtonText->SetText(FText::FromString(bIsEditMode ? TEXT("Edit") : TEXT("View")));
+	}
+	if (Edit3DModeToggleButton)
+	{
+		// View: yellow. Edit: green (same green used elsewhere for an "active" state, e.g.
+		// RefreshModeButtonHighlights/HandlePreviewModeChanged's own ActiveColor).
+		Edit3DModeToggleButton->SetBackgroundColor(bIsEditMode ? FLinearColor(0.2f, 0.75f, 0.3f, 1.f) : FLinearColor(0.8f, 0.7f, 0.1f, 1.f));
+	}
 }
 
 void UInteriorScreenWidget::RefreshDockPanelContentWidths()
@@ -3801,6 +3848,14 @@ void UInteriorScreenWidget::OnIncreaseSpeedClicked()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->IncreaseMoveSpeed3DPreview();
+	}
+}
+
+void UInteriorScreenWidget::OnEdit3DModeToggleClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetIn3DEditMode(!PC->IsIn3DEditMode());
 	}
 }
 

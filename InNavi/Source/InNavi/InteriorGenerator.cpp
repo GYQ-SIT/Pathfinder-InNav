@@ -715,13 +715,19 @@ FString AInteriorGenerator::PeekNextRoomId() const
 		return FString();
 	}
 
-	int32 NextIndex = 1;
-	if (const FInteriorRoomList* Rooms = RoomsByFloor.Find(ActiveFloor))
+	// Scans for the first free index rather than basing this on how many rooms currently exist on the
+	// floor (the old Rooms.Num() + 1 scheme) - that undercounts as soon as anything on this floor has
+	// ever been deleted (UsedRoomIds still remembers the id was used, Rooms.Num() doesn't), so it could
+	// hand out an id that's actually still in use by a room/wall that was never deleted. This is
+	// correct regardless of how many rooms/walls were created and deleted before this call.
+	for (int32 Index = 1; ; Index++)
 	{
-		NextIndex = Rooms->Rooms.Num() + 1;
+		const FString CandidateId = FString::Printf(TEXT("%s-%02d-%02d"), *LoadedBuildingId, ActiveFloor, Index);
+		if (!UsedRoomIds.Contains(CandidateId))
+		{
+			return CandidateId;
+		}
 	}
-
-	return FString::Printf(TEXT("%s-%02d-%02d"), *LoadedBuildingId, ActiveFloor, NextIndex);
 }
 
 AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2D>& Footprint, const FString& RoomId, const FString& RoomName, bool bIsPublic, bool bRequiresKey)
@@ -1067,6 +1073,7 @@ void AInteriorGenerator::RebuildConnectorMarker(FInteriorNavNode& Node, APolyBui
 	const FVector2D WorldCenter = (Node.Position + Building->BuildingOffset) * Scale;
 	const float FloorBaseZ = (Node.Level - 1) * Building->GetFloorHeight();
 	Node.MarkerActor->BuildMarker(Node.Type, WorldCenter, FloorBaseZ, Building->GetFloorHeight(), Node.RotationDegrees, Node.SizeScale);
+	Node.MarkerActor->SetOwnerGroupId(Node.ConnectorGroupId);
 	Node.MarkerActor->SetActorHiddenInGame(Node.Level != ActiveFloor);
 	Node.MarkerActor->SetActorEnableCollision(Node.Level == ActiveFloor);
 }

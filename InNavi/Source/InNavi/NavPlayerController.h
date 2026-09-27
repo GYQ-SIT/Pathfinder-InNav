@@ -11,6 +11,7 @@ class APolyBuilding;
 class ABuildingGenerator;
 class AInteriorGenerator;
 class AInteriorRoom;
+class AInteriorConnectorMarker;
 class UNavigationPanelWidget;
 
 // Broadcast whenever build mode turns on/off, so UI can show an indicator without polling every tick.
@@ -77,6 +78,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnInteriorContentChanged);
 // own 2D/3D toggle buttons' highlight, since the mode can also be left from other triggers than
 // its own buttons in principle (defensive symmetry with every other PC-state delegate here).
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOn3DPreviewModeChanged, bool, bIsActive);
+// Broadcast whenever 3D preview's View/Edit sub-mode changes (see SetIn3DEditMode) - bIsEditMode is
+// the new state. Only meaningful while 3D preview itself is active; leaving 3D preview entirely
+// resets this back to View (see SetIn3DPreviewMode) without a separate broadcast of its own, since
+// UInteriorScreenWidget's View/Edit button is already hidden at that point (see
+// HandlePreviewModeChanged) and just re-syncs to View the next time 3D preview is re-entered.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEdit3DModeChanged, bool, bIsEditMode);
 
 UCLASS()
 class INNAVI_API ANavPlayerController : public APlayerController
@@ -108,6 +115,10 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")
 	FOn3DPreviewModeChanged OnPreviewModeChanged;
 
+	// See FOnEdit3DModeChanged above.
+	UPROPERTY(BlueprintAssignable, Category = "Feedback")
+	FOnEdit3DModeChanged OnEdit3DModeChanged;
+
 	// Whether the interior editor is currently showing the 3D preview (an oblique view of the real
 	// spawned geometry, current building/floor only) instead of the 2D floor-plan overlay. View-only
 	// - no room/wall/door editing happens while this is active (see the OnClick() guard near
@@ -120,9 +131,20 @@ public:
 	// (SetOtherBuildingsHidden), and broadcasts OnPreviewModeChanged so
 	// UInteriorScreenWidget can hide/show its 2D overlay in step. Leaving restores the normal 2D
 	// top-down camera pose via the existing RepositionCameraToActiveFloor. No-op if there's no
-	// building/floor currently loaded.
+	// building/floor currently loaded. Always resets bIsIn3DEditMode back to View on the way out (see
+	// SetIn3DEditMode) - re-entering 3D preview always starts fresh in View mode.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void SetIn3DPreviewMode(bool bEnable);
+
+	// Whether 3D preview is currently in its Edit sub-mode rather than plain View. Only meaningful
+	// while IsIn3DPreviewMode() is true - always false in 2D mode or outside interior editing.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool IsIn3DEditMode() const { return bIsIn3DEditMode; }
+
+	// Switches 3D preview's View/Edit sub-mode and broadcasts OnEdit3DModeChanged. No-op outside 3D
+	// preview mode (bIsIn3DPreviewMode) - there's no "Edit" concept in 2D or the exterior view.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void SetIn3DEditMode(bool bEnable);
 
 	// Snaps the camera back to the current floor's default best-fit framing (see ResetFloorFraming) -
 	// the free-fly WASD/mouse-look this mode leaves enabled (see SetIn3DPreviewMode) makes it easy to
@@ -872,6 +894,21 @@ private:
 	// mutually exclusive with both SelectedRoomId and SelectedDoorRoomId/SelectedDoorId.
 	FString SelectedConnectorGroupId;
 
+	// Whichever AInteriorRoom/AInteriorConnectorMarker is currently tinted as the 3D Edit mode
+	// selection indicator (see RefreshSelectionHighlight) - null if nothing is, or if 3D preview has
+	// never been entered yet. Untyped since it can be either kind of actor; resolved with Cast when
+	// un-highlighting.
+	UPROPERTY()
+	AActor* HighlightedSelectionActor = nullptr;
+
+	// Un-highlights HighlightedSelectionActor, then re-highlights whichever room/connector
+	// SelectedRoomId/SelectedDoorRoomId/SelectedConnectorGroupId now points at (a selected door
+	// highlights its owning room - there's no separate 3D visual for "just this door"). Called at the
+	// end of SelectRoom/SelectDoor/SelectConnector regardless of bIsIn3DPreviewMode, since tinting a
+	// mesh that's currently hidden behind the 2D overlay is harmless and is already correct the next
+	// time 3D preview opens.
+	void RefreshSelectionHighlight();
+
 	// See IsBoundaryVisible/AreWallsVisible/ArePathNodesVisible/AreIONodesVisible and the
 	// IsXHidden/SetXHidden pairs above - driven by the interior editor's Layers panel, read by
 	// InteriorFloorPlanWidget::NativePaint to decide what to actually draw.
@@ -986,7 +1023,72 @@ private:
 	void ZoomIn3DPreview();
 	void ZoomOut3DPreview();
 
+	// 3D Edit mode click routing - the 3D-view equivalent of everything InteriorFloorPlanWidget's own
+	// mouse handlers do for the 2D floor plan. Called from OnClick() when bIsIn3DPreviewMode &&
+	// bIsIn3DEditMode; dispatches on the same mode flags 2D's widget already checks (draw room/wall,
+	// prefab, connector placement, add-door, select), each branch calling the exact same mutation
+	// function 2D calls, just fed a 3D-derived point/edge/offset instead of a 2D one.
+	void Handle3DEditClick();
+
+	// Draws a persistent debug sphere/line for the most recently added point of PendingRoomFootprint
+	// (mirrors AddFootprintPointUnderCursor's own debug draw for the exterior footprint tool) - without
+	// this, draw room/wall mode in 3D has no 2D widget to paint the points being clicked out, so there
+	// was no way to see where they landed. Called from Handle3DEditClick right after a point is
+	// successfully added; FinishRoom/CancelRoom/FinishWall/CancelWall already call
+	// FlushPersistentDebugLines on their own, which clears these same markers.
+	void DrawPendingRoomPointMarker3D();
+
+	// Converts a 3D click into a footprint-space point (what AddRoomPointAtFootprintPosition/
+	// PlacePrefabRoomAt/PlaceConnectorAt all expect) - Hit.Location.XY / Scale - BuildingOffset when
+	// Hit is a real blocking hit (mirrors AddFootprintPointUnderCursor's own unscale-and-subtract and
+	// LocalPositionToFootprintPoint's inverse); otherwise falls back to intersecting the camera ray
+	// with the active floor's own Z-plane (DeprojectMousePositionToWorld + FMath::RayPlaneIntersection),
+	// so a click just outside the building's real geometry still resolves to something. Returns false
+	// only if even that plane intersection is degenerate.
+	bool Get3DFloorFootprintPoint(const FHitResult& Hit, FVector2D& OutPoint) const;
+
+	// Finds the closest edge of Room's footprint to WorldHit (a real 3D world position, not a widget-
+	// local one - mirrors UInteriorFloorPlanWidget::FindRoomNearLocalPosition's own projection math,
+	// just without the screen/pixel step since this is already world space) and the offset along that
+	// edge, in world units, matching AddDoorToWall's expected units exactly. When
+	// MaxDistanceWorldUnits >= 0, returns false if even the closest edge is farther than that (used by
+	// Select3DEditTarget to tell "clicked near a wall" from "clicked in the middle of the room" - add-
+	// door mode passes no limit, since it only ever fires from a wall hit already). OutOffsetWorldUnits
+	// is the raw click-projected offset by default; bCenterOffsetForDoorWidth shifts it back by half a
+	// door's width (same as FindRoomNearLocalPosition always does) so it's ready to feed straight into
+	// AddDoorToWall as a new door's start position - only the add-door call site wants that shift,
+	// since FindDoorAtEdgeOffset needs the raw click position to test against an EXISTING door's range.
+	bool FindNearestRoomEdge3D(AInteriorRoom* Room, const FVector& WorldHit, int32& OutEdgeIndex, float& OutOffsetWorldUnits, float MaxDistanceWorldUnits = -1.f, bool bCenterOffsetForDoorWidth = false) const;
+
+	// Finds a Door-type opening on Room's EdgeIndex whose [Offset, Offset+Width] range contains
+	// OffsetWorldUnits - used by Select3DEditTarget to tell a door-marker click from a plain-wall
+	// click on the same edge. Null if none matches.
+	const FInteriorOpening* FindDoorAtEdgeOffset(AInteriorRoom* Room, int32 EdgeIndex, float OffsetWorldUnits) const;
+
+	// Select-mode click dispatch for 3D Edit mode - mirrors the 2D floor plan's own hit-test priority
+	// (connector marker -> door on the hit room's wall -> room). A room's floor slab and walls share
+	// one actor/collision (see AInteriorRoom), so a click anywhere inside the room - not just near a
+	// wall - already resolves to it directly, with no separate "room interior" fallback needed the way
+	// 2D's point-in-polygon FindRoomContainingLocalPosition is. Called by Handle3DEditClick.
+	void Select3DEditTarget(const FHitResult& Hit);
+
+	// Drag-to-move a selected room in 3D Edit mode - the 3D equivalent of InteriorFloorPlanWidget's
+	// own mouse-down/move/up drag sequence, driven by a separate LeftMouseButton press/release
+	// binding (see SetupInputComponent) plus Tick polling instead of native widget mouse events, since
+	// there's no 2D widget underneath to deliver those in 3D. OnLeftMouseDown3DEdit only actually
+	// starts a drag if Edit mode + select mode are active and the click hit a room; OnLeftMouseUp3DEdit
+	// commits it (or reverts, via CommitRoomMove) if one was in progress. Connectors are excluded -
+	// they're rotate/scale only, never moved (see RotateSelectedRoom/NudgeSelectedRoomSize's own
+	// connector branches).
+	void OnLeftMouseDown3DEdit();
+	void OnLeftMouseUp3DEdit();
+	bool bIsDragging3DRoom = false;
+	FString Dragging3DRoomId;
+	TArray<FVector2D> DragStart3DRoomFootprint;
+	FVector2D DragStart3DFootprintPosition = FVector2D::ZeroVector;
+
 	bool bIsIn3DPreviewMode = false;
+	bool bIsIn3DEditMode = false;
 	float ThreeDPreviewCameraDistance = 0.f;
 	float ThreeDPreviewYaw = -45.f;
 	float ThreeDPreviewPitch = -35.f;

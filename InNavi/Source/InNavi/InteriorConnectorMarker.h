@@ -42,6 +42,18 @@ public:
 	// AInteriorGenerator::SpawnConnectorMarker.
 	void BuildMarker(EInteriorNavNodeType Type, const FVector2D& WorldCenter, float FloorBaseZ, float FloorHeight, float RotationDegrees, float SizeScale);
 
+	// Tints the marker to a light green (3D Edit mode's selection indicator) when true, back to this
+	// connector's own normal tint (set by BuildMarker, per-type) when false. Mirrors
+	// APolyBuilding::SetHighlighted / AInteriorRoom::SetHighlighted.
+	void SetHighlighted(bool bHighlighted);
+
+	// Which connector group (FInteriorNavNode::ConnectorGroupId, same id RotateConnectorGroup/
+	// ScaleConnectorGroup/SelectConnector use) this floor-segment marker belongs to - set by
+	// AInteriorGenerator::SpawnConnectorMarker/RebuildConnectorMarker, since a hit on this actor only
+	// gives the actor itself, not the FInteriorNavNode it was built from.
+	void SetOwnerGroupId(const FString& InGroupId) { OwnerGroupId = InGroupId; }
+	const FString& GetOwnerGroupId() const { return OwnerGroupId; }
+
 private:
 	// Both Build* functions build their geometry in LOCAL space first (centered on the origin,
 	// unrotated, unscaled - the same fixed +X "rise" direction as before) and only apply
@@ -57,4 +69,11 @@ private:
 
 	UPROPERTY()
 	UMaterialInstanceDynamic* DynMaterial;
+
+	// This connector type's own tint (set by BuildElevatorShaft/BuildStairsSteps) - restored by
+	// SetHighlighted(false) instead of a single shared constant, since elevator/stairs/escalator each
+	// have a different normal color.
+	FLinearColor NormalColor = FLinearColor::White;
+
+	FString OwnerGroupId;
 };
