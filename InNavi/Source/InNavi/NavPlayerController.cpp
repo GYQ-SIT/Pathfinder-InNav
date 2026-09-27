@@ -22,6 +22,10 @@
 #include "IDesktopPlatform.h"
 #include "Framework/Application/SlateApplication.h"
 #include "UObject/UObjectIterator.h"
+#include "HAL/FileManager.h"
+#include "RuntimeAudioImporterLibrary.h"
+#include "Sound/ImportedSoundWave.h"
+#include "Components/AudioComponent.h"
 
 // ---- Helper: is Point inside the (possibly concave) polygon Poly? (even-odd ray-casting test) ----
 static bool IsPointInPolygon(const FVector2D& Point, const TArray<FVector2D>& Poly)
@@ -3171,6 +3175,11 @@ void ANavPlayerController::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	if (ActiveAudioPlaybacks.Num() > 0)
+	{
+		PruneFinishedAudioPlaybacks();
+	}
+
 	if (bIsDragging3DRoom)
 	{
 		FHitResult Hit;
@@ -3379,5 +3388,186 @@ void ANavPlayerController::ConfirmShapeTest()
 	if (!NewBuilding)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Could not create building - see error above. Edit the id in test_shape_params.json and try again."));
+	}
+}
+
+FString ANavPlayerController::GetAudioFolderPath()
+{
+	// FPaths::ProjectDir() is relative (something like "../../../InNavi/"), not absolute - fine for
+	// FFileHelper::LoadFileToString elsewhere in this file (which resolves relative to the working
+	// directory), but PlayAudioFile builds a file:// URL from this, and a relative path there produces
+	// an invalid URI (every media player plugin then rejects it as unsupported, not just a "file not
+	// found" - confirmed via the Output Log, which showed the literal unresolved "../../../.." in the
+	// URL it tried to open). ConvertRelativePathToFull makes this a real absolute path first.
+	return FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("Data") / TEXT("Audio"));
+}
+
+TArray<FString> ANavPlayerController::GetAvailableAudioFiles() const
+{
+	TArray<FString> FoundFiles;
+	// Not "FolderPath" - that name collides with a class member somewhere in this class's own
+	// inheritance chain (C4458 hides-class-member, a compile error in this project).
+	const FString AudioFolder = GetAudioFolderPath();
+	IFileManager::Get().FindFiles(FoundFiles, *(AudioFolder / TEXT("*.mp3")), true, false);
+	IFileManager::Get().FindFiles(FoundFiles, *(AudioFolder / TEXT("*.wav")), true, false);
+	FoundFiles.Sort();
+	return FoundFiles;
+}
+
+bool ANavPlayerController::PlayAudioFile(const FString& FileName)
+{
+	if (IsAudioFilePlaying(FileName))
+	{
+		return false;
+	}
+
+	const FString FullPath = GetAudioFolderPath() / FileName;
+	if (!FPaths::FileExists(FullPath))
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Audio file '%s' not found."), *FileName));
+		return false;
+	}
+
+	URuntimeAudioImporterLibrary* Importer = URuntimeAudioImporterLibrary::CreateRuntimeAudioImporter();
+	if (!Importer)
+	{
+		OnActionFailed.Broadcast(TEXT("Could not create the audio importer."));
+		return false;
+	}
+	PendingAudioImports.Add(Importer);
+
+	// Added immediately (SoundWave/AudioComponent still null) so a second click on the same row while
+	// it's still decoding is a no-op via IsAudioFilePlaying's own check above, instead of kicking off a
+	// duplicate import. The lambda below fills in SoundWave/AudioComponent once decoding finishes.
+	FActiveAudioPlayback& Playback = ActiveAudioPlaybacks.AddDefaulted_GetRef();
+	Playback.FileName = FileName;
+
+	Importer->OnResultNative.AddLambda([this, FileName](URuntimeAudioImporterLibrary* CompletedImporter, UImportedSoundWave* ImportedSoundWave, ERuntimeImportStatus Status)
+	{
+		PendingAudioImports.RemoveSingleSwap(CompletedImporter);
+
+		FActiveAudioPlayback* Found = ActiveAudioPlaybacks.FindByPredicate([&FileName](const FActiveAudioPlayback& P) { return P.FileName == FileName; });
+		if (!Found)
+		{
+			// Stopped (StopAllAudio clears ActiveAudioPlaybacks) before the async decode finished -
+			// nothing left to attach the result to.
+			return;
+		}
+
+		if (Status != ERuntimeImportStatus::SuccessfulImport || !ImportedSoundWave)
+		{
+			OnActionFailed.Broadcast(FString::Printf(TEXT("Could not decode audio file '%s'."), *FileName));
+			ActiveAudioPlaybacks.RemoveAll([&FileName](const FActiveAudioPlayback& P) { return P.FileName == FileName; });
+			return;
+		}
+
+		if (!AudioActor)
+		{
+			AudioActor = GetWorld()->SpawnActor<AActor>();
+		}
+		if (!AudioActor)
+		{
+			OnActionFailed.Broadcast(TEXT("Could not create the audio player actor."));
+			ActiveAudioPlaybacks.RemoveAll([&FileName](const FActiveAudioPlayback& P) { return P.FileName == FileName; });
+			return;
+		}
+
+		UAudioComponent* AudioComponent = NewObject<UAudioComponent>(AudioActor);
+		AudioComponent->bAutoActivate = false;
+		// AudioActor sits at the world origin (see its own comment) - miles from wherever the camera
+		// actually is on this campus-scale map. A spatialized 3D sound would attenuate with distance
+		// from the listener and be effectively silent from way out here; this is a UI/global sound
+		// (BGM, button click, ...), not something tied to a position in the world, so play it at a flat
+		// volume regardless of where AudioActor happens to be.
+		AudioComponent->bAllowSpatialization = false;
+		AudioComponent->SetSound(ImportedSoundWave);
+		AudioComponent->RegisterComponent();
+		AudioComponent->Play();
+
+		// TEMPORARY diagnostic logging (no sound was audible on the last test pass despite a clean
+		// decode) - prints immediately, then again after a short delay, so the Output Log shows
+		// whether IsPlaying() ever actually goes true, and what the component's own volume/sound
+		// state looks like. Remove once the root cause is confirmed fixed.
+		UE_LOG(LogTemp, Warning, TEXT("[AudioDebug] '%s' right after Play(): AudioComponent->IsPlaying()=%s, VolumeMultiplier=%.2f, Sound=%s, bIsActive=%s, SoundWave->IsPlaying()=%s, Duration=%.2f"),
+			*FileName,
+			AudioComponent->IsPlaying() ? TEXT("true") : TEXT("false"),
+			AudioComponent->VolumeMultiplier,
+			AudioComponent->Sound ? *AudioComponent->Sound->GetName() : TEXT("null"),
+			AudioComponent->IsActive() ? TEXT("true") : TEXT("false"),
+			ImportedSoundWave->IsPlaying(this) ? TEXT("true") : TEXT("false"),
+			ImportedSoundWave->GetDuration());
+		FTimerHandle DebugTimerHandle;
+		TWeakObjectPtr<UAudioComponent> WeakAudioComponent = AudioComponent;
+		TWeakObjectPtr<UImportedSoundWave> WeakSoundWave = ImportedSoundWave;
+		GetWorldTimerManager().SetTimer(DebugTimerHandle, [WeakAudioComponent, WeakSoundWave, FileName, this]()
+		{
+			if (WeakAudioComponent.IsValid() && WeakSoundWave.IsValid())
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[AudioDebug] '%s' 1s later: AudioComponent->IsPlaying()=%s, IsActive()=%s, SoundWave->IsPlaying()=%s"),
+					*FileName,
+					WeakAudioComponent->IsPlaying() ? TEXT("true") : TEXT("false"),
+					WeakAudioComponent->IsActive() ? TEXT("true") : TEXT("false"),
+					WeakSoundWave->IsPlaying(this) ? TEXT("true") : TEXT("false"));
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[AudioDebug] '%s' 1s later: component or sound wave no longer valid"), *FileName);
+			}
+		}, 1.0f, false);
+
+		Found->SoundWave = ImportedSoundWave;
+		Found->AudioComponent = AudioComponent;
+	});
+
+	// Auto: determine mp3/wav/etc. from the file extension - GetAvailableAudioFiles only ever lists
+	// .mp3/.wav, so there's nothing ambiguous to disambiguate here.
+	Importer->ImportAudioFromFile(FullPath, ERuntimeAudioFormat::Auto);
+	return true;
+}
+
+void ANavPlayerController::StopAllAudio()
+{
+	for (FActiveAudioPlayback& Playback : ActiveAudioPlaybacks)
+	{
+		if (Playback.AudioComponent)
+		{
+			Playback.AudioComponent->Stop();
+			Playback.AudioComponent->DestroyComponent();
+		}
+	}
+	ActiveAudioPlaybacks.Reset();
+
+	// Anything still decoding has nothing left to attach to once it finishes (see PlayAudioFile's own
+	// OnResultNative lambda, which checks ActiveAudioPlaybacks and no-ops if its entry is gone) - clear
+	// this too so those importers aren't kept alive for no reason.
+	PendingAudioImports.Reset();
+}
+
+bool ANavPlayerController::IsAudioFilePlaying(const FString& FileName) const
+{
+	for (const FActiveAudioPlayback& Playback : ActiveAudioPlaybacks)
+	{
+		if (Playback.FileName == FileName)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void ANavPlayerController::PruneFinishedAudioPlaybacks()
+{
+	for (int32 i = ActiveAudioPlaybacks.Num() - 1; i >= 0; i--)
+	{
+		FActiveAudioPlayback& Playback = ActiveAudioPlaybacks[i];
+		if (!Playback.AudioComponent || Playback.AudioComponent->IsPlaying())
+		{
+			// Null AudioComponent means still decoding (see FActiveAudioPlayback's own comment) - not
+			// finished, just not started yet.
+			continue;
+		}
+
+		Playback.AudioComponent->DestroyComponent();
+		ActiveAudioPlaybacks.RemoveAt(i);
 	}
 }

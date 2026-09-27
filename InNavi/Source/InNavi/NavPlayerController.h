@@ -13,6 +13,30 @@ class AInteriorGenerator;
 class AInteriorRoom;
 class AInteriorConnectorMarker;
 class UNavigationPanelWidget;
+class UImportedSoundWave;
+class UAudioComponent;
+class URuntimeAudioImporterLibrary;
+
+// One currently-playing (or still-decoding) audio file (see PlayAudioFile/StopAllAudio).
+// SoundWave/AudioComponent stay null between the initial PlayAudioFile call and the async decode
+// actually finishing (see PlayAudioFile's own OnResultNative lambda) - IsAudioFilePlaying and
+// PruneFinishedAudioPlaybacks both treat a null AudioComponent as "still pending", not "finished".
+// UImportedSoundWave is a plain UObject (not an ActorComponent like UAudioComponent), so it needs its
+// own UPROPERTY reference here to survive garbage collection while playing.
+USTRUCT()
+struct FActiveAudioPlayback
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FString FileName;
+
+	UPROPERTY()
+	UImportedSoundWave* SoundWave = nullptr;
+
+	UPROPERTY()
+	UAudioComponent* AudioComponent = nullptr;
+};
 
 // Broadcast whenever build mode turns on/off, so UI can show an indicator without polling every tick.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildModeChanged, bool, bNewBuildMode);
@@ -767,6 +791,33 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Room")
 	void StopRotateCW();
 
+	// Lists every playable audio file (.mp3/.wav) currently sitting in InNavi/Data/Audio/ - just
+	// filenames, sorted, for the Audio panel to list (mirrors the Data/ folder convention
+	// buildings.json already uses - a raw folder next to the .uproject, not imported UE assets).
+	// Rescans the folder on every call rather than caching it, so a file dropped in while the app is
+	// running shows up the next time the panel refreshes, no restart needed. Empty if the folder
+	// doesn't exist yet.
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	TArray<FString> GetAvailableAudioFiles() const;
+
+	// Starts playing FileName (one of GetAvailableAudioFiles' own results) - decoded asynchronously by
+	// the vendored RuntimeAudioImporter plugin (InNavi/Plugins/RuntimeAudioImporter/, MIT licensed; see
+	// InNavi.uproject) into a UImportedSoundWave, then played through a UAudioComponent. Not the
+	// engine's own Media Framework (WmfMedia) - that was tried first but UE 5.8's WmfMedia has dropped
+	// mp3 support entirely (a known engine regression). No-op (returns false) if FileName is already
+	// playing/decoding (see IsAudioFilePlaying) or doesn't exist. Multiple different files can play at
+	// once, each with its own UAudioComponent (see FActiveAudioPlayback) - Play the same file again
+	// once it's finished (or after StopAllAudio) to replay it.
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	bool PlayAudioFile(const FString& FileName);
+
+	// Stops and cleans up every currently-playing audio file at once.
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void StopAllAudio();
+
+	UFUNCTION(BlueprintPure, Category = "Audio")
+	bool IsAudioFilePlaying(const FString& FileName) const;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
@@ -1122,4 +1173,28 @@ private:
 	// Id of the building currently being interior-edited (i.e. has a floor/roof section hidden via
 	// PositionCameraForFloor) - empty if none. RestoreExteriorCameraView shows everything again.
 	FString InteriorBuildingHiddenById;
+
+	// See GetAvailableAudioFiles/PlayAudioFile's own comments.
+	static FString GetAudioFolderPath();
+
+	// Hosts every currently-playing UAudioComponent - one small persistent actor with no visible mesh,
+	// rather than attaching to the possessed Pawn (which gets destroyed/swapped when entering/leaving
+	// interiors), spawned lazily on the first PlayAudioFile call.
+	UPROPERTY()
+	AActor* AudioActor = nullptr;
+
+	UPROPERTY()
+	TArray<FActiveAudioPlayback> ActiveAudioPlaybacks;
+
+	// Keeps each in-flight URuntimeAudioImporterLibrary alive (it's a plain UObject with no other
+	// owner) between PlayAudioFile's ImportAudioFromFile call and its OnResultNative lambda firing -
+	// without this it could be garbage collected mid-decode. Entries are removed by that same lambda
+	// once the import finishes (successfully or not).
+	UPROPERTY()
+	TArray<URuntimeAudioImporterLibrary*> PendingAudioImports;
+
+	// Removes any playback whose UAudioComponent has actually finished (IsPlaying() false) - a null
+	// AudioComponent (still decoding, see FActiveAudioPlayback's own comment) is left alone, not
+	// treated as finished.
+	void PruneFinishedAudioPlaybacks();
 };

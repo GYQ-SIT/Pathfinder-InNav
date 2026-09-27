@@ -1,5 +1,6 @@
 #include "InteriorScreenWidget.h"
 
+#include "AudioFileRowWidget.h"
 #include "ConfirmDialogWidget.h"
 #include "EditScreenWidget.h"
 #include "FloorListEntryWidget.h"
@@ -61,6 +62,9 @@ void UInteriorScreenWidget::InitializeDockRuntimeArrays()
 	DockPanelWidths.Init(SidebarMinWidth, NumDockPanels);
 	DockPanelColumnIndex.Init(INDEX_NONE, NumDockPanels);
 	bDockPanelUserHidden.Init(false, NumDockPanels);
+	// Audio starts hidden - see the enum's own comment. ConstructDockPanel's Audio call site (below)
+	// collapses its actual Border to match.
+	bDockPanelUserHidden[(int32)EDockPanelId::Audio] = true;
 	bDockPanelIsDraggingMove.Init(false, NumDockPanels);
 	DockPanelMoveDragStartMouse.Init(FVector2D::ZeroVector, NumDockPanels);
 	DockPanelMoveDragStartPosition.Init(FVector2D::ZeroVector, NumDockPanels);
@@ -244,11 +248,17 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 				Splitter->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter2MouseMove);
 				Splitter->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter2MouseButtonUp);
 			}
-			else
+			else if (SplitterIndex == 3)
 			{
 				Splitter->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter3MouseButtonDown);
 				Splitter->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter3MouseMove);
 				Splitter->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter3MouseButtonUp);
+			}
+			else
+			{
+				Splitter->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter4MouseButtonDown);
+				Splitter->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter4MouseMove);
+				Splitter->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter4MouseButtonUp);
 			}
 			SplitterHandles[SplitterIndex] = Splitter;
 
@@ -736,6 +746,10 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		WindowLayersCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowLayersCheckChanged);
 		WindowNavigationCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowNavigation"), TEXT("Navigation"));
 		WindowNavigationCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowNavigationCheckChanged);
+		WindowAudioCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowAudio"), TEXT("Audio"));
+		// Unlike every other row, starts unchecked - see EDockPanelId::Audio's own comment.
+		WindowAudioCheckbox->SetIsChecked(false);
+		WindowAudioCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowAudioCheckChanged);
 
 		// Full-screen, fully transparent, Collapsed by default - see the comment on
 		// OnMenuClickCatcherMouseButtonDown for why this is how "click elsewhere closes the dropdown"
@@ -1226,6 +1240,58 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		NavRouteDetailsText->SetColorAndOpacity(FSlateColor(FLinearColor(0.45f, 0.92f, 1.f, 1.f)));
 		ApplyStandardTextWrap(NavRouteDetailsText);
 		NavStack->AddChildToVerticalBox(NavRouteDetailsText);
+
+		// -- Audio panel: reads InNavi/Data/Audio/ and lists every file as its own row with a Play
+		// button (see RefreshAudioList); Stop All halts everything at once
+		// (ANavPlayerController::StopAllAudio). Starts hidden (bDockPanelUserHidden, set in
+		// InitializeDockRuntimeArrays) - shown via the Window menu, same mechanism as hiding any other
+		// panel, just inverted for its starting state.
+		AudioPanel = ConstructDockPanel(EDockPanelId::Audio, TEXT("Pnl_Audio"), DockPanelColor, 14.f);
+		AudioPanel->SetVisibility(ESlateVisibility::Collapsed);
+		AudioPanel->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioPanelMouseButtonDown);
+		AudioPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioPanelMouseMove);
+		AudioPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioPanelMouseButtonUp);
+		DockResizeHandles[(int32)EDockPanelId::Audio]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioResizeMouseButtonDown);
+		DockResizeHandles[(int32)EDockPanelId::Audio]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioResizeMouseMove);
+		DockResizeHandles[(int32)EDockPanelId::Audio]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioResizeMouseButtonUp);
+		DockLeftResizeHandles[(int32)EDockPanelId::Audio]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioLeftResizeMouseButtonDown);
+		DockLeftResizeHandles[(int32)EDockPanelId::Audio]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioLeftResizeMouseMove);
+		DockLeftResizeHandles[(int32)EDockPanelId::Audio]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioLeftResizeMouseButtonUp);
+
+		UVerticalBox* AudioStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("AudioStack"));
+		AudioPanel->SetContent(AudioStack);
+
+		UTextBlock* AudioTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_AudioTitle"));
+		AudioTitle->SetText(FText::FromString(TEXT("Audio")));
+		AudioTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(AudioTitle);
+		UVerticalBoxSlot* AudioTitleSlot = AudioStack->AddChildToVerticalBox(AudioTitle);
+		AudioTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+
+		AudioStopAllButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_AudioStopAll"));
+		AudioStopAllButton->SetBackgroundColor(FLinearColor(0.75f, 0.2f, 0.2f, 1.f));
+		AudioStopAllButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioStopAllClicked);
+		UTextBlock* AudioStopAllText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_AudioStopAll"));
+		AudioStopAllText->SetText(FText::FromString(TEXT("Stop All")));
+		AudioStopAllText->SetJustification(ETextJustify::Center);
+		AudioStopAllText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardTextWrap(AudioStopAllText);
+		USizeBox* AudioStopAllSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Size_AudioStopAll"));
+		AudioStopAllSizeBox->SetWidthOverride(StandardButtonWidth);
+		AudioStopAllSizeBox->SetMinDesiredHeight(StandardButtonHeight);
+		AudioStopAllSizeBox->SetContent(AudioStopAllText);
+		AudioStopAllButton->SetContent(AudioStopAllSizeBox);
+		UVerticalBoxSlot* AudioStopAllSlot = AudioStack->AddChildToVerticalBox(AudioStopAllButton);
+		AudioStopAllSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+
+		// Rows themselves are built by RefreshAudioList (one UAudioFileRowWidget per file under
+		// Data/Audio/), same reasoning as FloorListBox/LayersListBox not being laid out here.
+		AudioFileListBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("AudioFileListBox"));
+		USizeBox* AudioFileListSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("AudioFileListSizeBox"));
+		AudioFileListSizeBox->SetHeightOverride(LayersListDefaultHeight);
+		AudioFileListSizeBox->SetWidthOverride(StandardButtonWidth);
+		AudioFileListSizeBox->SetContent(AudioFileListBox);
+		AudioStack->AddChildToVerticalBox(AudioFileListSizeBox);
 	}
 
 	return Super::RebuildWidget();
@@ -1308,6 +1374,7 @@ void UInteriorScreenWidget::NativeConstruct()
 	RefreshLayersList();
 	RefreshNavigationPanelDisplay();
 	RefreshNavRoomDropdowns();
+	RefreshAudioList();
 	RefreshModeButtonHighlights();
 	// Syncs Properties' placeholder title/visibility against PC's actual current selection state
 	// (normally nothing yet, but defensive either way) before panels get positioned below.
@@ -1414,6 +1481,10 @@ FVector2D UInteriorScreenWidget::GetDefaultPanelPosition(EDockPanelId Id, const 
 		// Right side, lower than Floor/Properties' own top-right default spot, so a fresh install
 		// doesn't start all 3 stacked on top of each other.
 		return FVector2D(FMath::Max(10.f, ViewportSize.X - DockPanelWidths[(int32)EDockPanelId::Navigation] - 20.f), ViewportSize.Y * 0.55f);
+	case EDockPanelId::Audio:
+		// Below Layers on the left side - starts hidden anyway (see bDockPanelUserHidden), this only
+		// matters for the very first time the user checks it in the Window menu.
+		return FVector2D(10.f, ViewportSize.Y * 0.75f);
 	default:
 		return FVector2D(10.f, SidebarTopMargin);
 	}
@@ -1501,6 +1572,9 @@ bool UInteriorScreenWidget::IsScreenPositionOverPanelButton(EDockPanelId Id, con
 	case EDockPanelId::Navigation:
 		Widgets = { NavSetStartButton, NavSetDestinationButton, NavFindRouteButton, NavClearRouteButton,
 			NavStartRoomComboBox, NavDestinationRoomComboBox };
+		break;
+	case EDockPanelId::Audio:
+		Widgets = { AudioStopAllButton, AudioFileListBox };
 		break;
 	}
 
@@ -1978,6 +2052,7 @@ const TCHAR* UInteriorScreenWidget::GetDockPanelName(EDockPanelId Id)
 	case EDockPanelId::Properties: return TEXT("Properties");
 	case EDockPanelId::Layers:     return TEXT("Layers");
 	case EDockPanelId::Navigation: return TEXT("Navigation");
+	case EDockPanelId::Audio:      return TEXT("Audio");
 	default:                       return TEXT("");
 	}
 }
@@ -2495,6 +2570,9 @@ FEventReply UInteriorScreenWidget::OnLayersPanelMouseButtonUp(FGeometry MyGeomet
 FEventReply UInteriorScreenWidget::OnNavigationPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonDown(EDockPanelId::Navigation, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnNavigationPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseMove(EDockPanelId::Navigation, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnNavigationPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonUp(EDockPanelId::Navigation, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnAudioPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonDown(EDockPanelId::Audio, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnAudioPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseMove(EDockPanelId::Audio, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnAudioPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonUp(EDockPanelId::Audio, MouseEvent); }
 
 FEventReply UInteriorScreenWidget::OnToolbarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
@@ -2511,6 +2589,9 @@ FEventReply UInteriorScreenWidget::OnLayersResizeMouseButtonUp(FGeometry MyGeome
 FEventReply UInteriorScreenWidget::OnNavigationResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Navigation, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnNavigationResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Navigation, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnNavigationResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Navigation, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnAudioResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Audio, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnAudioResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Audio, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnAudioResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Audio, MouseEvent); }
 
 FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
@@ -2527,6 +2608,9 @@ FEventReply UInteriorScreenWidget::OnLayersLeftResizeMouseButtonUp(FGeometry MyG
 FEventReply UInteriorScreenWidget::OnNavigationLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Navigation, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnNavigationLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Navigation, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnNavigationLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Navigation, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnAudioLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Audio, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnAudioLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Audio, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnAudioLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Audio, MouseEvent); }
 
 FEventReply UInteriorScreenWidget::OnSplitter0MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonDown(0, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnSplitter0MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseMove(0, MouseEvent); }
@@ -2540,6 +2624,9 @@ FEventReply UInteriorScreenWidget::OnSplitter2MouseButtonUp(FGeometry MyGeometry
 FEventReply UInteriorScreenWidget::OnSplitter3MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonDown(3, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnSplitter3MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseMove(3, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnSplitter3MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonUp(3, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnSplitter4MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonDown(4, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnSplitter4MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseMove(4, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnSplitter4MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonUp(4, MouseEvent); }
 
 void UInteriorScreenWidget::HandleEditModeChanged()
 {
@@ -2747,6 +2834,21 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 			SizeBox->SetWidthOverride(NavigationButtonWidth);
 		}
 	}
+
+	// Audio: Stop All tracks the panel width the same way as everything above. The file list is
+	// simpler than Floor/Layers' own (no per-row width tracking) - RefreshAudioList just rebuilds
+	// every row from scratch with the current width baked in, which is cheap enough for a list this
+	// small (a handful of audio files, not hundreds of rooms).
+	const float AudioButtonWidth = ComputePanelButtonWidth(EDockPanelId::Audio);
+	ResizeButton(AudioStopAllButton, AudioButtonWidth);
+	if (AudioFileListBox)
+	{
+		if (USizeBox* SizeBox = Cast<USizeBox>(AudioFileListBox->GetParent()))
+		{
+			SizeBox->SetWidthOverride(AudioButtonWidth);
+		}
+	}
+	RefreshAudioList();
 }
 
 void UInteriorScreenWidget::RefreshModeButtonHighlights()
@@ -3456,6 +3558,53 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 	}
 }
 
+void UInteriorScreenWidget::RefreshAudioList()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC || !AudioFileListBox)
+	{
+		return;
+	}
+
+	AudioFileListBox->ClearChildren();
+
+	const float RowWidth = ComputePanelButtonWidth(EDockPanelId::Audio);
+	for (const FString& FileName : PC->GetAvailableAudioFiles())
+	{
+		UAudioFileRowWidget* Row = CreateWidget<UAudioFileRowWidget>(PC, UAudioFileRowWidget::StaticClass());
+		if (!Row)
+		{
+			continue;
+		}
+		Row->SetFileName(FileName, PC->IsAudioFilePlaying(FileName));
+		Row->SetWidth(RowWidth);
+		Row->OnPlayClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleAudioRowPlayClicked);
+
+		if (UScrollBoxSlot* RowSlot = Cast<UScrollBoxSlot>(AudioFileListBox->AddChild(Row)))
+		{
+			RowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+		}
+	}
+}
+
+void UInteriorScreenWidget::OnAudioStopAllClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->StopAllAudio();
+		RefreshAudioList();
+	}
+}
+
+void UInteriorScreenWidget::HandleAudioRowPlayClicked(FString FileName)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->PlayAudioFile(FileName);
+		RefreshAudioList();
+	}
+}
+
 void UInteriorScreenWidget::HandleNavStartRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
 {
 	// Same reasoning as HandleBuildingSwitcherChanged - only react to the user's own pick, not this
@@ -4041,6 +4190,18 @@ void UInteriorScreenWidget::OnWindowLayersCheckChanged(bool bIsChecked)
 void UInteriorScreenWidget::OnWindowNavigationCheckChanged(bool bIsChecked)
 {
 	SetDockPanelUserHidden(EDockPanelId::Navigation, !bIsChecked);
+}
+
+void UInteriorScreenWidget::OnWindowAudioCheckChanged(bool bIsChecked)
+{
+	SetDockPanelUserHidden(EDockPanelId::Audio, !bIsChecked);
+	if (bIsChecked)
+	{
+		// The file list can go stale while the panel is hidden (a file dropped into Data/Audio/, or
+		// something finishing/starting playback) - refresh right as it becomes visible instead of
+		// waiting for some other trigger.
+		RefreshAudioList();
+	}
 }
 
 void UInteriorScreenWidget::SetDockPanelUserHidden(EDockPanelId Id, bool bHidden)

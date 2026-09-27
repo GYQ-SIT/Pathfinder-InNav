@@ -16,6 +16,7 @@ class UEditableTextBox;
 class FJsonObject;
 class UInteriorFloorPlanWidget;
 class ULayerRowWidget;
+class UAudioFileRowWidget;
 class UPanelWidget;
 class UScrollBox;
 class USizeBox;
@@ -322,6 +323,11 @@ private:
 	UFUNCTION()
 	void OnWindowNavigationCheckChanged(bool bIsChecked);
 
+	// Audio starts unchecked (see NativeConstruct) - unlike the other 5, so the panel doesn't clutter
+	// the screen for every project that isn't using audio.
+	UFUNCTION()
+	void OnWindowAudioCheckChanged(bool bIsChecked);
+
 	// Floor panel - lists every floor of the loaded building (top first, matching the mockup),
 	// highlighting the active one; clicking a row switches to it. "+Add floor"/"Delete floor" call
 	// straight through to ANavPlayerController::AddFloor/RemoveFloor(GetActiveFloor()), which
@@ -393,6 +399,19 @@ private:
 
 	void RefreshNavigationPanelDisplay();
 
+	// Audio panel - reads InNavi/Data/Audio/ (see ANavPlayerController::GetAvailableAudioFiles) and
+	// lists every file as its own UAudioFileRowWidget row; clicking a row plays that file
+	// (PlayAudioFile) and Stop All stops every currently-playing one at once (StopAllAudio). Rebuilt
+	// from scratch on every refresh (no per-row width tracking like Layers/Floor) since the file list
+	// is expected to be small and rarely changes mid-session.
+	void RefreshAudioList();
+
+	UFUNCTION()
+	void OnAudioStopAllClicked();
+
+	UFUNCTION()
+	void HandleAudioRowPlayClicked(FString FileName);
+
 	// Start/Destination room dropdowns - an alternative to clicking a point on the floor plan.
 	// Populated from UNavigationPanelWidget::GetSelectableRooms() (real rooms only, across every
 	// floor); picking one calls straight through to SetStartToRoom/SetDestinationToRoom, which sets
@@ -407,18 +426,19 @@ private:
 
 	void RefreshNavRoomDropdowns();
 
-	// --- Docking system for the Toolbar/Floor/Properties/Layers/Navigation panels ---
-	// Each of the 5 panels below is an independently draggable UBorder placed directly on the root
+	// --- Docking system for the Toolbar/Floor/Properties/Layers/Navigation/Audio panels ---
+	// Each of the 6 panels below is an independently draggable UBorder placed directly on the root
 	// canvas (not nested in a shared bar/VerticalBox like the old Left/Right sidebar bars). Dragging
 	// a panel by its own background (not one of its buttons - see IsScreenPositionOverPanelButton)
 	// moves it freely; releasing it with an edge close to another panel's edge (TrySnapPanel) snaps
 	// them together into a shared "column" that fills the screen height end to end, splitting that
 	// height among the column's members (adjustable per-boundary via a splitter handle, mirrors
 	// dragging the divider between two stacked panels in a real editor). Back is deliberately NOT
-	// part of this system (see RebuildWidget) - it's fixed chrome, not a dockable panel.
-	enum class EDockPanelId : uint8 { Toolbar, Floor, Properties, Layers, Navigation };
-	static constexpr int32 NumDockPanels = 5;
-	static constexpr int32 MaxDockSplitters = NumDockPanels - 1; // worst case: all 5 panels in one column
+	// part of this system (see RebuildWidget) - it's fixed chrome, not a dockable panel. Audio starts
+	// user-hidden (see bDockPanelUserHidden's own init) unlike the other 5 - see the Window menu.
+	enum class EDockPanelId : uint8 { Toolbar, Floor, Properties, Layers, Navigation, Audio };
+	static constexpr int32 NumDockPanels = 6;
+	static constexpr int32 MaxDockSplitters = NumDockPanels - 1; // worst case: all 6 panels in one column
 
 	struct FDockColumn
 	{
@@ -569,6 +589,9 @@ private:
 	UFUNCTION() FEventReply OnNavigationPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnNavigationPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnNavigationPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnAudioPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnAudioPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnAudioPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnToolbarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -585,6 +608,9 @@ private:
 	UFUNCTION() FEventReply OnNavigationResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnNavigationResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnNavigationResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnAudioResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnAudioResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnAudioResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -601,6 +627,9 @@ private:
 	UFUNCTION() FEventReply OnNavigationLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnNavigationLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnNavigationLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnAudioLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnAudioLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnAudioLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnSplitter0MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter0MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -614,6 +643,9 @@ private:
 	UFUNCTION() FEventReply OnSplitter3MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter3MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter3MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnSplitter4MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnSplitter4MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnSplitter4MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	// The root canvas every dock panel is a direct child of - see GetCanvasSize.
 	UPROPERTY()
@@ -806,6 +838,19 @@ private:
 	UPROPERTY()
 	UTextBlock* NavRouteDetailsText = nullptr;
 
+	// Audio panel - see the comment above RefreshAudioList. Starts hidden (bDockPanelUserHidden, set
+	// in NativeConstruct) unlike every other dock panel.
+	UPROPERTY()
+	UBorder* AudioPanel = nullptr;
+
+	UPROPERTY()
+	UButton* AudioStopAllButton = nullptr;
+
+	// One UAudioFileRowWidget child per file under Data/Audio/, rebuilt by RefreshAudioList. Scrollable
+	// (same reasoning as LayersListBox) since the folder could hold more files than fit the panel.
+	UPROPERTY()
+	UScrollBox* AudioFileListBox = nullptr;
+
 	UPROPERTY()
 	UComboBoxString* BuildingSwitcherComboBox = nullptr;
 
@@ -899,8 +944,12 @@ private:
 	UPROPERTY()
 	UCheckBox* WindowNavigationCheckbox = nullptr;
 
-	// Parallel to EDockPanelId, sized NumDockPanels - see SetDockPanelUserHidden. All false by
-	// default (every panel visible), set from the Window menu's checkboxes.
+	UPROPERTY()
+	UCheckBox* WindowAudioCheckbox = nullptr;
+
+	// Parallel to EDockPanelId, sized NumDockPanels - see SetDockPanelUserHidden. False by default
+	// (visible) for every panel except Audio, which InitializeDockRuntimeArrays sets true right after
+	// initializing this array - Audio only shows once the user actually checks it in the Window menu.
 	TArray<bool> bDockPanelUserHidden;
 
 	// Shared width bounds for every dock panel, and the snap/splitter tuning constants - also used
