@@ -1023,6 +1023,20 @@ private:
 	void ZoomIn3DPreview();
 	void ZoomOut3DPreview();
 
+	// Redraws the navigation route/start/destination markers in the 3D preview as persistent debug
+	// lines/spheres, mirroring InteriorFloorPlanWidget::NativePaint's own route-drawing exactly (same
+	// per-floor filtering - a route segment only draws if BOTH endpoints are on the active floor, an
+	// endpoint marker only draws if it's on the active floor - just in 3D world space instead of Slate
+	// draw elements). Bound to NavigationPanel's own OnStateChanged (see BeginPlay) so it stays live as
+	// the user picks Start/Destination and finds/clears a route, and also called directly from
+	// SetIn3DPreviewMode/SetActiveFloor so entering 3D preview or switching floors immediately shows
+	// whatever route already exists. Flushes and redraws every call rather than tracking individual
+	// primitives to update - simple and correct, at the cost of also clearing
+	// DrawPendingRoomPointMarker3D's own markers if a route redraw happens to land mid-room-drawing (an
+	// edge case not worth solving for a first, "debug line" pass of this feature).
+	UFUNCTION()
+	void RefreshRoute3DVisualization();
+
 	// 3D Edit mode click routing - the 3D-view equivalent of everything InteriorFloorPlanWidget's own
 	// mouse handlers do for the 2D floor plan. Called from OnClick() when bIsIn3DPreviewMode &&
 	// bIsIn3DEditMode; dispatches on the same mode flags 2D's widget already checks (draw room/wall,

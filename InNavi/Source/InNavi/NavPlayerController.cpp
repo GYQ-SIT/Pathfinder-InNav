@@ -65,6 +65,9 @@ void ANavPlayerController::BeginPlay()
 		FInputModeGameAndUI InputMode;
 		InputMode.SetHideCursorDuringCapture(false);
 		SetInputMode(InputMode);
+		// Keeps the 3D preview's route/start/destination markers live as the user picks points and
+		// finds/clears a route - see RefreshRoute3DVisualization's own comment.
+		NavigationPanel->OnStateChanged.AddUniqueDynamic(this, &ANavPlayerController::RefreshRoute3DVisualization);
 	}
 
 	for (TActorIterator<ABuildingGenerator> It(GetWorld()); It; ++It)
@@ -2089,6 +2092,11 @@ void ANavPlayerController::SetIn3DPreviewMode(bool bEnable)
 		bIsIn3DEditMode = false;
 	}
 
+	// Shows the route/start/destination markers immediately on entry if one already exists (rather
+	// than waiting for the next OnStateChanged), and clears them on the way out - the function itself
+	// checks bIsIn3DPreviewMode, so this one call handles both.
+	RefreshRoute3DVisualization();
+
 	OnPreviewModeChanged.Broadcast(bIsIn3DPreviewMode);
 }
 
@@ -2419,6 +2427,64 @@ void ANavPlayerController::DrawPendingRoomPointMarker3D()
 		DrawDebugLine(GetWorld(), PrevWorld, NewWorld, FColor::Green, true, -1.f, 0, 5.f);
 	}
 	DrawDebugSphere(GetWorld(), NewWorld, 20.f, 8, FColor::Green, true);
+}
+
+void ANavPlayerController::RefreshRoute3DVisualization()
+{
+	FlushPersistentDebugLines(GetWorld());
+
+	if (!bIsIn3DPreviewMode || !Generator || !InteriorGen || !NavigationPanel)
+	{
+		return;
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building)
+	{
+		return;
+	}
+
+	const float Scale = Generator->GetScale();
+	const int32 ActiveFloor = InteriorGen->GetActiveFloor();
+	// A little above the floor slab (see AInteriorRoom::RebuildMesh's own FloorSlabZOffset and
+	// DrawPendingRoomPointMarker3D's own Z) so the route doesn't z-fight with it.
+	const float Z = (ActiveFloor - 1) * Building->GetFloorHeight() + 15.f;
+
+	auto ToWorld = [&](const FVector2D& FootprintPoint) -> FVector
+	{
+		return FVector((FootprintPoint.X + Building->BuildingOffset.X) * Scale, (FootprintPoint.Y + Building->BuildingOffset.Y) * Scale, Z);
+	};
+
+	// Mirrors InteriorFloorPlanWidget::NativePaint's own route-drawing exactly: a segment only draws
+	// if BOTH endpoints are on the active floor (a floor-crossing segment, e.g. through an elevator,
+	// simply isn't drawn on either floor - same as 2D).
+	const TArray<FNavigationRoutePoint>& Route = NavigationPanel->GetRoutePoints();
+	for (int32 i = 1; i < Route.Num(); i++)
+	{
+		if (Route[i - 1].Floor != ActiveFloor || Route[i].Floor != ActiveFloor)
+		{
+			continue;
+		}
+		// FColor(255, 140, 0) - orange, matching the 2D route line's own FLinearColor(1.f, 0.55f, 0.f, 1.f).
+		DrawDebugLine(GetWorld(), ToWorld(Route[i - 1].Position), ToWorld(Route[i].Position), FColor(255, 140, 0), true, -1.f, 0, 8.f);
+	}
+
+	auto DrawEndpoint = [&](const FNavigationRoutePoint& Point, const FColor& Color)
+	{
+		if (Point.Floor != ActiveFloor)
+		{
+			return;
+		}
+		DrawDebugSphere(GetWorld(), ToWorld(Point.Position), 30.f, 12, Color, true);
+	};
+	if (NavigationPanel->HasStart())
+	{
+		DrawEndpoint(NavigationPanel->GetStart(), FColor::Green);
+	}
+	if (NavigationPanel->HasDestination())
+	{
+		DrawEndpoint(NavigationPanel->GetDestination(), FColor::Red);
+	}
 }
 
 void ANavPlayerController::OnLeftMouseDown3DEdit()
@@ -2802,6 +2868,9 @@ void ANavPlayerController::SetActiveFloor(int32 Level)
 	// the 3D Edit mode highlight follows the connector onto whichever of its floors is now visible,
 	// instead of staying stuck on the floor it was originally selected on.
 	RefreshSelectionHighlight();
+	// The route/start/destination markers are per-floor too (see RefreshRoute3DVisualization's own
+	// active-floor filtering) - redraw for whichever floor is now active.
+	RefreshRoute3DVisualization();
 	OnActiveFloorChanged.Broadcast();
 }
 
