@@ -26,6 +26,7 @@
 #include "RuntimeAudioImporterLibrary.h"
 #include "Sound/ImportedSoundWave.h"
 #include "Components/AudioComponent.h"
+#include "Kismet/GameplayStatics.h"
 
 // ---- Helper: is Point inside the (possibly concave) polygon Poly? (even-odd ray-casting test) ----
 static bool IsPointInPolygon(const FVector2D& Point, const TArray<FVector2D>& Poly)
@@ -3553,6 +3554,45 @@ bool ANavPlayerController::IsAudioFilePlaying(const FString& FileName) const
 		}
 	}
 	return false;
+}
+
+void ANavPlayerController::PlayButtonClickSound()
+{
+	if (!bButtonClickSoundEnabled)
+	{
+		return;
+	}
+
+	static const TCHAR* ClickSoundFileName = TEXT("click_button.mp3");
+
+	// Deliberately NOT cached/reused across clicks (an earlier version of this function was, and it
+	// crashed the editor: UImportedSoundWave tracks its own playback read-position internally, so two
+	// overlapping plays sharing one instance - e.g. rapid clicking - corrupted that state and hit an
+	// ensure failure in SoundWaveProcedural, "generated more bytes than expected"). Each click gets its
+	// own freshly-decoded, independent instance instead, same as PlayAudioFile - the file is tiny
+	// (a fraction of a second of audio), so decoding it fresh on every click is not noticeable.
+	const FString FullPath = GetAudioFolderPath() / ClickSoundFileName;
+	if (!FPaths::FileExists(FullPath))
+	{
+		return;
+	}
+
+	URuntimeAudioImporterLibrary* Importer = URuntimeAudioImporterLibrary::CreateRuntimeAudioImporter();
+	if (!Importer)
+	{
+		return;
+	}
+	PendingAudioImports.Add(Importer);
+
+	Importer->OnResultNative.AddLambda([this](URuntimeAudioImporterLibrary* CompletedImporter, UImportedSoundWave* ImportedSoundWave, ERuntimeImportStatus Status)
+	{
+		PendingAudioImports.RemoveSingleSwap(CompletedImporter);
+		if (Status == ERuntimeImportStatus::SuccessfulImport && ImportedSoundWave)
+		{
+			UGameplayStatics::PlaySound2D(this, ImportedSoundWave);
+		}
+	});
+	Importer->ImportAudioFromFile(FullPath, ERuntimeAudioFormat::Auto);
 }
 
 void ANavPlayerController::PruneFinishedAudioPlaybacks()

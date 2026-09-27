@@ -54,6 +54,11 @@ private:
 	UFUNCTION()
 	void HandleVisibilityClicked();
 
+	// Bound alongside both buttons' own click handlers so clicking either plays the same click sound
+	// every other button in the app does - see ANavPlayerController::PlayButtonClickSound.
+	UFUNCTION()
+	void PlayButtonClickSound();
+
 	// Applies RowKey/LabelText/Indent/bShowExpandArrow/bIsExpanded/bIsVisible/Width to the actual
 	// widgets - called from RebuildWidget (so the very first build already shows the right state)
 	// and again from Setup/SetWidth if the widget has already been realized by then.

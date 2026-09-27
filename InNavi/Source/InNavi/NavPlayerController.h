@@ -818,6 +818,29 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Audio")
 	bool IsAudioFilePlaying(const FString& FileName) const;
 
+	// Plays a short click sound (InNavi/Data/Audio/click_button.mp3) - bound to every button's own
+	// OnClicked across the app (see each screen/row widget's own PlayButtonClickSound wrapper method,
+	// which forwards here, bound right alongside that button's own specific handler) so clicking
+	// anything gives the same audible feedback. Decodes a fresh, independent UImportedSoundWave on
+	// every call via PlaySound2D (same pattern as PlayAudioFile, just without tracking it in
+	// ActiveAudioPlaybacks - a click sound is fire-and-forget, nothing to stop early or list as
+	// "playing"). Deliberately does NOT cache/reuse one decoded instance across clicks - an earlier
+	// version did, and it crashed the editor: UImportedSoundWave tracks its own playback
+	// read-position internally, so two overlapping plays sharing one instance (e.g. rapid clicking)
+	// corrupt that state.
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void PlayButtonClickSound();
+
+	// The Audio panel's own checkbox toggles this (see UInteriorScreenWidget::
+	// OnAudioClickSoundCheckChanged) - PlayButtonClickSound no-ops while it's false. Not persisted
+	// across sessions (a UI preference, not project data - matches the dock panels' own
+	// bDockPanelUserHidden, which isn't saved either); always starts true.
+	UFUNCTION(BlueprintPure, Category = "Audio")
+	bool IsButtonClickSoundEnabled() const { return bButtonClickSoundEnabled; }
+
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void SetButtonClickSoundEnabled(bool bEnabled) { bButtonClickSoundEnabled = bEnabled; }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
@@ -1197,4 +1220,7 @@ private:
 	// AudioComponent (still decoding, see FActiveAudioPlayback's own comment) is left alone, not
 	// treated as finished.
 	void PruneFinishedAudioPlaybacks();
+
+	// See IsButtonClickSoundEnabled/SetButtonClickSoundEnabled's own comment.
+	bool bButtonClickSoundEnabled = true;
 };

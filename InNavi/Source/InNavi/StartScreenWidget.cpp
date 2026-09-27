@@ -84,10 +84,20 @@ void UStartScreenWidget::NativeConstruct()
 	if (NewButton)
 	{
 		NewButton->OnClicked.AddUniqueDynamic(this, &UStartScreenWidget::OnNewClicked);
+		NewButton->OnClicked.AddUniqueDynamic(this, &UStartScreenWidget::PlayButtonClickSound);
 	}
 	if (OpenButton)
 	{
 		OpenButton->OnClicked.AddUniqueDynamic(this, &UStartScreenWidget::OnOpenClicked);
+		OpenButton->OnClicked.AddUniqueDynamic(this, &UStartScreenWidget::PlayButtonClickSound);
+	}
+}
+
+void UStartScreenWidget::PlayButtonClickSound()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->PlayButtonClickSound();
 	}
 }
 

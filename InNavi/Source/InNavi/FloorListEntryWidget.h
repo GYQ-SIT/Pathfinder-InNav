@@ -43,6 +43,11 @@ private:
 	UFUNCTION()
 	void HandleClicked();
 
+	// Bound alongside HandleClicked so clicking a floor row plays the same click sound every other
+	// button in the app does - see ANavPlayerController::PlayButtonClickSound.
+	UFUNCTION()
+	void PlayButtonClickSound();
+
 	// Applies FloorNumber/bIsActive to Button/Label - called from RebuildWidget (so the very first
 	// build already shows the right text/color) and again from SetFloorNumber if the widget has
 	// already been realized by then. SetFloorNumber runs right after CreateWidget, before this

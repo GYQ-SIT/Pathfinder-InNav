@@ -36,6 +36,11 @@ private:
 	UFUNCTION()
 	void OnEnterInteriorClicked();
 
+	// Bound alongside every button's own OnClicked so clicking anything plays the same click sound -
+	// see ANavPlayerController::PlayButtonClickSound, which owns the actual caching/playback.
+	UFUNCTION()
+	void PlayButtonClickSound();
+
 	// Bound to ANavPlayerController::OnBuildingSelected - reveals the Enter Interior button once
 	// there's actually a building selected to enter.
 	UFUNCTION()

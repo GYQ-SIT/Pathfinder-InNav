@@ -412,6 +412,18 @@ private:
 	UFUNCTION()
 	void HandleAudioRowPlayClicked(FString FileName);
 
+	// AudioClickSoundCheckbox's own handler - forwards to ANavPlayerController::
+	// SetButtonClickSoundEnabled.
+	UFUNCTION()
+	void OnAudioClickSoundCheckChanged(bool bIsChecked);
+
+	// Bound alongside every button's own OnClicked across this whole screen (see each button's
+	// construction site in RebuildWidget()/NativeConstruct()) so clicking anything plays the same
+	// click sound - forwards to ANavPlayerController::PlayButtonClickSound, which owns the actual
+	// caching/playback.
+	UFUNCTION()
+	void PlayButtonClickSound();
+
 	// Start/Destination room dropdowns - an alternative to clicking a point on the floor plan.
 	// Populated from UNavigationPanelWidget::GetSelectableRooms() (real rooms only, across every
 	// floor); picking one calls straight through to SetStartToRoom/SetDestinationToRoom, which sets
@@ -845,6 +857,11 @@ private:
 
 	UPROPERTY()
 	UButton* AudioStopAllButton = nullptr;
+
+	// Toggles ANavPlayerController::SetButtonClickSoundEnabled - see OnAudioClickSoundCheckChanged.
+	// Checked by default, matching bButtonClickSoundEnabled's own default.
+	UPROPERTY()
+	UCheckBox* AudioClickSoundCheckbox = nullptr;
 
 	// One UAudioFileRowWidget child per file under Data/Audio/, rebuilt by RefreshAudioList. Scrollable
 	// (same reasoning as LayersListBox) since the folder could hold more files than fit the panel.

@@ -44,6 +44,12 @@ private:
 	UFUNCTION()
 	void HandleClicked();
 
+	// Bound alongside HandleClicked so clicking a row plays the same click sound every other button
+	// in the app does, in addition to actually starting that file's own playback - see
+	// ANavPlayerController::PlayButtonClickSound.
+	UFUNCTION()
+	void PlayButtonClickSound();
+
 	// Applies FileName/bIsPlaying to Button/Label - called from RebuildWidget (so the very first
 	// build already shows the right text/color) and again from SetFileName if the widget has already
 	// been realized by then (same split as UFloorListEntryWidget::ApplyVisuals).

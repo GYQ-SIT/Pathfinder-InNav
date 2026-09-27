@@ -2,6 +2,7 @@
 
 #include "AudioFileRowWidget.h"
 
+#include "NavPlayerController.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
 #include "Components/SizeBox.h"
@@ -19,6 +20,7 @@ TSharedRef<SWidget> UAudioFileRowWidget::RebuildWidget()
 		Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_AudioEntry"));
 		Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
 		Button->OnClicked.AddUniqueDynamic(this, &UAudioFileRowWidget::HandleClicked);
+		Button->OnClicked.AddUniqueDynamic(this, &UAudioFileRowWidget::PlayButtonClickSound);
 
 		Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_AudioEntryLabel"));
 		Label->SetJustification(ETextJustify::Center);
@@ -81,4 +83,12 @@ void UAudioFileRowWidget::ApplyVisuals()
 void UAudioFileRowWidget::HandleClicked()
 {
 	OnPlayClicked.Broadcast(FileName);
+}
+
+void UAudioFileRowWidget::PlayButtonClickSound()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->PlayButtonClickSound();
+	}
 }

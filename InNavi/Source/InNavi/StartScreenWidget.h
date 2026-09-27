@@ -31,6 +31,11 @@ private:
 	UFUNCTION()
 	void OnOpenClicked();
 
+	// Bound alongside every button's own OnClicked so clicking anything plays the same click sound -
+	// see ANavPlayerController::PlayButtonClickSound, which owns the actual caching/playback.
+	UFUNCTION()
+	void PlayButtonClickSound();
+
 	// Spawns the edit screen and removes this widget - what both New and a successful Open do once
 	// there's something to edit.
 	void GoToEditScreen();

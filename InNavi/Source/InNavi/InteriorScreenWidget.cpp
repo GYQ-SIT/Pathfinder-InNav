@@ -372,6 +372,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
 			Button->SetToolTip(MakeToolTipWidget(TooltipLabel));
+			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 
 			UImage* Icon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), FName(FString(Name) + TEXT("Icon")));
 			const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), IconAssetName, IconAssetName);
@@ -446,6 +447,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
 			Button->SetToolTip(MakeToolTipWidget(TooltipLabel));
+			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 
 			UImage* Icon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), FName(FString(Name) + TEXT("Icon")));
 			const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), IconAssetName, IconAssetName);
@@ -611,6 +613,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.f)); // transparent - just the bar's own background shows through
+			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 			Text->SetText(FText::FromString(FString(Label)));
 			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
@@ -693,6 +696,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 			Text->SetText(FText::FromString(FString(Label)));
 			Text->SetJustification(ETextJustify::Center);
@@ -833,6 +837,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 			Text->SetText(FText::FromString(FString(Label)));
 			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
@@ -1204,6 +1209,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
 			Text->SetText(FText::FromString(FString(Label)));
 			Text->SetJustification(ETextJustify::Center);
@@ -1271,6 +1277,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		AudioStopAllButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_AudioStopAll"));
 		AudioStopAllButton->SetBackgroundColor(FLinearColor(0.75f, 0.2f, 0.2f, 1.f));
 		AudioStopAllButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioStopAllClicked);
+		AudioStopAllButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 		UTextBlock* AudioStopAllText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_AudioStopAll"));
 		AudioStopAllText->SetText(FText::FromString(TEXT("Stop All")));
 		AudioStopAllText->SetJustification(ETextJustify::Center);
@@ -1283,6 +1290,25 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		AudioStopAllButton->SetContent(AudioStopAllSizeBox);
 		UVerticalBoxSlot* AudioStopAllSlot = AudioStack->AddChildToVerticalBox(AudioStopAllButton);
 		AudioStopAllSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+
+		// Lets the user mute every button's click sound at once (see ANavPlayerController::
+		// SetButtonClickSoundEnabled) without touching the Audio files below - own row, not a
+		// UAudioFileRowWidget, since it's a setting rather than a playable file.
+		UHorizontalBox* AudioClickSoundRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("AudioClickSoundRow"));
+		AudioClickSoundCheckbox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), TEXT("Chk_AudioClickSound"));
+		AudioClickSoundCheckbox->SetIsChecked(true);
+		AudioClickSoundCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioClickSoundCheckChanged);
+		UHorizontalBoxSlot* AudioClickSoundCheckSlot = AudioClickSoundRow->AddChildToHorizontalBox(AudioClickSoundCheckbox);
+		AudioClickSoundCheckSlot->SetVerticalAlignment(VAlign_Center);
+		UTextBlock* AudioClickSoundText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_AudioClickSound"));
+		AudioClickSoundText->SetText(FText::FromString(TEXT("Button Click Sound")));
+		AudioClickSoundText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(AudioClickSoundText);
+		UHorizontalBoxSlot* AudioClickSoundTextSlot = AudioClickSoundRow->AddChildToHorizontalBox(AudioClickSoundText);
+		AudioClickSoundTextSlot->SetPadding(FMargin(4.f, 0.f, 0.f, 0.f));
+		AudioClickSoundTextSlot->SetVerticalAlignment(VAlign_Center);
+		UVerticalBoxSlot* AudioClickSoundRowSlot = AudioStack->AddChildToVerticalBox(AudioClickSoundRow);
+		AudioClickSoundRowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 
 		// Rows themselves are built by RefreshAudioList (one UAudioFileRowWidget per file under
 		// Data/Audio/), same reasoning as FloorListBox/LayersListBox not being laid out here.
@@ -1304,30 +1330,37 @@ void UInteriorScreenWidget::NativeConstruct()
 	if (BackButton)
 	{
 		BackButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnBackClicked);
+		BackButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 	}
 	if (AddFloorButton)
 	{
 		AddFloorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddFloorClicked);
+		AddFloorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 	}
 	if (RemoveFloorButton)
 	{
 		RemoveFloorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRemoveFloorClicked);
+		RemoveFloorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 	}
 	if (ApplyDoorButton)
 	{
 		ApplyDoorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyDoorClicked);
+		ApplyDoorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 	}
 	if (ApplyRoomButton)
 	{
 		ApplyRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyRoomClicked);
+		ApplyRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 	}
 	if (ApplyConnectorButton)
 	{
 		ApplyConnectorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyConnectorClicked);
+		ApplyConnectorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 	}
 	if (EditBuildingNameButton)
 	{
 		EditBuildingNameButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnEditBuildingNameClicked);
+		EditBuildingNameButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 	}
 	if (BuildingSwitcherComboBox)
 	{
@@ -1574,7 +1607,7 @@ bool UInteriorScreenWidget::IsScreenPositionOverPanelButton(EDockPanelId Id, con
 			NavStartRoomComboBox, NavDestinationRoomComboBox };
 		break;
 	case EDockPanelId::Audio:
-		Widgets = { AudioStopAllButton, AudioFileListBox };
+		Widgets = { AudioStopAllButton, AudioClickSoundCheckbox, AudioFileListBox };
 		break;
 	}
 
@@ -3596,12 +3629,28 @@ void UInteriorScreenWidget::OnAudioStopAllClicked()
 	}
 }
 
+void UInteriorScreenWidget::OnAudioClickSoundCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetButtonClickSoundEnabled(bIsChecked);
+	}
+}
+
 void UInteriorScreenWidget::HandleAudioRowPlayClicked(FString FileName)
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->PlayAudioFile(FileName);
 		RefreshAudioList();
+	}
+}
+
+void UInteriorScreenWidget::PlayButtonClickSound()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->PlayButtonClickSound();
 	}
 }
 
