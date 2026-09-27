@@ -2606,6 +2606,20 @@ void ANavPlayerController::ShrinkSelectedRoom()
 
 void ANavPlayerController::NudgeSelectedRoomSize(float Delta)
 {
+	// Grow/Shrink work on whichever kind of thing is currently selected - a connector (elevator/
+	// stairs/escalator) has no width/depth of its own, just a uniform SizeScale multiplier, so this
+	// branches off to a completely different code path (Delta's 20-unit convention below doesn't
+	// apply there at all - ConnectorScaleStep is its own, separate step size).
+	if (!SelectedConnectorGroupId.IsEmpty() && InteriorGen)
+	{
+		const float ScaleDelta = (Delta > 0.f) ? ConnectorScaleStep : -ConnectorScaleStep;
+		if (InteriorGen->ScaleConnectorGroup(SelectedConnectorGroupId, ScaleDelta))
+		{
+			bHasUnsavedChanges = true;
+		}
+		return;
+	}
+
 	if (SelectedRoomId.IsEmpty() || !InteriorGen)
 	{
 		return;
@@ -2657,6 +2671,20 @@ void ANavPlayerController::Tick(float DeltaSeconds)
 
 void ANavPlayerController::RotateSelectedRoom(float DeltaDegrees)
 {
+	// Same room-vs-connector branch as NudgeSelectedRoomSize - see its own comment. Unlike room
+	// rotation, connector rotation has no deferred/mid-gesture-allowed check (see
+	// AInteriorGenerator::RotateConnectorGroup's own comment), so there's no snapshot/commit dance to
+	// set up here - BeginRotationGestureIfNeeded/EndRotationGestureIfFinished simply don't do
+	// anything when a connector (not a room) is selected.
+	if (!SelectedConnectorGroupId.IsEmpty() && InteriorGen)
+	{
+		if (InteriorGen->RotateConnectorGroup(SelectedConnectorGroupId, DeltaDegrees))
+		{
+			bHasUnsavedChanges = true;
+		}
+		return;
+	}
+
 	if (SelectedRoomId.IsEmpty() || !InteriorGen)
 	{
 		return;
@@ -2696,7 +2724,22 @@ void ANavPlayerController::BeginRotationGestureIfNeeded()
 {
 	// Only snapshot at the true start of a gesture (neither key held yet) - if the other rotation
 	// key is already down, we're still mid-gesture and the original snapshot must be kept.
-	if (bRotatingCCW || bRotatingCW || SelectedRoomId.IsEmpty() || !InteriorGen)
+	if (bRotatingCCW || bRotatingCW || !InteriorGen)
+	{
+		return;
+	}
+
+	// Connector rotation is fully validated every tick (see RotateConnectorGroup), nothing deferred
+	// to check on release, so there's no snapshot to take - and SelectedRoomId is empty whenever a
+	// connector is selected anyway (the two are mutually exclusive, see SelectConnector), so the
+	// SelectedRoomId.IsEmpty() check below would already no-op here regardless. This explicit branch
+	// just makes that reasoning obvious rather than relying on it silently falling through.
+	if (!SelectedConnectorGroupId.IsEmpty())
+	{
+		return;
+	}
+
+	if (SelectedRoomId.IsEmpty())
 	{
 		return;
 	}

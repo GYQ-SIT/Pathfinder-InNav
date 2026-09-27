@@ -723,16 +723,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	bool SetLoadedBuildingName(const FString& NewName);
 
-	// Grow/shrink the currently selected room by a fixed 20-unit nudge (see NudgeSelectedRoomSize) -
-	// bound to =/- and called directly by the Toolbar panel's Gizmos Grow/Shrink buttons.
+	// Grow/shrink whatever's currently selected - a room by a fixed 20-unit nudge, or a connector
+	// (elevator/stairs/escalator) by a SizeScale multiplier step (see NudgeSelectedRoomSize, which
+	// despite the name handles both - kept the room-era name since it's already bound to =/- and the
+	// Toolbar panel's Gizmos Grow/Shrink buttons). Move itself is intentionally NOT supported for a
+	// connector - only rotate/scale, per the "选中后旋转和缩放（不能移动，只能旋转/缩放）" requirement.
 	UFUNCTION(BlueprintCallable, Category = "Room")
 	void GrowSelectedRoom();
 	UFUNCTION(BlueprintCallable, Category = "Room")
 	void ShrinkSelectedRoom();
 
-	// Continuous rotation of the currently selected room while held (RotationDegreesPerSecond,
-	// applied in Tick) - bound to 9/0 and called directly by the Toolbar panel's Gizmos Rotate
-	// buttons' OnPressed/OnReleased. CCW = counter-clockwise, CW = clockwise.
+	// Continuous rotation of whatever's currently selected (room or connector) while held
+	// (RotationDegreesPerSecond, applied in Tick) - bound to 9/0 and called directly by the Toolbar
+	// panel's Gizmos Rotate buttons' OnPressed/OnReleased. CCW = counter-clockwise, CW = clockwise.
 	UFUNCTION(BlueprintCallable, Category = "Room")
 	void StartRotateCCW();
 	UFUNCTION(BlueprintCallable, Category = "Room")
@@ -792,8 +795,14 @@ private:
 
 	// Bound to =/-, and called directly by the Toolbar panel's Gizmos Grow/Shrink buttons - see
 	// NudgeSelectedRoomSize. GrowSelectedRoom/ShrinkSelectedRoom themselves are declared public above
-	// (Blueprint/UMG-callable); this is just their shared implementation.
+	// (Blueprint/UMG-callable); this is just their shared implementation. Also handles a selected
+	// connector (elevator/stairs/escalator) instead of a room - see NudgeSelectedRoomSize's own
+	// comment.
 	void NudgeSelectedRoomSize(float Delta);
+
+	// See NudgeSelectedRoomSize's connector branch - AInteriorGenerator::ScaleConnectorGroup's own
+	// SizeScale multiplier, not an absolute unit size like a room's Delta.
+	static constexpr float ConnectorScaleStep = 0.1f;
 
 	static constexpr float RotationDegreesPerSecond = 90.f;
 	// No OnActionFailed broadcast on failure - called every tick while a rotation key is held,
