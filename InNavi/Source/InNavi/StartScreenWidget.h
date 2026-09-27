@@ -31,6 +31,10 @@ private:
 	UFUNCTION()
 	void OnOpenClicked();
 
+	// The actual browse-and-load, deferred a few frames out of OnOpenClicked - see OnOpenClicked's
+	// own comment for why.
+	void BrowseAndLoadBuildingData();
+
 	// Bound alongside every button's own OnClicked so clicking anything plays the same click sound -
 	// see ANavPlayerController::PlayButtonClickSound, which owns the actual caching/playback.
 	UFUNCTION()

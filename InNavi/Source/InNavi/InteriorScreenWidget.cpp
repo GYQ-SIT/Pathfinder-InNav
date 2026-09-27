@@ -1400,6 +1400,16 @@ void UInteriorScreenWidget::NativeConstruct()
 			Nav->SetPanelBorderForHitTest(NavigationPanel);
 			Nav->OnStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavigationStateChanged);
 		}
+
+		// bButtonClickSoundEnabled lives on the PC, not this widget, so it survives this screen being
+		// torn down and rebuilt (e.g. Back to the start screen and in again) - the checkbox was
+		// hardcoded to SetIsChecked(true) at construction (RebuildWidget has no reliable PC access yet),
+		// which showed "on" here even after the user had turned it off, despite the real setting
+		// correctly staying off. Sync it to the actual state now that PC is available.
+		if (AudioClickSoundCheckbox)
+		{
+			AudioClickSoundCheckbox->SetIsChecked(PC->IsButtonClickSoundEnabled());
+		}
 	}
 
 	RefreshBuildingSwitcher();
