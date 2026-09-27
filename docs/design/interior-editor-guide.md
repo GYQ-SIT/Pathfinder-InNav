@@ -1,6 +1,6 @@
 # Interior Editor — How to Use It
 
-> Current state as of 2026-09-26, branch `YQ_CUI`. The editor now has a real UMG UI
+> Current state as of 2026-09-27, branch `YQ_CUI`. The editor now has a real UMG UI
 > (menu bar, dockable panels, buttons) - every action below also still has a keyboard
 > shortcut, and both do the same thing under the hood.
 
@@ -35,7 +35,8 @@ exterior first (switching buildings while in 3D preview exits back to 2D first).
 pencil icon next to it lets you rename the currently-loaded building in place.
 
 Further right on the same row: **2D**/**3D** toggles the preview mode (see below);
-**Reset** and the **-**/**+** move-speed buttons only appear while in 3D preview.
+**Reset** and the **-**/**+** move-speed buttons, and a **View**/**Edit** toggle, only
+appear while in 3D preview (View/Edit is covered in the 3D preview section below).
 
 ## Dockable panels
 
@@ -114,10 +115,11 @@ resets both endpoints.
 The **2D**/**3D** toggle (building switcher bar, see above) switches from the 2D floor
 plan to a free-fly 3D view of the current floor's real generated geometry — current
 building only (others hidden), current floor's own exterior wall + floor slab only
-(other floors hidden, so upper/lower floors don't block the view). View-only: no
-room/wall/door editing happens in 3D, and the dock panels stay up and usable
-(Floor/Navigation in particular) so you can switch floors or plan a route while
-previewing.
+(other floors hidden, so upper/lower floors don't block the view). The dock panels stay
+up and usable (Floor/Navigation in particular) so you can switch floors or plan a route
+while previewing. A found route (and its Start/Destination markers) draws in 3D too —
+same per-floor rule as 2D, only the segment(s)/marker(s) on the currently viewed floor
+show.
 
 Camera controls:
 
@@ -129,6 +131,29 @@ Camera controls:
 
 Switching floors while in 3D re-frames the camera to the default view of the new
 floor. Switching buildings (via the building switcher) exits back to 2D first.
+
+### View / Edit
+
+3D preview opens in **View** mode (yellow button) — look around only, every editing
+tool is a no-op, matching 2D being read-only from outside select mode. Click the
+button to switch to **Edit** (green) for the same editing tools 2D has, driven by
+clicking in the 3D view instead of the 2D canvas:
+
+- **Select** — click a room, door, or connector; the selected room/connector tints
+  light green (3D's equivalent of 2D's red outline — a selected door highlights its
+  own room, same as 2D). Click empty space to deselect.
+- **Move** — drag a selected room to reposition it (connectors are rotate/scale only,
+  never dragged, same restriction as 2D).
+- **Resize**/**Rotate**/**Delete** — same `=`/`-`, hold `9`/`0`, and Backspace
+  shortcuts as 2D, now actually work in 3D Edit mode (they're inert in View mode, even
+  if something was selected before switching to it).
+- **Draw Room**/**Draw Wall**/prefab shapes/**Add Door**/elevator-stairs-escalator
+  placement — same P/L/1-2-3/K/4-5-6 tools as 2D, clicking points in the 3D view
+  instead of the 2D canvas. Each clicked point draws a temporary green marker/line so
+  you can see where it landed; Enter/Esc finish or cancel same as 2D.
+
+Switching back to View, leaving 3D preview, or switching buildings always resets back
+to View mode.
 
 ## Snapping
 
@@ -149,5 +174,8 @@ you have unsaved changes.
   interaction.
 - No dedicated tool for a plain path node (only elevator/stairs/escalator have a
   placement tool right now).
-- 3D preview is view-only - no room/wall/door editing in 3D yet, and no "3D Preview"
-  floating thumbnail overlaid on the 2D view.
+- No "3D Preview" floating thumbnail overlaid on the 2D view (the mockup's own stretch
+  goal, separate from the full-screen 2D/3D toggle that's already built).
+- The 3D route visualization is plain persistent debug lines/spheres, not a proper mesh
+  - a route redraw (e.g. picking a new Start point) also clears any in-progress
+  draw-room/wall point markers in 3D if the two happen to overlap in time.
