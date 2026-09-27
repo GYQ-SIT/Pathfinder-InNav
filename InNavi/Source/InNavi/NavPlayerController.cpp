@@ -308,6 +308,9 @@ void ANavPlayerController::SelectBuildingUnderCursor()
 	ClickedBuilding->SetHighlighted(true);
 	SelectedBuilding = ClickedBuilding;
 	OnBuildingSelected.Broadcast(ClickedBuilding->BuildingId);
+	// Only exterior building selection gets this sound - deselecting (above) and every other kind of
+	// selection in the app (rooms/doors/connectors in the interior editor) don't go through here.
+	PlayBuildingSelectSound();
 
 	UE_LOG(LogTemp, Warning, TEXT("Selected building: %s"), *ClickedBuilding->BuildingName);
 }
@@ -3563,15 +3566,23 @@ void ANavPlayerController::PlayButtonClickSound()
 		return;
 	}
 
-	static const TCHAR* ClickSoundFileName = TEXT("click_button.mp3");
+	PlayShortSoundEffect(TEXT("click_button.mp3"));
+}
 
-	// Deliberately NOT cached/reused across clicks (an earlier version of this function was, and it
-	// crashed the editor: UImportedSoundWave tracks its own playback read-position internally, so two
-	// overlapping plays sharing one instance - e.g. rapid clicking - corrupted that state and hit an
-	// ensure failure in SoundWaveProcedural, "generated more bytes than expected"). Each click gets its
-	// own freshly-decoded, independent instance instead, same as PlayAudioFile - the file is tiny
-	// (a fraction of a second of audio), so decoding it fresh on every click is not noticeable.
-	const FString FullPath = GetAudioFolderPath() / ClickSoundFileName;
+void ANavPlayerController::PlayBuildingSelectSound()
+{
+	PlayShortSoundEffect(TEXT("select_ui.mp3"));
+}
+
+void ANavPlayerController::PlayShortSoundEffect(const TCHAR* FileName)
+{
+	// Deliberately NOT cached/reused across calls (an earlier version of PlayButtonClickSound was, and
+	// it crashed the editor: UImportedSoundWave tracks its own playback read-position internally, so
+	// two overlapping plays sharing one instance - e.g. rapid clicking - corrupted that state and hit
+	// an ensure failure in SoundWaveProcedural, "generated more bytes than expected"). Each call gets
+	// its own freshly-decoded, independent instance instead, same as PlayAudioFile - these files are
+	// tiny (a fraction of a second of audio), so decoding fresh every time is not noticeable.
+	const FString FullPath = GetAudioFolderPath() / FileName;
 	if (!FPaths::FileExists(FullPath))
 	{
 		return;

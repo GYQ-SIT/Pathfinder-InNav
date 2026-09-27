@@ -841,6 +841,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void SetButtonClickSoundEnabled(bool bEnabled) { bButtonClickSoundEnabled = bEnabled; }
 
+	// Plays a short selection sound (InNavi/Data/Audio/select_ui.mp3) - called from
+	// SelectBuildingUnderCursor only when a click newly selects an exterior building (not on deselect,
+	// and not for anything selected inside the interior editor - rooms/doors/connectors have their own
+	// selection flow entirely separate from this one). Same fresh-decode-every-call pattern as
+	// PlayButtonClickSound (see its own comment for why), and likewise not gated by
+	// bButtonClickSoundEnabled - that flag is specifically the button-click-sound mute, not a general
+	// UI-sound mute.
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void PlayBuildingSelectSound();
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupInputComponent() override;
@@ -1220,6 +1230,11 @@ private:
 	// AudioComponent (still decoding, see FActiveAudioPlayback's own comment) is left alone, not
 	// treated as finished.
 	void PruneFinishedAudioPlaybacks();
+
+	// Shared by PlayButtonClickSound/PlayBuildingSelectSound - decodes FileName (a name under
+	// GetAudioFolderPath(), e.g. "click_button.mp3") fresh and plays it via PlaySound2D once decoded.
+	// See PlayButtonClickSound's own comment for why this deliberately doesn't cache/reuse instances.
+	void PlayShortSoundEffect(const TCHAR* FileName);
 
 	// See IsButtonClickSoundEnabled/SetButtonClickSoundEnabled's own comment.
 	bool bButtonClickSoundEnabled = true;

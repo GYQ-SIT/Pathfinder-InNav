@@ -26,14 +26,17 @@
 namespace
 {
 	// Same look as UInteriorScreenWidget's own menu bar/dropdown/dock-panel chrome (DockPanelColor,
-	// MenuBarHeight) - kept as separate local constants here rather than shared, since this screen
-	// has no dock system of its own to also key off them.
-	const FLinearColor MenuBarColor(0.03f, 0.03f, 0.03f, 0.88f);
-	constexpr float MenuBarHeight = 32.f;
-	constexpr float MenuButtonWidth = 50.f;
-	constexpr float MenuBarLeftMargin = 10.f;
-	constexpr float AudioPanelWidth = 220.f;
-	constexpr float AudioFileListHeight = 150.f;
+	// MenuBarHeight) - kept as separate, distinctly-named local constants here rather than shared
+	// (Edit-prefixed to avoid colliding with UInteriorScreenWidget::RebuildWidget's own identically-
+	// named local variables under Unreal's Unity Build, which merges multiple .cpp files into one
+	// translation unit - two unrelated same-named locals across files then trip C4459 "hides global
+	// declaration"), since this screen has no dock system of its own to also key off them.
+	const FLinearColor EditMenuBarColor(0.03f, 0.03f, 0.03f, 0.88f);
+	constexpr float EditMenuBarHeight = 32.f;
+	constexpr float EditMenuButtonWidth = 50.f;
+	constexpr float EditMenuBarLeftMargin = 10.f;
+	constexpr float EditAudioPanelWidth = 220.f;
+	constexpr float EditAudioFileListHeight = 150.f;
 }
 
 UEditScreenWidget::UEditScreenWidget(const FObjectInitializer& ObjectInitializer)
@@ -66,12 +69,12 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		// use for. Enter Interior and Back used to live in a standalone bottom-right button stack;
 		// they now live in this bar instead, Enter Interior immediately left of Back.
 		UBorder* MenuBarBackground = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_MenuBar"));
-		MenuBarBackground->SetBrushColor(MenuBarColor);
-		MenuBarBackground->SetPadding(FMargin(MenuBarLeftMargin, 0.f, 0.f, 0.f));
+		MenuBarBackground->SetBrushColor(EditMenuBarColor);
+		MenuBarBackground->SetPadding(FMargin(EditMenuBarLeftMargin, 0.f, 0.f, 0.f));
 		UCanvasPanelSlot* MenuBarSlot = Canvas->AddChildToCanvas(MenuBarBackground);
 		MenuBarSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
 		MenuBarSlot->SetAlignment(FVector2D(0.f, 0.f));
-		MenuBarSlot->SetOffsets(FMargin(0.f, 0.f, 0.f, MenuBarHeight));
+		MenuBarSlot->SetOffsets(FMargin(0.f, 0.f, 0.f, EditMenuBarHeight));
 		MenuBarSlot->SetZOrder(6);
 
 		UHorizontalBox* MenuBarRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("MenuBarRow"));
@@ -88,8 +91,8 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			Text->SetJustification(ETextJustify::Center);
 			ApplyStandardFont(Text);
 			USizeBox* MenuButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-			MenuButtonSizeBox->SetWidthOverride(MenuButtonWidth);
-			MenuButtonSizeBox->SetHeightOverride(MenuBarHeight);
+			MenuButtonSizeBox->SetWidthOverride(EditMenuButtonWidth);
+			MenuButtonSizeBox->SetHeightOverride(EditMenuBarHeight);
 			if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(MenuButtonSizeBox->SetContent(Text)))
 			{
 				TextSlot->SetHorizontalAlignment(HAlign_Center);
@@ -123,7 +126,7 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			ApplyStandardFont(Text);
 			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 			SizeBox->SetWidthOverride(Width);
-			SizeBox->SetHeightOverride(28.f); // shorter than MenuBarHeight so it visibly sits inside the bar
+			SizeBox->SetHeightOverride(28.f); // shorter than EditMenuBarHeight so it visibly sits inside the bar
 			if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(SizeBox->SetContent(Text)))
 			{
 				TextSlot->SetHorizontalAlignment(HAlign_Center);
@@ -154,14 +157,14 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		{
 			UVerticalBox* Stack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), FName(FString(Name) + TEXT("Stack")));
 			UBorder* Dropdown = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(Name));
-			Dropdown->SetBrushColor(MenuBarColor);
+			Dropdown->SetBrushColor(EditMenuBarColor);
 			Dropdown->SetPadding(FMargin(4.f));
 			Dropdown->SetContent(Stack);
 			Dropdown->SetVisibility(ESlateVisibility::Collapsed);
 			UCanvasPanelSlot* DropdownSlot = Canvas->AddChildToCanvas(Dropdown);
 			DropdownSlot->SetAnchors(FAnchors(0.f, 0.f));
 			DropdownSlot->SetAlignment(FVector2D(0.f, 0.f));
-			DropdownSlot->SetPosition(FVector2D(PositionX, MenuBarHeight + 4.f));
+			DropdownSlot->SetPosition(FVector2D(PositionX, EditMenuBarHeight + 4.f));
 			DropdownSlot->SetAutoSize(true);
 			DropdownSlot->SetZOrder(7);
 			return Dropdown;
@@ -206,14 +209,14 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			return CheckBox;
 		};
 
-		FileMenuDropdown = ConstructDropdown(TEXT("Pnl_FileDropdown"), MenuBarLeftMargin);
+		FileMenuDropdown = ConstructDropdown(TEXT("Pnl_FileDropdown"), EditMenuBarLeftMargin);
 		UVerticalBox* FileDropdownStack = Cast<UVerticalBox>(FileMenuDropdown->GetContent());
 		UButton* FileNewButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileNew"), TEXT("New"));
 		FileNewButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnFileNewClicked);
 		UButton* FileLoadButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileLoad"), TEXT("Load"));
 		FileLoadButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnFileLoadClicked);
 
-		WindowMenuDropdown = ConstructDropdown(TEXT("Pnl_WindowDropdown"), MenuBarLeftMargin + MenuButtonWidth + 10.f);
+		WindowMenuDropdown = ConstructDropdown(TEXT("Pnl_WindowDropdown"), EditMenuBarLeftMargin + EditMenuButtonWidth + 10.f);
 		UVerticalBox* WindowDropdownStack = Cast<UVerticalBox>(WindowMenuDropdown->GetContent());
 		WindowAudioCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowAudio"), TEXT("Audio"));
 		// Unlike UInteriorScreenWidget's own dock-panel checkboxes (all default checked, since those
@@ -235,13 +238,13 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		// UInteriorScreenWidget's own Audio panel, reusing the same backend and UAudioFileRowWidget
 		// class, just fixed in place - this screen has no dock/drag/resize system to plug into.
 		AudioPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_Audio"));
-		AudioPanel->SetBrushColor(MenuBarColor);
+		AudioPanel->SetBrushColor(EditMenuBarColor);
 		AudioPanel->SetPadding(FMargin(10.f));
 		AudioPanel->SetVisibility(ESlateVisibility::Collapsed);
 		UCanvasPanelSlot* AudioPanelSlot = Canvas->AddChildToCanvas(AudioPanel);
 		AudioPanelSlot->SetAnchors(FAnchors(0.f, 0.f));
 		AudioPanelSlot->SetAlignment(FVector2D(0.f, 0.f));
-		AudioPanelSlot->SetPosition(FVector2D(MenuBarLeftMargin, MenuBarHeight + 10.f));
+		AudioPanelSlot->SetPosition(FVector2D(EditMenuBarLeftMargin, EditMenuBarHeight + 10.f));
 		AudioPanelSlot->SetAutoSize(true);
 		AudioPanelSlot->SetZOrder(6);
 
@@ -265,7 +268,7 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		AudioStopAllText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		ApplyStandardFont(AudioStopAllText);
 		USizeBox* AudioStopAllSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Size_AudioStopAll"));
-		AudioStopAllSizeBox->SetWidthOverride(AudioPanelWidth);
+		AudioStopAllSizeBox->SetWidthOverride(EditAudioPanelWidth);
 		AudioStopAllSizeBox->SetMinDesiredHeight(32.f);
 		AudioStopAllSizeBox->SetContent(AudioStopAllText);
 		AudioStopAllButton->SetContent(AudioStopAllSizeBox);
@@ -295,8 +298,8 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		// Data/Audio/), same reasoning as UInteriorScreenWidget's own AudioFileListBox.
 		AudioFileListBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("AudioFileListBox"));
 		USizeBox* AudioFileListSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("AudioFileListSizeBox"));
-		AudioFileListSizeBox->SetHeightOverride(AudioFileListHeight);
-		AudioFileListSizeBox->SetWidthOverride(AudioPanelWidth);
+		AudioFileListSizeBox->SetHeightOverride(EditAudioFileListHeight);
+		AudioFileListSizeBox->SetWidthOverride(EditAudioPanelWidth);
 		AudioFileListSizeBox->SetContent(AudioFileListBox);
 		AudioStack->AddChildToVerticalBox(AudioFileListSizeBox);
 	}
@@ -620,7 +623,7 @@ void UEditScreenWidget::RefreshAudioList()
 			continue;
 		}
 		Row->SetFileName(FileName, PC->IsAudioFilePlaying(FileName));
-		Row->SetWidth(AudioPanelWidth);
+		Row->SetWidth(EditAudioPanelWidth);
 		Row->OnPlayClicked.AddUniqueDynamic(this, &UEditScreenWidget::HandleAudioRowPlayClicked);
 
 		if (UScrollBoxSlot* RowSlot = Cast<UScrollBoxSlot>(AudioFileListBox->AddChild(Row)))

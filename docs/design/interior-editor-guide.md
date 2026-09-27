@@ -8,23 +8,39 @@
 
 1. Launch the project, pick **New** (blank) or **Open** (load an existing
    `buildings.json`) from the start screen.
-2. Click a building in the 3D exterior view to select it, then **Enter Interior**.
-   Clicking empty space, or clicking the already-selected building again, deselects it.
+2. Click a building in the 3D exterior view to select it (plays a short selection
+   sound) and **Enter Interior** appears in the exterior screen's own top menu bar
+   (see below). Clicking empty space, or clicking the already-selected building again,
+   deselects it.
 3. You're now in the 2D floor-plan editor — a flat top-down view of the building's
    currently active floor, not a 3D camera trick. Right-click-drag to pan, mouse wheel
    to zoom. A separate **3D preview** is available too — see its own section below.
 4. **Back**, at the right end of the top menu bar, returns to the exterior view (will
    prompt to save if you have unsaved changes).
 
+## Exterior edit screen
+
+The 3D building-cluster view (before entering any building's interior) has its own top
+menu bar, same look as the interior editor's:
+
+- **File** — **New**/**Load**, same behavior and unsaved-changes check as the interior
+  editor's own File menu below.
+- **Window** — just **Audio** (this screen has no dockable panels to list) — see Audio
+  panel below.
+- **Enter Interior**, then **Back** on the far right — Enter Interior only appears once
+  a building is selected; Back here returns to the start screen (not to be confused
+  with the interior editor's own Back, which returns to *this* screen instead).
+
 ## Top menu bar
 
-Pinned across the very top of the screen.
+Pinned across the very top of the interior editor screen.
 
 - **File** — **New** clears everything and starts a blank project; **Load** opens the
   OS file picker for an existing `buildings.json`. Both check for unsaved changes first
   and prompt to save/discard/cancel, exactly like leaving to the exterior does.
-- **Window** — a checklist of the five dockable panels (Toolbar/Floor/Properties/
-  Layers/Navigation, see below). Unchecking one hides it; re-checking shows it again.
+- **Window** — a checklist of the six dockable panels (Toolbar/Floor/Properties/
+  Layers/Navigation/Audio, see below). Unchecking one hides it; re-checking shows it
+  again. Audio (unlike the other five) starts unchecked/hidden.
 - **Back**, on the right — same as described above.
 
 ## Building switcher bar
@@ -40,8 +56,8 @@ appear while in 3D preview (View/Edit is covered in the 3D preview section below
 
 ## Dockable panels
 
-Five panels — **Toolbar**, **Floor**, **Properties**, **Layers**, **Navigation** — can
-each be:
+Six panels — **Toolbar**, **Floor**, **Properties**, **Layers**, **Navigation**,
+**Audio** — can each be:
 
 - **Moved**: drag by the panel's own background (not one of its buttons).
 - **Resized**: drag either its left or right edge.
@@ -110,6 +126,19 @@ point directly on the floor plan instead - either way the button turns green onc
 route (including cross-floor connector instructions where relevant); **Clear Route**
 resets both endpoints.
 
+### Audio panel
+
+Hidden by default (Window > Audio to show it). Lists every file under
+`InNavi/Data/Audio/` (mp3 or wav) with its own **Play** button — click to start it,
+click again while it's playing to see it highlighted green; **Stop All** halts
+everything at once. Multiple files can play together (e.g. background music plus an
+effect). A **Button Click Sound** checkbox mutes/unmutes the short click sound every
+button in the app plays on click (this is a separate, PC-wide setting — the checkbox
+here and the identical one in the exterior edit screen's own Audio panel both read/
+write the same underlying flag, so toggling it in one place is reflected in the other
+next time that panel is opened). Leaving all the way back to the start screen stops any
+audio still playing.
+
 ## 3D preview mode
 
 The **2D**/**3D** toggle (building switcher bar, see above) switches from the 2D floor
@@ -167,6 +196,22 @@ small tolerance. Press `N` to toggle it off/on.
 yet (a New session), it opens the OS save dialog first. Leaving the interior back to
 the exterior, or exiting to the start screen, will prompt you to save/discard/cancel if
 you have unsaved changes.
+
+## Audio feedback
+
+Two kinds, both backed by mp3 files under `InNavi/Data/Audio/` (playback via a vendored
+third-party plugin, `RuntimeAudioImporter` — UE 5.8's own Media Framework dropped mp3
+support):
+
+- **Button click sound** (`click_button.mp3`) — every button in the app plays this on
+  click. Mute it from either screen's own Audio panel (see above) — it's one shared
+  setting, not per-screen.
+- **Building selection sound** (`select_ui.mp3`) — plays only when clicking newly
+  selects a building in the exterior 3D view (not on deselect, and not tied to the
+  click-sound mute above).
+
+Both are separate from the Audio panel's own file list, which is for playing back
+arbitrary files under `Data/Audio/` on demand (background music, effects, etc.).
 
 ## Known gaps / not built yet
 
