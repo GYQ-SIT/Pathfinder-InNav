@@ -1178,6 +1178,13 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UVerticalBoxSlot* NavContextSlot = NavStack->AddChildToVerticalBox(NavContextText);
 		NavContextSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
 
+		UTextBlock* NavAreaLegend = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_NavAreaLegend"));
+		NavAreaLegend->SetText(FText::FromString(TEXT("Floor 1 map:  BLUE = OUTSIDE  |  GRAY = INDOORS")));
+		NavAreaLegend->SetColorAndOpacity(FSlateColor(FLinearColor(0.45f, 0.82f, 1.f, 1.f)));
+		ApplyStandardTextWrap(NavAreaLegend);
+		UVerticalBoxSlot* NavAreaLegendSlot = NavStack->AddChildToVerticalBox(NavAreaLegend);
+		NavAreaLegendSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+
 		// Room dropdowns - an alternative to clicking a point on the floor plan (see the comment
 		// above HandleNavStartRoomChanged). Populated with every real room across every floor, so
 		// picking one can jump straight to a room on a different floor than the one currently shown.
@@ -1200,9 +1207,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			return ComboBox;
 		};
 
-		NavStartRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavStartRoom"), TEXT("Start Room"));
+		NavStartRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavStartRoom"), TEXT("Indoor Start Room"));
 		NavStartRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavStartRoomChanged);
-		NavDestinationRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavDestinationRoom"), TEXT("Destination Room"));
+		NavDestinationRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavDestinationRoom"), TEXT("Indoor Destination Room"));
 		NavDestinationRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavDestinationRoomChanged);
 
 		auto AddNavButton = [this, NavStack, ApplyStandardTextWrap](const TCHAR* Name, const TCHAR* Label, UTextBlock*& OutLabel) -> UButton*
@@ -3588,7 +3595,9 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 		const FString BuildingId = PC->GetLoadedBuildingId();
 		NavContextText->SetText(FText::FromString(BuildingId.IsEmpty()
 			? TEXT("No building loaded")
-			: FString::Printf(TEXT("Building: %s  |  Viewing Floor: %d"), *BuildingId, PC->GetActiveFloor())));
+			: PC->GetActiveFloor() == 1
+				? FString::Printf(TEXT("Building: %s  |  Viewing Floor 1 + Outside"), *BuildingId)
+				: FString::Printf(TEXT("Building: %s  |  Viewing Floor: %d"), *BuildingId, PC->GetActiveFloor())));
 	}
 	if (NavStatusText)
 	{

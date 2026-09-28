@@ -9,6 +9,7 @@
 #include "PolyBuilding.h"
 #include "NavPlayerController.h"
 #include "NavigationPanelWidget.h"
+#include "PolygonGeometryUtils.h"
 #include "EngineUtils.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
@@ -703,6 +704,18 @@ void UInteriorFloorPlanWidget::ComputeViewTransform(FVector2D WidgetSize, FVecto
 		MaxPoint.Y = FMath::Max(MaxPoint.Y, WorldPoint.Y);
 	}
 
+	// Floor 1 doubles as the indoor/outdoor navigation view. Frame the same highlighted campus
+	// area that navigation selection accepts, so every visible blue point is clickable.
+	if (InteriorGen->GetActiveFloor() == 1)
+	{
+		const FBox2D OutdoorBounds = UNavigationPanelWidget::GetOutdoorBounds(*Building);
+		if (OutdoorBounds.bIsValid)
+		{
+			MinPoint = (OutdoorBounds.Min + Building->BuildingOffset) * Scale;
+			MaxPoint = (OutdoorBounds.Max + Building->BuildingOffset) * Scale;
+		}
+	}
+
 	OutOrigin = (MinPoint + MaxPoint) * 0.5f + PanOffset;
 
 	// Fit each axis of the footprint's bounding box into the matching axis of the widget, and use
@@ -781,6 +794,50 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		{
 			return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
 		};
+
+	// ---- Floor 1 indoor/outdoor context ----
+	// Blue is the selectable campus area. The exact building footprint is overlaid in dark gray
+	// and reinforced by the heavy black boundary below. Keeping this behind
+	// rooms, routes and markers makes the location type clear without obscuring editor content.
+	if (InteriorGen->GetActiveFloor() == 1)
+	{
+		const FSlateBrush* AreaBrush = FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox"));
+		const FBox2D OutdoorBounds = UNavigationPanelWidget::GetOutdoorBounds(*Building);
+		if (OutdoorBounds.bIsValid)
+		{
+			const FVector2D OutdoorMin = WorldToLocal((OutdoorBounds.Min + Building->BuildingOffset) * Scale);
+			const FVector2D OutdoorMax = WorldToLocal((OutdoorBounds.Max + Building->BuildingOffset) * Scale);
+			const FVector2D TopLeft(FMath::Min(OutdoorMin.X, OutdoorMax.X), FMath::Min(OutdoorMin.Y, OutdoorMax.Y));
+			const FVector2D AreaSize(FMath::Abs(OutdoorMax.X - OutdoorMin.X), FMath::Abs(OutdoorMax.Y - OutdoorMin.Y));
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(
+				FVector2f(AreaSize.X, AreaSize.Y), FSlateLayoutTransform(TopLeft)), AreaBrush,
+				ESlateDrawEffect::None, FLinearColor(0.08f, 0.32f, 0.52f, 0.55f));
+		}
+
+		TArray<int32> TriangleIndices;
+		TriangulatePolygon(Building->GetFootprint(), TriangleIndices);
+		if (!TriangleIndices.IsEmpty())
+		{
+			TArray<FSlateVertex> Vertices;
+			Vertices.Reserve(Building->GetFootprint().Num());
+			for (const FVector2D& Point : Building->GetFootprint())
+			{
+				Vertices.AddZeroed();
+				FSlateVertex& Vertex = Vertices.Last();
+				Vertex.Position = FVector2f(AllottedGeometry.LocalToAbsolute(
+					WorldToLocal((Point + Building->BuildingOffset) * Scale)));
+				Vertex.Color = FLinearColor(0.14f, 0.15f, 0.17f, 0.96f).ToFColor(false);
+			}
+			TArray<SlateIndex> SlateIndices;
+			SlateIndices.Reserve(TriangleIndices.Num());
+			for (const int32 Index : TriangleIndices)
+			{
+				SlateIndices.Add(static_cast<SlateIndex>(Index));
+			}
+			FSlateDrawElement::MakeCustomVerts(OutDrawElements, LayerId,
+				AreaBrush->GetRenderingResource(), Vertices, SlateIndices, nullptr, 0, 0);
+		}
+	}
 
 	// ---- Building boundary ----
 	if (!PlayerController || PlayerController->IsBoundaryVisible())
@@ -997,10 +1054,15 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		if (const UNavigationPanelWidget* NavigationPanel = PlayerController->GetNavigationPanel())
 		{
 			const int32 ActiveFloor = InteriorGen->GetActiveFloor();
+			auto IsVisibleOnCurrentMap = [ActiveFloor](const FNavigationRoutePoint& Point)
+				{
+					return Point.Floor == ActiveFloor
+						|| (ActiveFloor == 1 && Point.Floor == UNavigationPanelWidget::OutdoorFloor);
+				};
 			const TArray<FNavigationRoutePoint>& Route = NavigationPanel->GetRoutePoints();
 			for (int32 I = 1; I < Route.Num(); ++I)
 			{
-				if (Route[I - 1].Floor != ActiveFloor || Route[I].Floor != ActiveFloor)
+				if (!IsVisibleOnCurrentMap(Route[I - 1]) || !IsVisibleOnCurrentMap(Route[I]))
 				{
 					continue;
 				}
@@ -1015,13 +1077,29 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			const FSlateBrush* MarkerBrush = FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox"));
 			auto DrawEndpoint = [&](const FNavigationRoutePoint& Point, const FLinearColor& Color)
 				{
-					if (Point.Floor != ActiveFloor)
+					if (!IsVisibleOnCurrentMap(Point))
 					{
 						return;
 					}
 					constexpr float MarkerSize = 18.f;
 					constexpr float OutlineSize = 24.f;
 					const FVector2D MarkerLocal = WorldToLocal((Point.Position + Building->BuildingOffset) * Scale);
+					if (Point.Floor == UNavigationPanelWidget::OutdoorFloor)
+					{
+						TArray<FVector2D> Diamond;
+						Diamond.Add(MarkerLocal + FVector2D(0.f, -OutlineSize * 0.5f));
+						Diamond.Add(MarkerLocal + FVector2D(OutlineSize * 0.5f, 0.f));
+						Diamond.Add(MarkerLocal + FVector2D(0.f, OutlineSize * 0.5f));
+						Diamond.Add(MarkerLocal + FVector2D(-OutlineSize * 0.5f, 0.f));
+						Diamond.Add(Diamond[0]);
+						FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 5,
+							AllottedGeometry.ToPaintGeometry(), Diamond, ESlateDrawEffect::None,
+							FLinearColor::White, true, 7.f);
+						FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 6,
+							AllottedGeometry.ToPaintGeometry(), Diamond, ESlateDrawEffect::None,
+							Color, true, 4.f);
+						return;
+					}
 					const FPaintGeometry OutlineGeometry = AllottedGeometry.ToPaintGeometry(
 						FVector2f(OutlineSize, OutlineSize),
 						FSlateLayoutTransform(MarkerLocal - FVector2D(OutlineSize * 0.5f)));
