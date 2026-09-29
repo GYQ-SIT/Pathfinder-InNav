@@ -191,6 +191,7 @@ void UNavigationPanelWidget::SelectPoint(FVector2D FootprintPosition, int32 Floo
 	Endpoint.Point.Position = FootprintPosition;
 	Endpoint.Point.Floor = Floor;
 	Endpoint.BuildingId = Building->BuildingId;
+	Endpoint.bSetViaDropdown = false;
 	RoutePoints.Reset();
 	bLastFindRouteFailed = false;
 	const bool bWasSelectingStart = SelectionMode == ENavigationSelectionMode::Start;
@@ -281,6 +282,7 @@ bool UNavigationPanelWidget::SetEndpointToRoom(const FString& RoomOptionLabel, b
 	Endpoint.Point.Position = Found->Centroid;
 	Endpoint.Point.Floor = Found->Floor;
 	Endpoint.BuildingId = Building->BuildingId;
+	Endpoint.bSetViaDropdown = true;
 	RoutePoints.Reset();
 	bLastFindRouteFailed = false;
 	SetStatusMessage(FString::Printf(TEXT("%s set to '%s'."), bIsStart ? TEXT("Start") : TEXT("Destination"), *Found->RoomName),

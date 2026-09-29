@@ -55,6 +55,13 @@ public:
 	const FNavigationRoutePoint& GetDestination() const { return Destination.Point; }
 	const TArray<FNavigationRoutePoint>& GetRoutePoints() const { return RoutePoints; }
 
+	// Which of the two equivalent ways of setting an endpoint was used last - the Navigation panel's
+	// room dropdown (SetStartToRoom/SetDestinationToRoom) or clicking a point on the floor plan
+	// (SelectPoint). Lets the panel highlight whichever control actually set it, instead of always
+	// highlighting the button. Meaningless (returns false) if that endpoint isn't set at all.
+	bool WasStartSetViaDropdown() const { return Start.bValid && Start.bSetViaDropdown; }
+	bool WasDestinationSetViaDropdown() const { return Destination.bValid && Destination.bSetViaDropdown; }
+
 	// Former OnXClicked handlers, renamed and made public now that they're called from
 	// UInteriorScreenWidget's own buttons instead of being bound to widgets this class
 	// no longer builds. Bodies are unchanged from the original implementation.
@@ -150,6 +157,7 @@ private:
 		bool bValid = false;
 		FNavigationRoutePoint Point;
 		FString BuildingId;
+		bool bSetViaDropdown = false;
 	};
 
 	FSelectedEndpoint Start;

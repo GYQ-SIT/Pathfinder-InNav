@@ -905,8 +905,18 @@ private:
 	UPROPERTY()
 	UComboBoxString* NavStartRoomComboBox = nullptr;
 
+	// Frame around NavStartRoomComboBox, tinted green only when Start was set by picking this
+	// dropdown (as opposed to clicking a point on the floor plan) - see RefreshNavigationPanelDisplay.
+	// Transparent otherwise, so it doesn't read as a permanent gray box.
+	UPROPERTY()
+	UBorder* NavStartRoomBorder = nullptr;
+
 	UPROPERTY()
 	UComboBoxString* NavDestinationRoomComboBox = nullptr;
+
+	// Same as NavStartRoomBorder, tinted red for Destination.
+	UPROPERTY()
+	UBorder* NavDestinationRoomBorder = nullptr;
 
 	UPROPERTY()
 	UButton* NavSetStartButton = nullptr;

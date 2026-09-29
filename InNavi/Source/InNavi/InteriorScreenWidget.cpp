@@ -1252,7 +1252,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// Room dropdowns - an alternative to clicking a point on the floor plan (see the comment
 		// above HandleNavStartRoomChanged). Populated with every real room across every floor, so
 		// picking one can jump straight to a room on a different floor than the one currently shown.
-		auto AddNavRoomDropdown = [this, NavStack](const TCHAR* Name, const TCHAR* LabelText) -> UComboBoxString*
+		auto AddNavRoomDropdown = [this, NavStack](const TCHAR* Name, const TCHAR* LabelText, UBorder*& OutBorder) -> UComboBoxString*
 		{
 			UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
 			Label->SetText(FText::FromString(FString(LabelText)));
@@ -1266,14 +1266,23 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			USizeBox* ComboSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
 			ComboSizeBox->SetWidthOverride(StandardButtonWidth);
 			ComboSizeBox->SetContent(ComboBox);
-			UVerticalBoxSlot* ComboSlot = NavStack->AddChildToVerticalBox(ComboSizeBox);
+
+			// Frame that tints green/red when this endpoint was set by picking from THIS dropdown,
+			// rather than by clicking a point on the floor plan - see RefreshNavigationPanelDisplay.
+			// Transparent by default so an unset/click-set dropdown shows no frame at all.
+			UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(Name) + TEXT("Border")));
+			Border->SetPadding(FMargin(3.f));
+			Border->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
+			Border->SetContent(ComboSizeBox);
+			UVerticalBoxSlot* ComboSlot = NavStack->AddChildToVerticalBox(Border);
 			ComboSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+			OutBorder = Border;
 			return ComboBox;
 		};
 
-		NavStartRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavStartRoom"), TEXT("Start Room"));
+		NavStartRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavStartRoom"), TEXT("Start Room"), NavStartRoomBorder);
 		NavStartRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavStartRoomChanged);
-		NavDestinationRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavDestinationRoom"), TEXT("Destination Room"));
+		NavDestinationRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavDestinationRoom"), TEXT("Destination Room"), NavDestinationRoomBorder);
 		NavDestinationRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavDestinationRoomChanged);
 
 		auto AddNavButton = [this, NavStack, ApplyStandardTextWrap](const TCHAR* Name, const TCHAR* Label, UTextBlock*& OutLabel) -> UButton*
@@ -1299,9 +1308,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		UTextBlock* UnusedFindRouteLabel = nullptr;
 		UTextBlock* UnusedClearRouteLabel = nullptr;
-		NavSetStartButton = AddNavButton(TEXT("Btn_NavSetStart"), TEXT("Set Start"), NavSetStartButtonLabel);
+		NavSetStartButton = AddNavButton(TEXT("Btn_NavSetStart"), TEXT("Click to Set Start"), NavSetStartButtonLabel);
 		NavSetStartButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavSetStartClicked);
-		NavSetDestinationButton = AddNavButton(TEXT("Btn_NavSetDestination"), TEXT("Set Destination"), NavSetDestinationButtonLabel);
+		NavSetDestinationButton = AddNavButton(TEXT("Btn_NavSetDestination"), TEXT("Click to Set Destination"), NavSetDestinationButtonLabel);
 		NavSetDestinationButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavSetDestinationClicked);
 		NavFindRouteButton = AddNavButton(TEXT("Btn_NavFindRoute"), TEXT("Find Route"), UnusedFindRouteLabel);
 		NavFindRouteButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavFindRouteClicked);
@@ -3908,6 +3917,19 @@ void UInteriorScreenWidget::OnNavClearRouteClicked()
 			Nav->RequestClearRoute();
 		}
 	}
+
+	// A ComboBoxString only fires OnSelectionChanged when the picked option actually changes - if we
+	// left the old room name showing, picking that SAME room again after Clear Route would silently
+	// do nothing. Clearing the visible selection here lets any room (including the one just cleared)
+	// be picked again right away.
+	if (NavStartRoomComboBox)
+	{
+		NavStartRoomComboBox->ClearSelection();
+	}
+	if (NavDestinationRoomComboBox)
+	{
+		NavDestinationRoomComboBox->ClearSelection();
+	}
 }
 
 void UInteriorScreenWidget::HandleNavigationStateChanged()
@@ -3928,31 +3950,43 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 	static const FLinearColor InactiveButtonColor(0.6f, 0.6f, 0.6f, 1.f);
 	static const FLinearColor ActiveStartColor(0.08f, 0.55f, 0.22f, 1.f);
 	static const FLinearColor ActiveDestinationColor(0.72f, 0.12f, 0.12f, 1.f);
+	static const FLinearColor DropdownUnsetColor(0.f, 0.f, 0.f, 0.f);
 
+	// Whichever of the button / dropdown-frame actually set the point gets the color; the other one
+	// stays neutral, so a glance says whether the current Start/Destination came from clicking the
+	// floor plan or from the room dropdown (see NavStartRoomBorder's own comment).
+	const bool bStartActivelyPicking = Mode == ENavigationSelectionMode::Start;
+	const bool bStartSetViaDropdown = Nav->WasStartSetViaDropdown();
+	const bool bStartSetViaClick = Nav->HasStart() && !bStartSetViaDropdown;
 	if (NavSetStartButton)
 	{
-		// Green while actively picking a start point, and stays green afterward too (once one's
-		// actually set) rather than reverting to gray the instant the point is accepted.
-		const bool bShowSet = Mode == ENavigationSelectionMode::Start || Nav->HasStart();
-		NavSetStartButton->SetBackgroundColor(bShowSet ? ActiveStartColor : InactiveButtonColor);
+		NavSetStartButton->SetBackgroundColor(bStartActivelyPicking || bStartSetViaClick ? ActiveStartColor : InactiveButtonColor);
 	}
 	if (NavSetStartButtonLabel)
 	{
-		NavSetStartButtonLabel->SetText(FText::FromString(Mode == ENavigationSelectionMode::Start
-			? TEXT("Click a Start Location (Cancel)") : TEXT("Set Start")));
+		NavSetStartButtonLabel->SetText(FText::FromString(bStartActivelyPicking
+			? TEXT("Click a Start Location (Cancel)") : TEXT("Click to Set Start")));
 	}
+	if (NavStartRoomBorder)
+	{
+		NavStartRoomBorder->SetBrushColor(bStartSetViaDropdown ? ActiveStartColor : DropdownUnsetColor);
+	}
+
+	const bool bDestActivelyPicking = Mode == ENavigationSelectionMode::Destination;
+	const bool bDestSetViaDropdown = Nav->WasDestinationSetViaDropdown();
+	const bool bDestSetViaClick = Nav->HasDestination() && !bDestSetViaDropdown;
 	if (NavSetDestinationButton)
 	{
-		// Red while actively picking (unchanged), but green (not red) once a destination is actually
-		// set - both buttons read as "green = set" once their own point is in place.
-		const FLinearColor SetColor = Mode == ENavigationSelectionMode::Destination ? ActiveDestinationColor : ActiveStartColor;
-		const bool bShowSet = Mode == ENavigationSelectionMode::Destination || Nav->HasDestination();
-		NavSetDestinationButton->SetBackgroundColor(bShowSet ? SetColor : InactiveButtonColor);
+		NavSetDestinationButton->SetBackgroundColor(bDestActivelyPicking || bDestSetViaClick ? ActiveDestinationColor : InactiveButtonColor);
 	}
 	if (NavSetDestinationButtonLabel)
 	{
-		NavSetDestinationButtonLabel->SetText(FText::FromString(Mode == ENavigationSelectionMode::Destination
-			? TEXT("Click a Destination (Cancel)") : TEXT("Set Destination")));
+		NavSetDestinationButtonLabel->SetText(FText::FromString(bDestActivelyPicking
+			? TEXT("Click a Destination (Cancel)") : TEXT("Click to Set Destination")));
+	}
+	if (NavDestinationRoomBorder)
+	{
+		NavDestinationRoomBorder->SetBrushColor(bDestSetViaDropdown ? ActiveDestinationColor : DropdownUnsetColor);
 	}
 	if (NavFindRouteButton)
 	{
