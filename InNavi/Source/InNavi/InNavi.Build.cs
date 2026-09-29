@@ -17,7 +17,11 @@ public class InNavi : ModuleRules
 
 		// DesktopPlatform: native "open file" dialog for importing building data.
 		// Slate/SlateCore: needed to get the active window handle to parent that dialog to.
-		PrivateDependencyModuleNames.AddRange(new string[] { "DesktopPlatform", "Slate", "SlateCore" });
+		// SQLiteCore: Epic's own built-in SQLite wrapper (FSQLiteDatabase/FSQLitePreparedStatement) -
+		// the second, database-backed way to load exterior buildings (see
+		// ABuildingGenerator::LoadBuildingsFromDatabase), alongside the existing JSON path. Must also be
+		// enabled in InNavi.uproject's Plugins list (EnabledByDefault: false upstream).
+		PrivateDependencyModuleNames.AddRange(new string[] { "DesktopPlatform", "Slate", "SlateCore", "SQLiteCore" });
 
 		// Uncomment if you are using online features
 		// PrivateDependencyModuleNames.Add("OnlineSubsystem");

@@ -8,6 +8,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
+#include "SQLiteDatabase.h"
 
 // ---- Helper: do segments AB and CD properly cross each other? ----
 static bool SegmentsIntersect(const FVector2D& A, const FVector2D& B, const FVector2D& C, const FVector2D& D)
@@ -146,6 +147,130 @@ int32 ABuildingGenerator::LoadBuildingsFromFile(const FString& FilePath)
 			{
 				InteriorDataById.Add(Id, *InteriorObject);
 			}
+		}
+	}
+
+	return SpawnedCount;
+}
+
+int32 ABuildingGenerator::LoadBuildingsFromDatabase(const FString& DatabasePath)
+{
+	FSQLiteDatabase Database;
+	if (!Database.Open(*DatabasePath, ESQLiteDatabaseOpenMode::ReadOnly))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Could not open SQLite database at: %s"), *DatabasePath);
+		return 0;
+	}
+
+	// One building's accumulated data - LatLonPoints is built up in sequence order by the query's own
+	// ORDER BY, so no separate node_id/sequence bookkeeping is needed here.
+	struct FDatabaseBuildingRow
+	{
+		FString BuildingType;
+		TArray<FVector2D> LatLonPoints; // X = lon, Y = lat
+	};
+	TMap<int64, FDatabaseBuildingRow> RowsById;
+
+	// Filtered to building_type='university' - this sample database (see project memory) covers the
+	// whole surrounding Punggol neighborhood, not just the SIT campus, and 'university' is the OSM tag
+	// that happens to land on the ~10 buildings actually inside the campus footprint. This is specific
+	// to this particular demo dataset's own tagging convention, not a general rule - revisit once the
+	// real database/schema is confirmed (it may not use OSM-style type tags at all).
+	const int64 NumRowsRead = Database.Execute(
+		TEXT("SELECT b.building_id, b.building_type, bn.lat, bn.lon FROM buildings b ")
+		TEXT("JOIN building_nodes bn ON b.building_id = bn.building_id ")
+		TEXT("WHERE b.building_type = 'university' ")
+		TEXT("ORDER BY b.building_id, bn.sequence"),
+		[&RowsById](const FSQLitePreparedStatement& Statement) -> ESQLitePreparedStatementExecuteRowResult
+		{
+			int64 BuildingId = 0;
+			FString BuildingType;
+			double Lat = 0.0, Lon = 0.0;
+			if (!Statement.GetColumnValueByName(TEXT("building_id"), BuildingId)
+				|| !Statement.GetColumnValueByName(TEXT("building_type"), BuildingType)
+				|| !Statement.GetColumnValueByName(TEXT("lat"), Lat)
+				|| !Statement.GetColumnValueByName(TEXT("lon"), Lon))
+			{
+				return ESQLitePreparedStatementExecuteRowResult::Error;
+			}
+
+			FDatabaseBuildingRow& Row = RowsById.FindOrAdd(BuildingId);
+			Row.BuildingType = BuildingType;
+			Row.LatLonPoints.Add(FVector2D((float)Lon, (float)Lat));
+			return ESQLitePreparedStatementExecuteRowResult::Continue;
+		});
+	Database.Close();
+
+	if (NumRowsRead == INDEX_NONE)
+	{
+		UE_LOG(LogTemp, Error, TEXT("Query failed while reading buildings from database at: %s"), *DatabasePath);
+		return 0;
+	}
+
+	if (RowsById.Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Database at %s contained no buildings"), *DatabasePath);
+		return 0;
+	}
+
+	if (!GetWorld())
+	{
+		return 0;
+	}
+
+	// Reference point for the local-meters projection: the centroid of every node just read, so the
+	// whole cluster lands near the world origin regardless of where on Earth it actually sits (same
+	// equirectangular approximation already validated by hand against this exact dataset - see
+	// project memory).
+	double SumLat = 0.0, SumLon = 0.0;
+	int32 TotalPoints = 0;
+	for (const TPair<int64, FDatabaseBuildingRow>& Pair : RowsById)
+	{
+		for (const FVector2D& LonLat : Pair.Value.LatLonPoints)
+		{
+			SumLon += LonLat.X;
+			SumLat += LonLat.Y;
+			TotalPoints++;
+		}
+	}
+	const double RefLat = SumLat / TotalPoints;
+	const double RefLon = SumLon / TotalPoints;
+
+	constexpr double MetersPerDegreeLat = 111320.0;
+	const double MetersPerDegreeLon = MetersPerDegreeLat * FMath::Cos(FMath::DegreesToRadians(RefLat));
+
+	// This data is the real campus at real scale (unlike buildings.json's hand-authored, non-
+	// geographic footprint units) - Scale=100 makes SpawnBuildingFromData's Footprint*Scale land
+	// directly in UE's cm-per-unit convention, so footprint units below can just be real meters with
+	// no further distortion.
+	Scale = 100.f;
+
+	int32 SpawnedCount = 0;
+	for (const TPair<int64, FDatabaseBuildingRow>& Pair : RowsById)
+	{
+		const FDatabaseBuildingRow& Row = Pair.Value;
+
+		TArray<FVector2D> Footprint;
+		Footprint.Reserve(Row.LatLonPoints.Num());
+		for (const FVector2D& LonLat : Row.LatLonPoints)
+		{
+			const double X = (LonLat.X - RefLon) * MetersPerDegreeLon;
+			const double Y = (LonLat.Y - RefLat) * MetersPerDegreeLat;
+			Footprint.Add(FVector2D((float)X, (float)Y));
+		}
+
+		// OSM closes a way by repeating its first node as the last one - SpawnBuildingFromData treats
+		// its input as an already-open polygon and closes it itself, so strip that duplicate first.
+		if (Footprint.Num() > 1 && Footprint[0].Equals(Footprint.Last(), 0.5f))
+		{
+			Footprint.RemoveAt(Footprint.Num() - 1);
+		}
+
+		const FString Id = FString::Printf(TEXT("SQL-%lld"), Pair.Key);
+		const FString Name = FString::Printf(TEXT("%s %lld"), *Row.BuildingType, Pair.Key);
+		if (SpawnBuildingFromData(Id, Name, Footprint, DefaultFloorCountForDatabaseBuildings, DefaultFloorHeightForDatabaseBuildings, FVector2D::ZeroVector))
+		{
+			SpawnedCount++;
 		}
 	}
 

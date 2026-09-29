@@ -54,6 +54,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingsFromFile(const FString& FilePath);
 
+	// Second, database-backed way to load exterior buildings - queries a SQLite file (schema:
+	// buildings(building_id, building_type), building_nodes(building_id, node_id, sequence, lat,
+	// lon), matching the "Map Viewer" project's own schema - see project memory) instead of parsing
+	// JSON. Each building's ordered lat/lon nodes are projected to local meters around the centroid
+	// of every point read (so the cluster lands near the world origin regardless of where on Earth it
+	// actually is), then spawned via the same SpawnBuildingFromData every other loading path uses -
+	// no interior data is involved here at all, unlike LoadBuildingsFromFile's "interior" field:
+	// interiors are always hand-authored through the interior editor regardless of where a building's
+	// exterior came from. Sets Scale to 100 (footprint units become real-world meters directly, since
+	// this data - unlike buildings.json's hand-authored, non-geographic footprints - already IS the
+	// real campus at real scale). Returns how many buildings were successfully spawned.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	int32 LoadBuildingsFromDatabase(const FString& DatabasePath);
+
 	// Looks up an already-spawned building by id (e.g. for InteriorGenerator to find which
 	// building's shell a piece of interior data belongs to). Returns nullptr if not found.
 	UFUNCTION(BlueprintCallable, Category = "Building")
@@ -117,6 +131,12 @@ public:
 private:
 	float Scale = 1.f;
 	TSet<FString> UsedBuildingIds;
+
+	// LoadBuildingsFromDatabase's fallback FloorCount/FloorHeight - the buildings/building_nodes
+	// schema has no floor data at all (it's OSM footprint+type only), unlike buildings.json's
+	// per-building "floorCount"/"floorHeight" fields.
+	static constexpr int32 DefaultFloorCountForDatabaseBuildings = 5;
+	static constexpr float DefaultFloorHeightForDatabaseBuildings = 300.f;
 
 	UPROPERTY()
 	TMap<FString, APolyBuilding*> BuildingsById;

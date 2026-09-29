@@ -153,6 +153,15 @@ void ANavPlayerController::SetupInputComponent()
 	// side of the same button.
 	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &ANavPlayerController::OnLeftMouseDown3DEdit);
 	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Released, this, &ANavPlayerController::OnLeftMouseUp3DEdit);
+
+	// TEMPORARY - see TestLoadBuildingsFromDatabase's own comment.
+	InputComponent->BindKey(EKeys::F9, IE_Pressed, this, &ANavPlayerController::TestLoadBuildingsFromDatabase);
+}
+
+void ANavPlayerController::TestLoadBuildingsFromDatabase()
+{
+	const FString DatabasePath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("Data") / TEXT("map_extended.db"));
+	LoadBuildingDataFromDatabase(DatabasePath);
 }
 
 void ANavPlayerController::OnClick()
@@ -1788,6 +1797,54 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 	return Count;
 }
 
+int32 ANavPlayerController::LoadBuildingDataFromDatabase(const FString& DatabasePath)
+{
+	if (!Generator)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LoadBuildingDataFromDatabase: no BuildingGenerator found in the level"));
+		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."));
+		return 0;
+	}
+
+	if (DatabasePath.IsEmpty())
+	{
+		OnActionFailed.Broadcast(TEXT("No database file selected."));
+		return 0;
+	}
+	if (NavigationPanel)
+	{
+		NavigationPanel->ClearAll();
+		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
+	}
+
+	if (InteriorGen)
+	{
+		InteriorGen->ClearLoadedInterior();
+	}
+	Generator->ClearAllBuildings();
+	SelectedBuilding = nullptr;
+
+	const int32 Count = Generator->LoadBuildingsFromDatabase(DatabasePath);
+	UE_LOG(LogTemp, Warning, TEXT("LoadBuildingDataFromDatabase: loaded %d buildings from %s"), Count, *DatabasePath);
+	if (Count == 0)
+	{
+		OnActionFailed.Broadcast(TEXT("No buildings were loaded from that database - check that it has 'buildings'/'building_nodes' tables."));
+	}
+	else
+	{
+		// Deliberately NOT setting CurrentProjectFilePath to DatabasePath - Ctrl+S writes JSON via
+		// SaveBuildingsToFile, and pointing that at the .db file would overwrite it with JSON text.
+		// A database-loaded project has no "file to save back to" yet; the existing Save-As flow
+		// (whatever prompts for a path when CurrentProjectFilePath is empty) is what should kick in if
+		// the user wants to persist it - interiors drawn afterward still save fine once they do, since
+		// SaveBuildingsToFile serializes whatever APolyBuilding actors currently exist regardless of
+		// how they were spawned.
+		bHasUnsavedChanges = false;
+		FocusCameraOnAllBuildings();
+	}
+	return Count;
+}
+
 void ANavPlayerController::StartNewProject()
 {
 	if (NavigationPanel)
@@ -2628,6 +2685,17 @@ void ANavPlayerController::FocusCameraOnAllBuildings()
 	const FVector2D Center = (MinPoint + MaxPoint) * 0.5f;
 	const float Span = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
 	const float ViewDistance = FMath::Max(Span * 1.2f, 2000.f);
+
+	// The free-fly pawn's WASD speed defaults to whatever ADefaultPawn ships with (1200 cm/s) -
+	// tuned for buildings.json's own small hand-placed campus (spans roughly 1000 units), but a
+	// database-loaded campus at real-world scale (see ABuildingGenerator::LoadBuildingsFromDatabase)
+	// can span hundreds of real meters, at which point that speed reads as "barely moving". Scale it
+	// to cross the whole loaded span in about 6 seconds instead, clamped so a small campus never gets
+	// SLOWER than the stock default.
+	if (UFloatingPawnMovement* Movement = Cast<UFloatingPawnMovement>(ControlledPawn->GetMovementComponent()))
+	{
+		Movement->MaxSpeed = FMath::Clamp(Span / 6.f, 1200.f, 50000.f);
+	}
 
 	// Pull the camera back-and-up along the pitch's own forward vector (same "Target -
 	// Rotation.Vector() * Distance" pattern PositionCameraForFloor/PositionCameraFor3DPreview use) so

@@ -215,6 +215,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingDataFromPath(const FString& FilePath);
 
+	// Second, database-backed way to load exterior buildings - see
+	// ABuildingGenerator::LoadBuildingsFromDatabase for the schema/coordinate-conversion details.
+	// Same clear-first behavior as LoadBuildingDataFromPath, but does NOT set CurrentProjectFilePath
+	// (see its own comment for why) - a database-loaded project needs an explicit Save As before
+	// Ctrl+S has anywhere to write. Returns how many buildings were spawned.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	int32 LoadBuildingDataFromDatabase(const FString& DatabasePath);
+
 	// The "New" button should call this before switching to the edit screen: destroys every
 	// currently-spawned building/interior and resets back to a blank project (no file path, no
 	// unsaved-changes flag) - without this, buildings drawn in a previous New/Open session would
@@ -881,6 +889,10 @@ protected:
 private:
 	// Left-click: selects a building normally, or adds a footprint point while in build mode.
 	void OnClick();
+
+	// TEMPORARY test hook for LoadBuildingDataFromDatabase, bound to F9 - remove once a real "Load
+	// from Database" UI entry exists. Loads the bundled Data/map_extended.db for a quick smoke test.
+	void TestLoadBuildingsFromDatabase();
 
 	UPROPERTY()
 	UNavigationPanelWidget* NavigationPanel = nullptr;
