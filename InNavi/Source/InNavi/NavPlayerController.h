@@ -100,6 +100,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOn3DPreviewModeChanged, bool, bIsAc
 // UInteriorScreenWidget's View/Edit button is already hidden at that point (see
 // HandlePreviewModeChanged) and just re-syncs to View the next time 3D preview is re-entered.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEdit3DModeChanged, bool, bIsEditMode);
+// Broadcast whenever vertex snapping is toggled (see ToggleSnapEnabled) - bIsEnabled is the new
+// state. UInteriorScreenWidget listens to update its snap toggle button's icon, since snapping can
+// also be toggled from the N key, not just that button (defensive symmetry with every other
+// PC-state delegate here).
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSnapEnabledChanged, bool, bIsEnabled);
 
 UCLASS()
 class INNAVI_API ANavPlayerController : public APlayerController
@@ -134,6 +139,10 @@ public:
 	// See FOnEdit3DModeChanged above.
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")
 	FOnEdit3DModeChanged OnEdit3DModeChanged;
+
+	// See FOnSnapEnabledChanged above.
+	UPROPERTY(BlueprintAssignable, Category = "Feedback")
+	FOnSnapEnabledChanged OnSnapEnabledChanged;
 
 	// Whether the interior editor is currently showing the 3D preview (an oblique view of the real
 	// spawned geometry, current building/floor only) instead of the 2D floor-plan overlay. View-only

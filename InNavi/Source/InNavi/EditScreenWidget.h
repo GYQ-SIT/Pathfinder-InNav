@@ -102,6 +102,11 @@ private:
 	// button, MenuClickCatcher for click-elsewhere-closes-it) - see that class's own header comments
 	// for the full reasoning, not repeated here.
 
+	// Save icon button, just left of File - calls PC->SaveCurrentProject() directly (same as Ctrl+S),
+	// no confirm dialog needed since saving is never destructive.
+	UFUNCTION()
+	void OnSaveClicked();
+
 	UFUNCTION()
 	void OnFileMenuClicked();
 
@@ -235,6 +240,9 @@ private:
 
 	UPROPERTY()
 	UEditableTextBox* CameraSpeedTextBox = nullptr;
+
+	UPROPERTY()
+	UButton* SaveButton = nullptr;
 
 	UPROPERTY()
 	UButton* FileMenuButton = nullptr;

@@ -129,6 +129,58 @@ void UInteriorScreenWidget::ApplyStandardFont(UEditableTextBox* TextBox)
 	TextBox->SetWidgetStyle(Style);
 }
 
+UWidget* UInteriorScreenWidget::MakeToolTipWidget(const TCHAR* TooltipLabel)
+{
+	UTextBlock* TooltipText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+	TooltipText->SetText(FText::FromString(FString(TooltipLabel)));
+	TooltipText->SetColorAndOpacity(FSlateColor(FLinearColor::Black));
+	TooltipText->SetAutoWrapText(true);
+	// Left-justified text in a fixed-width box left a ragged, lopsided-looking gap on the
+	// right of every line shorter than the longest one - centering each wrapped line reads as
+	// a balanced block instead.
+	TooltipText->SetJustification(ETextJustify::Center);
+	FSlateFontInfo TooltipFont = TooltipText->GetFont();
+	TooltipFont.TypefaceFontName = TEXT("Regular"); // the default font style otherwise renders bold
+	TooltipText->SetFont(TooltipFont);
+
+	// Descriptions are full sentences now (how to actually use the mode, not just its name) -
+	// wide enough for about 7 words a line before wrapping, instead of stretching edge to
+	// edge. MaxDesiredWidth alone let the wrap collapse to one word per line (nothing gave
+	// AutoWrapText an actual width to wrap against) - WidthOverride is a hard width, so
+	// wrapping has something real to measure against.
+	USizeBox* TooltipSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+	TooltipSizeBox->SetWidthOverride(1000.f);
+	TooltipSizeBox->SetContent(TooltipText);
+
+	UBorder* TooltipBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	TooltipBorder->SetBrushColor(FLinearColor::White);
+	TooltipBorder->SetPadding(FMargin(10.f, 6.f));
+	TooltipBorder->SetContent(TooltipSizeBox);
+
+	// UWidget::SetToolTip (below) builds its SToolTip with no border/background of its own
+	// (BorderImage(nullptr)), unlike the engine's native default tooltip (SetToolTipText),
+	// which has a soft drop shadow baked into its brush. Faking that here with a second,
+	// darker copy of the same box behind the real one, offset a few px down-right - an Overlay
+	// stretches every child to match its largest sibling by default, so the shadow layer ends
+	// up the same size as the real box even though it has no text of its own.
+	UBorder* ShadowBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	ShadowBorder->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.35f));
+
+	// Overlay slots default to Left/Top, not Fill - without Fill on both, the empty shadow
+	// layer would just collapse to zero size instead of stretching to match its sibling.
+	UOverlay* TooltipOverlay = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass());
+	UOverlaySlot* ShadowSlot = TooltipOverlay->AddChildToOverlay(ShadowBorder);
+	ShadowSlot->SetHorizontalAlignment(HAlign_Fill);
+	ShadowSlot->SetVerticalAlignment(VAlign_Fill);
+	ShadowSlot->SetPadding(FMargin(3.f, 3.f, 0.f, 0.f));
+	UOverlaySlot* ForegroundSlot = TooltipOverlay->AddChildToOverlay(TooltipBorder);
+	ForegroundSlot->SetHorizontalAlignment(HAlign_Fill);
+	ForegroundSlot->SetVerticalAlignment(VAlign_Fill);
+	ForegroundSlot->SetPadding(FMargin(0.f, 0.f, 3.f, 3.f));
+
+	return TooltipOverlay;
+}
+
 TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 {
 	if (WidgetTree && !WidgetTree->RootWidget)
@@ -369,64 +421,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// in InteriorFloorPlanWidget).
 		constexpr float ModeButtonSize = 36.f;
 
-		// SetToolTipText's default tooltip renders at the engine's small default font size with no
-		// way to resize just that text. SetToolTip(Widget) takes over the whole tooltip instead, but
-		// its SToolTip wrapper is built with no border/background of its own (BorderImage(nullptr)) -
-		// so this builds a small light box to replicate the default tooltip's look, just with the
-		// font doubled.
-		auto MakeToolTipWidget = [this](const TCHAR* TooltipLabel) -> UWidget*
-		{
-			UTextBlock* TooltipText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-			TooltipText->SetText(FText::FromString(FString(TooltipLabel)));
-			TooltipText->SetColorAndOpacity(FSlateColor(FLinearColor::Black));
-			TooltipText->SetAutoWrapText(true);
-			// Left-justified text in a fixed-width box left a ragged, lopsided-looking gap on the
-			// right of every line shorter than the longest one - centering each wrapped line reads as
-			// a balanced block instead.
-			TooltipText->SetJustification(ETextJustify::Center);
-			FSlateFontInfo TooltipFont = TooltipText->GetFont();
-			TooltipFont.TypefaceFontName = TEXT("Regular"); // the default font style otherwise renders bold
-			TooltipText->SetFont(TooltipFont);
-
-			// Descriptions are full sentences now (how to actually use the mode, not just its name) -
-			// wide enough for about 7 words a line before wrapping, instead of stretching edge to
-			// edge. MaxDesiredWidth alone let the wrap collapse to one word per line (nothing gave
-			// AutoWrapText an actual width to wrap against) - WidthOverride is a hard width, so
-			// wrapping has something real to measure against.
-			USizeBox* TooltipSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-			TooltipSizeBox->SetWidthOverride(1000.f);
-			TooltipSizeBox->SetContent(TooltipText);
-
-			UBorder* TooltipBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-			TooltipBorder->SetBrushColor(FLinearColor::White);
-			TooltipBorder->SetPadding(FMargin(10.f, 6.f));
-			TooltipBorder->SetContent(TooltipSizeBox);
-
-			// UWidget::SetToolTip (below) builds its SToolTip with no border/background of its own
-			// (BorderImage(nullptr)), unlike the engine's native default tooltip (SetToolTipText),
-			// which has a soft drop shadow baked into its brush. Faking that here with a second,
-			// darker copy of the same box behind the real one, offset a few px down-right - an Overlay
-			// stretches every child to match its largest sibling by default, so the shadow layer ends
-			// up the same size as the real box even though it has no text of its own.
-			UBorder* ShadowBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-			ShadowBorder->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.35f));
-
-			// Overlay slots default to Left/Top, not Fill - without Fill on both, the empty shadow
-			// layer would just collapse to zero size instead of stretching to match its sibling.
-			UOverlay* TooltipOverlay = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass());
-			UOverlaySlot* ShadowSlot = TooltipOverlay->AddChildToOverlay(ShadowBorder);
-			ShadowSlot->SetHorizontalAlignment(HAlign_Fill);
-			ShadowSlot->SetVerticalAlignment(VAlign_Fill);
-			ShadowSlot->SetPadding(FMargin(3.f, 3.f, 0.f, 0.f));
-			UOverlaySlot* ForegroundSlot = TooltipOverlay->AddChildToOverlay(TooltipBorder);
-			ForegroundSlot->SetHorizontalAlignment(HAlign_Fill);
-			ForegroundSlot->SetVerticalAlignment(VAlign_Fill);
-			ForegroundSlot->SetPadding(FMargin(0.f, 0.f, 3.f, 3.f));
-
-			return TooltipOverlay;
-		};
-
-		auto AddModeButton = [this, LeftSidebar, MakeToolTipWidget](const TCHAR* Name, const TCHAR* IconAssetName, const TCHAR* TooltipLabel) -> UButton*
+		auto AddModeButton = [this, LeftSidebar](const TCHAR* Name, const TCHAR* IconAssetName, const TCHAR* TooltipLabel) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
@@ -493,17 +488,16 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		AddEscalatorModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddEscalatorModeClicked);
 
 		AddToolGroupLabel(TEXT("Txt_GroupGizmos"), TEXT("Gizmos"));
-		// One icon asset each, reused for both buttons in its row rather than needing 4 separate
-		// images: Icon_GizmoMove is drawn at two different sizes (Grow full-size, Shrink shrunk down)
-		// so the icon's own size mirrors what the button does; Icon_GizmoRotate is drawn at two
-		// different rotations (CW as-authored, CCW rotated 180) so the two read as opposite
-		// directions. Grow/Shrink and Rotate CW/CCW mirror PC's existing =/- and 9/0 keys exactly (see
-		// OnGrowRoomClicked etc.) rather than introducing any new interaction - small square buttons,
-		// two per row, per the hand-drawn layout.
+		// Grow/Shrink and Rotate CW/CCW each have their own dedicated icon now (UX-provided
+		// Icon_IncreaseSize/Icon_DecreaseSize/Icon_RotateCW/Icon_RotateCCW) - previously Grow/Shrink
+		// reused one Icon_GizmoMove asset at two different sizes, and Rotate CW/CCW reused one
+		// Icon_GizmoRotate asset with CCW rotated 180 degrees, since a 180-degree rotation of a
+		// hand-drawn arrow icon isn't a true mirror image of it. Grow/Shrink and Rotate CW/CCW mirror
+		// PC's existing =/- and 9/0 keys exactly (see OnGrowRoomClicked etc.) rather than introducing
+		// any new interaction - small square buttons, two per row, per the hand-drawn layout.
 		constexpr float GizmoButtonSize = 26.f;
 		constexpr float GizmoIconSizeLarge = 18.f;
-		constexpr float GizmoIconSizeSmall = 11.f; // Shrink reuses Icon_GizmoMove at this smaller size instead of its own asset
-		auto AddGizmoIconButton = [this, MakeToolTipWidget, GizmoButtonSize](UHorizontalBox* Row, const TCHAR* Name, const TCHAR* IconAssetName, float IconSize, float IconRotationDegrees, const TCHAR* TooltipLabel) -> UButton*
+		auto AddGizmoIconButton = [this, GizmoButtonSize](UHorizontalBox* Row, const TCHAR* Name, const TCHAR* IconAssetName, float IconSize, float IconRotationDegrees, const TCHAR* TooltipLabel) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
@@ -544,9 +538,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// default a VerticalBoxSlot stretches/left-aligns it, leaving it hugging the left edge. Center
 		// it instead, matching the hand-drawn layout.
 		GizmoScaleRowSlot->SetHorizontalAlignment(HAlign_Center);
-		GrowRoomButton = AddGizmoIconButton(GizmoScaleRow, TEXT("Btn_GrowRoom"), TEXT("Icon_GizmoMove"), GizmoIconSizeLarge, 0.f, TEXT("Grow (increase the selected room's size)"));
+		GrowRoomButton = AddGizmoIconButton(GizmoScaleRow, TEXT("Btn_GrowRoom"), TEXT("Icon_IncreaseSize"), GizmoIconSizeLarge, 0.f, TEXT("Grow (increase the selected room's size)"));
 		GrowRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnGrowRoomClicked);
-		ShrinkRoomButton = AddGizmoIconButton(GizmoScaleRow, TEXT("Btn_ShrinkRoom"), TEXT("Icon_GizmoMove"), GizmoIconSizeSmall, 0.f, TEXT("Shrink (decrease the selected room's size)"));
+		ShrinkRoomButton = AddGizmoIconButton(GizmoScaleRow, TEXT("Btn_ShrinkRoom"), TEXT("Icon_DecreaseSize"), GizmoIconSizeLarge, 0.f, TEXT("Shrink (decrease the selected room's size)"));
 		ShrinkRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnShrinkRoomClicked);
 
 		UHorizontalBox* GizmoRotateRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("GizmoRotateRow"));
@@ -554,10 +548,10 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		{
 			GizmoRotateRowSlot->SetHorizontalAlignment(HAlign_Center);
 		}
-		RotateCCWButton = AddGizmoIconButton(GizmoRotateRow, TEXT("Btn_RotateCCW"), TEXT("Icon_GizmoRotate"), GizmoIconSizeLarge, 180.f, TEXT("Rotate Left (hold to keep rotating the selected room counter-clockwise)"));
+		RotateCCWButton = AddGizmoIconButton(GizmoRotateRow, TEXT("Btn_RotateCCW"), TEXT("Icon_RotateCCW"), GizmoIconSizeLarge, 0.f, TEXT("Rotate Left (hold to keep rotating the selected room counter-clockwise)"));
 		RotateCCWButton->OnPressed.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCCWPressed);
 		RotateCCWButton->OnReleased.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCCWReleased);
-		RotateCWButton = AddGizmoIconButton(GizmoRotateRow, TEXT("Btn_RotateCW"), TEXT("Icon_GizmoRotate"), GizmoIconSizeLarge, 0.f, TEXT("Rotate Right (hold to keep rotating the selected room clockwise)"));
+		RotateCWButton = AddGizmoIconButton(GizmoRotateRow, TEXT("Btn_RotateCW"), TEXT("Icon_RotateCW"), GizmoIconSizeLarge, 0.f, TEXT("Rotate Right (hold to keep rotating the selected room clockwise)"));
 		RotateCWButton->OnPressed.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCWPressed);
 		RotateCWButton->OnReleased.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCWReleased);
 
@@ -697,6 +691,31 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			MenuBarRow->AddChildToHorizontalBox(Button);
 			return Button;
 		};
+
+		// Save icon button, left of File - a plain icon rather than a labeled AddMenuButton, since it
+		// takes no dropdown of its own (unlike File/Window) and just fires PC->SaveCurrentProject()
+		// on click. Square, matching the bar's own height.
+		SaveButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Save"));
+		SaveButton->SetBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
+		SaveButton->SetToolTip(MakeToolTipWidget(TEXT("Save [Ctrl+S]")));
+		SaveButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSaveClicked);
+		SaveButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+		UImage* SaveIcon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("Img_Save"));
+		if (UTexture2D* SaveTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/ImageAssets/Icon_Save.Icon_Save")))
+		{
+			SaveIcon->SetBrushFromTexture(SaveTexture, false);
+			SaveIcon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
+		}
+		USizeBox* SaveSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		SaveSizeBox->SetWidthOverride(MenuBarHeight);
+		SaveSizeBox->SetHeightOverride(MenuBarHeight);
+		if (USizeBoxSlot* SaveIconSlot = Cast<USizeBoxSlot>(SaveSizeBox->SetContent(SaveIcon)))
+		{
+			SaveIconSlot->SetHorizontalAlignment(HAlign_Center);
+			SaveIconSlot->SetVerticalAlignment(VAlign_Center);
+		}
+		SaveButton->SetContent(SaveSizeBox);
+		MenuBarRow->AddChildToHorizontalBox(SaveButton);
 
 		FileMenuButton = AddMenuButton(TEXT("Btn_FileMenu"), TEXT("File"));
 		FileMenuButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileMenuClicked);
@@ -899,8 +918,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		// 2D/3D toggle + "Reset View"/move-speed +/-, same row as EditBuildingNameButton - see the
 		// comment on Switch2DButton in the header for why these live here instead of the menu bar.
-		constexpr float SwitcherButtonWidth = 44.f;
-		constexpr float SwitcherButtonHeight = 32.f;
+		constexpr float SwitcherButtonWidth = 48.f;
+		constexpr float SwitcherButtonHeight = 36.f;
 		auto AddSwitcherButton = [this, SwitcherRow, SwitcherButtonWidth, SwitcherButtonHeight](const TCHAR* Name, const TCHAR* Label) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
@@ -930,6 +949,31 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		Switch2DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSwitch2DClicked);
 		Switch3DButton = AddSwitcherButton(TEXT("Btn_Switch3D"), TEXT("3D"));
 		Switch3DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSwitch3DClicked);
+
+		// Snap toggle - icon-only, next to 3D, always visible (snapping matters in 2D too, unlike
+		// Reset/speed/View-Edit which are 3D-preview-only). Icon itself is set by HandleSnapEnabledChanged
+		// once PC is available (RebuildWidget has no reliable PC access yet - see NativeConstruct).
+		SnapToggleButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_SnapToggle"));
+		SnapToggleButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+		SnapToggleButton->SetToolTip(MakeToolTipWidget(TEXT("Toggle Snapping [N]")));
+		SnapToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSnapToggleClicked);
+		SnapToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+		SnapToggleIcon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("Img_SnapToggle"));
+		SnapToggleIcon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
+		USizeBox* SnapToggleSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		SnapToggleSizeBox->SetWidthOverride(SwitcherButtonWidth);
+		SnapToggleSizeBox->SetHeightOverride(SwitcherButtonHeight);
+		if (USizeBoxSlot* SnapToggleIconSlot = Cast<USizeBoxSlot>(SnapToggleSizeBox->SetContent(SnapToggleIcon)))
+		{
+			SnapToggleIconSlot->SetHorizontalAlignment(HAlign_Center);
+			SnapToggleIconSlot->SetVerticalAlignment(VAlign_Center);
+		}
+		SnapToggleButton->SetContent(SnapToggleSizeBox);
+		if (UHorizontalBoxSlot* SnapToggleRowSlot = Cast<UHorizontalBoxSlot>(SwitcherRow->AddChildToHorizontalBox(SnapToggleButton)))
+		{
+			SnapToggleRowSlot->SetVerticalAlignment(VAlign_Center);
+			SnapToggleRowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
+		}
 
 		// Only shown while in 3D preview (see HandlePreviewModeChanged).
 		ResetView3DButton = AddSwitcherButton(TEXT("Btn_ResetView3D"), TEXT("Reset"));
@@ -1546,6 +1590,10 @@ void UInteriorScreenWidget::NativeConstruct()
 		HandlePreviewModeChanged(PC->IsIn3DPreviewMode());
 		PC->OnEdit3DModeChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleEdit3DModeChanged);
 		HandleEdit3DModeChanged(PC->IsIn3DEditMode());
+		// Snapping can also be toggled by the N key, not just SnapToggleButton (defensive symmetry,
+		// matching every other PC-state delegate above).
+		PC->OnSnapEnabledChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSnapEnabledChanged);
+		HandleSnapEnabledChanged(PC->IsSnapEnabled());
 
 		// Navigation panel: hand ws/jh's UNavigationPanelWidget this screen's own Navigation Border to
 		// hit-test against (see SetPanelBorderForHitTest's own comment) and subscribe to its
@@ -1610,6 +1658,7 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnInteriorContentChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleInteriorContentChanged);
 		PC->OnPreviewModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandlePreviewModeChanged);
 		PC->OnEdit3DModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleEdit3DModeChanged);
+		PC->OnSnapEnabledChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSnapEnabledChanged);
 
 		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
 		{
@@ -3197,6 +3246,23 @@ void UInteriorScreenWidget::HandleEdit3DModeChanged(bool bIsEditMode)
 	}
 }
 
+void UInteriorScreenWidget::HandleSnapEnabledChanged(bool bNewSnapEnabled)
+{
+	if (SnapToggleIcon)
+	{
+		const TCHAR* AssetName = bNewSnapEnabled ? TEXT("Icon_SnappingOn") : TEXT("Icon_SnappingOff");
+		const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), AssetName, AssetName);
+		if (UTexture2D* IconTexture = LoadObject<UTexture2D>(nullptr, *IconPath))
+		{
+			SnapToggleIcon->SetBrushFromTexture(IconTexture, false);
+		}
+	}
+	if (SnapToggleButton)
+	{
+		SnapToggleButton->SetToolTip(MakeToolTipWidget(bNewSnapEnabled ? TEXT("Snapping ON [N]") : TEXT("Snapping OFF [N]")));
+	}
+}
+
 void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 {
 	// Toolbar: the building switcher used to live in this panel and tracked its width here - it's now
@@ -4496,6 +4562,14 @@ void UInteriorScreenWidget::OnRotateCWReleased()
 	}
 }
 
+void UInteriorScreenWidget::OnSaveClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SaveCurrentProject();
+	}
+}
+
 void UInteriorScreenWidget::OnFileMenuClicked()
 {
 	if (!FileMenuDropdown)
@@ -4541,6 +4615,14 @@ void UInteriorScreenWidget::OnSwitch3DClicked()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->SetIn3DPreviewMode(true);
+	}
+}
+
+void UInteriorScreenWidget::OnSnapToggleClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->ToggleSnapEnabled();
 	}
 }
 

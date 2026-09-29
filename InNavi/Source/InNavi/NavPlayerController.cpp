@@ -572,6 +572,7 @@ void ANavPlayerController::ToggleSnapEnabled()
 {
 	bSnapEnabled = !bSnapEnabled;
 	UE_LOG(LogTemp, Warning, TEXT("Snapping %s"), bSnapEnabled ? TEXT("ON") : TEXT("OFF"));
+	OnSnapEnabledChanged.Broadcast(bSnapEnabled);
 }
 
 void ANavPlayerController::ExitPrefabRoomMode()

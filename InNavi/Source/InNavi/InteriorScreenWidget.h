@@ -14,6 +14,7 @@ class UCheckBox;
 class UComboBoxString;
 class UEditableTextBox;
 class FJsonObject;
+class UImage;
 class UInteriorFloorPlanWidget;
 class ULayerRowWidget;
 class UAudioFileRowWidget;
@@ -142,6 +143,12 @@ private:
 	UFUNCTION()
 	void HandleEdit3DModeChanged(bool bIsEditMode);
 
+	// Bound to ANavPlayerController::OnSnapEnabledChanged - swaps SnapToggleIcon between
+	// Icon_SnappingOn/Icon_SnappingOff so it stays correct even when toggled via the N key.
+	// Parameter isn't called bIsEnabled - that shadows UWidget's own bIsEnabled property.
+	UFUNCTION()
+	void HandleSnapEnabledChanged(bool bNewSnapEnabled);
+
 	void RefreshModeButtonHighlights();
 
 	// Door/Room/Connector properties all share one PropertiesPanel (see RebuildWidget) instead of
@@ -223,6 +230,11 @@ private:
 
 	void GoToEditScreen();
 
+	// Save icon button, just left of File - calls PC->SaveCurrentProject() directly (same as Ctrl+S),
+	// no confirm dialog needed since saving is never destructive.
+	UFUNCTION()
+	void OnSaveClicked();
+
 	// Top menu bar (File/Window) - fixed chrome, same reasoning as Back (see RebuildWidget), not
 	// part of the dock system. File and Window each toggle their own dropdown open/closed via these,
 	// closing the other one's dropdown at the same time (only one open at a time).
@@ -242,6 +254,12 @@ private:
 
 	UFUNCTION()
 	void OnSwitch3DClicked();
+
+	// Toggles PC->IsSnapEnabled() via PC->ToggleSnapEnabled() - next to the 3D button, always visible
+	// (unlike Reset/speed/View-Edit, snapping matters in 2D too). Icon itself is refreshed by
+	// HandleSnapEnabledChanged, not here, since the N key can toggle it too.
+	UFUNCTION()
+	void OnSnapToggleClicked();
 
 	// Calls PC->ResetCamera3DPreview() - only shown while in 3D preview (see ResetView3DButton).
 	UFUNCTION()
@@ -604,6 +622,14 @@ private:
 	// Same, for a UEditableTextBox (the building name field, room name field, Layers search box) -
 	// its font lives on its WidgetStyle.TextStyle rather than being a direct SetFont() call.
 	static void ApplyStandardFont(UEditableTextBox* TextBox);
+
+	// SetToolTipText's default tooltip renders at the engine's small default font size with no way to
+	// resize just that text. SetToolTip(Widget) takes over the whole tooltip instead, but its SToolTip
+	// wrapper is built with no border/background of its own (BorderImage(nullptr)) - this builds a
+	// small light box to replicate the default tooltip's look, just with the font doubled. A plain
+	// member function (not a RebuildWidget-local lambda) since HandleSnapEnabledChanged needs to
+	// rebuild SnapToggleButton's tooltip after construction too, not just at construction time.
+	UWidget* MakeToolTipWidget(const TCHAR* TooltipLabel);
 
 	FVector2D GetPanelPosition(EDockPanelId Id) const;
 	FVector2D GetPanelSize(EDockPanelId Id) const;
@@ -1006,6 +1032,14 @@ private:
 	UPROPERTY()
 	UButton* Switch3DButton = nullptr;
 
+	// Next to Switch3DButton, always visible (unlike the 3D-preview-only controls after it) - see
+	// OnSnapToggleClicked/HandleSnapEnabledChanged.
+	UPROPERTY()
+	UButton* SnapToggleButton = nullptr;
+
+	UPROPERTY()
+	UImage* SnapToggleIcon = nullptr;
+
 	// Only shown while in 3D preview (see HandlePreviewModeChanged). 3D preview leaves WASD/mouse-look
 	// free rather than locked to a fixed angle, so this is the "un-lose yourself" button - see
 	// PC->ResetCamera3DPreview's own comment.
@@ -1054,6 +1088,9 @@ private:
 	UBorder* Background = nullptr;
 
 	// Top menu bar widgets - see the comment above OnFileMenuClicked/OnWindowToolbarCheckChanged.
+	UPROPERTY()
+	UButton* SaveButton = nullptr;
+
 	UPROPERTY()
 	UButton* FileMenuButton = nullptr;
 
@@ -1120,8 +1157,8 @@ private:
 	// building switcher bar directly below it) - dock panels' top boundary (SidebarTopMargin, below)
 	// sits flush under both, same as every panel's left/right edges already sit flush against the
 	// screen's own edges.
-	static constexpr float MenuBarHeight = 32.f;
-	static constexpr float BuildingSwitcherBarHeight = 40.f;
+	static constexpr float MenuBarHeight = 40.f;
+	static constexpr float BuildingSwitcherBarHeight = 52.f;
 	static constexpr float SidebarTopMargin = MenuBarHeight + BuildingSwitcherBarHeight;
 	static constexpr float SidebarBottomMargin = 10.f;
 	static constexpr float SidebarResizeHandleWidth = 8.f;
