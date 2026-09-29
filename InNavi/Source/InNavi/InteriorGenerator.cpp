@@ -852,6 +852,29 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 		return nullptr;
 	}
 
+	// Same overlap/connector-block checks CreateRoomFromFootprint runs for a closed room, adapted for
+	// an open polyline (bClosedLoop=false throughout - DoFootprintsOverlap/DoesFootprintBlockConnector
+	// both already support open loops, this was simply never wired up here before) - a wall previously
+	// had no geometric validation at all, so it could be drawn straight through an existing room,
+	// another wall, or an elevator/stairs/escalator shaft.
+	if (const FInteriorRoomList* ExistingRooms = RoomsByFloor.Find(ActiveFloor))
+	{
+		for (const AInteriorRoom* Other : ExistingRooms->Rooms)
+		{
+			if (Other && DoFootprintsOverlap(Points, false, Other->GetFootprint(), Other->IsClosedLoop()))
+			{
+				UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: wall overlaps existing room/wall '%s'"), *Other->RoomId);
+				return nullptr;
+			}
+		}
+	}
+
+	if (DoesFootprintBlockConnector(Points, /*bClosedLoop=*/false, ActiveFloor))
+	{
+		UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: wall would cut through an elevator/stairs/escalator"));
+		return nullptr;
+	}
+
 	// Shares the room id namespace/uniqueness check and auto-numbering - a wall is just an
 	// open-loop room as far as ids/floors are concerned.
 	const FString ResolvedId = WallId.IsEmpty() ? PeekNextRoomId() : WallId;
@@ -938,7 +961,7 @@ bool AInteriorGenerator::DoesFootprintBlockConnector(const TArray<FVector2D>& Fo
 	return false;
 }
 
-bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVector2D Position, int32 Level, float RotationDegrees, float SizeScale) const
+bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVector2D Position, int32 Level, float RotationDegrees, float SizeScale, const FString& IgnoreGroupId) const
 {
 	const FInteriorFloorInfo* FloorInfo = FloorInfoByLevel.Find(Level);
 	if (!FloorInfo)
@@ -1010,6 +1033,37 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVe
 					}
 				}
 			}
+		}
+	}
+
+	// Also can't overlap another connector's own footprint on this floor (elevators/stairs/escalators
+	// placed on top of each other) - IgnoreGroupId skips nodes belonging to the connector being
+	// rotated/scaled itself (see this function's own header comment), which already legitimately sit
+	// exactly here.
+	for (const FInteriorNavNode& Node : NavNodes)
+	{
+		if (Node.Level != Level || (!IgnoreGroupId.IsEmpty() && Node.ConnectorGroupId == IgnoreGroupId))
+		{
+			continue;
+		}
+
+		TArray<FVector2D> OtherLocalCorners;
+		GetConnectorFootprintCorners(Node.Type, Node.RotationDegrees, Node.SizeScale, OtherLocalCorners);
+		if (OtherLocalCorners.Num() == 0)
+		{
+			continue;
+		}
+		TArray<FVector2D> OtherCorners;
+		OtherCorners.Reserve(4);
+		for (const FVector2D& Local : OtherLocalCorners)
+		{
+			OtherCorners.Add(Node.Position + Local / FMath::Max(Scale, KINDA_SMALL_NUMBER));
+		}
+
+		if (DoFootprintsOverlap(Corners, true, OtherCorners, true))
+		{
+			UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint overlaps another connector ('%s') on floor %d"), *Node.ConnectorGroupId, Level);
+			return false;
 		}
 	}
 
@@ -1189,7 +1243,7 @@ bool AInteriorGenerator::SetConnectorFloors(const FString& GroupId, const TArray
 	// scaled connector shouldn't reset it back to defaults.
 	for (int32 Level : NewConnectsToFloors)
 	{
-		if (!CurrentFloors.Contains(Level) && !CanPlaceConnectorOnFloor(Type, Position, Level, RotationDegrees, SizeScale))
+		if (!CurrentFloors.Contains(Level) && !CanPlaceConnectorOnFloor(Type, Position, Level, RotationDegrees, SizeScale, GroupId))
 		{
 			UE_LOG(LogTemp, Error, TEXT("SetConnectorFloors: '%s' unchanged"), *GroupId);
 			return false;
@@ -1271,7 +1325,7 @@ bool AInteriorGenerator::RotateConnectorGroup(const FString& GroupId, float Delt
 	// floor would be blocked.
 	for (const FInteriorNavNode* Node : GroupNodes)
 	{
-		if (!CanPlaceConnectorOnFloor(Type, Position, Node->Level, NewRotation, SizeScale))
+		if (!CanPlaceConnectorOnFloor(Type, Position, Node->Level, NewRotation, SizeScale, GroupId))
 		{
 			return false;
 		}
@@ -1315,7 +1369,7 @@ bool AInteriorGenerator::ScaleConnectorGroup(const FString& GroupId, float Delta
 
 	for (const FInteriorNavNode* Node : GroupNodes)
 	{
-		if (!CanPlaceConnectorOnFloor(Type, Position, Node->Level, RotationDegrees, NewScale))
+		if (!CanPlaceConnectorOnFloor(Type, Position, Node->Level, RotationDegrees, NewScale, GroupId))
 		{
 			UE_LOG(LogTemp, Error, TEXT("ScaleConnectorGroup: '%s' unchanged"), *GroupId);
 			return false;
