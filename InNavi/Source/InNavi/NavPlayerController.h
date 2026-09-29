@@ -414,6 +414,29 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	bool IsSnapEnabled() const { return bSnapEnabled; }
 
+	// Debug helper for tuning FocusCameraOnAllBuildings' default exterior view - fly the free-fly
+	// camera to wherever looks right, press G, and read the pawn's Location/Rotation off the Output
+	// Log (and on-screen) to hardcode as the new default. Not gated to any particular screen/mode.
+	UFUNCTION(BlueprintCallable, Category = "Camera")
+	void LogCameraTransform();
+
+	// What the exterior page's Reset button calls - just FocusCameraOnAllBuildings under a public
+	// name, since that's private (also called automatically after New/Open). Not named
+	// ResetExteriorCameraView to avoid confusion with the existing, unrelated
+	// RestoreExteriorCameraView (unwinds interior-editing camera/mode state on Back, not a "reset to
+	// default view" at all despite the similar name).
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void ResetExteriorCameraToDefaultView();
+
+	// What the exterior page's "set current as default" button calls - reads back the free-fly
+	// camera's current pitch/yaw and its distance from the loaded campus's own center as a fraction of
+	// the campus's own span (not a raw world position, which would only make sense for this exact
+	// campus - see ApplyExteriorCameraSpeed's own reasoning for the same "ratio, not raw value" idea),
+	// stores them as the new ExteriorDefaultView.../persists to disk, and FocusCameraOnAllBuildings
+	// picks them up from then on. No-op (with OnActionFailed) if nothing is loaded to measure against.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetCurrentViewAsDefaultExterior();
+
 	UPROPERTY(BlueprintAssignable, Category = "Interior")
 	FOnSelectModeChanged OnSelectModeChanged;
 
@@ -1162,6 +1185,25 @@ private:
 	// SetCameraSpeedExterior - clamps NewSpeed and applies it as MaxSpeed, and scales
 	// Acceleration/Deceleration to match (see its own .cpp comment for why that second part matters).
 	void ApplyExteriorCameraSpeed(float NewSpeed);
+
+	// The footprint-bounds-to-world-space Center/Span computation FocusCameraOnAllBuildings and
+	// SetCurrentViewAsDefaultExterior both need (the same math GetBuildingFootprintBounds does for a
+	// single building, just across every loaded one). Returns false (leaving OutCenter/OutSpan
+	// untouched) if Generator is unset or nothing is loaded.
+	bool ComputeAllBuildingsBounds(FVector2D& OutCenter, float& OutSpan) const;
+
+	// See SetCurrentViewAsDefaultExterior's own comment - loaded once in BeginPlay, saved by that
+	// function. Saved/ExteriorEditorLayout.json, same Saved-dir/per-machine convention as
+	// UInteriorScreenWidget's own InteriorEditorLayout.json.
+	void LoadExteriorCameraDefaultFromDisk();
+	void SaveExteriorCameraDefaultToDisk() const;
+
+	// Defaults match the values FocusCameraOnAllBuildings shipped with before this became overridable
+	// (see its own history) - overwritten by LoadExteriorCameraDefaultFromDisk if a save exists.
+	float ExteriorDefaultViewPitch = -40.3f;
+	float ExteriorDefaultViewYaw = 270.1f;
+	float ExteriorDefaultViewDistanceRatio = 0.38f;
+	static constexpr float ExteriorDefaultViewMinDistance = 2000.f;
 
 	// Shared by PositionCameraForFloor and PositionCameraFor3DPreview - both need the same
 	// footprint-bounds-to-world-space Center/Span computation, just for different camera poses.

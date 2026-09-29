@@ -64,6 +64,17 @@ private:
 	UFUNCTION()
 	void OnDecreaseCameraSpeedClicked();
 
+	// Calls PC->ResetExteriorCameraToDefaultView() - snaps back to whatever the current default view
+	// is (the shipped one, or a saved override - see OnSetDefaultViewClicked).
+	UFUNCTION()
+	void OnResetCameraViewClicked();
+
+	// Calls PC->SetCurrentViewAsDefaultExterior() - saves the free-fly camera's current pose as the
+	// new default (persisted, see ANavPlayerController::SaveExteriorCameraDefaultToDisk), so Reset and
+	// every future New/Open land here from now on.
+	UFUNCTION()
+	void OnSetDefaultViewClicked();
+
 	// Lets the speed be typed directly instead of only nudged by +/- - fires on both Enter and
 	// clicking away (ETextCommit::OnEnter / OnUserMovedFocus), matching how a plain number field is
 	// expected to behave. Re-reads the actual (possibly clamped) speed back into the box afterward via
@@ -233,10 +244,16 @@ private:
 	UButton* EnterInteriorButton = nullptr;
 
 	UPROPERTY()
+	UButton* ResetCameraViewButton = nullptr;
+
+	UPROPERTY()
 	UButton* DecreaseCameraSpeedButton = nullptr;
 
 	UPROPERTY()
 	UButton* IncreaseCameraSpeedButton = nullptr;
+
+	UPROPERTY()
+	UButton* SetDefaultViewButton = nullptr;
 
 	UPROPERTY()
 	UEditableTextBox* CameraSpeedTextBox = nullptr;

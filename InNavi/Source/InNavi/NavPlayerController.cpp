@@ -17,6 +17,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
+#include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
@@ -59,6 +60,8 @@ void ANavPlayerController::BeginPlay()
 	bShowMouseCursor = true;
 	bEnableClickEvents = true;
 	bEnableMouseOverEvents = true;
+
+	LoadExteriorCameraDefaultFromDisk();
 
 	NavigationPanel = CreateWidget<UNavigationPanelWidget>(this, UNavigationPanelWidget::StaticClass());
 	if (NavigationPanel)
@@ -146,6 +149,7 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
 	InputComponent->BindKey(EKeys::N, IE_Pressed, this, &ANavPlayerController::ToggleSnapEnabled);
 	InputComponent->BindKey(FInputChord(EKeys::S, /*Shift*/false, /*Ctrl*/true, /*Alt*/false, /*Cmd*/false), IE_Pressed, this, &ANavPlayerController::SaveCurrentProjectKeyHandler);
+	InputComponent->BindKey(EKeys::G, IE_Pressed, this, &ANavPlayerController::LogCameraTransform);
 	InputComponent->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &ANavPlayerController::ZoomIn3DPreview);
 	InputComponent->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &ANavPlayerController::ZoomOut3DPreview);
 	// Separate from the "SelectBuilding" action above - carries the 3D Edit mode room-drag gesture
@@ -2725,24 +2729,34 @@ void ANavPlayerController::RepositionCameraToActiveFloor()
 	}
 }
 
-void ANavPlayerController::FocusCameraOnAllBuildings()
+void ANavPlayerController::LogCameraTransform()
 {
-	APawn* ControlledPawn = GetPawn();
-	if (!ControlledPawn || !Generator)
+	const APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn)
 	{
 		return;
 	}
+	const FVector Location = ControlledPawn->GetActorLocation();
+	const FRotator Rotation = GetControlRotation();
+	const FString Message = FString::Printf(TEXT("Camera Location=(X=%.1f, Y=%.1f, Z=%.1f) Rotation=(Pitch=%.1f, Yaw=%.1f, Roll=%.1f)"),
+		Location.X, Location.Y, Location.Z, Rotation.Pitch, Rotation.Yaw, Rotation.Roll);
+	UE_LOG(LogTemp, Warning, TEXT("%s"), *Message);
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 15.f, FColor::Yellow, Message);
+	}
+}
 
+bool ANavPlayerController::ComputeAllBuildingsBounds(FVector2D& OutCenter, float& OutSpan) const
+{
+	if (!Generator)
+	{
+		return false;
+	}
 	const TArray<APolyBuilding*> Buildings = Generator->GetAllBuildings();
 	if (Buildings.Num() == 0)
 	{
-		// Nothing to frame yet (e.g. a brand new blank project) - just pull the camera up above the
-		// origin instead of leaving it wherever PlayerStart put it.
-		const FVector DefaultLocation(0.f, 0.f, 3000.f);
-		const FRotator DefaultRotation(-50.f, 0.f, 0.f);
-		ControlledPawn->SetActorLocationAndRotation(DefaultLocation, DefaultRotation);
-		SetControlRotation(DefaultRotation);
-		return;
+		return false;
 	}
 
 	const float Scale = Generator->GetScale();
@@ -2764,9 +2778,31 @@ void ANavPlayerController::FocusCameraOnAllBuildings()
 		}
 	}
 
-	const FVector2D Center = (MinPoint + MaxPoint) * 0.5f;
-	const float Span = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
-	const float ViewDistance = FMath::Max(Span * 1.2f, 2000.f);
+	OutCenter = (MinPoint + MaxPoint) * 0.5f;
+	OutSpan = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
+	return true;
+}
+
+void ANavPlayerController::FocusCameraOnAllBuildings()
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn || !Generator)
+	{
+		return;
+	}
+
+	FVector2D Center;
+	float Span;
+	if (!ComputeAllBuildingsBounds(Center, Span))
+	{
+		// Nothing to frame yet (e.g. a brand new blank project) - just pull the camera up above the
+		// origin instead of leaving it wherever PlayerStart put it.
+		const FVector DefaultLocation(0.f, 0.f, 3000.f);
+		const FRotator DefaultRotation(-50.f, 0.f, 0.f);
+		ControlledPawn->SetActorLocationAndRotation(DefaultLocation, DefaultRotation);
+		SetControlRotation(DefaultRotation);
+		return;
+	}
 
 	// The free-fly pawn's WASD speed defaults to whatever ADefaultPawn ships with (1200 cm/s) -
 	// tuned for buildings.json's own small hand-placed campus (spans roughly 1000 units), but a
@@ -2780,15 +2816,95 @@ void ANavPlayerController::FocusCameraOnAllBuildings()
 
 	// Pull the camera back-and-up along the pitch's own forward vector (same "Target -
 	// Rotation.Vector() * Distance" pattern PositionCameraForFloor/PositionCameraFor3DPreview use) so
-	// the -50 deg pitch actually looks DOWN AT Center - placing it directly above Center with the same
-	// rotation (the old code) points the view down-and-forward from directly overhead, past the
-	// buildings entirely, which reads as "not tilted down" even though the pitch value is right.
+	// the pitch actually looks DOWN AT Center - placing it directly above Center with the same
+	// rotation points the view down-and-forward from directly overhead, past the buildings entirely,
+	// which reads as "not tilted down" even though the pitch value is right. Pitch/Yaw/distance ratio
+	// are user-tunable now (see SetCurrentViewAsDefaultExterior) rather than fixed constants.
 	const FVector Target(Center.X, Center.Y, 0.f);
-	const FRotator NewRotation(-50.f, 0.f, 0.f);
+	const FRotator NewRotation(ExteriorDefaultViewPitch, ExteriorDefaultViewYaw, 0.f);
+	const float ViewDistance = FMath::Max(Span * ExteriorDefaultViewDistanceRatio, ExteriorDefaultViewMinDistance);
 	const FVector NewLocation = Target - NewRotation.Vector() * ViewDistance;
 
 	ControlledPawn->SetActorLocationAndRotation(NewLocation, NewRotation);
 	SetControlRotation(NewRotation);
+}
+
+void ANavPlayerController::ResetExteriorCameraToDefaultView()
+{
+	FocusCameraOnAllBuildings();
+}
+
+void ANavPlayerController::SetCurrentViewAsDefaultExterior()
+{
+	const APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn)
+	{
+		return;
+	}
+
+	FVector2D Center;
+	float Span;
+	if (!ComputeAllBuildingsBounds(Center, Span) || Span <= KINDA_SMALL_NUMBER)
+	{
+		OnActionFailed.Broadcast(TEXT("Load some buildings first, then set the current view as the default."));
+		return;
+	}
+
+	const FRotator Rotation = GetControlRotation();
+	const FVector Target(Center.X, Center.Y, 0.f);
+	const float Distance = FVector::Dist(ControlledPawn->GetActorLocation(), Target);
+
+	ExteriorDefaultViewPitch = Rotation.Pitch;
+	ExteriorDefaultViewYaw = Rotation.Yaw;
+	ExteriorDefaultViewDistanceRatio = Distance / Span;
+
+	SaveExteriorCameraDefaultToDisk();
+	UE_LOG(LogTemp, Warning, TEXT("Set exterior default view: Pitch=%.2f Yaw=%.2f DistanceRatio=%.3f"),
+		ExteriorDefaultViewPitch, ExteriorDefaultViewYaw, ExteriorDefaultViewDistanceRatio);
+}
+
+void ANavPlayerController::LoadExteriorCameraDefaultFromDisk()
+{
+	FString FileContents;
+	if (!FFileHelper::LoadFileToString(FileContents, *(FPaths::ProjectSavedDir() / TEXT("ExteriorEditorLayout.json"))))
+	{
+		return; // nothing saved yet - keep the shipped defaults
+	}
+
+	TSharedPtr<FJsonObject> Root;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(FileContents);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		return;
+	}
+
+	double Pitch = 0.0, Yaw = 0.0, Ratio = 0.0;
+	if (Root->TryGetNumberField(TEXT("defaultViewPitch"), Pitch))
+	{
+		ExteriorDefaultViewPitch = static_cast<float>(Pitch);
+	}
+	if (Root->TryGetNumberField(TEXT("defaultViewYaw"), Yaw))
+	{
+		ExteriorDefaultViewYaw = static_cast<float>(Yaw);
+	}
+	if (Root->TryGetNumberField(TEXT("defaultViewDistanceRatio"), Ratio) && Ratio > 0.0)
+	{
+		ExteriorDefaultViewDistanceRatio = static_cast<float>(Ratio);
+	}
+}
+
+void ANavPlayerController::SaveExteriorCameraDefaultToDisk() const
+{
+	const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetNumberField(TEXT("defaultViewPitch"), ExteriorDefaultViewPitch);
+	Root->SetNumberField(TEXT("defaultViewYaw"), ExteriorDefaultViewYaw);
+	Root->SetNumberField(TEXT("defaultViewDistanceRatio"), ExteriorDefaultViewDistanceRatio);
+
+	FString OutputString;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
+	FJsonSerializer::Serialize(Root, Writer);
+
+	FFileHelper::SaveStringToFile(OutputString, *(FPaths::ProjectSavedDir() / TEXT("ExteriorEditorLayout.json")));
 }
 
 void ANavPlayerController::RestoreExteriorCameraView()

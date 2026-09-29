@@ -249,7 +249,11 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			return Button;
 		};
 
-		DecreaseCameraSpeedButton = AddToolbarButton(TEXT("Btn_DecreaseCameraSpeed"), TEXT("-"), 48.f, 0.f);
+		ResetCameraViewButton = AddToolbarButton(TEXT("Btn_ResetCameraView"), TEXT("Reset"), 64.f, 0.f);
+		ResetCameraViewButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnResetCameraViewClicked);
+		ResetCameraViewButton->SetToolTipText(FText::FromString(TEXT("Reset camera to the default view")));
+
+		DecreaseCameraSpeedButton = AddToolbarButton(TEXT("Btn_DecreaseCameraSpeed"), TEXT("-"), 48.f, 6.f);
 		DecreaseCameraSpeedButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnDecreaseCameraSpeedClicked);
 		DecreaseCameraSpeedButton->SetToolTipText(FText::FromString(TEXT("Decrease Camera Speed")));
 
@@ -274,6 +278,10 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		IncreaseCameraSpeedButton = AddToolbarButton(TEXT("Btn_IncreaseCameraSpeed"), TEXT("+"), 48.f, 6.f);
 		IncreaseCameraSpeedButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnIncreaseCameraSpeedClicked);
 		IncreaseCameraSpeedButton->SetToolTipText(FText::FromString(TEXT("Increase Camera Speed")));
+
+		SetDefaultViewButton = AddToolbarButton(TEXT("Btn_SetDefaultView"), TEXT("Set Default"), 84.f, 6.f);
+		SetDefaultViewButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnSetDefaultViewClicked);
+		SetDefaultViewButton->SetToolTipText(FText::FromString(TEXT("Save the current camera view as the default")));
 
 		// --- Dropdowns (File, Window) + the click-catcher that closes them on an outside click ---
 		auto ConstructDropdown = [this, Canvas](const TCHAR* Name, float PositionX) -> UBorder*
@@ -645,6 +653,23 @@ void UEditScreenWidget::OnDecreaseCameraSpeedClicked()
 		PC->DecreaseCameraSpeedExterior();
 	}
 	RefreshCameraSpeedDisplay();
+}
+
+void UEditScreenWidget::OnResetCameraViewClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->ResetExteriorCameraToDefaultView();
+	}
+	RefreshCameraSpeedDisplay();
+}
+
+void UEditScreenWidget::OnSetDefaultViewClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetCurrentViewAsDefaultExterior();
+	}
 }
 
 void UEditScreenWidget::OnCameraSpeedTextCommitted(const FText& NewText, ETextCommit::Type CommitType)
