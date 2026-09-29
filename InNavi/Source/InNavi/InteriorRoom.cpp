@@ -304,3 +304,15 @@ void AInteriorRoom::RebuildMesh()
 
 	UE_LOG(LogTemp, Warning, TEXT("Built room %s: %d edges, %d verts"), *RoomId, N, Vertices.Num());
 }
+
+void AInteriorRoom::SetHighlighted(bool bHighlighted)
+{
+	if (DynMaterial)
+	{
+		DynMaterial->SetVectorParameterValue(TEXT("Color"), bHighlighted ? FLinearColor(0.55f, 1.0f, 0.6f) : FLinearColor(0.85f, 0.85f, 0.82f));
+	}
+	if (FloorDynMaterial)
+	{
+		FloorDynMaterial->SetVectorParameterValue(TEXT("Color"), bHighlighted ? FLinearColor(0.55f, 1.0f, 0.6f) : FLinearColor(0.55f, 0.55f, 0.58f));
+	}
+}
