@@ -128,8 +128,8 @@ resets both endpoints.
 
 ### Audio panel
 
-Hidden by default (Window > Audio to show it). Lists every file under
-`InNavi/Data/Audio/` (mp3 or wav) with its own **Play** button — click to start it,
+Hidden by default (Window > Audio to show it). Lists every wav file under
+`InNavi/Data/Audio/` with its own **Play** button — click to start it,
 click again while it's playing to see it highlighted green; **Stop All** halts
 everything at once. Multiple files can play together (e.g. background music plus an
 effect). A **Button Click Sound** checkbox mutes/unmutes the short click sound every
@@ -199,16 +199,21 @@ you have unsaved changes.
 
 ## Audio feedback
 
-Two kinds, both backed by mp3 files under `InNavi/Data/Audio/` (playback via a vendored
-third-party plugin, `RuntimeAudioImporter` — UE 5.8's own Media Framework dropped mp3
-support):
+Three kinds, all backed by wav files under `InNavi/Data/Audio/` (read and decoded by
+this project's own small WAV reader, `WavFileLoader.h` — no third-party plugin; an
+earlier pass vendored one for mp3 support, removed once the professor confirmed
+wav-only playback is sufficient, including for the Audio panel's own arbitrary-file
+playback):
 
-- **Button click sound** (`click_button.mp3`) — every button in the app plays this on
+- **Button click sound** (`click_button.wav`) — every button in the app plays this on
   click. Mute it from either screen's own Audio panel (see above) — it's one shared
   setting, not per-screen.
-- **Building selection sound** (`select_ui.mp3`) — plays only when clicking newly
+- **Building selection sound** (`select_ui.wav`) — plays only when clicking newly
   selects a building in the exterior 3D view (not on deselect, and not tied to the
   click-sound mute above).
+- **Unsaved-changes dialog sound** (`quit_confirm.wav`) — plays once, the instant the
+  Save/Discard/Cancel dialog itself appears (Back, File > New, File > Load, switching
+  buildings — anywhere unsaved changes trigger it), not tied to any of its buttons.
 
 Both are separate from the Audio panel's own file list, which is for playing back
 arbitrary files under `Data/Audio/` on demand (background music, effects, etc.).

@@ -23,10 +23,9 @@
 #include "Framework/Application/SlateApplication.h"
 #include "UObject/UObjectIterator.h"
 #include "HAL/FileManager.h"
-#include "RuntimeAudioImporterLibrary.h"
-#include "Sound/ImportedSoundWave.h"
+#include "WavFileLoader.h"
+#include "Sound/SoundWaveProcedural.h"
 #include "Components/AudioComponent.h"
-#include "Kismet/GameplayStatics.h"
 
 // ---- Helper: is Point inside the (possibly concave) polygon Poly? (even-odd ray-casting test) ----
 static bool IsPointInPolygon(const FVector2D& Point, const TArray<FVector2D>& Poly)
@@ -1754,6 +1753,10 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 		InteriorGen->ClearLoadedInterior();
 	}
 	Generator->ClearAllBuildings();
+	// ClearAllBuildings() just destroyed whatever SelectedBuilding was pointing at - same reasoning as
+	// StartNewProject's own reset, just missing here until now (SelectBuildingUnderCursor/
+	// GetSelectedBuildingId would otherwise dereference a stale pointer if called right after an Open).
+	SelectedBuilding = nullptr;
 
 	const int32 Count = Generator->LoadBuildingsFromFile(FilePath);
 	UE_LOG(LogTemp, Warning, TEXT("LoadBuildingDataFromPath: loaded %d buildings from %s"), Count, *FilePath);
@@ -3397,12 +3400,10 @@ void ANavPlayerController::ConfirmShapeTest()
 
 FString ANavPlayerController::GetAudioFolderPath()
 {
-	// FPaths::ProjectDir() is relative (something like "../../../InNavi/"), not absolute - fine for
-	// FFileHelper::LoadFileToString elsewhere in this file (which resolves relative to the working
-	// directory), but PlayAudioFile builds a file:// URL from this, and a relative path there produces
-	// an invalid URI (every media player plugin then rejects it as unsupported, not just a "file not
-	// found" - confirmed via the Output Log, which showed the literal unresolved "../../../.." in the
-	// URL it tried to open). ConvertRelativePathToFull makes this a real absolute path first.
+	// FPaths::ProjectDir() is relative (something like "../../../InNavi/"), not absolute -
+	// ConvertRelativePathToFull isn't strictly required by FFileHelper::LoadFileToArray (which
+	// resolves a relative path against the working directory just fine), but costs nothing and keeps
+	// this robust against whatever future code ends up needing a real absolute path here too.
 	return FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("Data") / TEXT("Audio"));
 }
 
@@ -3412,7 +3413,6 @@ TArray<FString> ANavPlayerController::GetAvailableAudioFiles() const
 	// Not "FolderPath" - that name collides with a class member somewhere in this class's own
 	// inheritance chain (C4458 hides-class-member, a compile error in this project).
 	const FString AudioFolder = GetAudioFolderPath();
-	IFileManager::Get().FindFiles(FoundFiles, *(AudioFolder / TEXT("*.mp3")), true, false);
 	IFileManager::Get().FindFiles(FoundFiles, *(AudioFolder / TEXT("*.wav")), true, false);
 	FoundFiles.Sort();
 	return FoundFiles;
@@ -3425,107 +3425,16 @@ bool ANavPlayerController::PlayAudioFile(const FString& FileName)
 		return false;
 	}
 
-	const FString FullPath = GetAudioFolderPath() / FileName;
-	if (!FPaths::FileExists(FullPath))
+	UAudioComponent* AudioComponent = PlayWavFile(FileName, /*bDestroyWhenFinished=*/false);
+	if (!AudioComponent)
 	{
-		OnActionFailed.Broadcast(FString::Printf(TEXT("Audio file '%s' not found."), *FileName));
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not play audio file '%s'."), *FileName));
 		return false;
 	}
 
-	URuntimeAudioImporterLibrary* Importer = URuntimeAudioImporterLibrary::CreateRuntimeAudioImporter();
-	if (!Importer)
-	{
-		OnActionFailed.Broadcast(TEXT("Could not create the audio importer."));
-		return false;
-	}
-	PendingAudioImports.Add(Importer);
-
-	// Added immediately (SoundWave/AudioComponent still null) so a second click on the same row while
-	// it's still decoding is a no-op via IsAudioFilePlaying's own check above, instead of kicking off a
-	// duplicate import. The lambda below fills in SoundWave/AudioComponent once decoding finishes.
 	FActiveAudioPlayback& Playback = ActiveAudioPlaybacks.AddDefaulted_GetRef();
 	Playback.FileName = FileName;
-
-	Importer->OnResultNative.AddLambda([this, FileName](URuntimeAudioImporterLibrary* CompletedImporter, UImportedSoundWave* ImportedSoundWave, ERuntimeImportStatus Status)
-	{
-		PendingAudioImports.RemoveSingleSwap(CompletedImporter);
-
-		FActiveAudioPlayback* Found = ActiveAudioPlaybacks.FindByPredicate([&FileName](const FActiveAudioPlayback& P) { return P.FileName == FileName; });
-		if (!Found)
-		{
-			// Stopped (StopAllAudio clears ActiveAudioPlaybacks) before the async decode finished -
-			// nothing left to attach the result to.
-			return;
-		}
-
-		if (Status != ERuntimeImportStatus::SuccessfulImport || !ImportedSoundWave)
-		{
-			OnActionFailed.Broadcast(FString::Printf(TEXT("Could not decode audio file '%s'."), *FileName));
-			ActiveAudioPlaybacks.RemoveAll([&FileName](const FActiveAudioPlayback& P) { return P.FileName == FileName; });
-			return;
-		}
-
-		if (!AudioActor)
-		{
-			AudioActor = GetWorld()->SpawnActor<AActor>();
-		}
-		if (!AudioActor)
-		{
-			OnActionFailed.Broadcast(TEXT("Could not create the audio player actor."));
-			ActiveAudioPlaybacks.RemoveAll([&FileName](const FActiveAudioPlayback& P) { return P.FileName == FileName; });
-			return;
-		}
-
-		UAudioComponent* AudioComponent = NewObject<UAudioComponent>(AudioActor);
-		AudioComponent->bAutoActivate = false;
-		// AudioActor sits at the world origin (see its own comment) - miles from wherever the camera
-		// actually is on this campus-scale map. A spatialized 3D sound would attenuate with distance
-		// from the listener and be effectively silent from way out here; this is a UI/global sound
-		// (BGM, button click, ...), not something tied to a position in the world, so play it at a flat
-		// volume regardless of where AudioActor happens to be.
-		AudioComponent->bAllowSpatialization = false;
-		AudioComponent->SetSound(ImportedSoundWave);
-		AudioComponent->RegisterComponent();
-		AudioComponent->Play();
-
-		// TEMPORARY diagnostic logging (no sound was audible on the last test pass despite a clean
-		// decode) - prints immediately, then again after a short delay, so the Output Log shows
-		// whether IsPlaying() ever actually goes true, and what the component's own volume/sound
-		// state looks like. Remove once the root cause is confirmed fixed.
-		UE_LOG(LogTemp, Warning, TEXT("[AudioDebug] '%s' right after Play(): AudioComponent->IsPlaying()=%s, VolumeMultiplier=%.2f, Sound=%s, bIsActive=%s, SoundWave->IsPlaying()=%s, Duration=%.2f"),
-			*FileName,
-			AudioComponent->IsPlaying() ? TEXT("true") : TEXT("false"),
-			AudioComponent->VolumeMultiplier,
-			AudioComponent->Sound ? *AudioComponent->Sound->GetName() : TEXT("null"),
-			AudioComponent->IsActive() ? TEXT("true") : TEXT("false"),
-			ImportedSoundWave->IsPlaying(this) ? TEXT("true") : TEXT("false"),
-			ImportedSoundWave->GetDuration());
-		FTimerHandle DebugTimerHandle;
-		TWeakObjectPtr<UAudioComponent> WeakAudioComponent = AudioComponent;
-		TWeakObjectPtr<UImportedSoundWave> WeakSoundWave = ImportedSoundWave;
-		GetWorldTimerManager().SetTimer(DebugTimerHandle, [WeakAudioComponent, WeakSoundWave, FileName, this]()
-		{
-			if (WeakAudioComponent.IsValid() && WeakSoundWave.IsValid())
-			{
-				UE_LOG(LogTemp, Warning, TEXT("[AudioDebug] '%s' 1s later: AudioComponent->IsPlaying()=%s, IsActive()=%s, SoundWave->IsPlaying()=%s"),
-					*FileName,
-					WeakAudioComponent->IsPlaying() ? TEXT("true") : TEXT("false"),
-					WeakAudioComponent->IsActive() ? TEXT("true") : TEXT("false"),
-					WeakSoundWave->IsPlaying(this) ? TEXT("true") : TEXT("false"));
-			}
-			else
-			{
-				UE_LOG(LogTemp, Warning, TEXT("[AudioDebug] '%s' 1s later: component or sound wave no longer valid"), *FileName);
-			}
-		}, 1.0f, false);
-
-		Found->SoundWave = ImportedSoundWave;
-		Found->AudioComponent = AudioComponent;
-	});
-
-	// Auto: determine mp3/wav/etc. from the file extension - GetAvailableAudioFiles only ever lists
-	// .mp3/.wav, so there's nothing ambiguous to disambiguate here.
-	Importer->ImportAudioFromFile(FullPath, ERuntimeAudioFormat::Auto);
+	Playback.AudioComponent = AudioComponent;
 	return true;
 }
 
@@ -3540,11 +3449,6 @@ void ANavPlayerController::StopAllAudio()
 		}
 	}
 	ActiveAudioPlaybacks.Reset();
-
-	// Anything still decoding has nothing left to attach to once it finishes (see PlayAudioFile's own
-	// OnResultNative lambda, which checks ActiveAudioPlaybacks and no-ops if its entry is gone) - clear
-	// this too so those importers aren't kept alive for no reason.
-	PendingAudioImports.Reset();
 }
 
 bool ANavPlayerController::IsAudioFilePlaying(const FString& FileName) const
@@ -3566,44 +3470,79 @@ void ANavPlayerController::PlayButtonClickSound()
 		return;
 	}
 
-	PlayShortSoundEffect(TEXT("click_button.mp3"));
+	PlayShortSoundEffect(TEXT("click_button.wav"));
 }
 
 void ANavPlayerController::PlayBuildingSelectSound()
 {
-	PlayShortSoundEffect(TEXT("select_ui.mp3"));
+	PlayShortSoundEffect(TEXT("select_ui.wav"));
+}
+
+void ANavPlayerController::PlayQuitConfirmSound()
+{
+	PlayShortSoundEffect(TEXT("quit_confirm.wav"));
 }
 
 void ANavPlayerController::PlayShortSoundEffect(const TCHAR* FileName)
 {
-	// Deliberately NOT cached/reused across calls (an earlier version of PlayButtonClickSound was, and
-	// it crashed the editor: UImportedSoundWave tracks its own playback read-position internally, so
-	// two overlapping plays sharing one instance - e.g. rapid clicking - corrupted that state and hit
-	// an ensure failure in SoundWaveProcedural, "generated more bytes than expected"). Each call gets
-	// its own freshly-decoded, independent instance instead, same as PlayAudioFile - these files are
-	// tiny (a fraction of a second of audio), so decoding fresh every time is not noticeable.
+	PlayWavFile(FileName, /*bDestroyWhenFinished=*/true);
+}
+
+UAudioComponent* ANavPlayerController::PlayWavFile(const FString& FileName, bool bDestroyWhenFinished)
+{
 	const FString FullPath = GetAudioFolderPath() / FileName;
 	if (!FPaths::FileExists(FullPath))
 	{
-		return;
+		return nullptr;
 	}
 
-	URuntimeAudioImporterLibrary* Importer = URuntimeAudioImporterLibrary::CreateRuntimeAudioImporter();
-	if (!Importer)
+	USoundWaveProcedural* SoundWave = LoadWavFileAsSoundWave(FullPath, this);
+	if (!SoundWave)
 	{
-		return;
+		return nullptr;
 	}
-	PendingAudioImports.Add(Importer);
 
-	Importer->OnResultNative.AddLambda([this](URuntimeAudioImporterLibrary* CompletedImporter, UImportedSoundWave* ImportedSoundWave, ERuntimeImportStatus Status)
+	if (!AudioActor)
 	{
-		PendingAudioImports.RemoveSingleSwap(CompletedImporter);
-		if (Status == ERuntimeImportStatus::SuccessfulImport && ImportedSoundWave)
+		AudioActor = GetWorld()->SpawnActor<AActor>();
+	}
+	if (!AudioActor)
+	{
+		return nullptr;
+	}
+
+	UAudioComponent* AudioComponent = NewObject<UAudioComponent>(AudioActor);
+	AudioComponent->bAutoActivate = false;
+	// AudioActor sits at the world origin (see its own comment) - miles from wherever the camera
+	// actually is on this campus-scale map. A spatialized 3D sound would attenuate with distance from
+	// the listener and be effectively silent from way out here; this is a UI/global sound (BGM,
+	// button click, ...), not something tied to a position in the world, so play it at a flat volume
+	// regardless of where AudioActor happens to be.
+	AudioComponent->bAllowSpatialization = false;
+	AudioComponent->SetSound(SoundWave);
+	AudioComponent->RegisterComponent();
+	AudioComponent->Play();
+
+	// See this function's own header comment - USoundWaveProcedural never signals "finished" on its
+	// own, so this is what actually stops the voice (and, for a fire-and-forget effect, frees the
+	// component) once the clip's real length has elapsed.
+	const float Duration = FMath::Max(SoundWave->Duration, 0.05f);
+	FTimerHandle StopTimerHandle;
+	TWeakObjectPtr<UAudioComponent> WeakAudioComponent = AudioComponent;
+	GetWorldTimerManager().SetTimer(StopTimerHandle, [WeakAudioComponent, bDestroyWhenFinished]()
+	{
+		if (!WeakAudioComponent.IsValid())
 		{
-			UGameplayStatics::PlaySound2D(this, ImportedSoundWave);
+			return;
 		}
-	});
-	Importer->ImportAudioFromFile(FullPath, ERuntimeAudioFormat::Auto);
+		WeakAudioComponent->Stop();
+		if (bDestroyWhenFinished)
+		{
+			WeakAudioComponent->DestroyComponent();
+		}
+	}, Duration, false);
+
+	return AudioComponent;
 }
 
 void ANavPlayerController::PruneFinishedAudioPlaybacks()
@@ -3613,8 +3552,6 @@ void ANavPlayerController::PruneFinishedAudioPlaybacks()
 		FActiveAudioPlayback& Playback = ActiveAudioPlaybacks[i];
 		if (!Playback.AudioComponent || Playback.AudioComponent->IsPlaying())
 		{
-			// Null AudioComponent means still decoding (see FActiveAudioPlayback's own comment) - not
-			// finished, just not started yet.
 			continue;
 		}
 

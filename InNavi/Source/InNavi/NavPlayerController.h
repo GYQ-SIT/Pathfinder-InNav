@@ -13,16 +13,11 @@ class AInteriorGenerator;
 class AInteriorRoom;
 class AInteriorConnectorMarker;
 class UNavigationPanelWidget;
-class UImportedSoundWave;
 class UAudioComponent;
-class URuntimeAudioImporterLibrary;
 
-// One currently-playing (or still-decoding) audio file (see PlayAudioFile/StopAllAudio).
-// SoundWave/AudioComponent stay null between the initial PlayAudioFile call and the async decode
-// actually finishing (see PlayAudioFile's own OnResultNative lambda) - IsAudioFilePlaying and
-// PruneFinishedAudioPlaybacks both treat a null AudioComponent as "still pending", not "finished".
-// UImportedSoundWave is a plain UObject (not an ActorComponent like UAudioComponent), so it needs its
-// own UPROPERTY reference here to survive garbage collection while playing.
+// One currently-playing audio file (see PlayAudioFile/StopAllAudio). AudioComponent already keeps
+// its own USoundWaveProcedural alive via its own Sound UPROPERTY, so there's no need to separately
+// track the sound wave here too.
 USTRUCT()
 struct FActiveAudioPlayback
 {
@@ -30,9 +25,6 @@ struct FActiveAudioPlayback
 
 	UPROPERTY()
 	FString FileName;
-
-	UPROPERTY()
-	UImportedSoundWave* SoundWave = nullptr;
 
 	UPROPERTY()
 	UAudioComponent* AudioComponent = nullptr;
@@ -791,7 +783,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Room")
 	void StopRotateCW();
 
-	// Lists every playable audio file (.mp3/.wav) currently sitting in InNavi/Data/Audio/ - just
+	// Lists every playable audio file (.wav) currently sitting in InNavi/Data/Audio/ - just
 	// filenames, sorted, for the Audio panel to list (mirrors the Data/ folder convention
 	// buildings.json already uses - a raw folder next to the .uproject, not imported UE assets).
 	// Rescans the folder on every call rather than caching it, so a file dropped in while the app is
@@ -800,14 +792,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	TArray<FString> GetAvailableAudioFiles() const;
 
-	// Starts playing FileName (one of GetAvailableAudioFiles' own results) - decoded asynchronously by
-	// the vendored RuntimeAudioImporter plugin (InNavi/Plugins/RuntimeAudioImporter/, MIT licensed; see
-	// InNavi.uproject) into a UImportedSoundWave, then played through a UAudioComponent. Not the
-	// engine's own Media Framework (WmfMedia) - that was tried first but UE 5.8's WmfMedia has dropped
-	// mp3 support entirely (a known engine regression). No-op (returns false) if FileName is already
-	// playing/decoding (see IsAudioFilePlaying) or doesn't exist. Multiple different files can play at
-	// once, each with its own UAudioComponent (see FActiveAudioPlayback) - Play the same file again
-	// once it's finished (or after StopAllAudio) to replay it.
+	// Starts playing FileName (one of GetAvailableAudioFiles' own results) - see PlayWavFile, which
+	// does the actual loading/playing. No-op (returns false) if FileName is already playing (see
+	// IsAudioFilePlaying) or doesn't exist. Multiple different files can play at once, each with its
+	// own UAudioComponent (see FActiveAudioPlayback) - Play the same file again once it's finished
+	// (or after StopAllAudio) to replay it.
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	bool PlayAudioFile(const FString& FileName);
 
@@ -818,16 +807,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Audio")
 	bool IsAudioFilePlaying(const FString& FileName) const;
 
-	// Plays a short click sound (InNavi/Data/Audio/click_button.mp3) - bound to every button's own
+	// Plays a short click sound (InNavi/Data/Audio/click_button.wav) - bound to every button's own
 	// OnClicked across the app (see each screen/row widget's own PlayButtonClickSound wrapper method,
 	// which forwards here, bound right alongside that button's own specific handler) so clicking
-	// anything gives the same audible feedback. Decodes a fresh, independent UImportedSoundWave on
-	// every call via PlaySound2D (same pattern as PlayAudioFile, just without tracking it in
-	// ActiveAudioPlaybacks - a click sound is fire-and-forget, nothing to stop early or list as
-	// "playing"). Deliberately does NOT cache/reuse one decoded instance across clicks - an earlier
-	// version did, and it crashed the editor: UImportedSoundWave tracks its own playback
-	// read-position internally, so two overlapping plays sharing one instance (e.g. rapid clicking)
-	// corrupt that state.
+	// anything gives the same audible feedback. Fire-and-forget - see PlayWavFile/PlayShortSoundEffect,
+	// which auto-destroy the UAudioComponent once the clip finishes, nothing to stop early or list as
+	// "playing".
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void PlayButtonClickSound();
 
@@ -841,7 +826,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void SetButtonClickSoundEnabled(bool bEnabled) { bButtonClickSoundEnabled = bEnabled; }
 
-	// Plays a short selection sound (InNavi/Data/Audio/select_ui.mp3) - called from
+	// Plays a short selection sound (InNavi/Data/Audio/select_ui.wav) - called from
 	// SelectBuildingUnderCursor only when a click newly selects an exterior building (not on deselect,
 	// and not for anything selected inside the interior editor - rooms/doors/connectors have their own
 	// selection flow entirely separate from this one). Same fresh-decode-every-call pattern as
@@ -850,6 +835,15 @@ public:
 	// UI-sound mute.
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void PlayBuildingSelectSound();
+
+	// Plays a short notification sound (InNavi/Data/Audio/quit_confirm.wav) - called once from
+	// UConfirmDialogWidget::NativeConstruct, so it plays the instant the Save/Discard/Cancel dialog
+	// appears (leaving via Back, File > New, File > Load, switching buildings - anywhere
+	// HasUnsavedChanges() triggers it), not tied to any button click inside it. Same fresh-decode-
+	// every-call pattern as the other short sound effects, and likewise not gated by
+	// bButtonClickSoundEnabled.
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void PlayQuitConfirmSound();
 
 protected:
 	virtual void BeginPlay() override;
@@ -1212,28 +1206,34 @@ private:
 
 	// Hosts every currently-playing UAudioComponent - one small persistent actor with no visible mesh,
 	// rather than attaching to the possessed Pawn (which gets destroyed/swapped when entering/leaving
-	// interiors), spawned lazily on the first PlayAudioFile call.
+	// interiors), spawned lazily on the first PlayWavFile call.
 	UPROPERTY()
 	AActor* AudioActor = nullptr;
 
 	UPROPERTY()
 	TArray<FActiveAudioPlayback> ActiveAudioPlaybacks;
 
-	// Keeps each in-flight URuntimeAudioImporterLibrary alive (it's a plain UObject with no other
-	// owner) between PlayAudioFile's ImportAudioFromFile call and its OnResultNative lambda firing -
-	// without this it could be garbage collected mid-decode. Entries are removed by that same lambda
-	// once the import finishes (successfully or not).
-	UPROPERTY()
-	TArray<URuntimeAudioImporterLibrary*> PendingAudioImports;
-
-	// Removes any playback whose UAudioComponent has actually finished (IsPlaying() false) - a null
-	// AudioComponent (still decoding, see FActiveAudioPlayback's own comment) is left alone, not
-	// treated as finished.
+	// Removes any playback whose UAudioComponent has actually finished (IsPlaying() false) - see
+	// PlayWavFile's own comment for what makes that actually happen for a USoundWaveProcedural.
 	void PruneFinishedAudioPlaybacks();
 
-	// Shared by PlayButtonClickSound/PlayBuildingSelectSound - decodes FileName (a name under
-	// GetAudioFolderPath(), e.g. "click_button.mp3") fresh and plays it via PlaySound2D once decoded.
-	// See PlayButtonClickSound's own comment for why this deliberately doesn't cache/reuse instances.
+	// Loads FileName (a name under GetAudioFolderPath()) via LoadWavFileAsSoundWave and plays it
+	// through a fresh UAudioComponent on AudioActor - the shared core behind both PlayAudioFile
+	// (bDestroyWhenFinished=false; the caller tracks/stops it via ActiveAudioPlaybacks) and
+	// PlayShortSoundEffect (bDestroyWhenFinished=true; nothing else references it). Returns
+	// nullptr if the file doesn't exist or isn't a WAV this understands.
+	//
+	// USoundWaveProcedural doesn't signal "finished" on its own - once the audio it was queued with
+	// (see LoadWavFileAsSoundWave) runs out, it just pads silence forever rather than ending the
+	// voice, so a component playing one would otherwise report IsPlaying()==true indefinitely. This
+	// schedules an explicit Stop() (and DestroyComponent() if bDestroyWhenFinished) at the clip's
+	// own Duration instead of relying on that, which is what actually makes IsAudioFilePlaying/
+	// PruneFinishedAudioPlaybacks see it as finished, and what stops a fire-and-forget effect from
+	// occupying a voice forever.
+	UAudioComponent* PlayWavFile(const FString& FileName, bool bDestroyWhenFinished);
+
+	// Thin wrapper over PlayWavFile for the short, fire-and-forget UI sound effects (click/select/
+	// quit-confirm) - see PlayButtonClickSound's own comment for why nothing needs to track these.
 	void PlayShortSoundEffect(const TCHAR* FileName);
 
 	// See IsButtonClickSoundEnabled/SetButtonClickSoundEnabled's own comment.
