@@ -2174,14 +2174,33 @@ TSharedPtr<FJsonObject> UInteriorScreenWidget::BuildLayoutSaveData() const
 {
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
 
+	// LayoutVersion 2: every x/y/width/Column.X below is saved as a FRACTION of the viewport size at
+	// save time (x/width relative to ViewportSize.X, y relative to ViewportSize.Y), not raw pixels -
+	// version 1 saved raw pixels, so a layout arranged on one screen and reopened on a different
+	// resolution/aspect ratio (e.g. desktop -> laptop) restored panels at the literal same pixel
+	// coordinates, which could land off-screen or badly overlapping on a smaller/differently-shaped
+	// viewport. ApplyLayoutSaveData/LoadDockLayoutFromDisk key off this field to tell an old-format
+	// (unversioned) save apart from this one - an old save's raw pixels would otherwise be
+	// misinterpreted as fractions (e.g. a saved x of 1850 read as "1850x the viewport width").
+	Root->SetNumberField(TEXT("layoutVersion"), 2);
+
+	const FVector2D ViewportSize = GetCanvasSize();
+	if (ViewportSize.X <= 0.f || ViewportSize.Y <= 0.f)
+	{
+		// Nothing sensible to save without a real viewport size to normalize against (e.g. queried
+		// before the first paint) - leave "panels"/"columns" absent, same as a version-1 file, so this
+		// gets treated as unusable and discarded on next load rather than saving zeros.
+		return Root;
+	}
+
 	TSharedPtr<FJsonObject> PanelsObject = MakeShared<FJsonObject>();
 	for (int32 Index = 0; Index < NumDockPanels; ++Index)
 	{
 		const FVector2D Position = GetPanelPosition((EDockPanelId)Index);
 		TSharedPtr<FJsonObject> PanelObject = MakeShared<FJsonObject>();
-		PanelObject->SetNumberField(TEXT("x"), Position.X);
-		PanelObject->SetNumberField(TEXT("y"), Position.Y);
-		PanelObject->SetNumberField(TEXT("width"), DockPanelWidths[Index]);
+		PanelObject->SetNumberField(TEXT("x"), Position.X / ViewportSize.X);
+		PanelObject->SetNumberField(TEXT("y"), Position.Y / ViewportSize.Y);
+		PanelObject->SetNumberField(TEXT("width"), DockPanelWidths[Index] / ViewportSize.X);
 		PanelsObject->SetObjectField(GetDockPanelName((EDockPanelId)Index), PanelObject);
 	}
 	Root->SetObjectField(TEXT("panels"), PanelsObject);
@@ -2200,7 +2219,7 @@ TSharedPtr<FJsonObject> UInteriorScreenWidget::BuildLayoutSaveData() const
 		TSharedPtr<FJsonObject> ColumnObject = MakeShared<FJsonObject>();
 		ColumnObject->SetArrayField(TEXT("panels"), PanelNameArray);
 		ColumnObject->SetArrayField(TEXT("fractions"), FractionArray);
-		ColumnObject->SetNumberField(TEXT("x"), Column.X);
+		ColumnObject->SetNumberField(TEXT("x"), Column.X / ViewportSize.X);
 		ColumnsArray.Add(MakeShared<FJsonValueObject>(ColumnObject));
 	}
 	Root->SetArrayField(TEXT("columns"), ColumnsArray);
@@ -2216,6 +2235,15 @@ void UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 	}
 
 	const FVector2D ViewportSize = GetCanvasSize();
+	if (ViewportSize.X <= 0.f || ViewportSize.Y <= 0.f)
+	{
+		// Nothing sensible to restore against a zero-size viewport (dividing by it below would produce
+		// inf/NaN positions) - leave every panel at whatever CanvasSlot position it already has
+		// (InitializeDefaultDockLayout's own caller falls back to fresh defaults when this function
+		// can't apply anything usable).
+		return;
+	}
+
 	const TSharedPtr<FJsonObject>* PanelsObject = nullptr;
 	const bool bHasPanelsObject = Root->TryGetObjectField(TEXT("panels"), PanelsObject);
 	for (int32 Index = 0; Index < NumDockPanels; ++Index)
@@ -2234,20 +2262,33 @@ void UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 			continue;
 		}
 
-		double X = 0.0, Y = 0.0, Width = SidebarMinWidth;
-		(*PanelObject)->TryGetNumberField(TEXT("x"), X);
-		(*PanelObject)->TryGetNumberField(TEXT("y"), Y);
-		(*PanelObject)->TryGetNumberField(TEXT("width"), Width);
+		double XFraction = 0.0, YFraction = 0.0, WidthFraction = SidebarMinWidth / ViewportSize.X;
+		(*PanelObject)->TryGetNumberField(TEXT("x"), XFraction);
+		(*PanelObject)->TryGetNumberField(TEXT("y"), YFraction);
+		(*PanelObject)->TryGetNumberField(TEXT("width"), WidthFraction);
+
+		// Fractions of the CURRENT viewport size (see BuildLayoutSaveData's own comment) - this is what
+		// actually makes a layout saved on one screen reopen sensibly on a different resolution/aspect
+		// ratio, instead of landing at the same raw pixel coordinates.
+		const float X = (float)(XFraction * ViewportSize.X);
+		const float Y = (float)(YFraction * ViewportSize.Y);
 
 		if (UCanvasPanelSlot* PanelSlot = DockPanelCanvasSlots[Index])
 		{
-			// A layout saved before the menu bar existed can have a Y above it but under the bar's
-			// current height (e.g. the old default of 10px) - clamp so a floating panel from an old
-			// save never loads in underneath the bar. Docked panels get repositioned by RefreshDockLayout
-			// right after this anyway, so this only actually matters for floating ones.
-			PanelSlot->SetPosition(FVector2D((float)X, FMath::Max((float)Y, SidebarTopMargin)));
+			// Clamped to stay reachable within the CURRENT viewport regardless of how different its
+			// aspect ratio is from the one this was saved under (fractional scaling alone narrows the
+			// gap but doesn't guarantee it for an extreme ratio change, e.g. ultrawide -> 4:3) -
+			// MinVisiblePanelMargin is how much of the panel must stay on-screen so it's always
+			// draggable back into full view. Also keeps a floating panel below the menu bar, same as
+			// before (a layout saved before the menu bar existed can have a Y above it) - docked panels
+			// get repositioned by RefreshDockLayout right after this anyway, so this only actually
+			// matters for floating ones.
+			constexpr float MinVisiblePanelMargin = 40.f;
+			const float ClampedX = FMath::Clamp(X, 0.f, FMath::Max(0.f, ViewportSize.X - MinVisiblePanelMargin));
+			const float ClampedY = FMath::Clamp(Y, SidebarTopMargin, FMath::Max(SidebarTopMargin, ViewportSize.Y - MinVisiblePanelMargin));
+			PanelSlot->SetPosition(FVector2D(ClampedX, ClampedY));
 		}
-		DockPanelWidths[Index] = FMath::Clamp((float)Width, SidebarMinWidth, SidebarMaxWidth);
+		DockPanelWidths[Index] = FMath::Clamp((float)(WidthFraction * ViewportSize.X), SidebarMinWidth, SidebarMaxWidth);
 	}
 
 	DockColumns.Reset();
@@ -2295,9 +2336,13 @@ void UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 				continue;
 			}
 
-			double ColumnX = 0.0;
-			(*ColumnObject)->TryGetNumberField(TEXT("x"), ColumnX);
-			NewColumn.X = (float)ColumnX;
+			double ColumnXFraction = 0.0;
+			(*ColumnObject)->TryGetNumberField(TEXT("x"), ColumnXFraction);
+			// Same fraction-of-viewport-width convention, and the same on-screen clamp, as the floating
+			// panel X above (see BuildLayoutSaveData/that clamp's own comment) - RefreshDockLayout
+			// applies this directly to every panel docked in the column with no clamping of its own.
+			constexpr float MinVisibleColumnMargin = 40.f;
+			NewColumn.X = FMath::Clamp((float)(ColumnXFraction * ViewportSize.X), 0.f, FMath::Max(0.f, ViewportSize.X - MinVisibleColumnMargin));
 
 			const int32 NewColumnIndex = DockColumns.Add(NewColumn);
 			for (EDockPanelId PanelId : NewColumn.Panels)
@@ -2337,6 +2382,18 @@ bool UInteriorScreenWidget::LoadDockLayoutFromDisk()
 	TSharedPtr<FJsonObject> Root;
 	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(FileContents);
 	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		return false;
+	}
+
+	// A file saved before layoutVersion 2 (see BuildLayoutSaveData's own comment) stored raw pixel
+	// positions instead of viewport-relative fractions - reinterpreting those old raw values as
+	// fractions here would be actively wrong (e.g. a saved x of 1850 read as "1850x the viewport
+	// width"), not just imprecise. Treating it as if nothing were saved and falling back to fresh,
+	// resolution-aware defaults (see InitializeDefaultDockLayout's own caller) is the safe choice, and
+	// the layout gets re-saved in the new format the next time it changes anyway.
+	double LayoutVersion = 0.0;
+	if (!Root->TryGetNumberField(TEXT("layoutVersion"), LayoutVersion) || LayoutVersion < 2.0)
 	{
 		return false;
 	}
