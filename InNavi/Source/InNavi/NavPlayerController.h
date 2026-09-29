@@ -177,6 +177,32 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void DecreaseMoveSpeed3DPreview();
 
+	// Same idea as IncreaseMoveSpeed3DPreview/DecreaseMoveSpeed3DPreview, but for the exterior view's
+	// own free-fly camera (see FocusCameraOnAllBuildings) - a separate pair, not a reuse of those two,
+	// because the exterior's usable speed range is far wider (a hand-placed campus vs. a real-world-
+	// scale database-loaded one can differ by 40x) and steps multiplicatively instead of by a fixed
+	// amount so a single click still feels meaningful at either end of that range.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void IncreaseCameraSpeedExterior();
+
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void DecreaseCameraSpeedExterior();
+
+	// Sets the exterior camera's speed to an exact value (typed into a speed box) rather than
+	// stepping it - clamped the same as IncreaseCameraSpeedExterior/DecreaseCameraSpeedExterior.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetCameraSpeedExterior(float NewSpeed);
+
+	// Same idea for 3D preview's own speed box.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void SetMoveSpeed3DPreview(float NewSpeed);
+
+	// Reads the free-fly pawn's current WASD/camera speed - shared by both the exterior page's and
+	// 3D preview's speed display so each stays in sync with whatever last changed it (+/-, typing a
+	// value, or the auto-computed default on load). 0 if there's no pawn/movement component yet.
+	UFUNCTION(BlueprintPure, Category = "Camera")
+	float GetCameraMoveSpeed() const;
+
 	// Plan A (freehand footprint). Callable from Blueprint/UMG as well as the B key, so a UI
 	// button can drive this directly once one exists (e.g. for mobile, where there's no keyboard).
 	UFUNCTION(BlueprintCallable, Category = "Building")
@@ -1123,6 +1149,11 @@ private:
 	// buildings yet (a blank new project), just raises the camera above the origin instead.
 	void FocusCameraOnAllBuildings();
 
+	// Shared by FocusCameraOnAllBuildings/IncreaseCameraSpeedExterior/DecreaseCameraSpeedExterior/
+	// SetCameraSpeedExterior - clamps NewSpeed and applies it as MaxSpeed, and scales
+	// Acceleration/Deceleration to match (see its own .cpp comment for why that second part matters).
+	void ApplyExteriorCameraSpeed(float NewSpeed);
+
 	// Shared by PositionCameraForFloor and PositionCameraFor3DPreview - both need the same
 	// footprint-bounds-to-world-space Center/Span computation, just for different camera poses.
 	void GetBuildingFootprintBounds(APolyBuilding* Building, FVector2D& OutCenter, float& OutSpan) const;
@@ -1247,6 +1278,13 @@ private:
 	static constexpr float ThreeDPreviewMoveSpeedStep = 300.f;
 	static constexpr float ThreeDPreviewMinMoveSpeed = 200.f;
 	static constexpr float ThreeDPreviewMaxMoveSpeed = 5000.f;
+
+	// See FocusCameraOnAllBuildings and IncreaseCameraSpeedExterior/DecreaseCameraSpeedExterior's own
+	// comments. Min/max also double as FocusCameraOnAllBuildings' own clamp range, so a manually-tuned
+	// speed and the auto-computed default always agree on the same floor/ceiling.
+	static constexpr float ExteriorCameraSpeedFactor = 1.25f;
+	static constexpr float ExteriorCameraMinSpeed = 2000.f;
+	static constexpr float ExteriorCameraMaxSpeed = 300000.f;
 
 	FVector SavedCameraLocation = FVector::ZeroVector;
 	FRotator SavedCameraRotation = FRotator::ZeroRotator;

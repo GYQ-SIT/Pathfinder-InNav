@@ -10,6 +10,7 @@ class UBorder;
 class UButton;
 class UCanvasPanelSlot;
 class UCheckBox;
+class UEditableTextBox;
 class UScrollBox;
 class USlider;
 class UTextBlock;
@@ -53,6 +54,27 @@ private:
 
 	UFUNCTION()
 	void OnEnterInteriorClicked();
+
+	// Calls PC->Increase/DecreaseCameraSpeedExterior() - the exterior free-fly camera's default speed
+	// auto-scales to the loaded campus's span (see FocusCameraOnAllBuildings), but these let the user
+	// tune it further either way without waiting for a reload.
+	UFUNCTION()
+	void OnIncreaseCameraSpeedClicked();
+
+	UFUNCTION()
+	void OnDecreaseCameraSpeedClicked();
+
+	// Lets the speed be typed directly instead of only nudged by +/- - fires on both Enter and
+	// clicking away (ETextCommit::OnEnter / OnUserMovedFocus), matching how a plain number field is
+	// expected to behave. Re-reads the actual (possibly clamped) speed back into the box afterward via
+	// RefreshCameraSpeedDisplay, so an out-of-range value the user typed doesn't linger displayed.
+	UFUNCTION()
+	void OnCameraSpeedTextCommitted(const FText& NewText, ETextCommit::Type CommitType);
+
+	// Syncs CameraSpeedTextBox to PC->GetCameraMoveSpeed() - called after construction and after
+	// anything that can change the speed (+/-, typing a new value) so the box never shows a stale
+	// number.
+	void RefreshCameraSpeedDisplay();
 
 	// Bound alongside every button's own OnClicked so clicking anything plays the same click sound -
 	// see ANavPlayerController::PlayButtonClickSound, which owns the actual caching/playback.
@@ -206,6 +228,15 @@ private:
 	UButton* EnterInteriorButton = nullptr;
 
 	UPROPERTY()
+	UButton* DecreaseCameraSpeedButton = nullptr;
+
+	UPROPERTY()
+	UButton* IncreaseCameraSpeedButton = nullptr;
+
+	UPROPERTY()
+	UEditableTextBox* CameraSpeedTextBox = nullptr;
+
+	UPROPERTY()
 	UButton* FileMenuButton = nullptr;
 
 	UPROPERTY()
@@ -319,4 +350,5 @@ private:
 	// 15pt, matching the rest of the app's UI text (see UInteriorScreenWidget::StandardFontSize).
 	static constexpr int32 StandardFontSize = 15;
 	static void ApplyStandardFont(UTextBlock* TextBlock);
+	static void ApplyStandardFont(UEditableTextBox* TextBox);
 };

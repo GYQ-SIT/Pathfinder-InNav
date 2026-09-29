@@ -255,6 +255,15 @@ private:
 	UFUNCTION()
 	void OnIncreaseSpeedClicked();
 
+	// Lets 3D preview's own speed be typed directly - same reasoning/commit behavior as
+	// UEditScreenWidget::OnCameraSpeedTextCommitted (Enter or clicking away both commit it).
+	UFUNCTION()
+	void OnCameraSpeedTextCommitted(const FText& NewText, ETextCommit::Type CommitType);
+
+	// Syncs CameraSpeedTextBox to PC->GetCameraMoveSpeed() - see UEditScreenWidget's own
+	// RefreshCameraSpeedDisplay for the full reasoning.
+	void RefreshCameraSpeedDisplay();
+
 	// Toggles PC's View/Edit sub-mode (PC->SetIn3DEditMode(!PC->IsIn3DEditMode())) - only shown while
 	// in 3D preview (see Edit3DModeToggleButton).
 	UFUNCTION()
@@ -466,8 +475,9 @@ private:
 	// them together into a shared "column" that fills the screen height end to end, splitting that
 	// height among the column's members (adjustable per-boundary via a splitter handle, mirrors
 	// dragging the divider between two stacked panels in a real editor). Back is deliberately NOT
-	// part of this system (see RebuildWidget) - it's fixed chrome, not a dockable panel. Audio starts
-	// user-hidden (see bDockPanelUserHidden's own init) unlike the other 5 - see the Window menu.
+	// part of this system (see RebuildWidget) - it's fixed chrome, not a dockable panel. Audio and
+	// Navigation both start user-hidden (see bDockPanelUserHidden's own init) unlike the other 4 -
+	// see the Window menu.
 	enum class EDockPanelId : uint8 { Toolbar, Floor, Properties, Layers, Navigation, Audio };
 	static constexpr int32 NumDockPanels = 6;
 	static constexpr int32 MaxDockSplitters = NumDockPanels - 1; // worst case: all 6 panels in one column
@@ -1010,6 +1020,11 @@ private:
 	UPROPERTY()
 	UButton* IncreaseSpeedButton = nullptr;
 
+	// Typed speed entry, between DecreaseSpeedButton/IncreaseSpeedButton - see
+	// OnCameraSpeedTextCommitted. Shown/hidden together with the other 3D-preview-only controls.
+	UPROPERTY()
+	UEditableTextBox* CameraSpeedTextBox = nullptr;
+
 	// Toggles 3D preview's View/Edit sub-mode (see PC->SetIn3DEditMode) - "View" in yellow by default,
 	// "Edit" in green once toggled. Shown/hidden together with ResetView3DButton; always shows "View"
 	// again the next time 3D preview is entered (see HandleEdit3DModeChanged/HandlePreviewModeChanged).
@@ -1073,8 +1088,9 @@ private:
 	UCheckBox* WindowAudioCheckbox = nullptr;
 
 	// Parallel to EDockPanelId, sized NumDockPanels - see SetDockPanelUserHidden. False by default
-	// (visible) for every panel except Audio, which InitializeDockRuntimeArrays sets true right after
-	// initializing this array - Audio only shows once the user actually checks it in the Window menu.
+	// (visible) for every panel except Audio and Navigation, which InitializeDockRuntimeArrays sets
+	// true right after initializing this array - each only shows once the user actually checks it in
+	// the Window menu.
 	TArray<bool> bDockPanelUserHidden;
 
 	// Shared width bounds for every dock panel, and the snap/splitter tuning constants - also used
@@ -1090,6 +1106,15 @@ private:
 	// at each text's construction site, since UMG has no single "default style" to override once for
 	// every independently-constructed UTextBlock.
 	static constexpr int32 StandardFontSize = 15;
+
+	// Every editable text box's background/typed-text color (see ApplyStandardFont's UEditableTextBox
+	// overload) - the engine default background/foreground read as nearly the same gray against this
+	// app's dark panel chrome, making typed text hard to read. A shade lighter than the panel
+	// background (0.03) but darker than a normal button (0.6) so a text box reads as its own distinct
+	// "this is editable" element rather than blending into either.
+	static const FLinearColor StandardTextBoxBackgroundColor;
+	static const FLinearColor StandardTextBoxTextColor;
+
 	static constexpr float SidebarMaxWidth = 600.f;
 	// Heights of the two fixed bars pinned across the top of the canvas (File/Window menu, then the
 	// building switcher bar directly below it) - dock panels' top boundary (SidebarTopMargin, below)

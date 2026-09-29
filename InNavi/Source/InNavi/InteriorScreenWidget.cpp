@@ -72,6 +72,10 @@ void UInteriorScreenWidget::InitializeDockRuntimeArrays()
 	// Audio starts hidden - see the enum's own comment. ConstructDockPanel's Audio call site (below)
 	// collapses its actual Border to match.
 	bDockPanelUserHidden[(int32)EDockPanelId::Audio] = true;
+	// Navigation also starts hidden now - most sessions are drawing/editing, not routing, so this
+	// keeps that screen real estate free until the user actually opens it from the Window menu (same
+	// mechanism as Audio above; ConstructDockPanel's Navigation call site collapses its Border to match).
+	bDockPanelUserHidden[(int32)EDockPanelId::Navigation] = true;
 	bDockPanelIsDraggingMove.Init(false, NumDockPanels);
 	DockPanelMoveDragStartMouse.Init(FVector2D::ZeroVector, NumDockPanels);
 	DockPanelMoveDragStartPosition.Init(FVector2D::ZeroVector, NumDockPanels);
@@ -108,6 +112,9 @@ void UInteriorScreenWidget::ApplyStandardFont(UTextBlock* TextBlock)
 	TextBlock->SetFont(Font);
 }
 
+const FLinearColor UInteriorScreenWidget::StandardTextBoxBackgroundColor(0.149f, 0.149f, 0.169f, 1.f);
+const FLinearColor UInteriorScreenWidget::StandardTextBoxTextColor(1.f, 1.f, 1.f, 1.f);
+
 void UInteriorScreenWidget::ApplyStandardFont(UEditableTextBox* TextBox)
 {
 	if (!TextBox)
@@ -116,6 +123,9 @@ void UInteriorScreenWidget::ApplyStandardFont(UEditableTextBox* TextBox)
 	}
 	FEditableTextBoxStyle Style = TextBox->GetWidgetStyle();
 	Style.TextStyle.Font.Size = StandardFontSize;
+	Style.BackgroundColor = FSlateColor(StandardTextBoxBackgroundColor);
+	Style.ForegroundColor = FSlateColor(StandardTextBoxTextColor);
+	Style.FocusedForegroundColor = FSlateColor(StandardTextBoxTextColor);
 	TextBox->SetWidgetStyle(Style);
 }
 
@@ -457,29 +467,29 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// Toolbar has no separate panel-level title (see DockPanelTitleTexts' own comment) - its first
 		// group label doubles as the text the drag handle sizes itself off.
 		DockPanelTitleTexts[(int32)EDockPanelId::Toolbar] = AddToolGroupLabel(TEXT("Txt_GroupDefault"), TEXT("Default"));
-		SelectModeButton = AddModeButton(TEXT("Select_Mode_Button"), TEXT("Icon_Select"), TEXT("Select Mode (click a room, door, or connector to select it; drag to move it; Backspace to delete)"));
+		SelectModeButton = AddModeButton(TEXT("Select_Mode_Button"), TEXT("Icon_Select"), TEXT("Select Mode [Q] (click a room, door, or connector to select it; drag to move it; Backspace to delete)"));
 		SelectModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSelectModeClicked);
 
 		AddToolGroupLabel(TEXT("Txt_GroupDraw"), TEXT("Draw"));
-		DrawRoomModeButton = AddModeButton(TEXT("Draw_Mode_Button"), TEXT("Icon_DrawRoom"), TEXT("Draw Room Mode (click at least 3 points to outline a room, then press Enter to finish; Esc cancels)"));
+		DrawRoomModeButton = AddModeButton(TEXT("Draw_Mode_Button"), TEXT("Icon_DrawRoom"), TEXT("Draw Room Mode [P] (click at least 3 points to outline a room, then press Enter to finish; Esc cancels)"));
 		DrawRoomModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnDrawRoomModeClicked);
-		DrawWallModeButton = AddModeButton(TEXT("Draw_Wall_Button"), TEXT("Icon_DrawWall"), TEXT("Draw Wall Mode (click points to draw a standalone wall, then press Enter to finish; Esc cancels)"));
+		DrawWallModeButton = AddModeButton(TEXT("Draw_Wall_Button"), TEXT("Icon_DrawWall"), TEXT("Draw Wall Mode [L] (click points to draw a standalone wall, then press Enter to finish; Esc cancels)"));
 		DrawWallModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnDrawWallModeClicked);
-		AddRectModeButton = AddModeButton(TEXT("Add_Rect_Button"), TEXT("Icon_AddRectangle"), TEXT("Add Rectangle (click a point to place a rectangular room centered there)"));
+		AddRectModeButton = AddModeButton(TEXT("Add_Rect_Button"), TEXT("Icon_AddRectangle"), TEXT("Add Rectangle [1] (click a point to place a rectangular room centered there)"));
 		AddRectModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddRectangleClicked);
-		AddTriangleModeButton = AddModeButton(TEXT("Add_Triangle_Button"), TEXT("Icon_AddTriangle"), TEXT("Add Triangle (click a point to place a triangular room centered there)"));
+		AddTriangleModeButton = AddModeButton(TEXT("Add_Triangle_Button"), TEXT("Icon_AddTriangle"), TEXT("Add Triangle [2] (click a point to place a triangular room centered there)"));
 		AddTriangleModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddTriangleClicked);
-		AddCircleModeButton = AddModeButton(TEXT("Add_Circle_Button"), TEXT("Icon_AddCircle"), TEXT("Add Circle (click a point to place a circular room centered there)"));
+		AddCircleModeButton = AddModeButton(TEXT("Add_Circle_Button"), TEXT("Icon_AddCircle"), TEXT("Add Circle [3] (click a point to place a circular room centered there)"));
 		AddCircleModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddCircleClicked);
 
 		AddToolGroupLabel(TEXT("Txt_GroupNavigate"), TEXT("Navigate"));
-		AddDoorModeButton = AddModeButton(TEXT("Add_Door_Button"), TEXT("Icon_AddDoor"), TEXT("Add Door Mode (click a wall edge to cut a fixed-size door into it)"));
+		AddDoorModeButton = AddModeButton(TEXT("Add_Door_Button"), TEXT("Icon_AddDoor"), TEXT("Add Door Mode [K] (click a wall edge to cut a fixed-size door into it)"));
 		AddDoorModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddDoorModeClicked);
-		AddStairsModeButton = AddModeButton(TEXT("Add_Stairs_Button"), TEXT("Icon_AddStairs"), TEXT("Add Stairs Mode (click a point to place stairs, connecting the floor above and below by default)"));
+		AddStairsModeButton = AddModeButton(TEXT("Add_Stairs_Button"), TEXT("Icon_AddStairs"), TEXT("Add Stairs Mode [5] (click a point to place stairs, connecting the floor above and below by default)"));
 		AddStairsModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddStairsModeClicked);
-		AddElevatorModeButton = AddModeButton(TEXT("Add_Elevator_Button"), TEXT("Icon_AddElevator"), TEXT("Add Elevator Mode (click a point to place an elevator, connecting every floor by default)"));
+		AddElevatorModeButton = AddModeButton(TEXT("Add_Elevator_Button"), TEXT("Icon_AddElevator"), TEXT("Add Elevator Mode [4] (click a point to place an elevator, connecting every floor by default)"));
 		AddElevatorModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddElevatorModeClicked);
-		AddEscalatorModeButton = AddModeButton(TEXT("Add_Escalator_Button"), TEXT("Icon_AddEscalator"), TEXT("Add Escalator Mode (click a point to place an escalator, connecting the floor above and below by default)"));
+		AddEscalatorModeButton = AddModeButton(TEXT("Add_Escalator_Button"), TEXT("Icon_AddEscalator"), TEXT("Add Escalator Mode [6] (click a point to place an escalator, connecting the floor above and below by default)"));
 		AddEscalatorModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddEscalatorModeClicked);
 
 		AddToolGroupLabel(TEXT("Txt_GroupGizmos"), TEXT("Gizmos"));
@@ -805,6 +815,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		WindowLayersCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowLayers"), TEXT("Layers"));
 		WindowLayersCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowLayersCheckChanged);
 		WindowNavigationCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowNavigation"), TEXT("Navigation"));
+		// Unlike every row besides Audio, starts unchecked - see EDockPanelId::Navigation's own comment.
+		WindowNavigationCheckbox->SetIsChecked(false);
 		WindowNavigationCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowNavigationCheckChanged);
 		WindowAudioCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowAudio"), TEXT("Audio"));
 		// Unlike every other row, starts unchecked - see EDockPanelId::Audio's own comment.
@@ -927,12 +939,29 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		DecreaseSpeedButton = AddSwitcherButton(TEXT("Btn_DecreaseSpeed"), TEXT("-"));
 		DecreaseSpeedButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnDecreaseSpeedClicked);
-		DecreaseSpeedButton->SetToolTipText(FText::FromString(TEXT("Decrease Move Speed")));
+		DecreaseSpeedButton->SetToolTipText(FText::FromString(TEXT("Decrease Camera Speed")));
 		DecreaseSpeedButton->SetVisibility(ESlateVisibility::Collapsed);
+
+		// Typed speed entry, between the -/+ buttons - see OnCameraSpeedTextCommitted.
+		CameraSpeedTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_CameraSpeed"));
+		CameraSpeedTextBox->SetJustification(ETextJustify::Center);
+		CameraSpeedTextBox->SetToolTipText(FText::FromString(TEXT("Camera Speed (type a value, then press Enter or click away)")));
+		CameraSpeedTextBox->OnTextCommitted.AddUniqueDynamic(this, &UInteriorScreenWidget::OnCameraSpeedTextCommitted);
+		CameraSpeedTextBox->SetVisibility(ESlateVisibility::Collapsed);
+		ApplyStandardFont(CameraSpeedTextBox);
+		USizeBox* CameraSpeedSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		CameraSpeedSizeBox->SetWidthOverride(64.f);
+		CameraSpeedSizeBox->SetHeightOverride(SwitcherButtonHeight);
+		CameraSpeedSizeBox->SetContent(CameraSpeedTextBox);
+		if (UHorizontalBoxSlot* CameraSpeedRowSlot = Cast<UHorizontalBoxSlot>(SwitcherRow->AddChildToHorizontalBox(CameraSpeedSizeBox)))
+		{
+			CameraSpeedRowSlot->SetVerticalAlignment(VAlign_Center);
+			CameraSpeedRowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
+		}
 
 		IncreaseSpeedButton = AddSwitcherButton(TEXT("Btn_IncreaseSpeed"), TEXT("+"));
 		IncreaseSpeedButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnIncreaseSpeedClicked);
-		IncreaseSpeedButton->SetToolTipText(FText::FromString(TEXT("Increase Move Speed")));
+		IncreaseSpeedButton->SetToolTipText(FText::FromString(TEXT("Increase Camera Speed")));
 		IncreaseSpeedButton->SetVisibility(ESlateVisibility::Collapsed);
 
 		// "View"/"Edit" toggle - starts as "View" (yellow), matching PC's own default (see
@@ -1218,6 +1247,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// original bespoke draggable-overlay look; RefreshNavigationPanelDisplay fills in the dynamic
 		// bits (button colors/labels/enablement, status/route text) once NativeConstruct hooks it up.
 		NavigationPanel = ConstructDockPanel(EDockPanelId::Navigation, TEXT("Pnl_Navigation"), DockPanelColor, 14.f);
+		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
 		// Bound to the drag handle, not NavigationPanel itself - see DockDragHandleSize's own comment.
 		DockDragHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationPanelMouseButtonDown);
 		NavigationPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationPanelMouseMove);
@@ -3127,6 +3157,14 @@ void UInteriorScreenWidget::HandlePreviewModeChanged(bool bIsActive)
 	{
 		IncreaseSpeedButton->SetVisibility(bIsActive ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
+	if (CameraSpeedTextBox)
+	{
+		CameraSpeedTextBox->SetVisibility(bIsActive ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (bIsActive)
+	{
+		RefreshCameraSpeedDisplay();
+	}
 	if (Edit3DModeToggleButton)
 	{
 		Edit3DModeToggleButton->SetVisibility(bIsActive ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
@@ -4520,6 +4558,7 @@ void UInteriorScreenWidget::OnDecreaseSpeedClicked()
 	{
 		PC->DecreaseMoveSpeed3DPreview();
 	}
+	RefreshCameraSpeedDisplay();
 }
 
 void UInteriorScreenWidget::OnIncreaseSpeedClicked()
@@ -4527,6 +4566,32 @@ void UInteriorScreenWidget::OnIncreaseSpeedClicked()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->IncreaseMoveSpeed3DPreview();
+	}
+	RefreshCameraSpeedDisplay();
+}
+
+void UInteriorScreenWidget::OnCameraSpeedTextCommitted(const FText& NewText, ETextCommit::Type CommitType)
+{
+	if (CommitType != ETextCommit::OnEnter && CommitType != ETextCommit::OnUserMovedFocus)
+	{
+		return;
+	}
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetMoveSpeed3DPreview(FCString::Atof(*NewText.ToString()));
+	}
+	RefreshCameraSpeedDisplay();
+}
+
+void UInteriorScreenWidget::RefreshCameraSpeedDisplay()
+{
+	if (!CameraSpeedTextBox)
+	{
+		return;
+	}
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		CameraSpeedTextBox->SetText(FText::FromString(FString::FromInt(FMath::RoundToInt(PC->GetCameraMoveSpeed()))));
 	}
 }
 

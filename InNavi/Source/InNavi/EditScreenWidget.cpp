@@ -12,6 +12,7 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/CheckBox.h"
+#include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/PanelWidget.h"
@@ -34,11 +35,21 @@ namespace
 	// translation unit - two unrelated same-named locals across files then trip C4459 "hides global
 	// declaration"), since this screen has no dock system of its own to also key off them.
 	const FLinearColor EditMenuBarColor(0.03f, 0.03f, 0.03f, 0.88f);
+	// Matches UInteriorScreenWidget::StandardTextBoxBackgroundColor/StandardTextBoxTextColor exactly -
+	// see that pair's own comment for why (engine default editable-text-box colors read as nearly the
+	// same gray against this app's dark chrome). Duplicated rather than shared for the same Unity
+	// Build reason as EditMenuBarColor above.
+	const FLinearColor EditTextBoxBackgroundColor(0.149f, 0.149f, 0.169f, 1.f);
+	const FLinearColor EditTextBoxTextColor(1.f, 1.f, 1.f, 1.f);
 	constexpr float EditMenuBarHeight = 32.f;
 	constexpr float EditMenuButtonWidth = 50.f;
 	constexpr float EditMenuBarLeftMargin = 10.f;
 	constexpr float EditAudioPanelWidth = 220.f;
 	constexpr float EditAudioFileListHeight = 150.f;
+
+	// Second bar under the menu bar, matching UInteriorScreenWidget's own BuildingSwitcherBarHeight -
+	// see the toolbar row's own construction comment in RebuildWidget for why it exists here.
+	constexpr float ExteriorToolbarBarHeight = 40.f;
 }
 
 UEditScreenWidget::UEditScreenWidget(const FObjectInitializer& ObjectInitializer)
@@ -55,6 +66,20 @@ void UEditScreenWidget::ApplyStandardFont(UTextBlock* TextBlock)
 	FSlateFontInfo Font = TextBlock->GetFont();
 	Font.Size = StandardFontSize;
 	TextBlock->SetFont(Font);
+}
+
+void UEditScreenWidget::ApplyStandardFont(UEditableTextBox* TextBox)
+{
+	if (!TextBox)
+	{
+		return;
+	}
+	FEditableTextBoxStyle Style = TextBox->GetWidgetStyle();
+	Style.TextStyle.Font.Size = StandardFontSize;
+	Style.BackgroundColor = FSlateColor(EditTextBoxBackgroundColor);
+	Style.ForegroundColor = FSlateColor(EditTextBoxTextColor);
+	Style.FocusedForegroundColor = FSlateColor(EditTextBoxTextColor);
+	TextBox->SetWidgetStyle(Style);
 }
 
 TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
@@ -110,13 +135,6 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		WindowMenuButton = AddMenuButton(TEXT("Btn_WindowMenu"), TEXT("Window"));
 		WindowMenuButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowMenuClicked);
 
-		// Eats all remaining row width so Enter Interior/Back land flush against the bar's right edge.
-		USpacer* MenuBarSpacer = WidgetTree->ConstructWidget<USpacer>(USpacer::StaticClass());
-		if (UHorizontalBoxSlot* SpacerSlot = Cast<UHorizontalBoxSlot>(MenuBarRow->AddChildToHorizontalBox(MenuBarSpacer)))
-		{
-			SpacerSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-		}
-
 		auto AddBarButton = [this, MenuBarRow](const TCHAR* Name, const TCHAR* Label, float Width) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
@@ -143,6 +161,13 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			return Button;
 		};
 
+		// Eats all remaining row width so Enter Interior/Back land flush against the bar's right edge.
+		USpacer* MenuBarSpacer = WidgetTree->ConstructWidget<USpacer>(USpacer::StaticClass());
+		if (UHorizontalBoxSlot* SpacerSlot = Cast<UHorizontalBoxSlot>(MenuBarRow->AddChildToHorizontalBox(MenuBarSpacer)))
+		{
+			SpacerSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		}
+
 		EnterInteriorButton = AddBarButton(TEXT("Btn_EnterInterior"), TEXT("Enter Interior"), 120.f);
 		EnterInteriorButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnEnterInteriorClicked);
 		EnterInteriorButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::PlayButtonClickSound);
@@ -153,6 +178,111 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		BackButton = AddBarButton(TEXT("Btn_Back"), TEXT("Back"), 60.f);
 		BackButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnBackClicked);
 		BackButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::PlayButtonClickSound);
+
+		// --- Toolbar bar: fixed chrome directly under the menu bar, same position/style as
+		// UInteriorScreenWidget's own BuildingSwitcherBarBackground+SwitcherRow - this screen has
+		// nothing else to put there (no building switcher, 2D/3D toggle, Reset, or View/Edit of its
+		// own), so it only ever holds the camera speed controls, left-aligned like that row is. Not
+		// mixed into the top File/Window/Back bar (where these used to live) - putting it at the same
+		// row/vertical position as UInteriorScreenWidget's own speed controls, rather than pinned to
+		// the far right next to Back, is what actually made the two screens' controls land in
+		// comparable places.
+		UBorder* ToolbarBarBackground = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_ToolbarBar"));
+		ToolbarBarBackground->SetBrushColor(EditMenuBarColor);
+		ToolbarBarBackground->SetPadding(FMargin(10.f, 8.f));
+		ToolbarBarBackground->SetHorizontalAlignment(HAlign_Left);
+		ToolbarBarBackground->SetVerticalAlignment(VAlign_Center);
+		UCanvasPanelSlot* ToolbarBarSlot = Canvas->AddChildToCanvas(ToolbarBarBackground);
+		ToolbarBarSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
+		ToolbarBarSlot->SetAlignment(FVector2D(0.f, 0.f));
+		ToolbarBarSlot->SetOffsets(FMargin(0.f, EditMenuBarHeight, 0.f, ExteriorToolbarBarHeight));
+		ToolbarBarSlot->SetZOrder(6);
+
+		UHorizontalBox* ToolbarRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ToolbarRow"));
+		ToolbarBarBackground->SetContent(ToolbarRow);
+
+		auto AddToolbarButton = [this, ToolbarRow](const TCHAR* Name, const TCHAR* Label, float Width, float LeftPadding) -> UButton*
+		{
+			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+			Button->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::PlayButtonClickSound);
+			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+			Text->SetText(FText::FromString(FString(Label)));
+			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			Text->SetJustification(ETextJustify::Center);
+			ApplyStandardFont(Text);
+			USizeBox* ButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+			ButtonSizeBox->SetWidthOverride(Width);
+			ButtonSizeBox->SetHeightOverride(32.f);
+			if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(ButtonSizeBox->SetContent(Text)))
+			{
+				TextSlot->SetHorizontalAlignment(HAlign_Center);
+				TextSlot->SetVerticalAlignment(VAlign_Center);
+			}
+			Button->SetContent(ButtonSizeBox);
+			if (UHorizontalBoxSlot* RowSlot = Cast<UHorizontalBoxSlot>(ToolbarRow->AddChildToHorizontalBox(Button)))
+			{
+				RowSlot->SetVerticalAlignment(VAlign_Center);
+				RowSlot->SetPadding(FMargin(LeftPadding, 0.f, 0.f, 0.f));
+			}
+			return Button;
+		};
+
+		// Reserves the same width UInteriorScreenWidget's own widgets occupy at each position, with no
+		// content of its own - purely a spacer, not an interactive/visible element. Without these, the
+		// -/speed/+ trio lands flush against the left edge instead of where its counterpart actually
+		// sits in UInteriorScreenWidget's own row (after its building switcher/2D/3D/Reset group) -
+		// simply omitting the unused controls, tried first, left the two screens' controls looking
+		// like they were in unrelated places rather than the same one.
+		auto AddBlankSlot = [this, ToolbarRow](float Width, float LeftPadding)
+		{
+			USizeBox* Blank = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+			Blank->SetWidthOverride(Width);
+			Blank->SetHeightOverride(32.f);
+			if (UHorizontalBoxSlot* BlankSlot = Cast<UHorizontalBoxSlot>(ToolbarRow->AddChildToHorizontalBox(Blank)))
+			{
+				BlankSlot->SetVerticalAlignment(VAlign_Center);
+				BlankSlot->SetPadding(FMargin(LeftPadding, 0.f, 0.f, 0.f));
+			}
+		};
+
+		AddBlankSlot(296.f, 0.f);	// Building switcher combo (260+4 pad) + edit-name pencil button (32)
+		AddBlankSlot(44.f, 6.f);	// 2D toggle
+		AddBlankSlot(44.f, 6.f);	// 3D toggle
+		AddBlankSlot(44.f, 6.f);	// Reset View
+		// Measured-widths math above still landed the trio noticeably left of where
+		// UInteriorScreenWidget's own -/speed/+ actually sit on screen - nudged right by ~2 extra
+		// button-widths to match what was actually observed rather than re-deriving the math blind.
+		AddBlankSlot(44.f, 6.f);
+		AddBlankSlot(44.f, 6.f);
+
+		DecreaseCameraSpeedButton = AddToolbarButton(TEXT("Btn_DecreaseCameraSpeed"), TEXT("-"), 44.f, 6.f);
+		DecreaseCameraSpeedButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnDecreaseCameraSpeedClicked);
+		DecreaseCameraSpeedButton->SetToolTipText(FText::FromString(TEXT("Decrease Camera Speed")));
+
+		// Typed speed entry, between the -/+ buttons - see OnCameraSpeedTextCommitted. Shows/accepts
+		// the raw speed value directly (matching UInteriorScreenWidget's own 3D-preview speed box,
+		// which does the same) - up to 6 digits at ExteriorCameraMaxSpeed=300000, hence the wider box.
+		CameraSpeedTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_CameraSpeed"));
+		CameraSpeedTextBox->SetJustification(ETextJustify::Center);
+		CameraSpeedTextBox->SetToolTipText(FText::FromString(TEXT("Camera Speed (type a value, then press Enter or click away)")));
+		CameraSpeedTextBox->OnTextCommitted.AddUniqueDynamic(this, &UEditScreenWidget::OnCameraSpeedTextCommitted);
+		ApplyStandardFont(CameraSpeedTextBox);
+		USizeBox* CameraSpeedSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		CameraSpeedSizeBox->SetWidthOverride(68.f);
+		CameraSpeedSizeBox->SetHeightOverride(32.f);
+		CameraSpeedSizeBox->SetContent(CameraSpeedTextBox);
+		if (UHorizontalBoxSlot* CameraSpeedRowSlot = Cast<UHorizontalBoxSlot>(ToolbarRow->AddChildToHorizontalBox(CameraSpeedSizeBox)))
+		{
+			CameraSpeedRowSlot->SetVerticalAlignment(VAlign_Center);
+			CameraSpeedRowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
+		}
+
+		IncreaseCameraSpeedButton = AddToolbarButton(TEXT("Btn_IncreaseCameraSpeed"), TEXT("+"), 44.f, 6.f);
+		IncreaseCameraSpeedButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnIncreaseCameraSpeedClicked);
+		IncreaseCameraSpeedButton->SetToolTipText(FText::FromString(TEXT("Increase Camera Speed")));
+
+		AddBlankSlot(44.f, 6.f);	// View/Edit toggle
 
 		// --- Dropdowns (File, Window) + the click-catcher that closes them on an outside click ---
 		auto ConstructDropdown = [this, Canvas](const TCHAR* Name, float PositionX) -> UBorder*
@@ -263,7 +393,9 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		AudioPanelSlot = Canvas->AddChildToCanvas(AudioPanelWrapper);
 		AudioPanelSlot->SetAnchors(FAnchors(0.f, 0.f));
 		AudioPanelSlot->SetAlignment(FVector2D(0.f, 0.f));
-		AudioPanelSlot->SetPosition(FVector2D(EditMenuBarLeftMargin, EditMenuBarHeight + 10.f));
+		// Below the toolbar bar (EditMenuBarHeight + ExteriorToolbarBarHeight), not just the menu bar -
+		// otherwise this panel's own default spawn position would sit on top of it.
+		AudioPanelSlot->SetPosition(FVector2D(EditMenuBarLeftMargin, EditMenuBarHeight + ExteriorToolbarBarHeight + 10.f));
 		AudioPanelSlot->SetAutoSize(true);
 		AudioPanelSlot->SetZOrder(6);
 
@@ -445,6 +577,7 @@ void UEditScreenWidget::NativeConstruct()
 	}
 
 	RefreshAudioList();
+	RefreshCameraSpeedDisplay();
 }
 
 void UEditScreenWidget::PlayButtonClickSound()
@@ -502,6 +635,54 @@ void UEditScreenWidget::OnEnterInteriorClicked()
 	{
 		InteriorScreen->AddToViewport();
 		RemoveFromParent();
+	}
+}
+
+void UEditScreenWidget::OnIncreaseCameraSpeedClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->IncreaseCameraSpeedExterior();
+	}
+	RefreshCameraSpeedDisplay();
+}
+
+void UEditScreenWidget::OnDecreaseCameraSpeedClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->DecreaseCameraSpeedExterior();
+	}
+	RefreshCameraSpeedDisplay();
+}
+
+void UEditScreenWidget::OnCameraSpeedTextCommitted(const FText& NewText, ETextCommit::Type CommitType)
+{
+	if (CommitType != ETextCommit::OnEnter && CommitType != ETextCommit::OnUserMovedFocus)
+	{
+		return;
+	}
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetCameraSpeedExterior(FCString::Atof(*NewText.ToString()));
+	}
+	// Re-reads the actual (possibly clamped) value back in, so a garbage or out-of-range entry
+	// doesn't stay displayed as if it had taken effect.
+	RefreshCameraSpeedDisplay();
+}
+
+void UEditScreenWidget::RefreshCameraSpeedDisplay()
+{
+	if (!CameraSpeedTextBox)
+	{
+		return;
+	}
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		// Plain FString::FromInt, not FText::AsNumber - the latter can insert locale thousands
+		// separators (e.g. "12,500"), which FCString::Atof would then misparse as just "12" if the
+		// user committed the box without editing it.
+		CameraSpeedTextBox->SetText(FText::FromString(FString::FromInt(FMath::RoundToInt(PC->GetCameraMoveSpeed()))));
 	}
 }
 

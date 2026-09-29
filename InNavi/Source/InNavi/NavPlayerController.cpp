@@ -2152,6 +2152,69 @@ void ANavPlayerController::DecreaseMoveSpeed3DPreview()
 	}
 }
 
+void ANavPlayerController::ApplyExteriorCameraSpeed(float NewSpeed)
+{
+	APawn* ControlledPawn = GetPawn();
+	UFloatingPawnMovement* Movement = ControlledPawn ? Cast<UFloatingPawnMovement>(ControlledPawn->GetMovementComponent()) : nullptr;
+	if (!Movement)
+	{
+		return;
+	}
+	Movement->MaxSpeed = FMath::Clamp(NewSpeed, ExteriorCameraMinSpeed, ExteriorCameraMaxSpeed);
+
+	// UFloatingPawnMovement's Acceleration/Deceleration are flat values (engine default 4000/8000,
+	// tuned for the stock 1200 MaxSpeed) - NOT scaled to MaxSpeed automatically. Left alone, reaching
+	// a much higher MaxSpeed (this screen's campus-span-scaled default, or a manually typed value) at
+	// a flat 4000 accel takes far longer than anyone actually holds a WASD key for, so raising MaxSpeed
+	// alone made no felt difference. Scale both proportionally so the pawn keeps reaching full speed in
+	// the same ~0.3s/0.15s the engine default itself implies (1200/4000 and 1200/8000) no matter what
+	// MaxSpeed is currently set to.
+	Movement->Acceleration = Movement->MaxSpeed / 0.3f;
+	Movement->Deceleration = Movement->MaxSpeed / 0.15f;
+}
+
+void ANavPlayerController::IncreaseCameraSpeedExterior()
+{
+	ApplyExteriorCameraSpeed(GetCameraMoveSpeed() * ExteriorCameraSpeedFactor);
+}
+
+void ANavPlayerController::DecreaseCameraSpeedExterior()
+{
+	ApplyExteriorCameraSpeed(GetCameraMoveSpeed() / ExteriorCameraSpeedFactor);
+}
+
+void ANavPlayerController::SetCameraSpeedExterior(float NewSpeed)
+{
+	ApplyExteriorCameraSpeed(NewSpeed);
+}
+
+void ANavPlayerController::SetMoveSpeed3DPreview(float NewSpeed)
+{
+	if (!bIsIn3DPreviewMode)
+	{
+		return;
+	}
+	if (APawn* ControlledPawn = GetPawn())
+	{
+		if (UFloatingPawnMovement* Movement = Cast<UFloatingPawnMovement>(ControlledPawn->GetMovementComponent()))
+		{
+			Movement->MaxSpeed = FMath::Clamp(NewSpeed, ThreeDPreviewMinMoveSpeed, ThreeDPreviewMaxMoveSpeed);
+		}
+	}
+}
+
+float ANavPlayerController::GetCameraMoveSpeed() const
+{
+	if (const APawn* ControlledPawn = GetPawn())
+	{
+		if (const UFloatingPawnMovement* Movement = Cast<UFloatingPawnMovement>(ControlledPawn->GetMovementComponent()))
+		{
+			return Movement->MaxSpeed;
+		}
+	}
+	return 0.f;
+}
+
 void ANavPlayerController::SetIn3DPreviewMode(bool bEnable)
 {
 	if (bEnable == bIsIn3DPreviewMode || !Generator || !InteriorGen)
@@ -2708,12 +2771,11 @@ void ANavPlayerController::FocusCameraOnAllBuildings()
 	// tuned for buildings.json's own small hand-placed campus (spans roughly 1000 units), but a
 	// database-loaded campus at real-world scale (see ABuildingGenerator::LoadBuildingsFromDatabase)
 	// can span hundreds of real meters, at which point that speed reads as "barely moving". Scale it
-	// to cross the whole loaded span in about 6 seconds instead, clamped so a small campus never gets
-	// SLOWER than the stock default.
-	if (UFloatingPawnMovement* Movement = Cast<UFloatingPawnMovement>(ControlledPawn->GetMovementComponent()))
-	{
-		Movement->MaxSpeed = FMath::Clamp(Span / 6.f, 1200.f, 50000.f);
-	}
+	// to cross the whole loaded span in about 4 seconds instead - ApplyExteriorCameraSpeed clamps to
+	// the same range IncreaseCameraSpeedExterior/DecreaseCameraSpeedExterior use (so a manual
+	// adjustment and a fresh load never disagree on the floor/ceiling) and also scales
+	// Acceleration/Deceleration to match, see its own comment.
+	ApplyExteriorCameraSpeed(Span / 4.f);
 
 	// Pull the camera back-and-up along the pitch's own forward vector (same "Target -
 	// Rotation.Vector() * Distance" pattern PositionCameraForFloor/PositionCameraFor3DPreview use) so
