@@ -200,9 +200,11 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Building")
 	FOnFootprintPointCountChanged OnFootprintPointCountChanged;
 
-	// Opens the OS "open file" dialog filtered to .json and returns the path the user picked (empty
-	// string if they cancelled). Doesn't load anything - pairs with LoadBuildingDataFromPath so UI
-	// can show the picked path (e.g. in a text box) before the user commits to loading it.
+	// Opens the OS "open file" dialog filtered to .json and .db (one combined filter, not a format
+	// picker) and returns the path the user picked (empty string if they cancelled). Doesn't load
+	// anything - pairs with LoadBuildingDataFromPathOrDatabase, which dispatches on the picked path's
+	// own extension, so UI can show the picked path (e.g. in a text box) before the user commits to
+	// loading it.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	FString BrowseForBuildingDataFile();
 
@@ -222,6 +224,23 @@ public:
 	// Ctrl+S has anywhere to write. Returns how many buildings were spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingDataFromDatabase(const FString& DatabasePath);
+
+	// What BrowseForBuildingDataFile's callers should call with whatever path the (now dual-format)
+	// file picker returned, instead of picking a loader themselves - dispatches to
+	// LoadBuildingDataFromDatabase for a ".db" path, LoadBuildingDataFromPath for anything else (kept
+	// as the default so an unrecognized/missing extension still gets the same "not valid JSON" error
+	// it always did, rather than a new, less informative failure mode). Returns how many buildings
+	// were spawned.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	int32 LoadBuildingDataFromPathOrDatabase(const FString& FilePath);
+
+	// ABuildingGenerator::GetScale() pass-through, defaulting to 1 if no BuildingGenerator is placed
+	// in the level - what any footprint-space size/distance constant (snap tolerance, prefab room
+	// size, etc.) should divide by to convert to a fixed WORLD size, instead of assuming footprint
+	// units are already sanely sized (see PlacePrefabRoomAt's own comment - that assumption breaks
+	// for a database-loaded building, where Scale is much larger than buildings.json's own ~10).
+	UFUNCTION(BlueprintPure, Category = "Building")
+	float GetBuildingScale() const;
 
 	// The "New" button should call this before switching to the edit screen: destroys every
 	// currently-spawned building/interior and resets back to a blank project (no file path, no
@@ -889,10 +908,6 @@ protected:
 private:
 	// Left-click: selects a building normally, or adds a footprint point while in build mode.
 	void OnClick();
-
-	// TEMPORARY test hook for LoadBuildingDataFromDatabase, bound to F9 - remove once a real "Load
-	// from Database" UI entry exists. Loads the bundled Data/map_extended.db for a quick smoke test.
-	void TestLoadBuildingsFromDatabase();
 
 	UPROPERTY()
 	UNavigationPanelWidget* NavigationPanel = nullptr;

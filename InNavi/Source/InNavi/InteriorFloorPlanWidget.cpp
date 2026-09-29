@@ -272,8 +272,10 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 		{
 			// Vertex snapping: if any corner of the room as currently dragged is close to another
 			// room/wall's corner, nudge the whole footprint so that pair lines up exactly - same
-			// tolerance/approach as P-mode's next click (see AddRoomPointAtFootprintPosition).
-			constexpr float SnapToleranceFootprintUnits = 8.f;
+			// tolerance/approach as P-mode's next click (see AddRoomPointAtFootprintPosition, and
+			// ANavPlayerController::GetBuildingScale's own comment for why this divides by Scale
+			// instead of using a bare footprint-unit constant).
+			const float SnapToleranceFootprintUnits = 80.f / PlayerController->GetBuildingScale();
 			FVector2D SnapOffset;
 			if (PlayerController->IsSnapEnabled() && InteriorGen->FindSnapOffset(InteriorGen->GetActiveFloor(), NewFootprint, DraggingRoomId, SnapToleranceFootprintUnits, SnapOffset))
 			{

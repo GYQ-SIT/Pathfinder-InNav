@@ -4621,7 +4621,7 @@ void UInteriorScreenWidget::OnFileLoadClicked()
 	if (!PC->HasUnsavedChanges())
 	{
 		PC->RestoreExteriorCameraView();
-		PC->LoadBuildingDataFromPath(FilePath);
+		PC->LoadBuildingDataFromPathOrDatabase(FilePath);
 		GoToEditScreen();
 		return;
 	}
@@ -4642,7 +4642,7 @@ void UInteriorScreenWidget::HandleFileLoadSave()
 	{
 		PC->SaveCurrentProject();
 		PC->RestoreExteriorCameraView();
-		PC->LoadBuildingDataFromPath(PendingLoadFilePath);
+		PC->LoadBuildingDataFromPathOrDatabase(PendingLoadFilePath);
 	}
 	GoToEditScreen();
 }
@@ -4653,7 +4653,7 @@ void UInteriorScreenWidget::HandleFileLoadDiscard()
 	{
 		PC->DiscardUnsavedChanges();
 		PC->RestoreExteriorCameraView();
-		PC->LoadBuildingDataFromPath(PendingLoadFilePath);
+		PC->LoadBuildingDataFromPathOrDatabase(PendingLoadFilePath);
 	}
 	GoToEditScreen();
 }

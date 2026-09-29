@@ -153,15 +153,6 @@ void ANavPlayerController::SetupInputComponent()
 	// side of the same button.
 	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &ANavPlayerController::OnLeftMouseDown3DEdit);
 	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Released, this, &ANavPlayerController::OnLeftMouseUp3DEdit);
-
-	// TEMPORARY - see TestLoadBuildingsFromDatabase's own comment.
-	InputComponent->BindKey(EKeys::F9, IE_Pressed, this, &ANavPlayerController::TestLoadBuildingsFromDatabase);
-}
-
-void ANavPlayerController::TestLoadBuildingsFromDatabase()
-{
-	const FString DatabasePath = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("Data") / TEXT("map_extended.db"));
-	LoadBuildingDataFromDatabase(DatabasePath);
 }
 
 void ANavPlayerController::OnClick()
@@ -976,7 +967,10 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 	// rescue a click that's genuinely outside the building.
 	if (InteriorGen && bSnapEnabled)
 	{
-		constexpr float SnapToleranceFootprintUnits = 8.f;
+		// Fixed WORLD distance (80cm) divided by Scale, not a bare footprint-unit constant - same
+		// "footprint units assumed Scale~10" reasoning as PlacePrefabRoomAt (see its own comment); a
+		// bare constant here would snap across nearly a whole room's width at Scale=100.
+		const float SnapToleranceFootprintUnits = 80.f / GetBuildingScale();
 		FVector2D SnapOffset;
 		if (InteriorGen->FindSnapOffset(InteriorGen->GetActiveFloor(), { FootprintPoint }, FString(), SnapToleranceFootprintUnits, SnapOffset))
 		{
@@ -1434,6 +1428,11 @@ bool ANavPlayerController::CommitRoomMove(const FString& RoomId, const TArray<FV
 	return bSuccess;
 }
 
+float ANavPlayerController::GetBuildingScale() const
+{
+	return Generator ? Generator->GetScale() : 1.f;
+}
+
 AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter)
 {
 	if (ActivePrefabShape == 0)
@@ -1460,23 +1459,29 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter
 		}
 	}
 
-	// Default sizes are deliberately small - ResizeRoom (below) is how they grow from here.
+	// Default sizes are deliberately small - ResizeRoom (below) is how they grow from here. Expressed
+	// as a fixed WORLD size (cm) divided by the building's own Scale, not a bare footprint-unit
+	// constant - footprint-space is pre-scale, so a bare constant here would produce a room 10x too
+	// big for a database-loaded building (Scale=100) versus a hand-authored JSON one (Scale=10). See
+	// project memory for the full audit of this "footprint units assumed Scale~10" bug family.
+	const float Scale = GetBuildingScale();
+
 	TArray<FVector2D> Footprint;
 	switch (ActivePrefabShape)
 	{
-	case 1: // Rectangle: 60 x 45, axis-aligned.
+	case 1: // Rectangle: 6m x 4.5m in world space.
 	{
-		constexpr float HalfWidth = 30.f;
-		constexpr float HalfDepth = 22.5f;
+		const float HalfWidth = 300.f / Scale;
+		const float HalfDepth = 225.f / Scale;
 		Footprint.Add(FootprintCenter + FVector2D(-HalfWidth, -HalfDepth));
 		Footprint.Add(FootprintCenter + FVector2D(HalfWidth, -HalfDepth));
 		Footprint.Add(FootprintCenter + FVector2D(HalfWidth, HalfDepth));
 		Footprint.Add(FootprintCenter + FVector2D(-HalfWidth, HalfDepth));
 		break;
 	}
-	case 2: // Triangle: equilateral, radius 30, pointing up.
+	case 2: // Triangle: equilateral, 3m radius in world space, pointing up.
 	{
-		constexpr float Radius = 30.f;
+		const float Radius = 300.f / Scale;
 		constexpr int32 Sides = 3;
 		for (int32 i = 0; i < Sides; i++)
 		{
@@ -1486,9 +1491,9 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter
 		}
 		break;
 	}
-	case 3: // Circle: approximated as a 24-sided regular polygon, radius 30.
+	case 3: // Circle: approximated as a 24-sided regular polygon, 3m radius in world space.
 	{
-		constexpr float Radius = 30.f;
+		const float Radius = 300.f / Scale;
 		constexpr int32 Sides = 24;
 		for (int32 i = 0; i < Sides; i++)
 		{
@@ -1738,7 +1743,11 @@ FString ANavPlayerController::BrowseForBuildingDataFile()
 		TEXT("Import building data"),
 		TEXT(""),
 		TEXT(""),
-		TEXT("JSON files (*.json)|*.json"),
+		// Both formats in one filter (not two separate filter entries) so this stays a single "Open"
+		// flow the user doesn't have to pre-choose a format for - see
+		// LoadBuildingDataFromPathOrDatabase, which the picked path should be handed to instead of
+		// either format-specific loader directly.
+		TEXT("Building data (*.json, *.db)|*.json;*.db"),
 		EFileDialogFlags::None,
 		OutFiles);
 
@@ -1843,6 +1852,15 @@ int32 ANavPlayerController::LoadBuildingDataFromDatabase(const FString& Database
 		FocusCameraOnAllBuildings();
 	}
 	return Count;
+}
+
+int32 ANavPlayerController::LoadBuildingDataFromPathOrDatabase(const FString& FilePath)
+{
+	if (FPaths::GetExtension(FilePath).Equals(TEXT("db"), ESearchCase::IgnoreCase))
+	{
+		return LoadBuildingDataFromDatabase(FilePath);
+	}
+	return LoadBuildingDataFromPath(FilePath);
 }
 
 void ANavPlayerController::StartNewProject()
@@ -2920,6 +2938,18 @@ int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 	if (bIsIn3DPreviewMode)
 	{
 		SetIn3DPreviewMode(false);
+	}
+
+	// The exterior "this building is selected" yellow tint (APolyBuilding::SetHighlighted) never
+	// meant anything once you're inside editing/viewing that building's own interior - clearing it
+	// here (not just on deselect/reselect in SelectBuildingUnderCursor) was invisible in the 2D floor
+	// plan (its opaque Background border hides the real exterior mesh underneath entirely), so this
+	// went unnoticed until 3D preview mode exposed the same still-tinted wall mesh directly.
+	if (SelectedBuilding)
+	{
+		SelectedBuilding->SetHighlighted(false);
+		SelectedBuilding = nullptr;
+		OnBuildingSelected.Broadcast(FString());
 	}
 
 	const int32 Result = InteriorGen->LoadInteriorForBuilding(BuildingId);
