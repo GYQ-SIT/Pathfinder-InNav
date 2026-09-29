@@ -48,6 +48,11 @@ private:
 	UFUNCTION()
 	void OnCancelClicked();
 
+	// Bound alongside every button's own OnClicked so clicking anything plays the same click sound -
+	// see ANavPlayerController::PlayButtonClickSound, which owns the actual caching/playback.
+	UFUNCTION()
+	void PlayButtonClickSound();
+
 	UPROPERTY()
 	UButton* SaveAndLeaveButton = nullptr;
 

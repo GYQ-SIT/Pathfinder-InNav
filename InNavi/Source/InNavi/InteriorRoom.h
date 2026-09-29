@@ -86,6 +86,11 @@ public:
 	const TArray<FInteriorOpening>& GetOpenings() const { return CachedOpenings; }
 	bool IsClosedLoop() const { return CachedClosedLoop; }
 
+	// Tints the walls and floor slab to a light green (3D Edit mode's selection indicator, the
+	// equivalent of the 2D floor plan's red outline) when true, back to this room's own normal tint
+	// when false. Mirrors APolyBuilding::SetHighlighted.
+	void SetHighlighted(bool bHighlighted);
+
 private:
 	// Regenerates the mesh from the cached inputs below. Called by both BuildWalls and
 	// SetFloorBaseZ.

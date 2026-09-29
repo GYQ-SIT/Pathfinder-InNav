@@ -1,5 +1,6 @@
 #include "ConfirmDialogWidget.h"
 
+#include "NavPlayerController.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
@@ -132,14 +133,25 @@ void UConfirmDialogWidget::NativeConstruct()
 	if (SaveAndLeaveButton)
 	{
 		SaveAndLeaveButton->OnClicked.AddUniqueDynamic(this, &UConfirmDialogWidget::OnSaveAndLeaveClicked);
+		SaveAndLeaveButton->OnClicked.AddUniqueDynamic(this, &UConfirmDialogWidget::PlayButtonClickSound);
 	}
 	if (DiscardAndLeaveButton)
 	{
 		DiscardAndLeaveButton->OnClicked.AddUniqueDynamic(this, &UConfirmDialogWidget::OnDiscardAndLeaveClicked);
+		DiscardAndLeaveButton->OnClicked.AddUniqueDynamic(this, &UConfirmDialogWidget::PlayButtonClickSound);
 	}
 	if (CancelButton)
 	{
 		CancelButton->OnClicked.AddUniqueDynamic(this, &UConfirmDialogWidget::OnCancelClicked);
+		CancelButton->OnClicked.AddUniqueDynamic(this, &UConfirmDialogWidget::PlayButtonClickSound);
+	}
+}
+
+void UConfirmDialogWidget::PlayButtonClickSound()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->PlayButtonClickSound();
 	}
 }
 

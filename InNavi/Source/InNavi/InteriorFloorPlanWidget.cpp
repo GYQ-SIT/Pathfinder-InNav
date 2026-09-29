@@ -936,18 +936,28 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			}
 
 			const FVector2D MarkerLocal = WorldToLocal((Node.Position + Building->BuildingOffset) * Scale);
+			// Same SizeScale multiplier the 3D marker's footprint uses (see AInteriorConnectorMarker::
+			// BuildMarker) - PathNode's SizeScale is always 1 (see GetConnectorFootprintCorners/
+			// FInteriorNavNode's own default), so this is a no-op for the plain gray box.
+			const float ScaledConnectorSize = ConnectorSize * Node.SizeScale;
 			const bool bSelected = !SelectedConnectorGroupId.IsEmpty() && Node.ConnectorGroupId == SelectedConnectorGroupId;
 			if (bSelected)
 			{
 				// The icon's own color no longer distinguishes selected/not, so draw a highlight
 				// square behind it instead - same red used for every other selection highlight.
-				constexpr float HighlightSize = ConnectorSize + 8.f;
+				const float HighlightSize = ScaledConnectorSize + 8.f;
 				const FPaintGeometry HighlightGeometry = AllottedGeometry.ToPaintGeometry(FVector2f(HighlightSize, HighlightSize), FSlateLayoutTransform(MarkerLocal - FVector2D(HighlightSize * 0.5f, HighlightSize * 0.5f)));
 				FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 2, HighlightGeometry, FallbackBrush, ESlateDrawEffect::None, FLinearColor(1.f, 0.15f, 0.15f, 1.f));
 			}
 
-			const FPaintGeometry MarkerGeometry = AllottedGeometry.ToPaintGeometry(FVector2f(ConnectorSize, ConnectorSize), FSlateLayoutTransform(MarkerLocal - FVector2D(ConnectorSize * 0.5f, ConnectorSize * 0.5f)));
-			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 3, MarkerGeometry, IconBrush, ESlateDrawEffect::None, NodeColor);
+			const FPaintGeometry MarkerGeometry = AllottedGeometry.ToPaintGeometry(FVector2f(ScaledConnectorSize, ScaledConnectorSize), FSlateLayoutTransform(MarkerLocal - FVector2D(ScaledConnectorSize * 0.5f, ScaledConnectorSize * 0.5f)));
+			// Rotated around the icon's own center (RelativeToElement space, so half its own size,
+			// not MarkerLocal) by the same RotationDegrees the 3D marker uses (see
+			// AInteriorConnectorMarker::BuildMarker/GetConnectorFootprintCorners) - kept in radians
+			// only for this one call, degrees everywhere else in this codebase's own convention.
+			FSlateDrawElement::MakeRotatedBox(OutDrawElements, LayerId + 3, MarkerGeometry, IconBrush, ESlateDrawEffect::None,
+				FMath::DegreesToRadians(Node.RotationDegrees), FVector2f(ScaledConnectorSize, ScaledConnectorSize) * 0.5f,
+				FSlateDrawElement::RelativeToElement, NodeColor);
 		}
 	}
 

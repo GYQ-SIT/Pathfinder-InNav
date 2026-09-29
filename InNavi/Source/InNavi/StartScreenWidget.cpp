@@ -2,6 +2,7 @@
 
 #include "EditScreenWidget.h"
 #include "NavPlayerController.h"
+#include "TimerManager.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
@@ -84,10 +85,24 @@ void UStartScreenWidget::NativeConstruct()
 	if (NewButton)
 	{
 		NewButton->OnClicked.AddUniqueDynamic(this, &UStartScreenWidget::OnNewClicked);
+		NewButton->OnClicked.AddUniqueDynamic(this, &UStartScreenWidget::PlayButtonClickSound);
 	}
 	if (OpenButton)
 	{
+		// PlayButtonClickSound bound BEFORE OnOpenClicked (opposite of every other button in the app) -
+		// a multicast delegate fires its bound functions in bind order, and OnOpenClicked's
+		// BrowseForBuildingDataFile() opens a blocking native file picker, so with the usual order the
+		// click sound wouldn't play until the dialog closed and the user had already picked a file.
+		OpenButton->OnClicked.AddUniqueDynamic(this, &UStartScreenWidget::PlayButtonClickSound);
 		OpenButton->OnClicked.AddUniqueDynamic(this, &UStartScreenWidget::OnOpenClicked);
+	}
+}
+
+void UStartScreenWidget::PlayButtonClickSound()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->PlayButtonClickSound();
 	}
 }
 
@@ -104,6 +119,26 @@ void UStartScreenWidget::OnNewClicked()
 }
 
 void UStartScreenWidget::OnOpenClicked()
+{
+	// PlayButtonClickSound (bound alongside this handler) decodes the click sound asynchronously and
+	// only actually starts playing once the game thread processes that decode's completion callback -
+	// see ANavPlayerController::PlayButtonClickSound. That can't happen while this function is
+	// blocked inside BrowseForBuildingDataFile's native OS dialog below, on the very same call stack,
+	// with no tick in between - the sound would only become audible once the dialog had already
+	// closed. Deferring the actual browse-and-load by a short delay instead gives that callback time
+	// to run first, so the click is audible right away.
+	if (UWorld* World = GetWorld())
+	{
+		FTimerHandle Unused;
+		World->GetTimerManager().SetTimer(Unused, FTimerDelegate::CreateUObject(this, &UStartScreenWidget::BrowseAndLoadBuildingData), 0.15f, false);
+	}
+	else
+	{
+		BrowseAndLoadBuildingData();
+	}
+}
+
+void UStartScreenWidget::BrowseAndLoadBuildingData()
 {
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
 	if (!PC)

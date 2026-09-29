@@ -1,5 +1,6 @@
 #include "LayerRowWidget.h"
 
+#include "NavPlayerController.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Button.h"
 #include "Components/HorizontalBox.h"
@@ -32,6 +33,7 @@ TSharedRef<SWidget> ULayerRowWidget::RebuildWidget()
 		ExpandButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_LayerRowExpand"));
 		ExpandButton->SetBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
 		ExpandButton->OnClicked.AddUniqueDynamic(this, &ULayerRowWidget::HandleExpandClicked);
+		ExpandButton->OnClicked.AddUniqueDynamic(this, &ULayerRowWidget::PlayButtonClickSound);
 		ExpandButtonText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_LayerRowExpand"));
 		ExpandButtonText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		ExpandButtonText->SetJustification(ETextJustify::Center);
@@ -67,6 +69,7 @@ TSharedRef<SWidget> ULayerRowWidget::RebuildWidget()
 		VisibilityButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_LayerRowVisibility"));
 		VisibilityButton->SetBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
 		VisibilityButton->OnClicked.AddUniqueDynamic(this, &ULayerRowWidget::HandleVisibilityClicked);
+		VisibilityButton->OnClicked.AddUniqueDynamic(this, &ULayerRowWidget::PlayButtonClickSound);
 		VisibilityButtonText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_LayerRowVisibility"));
 		VisibilityButtonText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		VisibilityButtonText->SetJustification(ETextJustify::Center);
@@ -145,4 +148,12 @@ void ULayerRowWidget::HandleExpandClicked()
 void ULayerRowWidget::HandleVisibilityClicked()
 {
 	OnVisibilityClicked.Broadcast(RowKey);
+}
+
+void ULayerRowWidget::PlayButtonClickSound()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->PlayButtonClickSound();
+	}
 }

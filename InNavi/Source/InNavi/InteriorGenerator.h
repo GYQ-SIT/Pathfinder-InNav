@@ -9,6 +9,8 @@
 
 class ABuildingGenerator;
 class AInteriorRoom;
+class AInteriorConnectorMarker;
+class APolyBuilding;
 class FJsonObject;
 
 // GC-safe wrapper so RoomsByFloor can be a TMap<int32, ...> - UHT doesn't support a TArray
@@ -260,6 +262,24 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool SetConnectorFloors(const FString& GroupId, const TArray<int32>& NewConnectsToFloors);
 
+	// Rotates every floor instance of connector GroupId by DeltaDegrees about its own center
+	// (positive = counter-clockwise, same convention as RotateRoom) - they share one orientation
+	// (see FInteriorNavNode::RotationDegrees), so this validates the new footprint on EVERY floor the
+	// connector reaches (building outline, walls, other buildings - see CanPlaceConnectorOnFloor) and
+	// only applies it if all of them pass; no partial rotation. Unlike RotateRoom, there's no
+	// deferred/mid-gesture-allowed check to speak of (connectors don't currently check against each
+	// other's footprints, only against walls/buildings), so this is fully validated on every call -
+	// safe to call every tick while a rotate key/button is held, same usage pattern as RotateRoom.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool RotateConnectorGroup(const FString& GroupId, float DeltaDegrees);
+
+	// Adjusts every floor instance of connector GroupId's SizeScale by DeltaScale (clamped to
+	// [MinConnectorScale, MaxConnectorScale]) - same all-floors-must-pass validation as
+	// RotateConnectorGroup, and a discrete immediate step (no drag/release split) like
+	// GrowSelectedRoom/ShrinkSelectedRoom's NudgeSelectedRoomSize.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool ScaleConnectorGroup(const FString& GroupId, float DeltaScale);
+
 	// The rooms/walls spawned on a given floor - read-only, for a 2D floor plan renderer to draw
 	// (see UInteriorFloorPlanWidget). Empty if that floor doesn't exist.
 	UFUNCTION(BlueprintPure, Category = "Interior")
@@ -274,11 +294,15 @@ private:
 	// SyncInteriorToBuildingGenerator.
 	TSharedRef<FJsonObject> SerializeCurrentInterior() const;
 
-	// Shared validation behind PlaceConnectorNode and SetConnectorFloors: can a connector sit at
-	// Position on Level - the floor exists, Position is inside the building's outline, and Position
-	// isn't inside a wall's solid thickness there (being inside a room's open interior is fine).
-	// Logs the specific reason on failure.
-	bool CanPlaceConnectorOnFloor(FVector2D Position, int32 Level) const;
+	// Shared validation behind PlaceConnectorNode, SetConnectorFloors, RotateConnectorGroup, and
+	// ScaleConnectorGroup: can a Type connector with this RotationDegrees/SizeScale sit at Position on
+	// Level - the floor exists, and the connector's real 3D footprint (see
+	// GetConnectorFootprintCorners, InteriorTypes.h - the same shape AInteriorConnectorMarker actually
+	// builds, so this and the 3D preview never disagree) fits entirely inside the building's own
+	// outline, doesn't come within half the wall thickness of any room/wall on that floor (being
+	// inside a room's open interior is fine, only overlapping a wall itself is rejected), and doesn't
+	// overlap a neighboring building's own footprint. Logs the specific reason on failure.
+	bool CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVector2D Position, int32 Level, float RotationDegrees, float SizeScale) const;
 
 	// The reverse of CanPlaceConnectorOnFloor's wall-thickness check: would this room/wall
 	// footprint's own walls end up inside a wall's solid thickness of an existing connector
@@ -286,6 +310,22 @@ private:
 	// to this footprint bury a connector inside a wall. Used by CreateRoomFromFootprint,
 	// CommitRoomMove, ResizeRoom, and RotateRoom's commit step.
 	bool DoesFootprintBlockConnector(const TArray<FVector2D>& Footprint, bool bClosedLoop, int32 Level) const;
+
+	// Spawns Node's 3D preview placeholder marker (see AInteriorConnectorMarker) and assigns it to
+	// Node.MarkerActor, then calls RebuildConnectorMarker to actually build it - called from every
+	// site that does NavNodes.Add() (the JSON load path, PlaceConnectorNode, SetConnectorFloors).
+	// No-op for PathNode (nothing to spawn) or if Building/Generator aren't available.
+	void SpawnConnectorMarker(FInteriorNavNode& Node, APolyBuilding* Building);
+
+	// Rebuilds Node.MarkerActor's mesh from Node's current Position/Level/RotationDegrees/SizeScale
+	// and hides it if Node.Level isn't the currently active floor - called by SpawnConnectorMarker
+	// right after spawning (initial build) and by RotateConnectorGroup/ScaleConnectorGroup (in-place
+	// rebuild of an existing marker, no respawn). No-op if Node.MarkerActor is null.
+	void RebuildConnectorMarker(FInteriorNavNode& Node, APolyBuilding* Building) const;
+
+	// See ScaleConnectorGroup.
+	static constexpr float MinConnectorScale = 0.5f;
+	static constexpr float MaxConnectorScale = 2.0f;
 
 	UPROPERTY()
 	ABuildingGenerator* Generator;
