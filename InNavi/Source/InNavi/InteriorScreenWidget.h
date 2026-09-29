@@ -553,11 +553,18 @@ private:
 	// action the user already performs, not saved continuously on every drag.
 	void SaveDockLayoutToDisk() const;
 
-	// Called once from InitializeDefaultDockLayout - if a previously-saved layout file exists,
-	// applies it and returns true (InitializeDefaultDockLayout then skips its own placement guesses
-	// entirely); returns false if there's nothing saved yet (first-ever run), leaving
-	// InitializeDefaultDockLayout to fall back to its normal default placement.
+	// Called once from InitializeDefaultDockLayout - tries the user's own saved layout first, then
+	// falls back to the team's shipped default arrangement (see TryLoadDockLayoutFromFile's own
+	// comment), applying whichever one actually exists and returning true; returns false only if
+	// neither file is usable, leaving InitializeDefaultDockLayout to fall back to
+	// GetDefaultPanelPosition's per-panel guesses.
 	bool LoadDockLayoutFromDisk();
+
+	// Shared by LoadDockLayoutFromDisk for both the per-user save (InteriorEditorLayout.json under
+	// Saved/) and the team's shipped default (DefaultInteriorLayout.json under Data/) - same file
+	// format, same layoutVersion check, same ApplyLayoutSaveData/PendingSavedLayoutToReapply handling
+	// either way, just a different path.
+	bool TryLoadDockLayoutFromFile(const FString& FilePath);
 
 	TSharedPtr<FJsonObject> BuildLayoutSaveData() const;
 

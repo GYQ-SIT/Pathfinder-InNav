@@ -2543,12 +2543,12 @@ void UInteriorScreenWidget::SaveDockLayoutToDisk() const
 	FFileHelper::SaveStringToFile(OutputString, *(FPaths::ProjectSavedDir() / TEXT("InteriorEditorLayout.json")));
 }
 
-bool UInteriorScreenWidget::LoadDockLayoutFromDisk()
+bool UInteriorScreenWidget::TryLoadDockLayoutFromFile(const FString& FilePath)
 {
 	FString FileContents;
-	if (!FFileHelper::LoadFileToString(FileContents, *(FPaths::ProjectSavedDir() / TEXT("InteriorEditorLayout.json"))))
+	if (!FFileHelper::LoadFileToString(FileContents, *FilePath))
 	{
-		return false; // nothing saved yet
+		return false; // nothing there
 	}
 
 	TSharedPtr<FJsonObject> Root;
@@ -2581,6 +2581,22 @@ bool UInteriorScreenWidget::LoadDockLayoutFromDisk()
 	}
 
 	return true;
+}
+
+bool UInteriorScreenWidget::LoadDockLayoutFromDisk()
+{
+	if (TryLoadDockLayoutFromFile(FPaths::ProjectSavedDir() / TEXT("InteriorEditorLayout.json")))
+	{
+		return true;
+	}
+
+	// No per-user save yet (first launch on this machine) - fall back to the team's own shipped
+	// arrangement instead of GetDefaultPanelPosition's generic spread, so a first-time user already
+	// sees the layout the team actually works with. Committed under Data/ (unlike Saved/, which is
+	// gitignored and per-machine) specifically so every machine ships with it, and stored in the exact
+	// same viewport-fraction format as a real save, so it already adapts to whatever screen this first
+	// launch happens to be on rather than being tied to whichever screen it was originally arranged on.
+	return TryLoadDockLayoutFromFile(FPaths::ProjectDir() / TEXT("Data") / TEXT("DefaultInteriorLayout.json"));
 }
 
 FEventReply UInteriorScreenWidget::HandlePanelMouseButtonDown(EDockPanelId Id, const FPointerEvent& MouseEvent)
