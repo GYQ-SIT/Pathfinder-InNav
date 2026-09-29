@@ -8,6 +8,11 @@ public class InNavi : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
+		// Runtime audio (see WavFileLoader.h and ANavPlayerController::PlayWavFile) reads/decodes .wav
+		// files itself via FFileHelper + USoundWaveProcedural, both already covered by Engine - no
+		// audio-specific module needed. (An earlier pass vendored a third-party mp3-decoding plugin
+		// here, back when mp3 support was a hard requirement; removed once wav-only was confirmed
+		// sufficient - see docs/deliverables.md.)
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "Json", "JsonUtilities", "ProceduralMeshComponent", "UMG" });
 
 		// DesktopPlatform: native "open file" dialog for importing building data.

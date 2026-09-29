@@ -64,6 +64,31 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	TArray<APolyBuilding*> GetAllBuildings() const;
 
+	// Every currently-spawned building's id, in no particular order - for a building-switcher
+	// dropdown to list, since ids (not names) are what LoadInteriorForBuilding takes.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	TArray<FString> GetAllBuildingIds() const;
+
+	// Reads a building's current human-readable name - mirrors AInteriorGenerator::GetRoomName.
+	// Returns an empty string if no building with that id exists.
+	UFUNCTION(BlueprintPure, Category = "Building")
+	FString GetBuildingName(const FString& BuildingId) const;
+
+	// Renames a building. Names (not just ids) need to be unique across all buildings - a
+	// building-switcher dropdown shows/picks by name, so a collision would make that ambiguous
+	// (same reasoning as AInteriorGenerator::SetRoomName for rooms/walls). Returns false if no
+	// building with that id exists, or if NewName is already used by a different building.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	bool SetBuildingName(const FString& BuildingId, const FString& NewName);
+
+	// Resolves a building's current display name back to its stable id - what a building-switcher
+	// dropdown's "apply selection" should call before feeding the result to
+	// LoadInteriorForBuilding, since the dropdown's options are names, not ids (mirrors
+	// NavPlayerController::SetSelectedDoorConnectsTo's name-to-id resolution for rooms). Returns
+	// an empty string if no building currently has that name.
+	UFUNCTION(BlueprintPure, Category = "Building")
+	FString FindBuildingIdByName(const FString& Name) const;
+
 	// Writes every currently-spawned building back out as a buildings.json-format file (the same
 	// schema LoadBuildingsFromFile reads) - the "Save" side of the Open/New + Ctrl+S save flow
 	// (see NavPlayerController::SaveCurrentProject). Each building's stored interior data (see

@@ -12,6 +12,7 @@
 #include "EngineUtils.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
+#include "Engine/Texture2D.h"
 
 void UInteriorFloorPlanWidget::NativeConstruct()
 {
@@ -31,6 +32,20 @@ void UInteriorFloorPlanWidget::NativeConstruct()
 		}
 		PlayerController = Cast<ANavPlayerController>(World->GetFirstPlayerController());
 	}
+
+	auto LoadConnectorIcon = [](const TCHAR* AssetPath, TObjectPtr<UTexture2D>& OutTexture, FSlateBrush& OutBrush)
+	{
+		OutTexture = LoadObject<UTexture2D>(nullptr, AssetPath);
+		if (OutTexture)
+		{
+			OutBrush.SetResourceObject(OutTexture);
+			OutBrush.ImageSize = FVector2D(OutTexture->GetSizeX(), OutTexture->GetSizeY());
+			OutBrush.DrawAs = ESlateBrushDrawType::Image;
+		}
+	};
+	LoadConnectorIcon(TEXT("/Game/ImageAssets/Icon_AddElevator.Icon_AddElevator"), ElevatorIconTexture, ElevatorIconBrush);
+	LoadConnectorIcon(TEXT("/Game/ImageAssets/Icon_AddStairs.Icon_AddStairs"), StairsIconTexture, StairsIconBrush);
+	LoadConnectorIcon(TEXT("/Game/ImageAssets/Icon_AddEscalator.Icon_AddEscalator"), EscalatorIconTexture, EscalatorIconBrush);
 
 	UE_LOG(LogTemp, Warning,
 		TEXT("[Navigation] Floor-plan constructed: PlayerController=%s Generator=%s Interior=%s BuildingId=%s Floor=%d"),
@@ -768,6 +783,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		};
 
 	// ---- Building boundary ----
+	if (!PlayerController || PlayerController->IsBoundaryVisible())
 	{
 		TArray<FVector2D> LinePoints;
 		for (const FVector2D& Point : Building->GetFootprint())
@@ -789,6 +805,20 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		if (!Room)
 		{
 			continue;
+		}
+
+		// Layers panel per-category/per-item visibility (see ANavPlayerController::AreRoomsVisible/
+		// AreWallsVisible/IsRoomHidden) - Rooms and Walls are separate categories despite sharing this
+		// one loop, split by IsClosedLoop() same as everywhere else that distinguishes them. A hidden
+		// room's door(s) are drawn as part of this same loop iteration, so skipping the room here
+		// already hides them too, no separate check needed.
+		if (PlayerController)
+		{
+			const bool bCategoryVisible = Room->IsClosedLoop() ? PlayerController->AreRoomsVisible() : PlayerController->AreWallsVisible();
+			if (!bCategoryVisible || PlayerController->IsRoomHidden(Room->RoomId))
+			{
+				continue;
+			}
 		}
 
 		const TArray<FVector2D>& Footprint = Room->GetFootprint();
@@ -874,10 +904,8 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 	// ---- Connectors (elevator/stairs/escalator) on the active floor ----
 	if (PlayerController)
 	{
-		// Placeholder box per type for now, distinguished only by color - swapping in real icons
-		// later only means changing what's drawn here, nothing about how nodes are found/selected.
-		const FSlateBrush* ConnectorBrush = FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox"));
-		constexpr float ConnectorSize = 14.f;
+		constexpr float ConnectorSize = 20.f;
+		const FSlateBrush* FallbackBrush = FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox")); // PathNode only - no icon for it yet
 		const FString SelectedConnectorGroupId = PlayerController->GetSelectedConnectorGroupId();
 
 		for (const FInteriorNavNode& Node : InteriorGen->GetNavNodes())
@@ -887,22 +915,49 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 				continue;
 			}
 
-			FLinearColor NodeColor;
+			// Layers panel per-category/per-item visibility - Path Nodes and I/O Nodes (elevator/
+			// stairs/escalator) are separate categories despite sharing this one loop/array.
+			const bool bIsPathNode = Node.Type == EInteriorNavNodeType::PathNode;
+			if (bIsPathNode
+				? (!PlayerController->ArePathNodesVisible() || PlayerController->IsPathNodeHidden(Node.Id))
+				: (!PlayerController->AreIONodesVisible() || PlayerController->IsIONodeHidden(Node.Id)))
+			{
+				continue;
+			}
+
+			const FSlateBrush* IconBrush = FallbackBrush;
+			FLinearColor NodeColor = FLinearColor(0.6f, 0.6f, 0.6f, 1.f);
 			switch (Node.Type)
 			{
-			case EInteriorNavNodeType::Elevator:  NodeColor = FLinearColor(0.2f, 0.6f, 1.f, 1.f); break;
-			case EInteriorNavNodeType::Stairs:    NodeColor = FLinearColor(0.7f, 0.3f, 1.f, 1.f); break;
-			case EInteriorNavNodeType::Escalator: NodeColor = FLinearColor(0.2f, 0.85f, 0.5f, 1.f); break;
-			default:                              NodeColor = FLinearColor(0.6f, 0.6f, 0.6f, 1.f); break; // PathNode
-			}
-			if (!SelectedConnectorGroupId.IsEmpty() && Node.ConnectorGroupId == SelectedConnectorGroupId)
-			{
-				NodeColor = FLinearColor(1.f, 0.15f, 0.15f, 1.f);
+			case EInteriorNavNodeType::Elevator:  IconBrush = &ElevatorIconBrush;  NodeColor = FLinearColor::White; break;
+			case EInteriorNavNodeType::Stairs:    IconBrush = &StairsIconBrush;    NodeColor = FLinearColor::White; break;
+			case EInteriorNavNodeType::Escalator: IconBrush = &EscalatorIconBrush; NodeColor = FLinearColor::White; break;
+			default: break; // PathNode - keep the plain gray box
 			}
 
 			const FVector2D MarkerLocal = WorldToLocal((Node.Position + Building->BuildingOffset) * Scale);
-			const FPaintGeometry MarkerGeometry = AllottedGeometry.ToPaintGeometry(FVector2f(ConnectorSize, ConnectorSize), FSlateLayoutTransform(MarkerLocal - FVector2D(ConnectorSize * 0.5f, ConnectorSize * 0.5f)));
-			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 2, MarkerGeometry, ConnectorBrush, ESlateDrawEffect::None, NodeColor);
+			// Same SizeScale multiplier the 3D marker's footprint uses (see AInteriorConnectorMarker::
+			// BuildMarker) - PathNode's SizeScale is always 1 (see GetConnectorFootprintCorners/
+			// FInteriorNavNode's own default), so this is a no-op for the plain gray box.
+			const float ScaledConnectorSize = ConnectorSize * Node.SizeScale;
+			const bool bSelected = !SelectedConnectorGroupId.IsEmpty() && Node.ConnectorGroupId == SelectedConnectorGroupId;
+			if (bSelected)
+			{
+				// The icon's own color no longer distinguishes selected/not, so draw a highlight
+				// square behind it instead - same red used for every other selection highlight.
+				const float HighlightSize = ScaledConnectorSize + 8.f;
+				const FPaintGeometry HighlightGeometry = AllottedGeometry.ToPaintGeometry(FVector2f(HighlightSize, HighlightSize), FSlateLayoutTransform(MarkerLocal - FVector2D(HighlightSize * 0.5f, HighlightSize * 0.5f)));
+				FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 2, HighlightGeometry, FallbackBrush, ESlateDrawEffect::None, FLinearColor(1.f, 0.15f, 0.15f, 1.f));
+			}
+
+			const FPaintGeometry MarkerGeometry = AllottedGeometry.ToPaintGeometry(FVector2f(ScaledConnectorSize, ScaledConnectorSize), FSlateLayoutTransform(MarkerLocal - FVector2D(ScaledConnectorSize * 0.5f, ScaledConnectorSize * 0.5f)));
+			// Rotated around the icon's own center (RelativeToElement space, so half its own size,
+			// not MarkerLocal) by the same RotationDegrees the 3D marker uses (see
+			// AInteriorConnectorMarker::BuildMarker/GetConnectorFootprintCorners) - kept in radians
+			// only for this one call, degrees everywhere else in this codebase's own convention.
+			FSlateDrawElement::MakeRotatedBox(OutDrawElements, LayerId + 3, MarkerGeometry, IconBrush, ESlateDrawEffect::None,
+				FMath::DegreesToRadians(Node.RotationDegrees), FVector2f(ScaledConnectorSize, ScaledConnectorSize) * 0.5f,
+				FSlateDrawElement::RelativeToElement, NodeColor);
 		}
 	}
 

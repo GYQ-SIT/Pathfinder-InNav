@@ -1,27 +1,17 @@
-﻿#include "NavigationPanelWidget.h"
+#include "NavigationPanelWidget.h"
 
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
+#include "InteriorRoom.h"
 #include "PolyBuilding.h"
-#include "Blueprint/WidgetLayoutLibrary.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
-#include "Components/Button.h"
 #include "Components/CanvasPanel.h"
-#include "Components/CanvasPanelSlot.h"
-#include "Components/SizeBox.h"
-#include "Components/TextBlock.h"
-#include "Components/VerticalBox.h"
-#include "Components/VerticalBoxSlot.h"
 #include "Framework/Application/SlateApplication.h"
 #include "InputCoreTypes.h"
 
 namespace
 {
-	const FLinearColor InactiveButtonColor(0.12f, 0.18f, 0.28f, 1.f);
-	const FLinearColor ActiveStartColor(0.08f, 0.55f, 0.22f, 1.f);
-	const FLinearColor ActiveDestinationColor(0.72f, 0.12f, 0.12f, 1.f);
-
 	FString ConnectorTypeName(EInteriorNavNodeType Type)
 	{
 		switch (Type)
@@ -32,136 +22,71 @@ namespace
 		default: return TEXT("connector");
 		}
 	}
+
+	// Area-weighted centroid ("center of mass") of a simple polygon - the standard formula, correct
+	// for any convex OR concave shape, not just a vertex average or bounding-box center (either of
+	// which can land badly off-center, or even outside the shape entirely, on an irregular room).
+	// Falls back to a plain vertex average only for a degenerate footprint (fewer than 3 points, or
+	// zero signed area) where the area formula can't be used at all.
+	FVector2D ComputePolygonCentroid(const TArray<FVector2D>& Footprint)
+	{
+		if (Footprint.Num() == 0)
+		{
+			return FVector2D::ZeroVector;
+		}
+
+		auto VertexAverage = [&Footprint]() -> FVector2D
+		{
+			FVector2D Sum = FVector2D::ZeroVector;
+			for (const FVector2D& Point : Footprint)
+			{
+				Sum += Point;
+			}
+			return Sum / Footprint.Num();
+		};
+
+		if (Footprint.Num() < 3)
+		{
+			return VertexAverage();
+		}
+
+		double SignedArea = 0.0;
+		double Cx = 0.0;
+		double Cy = 0.0;
+		for (int32 Index = 0; Index < Footprint.Num(); ++Index)
+		{
+			const FVector2D& P0 = Footprint[Index];
+			const FVector2D& P1 = Footprint[(Index + 1) % Footprint.Num()];
+			const double Cross = (double)P0.X * P1.Y - (double)P1.X * P0.Y;
+			SignedArea += Cross;
+			Cx += (P0.X + P1.X) * Cross;
+			Cy += (P0.Y + P1.Y) * Cross;
+		}
+		SignedArea *= 0.5;
+		if (FMath::IsNearlyZero(SignedArea))
+		{
+			return VertexAverage();
+		}
+
+		Cx /= (6.0 * SignedArea);
+		Cy /= (6.0 * SignedArea);
+		return FVector2D((float)Cx, (float)Cy);
+	}
 }
 
 TSharedRef<SWidget> UNavigationPanelWidget::RebuildWidget()
 {
+	// No UI of its own any more - UInteriorScreenWidget's own Navigation dock panel is the
+	// presentation layer (see RefreshNavigationPanelDisplay). Still needs a root widget since this
+	// stays a UUserWidget added to the viewport by ANavPlayerController.
 	if (WidgetTree && !WidgetTree->RootWidget)
 	{
 		UCanvasPanel* Canvas = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("NavigationCanvas"));
 		Canvas->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 		WidgetTree->RootWidget = Canvas;
-
-		PanelBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("NavigationPanel"));
-		PanelBorder->SetBrushColor(FLinearColor(0.02f, 0.04f, 0.08f, 0.94f));
-		PanelBorder->SetPadding(FMargin(14.f));
-		PanelCanvasSlot = Canvas->AddChildToCanvas(PanelBorder);
-		PanelCanvasSlot->SetAnchors(FAnchors(1.f, 0.f));
-		PanelCanvasSlot->SetAlignment(FVector2D(1.f, 0.f));
-		PanelCanvasSlot->SetPosition(FVector2D(-20.f, 20.f));
-		PanelCanvasSlot->SetAutoSize(true);
-
-		PanelSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("NavigationPanelSize"));
-		PanelSizeBox->SetWidthOverride(340.f);
-		PanelBorder->SetContent(PanelSizeBox);
-
-		UVerticalBox* Controls = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("NavigationControls"));
-		PanelSizeBox->SetContent(Controls);
-
-		auto AddText = [this, Controls](const TCHAR* Name, const FString& Value,
-			const FLinearColor& Color, int32 FontSize) -> UTextBlock*
-			{
-				UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(Name));
-				Text->SetText(FText::FromString(Value));
-				Text->SetColorAndOpacity(FSlateColor(Color));
-				Text->SetAutoWrapText(true);
-				FSlateFontInfo Font = Text->GetFont();
-				Font.Size = FontSize;
-				Text->SetFont(Font);
-				UVerticalBoxSlot* Slot = Controls->AddChildToVerticalBox(Text);
-				Slot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
-				return Text;
-			};
-
-		AddText(TEXT("Txt_NavigationTitle"), TEXT("Navigation"), FLinearColor::White, 20);
-		ContextText = AddText(TEXT("Txt_NavigationContext"), TEXT("No building loaded"),
-			FLinearColor(0.7f, 0.78f, 0.88f, 1.f), 12);
-
-		auto AddButton = [this, Controls](const TCHAR* ButtonName, const TCHAR* Label,
-			UTextBlock*& OutLabel) -> UButton*
-			{
-				UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(ButtonName));
-				UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(),
-					FName(FString(ButtonName) + TEXT("Label")));
-				Text->SetText(FText::FromString(FString(Label)));
-				Text->SetJustification(ETextJustify::Center);
-				Text->SetAutoWrapText(true);
-				Button->SetContent(Text);
-				Button->SetBackgroundColor(InactiveButtonColor);
-				UVerticalBoxSlot* Slot = Controls->AddChildToVerticalBox(Button);
-				Slot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-				OutLabel = Text;
-				return Button;
-			};
-
-		UTextBlock* UnusedFindLabel = nullptr;
-		UTextBlock* UnusedClearLabel = nullptr;
-		SetStartButton = AddButton(TEXT("Btn_SetStart"), TEXT("Set Start"), SetStartButtonLabel);
-		SetDestinationButton = AddButton(TEXT("Btn_SetDestination"), TEXT("Set Destination"), SetDestinationButtonLabel);
-		FindRouteButton = AddButton(TEXT("Btn_FindRoute"), TEXT("Find Route"), UnusedFindLabel);
-		ClearRouteButton = AddButton(TEXT("Btn_ClearRoute"), TEXT("Clear Route"), UnusedClearLabel);
-
-		StatusText = AddText(TEXT("Txt_Status"), TEXT("Choose Set Start or Set Destination."),
-			FLinearColor(0.55f, 0.82f, 1.f, 1.f), 13);
-		RouteDetailsText = AddText(TEXT("Txt_RouteDetails"), FString(),
-			FLinearColor(0.45f, 0.92f, 1.f, 1.f), 12);
 	}
 
 	return Super::RebuildWidget();
-}
-
-void UNavigationPanelWidget::NativeConstruct()
-{
-	Super::NativeConstruct();
-
-	UE_LOG(LogTemp, Warning,
-		TEXT("[Navigation] Panel constructed: Start=%s Destination=%s Find=%s Clear=%s"),
-		SetStartButton ? TEXT("valid") : TEXT("NULL"),
-		SetDestinationButton ? TEXT("valid") : TEXT("NULL"),
-		FindRouteButton ? TEXT("valid") : TEXT("NULL"),
-		ClearRouteButton ? TEXT("valid") : TEXT("NULL"));
-
-	// Bind each button independently. One missing optional control must not prevent
-	// Set Start and Set Destination from receiving their click handlers.
-	if (SetStartButton)
-	{
-		SetStartButton->OnClicked.AddUniqueDynamic(this, &UNavigationPanelWidget::OnSetStartClicked);
-	}
-	if (SetDestinationButton)
-	{
-		SetDestinationButton->OnClicked.AddUniqueDynamic(this, &UNavigationPanelWidget::OnSetDestinationClicked);
-	}
-	if (FindRouteButton)
-	{
-		FindRouteButton->OnClicked.AddUniqueDynamic(this, &UNavigationPanelWidget::OnFindRouteClicked);
-	}
-	if (ClearRouteButton)
-	{
-		ClearRouteButton->OnClicked.AddUniqueDynamic(this, &UNavigationPanelWidget::OnClearRouteClicked);
-	}
-
-	RefreshControls();
-}
-
-void UNavigationPanelWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
-{
-	Super::NativeTick(MyGeometry, InDeltaTime);
-
-	const int32 ActiveFloor = Interior ? Interior->GetActiveFloor() : INDEX_NONE;
-	const FString BuildingId = Interior ? Interior->GetLoadedBuildingId() : FString();
-	const FVector2D ViewportSize = UWidgetLayoutLibrary::GetViewportSize(this);
-	const float DesiredWidth = FMath::Clamp(ViewportSize.X * 0.28f, 260.f, 360.f);
-	if (PanelSizeBox && !FMath::IsNearlyEqual(LastPanelWidth, DesiredWidth, 1.f))
-	{
-		PanelSizeBox->SetWidthOverride(DesiredWidth);
-		LastPanelWidth = DesiredWidth;
-	}
-	if (ActiveFloor != LastDisplayedFloor || BuildingId != LastDisplayedBuildingId)
-	{
-		LastDisplayedFloor = ActiveFloor;
-		LastDisplayedBuildingId = BuildingId;
-		RefreshControls();
-	}
 }
 
 FReply UNavigationPanelWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
@@ -175,9 +100,9 @@ FReply UNavigationPanelWidget::NativeOnKeyDown(const FGeometry& InGeometry, cons
 	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
 }
 
-void UNavigationPanelWidget::OnSetStartClicked()
+void UNavigationPanelWidget::ToggleSelectStart()
 {
-	UE_LOG(LogTemp, Warning, TEXT("[Navigation] Set Start button clicked; previous mode=%d"),
+	UE_LOG(LogTemp, Warning, TEXT("[Navigation] Set Start requested; previous mode=%d"),
 		static_cast<int32>(SelectionMode));
 
 	if (SelectionMode == ENavigationSelectionMode::Start)
@@ -190,9 +115,9 @@ void UNavigationPanelWidget::OnSetStartClicked()
 	}
 }
 
-void UNavigationPanelWidget::OnSetDestinationClicked()
+void UNavigationPanelWidget::ToggleSelectDestination()
 {
-	UE_LOG(LogTemp, Warning, TEXT("[Navigation] Set Destination button clicked; previous mode=%d"),
+	UE_LOG(LogTemp, Warning, TEXT("[Navigation] Set Destination requested; previous mode=%d"),
 		static_cast<int32>(SelectionMode));
 
 	if (SelectionMode == ENavigationSelectionMode::Destination)
@@ -205,7 +130,7 @@ void UNavigationPanelWidget::OnSetDestinationClicked()
 	}
 }
 
-void UNavigationPanelWidget::OnClearRouteClicked()
+void UNavigationPanelWidget::RequestClearRoute()
 {
 	ClearAll();
 	SetStatusMessage(TEXT("Route and selected points cleared."), ENavigationMessageKind::Success);
@@ -220,7 +145,7 @@ void UNavigationPanelWidget::SetNavigationContext(ABuildingGenerator* InGenerato
 		Interior ? TEXT("valid") : TEXT("NULL"),
 		Interior ? *Interior->GetLoadedBuildingId() : TEXT("<none>"),
 		Interior ? Interior->GetActiveFloor() : INDEX_NONE);
-	RefreshControls();
+	BroadcastStateChanged();
 }
 
 void UNavigationPanelWidget::SelectPoint(FVector2D FootprintPosition, int32 Floor)
@@ -267,6 +192,7 @@ void UNavigationPanelWidget::SelectPoint(FVector2D FootprintPosition, int32 Floo
 	Endpoint.Point.Floor = Floor;
 	Endpoint.BuildingId = Building->BuildingId;
 	RoutePoints.Reset();
+	bLastFindRouteFailed = false;
 	const bool bWasSelectingStart = SelectionMode == ENavigationSelectionMode::Start;
 	const FString EndpointName = bWasSelectingStart ? TEXT("Start") : TEXT("Destination");
 	const FString AcceptedMessage = bWasSelectingStart
@@ -279,7 +205,90 @@ void UNavigationPanelWidget::SelectPoint(FVector2D FootprintPosition, int32 Floo
 	SetStatusMessage(AcceptedMessage, ENavigationMessageKind::Success);
 }
 
-void UNavigationPanelWidget::OnFindRouteClicked()
+TArray<UNavigationPanelWidget::FNavigationRoomOption> UNavigationPanelWidget::GetSelectableRooms() const
+{
+	TArray<FNavigationRoomOption> Options;
+	if (!Generator || !Interior || Interior->GetLoadedBuildingId().IsEmpty())
+	{
+		return Options;
+	}
+	APolyBuilding* Building = Generator->FindBuildingById(Interior->GetLoadedBuildingId());
+	if (!Building)
+	{
+		return Options;
+	}
+
+	for (int32 Floor = 1; Floor <= Building->GetFloorCount(); ++Floor)
+	{
+		for (AInteriorRoom* Room : Interior->GetRoomsOnFloor(Floor))
+		{
+			// Walls/standalone partitions share the same class and id namespace as real rooms (see
+			// AInteriorRoom::IsClosedLoop) - only closed-loop ones are actual rooms a person can
+			// stand in.
+			if (!Room || !Room->IsClosedLoop())
+			{
+				continue;
+			}
+			FNavigationRoomOption Option;
+			Option.RoomName = Room->RoomName.IsEmpty() ? Room->RoomId : Room->RoomName;
+			Option.Floor = Floor;
+			Option.Centroid = ComputePolygonCentroid(Room->GetFootprint());
+			Options.Add(Option);
+		}
+	}
+	return Options;
+}
+
+bool UNavigationPanelWidget::SetStartToRoom(const FString& RoomOptionLabel)
+{
+	return SetEndpointToRoom(RoomOptionLabel, true);
+}
+
+bool UNavigationPanelWidget::SetDestinationToRoom(const FString& RoomOptionLabel)
+{
+	return SetEndpointToRoom(RoomOptionLabel, false);
+}
+
+bool UNavigationPanelWidget::SetEndpointToRoom(const FString& RoomOptionLabel, bool bIsStart)
+{
+	const TArray<FNavigationRoomOption> Options = GetSelectableRooms();
+	const FNavigationRoomOption* Found = Options.FindByPredicate([&RoomOptionLabel](const FNavigationRoomOption& Option)
+	{
+		return Option.GetDisplayLabel() == RoomOptionLabel;
+	});
+	if (!Found)
+	{
+		SetStatusMessage(TEXT("Could not find that room."), ENavigationMessageKind::Error);
+		return false;
+	}
+
+	APolyBuilding* Building = Generator ? Generator->FindBuildingById(Interior->GetLoadedBuildingId()) : nullptr;
+	FString Error;
+	if (!Building || !FNavigationRoutePlanner::IsValidPoint(*Building, *Interior, Generator->GetScale(),
+		Found->Floor, Found->Centroid, Error))
+	{
+		SetStatusMessage(FString::Printf(TEXT("'%s''s center isn't reachable (%s) - try clicking a point inside it instead."),
+			*Found->RoomName, *Error), ENavigationMessageKind::Error);
+		return false;
+	}
+
+	// A dropdown pick is a direct, immediate set - cancel any in-progress click-to-pick rather than
+	// leaving it dangling.
+	SelectionMode = ENavigationSelectionMode::None;
+
+	FSelectedEndpoint& Endpoint = bIsStart ? Start : Destination;
+	Endpoint.bValid = true;
+	Endpoint.Point.Position = Found->Centroid;
+	Endpoint.Point.Floor = Found->Floor;
+	Endpoint.BuildingId = Building->BuildingId;
+	RoutePoints.Reset();
+	bLastFindRouteFailed = false;
+	SetStatusMessage(FString::Printf(TEXT("%s set to '%s'."), bIsStart ? TEXT("Start") : TEXT("Destination"), *Found->RoomName),
+		ENavigationMessageKind::Success);
+	return true;
+}
+
+void UNavigationPanelWidget::RequestFindRoute()
 {
 	if (!Generator || !Interior || !Start.bValid || !Destination.bValid
 		|| Start.BuildingId != Destination.BuildingId
@@ -302,11 +311,13 @@ void UNavigationPanelWidget::OnFindRouteClicked()
 		Destination.Point.Position, Result))
 	{
 		RoutePoints.Reset();
+		bLastFindRouteFailed = true;
 		SetStatusMessage(Result.Error, ENavigationMessageKind::Warning);
 		return;
 	}
 
 	RoutePoints = MoveTemp(Result.Points);
+	bLastFindRouteFailed = false;
 	SetStatusMessage(FString::Printf(TEXT("Route found: %d points."), RoutePoints.Num()),
 		ENavigationMessageKind::Success);
 }
@@ -317,9 +328,10 @@ void UNavigationPanelWidget::ClearAll()
 	Start = FSelectedEndpoint();
 	Destination = FSelectedEndpoint();
 	RoutePoints.Reset();
+	bLastFindRouteFailed = false;
 	StatusMessage.Empty();
 	StatusKind = ENavigationMessageKind::Instruction;
-	RefreshControls();
+	BroadcastStateChanged();
 }
 
 void UNavigationPanelWidget::CancelSelection()
@@ -336,84 +348,47 @@ void UNavigationPanelWidget::SetSelectionMode(ENavigationSelectionMode NewMode)
 	SelectionMode = NewMode;
 	StatusMessage.Empty();
 	StatusKind = ENavigationMessageKind::Instruction;
-	RefreshControls();
+	BroadcastStateChanged();
 }
 
 void UNavigationPanelWidget::SetStatusMessage(const FString& Message, ENavigationMessageKind Kind)
 {
 	StatusMessage = Message;
 	StatusKind = Kind;
-	RefreshControls();
+	BroadcastStateChanged();
 }
 
-void UNavigationPanelWidget::RefreshControls()
+void UNavigationPanelWidget::BroadcastStateChanged()
 {
-	if (FindRouteButton)
+	OnStateChanged.Broadcast();
+}
+
+bool UNavigationPanelWidget::CanFindRoute() const
+{
+	return Start.bValid && Destination.bValid && Interior
+		&& Start.BuildingId == Destination.BuildingId
+		&& Start.BuildingId == Interior->GetLoadedBuildingId();
+}
+
+bool UNavigationPanelWidget::CanClearRoute() const
+{
+	return IsSelectingPoint() || Start.bValid || Destination.bValid || !RoutePoints.IsEmpty();
+}
+
+FString UNavigationPanelWidget::GetDisplayStatusMessage() const
+{
+	if (!StatusMessage.IsEmpty())
 	{
-		FindRouteButton->SetIsEnabled(Start.bValid && Destination.bValid && Interior
-			&& Start.BuildingId == Destination.BuildingId
-			&& Start.BuildingId == Interior->GetLoadedBuildingId());
+		return StatusMessage;
 	}
-	if (ClearRouteButton)
+	switch (SelectionMode)
 	{
-		ClearRouteButton->SetIsEnabled(IsSelectingPoint() || Start.bValid || Destination.bValid
-			|| !RoutePoints.IsEmpty());
-	}
-	if (SetStartButton)
-	{
-		SetStartButton->SetBackgroundColor(SelectionMode == ENavigationSelectionMode::Start
-			? ActiveStartColor : InactiveButtonColor);
-	}
-	if (SetDestinationButton)
-	{
-		SetDestinationButton->SetBackgroundColor(SelectionMode == ENavigationSelectionMode::Destination
-			? ActiveDestinationColor : InactiveButtonColor);
-	}
-	if (SetStartButtonLabel)
-	{
-		SetStartButtonLabel->SetText(FText::FromString(SelectionMode == ENavigationSelectionMode::Start
-			? TEXT("Click a Start Location (Cancel)") : TEXT("Set Start")));
-	}
-	if (SetDestinationButtonLabel)
-	{
-		SetDestinationButtonLabel->SetText(FText::FromString(
-			SelectionMode == ENavigationSelectionMode::Destination
-			? TEXT("Click a Destination (Cancel)") : TEXT("Set Destination")));
-	}
-	if (ContextText)
-	{
-		const FString BuildingId = Interior ? Interior->GetLoadedBuildingId() : FString();
-		const int32 ActiveFloor = Interior ? Interior->GetActiveFloor() : INDEX_NONE;
-		ContextText->SetText(FText::FromString(BuildingId.IsEmpty()
-			? TEXT("No building loaded")
-			: FString::Printf(TEXT("Building: %s  |  Viewing Floor: %d"), *BuildingId, ActiveFloor)));
-	}
-	if (StatusText)
-	{
-		if (!StatusMessage.IsEmpty())
-		{
-			StatusText->SetText(FText::FromString(StatusMessage));
-		}
-		else
-		{
-			switch (SelectionMode)
-			{
-			case ENavigationSelectionMode::Start:
-				StatusText->SetText(FText::FromString(TEXT("Select a start on the current floor.")));
-				break;
-			case ENavigationSelectionMode::Destination:
-				StatusText->SetText(FText::FromString(TEXT("Select a destination on the current floor.")));
-				break;
-			default:
-				StatusText->SetText(FText::FromString(TEXT("Choose Set Start or Set Destination.")));
-				break;
-			}
-		}
-		StatusText->SetColorAndOpacity(FSlateColor(GetStatusColor()));
-	}
-	if (RouteDetailsText)
-	{
-		RouteDetailsText->SetText(FText::FromString(BuildRouteDetails()));
+	case ENavigationSelectionMode::Start:
+		return TEXT("Select a start on the current floor.");
+	case ENavigationSelectionMode::Destination:
+		return TEXT("Select a destination on the current floor.");
+	default:
+		return TEXT("Choose Set Start or Set Destination.");
 	}
 }
 
@@ -484,6 +459,10 @@ FLinearColor UNavigationPanelWidget::GetStatusColor() const
 
 bool UNavigationPanelWidget::IsPointerOverPanel() const
 {
-	return GetVisibility() == ESlateVisibility::Visible && PanelBorder && FSlateApplication::IsInitialized()
-		&& PanelBorder->GetCachedGeometry().IsUnderLocation(FSlateApplication::Get().GetCursorPos());
+	// The full-screen user widget is SelfHitTestInvisible so WBP_InteriorScreen remains
+	// interactive underneath it. Check general visibility rather than requiring the
+	// exact Visible enum value; only HitTestBorder (UInteriorScreenWidget's own Navigation
+	// dock panel Border - see SetPanelBorderForHitTest) should own pointer input.
+	return IsVisible() && HitTestBorder && FSlateApplication::IsInitialized()
+		&& HitTestBorder->GetCachedGeometry().IsUnderLocation(FSlateApplication::Get().GetCursorPos());
 }

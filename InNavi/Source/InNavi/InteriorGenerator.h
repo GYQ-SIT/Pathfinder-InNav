@@ -9,6 +9,8 @@
 
 class ABuildingGenerator;
 class AInteriorRoom;
+class AInteriorConnectorMarker;
+class APolyBuilding;
 class FJsonObject;
 
 // GC-safe wrapper so RoomsByFloor can be a TMap<int32, ...> - UHT doesn't support a TArray
@@ -128,6 +130,22 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth);
 
+	// Rotates a room/wall's footprint by DeltaDegrees around its own bounding-box center (positive
+	// = counter-clockwise). Rejects (no-op, returns false) if the rotated footprint would extend
+	// outside the building's outline or overlap another room/wall - checked every call (i.e. every
+	// tick while a rotation key is held), same as ResizeRoom/MoveRoom's boundary check. Does NOT
+	// check against connectors (elevator/stairs/escalator) - rotating through one is allowed
+	// mid-gesture; see CommitRoomRotation for the deferred check applied once the key is released.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool RotateRoom(const FString& RoomId, float DeltaDegrees);
+
+	// Call once when a rotation gesture ends (a rotation key is released) - reverts the room to
+	// FallbackFootprint if it ended up walling in a connector (elevator/stairs/escalator), the one
+	// check RotateRoom itself intentionally skips mid-gesture. Mirrors CommitRoomMove's role for a
+	// drag. Returns false (and reverts) if blocked, or if RoomId doesn't exist.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool CommitRoomRotation(const FString& RoomId, const TArray<FVector2D>& FallbackFootprint);
+
 	// Replaces a room/wall's footprint wholesale with NewFootprint (same pre-scale units as
 	// everything else, same point count/winding expected - this is a translate, not a reshape) -
 	// what dragging a selected room on the 2D floor plan canvas calls, recomputing the whole
@@ -204,6 +222,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	FString GetRoomName(const FString& RoomId) const;
 
+	// Whether RoomId is an actual closed room (true) or an open standalone wall (false, drawn via
+	// draw-wall mode) - rooms and walls share this same id namespace/class (see AInteriorRoom::
+	// IsClosedLoop), so a properties panel needs this to tell them apart, e.g. to show "Wall
+	// property" instead of "Room property" for a selected wall. Returns false (same as a wall) if
+	// no room with that id exists.
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool IsRoomClosedLoop(const FString& RoomId) const;
+
 	// Nav nodes (Path Node/Elevator/Stairs/Escalator) for the currently loaded building, all
 	// floors. Data format agreed with the navigation (NavMesh/NavLinks) team - see
 	// FInteriorNavNode's own comment.
@@ -236,6 +262,24 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool SetConnectorFloors(const FString& GroupId, const TArray<int32>& NewConnectsToFloors);
 
+	// Rotates every floor instance of connector GroupId by DeltaDegrees about its own center
+	// (positive = counter-clockwise, same convention as RotateRoom) - they share one orientation
+	// (see FInteriorNavNode::RotationDegrees), so this validates the new footprint on EVERY floor the
+	// connector reaches (building outline, walls, other connectors, other buildings - see
+	// CanPlaceConnectorOnFloor) and only applies it if all of them pass; no partial rotation. Unlike
+	// RotateRoom, there's no deferred/mid-gesture-allowed check to speak of, so this is fully
+	// validated on every call - safe to call every tick while a rotate key/button is held, same usage
+	// pattern as RotateRoom.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool RotateConnectorGroup(const FString& GroupId, float DeltaDegrees);
+
+	// Adjusts every floor instance of connector GroupId's SizeScale by DeltaScale (clamped to
+	// [MinConnectorScale, MaxConnectorScale]) - same all-floors-must-pass validation as
+	// RotateConnectorGroup, and a discrete immediate step (no drag/release split) like
+	// GrowSelectedRoom/ShrinkSelectedRoom's NudgeSelectedRoomSize.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool ScaleConnectorGroup(const FString& GroupId, float DeltaScale);
+
 	// The rooms/walls spawned on a given floor - read-only, for a 2D floor plan renderer to draw
 	// (see UInteriorFloorPlanWidget). Empty if that floor doesn't exist.
 	UFUNCTION(BlueprintPure, Category = "Interior")
@@ -267,11 +311,45 @@ private:
 	// SyncInteriorToBuildingGenerator.
 	TSharedRef<FJsonObject> SerializeCurrentInterior() const;
 
-	// Shared validation behind PlaceConnectorNode and SetConnectorFloors: can a connector sit at
-	// Position on Level - the floor exists, Position is inside the building's outline, and Position
-	// isn't inside a wall's solid thickness there (being inside a room's open interior is fine).
-	// Logs the specific reason on failure.
-	bool CanPlaceConnectorOnFloor(FVector2D Position, int32 Level) const;
+	// Shared validation behind PlaceConnectorNode, SetConnectorFloors, RotateConnectorGroup, and
+	// ScaleConnectorGroup: can a Type connector with this RotationDegrees/SizeScale sit at Position on
+	// Level - the floor exists, and the connector's real 3D footprint (see
+	// GetConnectorFootprintCorners, InteriorTypes.h - the same shape AInteriorConnectorMarker actually
+	// builds, so this and the 3D preview never disagree) fits entirely inside the building's own
+	// outline, doesn't come within half the wall thickness of any room/wall on that floor (being
+	// inside a room's open interior is fine, only overlapping a wall itself is rejected), doesn't
+	// overlap another connector's own footprint on that floor, and doesn't overlap a neighboring
+	// building's own footprint. Logs the specific reason on failure.
+	//
+	// IgnoreGroupId skips nodes belonging to that ConnectorGroupId in the connector-vs-connector
+	// check - needed by RotateConnectorGroup/ScaleConnectorGroup, which re-validate a connector's OWN
+	// existing floor instances against everything else; without it, a connector would always overlap
+	// itself and could never be rotated or scaled in place. Left empty (default) for a brand new
+	// placement, which has no group of its own yet to exclude.
+	bool CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVector2D Position, int32 Level, float RotationDegrees, float SizeScale, const FString& IgnoreGroupId = FString()) const;
+
+	// The reverse of CanPlaceConnectorOnFloor's wall-thickness check: would this room/wall
+	// footprint's own walls end up inside a wall's solid thickness of an existing connector
+	// (elevator/stairs/escalator) on Level - i.e. would creating/moving/resizing/rotating a room
+	// to this footprint bury a connector inside a wall. Used by CreateRoomFromFootprint,
+	// CommitRoomMove, ResizeRoom, and RotateRoom's commit step.
+	bool DoesFootprintBlockConnector(const TArray<FVector2D>& Footprint, bool bClosedLoop, int32 Level) const;
+
+	// Spawns Node's 3D preview placeholder marker (see AInteriorConnectorMarker) and assigns it to
+	// Node.MarkerActor, then calls RebuildConnectorMarker to actually build it - called from every
+	// site that does NavNodes.Add() (the JSON load path, PlaceConnectorNode, SetConnectorFloors).
+	// No-op for PathNode (nothing to spawn) or if Building/Generator aren't available.
+	void SpawnConnectorMarker(FInteriorNavNode& Node, APolyBuilding* Building);
+
+	// Rebuilds Node.MarkerActor's mesh from Node's current Position/Level/RotationDegrees/SizeScale
+	// and hides it if Node.Level isn't the currently active floor - called by SpawnConnectorMarker
+	// right after spawning (initial build) and by RotateConnectorGroup/ScaleConnectorGroup (in-place
+	// rebuild of an existing marker, no respawn). No-op if Node.MarkerActor is null.
+	void RebuildConnectorMarker(FInteriorNavNode& Node, APolyBuilding* Building) const;
+
+	// See ScaleConnectorGroup.
+	static constexpr float MinConnectorScale = 0.5f;
+	static constexpr float MaxConnectorScale = 2.0f;
 
 	UPROPERTY()
 	ABuildingGenerator* Generator;
@@ -285,6 +363,11 @@ private:
 	UPROPERTY()
 	TMap<int32, FInteriorRoomList> RoomsByFloor;
 
+	// Elevator/stairs/escalator/path nodes for the currently loaded building. UPROPERTY() so the
+	// struct's own MarkerActor UPROPERTY() (InteriorTypes.h) is actually reachable by GC reflection -
+	// without it on this containing TArray, UHT has no path down into FInteriorNavNode at all (matches
+	// RoomsByFloor's own UPROPERTY() right above, which this had drifted out of sync with).
+	UPROPERTY()
 	TArray<FInteriorNavNode> NavNodes;
 
 	// Wall defaults per loaded floor, keyed by level - kept around after the JSON parse so

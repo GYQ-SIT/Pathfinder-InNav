@@ -150,6 +150,7 @@ itself.
 | Drag a selected room | `MoveRoomTo(RoomId, const TArray<FVector2D>& NewFootprint)` while dragging, then `CommitRoomMove(RoomId, const TArray<FVector2D>& FallbackFootprint)` once on release | `MoveRoomTo`: call continuously during the drag with the whole footprint translated by the drag delta (not just a position — compute the new footprint yourself each move). No `OnActionFailed` on failure, since it's called every frame of a drag and a stray failure mid-drag shouldn't spam the UI. `CommitRoomMove`: call once when the drag ends, passing the *original* (pre-drag) footprint as `FallbackFootprint` — if the room ended up overlapping something, it's silently reverted to that fallback (this one does broadcast `OnActionFailed`, since it only fires once per drag) |
 | Drag a selected door | `MoveDoor(RoomId, DoorId, float NewOffsetWorldUnits)` | Slides the door along its own edge. Call continuously during the drag, same "no failure spam" reasoning as `MoveRoomTo` |
 | Resize (`=`/`-` keys currently — test-only UX) | `ResizeRoom(RoomId, float NewWidth, float NewDepth)` | Rescales keeping the room centered where it is. Not wired into UMG yet on my side either — this is the general-purpose function to build a real resize UI against later, not urgent |
+| Rotate (hold `9`/`0` currently — test-only UX) | `AInteriorGenerator::RotateRoom(RoomId, float DeltaDegrees)` | Rotates around the room/wall's own center; rejects (no-op) if the result would extend outside the building or overlap another room/wall. Currently only reachable via the held-key input (continuous, 90°/sec) - not yet exposed as a `NavPlayerController` pass-through, so ping me first if you want to build a real rotate UI against it (unlike the rest of this doc, this one still needs a small addition on my side) |
 
 ### 6.1 Room properties panel
 
@@ -157,8 +158,9 @@ Shown when `OnSelectedRoomChanged` fires with a non-empty `RoomId`.
 
 | UI element | Call / bind | Notes |
 |---|---|---|
+| Panel title, populated on open | `IsSelectedRoomClosedLoop()` | Returns `true` for an actual closed room, `false` for an open standalone wall (draw-wall mode) - rooms and walls share this same panel/selection, so use this to show "Room property" vs "Wall property" |
 | Name field, populated on open | `GetSelectedRoomName()` | Empty if nothing is selected |
-| "Apply" button | `SetSelectedRoomName(const FString& NewName)` | Returns `false` (no-op) if nothing is selected |
+| "Apply" button | `SetSelectedRoomName(const FString& NewName)` | Returns `false` if nothing is selected, **or if that name is already used by another room/wall in the building** (names must be unique building-wide, since the door ConnectsTo dropdown resolves a room by its current name - see §6.2). Bind `OnActionFailed` to show the rejection reason |
 
 ### 6.2 Door properties panel
 

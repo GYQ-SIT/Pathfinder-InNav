@@ -86,6 +86,11 @@ public:
 	const TArray<FInteriorOpening>& GetOpenings() const { return CachedOpenings; }
 	bool IsClosedLoop() const { return CachedClosedLoop; }
 
+	// Tints the walls and floor slab to a light green (3D Edit mode's selection indicator, the
+	// equivalent of the 2D floor plan's red outline) when true, back to this room's own normal tint
+	// when false. Mirrors APolyBuilding::SetHighlighted.
+	void SetHighlighted(bool bHighlighted);
+
 private:
 	// Regenerates the mesh from the cached inputs below. Called by both BuildWalls and
 	// SetFloorBaseZ.
@@ -105,4 +110,10 @@ private:
 
 	UPROPERTY()
 	UMaterialInstanceDynamic* DynMaterial;
+
+	// Separate material for the floor slab (section 1, see RebuildMesh) - a distinct, plain tint
+	// from the walls' own DynMaterial rather than sharing it, so the floor and walls read as
+	// different surfaces once the 3D preview mode can actually see both at once.
+	UPROPERTY()
+	UMaterialInstanceDynamic* FloorDynMaterial;
 };

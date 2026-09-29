@@ -45,10 +45,14 @@ public:
 	void SetHighlighted(bool bHighlighted);
 
 	// Shows the given floor's plan by hiding every ceiling from that floor up through the roof
-	// (both visually and its collision, so clicks reach the floor below too) - the walls and every
-	// slab AT or BELOW the given floor stay visible/solid, so you don't see (or click) through into
-	// whatever's underneath. The mesh keeps each floor boundary as its own section (see RebuildMesh)
-	// specifically so this doesn't have to hide the whole building.
+	// (both visually and its collision, so clicks reach the floor below too) - every slab AT or BELOW
+	// the given floor stay visible/solid, so you don't see (or click) through into whatever's
+	// underneath. Also hides every OTHER floor's own exterior wall ring, showing only Level's - the
+	// 2D floor-plan camera never needed this (near-top-down, and hidden behind the 2D overlay anyway),
+	// but the 3D preview camera sits outside the footprint at an oblique angle, where a full-height
+	// wall would otherwise block the view into whichever floor is being looked at. The mesh keeps each
+	// floor boundary as its own section (see RebuildMesh) specifically so this doesn't have to hide the
+	// whole building.
 	// Level must be between 1 and GetFloorCount(); pass 0 to show everything (exterior view).
 	void SetVisibleInteriorLevel(int32 Level);
 
@@ -78,11 +82,21 @@ private:
 	// without it (see ApplySlabVisibility).
 	void BuildCapSection(const TArray<FVector2D>& Poly2D, const TArray<int32>& CapTris, float Z, int32 SectionIndex, bool bCreateCollision);
 
-	// Rebuilds every roof/slab section (visibility AND collision together) based on
-	// VisibleInteriorLevel - called after RebuildMesh (so a floor add/remove reapplies it) and by
-	// SetVisibleInteriorLevel. Uses CachedPoly2D/CachedCapTris rather than needing RebuildMesh to
+	// Builds (or rebuilds) one floor's own exterior wall ring - a box per footprint edge, ZBottom to
+	// ZTop - at the given section index. Same bCreateCollision-must-be-respecified reasoning as
+	// BuildCapSection (recreating is the only way to toggle a section's collision).
+	void BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBottom, float ZTop, int32 SectionIndex, bool bCreateCollision);
+
+	// Rebuilds every roof/slab section AND every floor's wall ring (visibility AND collision together)
+	// based on VisibleInteriorLevel - called after RebuildMesh (so a floor add/remove reapplies it) and
+	// by SetVisibleInteriorLevel. Uses CachedPoly2D/CachedCapTris rather than needing RebuildMesh to
 	// re-triangulate the footprint just to hide one floor.
 	void ApplySlabVisibility();
+
+	// Wall sections live after the cap sections (0 = ground cap, 1..FloorCount = roof/inter-floor
+	// caps - see RebuildMesh) so adding/removing floors never renumbers either group relative to
+	// itself.
+	int32 GetWallSectionIndex(int32 Level) const { return FloorCount + Level; }
 
 	TArray<FVector2D> CachedFootprint;
 	float CachedScale = 1.f;

@@ -2,6 +2,7 @@
 
 
 #include "InteriorRoom.h"
+#include "PolygonGeometryUtils.h"
 #include "ProceduralMeshComponent.h"
 #include "KismetProceduralMeshLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -15,33 +16,6 @@ AInteriorRoom::AInteriorRoom()
 
 	MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	MeshComp->SetCollisionResponseToAllChannels(ECR_Block);
-}
-
-// ---- Helper: append one box (8 logical corners, 6 hard-edged faces) to the mesh arrays. ----
-// Corner naming: P<x><y><z> where x=start/end along the wall edge, y=inner/outer across the wall
-// thickness, z=bottom/top. Each quad below is listed in outward-facing CCW order, verified against
-// the right-handed (Dir, Perp, Up) frame BuildWalls constructs each box in.
-static void AddBox(TArray<FVector>& Vertices, TArray<int32>& Triangles,
-	const FVector& P000, const FVector& P100, const FVector& P010, const FVector& P110,
-	const FVector& P001, const FVector& P101, const FVector& P011, const FVector& P111)
-{
-	auto AddQuad = [&Vertices, &Triangles](const FVector& A, const FVector& B, const FVector& C, const FVector& D)
-	{
-		const int32 Base = Vertices.Num();
-		Vertices.Add(A);
-		Vertices.Add(B);
-		Vertices.Add(C);
-		Vertices.Add(D);
-		Triangles.Add(Base);     Triangles.Add(Base + 1); Triangles.Add(Base + 2);
-		Triangles.Add(Base);     Triangles.Add(Base + 2); Triangles.Add(Base + 3);
-	};
-
-	AddQuad(P000, P001, P011, P010); // start end-cap
-	AddQuad(P100, P110, P111, P101); // end end-cap
-	AddQuad(P000, P100, P101, P001); // inner long face
-	AddQuad(P010, P011, P111, P110); // outer long face
-	AddQuad(P000, P010, P110, P100); // bottom
-	AddQuad(P001, P101, P111, P011); // top
 }
 
 // ---- Helper: for one edge, split [0, EdgeLength] into solid wall spans around its openings. ----
@@ -237,7 +211,7 @@ void AInteriorRoom::RebuildMesh()
 			const float ZBottom = CachedFloorBaseZ + Span.ZBottom;
 			const float ZTop = CachedFloorBaseZ + Span.ZTop;
 
-			AddBox(Vertices, Triangles,
+			AppendWallBox(Vertices, Triangles,
 				FVector(Inner0.X, Inner0.Y, ZBottom), FVector(Inner1.X, Inner1.Y, ZBottom),
 				FVector(Outer0.X, Outer0.Y, ZBottom), FVector(Outer1.X, Outer1.Y, ZBottom),
 				FVector(Inner0.X, Inner0.Y, ZTop),    FVector(Inner1.X, Inner1.Y, ZTop),
@@ -264,6 +238,69 @@ void AInteriorRoom::RebuildMesh()
 		}
 	}
 	MeshComp->SetMaterial(0, DynMaterial);
+
+	// -- Section 1: floor slab - a flat, upward-facing cap of the room's own footprint. Not visible
+	// in the 2D floor plan (that's a UMG overlay drawn on top of an opaque background, not a render
+	// of this mesh), but needed for the 3D preview mode to have an actual floor to look down at
+	// instead of empty space between the walls. Skipped for standalone open walls (CachedClosedLoop
+	// false) - ear clipping needs a closed polygon, and there's no "floor" under a freestanding wall
+	// segment anyway. Hidden/shown together with the walls above for free, since both live on this
+	// same actor (see AInteriorGenerator::SetActiveFloor's per-floor SetActorHiddenInGame).
+	if (CachedClosedLoop)
+	{
+		TArray<int32> CapTris;
+		TriangulatePolygon(Poly2D, CapTris);
+
+		// The ground floor's slab (Level 1, CachedFloorBaseZ == 0) sits exactly coplanar with the
+		// level's own Z=0 ground plane - two flat surfaces sharing a depth means z-fighting, which at
+		// the 3D preview's shallow oblique angle can make the whole slab flicker away to nothing. A
+		// small upward nudge (imperceptible at normal room scale) gives it its own depth so it always
+		// wins against whatever's underneath.
+		constexpr float FloorSlabZOffset = 2.f;
+
+		TArray<FVector> FloorVertices;
+		FloorVertices.Reserve(Poly2D.Num());
+		for (const FVector2D& Point : Poly2D)
+		{
+			FloorVertices.Add(FVector(Point.X, Point.Y, CachedFloorBaseZ + FloorSlabZOffset));
+		}
+
+		TArray<int32> FloorTriangles;
+		FloorTriangles.Reserve(CapTris.Num());
+		// Same winding-flip APolyBuilding::BuildCapSection uses for its own upward-facing roof/slab
+		// sections (TriangulatePolygon's raw output needs this to actually face up once rebuilt into
+		// a section-local vertex buffer) - keep the two in sync if that ever changes.
+		for (int32 i = 0; i < CapTris.Num(); i += 3)
+		{
+			FloorTriangles.Add(CapTris[i]);
+			FloorTriangles.Add(CapTris[i + 2]);
+			FloorTriangles.Add(CapTris[i + 1]);
+		}
+
+		TArray<FVector> FloorNormals;
+		TArray<FVector2D> FloorUV0;
+		TArray<FProcMeshTangent> FloorTangents;
+		UKismetProceduralMeshLibrary::CalculateTangentsForMesh(FloorVertices, FloorTriangles, FloorUV0, FloorNormals, FloorTangents);
+
+		TArray<FColor> FloorVertexColors;
+		MeshComp->CreateMeshSection(1, FloorVertices, FloorTriangles, FloorNormals, FloorUV0, FloorVertexColors, FloorTangents, true);
+
+		if (!FloorDynMaterial)
+		{
+			UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(
+				nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+			if (BaseMat)
+			{
+				FloorDynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
+				FloorDynMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.55f, 0.55f, 0.58f));
+			}
+		}
+		MeshComp->SetMaterial(1, FloorDynMaterial);
+	}
+	else
+	{
+		MeshComp->ClearMeshSection(1);
+	}
 
 	UE_LOG(LogTemp, Warning, TEXT("Built room %s: %d edges, %d verts"), *RoomId, N, Vertices.Num());
 }
