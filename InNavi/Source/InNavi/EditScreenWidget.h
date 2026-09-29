@@ -8,6 +8,7 @@
 
 class UBorder;
 class UButton;
+class UCanvasPanelSlot;
 class UCheckBox;
 class UScrollBox;
 class USlider;
@@ -24,7 +25,9 @@ class UTextBlock;
 //
 // Also has its own top menu bar (File: New/Load; Window: Audio panel visibility) and Audio panel,
 // mirroring UInteriorScreenWidget's own - but this screen has no dockable-panel system at all, so
-// the Audio panel here is just a fixed Border (no drag/resize/dock chrome) and Window only ever
+// the Audio panel here is just a single freely-draggable Border (see AudioDragHandle - same
+// drag-by-a-small-corner-handle-only idea as UInteriorScreenWidget's dock panels, just without any
+// resize/dock/snap/column chrome, since there's only ever the one panel here) and Window only ever
 // has the one Audio entry, not a panel-per-checkbox list. Enter Interior/Back live in this menu
 // bar's own right side (Enter Interior, then Back) instead of the old standalone bottom-right
 // button stack - do NOT confuse this Back (menu-bar chrome, returns to the start screen) with
@@ -42,6 +45,7 @@ protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 private:
 	UFUNCTION()
@@ -129,10 +133,45 @@ private:
 	// Same Play/Stop All/mute-click-sound/file-list layout as UInteriorScreenWidget's own Audio
 	// panel (reuses the same UAudioFileRowWidget class for rows, and the same PC-level
 	// GetAvailableAudioFiles/PlayAudioFile/StopAllAudio/IsButtonClickSoundEnabled functions - none of
-	// that is tied to the interior editor specifically), just a fixed Border with no drag/resize/
-	// dock chrome, since this screen has no dock system to plug into. Starts hidden, same as the
-	// interior editor's own Audio panel.
+	// that is tied to the interior editor specifically), a single freely-draggable Border (see
+	// AudioDragHandle) with no resize/dock/snap/column chrome, since this screen only ever has the
+	// one panel to plug into a dock system for. Starts hidden, same as the interior editor's own
+	// Audio panel.
 	void RefreshAudioList();
+
+	// Sizes AudioDragHandleSlot off AudioTitleText's own rendered size (same reasoning as
+	// UInteriorScreenWidget::GetDockDragHandleSize - GetCachedGeometry is the text's real painted
+	// size, not a pre-paint estimate) and positions it at AudioPanel's current top-left corner, inset
+	// by AudioPanelPadding to match where the title text itself starts. Called once right after
+	// construction, again every tick for AudioDragHandleSettleFrameCount ticks after that (the text
+	// isn't necessarily painted yet on the very first call - same class of staleness
+	// UInteriorScreenWidget hits, see its own LayoutGeometrySettleFramesRemaining), and again on every
+	// drag move (the panel's own position changed, not its size, but the handle must track it too).
+	void RefreshAudioDragHandle();
+
+	UFUNCTION()
+	FEventReply OnAudioDragHandleMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+	UFUNCTION()
+	FEventReply OnAudioPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+	UFUNCTION()
+	FEventReply OnAudioPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+	// Positions AudioBottomResizeHandleSlot at AudioPanel's current bottom edge (AudioPanelHeight if
+	// the user has dragged it at least once, else the panel's own natural painted height) and spans
+	// its current width. Called from the same trigger points as RefreshAudioDragHandle, plus every
+	// bottom-drag mouse move.
+	void RefreshAudioBottomResizeHandle();
+
+	UFUNCTION()
+	FEventReply OnAudioBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+	UFUNCTION()
+	FEventReply OnAudioBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+	UFUNCTION()
+	FEventReply OnAudioBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION()
 	void OnAudioStopAllClicked();
@@ -193,6 +232,68 @@ private:
 
 	UPROPERTY()
 	UBorder* AudioPanel = nullptr;
+
+	// AudioPanel's own CanvasPanelSlot - promoted to a member (RebuildWidget's other slots stay local)
+	// purely so the drag handlers can read/set its position without threading it through every call.
+	UPROPERTY()
+	UCanvasPanelSlot* AudioPanelSlot = nullptr;
+
+	// AudioPanel's title UTextBlock - see RefreshAudioDragHandle's own comment.
+	UPROPERTY()
+	UTextBlock* AudioTitleText = nullptr;
+
+	// The small move-drag handle box in AudioPanel's top-left corner - same idea as
+	// UInteriorScreenWidget's own DockDragHandles (only this specific box starts a drag; clicking
+	// anywhere else on the panel, like its checkboxes or file list, does not), just for the one panel
+	// this screen has instead of a per-panel array.
+	UPROPERTY()
+	UBorder* AudioDragHandle = nullptr;
+
+	UPROPERTY()
+	UCanvasPanelSlot* AudioDragHandleSlot = nullptr;
+
+	bool bIsDraggingAudioPanel = false;
+	FVector2D AudioPanelDragStartMouse = FVector2D::ZeroVector;
+	FVector2D AudioPanelDragStartPosition = FVector2D::ZeroVector;
+
+	// See RefreshAudioDragHandle's own comment on why more than one retry is needed.
+	int32 AudioDragHandleSettleFramesRemaining = 0;
+	static constexpr int32 AudioDragHandleSettleFrameCount = 6;
+
+	// Matches UInteriorScreenWidget::DockDragHandleSize - the floor each axis of the handle is
+	// clamped to, so a not-yet-painted or empty title never shrinks it to something unclickable.
+	static constexpr float AudioDragHandleSize = 12.f;
+
+	// Matches AudioPanel's own SetPadding(FMargin(10.f)) in RebuildWidget - the handle is inset by
+	// this same amount so it sits right where the title text itself starts, not some separate margin.
+	static constexpr float AudioPanelPadding = 10.f;
+
+	// Matches RebuildWidget's own local EditMenuBarHeight (kept as a separate class constant rather
+	// than shared - see RebuildWidget's own comment on why EditMenuBarHeight is a local, not a class
+	// member) - the drag clamp's own top bound, so the panel can't be dragged up under the menu bar.
+	static constexpr float AudioPanelDragMinY = 32.f;
+
+	// The small resize handle bar at AudioPanel's bottom edge - only this class' one panel needs it,
+	// so unlike UInteriorScreenWidget's per-panel DockBottomResizeHandles array this is just a single
+	// widget. Dragging it sets AudioPanelHeight to an explicit value via AudioPanelWrapper's own
+	// SetHeightOverride (see its construction comment in RebuildWidget for why AudioPanel needs a
+	// wrapping SizeBox at all).
+	UPROPERTY()
+	UBorder* AudioBottomResizeHandle = nullptr;
+
+	UPROPERTY()
+	UCanvasPanelSlot* AudioBottomResizeHandleSlot = nullptr;
+
+	// 0 = never manually resized, keep sizing to natural content height - same "0 means auto" idiom as
+	// UInteriorScreenWidget::DockPanelHeights.
+	float AudioPanelHeight = 0.f;
+	bool bIsResizingAudioPanelHeight = false;
+	float AudioPanelResizeStartMouseY = 0.f;
+	float AudioPanelResizeStartHeight = 0.f;
+
+	// Floor for AudioPanelHeight - matches UInteriorScreenWidget::DockPanelMinHeight's role, just a
+	// smaller value since this one panel's natural content is itself much shorter than a dock panel's.
+	static constexpr float AudioPanelMinHeight = 60.f;
 
 	UPROPERTY()
 	UButton* AudioStopAllButton = nullptr;

@@ -461,8 +461,8 @@ private:
 	// --- Docking system for the Toolbar/Floor/Properties/Layers/Navigation/Audio panels ---
 	// Each of the 6 panels below is an independently draggable UBorder placed directly on the root
 	// canvas (not nested in a shared bar/VerticalBox like the old Left/Right sidebar bars). Dragging
-	// a panel by its own background (not one of its buttons - see IsScreenPositionOverPanelButton)
-	// moves it freely; releasing it with an edge close to another panel's edge (TrySnapPanel) snaps
+	// a panel by its own small top-left drag handle (see DockDragHandleSize) moves it freely;
+	// releasing it with an edge close to another panel's edge (TrySnapPanel) snaps
 	// them together into a shared "column" that fills the screen height end to end, splitting that
 	// height among the column's members (adjustable per-boundary via a splitter handle, mirrors
 	// dragging the divider between two stacked panels in a real editor). Back is deliberately NOT
@@ -590,7 +590,11 @@ private:
 
 	FVector2D GetPanelPosition(EDockPanelId Id) const;
 	FVector2D GetPanelSize(EDockPanelId Id) const;
-	bool IsScreenPositionOverPanelButton(EDockPanelId Id, const FVector2D& ScreenPosition) const;
+
+	// DockPanelTitleTexts[Id]'s own rendered size (clamped to a sane minimum on each axis), or
+	// (DockDragHandleSize, DockDragHandleSize) if that entry is somehow still null - see
+	// DockPanelTitleTexts' own comment.
+	FVector2D GetDockDragHandleSize(EDockPanelId Id) const;
 
 	// Applies NewWidth to Id, and to every sibling in Id's column too (a docked column always stays
 	// a uniform width, like a real docked group), then refreshes content widths + layout.
@@ -620,6 +624,15 @@ private:
 	FEventReply HandleLeftResizeMouseButtonDown(EDockPanelId Id, const FPointerEvent& MouseEvent);
 	FEventReply HandleLeftResizeMouseMove(EDockPanelId Id, const FPointerEvent& MouseEvent);
 	FEventReply HandleLeftResizeMouseButtonUp(EDockPanelId Id, const FPointerEvent& MouseEvent);
+
+	// BOTTOM-edge HEIGHT handle - only meaningful while Id is floating (DockBottomResizeHandles[Id]
+	// stays Collapsed, and this never gets a mouse-down to start from, while docked - see
+	// DockBottomResizeHandles' own comment). Sets DockPanelHeights[Id] to an explicit value instead of
+	// leaving it auto/natural, same idea as HandleResizeMouseMove but for height instead of width, and
+	// with no docked-column sibling-sync to do (DockPanelHeights is per-panel only, never shared).
+	FEventReply HandleBottomResizeMouseButtonDown(EDockPanelId Id, const FPointerEvent& MouseEvent);
+	FEventReply HandleBottomResizeMouseMove(EDockPanelId Id, const FPointerEvent& MouseEvent);
+	FEventReply HandleBottomResizeMouseButtonUp(EDockPanelId Id, const FPointerEvent& MouseEvent);
 
 	FEventReply HandleSplitterMouseButtonDown(int32 SplitterIndex, const FPointerEvent& MouseEvent);
 	FEventReply HandleSplitterMouseMove(int32 SplitterIndex, const FPointerEvent& MouseEvent);
@@ -685,6 +698,25 @@ private:
 	UFUNCTION() FEventReply OnAudioLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+	UFUNCTION() FEventReply OnToolbarBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnToolbarBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnToolbarBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnFloorBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnFloorBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnFloorBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnPropertiesBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnPropertiesBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnPropertiesBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnLayersBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnLayersBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnLayersBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnNavigationBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnNavigationBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnNavigationBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnAudioBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnAudioBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnAudioBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnSplitter0MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter0MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -1051,6 +1083,17 @@ private:
 	static constexpr float SidebarTopMargin = MenuBarHeight + BuildingSwitcherBarHeight;
 	static constexpr float SidebarBottomMargin = 10.f;
 	static constexpr float SidebarResizeHandleWidth = 8.f;
+	// A dedicated small box pinned to every panel's top-left corner - HandlePanelMouseButtonDown only
+	// starts a move-drag when the click lands on THIS, not anywhere else on the panel (see its own
+	// comment for why: clicking panel content used to be indistinguishable from clicking empty panel
+	// space, so an ordinary click meant to interact with content could accidentally start a drag).
+	// Inset to roughly sit right where the panel's own title text starts (see DockPanelBorderPadding),
+	// not just some arbitrary corner offset - floating disconnected from the title looked wrong in
+	// practice. The handle's actual on-screen size instead tracks the title text's own rendered size on
+	// both axes (see GetDockDragHandleSize), so "Floor" gets a smaller handle than "Properties" - this
+	// constant is just the floor each axis is clamped to, so a very short/empty title never shrinks it
+	// down to something unclickable.
+	static constexpr float DockDragHandleSize = 12.f;
 	static constexpr float DockSnapThresholdPx = 20.f;
 	static constexpr float SplitterHeight = 8.f;
 	static constexpr float DockPanelMinHeight = 80.f; // floor for a docked panel's height share
@@ -1091,6 +1134,34 @@ private:
 	UPROPERTY()
 	TArray<UCanvasPanelSlot*> DockLeftResizeHandleSlots;
 
+	// BOTTOM-edge HEIGHT handle per panel - see the comment above HandleBottomResizeMouseMove. Only
+	// ever shown for a FLOATING panel (RefreshDockLayout's docked branch keeps this Collapsed) - a
+	// docked panel's height already comes from its column's splitter(s), so there's nothing for this
+	// to control there.
+	UPROPERTY()
+	TArray<UBorder*> DockBottomResizeHandles;
+
+	UPROPERTY()
+	TArray<UCanvasPanelSlot*> DockBottomResizeHandleSlots;
+
+	// The small move-drag handle box in each panel's top-left corner - see DockDragHandleSize's own
+	// comment. Positioned wherever RefreshDockLayout/HandlePanelMouseMove already position that
+	// panel's other handles, so it always tracks the panel it belongs to.
+	UPROPERTY()
+	TArray<UBorder*> DockDragHandles;
+
+	// Each panel's own title UTextBlock (Toolbar has no separate panel-level title - it opens straight
+	// into its Default/Draw/Navigate group labels, so this holds the "Default" group label instead,
+	// the first thing at its own top-left corner) - purely so the drag handle can be sized off this
+	// text's own rendered size (see GetDockDragHandleSize), matching however long/short and tall the
+	// panel's own title happens to be instead of one fixed size for every panel regardless of
+	// "Floor" vs "Properties" vs "Navigation".
+	UPROPERTY()
+	TArray<UTextBlock*> DockPanelTitleTexts;
+
+	UPROPERTY()
+	TArray<UCanvasPanelSlot*> DockDragHandleSlots;
+
 	UPROPERTY()
 	TArray<UBorder*> SplitterHandles;
 
@@ -1101,6 +1172,11 @@ private:
 	// splitter index, same sizing as the widget arrays above. Populated in InitializeDockRuntimeArrays. ---
 	TArray<float> DockPanelWidths;
 	TArray<int32> DockPanelColumnIndex; // INDEX_NONE = floating
+
+	// Each panel's own BorderPadding argument (see ConstructDockPanel), stashed here purely so the
+	// drag handle can be inset by the SAME amount as the panel's own content (that's where the title
+	// text itself starts) instead of some separate arbitrary margin that doesn't line up with it.
+	TArray<float> DockPanelBorderPadding;
 
 	TArray<bool> bDockPanelIsDraggingMove;
 	TArray<FVector2D> DockPanelMoveDragStartMouse;
@@ -1115,6 +1191,18 @@ private:
 	TArray<float> DockPanelLeftResizeStartWidth;
 	TArray<float> DockPanelLeftResizeStartPanelX; // the panel's (or its column's) X when the drag started
 
+	// A FLOATING panel's explicit height, set once the user drags DockBottomResizeHandles[Id] for the
+	// first time - 0 (its InitializeDockRuntimeArrays default) means "never manually resized, keep
+	// sizing to natural content height" (RefreshDockLayout's floating branch only calls
+	// SetHeightOverride once this is actually positive). Meaningless while docked - a docked panel's
+	// height always comes from its column's own HeightFractions/splitters instead, same as
+	// DockPanelWidths already does for width regardless of docked/floating.
+	TArray<float> DockPanelHeights;
+
+	TArray<bool> bDockPanelIsResizingHeight;
+	TArray<float> DockPanelResizeStartMouseY;
+	TArray<float> DockPanelResizeStartHeight;
+
 	TArray<FDockColumn> DockColumns;
 
 	TArray<int32> SplitterColumnIndex;        // INDEX_NONE = this splitter slot is unused right now
@@ -1125,15 +1213,8 @@ private:
 
 	bool bDockLayoutInitialized = false;
 
-	// InitializeDefaultDockLayout runs synchronously from NativeConstruct, before this widget has
-	// been through even one real Slate layout/paint pass - the docked panels' background borders end
-	// up a frame stale as a result (a small chunk of background missing at a panel's bottom edge
-	// until the next unrelated click forces a fresh layout pass). Set there, consumed by the first
-	// real NativeTick to re-run RefreshDockLayout once everything has actually settled.
-	bool bNeedsPostConstructLayoutRefresh = false;
-
 	// A saved layout loaded via LoadDockLayoutFromDisk, held onto until the first real NativeTick so
-	// it can be RE-applied then (see bNeedsPostConstructLayoutRefresh's own comment on why
+	// it can be RE-applied then (see LayoutGeometrySettleFramesRemaining's own comment on why
 	// NativeConstruct-time is unreliable). ApplyLayoutSaveData converts every saved position from a
 	// viewport-relative fraction back to pixels using GetCanvasSize() at the moment it runs - called
 	// from NativeConstruct (as it normally is), that can return a premature/undersized viewport before
@@ -1157,16 +1238,22 @@ private:
 	int32 PropertiesFractionRecalcFramesRemaining = 0;
 	static constexpr int32 PropertiesFractionRecalcFrameCount = 6;
 
-	// Set by TrySnapPanel right after a panel joins an EXISTING column (2+ members already) - the
-	// member it snapped against (e.g. Layers, when Properties joins below it) just had its own Border
-	// resized smaller via SetHeightOverride to make room, but RefreshSplitterLayout positions the new
-	// splitter off that member's GetPanelSize, which reads Border->GetCachedGeometry() - i.e. whatever
-	// Slate last actually painted, not the just-set override. That resize needs its own settle time
-	// before the geometry reflects it, same underlying cause and same multi-frame need as
-	// PropertiesFractionRecalcFramesRemaining's own comment explains (one retry isn't reliably
-	// enough) - counts down over the next several NativeTicks, calling RefreshDockLayout (which ends
-	// in RefreshSplitterLayout) on each one, so the new splitter settles into its correct position
-	// instead of being stuck wherever the stale first-frame geometry put it.
-	int32 SplitterSettleFramesRemaining = 0;
-	static constexpr int32 SplitterSettleFrameCount = 6;
+	// General-purpose "give Slate a few more frames to settle, then re-run RefreshDockLayout" retry -
+	// every use so far is the same underlying cause: something was just set (a Border's height
+	// override, a title UTextBlock's text) that Slate hasn't actually re-measured/re-painted yet, so
+	// reading it back immediately (GetPanelSize's GetCachedGeometry, GetDockDragHandleSize's
+	// GetDesiredSize) returns a stale value - and, per PropertiesFractionRecalcFramesRemaining's own
+	// comment, one retry isn't reliably enough (a WrapBox in particular can take a couple of ticks to
+	// finish reflowing). Set by:
+	// - InitializeDefaultDockLayout, unconditionally, right after it runs synchronously from
+	//   NativeConstruct - before this widget has been through even one real Slate layout/paint pass,
+	//   which left the docked panels' background borders AND every drag handle's title-text-based
+	//   width a frame stale in practice.
+	// - TrySnapPanel, right after a panel joins an EXISTING column (2+ members already) - the member
+	//   it snapped against (e.g. Layers, when Properties joins below it) just had its own Border
+	//   resized smaller via SetHeightOverride to make room, and RefreshSplitterLayout's new splitter
+	//   position (which reads that member's GetPanelSize) needs the resize to have actually painted
+	//   first.
+	int32 LayoutGeometrySettleFramesRemaining = 0;
+	static constexpr int32 LayoutGeometrySettleFrameCount = 6;
 };
