@@ -2268,13 +2268,6 @@ bool UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 		return false;
 	}
 
-	// TEMPORARY diagnostic - remove once the cross-machine dock-layout bug is confirmed fixed.
-	{
-		const TArray<TSharedPtr<FJsonValue>>* DebugColumnsArray = nullptr;
-		UE_LOG(LogTemp, Warning, TEXT("[LayoutDebug] ApplyLayoutSaveData begin: ReliableViewportSize=%s, columns in JSON=%d"),
-			*ViewportSize.ToString(), Root->TryGetArrayField(TEXT("columns"), DebugColumnsArray) ? DebugColumnsArray->Num() : -1);
-	}
-
 	const TSharedPtr<FJsonObject>* PanelsObject = nullptr;
 	const bool bHasPanelsObject = Root->TryGetObjectField(TEXT("panels"), PanelsObject);
 	for (int32 Index = 0; Index < NumDockPanels; ++Index)
@@ -2316,13 +2309,6 @@ bool UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 		constexpr double RightEdgeFractionEpsilon = 0.03;
 		const bool bIsRightEdgeAnchored = (XFraction + WidthFraction) >= (1.0 - RightEdgeFractionEpsilon);
 		const float X = bIsRightEdgeAnchored ? (ViewportSize.X - ClampedWidth) : (float)(XFraction * ViewportSize.X);
-
-		// TEMPORARY diagnostic - remove once the cross-machine dock-layout bug is confirmed fixed.
-		if (Id == EDockPanelId::Floor || Id == EDockPanelId::Layers || Id == EDockPanelId::Properties)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("[LayoutDebug] Panel %s: XFraction=%.4f YFraction=%.4f WidthFraction=%.4f ClampedWidth=%.1f bIsRightEdgeAnchored=%s X(pre-clamp)=%.1f"),
-				GetDockPanelName(Id), XFraction, YFraction, WidthFraction, ClampedWidth, bIsRightEdgeAnchored ? TEXT("true") : TEXT("false"), X);
-		}
 
 		if (UCanvasPanelSlot* PanelSlot = DockPanelCanvasSlots[Index])
 		{
@@ -2418,12 +2404,6 @@ bool UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 			// directly to every panel docked in the column with no clamping of its own.
 			constexpr float MinVisibleColumnMargin = 40.f;
 			NewColumn.X = FMath::Clamp(ColumnX, 0.f, FMath::Max(0.f, ViewportSize.X - MinVisibleColumnMargin));
-
-			// TEMPORARY diagnostic - remove once the cross-machine dock-layout bug is confirmed fixed.
-			UE_LOG(LogTemp, Warning, TEXT("[LayoutDebug] Column: ViewportSize=%s MemberCount=%d FirstMember=%s ColumnXFraction=%.4f ColumnWidth=%.1f bColumnIsRightEdgeAnchored=%s ColumnX(pre-clamp)=%.1f NewColumn.X(final)=%.1f"),
-				*ViewportSize.ToString(), NewColumn.Panels.Num(),
-				NewColumn.Panels.Num() > 0 ? GetDockPanelName(NewColumn.Panels[0]) : TEXT("<none>"),
-				ColumnXFraction, ColumnWidth, bColumnIsRightEdgeAnchored ? TEXT("true") : TEXT("false"), ColumnX, NewColumn.X);
 
 			const int32 NewColumnIndex = DockColumns.Add(NewColumn);
 			for (EDockPanelId PanelId : NewColumn.Panels)
