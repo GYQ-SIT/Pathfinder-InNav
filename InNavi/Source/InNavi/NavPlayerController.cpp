@@ -17,6 +17,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
+#include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
@@ -59,6 +60,8 @@ void ANavPlayerController::BeginPlay()
 	bShowMouseCursor = true;
 	bEnableClickEvents = true;
 	bEnableMouseOverEvents = true;
+
+	LoadExteriorCameraDefaultFromDisk();
 
 	NavigationPanel = CreateWidget<UNavigationPanelWidget>(this, UNavigationPanelWidget::StaticClass());
 	if (NavigationPanel)
@@ -146,6 +149,7 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
 	InputComponent->BindKey(EKeys::N, IE_Pressed, this, &ANavPlayerController::ToggleSnapEnabled);
 	InputComponent->BindKey(FInputChord(EKeys::S, /*Shift*/false, /*Ctrl*/true, /*Alt*/false, /*Cmd*/false), IE_Pressed, this, &ANavPlayerController::SaveCurrentProjectKeyHandler);
+	InputComponent->BindKey(EKeys::G, IE_Pressed, this, &ANavPlayerController::LogCameraTransform);
 	InputComponent->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &ANavPlayerController::ZoomIn3DPreview);
 	InputComponent->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &ANavPlayerController::ZoomOut3DPreview);
 	// Separate from the "SelectBuilding" action above - carries the 3D Edit mode room-drag gesture
@@ -572,6 +576,7 @@ void ANavPlayerController::ToggleSnapEnabled()
 {
 	bSnapEnabled = !bSnapEnabled;
 	UE_LOG(LogTemp, Warning, TEXT("Snapping %s"), bSnapEnabled ? TEXT("ON") : TEXT("OFF"));
+	OnSnapEnabledChanged.Broadcast(bSnapEnabled);
 }
 
 void ANavPlayerController::ExitPrefabRoomMode()
@@ -967,7 +972,10 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 	// rescue a click that's genuinely outside the building.
 	if (InteriorGen && bSnapEnabled)
 	{
-		constexpr float SnapToleranceFootprintUnits = 8.f;
+		// Fixed WORLD distance (80cm) divided by Scale, not a bare footprint-unit constant - same
+		// "footprint units assumed Scale~10" reasoning as PlacePrefabRoomAt (see its own comment); a
+		// bare constant here would snap across nearly a whole room's width at Scale=100.
+		const float SnapToleranceFootprintUnits = 80.f / GetBuildingScale();
 		FVector2D SnapOffset;
 		if (InteriorGen->FindSnapOffset(InteriorGen->GetActiveFloor(), { FootprintPoint }, FString(), SnapToleranceFootprintUnits, SnapOffset))
 		{
@@ -1425,6 +1433,11 @@ bool ANavPlayerController::CommitRoomMove(const FString& RoomId, const TArray<FV
 	return bSuccess;
 }
 
+float ANavPlayerController::GetBuildingScale() const
+{
+	return Generator ? Generator->GetScale() : 1.f;
+}
+
 AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter)
 {
 	if (ActivePrefabShape == 0)
@@ -1451,23 +1464,29 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter
 		}
 	}
 
-	// Default sizes are deliberately small - ResizeRoom (below) is how they grow from here.
+	// Default sizes are deliberately small - ResizeRoom (below) is how they grow from here. Expressed
+	// as a fixed WORLD size (cm) divided by the building's own Scale, not a bare footprint-unit
+	// constant - footprint-space is pre-scale, so a bare constant here would produce a room 10x too
+	// big for a database-loaded building (Scale=100) versus a hand-authored JSON one (Scale=10). See
+	// project memory for the full audit of this "footprint units assumed Scale~10" bug family.
+	const float Scale = GetBuildingScale();
+
 	TArray<FVector2D> Footprint;
 	switch (ActivePrefabShape)
 	{
-	case 1: // Rectangle: 60 x 45, axis-aligned.
+	case 1: // Rectangle: 6m x 4.5m in world space.
 	{
-		constexpr float HalfWidth = 30.f;
-		constexpr float HalfDepth = 22.5f;
+		const float HalfWidth = 300.f / Scale;
+		const float HalfDepth = 225.f / Scale;
 		Footprint.Add(FootprintCenter + FVector2D(-HalfWidth, -HalfDepth));
 		Footprint.Add(FootprintCenter + FVector2D(HalfWidth, -HalfDepth));
 		Footprint.Add(FootprintCenter + FVector2D(HalfWidth, HalfDepth));
 		Footprint.Add(FootprintCenter + FVector2D(-HalfWidth, HalfDepth));
 		break;
 	}
-	case 2: // Triangle: equilateral, radius 30, pointing up.
+	case 2: // Triangle: equilateral, 3m radius in world space, pointing up.
 	{
-		constexpr float Radius = 30.f;
+		const float Radius = 300.f / Scale;
 		constexpr int32 Sides = 3;
 		for (int32 i = 0; i < Sides; i++)
 		{
@@ -1477,9 +1496,9 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter
 		}
 		break;
 	}
-	case 3: // Circle: approximated as a 24-sided regular polygon, radius 30.
+	case 3: // Circle: approximated as a 24-sided regular polygon, 3m radius in world space.
 	{
-		constexpr float Radius = 30.f;
+		const float Radius = 300.f / Scale;
 		constexpr int32 Sides = 24;
 		for (int32 i = 0; i < Sides; i++)
 		{
@@ -1729,7 +1748,11 @@ FString ANavPlayerController::BrowseForBuildingDataFile()
 		TEXT("Import building data"),
 		TEXT(""),
 		TEXT(""),
-		TEXT("JSON files (*.json)|*.json"),
+		// Both formats in one filter (not two separate filter entries) so this stays a single "Open"
+		// flow the user doesn't have to pre-choose a format for - see
+		// LoadBuildingDataFromPathOrDatabase, which the picked path should be handed to instead of
+		// either format-specific loader directly.
+		TEXT("Building data (*.json, *.db)|*.json;*.db"),
 		EFileDialogFlags::None,
 		OutFiles);
 
@@ -1786,6 +1809,63 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 		FocusCameraOnAllBuildings();
 	}
 	return Count;
+}
+
+int32 ANavPlayerController::LoadBuildingDataFromDatabase(const FString& DatabasePath)
+{
+	if (!Generator)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LoadBuildingDataFromDatabase: no BuildingGenerator found in the level"));
+		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."));
+		return 0;
+	}
+
+	if (DatabasePath.IsEmpty())
+	{
+		OnActionFailed.Broadcast(TEXT("No database file selected."));
+		return 0;
+	}
+	if (NavigationPanel)
+	{
+		NavigationPanel->ClearAll();
+		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
+	}
+
+	if (InteriorGen)
+	{
+		InteriorGen->ClearLoadedInterior();
+	}
+	Generator->ClearAllBuildings();
+	SelectedBuilding = nullptr;
+
+	const int32 Count = Generator->LoadBuildingsFromDatabase(DatabasePath);
+	UE_LOG(LogTemp, Warning, TEXT("LoadBuildingDataFromDatabase: loaded %d buildings from %s"), Count, *DatabasePath);
+	if (Count == 0)
+	{
+		OnActionFailed.Broadcast(TEXT("No buildings were loaded from that database - check that it has 'buildings'/'building_nodes' tables."));
+	}
+	else
+	{
+		// Deliberately NOT setting CurrentProjectFilePath to DatabasePath - Ctrl+S writes JSON via
+		// SaveBuildingsToFile, and pointing that at the .db file would overwrite it with JSON text.
+		// A database-loaded project has no "file to save back to" yet; the existing Save-As flow
+		// (whatever prompts for a path when CurrentProjectFilePath is empty) is what should kick in if
+		// the user wants to persist it - interiors drawn afterward still save fine once they do, since
+		// SaveBuildingsToFile serializes whatever APolyBuilding actors currently exist regardless of
+		// how they were spawned.
+		bHasUnsavedChanges = false;
+		FocusCameraOnAllBuildings();
+	}
+	return Count;
+}
+
+int32 ANavPlayerController::LoadBuildingDataFromPathOrDatabase(const FString& FilePath)
+{
+	if (FPaths::GetExtension(FilePath).Equals(TEXT("db"), ESearchCase::IgnoreCase))
+	{
+		return LoadBuildingDataFromDatabase(FilePath);
+	}
+	return LoadBuildingDataFromPath(FilePath);
 }
 
 void ANavPlayerController::StartNewProject()
@@ -2075,6 +2155,69 @@ void ANavPlayerController::DecreaseMoveSpeed3DPreview()
 				ThreeDPreviewMinMoveSpeed, ThreeDPreviewMaxMoveSpeed);
 		}
 	}
+}
+
+void ANavPlayerController::ApplyExteriorCameraSpeed(float NewSpeed)
+{
+	APawn* ControlledPawn = GetPawn();
+	UFloatingPawnMovement* Movement = ControlledPawn ? Cast<UFloatingPawnMovement>(ControlledPawn->GetMovementComponent()) : nullptr;
+	if (!Movement)
+	{
+		return;
+	}
+	Movement->MaxSpeed = FMath::Clamp(NewSpeed, ExteriorCameraMinSpeed, ExteriorCameraMaxSpeed);
+
+	// UFloatingPawnMovement's Acceleration/Deceleration are flat values (engine default 4000/8000,
+	// tuned for the stock 1200 MaxSpeed) - NOT scaled to MaxSpeed automatically. Left alone, reaching
+	// a much higher MaxSpeed (this screen's campus-span-scaled default, or a manually typed value) at
+	// a flat 4000 accel takes far longer than anyone actually holds a WASD key for, so raising MaxSpeed
+	// alone made no felt difference. Scale both proportionally so the pawn keeps reaching full speed in
+	// the same ~0.3s/0.15s the engine default itself implies (1200/4000 and 1200/8000) no matter what
+	// MaxSpeed is currently set to.
+	Movement->Acceleration = Movement->MaxSpeed / 0.3f;
+	Movement->Deceleration = Movement->MaxSpeed / 0.15f;
+}
+
+void ANavPlayerController::IncreaseCameraSpeedExterior()
+{
+	ApplyExteriorCameraSpeed(GetCameraMoveSpeed() * ExteriorCameraSpeedFactor);
+}
+
+void ANavPlayerController::DecreaseCameraSpeedExterior()
+{
+	ApplyExteriorCameraSpeed(GetCameraMoveSpeed() / ExteriorCameraSpeedFactor);
+}
+
+void ANavPlayerController::SetCameraSpeedExterior(float NewSpeed)
+{
+	ApplyExteriorCameraSpeed(NewSpeed);
+}
+
+void ANavPlayerController::SetMoveSpeed3DPreview(float NewSpeed)
+{
+	if (!bIsIn3DPreviewMode)
+	{
+		return;
+	}
+	if (APawn* ControlledPawn = GetPawn())
+	{
+		if (UFloatingPawnMovement* Movement = Cast<UFloatingPawnMovement>(ControlledPawn->GetMovementComponent()))
+		{
+			Movement->MaxSpeed = FMath::Clamp(NewSpeed, ThreeDPreviewMinMoveSpeed, ThreeDPreviewMaxMoveSpeed);
+		}
+	}
+}
+
+float ANavPlayerController::GetCameraMoveSpeed() const
+{
+	if (const APawn* ControlledPawn = GetPawn())
+	{
+		if (const UFloatingPawnMovement* Movement = Cast<UFloatingPawnMovement>(ControlledPawn->GetMovementComponent()))
+		{
+			return Movement->MaxSpeed;
+		}
+	}
+	return 0.f;
 }
 
 void ANavPlayerController::SetIn3DPreviewMode(bool bEnable)
@@ -2586,24 +2729,34 @@ void ANavPlayerController::RepositionCameraToActiveFloor()
 	}
 }
 
-void ANavPlayerController::FocusCameraOnAllBuildings()
+void ANavPlayerController::LogCameraTransform()
 {
-	APawn* ControlledPawn = GetPawn();
-	if (!ControlledPawn || !Generator)
+	const APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn)
 	{
 		return;
 	}
+	const FVector Location = ControlledPawn->GetActorLocation();
+	const FRotator Rotation = GetControlRotation();
+	const FString Message = FString::Printf(TEXT("Camera Location=(X=%.1f, Y=%.1f, Z=%.1f) Rotation=(Pitch=%.1f, Yaw=%.1f, Roll=%.1f)"),
+		Location.X, Location.Y, Location.Z, Rotation.Pitch, Rotation.Yaw, Rotation.Roll);
+	UE_LOG(LogTemp, Warning, TEXT("%s"), *Message);
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 15.f, FColor::Yellow, Message);
+	}
+}
 
+bool ANavPlayerController::ComputeAllBuildingsBounds(FVector2D& OutCenter, float& OutSpan) const
+{
+	if (!Generator)
+	{
+		return false;
+	}
 	const TArray<APolyBuilding*> Buildings = Generator->GetAllBuildings();
 	if (Buildings.Num() == 0)
 	{
-		// Nothing to frame yet (e.g. a brand new blank project) - just pull the camera up above the
-		// origin instead of leaving it wherever PlayerStart put it.
-		const FVector DefaultLocation(0.f, 0.f, 3000.f);
-		const FRotator DefaultRotation(-50.f, 0.f, 0.f);
-		ControlledPawn->SetActorLocationAndRotation(DefaultLocation, DefaultRotation);
-		SetControlRotation(DefaultRotation);
-		return;
+		return false;
 	}
 
 	const float Scale = Generator->GetScale();
@@ -2625,21 +2778,133 @@ void ANavPlayerController::FocusCameraOnAllBuildings()
 		}
 	}
 
-	const FVector2D Center = (MinPoint + MaxPoint) * 0.5f;
-	const float Span = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
-	const float ViewDistance = FMath::Max(Span * 1.2f, 2000.f);
+	OutCenter = (MinPoint + MaxPoint) * 0.5f;
+	OutSpan = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
+	return true;
+}
+
+void ANavPlayerController::FocusCameraOnAllBuildings()
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn || !Generator)
+	{
+		return;
+	}
+
+	FVector2D Center;
+	float Span;
+	if (!ComputeAllBuildingsBounds(Center, Span))
+	{
+		// Nothing to frame yet (e.g. a brand new blank project) - just pull the camera up above the
+		// origin instead of leaving it wherever PlayerStart put it.
+		const FVector DefaultLocation(0.f, 0.f, 3000.f);
+		const FRotator DefaultRotation(-50.f, 0.f, 0.f);
+		ControlledPawn->SetActorLocationAndRotation(DefaultLocation, DefaultRotation);
+		SetControlRotation(DefaultRotation);
+		return;
+	}
+
+	// The free-fly pawn's WASD speed defaults to whatever ADefaultPawn ships with (1200 cm/s) -
+	// tuned for buildings.json's own small hand-placed campus (spans roughly 1000 units), but a
+	// database-loaded campus at real-world scale (see ABuildingGenerator::LoadBuildingsFromDatabase)
+	// can span hundreds of real meters, at which point that speed reads as "barely moving". Scale it
+	// to cross the whole loaded span in about 4 seconds instead - ApplyExteriorCameraSpeed clamps to
+	// the same range IncreaseCameraSpeedExterior/DecreaseCameraSpeedExterior use (so a manual
+	// adjustment and a fresh load never disagree on the floor/ceiling) and also scales
+	// Acceleration/Deceleration to match, see its own comment.
+	ApplyExteriorCameraSpeed(Span / 4.f);
 
 	// Pull the camera back-and-up along the pitch's own forward vector (same "Target -
 	// Rotation.Vector() * Distance" pattern PositionCameraForFloor/PositionCameraFor3DPreview use) so
-	// the -50 deg pitch actually looks DOWN AT Center - placing it directly above Center with the same
-	// rotation (the old code) points the view down-and-forward from directly overhead, past the
-	// buildings entirely, which reads as "not tilted down" even though the pitch value is right.
+	// the pitch actually looks DOWN AT Center - placing it directly above Center with the same
+	// rotation points the view down-and-forward from directly overhead, past the buildings entirely,
+	// which reads as "not tilted down" even though the pitch value is right. Pitch/Yaw/distance ratio
+	// are user-tunable now (see SetCurrentViewAsDefaultExterior) rather than fixed constants.
 	const FVector Target(Center.X, Center.Y, 0.f);
-	const FRotator NewRotation(-50.f, 0.f, 0.f);
+	const FRotator NewRotation(ExteriorDefaultViewPitch, ExteriorDefaultViewYaw, 0.f);
+	const float ViewDistance = FMath::Max(Span * ExteriorDefaultViewDistanceRatio, ExteriorDefaultViewMinDistance);
 	const FVector NewLocation = Target - NewRotation.Vector() * ViewDistance;
 
 	ControlledPawn->SetActorLocationAndRotation(NewLocation, NewRotation);
 	SetControlRotation(NewRotation);
+}
+
+void ANavPlayerController::ResetExteriorCameraToDefaultView()
+{
+	FocusCameraOnAllBuildings();
+}
+
+void ANavPlayerController::SetCurrentViewAsDefaultExterior()
+{
+	const APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn)
+	{
+		return;
+	}
+
+	FVector2D Center;
+	float Span;
+	if (!ComputeAllBuildingsBounds(Center, Span) || Span <= KINDA_SMALL_NUMBER)
+	{
+		OnActionFailed.Broadcast(TEXT("Load some buildings first, then set the current view as the default."));
+		return;
+	}
+
+	const FRotator Rotation = GetControlRotation();
+	const FVector Target(Center.X, Center.Y, 0.f);
+	const float Distance = FVector::Dist(ControlledPawn->GetActorLocation(), Target);
+
+	ExteriorDefaultViewPitch = Rotation.Pitch;
+	ExteriorDefaultViewYaw = Rotation.Yaw;
+	ExteriorDefaultViewDistanceRatio = Distance / Span;
+
+	SaveExteriorCameraDefaultToDisk();
+	UE_LOG(LogTemp, Warning, TEXT("Set exterior default view: Pitch=%.2f Yaw=%.2f DistanceRatio=%.3f"),
+		ExteriorDefaultViewPitch, ExteriorDefaultViewYaw, ExteriorDefaultViewDistanceRatio);
+}
+
+void ANavPlayerController::LoadExteriorCameraDefaultFromDisk()
+{
+	FString FileContents;
+	if (!FFileHelper::LoadFileToString(FileContents, *(FPaths::ProjectSavedDir() / TEXT("ExteriorEditorLayout.json"))))
+	{
+		return; // nothing saved yet - keep the shipped defaults
+	}
+
+	TSharedPtr<FJsonObject> Root;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(FileContents);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		return;
+	}
+
+	double Pitch = 0.0, Yaw = 0.0, Ratio = 0.0;
+	if (Root->TryGetNumberField(TEXT("defaultViewPitch"), Pitch))
+	{
+		ExteriorDefaultViewPitch = static_cast<float>(Pitch);
+	}
+	if (Root->TryGetNumberField(TEXT("defaultViewYaw"), Yaw))
+	{
+		ExteriorDefaultViewYaw = static_cast<float>(Yaw);
+	}
+	if (Root->TryGetNumberField(TEXT("defaultViewDistanceRatio"), Ratio) && Ratio > 0.0)
+	{
+		ExteriorDefaultViewDistanceRatio = static_cast<float>(Ratio);
+	}
+}
+
+void ANavPlayerController::SaveExteriorCameraDefaultToDisk() const
+{
+	const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetNumberField(TEXT("defaultViewPitch"), ExteriorDefaultViewPitch);
+	Root->SetNumberField(TEXT("defaultViewYaw"), ExteriorDefaultViewYaw);
+	Root->SetNumberField(TEXT("defaultViewDistanceRatio"), ExteriorDefaultViewDistanceRatio);
+
+	FString OutputString;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
+	FJsonSerializer::Serialize(Root, Writer);
+
+	FFileHelper::SaveStringToFile(OutputString, *(FPaths::ProjectSavedDir() / TEXT("ExteriorEditorLayout.json")));
 }
 
 void ANavPlayerController::RestoreExteriorCameraView()
@@ -2852,6 +3117,18 @@ int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 	if (bIsIn3DPreviewMode)
 	{
 		SetIn3DPreviewMode(false);
+	}
+
+	// The exterior "this building is selected" yellow tint (APolyBuilding::SetHighlighted) never
+	// meant anything once you're inside editing/viewing that building's own interior - clearing it
+	// here (not just on deselect/reselect in SelectBuildingUnderCursor) was invisible in the 2D floor
+	// plan (its opaque Background border hides the real exterior mesh underneath entirely), so this
+	// went unnoticed until 3D preview mode exposed the same still-tinted wall mesh directly.
+	if (SelectedBuilding)
+	{
+		SelectedBuilding->SetHighlighted(false);
+		SelectedBuilding = nullptr;
+		OnBuildingSelected.Broadcast(FString());
 	}
 
 	const int32 Result = InteriorGen->LoadInteriorForBuilding(BuildingId);
