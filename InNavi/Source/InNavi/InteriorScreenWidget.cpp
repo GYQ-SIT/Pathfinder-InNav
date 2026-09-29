@@ -1517,6 +1517,16 @@ void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 		RefreshDockLayout();
 	}
 
+	// Keeps retrying every tick, not just once - RootCanvas's cached geometry (what
+	// ApplyLayoutSaveData actually needs, see GetReliableCanvasSize's own comment) turned out to
+	// still not be valid a tick or two after construction in practice, not just on the literal first
+	// call, so a single one-shot retry (the previous approach) wasn't reliably enough. Cheap to poll -
+	// ApplyLayoutSaveData returns immediately without doing any work once RootCanvas isn't ready.
+	if (PendingSavedLayoutToReapply.IsValid() && ApplyLayoutSaveData(PendingSavedLayoutToReapply))
+	{
+		PendingSavedLayoutToReapply.Reset();
+	}
+
 	if (PropertiesFractionRecalcFramesRemaining > 0)
 	{
 		--PropertiesFractionRecalcFramesRemaining;
@@ -1551,15 +1561,27 @@ FReply UInteriorScreenWidget::NativeOnMouseWheel(const FGeometry& InGeometry, co
 
 FVector2D UInteriorScreenWidget::GetCanvasSize() const
 {
-	if (RootCanvas)
+	FVector2D ReliableSize;
+	if (GetReliableCanvasSize(ReliableSize))
 	{
-		const FVector2D LocalSize = RootCanvas->GetCachedGeometry().GetLocalSize();
-		if (LocalSize.X > 0.f && LocalSize.Y > 0.f)
-		{
-			return LocalSize;
-		}
+		return ReliableSize;
 	}
 	return UWidgetLayoutLibrary::GetViewportSize(this);
+}
+
+bool UInteriorScreenWidget::GetReliableCanvasSize(FVector2D& OutSize) const
+{
+	if (!RootCanvas)
+	{
+		return false;
+	}
+	const FVector2D LocalSize = RootCanvas->GetCachedGeometry().GetLocalSize();
+	if (LocalSize.X <= 0.f || LocalSize.Y <= 0.f)
+	{
+		return false;
+	}
+	OutSize = LocalSize;
+	return true;
 }
 
 FVector2D UInteriorScreenWidget::GetDefaultPanelPosition(EDockPanelId Id, const FVector2D& ViewportSize) const
@@ -2184,12 +2206,14 @@ TSharedPtr<FJsonObject> UInteriorScreenWidget::BuildLayoutSaveData() const
 	// misinterpreted as fractions (e.g. a saved x of 1850 read as "1850x the viewport width").
 	Root->SetNumberField(TEXT("layoutVersion"), 2);
 
-	const FVector2D ViewportSize = GetCanvasSize();
-	if (ViewportSize.X <= 0.f || ViewportSize.Y <= 0.f)
+	// GetReliableCanvasSize, not GetCanvasSize - this specifically must not silently fall back to
+	// GetViewportSize's different coordinate system (see GetReliableCanvasSize's own comment); saving
+	// is always user-triggered well after this screen has painted, so RootCanvas's geometry should
+	// always be valid by then, but if it somehow isn't, skipping the save (matching a version-1 file's
+	// own shape) is far safer than silently writing fractions in the wrong basis.
+	FVector2D ViewportSize;
+	if (!GetReliableCanvasSize(ViewportSize))
 	{
-		// Nothing sensible to save without a real viewport size to normalize against (e.g. queried
-		// before the first paint) - leave "panels"/"columns" absent, same as a version-1 file, so this
-		// gets treated as unusable and discarded on next load rather than saving zeros.
 		return Root;
 	}
 
@@ -2227,21 +2251,21 @@ TSharedPtr<FJsonObject> UInteriorScreenWidget::BuildLayoutSaveData() const
 	return Root;
 }
 
-void UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& Root)
+bool UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& Root)
 {
 	if (!Root.IsValid())
 	{
-		return;
+		return true; // nothing to apply, and nothing worth retrying later either
 	}
 
-	const FVector2D ViewportSize = GetCanvasSize();
-	if (ViewportSize.X <= 0.f || ViewportSize.Y <= 0.f)
+	// GetReliableCanvasSize, not GetCanvasSize - see this function's own header comment for why the
+	// fallback specifically breaks this round trip. Returning false here (instead of falling back)
+	// is what lets the caller retry on a later tick instead of applying positions computed in the
+	// wrong coordinate system.
+	FVector2D ViewportSize;
+	if (!GetReliableCanvasSize(ViewportSize))
 	{
-		// Nothing sensible to restore against a zero-size viewport (dividing by it below would produce
-		// inf/NaN positions) - leave every panel at whatever CanvasSlot position it already has
-		// (InitializeDefaultDockLayout's own caller falls back to fresh defaults when this function
-		// can't apply anything usable).
-		return;
+		return false;
 	}
 
 	const TSharedPtr<FJsonObject>* PanelsObject = nullptr;
@@ -2270,8 +2294,21 @@ void UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 		// Fractions of the CURRENT viewport size (see BuildLayoutSaveData's own comment) - this is what
 		// actually makes a layout saved on one screen reopen sensibly on a different resolution/aspect
 		// ratio, instead of landing at the same raw pixel coordinates.
-		const float X = (float)(XFraction * ViewportSize.X);
 		const float Y = (float)(YFraction * ViewportSize.Y);
+		const float ClampedWidth = FMath::Clamp((float)(WidthFraction * ViewportSize.X), SidebarMinWidth, SidebarMaxWidth);
+
+		// XFraction and WidthFraction alone reproduce the exact same right-edge position on any
+		// screen (X/Vp + Width/Vp is scale-invariant) - UNLESS ClampedWidth above actually changed the
+		// width from what WidthFraction*ViewportSize.X would've been (e.g. the same proportional width
+		// that fit on a laptop exceeds SidebarMaxWidth on a much wider desktop monitor and gets clamped
+		// down), which breaks that invariant and opens a gap between the panel and the screen edge it
+		// was touching. IsRightEdgeAnchored recognizes "was touching (or within a hair of) the right
+		// edge when saved" from the fractions alone, and recomputes X from the CURRENT ClampedWidth so
+		// it stays flush - the usual case (no clamping needed) leaves X unchanged either way, since
+		// then ViewportSize.X - ClampedWidth already equals XFraction*ViewportSize.X exactly.
+		constexpr double RightEdgeFractionEpsilon = 0.03;
+		const bool bIsRightEdgeAnchored = (XFraction + WidthFraction) >= (1.0 - RightEdgeFractionEpsilon);
+		const float X = bIsRightEdgeAnchored ? (ViewportSize.X - ClampedWidth) : (float)(XFraction * ViewportSize.X);
 
 		if (UCanvasPanelSlot* PanelSlot = DockPanelCanvasSlots[Index])
 		{
@@ -2288,7 +2325,7 @@ void UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 			const float ClampedY = FMath::Clamp(Y, SidebarTopMargin, FMath::Max(SidebarTopMargin, ViewportSize.Y - MinVisiblePanelMargin));
 			PanelSlot->SetPosition(FVector2D(ClampedX, ClampedY));
 		}
-		DockPanelWidths[Index] = FMath::Clamp((float)(WidthFraction * ViewportSize.X), SidebarMinWidth, SidebarMaxWidth);
+		DockPanelWidths[Index] = ClampedWidth;
 	}
 
 	DockColumns.Reset();
@@ -2338,11 +2375,35 @@ void UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 
 			double ColumnXFraction = 0.0;
 			(*ColumnObject)->TryGetNumberField(TEXT("x"), ColumnXFraction);
-			// Same fraction-of-viewport-width convention, and the same on-screen clamp, as the floating
-			// panel X above (see BuildLayoutSaveData/that clamp's own comment) - RefreshDockLayout
-			// applies this directly to every panel docked in the column with no clamping of its own.
+
+			// Same right-edge-anchor reasoning as the floating panel X above (see its own comment) -
+			// the column's rendered width is its first member's (all members share one width via
+			// SetPanelWidth's sibling-sync), already resolved to its final clamped pixel value by the
+			// per-panel loop above. Re-reads that same member's saved width fraction here (not carried
+			// over from that loop, which is scoped per-panel) purely to test whether the column was
+			// flush against the right edge when saved.
+			float ColumnWidth = SidebarMinWidth;
+			bool bColumnIsRightEdgeAnchored = false;
+			if (NewColumn.Panels.Num() > 0)
+			{
+				const EDockPanelId FirstMemberId = NewColumn.Panels[0];
+				ColumnWidth = DockPanelWidths[(int32)FirstMemberId];
+
+				double MemberWidthFraction = 0.0;
+				const TSharedPtr<FJsonObject>* MemberPanelObject = nullptr;
+				if (bHasPanelsObject && (*PanelsObject)->TryGetObjectField(GetDockPanelName(FirstMemberId), MemberPanelObject))
+				{
+					(*MemberPanelObject)->TryGetNumberField(TEXT("width"), MemberWidthFraction);
+				}
+				constexpr double RightEdgeFractionEpsilon = 0.03;
+				bColumnIsRightEdgeAnchored = (ColumnXFraction + MemberWidthFraction) >= (1.0 - RightEdgeFractionEpsilon);
+			}
+			const float ColumnX = bColumnIsRightEdgeAnchored ? (ViewportSize.X - ColumnWidth) : (float)(ColumnXFraction * ViewportSize.X);
+
+			// Same on-screen clamp as the floating panel X above - RefreshDockLayout applies this
+			// directly to every panel docked in the column with no clamping of its own.
 			constexpr float MinVisibleColumnMargin = 40.f;
-			NewColumn.X = FMath::Clamp((float)(ColumnXFraction * ViewportSize.X), 0.f, FMath::Max(0.f, ViewportSize.X - MinVisibleColumnMargin));
+			NewColumn.X = FMath::Clamp(ColumnX, 0.f, FMath::Max(0.f, ViewportSize.X - MinVisibleColumnMargin));
 
 			const int32 NewColumnIndex = DockColumns.Add(NewColumn);
 			for (EDockPanelId PanelId : NewColumn.Panels)
@@ -2358,6 +2419,7 @@ void UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 
 	RefreshDockPanelContentWidths();
 	RefreshDockLayout();
+	return true;
 }
 
 void UInteriorScreenWidget::SaveDockLayoutToDisk() const
@@ -2398,7 +2460,16 @@ bool UInteriorScreenWidget::LoadDockLayoutFromDisk()
 		return false;
 	}
 
-	ApplyLayoutSaveData(Root);
+	// Called this early (from NativeConstruct), RootCanvas's cached geometry is essentially never
+	// valid yet in practice, so this first attempt is expected to return false - held onto so
+	// NativeTick can keep retrying every tick until GetReliableCanvasSize actually succeeds (see
+	// PendingSavedLayoutToReapply's own comment). Skipped entirely on the rare chance this first
+	// attempt already succeeded - nothing left to retry.
+	if (!ApplyLayoutSaveData(Root))
+	{
+		PendingSavedLayoutToReapply = Root;
+	}
+
 	return true;
 }
 

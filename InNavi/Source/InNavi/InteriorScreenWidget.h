@@ -489,6 +489,21 @@ private:
 	// call, before the canvas has painted even once and its cached geometry is still zero.
 	FVector2D GetCanvasSize() const;
 
+	// Like GetCanvasSize, but never falls back to GetViewportSize - returns false (OutSize untouched)
+	// if RootCanvas's cached geometry isn't valid yet, rather than silently returning a value in the
+	// wrong coordinate system. GetCanvasSize's own fallback turned out to not be a one-frame thing in
+	// practice (confirmed via temporary logging - RootCanvas's geometry can still be unset several
+	// ticks into a freshly-constructed screen, not just on the literal first call), which broke the
+	// dock-layout save/restore fraction math specifically: it round-trips a panel's Position through
+	// division-then-multiplication by this size, so using the raw-pixel fallback for either half of
+	// that round trip (even just once) introduces a real, visible drift by the DPI scale factor - a
+	// panel saved flush against the right edge would restore short of it (or past it) by however many
+	// pixels that scale factor represents at the panel's own distance from center. Used by
+	// BuildLayoutSaveData/ApplyLayoutSaveData for exactly this reason; every other caller of
+	// GetCanvasSize (default panel positions, live drag clamping, etc.) tolerates the fallback fine,
+	// since those don't require this round-trip precision.
+	bool GetReliableCanvasSize(FVector2D& OutSize) const;
+
 	// Called once from NativeConstruct - places Toolbar floating top-left and pre-docks Floor +
 	// Properties into one column top-right, matching today's default look (nothing should appear
 	// different until the user actually drags something).
@@ -545,7 +560,15 @@ private:
 	bool LoadDockLayoutFromDisk();
 
 	TSharedPtr<FJsonObject> BuildLayoutSaveData() const;
-	void ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& Root);
+
+	// Converts Root's saved viewport-relative fractions back to pixel positions and applies them.
+	// Returns false (applying nothing) without RootCanvas's REAL cached Slate geometry to convert
+	// against - GetViewportSize()'s raw-platform-pixel fallback is a different coordinate system than
+	// what UCanvasPanelSlot positions are actually in whenever the platform's DPI scale isn't 1.0 (see
+	// GetReliableCanvasSize's own comment), so unlike every other caller of GetCanvasSize() in this
+	// file, this one specifically cannot tolerate that fallback - the caller (NativeTick, the only
+	// caller of this on the restore path) keeps retrying on a later tick instead.
+	bool ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& Root);
 
 	static const TCHAR* GetDockPanelName(EDockPanelId Id);
 	static bool FindDockPanelIdByName(const FString& Name, EDockPanelId& OutId);
@@ -1108,6 +1131,17 @@ private:
 	// until the next unrelated click forces a fresh layout pass). Set there, consumed by the first
 	// real NativeTick to re-run RefreshDockLayout once everything has actually settled.
 	bool bNeedsPostConstructLayoutRefresh = false;
+
+	// A saved layout loaded via LoadDockLayoutFromDisk, held onto until the first real NativeTick so
+	// it can be RE-applied then (see bNeedsPostConstructLayoutRefresh's own comment on why
+	// NativeConstruct-time is unreliable). ApplyLayoutSaveData converts every saved position from a
+	// viewport-relative fraction back to pixels using GetCanvasSize() at the moment it runs - called
+	// from NativeConstruct (as it normally is), that can return a premature/undersized viewport before
+	// the widget's first real paint, which throws off the fraction math for every panel (not just the
+	// border-staleness NativeTick already re-runs RefreshDockLayout for) - e.g. panels dragged flush
+	// against the right edge and saved would drift left on the very next load, even on the exact same
+	// screen. Null once there's nothing pending to redo (the common case, once NativeTick has run).
+	TSharedPtr<FJsonObject> PendingSavedLayoutToReapply;
 
 	// Set by RefreshPropertiesPanelVisibility on every selection change (Properties is a permanent
 	// panel now - its content, not its own visibility, is what changes: Door/Room/Connector fields
