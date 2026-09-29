@@ -1533,6 +1533,12 @@ void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 		RecomputeColumnFractionsFromNaturalSizes(DockPanelColumnIndex[(int32)EDockPanelId::Properties]);
 		RefreshDockLayout();
 	}
+
+	if (SplitterSettleFramesRemaining > 0)
+	{
+		--SplitterSettleFramesRemaining;
+		RefreshDockLayout();
+	}
 }
 
 FReply UInteriorScreenWidget::NativeOnMouseWheel(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
@@ -1866,6 +1872,15 @@ void UInteriorScreenWidget::TrySnapPanel(EDockPanelId Id)
 
 		DockPanelColumnIndex[(int32)Id] = ColumnIdx;
 		SetPanelWidth(Id, DockPanelWidths[OtherIndex]); // also refreshes content widths + layout
+
+		// See SplitterSettleFramesRemaining's own comment - Other's Border (e.g. Layers, when
+		// Properties is the one joining) just had its height overridden smaller by the RefreshDockLayout
+		// call inside SetPanelWidth above, and RefreshSplitterLayout (called in that same pass) already
+		// tried to position the new splitter off Other's GetPanelSize - but that still reads whatever
+		// Slate last actually painted, not the just-set override, so the splitter lands off Other's OLD
+		// size. Keep re-running RefreshDockLayout for the next several ticks until Other's geometry has
+		// actually settled to its new size.
+		SplitterSettleFramesRemaining = SplitterSettleFrameCount;
 		return;
 	}
 

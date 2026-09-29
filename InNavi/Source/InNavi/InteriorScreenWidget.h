@@ -1156,4 +1156,17 @@ private:
 	// past its box and off the bottom of the screen.
 	int32 PropertiesFractionRecalcFramesRemaining = 0;
 	static constexpr int32 PropertiesFractionRecalcFrameCount = 6;
+
+	// Set by TrySnapPanel right after a panel joins an EXISTING column (2+ members already) - the
+	// member it snapped against (e.g. Layers, when Properties joins below it) just had its own Border
+	// resized smaller via SetHeightOverride to make room, but RefreshSplitterLayout positions the new
+	// splitter off that member's GetPanelSize, which reads Border->GetCachedGeometry() - i.e. whatever
+	// Slate last actually painted, not the just-set override. That resize needs its own settle time
+	// before the geometry reflects it, same underlying cause and same multi-frame need as
+	// PropertiesFractionRecalcFramesRemaining's own comment explains (one retry isn't reliably
+	// enough) - counts down over the next several NativeTicks, calling RefreshDockLayout (which ends
+	// in RefreshSplitterLayout) on each one, so the new splitter settles into its correct position
+	// instead of being stuck wherever the stale first-frame geometry put it.
+	int32 SplitterSettleFramesRemaining = 0;
+	static constexpr int32 SplitterSettleFrameCount = 6;
 };
