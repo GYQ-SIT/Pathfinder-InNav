@@ -255,12 +255,26 @@ void ANavPlayerController::OnClick()
 		ActivePrefabShape != 0 ||
 		ActiveConnectorType != 0)
 	{
-		// In 2D, interior-editing clicks are handled by InteriorFloorPlanWidget; in plain 3D View
-		// mode, they're an intentional no-op (see IsIn3DPreviewMode's own comment). Only 3D Edit mode
-		// routes them anywhere.
-		if (bIsIn3DPreviewMode && bIsIn3DEditMode)
+		// In 2D, interior-editing clicks are handled by InteriorFloorPlanWidget. In 3D, Edit mode
+		// routes a click through the full dispatch (draw/prefab/connector/door/select - see
+		// Handle3DEditClick). View mode is more restricted - looking without editing is still useful
+		// (Select mode lets you click a room/door/connector to see it in the Properties panel), but
+		// none of the mutating modes make sense there, so it goes straight to selection instead of
+		// Handle3DEditClick's full dispatch. bSelectMode is the only mode flag not itself gated to
+		// Edit mode (see the mode toolbar buttons), so a stray click while some other mode happens to
+		// still be active from before switching to View is correctly still a no-op here.
+		if (bIsIn3DPreviewMode)
 		{
-			Handle3DEditClick();
+			if (bIsIn3DEditMode)
+			{
+				Handle3DEditClick();
+			}
+			else if (bSelectMode)
+			{
+				FHitResult Hit;
+				GetHitResultUnderCursor(ECC_Visibility, false, Hit);
+				Select3DEditTarget(Hit);
+			}
 		}
 	}
 	else
