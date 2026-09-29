@@ -29,6 +29,7 @@
 #include "Components/ScrollBoxSlot.h"
 #include "Components/SizeBox.h"
 #include "Components/SizeBoxSlot.h"
+#include "Components/Slider.h"
 #include "Components/Spacer.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -1291,24 +1292,65 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UVerticalBoxSlot* AudioStopAllSlot = AudioStack->AddChildToVerticalBox(AudioStopAllButton);
 		AudioStopAllSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 
-		// Lets the user mute every button's click sound at once (see ANavPlayerController::
-		// SetButtonClickSoundEnabled) without touching the Audio files below - own row, not a
-		// UAudioFileRowWidget, since it's a setting rather than a playable file.
-		UHorizontalBox* AudioClickSoundRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("AudioClickSoundRow"));
-		AudioClickSoundCheckbox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), TEXT("Chk_AudioClickSound"));
-		AudioClickSoundCheckbox->SetIsChecked(true);
+		// Lets the user mute each UI sound at once (see ANavPlayerController::SetButtonClickSoundEnabled/
+		// SetBuildingSelectSoundEnabled/SetQuitConfirmSoundEnabled) without touching the Audio files
+		// below - own rows, not UAudioFileRowWidgets, since these are settings rather than playable
+		// files.
+		auto AddAudioCheckRow = [this, AudioStack](const TCHAR* Name, const TCHAR* Label, bool bDefaultChecked) -> UCheckBox*
+		{
+			UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+			UCheckBox* CheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), FName(Name));
+			CheckBox->SetIsChecked(bDefaultChecked);
+			UHorizontalBoxSlot* CheckSlot = Row->AddChildToHorizontalBox(CheckBox);
+			CheckSlot->SetVerticalAlignment(VAlign_Center);
+			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+			Text->SetText(FText::FromString(FString(Label)));
+			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			ApplyStandardFont(Text);
+			UHorizontalBoxSlot* TextSlot = Row->AddChildToHorizontalBox(Text);
+			TextSlot->SetPadding(FMargin(4.f, 0.f, 0.f, 0.f));
+			TextSlot->SetVerticalAlignment(VAlign_Center);
+			UVerticalBoxSlot* RowSlot = AudioStack->AddChildToVerticalBox(Row);
+			RowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+			return CheckBox;
+		};
+
+		AudioClickSoundCheckbox = AddAudioCheckRow(TEXT("Chk_AudioClickSound"), TEXT("Button Click Sound"), true);
 		AudioClickSoundCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioClickSoundCheckChanged);
-		UHorizontalBoxSlot* AudioClickSoundCheckSlot = AudioClickSoundRow->AddChildToHorizontalBox(AudioClickSoundCheckbox);
-		AudioClickSoundCheckSlot->SetVerticalAlignment(VAlign_Center);
-		UTextBlock* AudioClickSoundText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_AudioClickSound"));
-		AudioClickSoundText->SetText(FText::FromString(TEXT("Button Click Sound")));
-		AudioClickSoundText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(AudioClickSoundText);
-		UHorizontalBoxSlot* AudioClickSoundTextSlot = AudioClickSoundRow->AddChildToHorizontalBox(AudioClickSoundText);
-		AudioClickSoundTextSlot->SetPadding(FMargin(4.f, 0.f, 0.f, 0.f));
-		AudioClickSoundTextSlot->SetVerticalAlignment(VAlign_Center);
-		UVerticalBoxSlot* AudioClickSoundRowSlot = AudioStack->AddChildToVerticalBox(AudioClickSoundRow);
-		AudioClickSoundRowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+
+		AudioSelectSoundCheckbox = AddAudioCheckRow(TEXT("Chk_AudioSelectSound"), TEXT("Building Select Sound"), true);
+		AudioSelectSoundCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioSelectSoundCheckChanged);
+
+		AudioQuitConfirmSoundCheckbox = AddAudioCheckRow(TEXT("Chk_AudioQuitConfirmSound"), TEXT("Confirm Dialog Sound"), true);
+		AudioQuitConfirmSoundCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioQuitConfirmSoundCheckChanged);
+
+		// Checked = everything muted (opposite sense from the three rows above) - unchecked by default,
+		// matching nothing being muted at first.
+		AudioMuteAllCheckbox = AddAudioCheckRow(TEXT("Chk_AudioMuteAll"), TEXT("Mute All"), false);
+		AudioMuteAllCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioMuteAllCheckChanged);
+
+		// Volume slider - ANavPlayerController::MasterVolume, applied to every sound this class plays.
+		UHorizontalBox* AudioVolumeRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("AudioVolumeRow"));
+		UTextBlock* AudioVolumeLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_AudioVolume"));
+		AudioVolumeLabel->SetText(FText::FromString(TEXT("Volume")));
+		AudioVolumeLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(AudioVolumeLabel);
+		UHorizontalBoxSlot* AudioVolumeLabelSlot = AudioVolumeRow->AddChildToHorizontalBox(AudioVolumeLabel);
+		AudioVolumeLabelSlot->SetVerticalAlignment(VAlign_Center);
+		AudioVolumeLabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+
+		AudioVolumeSlider = WidgetTree->ConstructWidget<USlider>(USlider::StaticClass(), TEXT("Slider_AudioVolume"));
+		AudioVolumeSlider->SetMinValue(0.f);
+		AudioVolumeSlider->SetMaxValue(1.f);
+		AudioVolumeSlider->SetValue(1.f);
+		AudioVolumeSlider->OnValueChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioVolumeChanged);
+		USizeBox* AudioVolumeSliderSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		AudioVolumeSliderSizeBox->SetWidthOverride(StandardButtonWidth - 60.f);
+		AudioVolumeSliderSizeBox->SetContent(AudioVolumeSlider);
+		UHorizontalBoxSlot* AudioVolumeSliderSlot = AudioVolumeRow->AddChildToHorizontalBox(AudioVolumeSliderSizeBox);
+		AudioVolumeSliderSlot->SetVerticalAlignment(VAlign_Center);
+		UVerticalBoxSlot* AudioVolumeRowSlot = AudioStack->AddChildToVerticalBox(AudioVolumeRow);
+		AudioVolumeRowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 
 		// Rows themselves are built by RefreshAudioList (one UAudioFileRowWidget per file under
 		// Data/Audio/), same reasoning as FloorListBox/LayersListBox not being laid out here.
@@ -1401,14 +1443,28 @@ void UInteriorScreenWidget::NativeConstruct()
 			Nav->OnStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavigationStateChanged);
 		}
 
-		// bButtonClickSoundEnabled lives on the PC, not this widget, so it survives this screen being
-		// torn down and rebuilt (e.g. Back to the start screen and in again) - the checkbox was
-		// hardcoded to SetIsChecked(true) at construction (RebuildWidget has no reliable PC access yet),
-		// which showed "on" here even after the user had turned it off, despite the real setting
-		// correctly staying off. Sync it to the actual state now that PC is available.
+		// bButtonClickSoundEnabled (and the two flags below) live on the PC, not this widget, so they
+		// survive this screen being torn down and rebuilt (e.g. Back to the start screen and in again) -
+		// these checkboxes were hardcoded to SetIsChecked(true/false) at construction (RebuildWidget has
+		// no reliable PC access yet), which could show stale state even after the user had changed the
+		// real setting. Sync them to the actual state now that PC is available. Mute All has no backing
+		// flag of its own (see SetAllUiSoundsEnabled's own comment) so there's nothing to sync it to
+		// here - it always starts unchecked.
 		if (AudioClickSoundCheckbox)
 		{
 			AudioClickSoundCheckbox->SetIsChecked(PC->IsButtonClickSoundEnabled());
+		}
+		if (AudioSelectSoundCheckbox)
+		{
+			AudioSelectSoundCheckbox->SetIsChecked(PC->IsBuildingSelectSoundEnabled());
+		}
+		if (AudioQuitConfirmSoundCheckbox)
+		{
+			AudioQuitConfirmSoundCheckbox->SetIsChecked(PC->IsQuitConfirmSoundEnabled());
+		}
+		if (AudioVolumeSlider)
+		{
+			AudioVolumeSlider->SetValue(PC->GetMasterVolume());
 		}
 	}
 
@@ -1617,7 +1673,8 @@ bool UInteriorScreenWidget::IsScreenPositionOverPanelButton(EDockPanelId Id, con
 			NavStartRoomComboBox, NavDestinationRoomComboBox };
 		break;
 	case EDockPanelId::Audio:
-		Widgets = { AudioStopAllButton, AudioClickSoundCheckbox, AudioFileListBox };
+		Widgets = { AudioStopAllButton, AudioClickSoundCheckbox, AudioSelectSoundCheckbox,
+			AudioQuitConfirmSoundCheckbox, AudioMuteAllCheckbox, AudioVolumeSlider, AudioFileListBox };
 		break;
 	}
 
@@ -3644,6 +3701,52 @@ void UInteriorScreenWidget::OnAudioClickSoundCheckChanged(bool bIsChecked)
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->SetButtonClickSoundEnabled(bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnAudioSelectSoundCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetBuildingSelectSoundEnabled(bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnAudioQuitConfirmSoundCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetQuitConfirmSoundEnabled(bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnAudioMuteAllCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		// bIsChecked means "muted" here, opposite of the three individual "X Sound" checkboxes (which
+		// are checked when ENABLED) - so the three get the inverse, and get visually synced to match.
+		PC->SetAllUiSoundsEnabled(!bIsChecked);
+	}
+	if (AudioClickSoundCheckbox)
+	{
+		AudioClickSoundCheckbox->SetIsChecked(!bIsChecked);
+	}
+	if (AudioSelectSoundCheckbox)
+	{
+		AudioSelectSoundCheckbox->SetIsChecked(!bIsChecked);
+	}
+	if (AudioQuitConfirmSoundCheckbox)
+	{
+		AudioQuitConfirmSoundCheckbox->SetIsChecked(!bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnAudioVolumeChanged(float NewValue)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetMasterVolume(NewValue);
 	}
 }
 

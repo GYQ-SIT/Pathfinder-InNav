@@ -830,20 +830,48 @@ public:
 	// SelectBuildingUnderCursor only when a click newly selects an exterior building (not on deselect,
 	// and not for anything selected inside the interior editor - rooms/doors/connectors have their own
 	// selection flow entirely separate from this one). Same fresh-decode-every-call pattern as
-	// PlayButtonClickSound (see its own comment for why), and likewise not gated by
-	// bButtonClickSoundEnabled - that flag is specifically the button-click-sound mute, not a general
-	// UI-sound mute.
+	// PlayButtonClickSound (see its own comment for why).
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void PlayBuildingSelectSound();
+
+	// See IsButtonClickSoundEnabled/SetButtonClickSoundEnabled's own comment - same idea, own flag.
+	UFUNCTION(BlueprintPure, Category = "Audio")
+	bool IsBuildingSelectSoundEnabled() const { return bBuildingSelectSoundEnabled; }
+
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void SetBuildingSelectSoundEnabled(bool bEnabled) { bBuildingSelectSoundEnabled = bEnabled; }
 
 	// Plays a short notification sound (InNavi/Data/Audio/quit_confirm.wav) - called once from
 	// UConfirmDialogWidget::NativeConstruct, so it plays the instant the Save/Discard/Cancel dialog
 	// appears (leaving via Back, File > New, File > Load, switching buildings - anywhere
 	// HasUnsavedChanges() triggers it), not tied to any button click inside it. Same fresh-decode-
-	// every-call pattern as the other short sound effects, and likewise not gated by
-	// bButtonClickSoundEnabled.
+	// every-call pattern as the other short sound effects.
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void PlayQuitConfirmSound();
+
+	// See IsButtonClickSoundEnabled/SetButtonClickSoundEnabled's own comment - same idea, own flag.
+	UFUNCTION(BlueprintPure, Category = "Audio")
+	bool IsQuitConfirmSoundEnabled() const { return bQuitConfirmSoundEnabled; }
+
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void SetQuitConfirmSoundEnabled(bool bEnabled) { bQuitConfirmSoundEnabled = bEnabled; }
+
+	// Backs the Audio panel's "Mute All" checkbox - sets all three UI-sound flags
+	// (click/select/quit-confirm) to bEnabled at once, e.g. SetAllUiSoundsEnabled(false) to mute
+	// everything in one call. Deliberately doesn't track "what was on before" - un-muting always turns
+	// all three back on, rather than restoring whatever subset was on before muting.
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void SetAllUiSoundsEnabled(bool bEnabled);
+
+	// Multiplies the volume of every sound this class plays (the Audio panel's own file playback and
+	// all three short UI effects) - see PlayWavFile, which applies this to every UAudioComponent it
+	// creates. Clamped to [0, 1]. Live-updates every currently-playing ActiveAudioPlaybacks entry too,
+	// so dragging the Audio panel's volume slider is heard immediately, not just on the next play.
+	UFUNCTION(BlueprintPure, Category = "Audio")
+	float GetMasterVolume() const { return MasterVolume; }
+
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void SetMasterVolume(float NewVolume);
 
 protected:
 	virtual void BeginPlay() override;
@@ -1238,4 +1266,13 @@ private:
 
 	// See IsButtonClickSoundEnabled/SetButtonClickSoundEnabled's own comment.
 	bool bButtonClickSoundEnabled = true;
+
+	// See IsBuildingSelectSoundEnabled/SetBuildingSelectSoundEnabled's own comment.
+	bool bBuildingSelectSoundEnabled = true;
+
+	// See IsQuitConfirmSoundEnabled/SetQuitConfirmSoundEnabled's own comment.
+	bool bQuitConfirmSoundEnabled = true;
+
+	// See GetMasterVolume/SetMasterVolume's own comment.
+	float MasterVolume = 1.f;
 };

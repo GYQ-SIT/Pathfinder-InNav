@@ -10,6 +10,7 @@ class UBorder;
 class UButton;
 class UCheckBox;
 class UScrollBox;
+class USlider;
 class UTextBlock;
 
 // Pure-C++ replacement for WBP_EditScreen (the exterior building-placement screen), built the
@@ -142,6 +143,23 @@ private:
 	UFUNCTION()
 	void OnAudioClickSoundCheckChanged(bool bIsChecked);
 
+	// Same idea as OnAudioClickSoundCheckChanged, one per remaining UI sound.
+	UFUNCTION()
+	void OnAudioSelectSoundCheckChanged(bool bIsChecked);
+
+	UFUNCTION()
+	void OnAudioQuitConfirmSoundCheckChanged(bool bIsChecked);
+
+	// Checked means everything's muted (opposite sense from the three "X Sound" checkboxes above) -
+	// forwards to ANavPlayerController::SetAllUiSoundsEnabled(!bIsChecked) and syncs the three
+	// individual checkboxes to match.
+	UFUNCTION()
+	void OnAudioMuteAllCheckChanged(bool bIsChecked);
+
+	// Forwards to ANavPlayerController::SetMasterVolume.
+	UFUNCTION()
+	void OnAudioVolumeChanged(float NewValue);
+
 	UPROPERTY()
 	UButton* BackButton = nullptr;
 
@@ -181,6 +199,18 @@ private:
 
 	UPROPERTY()
 	UCheckBox* AudioClickSoundCheckbox = nullptr;
+
+	UPROPERTY()
+	UCheckBox* AudioSelectSoundCheckbox = nullptr;
+
+	UPROPERTY()
+	UCheckBox* AudioQuitConfirmSoundCheckbox = nullptr;
+
+	UPROPERTY()
+	UCheckBox* AudioMuteAllCheckbox = nullptr;
+
+	UPROPERTY()
+	USlider* AudioVolumeSlider = nullptr;
 
 	UPROPERTY()
 	UScrollBox* AudioFileListBox = nullptr;

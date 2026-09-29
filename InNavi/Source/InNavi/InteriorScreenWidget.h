@@ -20,6 +20,7 @@ class UAudioFileRowWidget;
 class UPanelWidget;
 class UScrollBox;
 class USizeBox;
+class USlider;
 class UTextBlock;
 class UVerticalBox;
 
@@ -416,6 +417,25 @@ private:
 	// SetButtonClickSoundEnabled.
 	UFUNCTION()
 	void OnAudioClickSoundCheckChanged(bool bIsChecked);
+
+	// AudioSelectSoundCheckbox/AudioQuitConfirmSoundCheckbox's own handlers - same idea as
+	// OnAudioClickSoundCheckChanged, one per sound.
+	UFUNCTION()
+	void OnAudioSelectSoundCheckChanged(bool bIsChecked);
+
+	UFUNCTION()
+	void OnAudioQuitConfirmSoundCheckChanged(bool bIsChecked);
+
+	// AudioMuteAllCheckbox's own handler - checked means everything's muted (opposite sense from the
+	// three "X Sound" checkboxes above, which are checked when their sound is ENABLED) - forwards to
+	// ANavPlayerController::SetAllUiSoundsEnabled(!bIsChecked) and syncs the three individual
+	// checkboxes to match (all unchecked while muted, all checked once un-muted).
+	UFUNCTION()
+	void OnAudioMuteAllCheckChanged(bool bIsChecked);
+
+	// AudioVolumeSlider's own handler - forwards to ANavPlayerController::SetMasterVolume.
+	UFUNCTION()
+	void OnAudioVolumeChanged(float NewValue);
 
 	// Bound alongside every button's own OnClicked across this whole screen (see each button's
 	// construction site in RebuildWidget()/NativeConstruct()) so clicking anything plays the same
@@ -862,6 +882,22 @@ private:
 	// Checked by default, matching bButtonClickSoundEnabled's own default.
 	UPROPERTY()
 	UCheckBox* AudioClickSoundCheckbox = nullptr;
+
+	// Same as AudioClickSoundCheckbox, one per remaining UI sound - see OnAudioSelectSoundCheckChanged/
+	// OnAudioQuitConfirmSoundCheckChanged.
+	UPROPERTY()
+	UCheckBox* AudioSelectSoundCheckbox = nullptr;
+
+	UPROPERTY()
+	UCheckBox* AudioQuitConfirmSoundCheckbox = nullptr;
+
+	// See OnAudioMuteAllCheckChanged - unchecked by default (nothing's muted at first).
+	UPROPERTY()
+	UCheckBox* AudioMuteAllCheckbox = nullptr;
+
+	// See OnAudioVolumeChanged - ANavPlayerController::MasterVolume as a 0-1 slider.
+	UPROPERTY()
+	USlider* AudioVolumeSlider = nullptr;
 
 	// One UAudioFileRowWidget child per file under Data/Audio/, rebuilt by RefreshAudioList. Scrollable
 	// (same reasoning as LayersListBox) since the folder could hold more files than fit the panel.

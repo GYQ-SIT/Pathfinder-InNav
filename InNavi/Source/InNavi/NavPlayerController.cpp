@@ -3475,12 +3475,42 @@ void ANavPlayerController::PlayButtonClickSound()
 
 void ANavPlayerController::PlayBuildingSelectSound()
 {
+	if (!bBuildingSelectSoundEnabled)
+	{
+		return;
+	}
+
 	PlayShortSoundEffect(TEXT("select_ui.wav"));
 }
 
 void ANavPlayerController::PlayQuitConfirmSound()
 {
+	if (!bQuitConfirmSoundEnabled)
+	{
+		return;
+	}
+
 	PlayShortSoundEffect(TEXT("quit_confirm.wav"));
+}
+
+void ANavPlayerController::SetAllUiSoundsEnabled(bool bEnabled)
+{
+	bButtonClickSoundEnabled = bEnabled;
+	bBuildingSelectSoundEnabled = bEnabled;
+	bQuitConfirmSoundEnabled = bEnabled;
+}
+
+void ANavPlayerController::SetMasterVolume(float NewVolume)
+{
+	MasterVolume = FMath::Clamp(NewVolume, 0.f, 1.f);
+
+	for (const FActiveAudioPlayback& Playback : ActiveAudioPlaybacks)
+	{
+		if (Playback.AudioComponent)
+		{
+			Playback.AudioComponent->SetVolumeMultiplier(MasterVolume);
+		}
+	}
 }
 
 void ANavPlayerController::PlayShortSoundEffect(const TCHAR* FileName)
@@ -3520,6 +3550,7 @@ UAudioComponent* ANavPlayerController::PlayWavFile(const FString& FileName, bool
 	// regardless of where AudioActor happens to be.
 	AudioComponent->bAllowSpatialization = false;
 	AudioComponent->SetSound(SoundWave);
+	AudioComponent->SetVolumeMultiplier(MasterVolume);
 	AudioComponent->RegisterComponent();
 	AudioComponent->Play();
 
