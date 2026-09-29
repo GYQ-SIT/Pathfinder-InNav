@@ -874,6 +874,33 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UHorizontalBox* SwitcherRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BuildingSwitcherRow"));
 		BuildingSwitcherBarBackground->SetContent(SwitcherRow);
 
+		// CameraControlsGroup (Reset/-/speed/+, added below once built) lives in its OWN separate Border,
+		// laid over the same row/Y-band as BuildingSwitcherBarBackground but with its own CanvasPanelSlot
+		// centered against the WHOLE bar width - exactly UEditScreenWidget's own ToolbarBarBackground
+		// recipe (HAlign_Center on a full-width-anchored Border), not nested inside
+		// BuildingSwitcherBarBackground/SwitcherRow at all. Nesting it there was tried first (an Overlay
+		// sibling of SwitcherRow) but BuildingSwitcherBarBackground's own SetHorizontalAlignment(HAlign_Left)
+		// below shrink-wraps ITS content to the icons' own width instead of stretching it to the bar's
+		// full width, so anything centered inside that content lands centered against the ICONS' width,
+		// not the bar's - a separate Border sidesteps that entirely.
+		UBorder* CameraControlsBarBackground = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_CameraControlsBar"));
+		CameraControlsBarBackground->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
+		CameraControlsBarBackground->SetHorizontalAlignment(HAlign_Center);
+		CameraControlsBarBackground->SetVerticalAlignment(VAlign_Center);
+		// The stretching X anchor below (0 to 1) makes this Border's own layout bounds span the FULL bar
+		// width regardless of HAlign_Center (that only centers its CONTENT within those bounds) - at a
+		// higher Z than BuildingSwitcherBarBackground, a transparent full-width Border left at the
+		// default Visible would still capture every click across the whole row, blocking the
+		// combo/pencil/2D/3D/Snap icons underneath even where this Border's own (empty, transparent)
+		// area renders nothing. SelfHitTestInvisible lets clicks fall through to whatever's beneath
+		// EXCEPT where an actual child widget (a camera control button, once visible) sits.
+		CameraControlsBarBackground->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		UCanvasPanelSlot* CameraControlsBarSlot = Canvas->AddChildToCanvas(CameraControlsBarBackground);
+		CameraControlsBarSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
+		CameraControlsBarSlot->SetAlignment(FVector2D(0.f, 0.f));
+		CameraControlsBarSlot->SetOffsets(FMargin(0.f, MenuBarHeight, 0.f, BuildingSwitcherBarHeight));
+		CameraControlsBarSlot->SetZOrder(7);
+
 		BuildingSwitcherComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_BuildingSwitcher"));
 		BuildingSwitcherComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
 		USizeBox* BuildingSwitcherSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
@@ -920,7 +947,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// comment on Switch2DButton in the header for why these live here instead of the menu bar.
 		constexpr float SwitcherButtonWidth = 48.f;
 		constexpr float SwitcherButtonHeight = 36.f;
-		auto AddSwitcherButton = [this, SwitcherRow, SwitcherButtonWidth, SwitcherButtonHeight](const TCHAR* Name, const TCHAR* Label) -> UButton*
+		auto AddSwitcherButton = [this, SwitcherButtonWidth, SwitcherButtonHeight](UHorizontalBox* TargetRow, const TCHAR* Name, const TCHAR* Label) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
@@ -939,16 +966,31 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 				TextSlot->SetVerticalAlignment(VAlign_Center);
 			}
 			Button->SetContent(ButtonSizeBox);
-			UHorizontalBoxSlot* RowSlot = SwitcherRow->AddChildToHorizontalBox(Button);
+			UHorizontalBoxSlot* RowSlot = TargetRow->AddChildToHorizontalBox(Button);
 			RowSlot->SetVerticalAlignment(VAlign_Center);
 			RowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
 			return Button;
 		};
 
-		Switch2DButton = AddSwitcherButton(TEXT("Btn_Switch2D"), TEXT("2D"));
+		Switch2DButton = AddSwitcherButton(SwitcherRow, TEXT("Btn_Switch2D"), TEXT("2D"));
 		Switch2DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSwitch2DClicked);
-		Switch3DButton = AddSwitcherButton(TEXT("Btn_Switch3D"), TEXT("3D"));
+		Switch3DButton = AddSwitcherButton(SwitcherRow, TEXT("Btn_Switch3D"), TEXT("3D"));
 		Switch3DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSwitch3DClicked);
+
+		// "View"/"Edit" toggle - right after 3D now (was after the speed controls) - starts as "View"
+		// (yellow), matching PC's own default (see ANavPlayerController::bIsIn3DEditMode).
+		// AddSwitcherButton doesn't hand back its inner UTextBlock (every other button built with it has
+		// a fixed label), so this one reaches it back out through the widget tree instead, same "don't
+		// return every intermediate" convention used elsewhere in this function (e.g. the File/Window
+		// dropdowns).
+		Edit3DModeToggleButton = AddSwitcherButton(SwitcherRow, TEXT("Btn_Edit3DModeToggle"), TEXT("View"));
+		Edit3DModeToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnEdit3DModeToggleClicked);
+		Edit3DModeToggleButton->SetBackgroundColor(FLinearColor(0.8f, 0.7f, 0.1f, 1.f));
+		Edit3DModeToggleButton->SetVisibility(ESlateVisibility::Collapsed);
+		if (USizeBox* Edit3DModeSizeBox = Cast<USizeBox>(Edit3DModeToggleButton->GetContent()))
+		{
+			Edit3DModeToggleButtonText = Cast<UTextBlock>(Edit3DModeSizeBox->GetContent());
+		}
 
 		// Snap toggle - icon-only, next to 3D, always visible (snapping matters in 2D too, unlike
 		// Reset/speed/View-Edit which are 3D-preview-only). Icon itself is set by HandleSnapEnabledChanged
@@ -975,13 +1017,18 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			SnapToggleRowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
 		}
 
+		// Reset/-/speed/+ - see CameraControlsBarBackground's own comment for why this is its own Border
+		// instead of living inside SwitcherRow.
+		UHorizontalBox* CameraControlsGroup = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("CameraControlsGroup"));
+		CameraControlsBarBackground->SetContent(CameraControlsGroup);
+
 		// Only shown while in 3D preview (see HandlePreviewModeChanged).
-		ResetView3DButton = AddSwitcherButton(TEXT("Btn_ResetView3D"), TEXT("Reset"));
+		ResetView3DButton = AddSwitcherButton(CameraControlsGroup, TEXT("Btn_ResetView3D"), TEXT("Reset"));
 		ResetView3DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnResetView3DClicked);
 		ResetView3DButton->SetToolTipText(FText::FromString(TEXT("Reset View")));
 		ResetView3DButton->SetVisibility(ESlateVisibility::Collapsed);
 
-		DecreaseSpeedButton = AddSwitcherButton(TEXT("Btn_DecreaseSpeed"), TEXT("-"));
+		DecreaseSpeedButton = AddSwitcherButton(CameraControlsGroup, TEXT("Btn_DecreaseSpeed"), TEXT("-"));
 		DecreaseSpeedButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnDecreaseSpeedClicked);
 		DecreaseSpeedButton->SetToolTipText(FText::FromString(TEXT("Decrease Camera Speed")));
 		DecreaseSpeedButton->SetVisibility(ESlateVisibility::Collapsed);
@@ -997,30 +1044,16 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		CameraSpeedSizeBox->SetWidthOverride(64.f);
 		CameraSpeedSizeBox->SetHeightOverride(SwitcherButtonHeight);
 		CameraSpeedSizeBox->SetContent(CameraSpeedTextBox);
-		if (UHorizontalBoxSlot* CameraSpeedRowSlot = Cast<UHorizontalBoxSlot>(SwitcherRow->AddChildToHorizontalBox(CameraSpeedSizeBox)))
+		if (UHorizontalBoxSlot* CameraSpeedRowSlot = Cast<UHorizontalBoxSlot>(CameraControlsGroup->AddChildToHorizontalBox(CameraSpeedSizeBox)))
 		{
 			CameraSpeedRowSlot->SetVerticalAlignment(VAlign_Center);
 			CameraSpeedRowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
 		}
 
-		IncreaseSpeedButton = AddSwitcherButton(TEXT("Btn_IncreaseSpeed"), TEXT("+"));
+		IncreaseSpeedButton = AddSwitcherButton(CameraControlsGroup, TEXT("Btn_IncreaseSpeed"), TEXT("+"));
 		IncreaseSpeedButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnIncreaseSpeedClicked);
 		IncreaseSpeedButton->SetToolTipText(FText::FromString(TEXT("Increase Camera Speed")));
 		IncreaseSpeedButton->SetVisibility(ESlateVisibility::Collapsed);
-
-		// "View"/"Edit" toggle - starts as "View" (yellow), matching PC's own default (see
-		// ANavPlayerController::bIsIn3DEditMode). AddSwitcherButton doesn't hand back its inner
-		// UTextBlock (every other button built with it has a fixed label), so this one reaches it back
-		// out through the widget tree instead, same "don't return every intermediate" convention used
-		// elsewhere in this function (e.g. the File/Window dropdowns).
-		Edit3DModeToggleButton = AddSwitcherButton(TEXT("Btn_Edit3DModeToggle"), TEXT("View"));
-		Edit3DModeToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnEdit3DModeToggleClicked);
-		Edit3DModeToggleButton->SetBackgroundColor(FLinearColor(0.8f, 0.7f, 0.1f, 1.f));
-		Edit3DModeToggleButton->SetVisibility(ESlateVisibility::Collapsed);
-		if (USizeBox* Edit3DModeSizeBox = Cast<USizeBox>(Edit3DModeToggleButton->GetContent()))
-		{
-			Edit3DModeToggleButtonText = Cast<UTextBlock>(Edit3DModeSizeBox->GetContent());
-		}
 
 		// Thin separator lines at the seam between the menu bar and the switcher bar, and again below
 		// the switcher bar - both bars (and the panels below) share the same dark background color, so
