@@ -1,6 +1,6 @@
 # Interior Editor — How to Use It
 
-> Current state as of 2026-09-26, branch `YQ_CUI`. The editor now has a real UMG UI
+> Current state as of 2026-09-27, branch `YQ_CUI`. The editor now has a real UMG UI
 > (menu bar, dockable panels, buttons) - every action below also still has a keyboard
 > shortcut, and both do the same thing under the hood.
 
@@ -8,23 +8,39 @@
 
 1. Launch the project, pick **New** (blank) or **Open** (load an existing
    `buildings.json`) from the start screen.
-2. Click a building in the 3D exterior view to select it, then **Enter Interior**.
-   Clicking empty space, or clicking the already-selected building again, deselects it.
+2. Click a building in the 3D exterior view to select it (plays a short selection
+   sound) and **Enter Interior** appears in the exterior screen's own top menu bar
+   (see below). Clicking empty space, or clicking the already-selected building again,
+   deselects it.
 3. You're now in the 2D floor-plan editor — a flat top-down view of the building's
    currently active floor, not a 3D camera trick. Right-click-drag to pan, mouse wheel
    to zoom. A separate **3D preview** is available too — see its own section below.
 4. **Back**, at the right end of the top menu bar, returns to the exterior view (will
    prompt to save if you have unsaved changes).
 
+## Exterior edit screen
+
+The 3D building-cluster view (before entering any building's interior) has its own top
+menu bar, same look as the interior editor's:
+
+- **File** — **New**/**Load**, same behavior and unsaved-changes check as the interior
+  editor's own File menu below.
+- **Window** — just **Audio** (this screen has no dockable panels to list) — see Audio
+  panel below.
+- **Enter Interior**, then **Back** on the far right — Enter Interior only appears once
+  a building is selected; Back here returns to the start screen (not to be confused
+  with the interior editor's own Back, which returns to *this* screen instead).
+
 ## Top menu bar
 
-Pinned across the very top of the screen.
+Pinned across the very top of the interior editor screen.
 
 - **File** — **New** clears everything and starts a blank project; **Load** opens the
   OS file picker for an existing `buildings.json`. Both check for unsaved changes first
   and prompt to save/discard/cancel, exactly like leaving to the exterior does.
-- **Window** — a checklist of the five dockable panels (Toolbar/Floor/Properties/
-  Layers/Navigation, see below). Unchecking one hides it; re-checking shows it again.
+- **Window** — a checklist of the six dockable panels (Toolbar/Floor/Properties/
+  Layers/Navigation/Audio, see below). Unchecking one hides it; re-checking shows it
+  again. Audio (unlike the other five) starts unchecked/hidden.
 - **Back**, on the right — same as described above.
 
 ## Building switcher bar
@@ -35,12 +51,13 @@ exterior first (switching buildings while in 3D preview exits back to 2D first).
 pencil icon next to it lets you rename the currently-loaded building in place.
 
 Further right on the same row: **2D**/**3D** toggles the preview mode (see below);
-**Reset** and the **-**/**+** move-speed buttons only appear while in 3D preview.
+**Reset** and the **-**/**+** move-speed buttons, and a **View**/**Edit** toggle, only
+appear while in 3D preview (View/Edit is covered in the 3D preview section below).
 
 ## Dockable panels
 
-Five panels — **Toolbar**, **Floor**, **Properties**, **Layers**, **Navigation** — can
-each be:
+Six panels — **Toolbar**, **Floor**, **Properties**, **Layers**, **Navigation**,
+**Audio** — can each be:
 
 - **Moved**: drag by the panel's own background (not one of its buttons).
 - **Resized**: drag either its left or right edge.
@@ -109,15 +126,29 @@ point directly on the floor plan instead - either way the button turns green onc
 route (including cross-floor connector instructions where relevant); **Clear Route**
 resets both endpoints.
 
+### Audio panel
+
+Hidden by default (Window > Audio to show it). Lists every wav file under
+`InNavi/Data/Audio/` with its own **Play** button — click to start it,
+click again while it's playing to see it highlighted green; **Stop All** halts
+everything at once. Multiple files can play together (e.g. background music plus an
+effect). A **Button Click Sound** checkbox mutes/unmutes the short click sound every
+button in the app plays on click (this is a separate, PC-wide setting — the checkbox
+here and the identical one in the exterior edit screen's own Audio panel both read/
+write the same underlying flag, so toggling it in one place is reflected in the other
+next time that panel is opened). Leaving all the way back to the start screen stops any
+audio still playing.
+
 ## 3D preview mode
 
 The **2D**/**3D** toggle (building switcher bar, see above) switches from the 2D floor
 plan to a free-fly 3D view of the current floor's real generated geometry — current
 building only (others hidden), current floor's own exterior wall + floor slab only
-(other floors hidden, so upper/lower floors don't block the view). View-only: no
-room/wall/door editing happens in 3D, and the dock panels stay up and usable
-(Floor/Navigation in particular) so you can switch floors or plan a route while
-previewing.
+(other floors hidden, so upper/lower floors don't block the view). The dock panels stay
+up and usable (Floor/Navigation in particular) so you can switch floors or plan a route
+while previewing. A found route (and its Start/Destination markers) draws in 3D too —
+same per-floor rule as 2D, only the segment(s)/marker(s) on the currently viewed floor
+show.
 
 Camera controls:
 
@@ -129,6 +160,29 @@ Camera controls:
 
 Switching floors while in 3D re-frames the camera to the default view of the new
 floor. Switching buildings (via the building switcher) exits back to 2D first.
+
+### View / Edit
+
+3D preview opens in **View** mode (yellow button) — look around only, every editing
+tool is a no-op, matching 2D being read-only from outside select mode. Click the
+button to switch to **Edit** (green) for the same editing tools 2D has, driven by
+clicking in the 3D view instead of the 2D canvas:
+
+- **Select** — click a room, door, or connector; the selected room/connector tints
+  light green (3D's equivalent of 2D's red outline — a selected door highlights its
+  own room, same as 2D). Click empty space to deselect.
+- **Move** — drag a selected room to reposition it (connectors are rotate/scale only,
+  never dragged, same restriction as 2D).
+- **Resize**/**Rotate**/**Delete** — same `=`/`-`, hold `9`/`0`, and Backspace
+  shortcuts as 2D, now actually work in 3D Edit mode (they're inert in View mode, even
+  if something was selected before switching to it).
+- **Draw Room**/**Draw Wall**/prefab shapes/**Add Door**/elevator-stairs-escalator
+  placement — same P/L/1-2-3/K/4-5-6 tools as 2D, clicking points in the 3D view
+  instead of the 2D canvas. Each clicked point draws a temporary green marker/line so
+  you can see where it landed; Enter/Esc finish or cancel same as 2D.
+
+Switching back to View, leaving 3D preview, or switching buildings always resets back
+to View mode.
 
 ## Snapping
 
@@ -143,11 +197,35 @@ yet (a New session), it opens the OS save dialog first. Leaving the interior bac
 the exterior, or exiting to the start screen, will prompt you to save/discard/cancel if
 you have unsaved changes.
 
+## Audio feedback
+
+Three kinds, all backed by wav files under `InNavi/Data/Audio/` (read and decoded by
+this project's own small WAV reader, `WavFileLoader.h` — no third-party plugin; an
+earlier pass vendored one for mp3 support, removed once the professor confirmed
+wav-only playback is sufficient, including for the Audio panel's own arbitrary-file
+playback):
+
+- **Button click sound** (`click_button.wav`) — every button in the app plays this on
+  click. Mute it from either screen's own Audio panel (see above) — it's one shared
+  setting, not per-screen.
+- **Building selection sound** (`select_ui.wav`) — plays only when clicking newly
+  selects a building in the exterior 3D view (not on deselect, and not tied to the
+  click-sound mute above).
+- **Unsaved-changes dialog sound** (`quit_confirm.wav`) — plays once, the instant the
+  Save/Discard/Cancel dialog itself appears (Back, File > New, File > Load, switching
+  buildings — anywhere unsaved changes trigger it), not tied to any of its buttons.
+
+Both are separate from the Audio panel's own file list, which is for playing back
+arbitrary files under `Data/Audio/` on demand (background music, effects, etc.).
+
 ## Known gaps / not built yet
 
 - Grow/Shrink is still a fixed 20-unit nudge, not a typed Length/Width or drag-to-resize
   interaction.
 - No dedicated tool for a plain path node (only elevator/stairs/escalator have a
   placement tool right now).
-- 3D preview is view-only - no room/wall/door editing in 3D yet, and no "3D Preview"
-  floating thumbnail overlaid on the 2D view.
+- No "3D Preview" floating thumbnail overlaid on the 2D view (the mockup's own stretch
+  goal, separate from the full-screen 2D/3D toggle that's already built).
+- The 3D route visualization is plain persistent debug lines/spheres, not a proper mesh
+  - a route redraw (e.g. picking a new Start point) also clears any in-progress
+  draw-room/wall point markers in 3D if the two happen to overlap in time.

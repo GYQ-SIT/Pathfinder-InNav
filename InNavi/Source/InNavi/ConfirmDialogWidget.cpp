@@ -130,6 +130,13 @@ void UConfirmDialogWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
+	// Plays once, right when the dialog itself appears - not tied to any of its buttons (see
+	// PlayButtonClickSound below for those).
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->PlayQuitConfirmSound();
+	}
+
 	if (SaveAndLeaveButton)
 	{
 		SaveAndLeaveButton->OnClicked.AddUniqueDynamic(this, &UConfirmDialogWidget::OnSaveAndLeaveClicked);

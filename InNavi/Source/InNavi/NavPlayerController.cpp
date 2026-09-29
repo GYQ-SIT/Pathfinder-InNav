@@ -11,6 +11,7 @@
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
+#include "InteriorConnectorMarker.h"
 #include "EngineUtils.h"
 #include "DrawDebugHelpers.h"
 #include "Misc/FileHelper.h"
@@ -21,6 +22,10 @@
 #include "IDesktopPlatform.h"
 #include "Framework/Application/SlateApplication.h"
 #include "UObject/UObjectIterator.h"
+#include "HAL/FileManager.h"
+#include "WavFileLoader.h"
+#include "Sound/SoundWaveProcedural.h"
+#include "Components/AudioComponent.h"
 
 // ---- Helper: is Point inside the (possibly concave) polygon Poly? (even-odd ray-casting test) ----
 static bool IsPointInPolygon(const FVector2D& Point, const TArray<FVector2D>& Poly)
@@ -64,6 +69,9 @@ void ANavPlayerController::BeginPlay()
 		FInputModeGameAndUI InputMode;
 		InputMode.SetHideCursorDuringCapture(false);
 		SetInputMode(InputMode);
+		// Keeps the 3D preview's route/start/destination markers live as the user picks points and
+		// finds/clears a route - see RefreshRoute3DVisualization's own comment.
+		NavigationPanel->OnStateChanged.AddUniqueDynamic(this, &ANavPlayerController::RefreshRoute3DVisualization);
 	}
 
 	for (TActorIterator<ABuildingGenerator> It(GetWorld()); It; ++It)
@@ -140,6 +148,11 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(FInputChord(EKeys::S, /*Shift*/false, /*Ctrl*/true, /*Alt*/false, /*Cmd*/false), IE_Pressed, this, &ANavPlayerController::SaveCurrentProjectKeyHandler);
 	InputComponent->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &ANavPlayerController::ZoomIn3DPreview);
 	InputComponent->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &ANavPlayerController::ZoomOut3DPreview);
+	// Separate from the "SelectBuilding" action above - carries the 3D Edit mode room-drag gesture
+	// (see OnLeftMouseDown3DEdit/Up), while OnClick still fires for the plain-click (select/draw/etc.)
+	// side of the same button.
+	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &ANavPlayerController::OnLeftMouseDown3DEdit);
+	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Released, this, &ANavPlayerController::OnLeftMouseUp3DEdit);
 }
 
 void ANavPlayerController::OnClick()
@@ -242,9 +255,27 @@ void ANavPlayerController::OnClick()
 		ActivePrefabShape != 0 ||
 		ActiveConnectorType != 0)
 	{
-		// Interior-editing clicks are handled by
-		// InteriorFloorPlanWidget.
-		// Therefore, do nothing here.
+		// In 2D, interior-editing clicks are handled by InteriorFloorPlanWidget. In 3D, Edit mode
+		// routes a click through the full dispatch (draw/prefab/connector/door/select - see
+		// Handle3DEditClick). View mode is more restricted - looking without editing is still useful
+		// (Select mode lets you click a room/door/connector to see it in the Properties panel), but
+		// none of the mutating modes make sense there, so it goes straight to selection instead of
+		// Handle3DEditClick's full dispatch. bSelectMode is the only mode flag not itself gated to
+		// Edit mode (see the mode toolbar buttons), so a stray click while some other mode happens to
+		// still be active from before switching to View is correctly still a no-op here.
+		if (bIsIn3DPreviewMode)
+		{
+			if (bIsIn3DEditMode)
+			{
+				Handle3DEditClick();
+			}
+			else if (bSelectMode)
+			{
+				FHitResult Hit;
+				GetHitResultUnderCursor(ECC_Visibility, false, Hit);
+				Select3DEditTarget(Hit);
+			}
+		}
 	}
 	else
 	{
@@ -290,6 +321,9 @@ void ANavPlayerController::SelectBuildingUnderCursor()
 	ClickedBuilding->SetHighlighted(true);
 	SelectedBuilding = ClickedBuilding;
 	OnBuildingSelected.Broadcast(ClickedBuilding->BuildingId);
+	// Only exterior building selection gets this sound - deselecting (above) and every other kind of
+	// selection in the app (rooms/doors/connectors in the interior editor) don't go through here.
+	PlayBuildingSelectSound();
 
 	UE_LOG(LogTemp, Warning, TEXT("Selected building: %s"), *ClickedBuilding->BuildingName);
 }
@@ -477,6 +511,12 @@ void ANavPlayerController::ExitDrawRoomMode()
 
 void ANavPlayerController::ExitSelectMode()
 {
+	// A 3D room drag needs select mode to have started it (see OnLeftMouseDown3DEdit) - if select
+	// mode is turned off mid-drag (self-toggle, Esc, or another mode taking over), finish the drag
+	// the same way a mouse-up would, rather than leaving it stuck with SetIgnoreLookInput(true) never
+	// balanced back to false. No-op if no drag is in progress.
+	OnLeftMouseUp3DEdit();
+
 	if (bSelectMode)
 	{
 		bSelectMode = false;
@@ -943,25 +983,37 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 
 void ANavPlayerController::SelectRoom(const FString& RoomId)
 {
+	// Tracked (rather than an early-return once SelectedRoomId itself is unchanged) so
+	// RefreshSelectionHighlight still fires when this call's only real effect was clearing a
+	// previously-selected door/connector - e.g. deselecting by clicking empty space while a connector,
+	// not a room, was selected (SelectedRoomId was already empty on both sides of that call).
+	bool bChanged = false;
+
 	if (!SelectedDoorId.IsEmpty())
 	{
 		SelectedDoorRoomId.Empty();
 		SelectedDoorId.Empty();
 		OnSelectedDoorChanged.Broadcast(FString(), FString());
+		bChanged = true;
 	}
 	if (!SelectedConnectorGroupId.IsEmpty())
 	{
 		SelectedConnectorGroupId.Empty();
 		OnSelectedConnectorChanged.Broadcast(FString());
+		bChanged = true;
 	}
 
-	if (SelectedRoomId == RoomId)
+	if (SelectedRoomId != RoomId)
 	{
-		return;
+		SelectedRoomId = RoomId;
+		OnSelectedRoomChanged.Broadcast(SelectedRoomId);
+		bChanged = true;
 	}
 
-	SelectedRoomId = RoomId;
-	OnSelectedRoomChanged.Broadcast(SelectedRoomId);
+	if (bChanged)
+	{
+		RefreshSelectionHighlight();
+	}
 }
 
 void ANavPlayerController::SelectDoor(const FString& RoomId, const FString& DoorId)
@@ -980,29 +1032,39 @@ void ANavPlayerController::SelectDoor(const FString& RoomId, const FString& Door
 	SelectedDoorRoomId = RoomId;
 	SelectedDoorId = DoorId;
 	OnSelectedDoorChanged.Broadcast(SelectedDoorRoomId, SelectedDoorId);
+	RefreshSelectionHighlight();
 }
 
 void ANavPlayerController::SelectConnector(const FString& GroupId)
 {
+	// See SelectRoom's own comment on why this is tracked rather than an early return.
+	bool bChanged = false;
+
 	if (!SelectedRoomId.IsEmpty())
 	{
 		SelectedRoomId.Empty();
 		OnSelectedRoomChanged.Broadcast(FString());
+		bChanged = true;
 	}
 	if (!SelectedDoorId.IsEmpty())
 	{
 		SelectedDoorRoomId.Empty();
 		SelectedDoorId.Empty();
 		OnSelectedDoorChanged.Broadcast(FString(), FString());
+		bChanged = true;
 	}
 
-	if (SelectedConnectorGroupId == GroupId)
+	if (SelectedConnectorGroupId != GroupId)
 	{
-		return;
+		SelectedConnectorGroupId = GroupId;
+		OnSelectedConnectorChanged.Broadcast(SelectedConnectorGroupId);
+		bChanged = true;
 	}
 
-	SelectedConnectorGroupId = GroupId;
-	OnSelectedConnectorChanged.Broadcast(SelectedConnectorGroupId);
+	if (bChanged)
+	{
+		RefreshSelectionHighlight();
+	}
 }
 
 bool ANavPlayerController::SetSelectedRoomName(const FString& NewName)
@@ -1210,6 +1272,12 @@ bool ANavPlayerController::MoveDoor(const FString& RoomId, const FString& DoorId
 
 bool ANavPlayerController::DeleteSelection()
 {
+	// See NudgeSelectedRoomSize's own comment - same View-mode edit-proofing.
+	if (bIsIn3DPreviewMode && !bIsIn3DEditMode)
+	{
+		return false;
+	}
+
 	if (!SelectedDoorId.IsEmpty())
 	{
 		return DeleteDoor(SelectedDoorRoomId, SelectedDoorId);
@@ -1699,6 +1767,10 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 		InteriorGen->ClearLoadedInterior();
 	}
 	Generator->ClearAllBuildings();
+	// ClearAllBuildings() just destroyed whatever SelectedBuilding was pointing at - same reasoning as
+	// StartNewProject's own reset, just missing here until now (SelectBuildingUnderCursor/
+	// GetSelectedBuildingId would otherwise dereference a stale pointer if called right after an Open).
+	SelectedBuilding = nullptr;
 
 	const int32 Count = Generator->LoadBuildingsFromFile(FilePath);
 	UE_LOG(LogTemp, Warning, TEXT("LoadBuildingDataFromPath: loaded %d buildings from %s"), Count, *FilePath);
@@ -2033,11 +2105,460 @@ void ANavPlayerController::SetIn3DPreviewMode(bool bEnable)
 	}
 	else
 	{
+		// Finish (or revert) any drag still in progress before leaving 3D preview entirely - same
+		// reasoning as ExitSelectMode's own call, otherwise SetIgnoreLookInput(true) from a
+		// mid-drag exit would never get balanced back to false.
+		OnLeftMouseUp3DEdit();
 		SetOtherBuildingsHidden(false);
 		RepositionCameraToActiveFloor();
+		// Always leave 3D preview back in View mode, not however Edit/View happened to be left - no
+		// separate OnEdit3DModeChanged broadcast needed, the View/Edit button is already hidden by the
+		// OnPreviewModeChanged broadcast below and just re-syncs to View next time 3D is re-entered.
+		bIsIn3DEditMode = false;
 	}
 
+	// Shows the route/start/destination markers immediately on entry if one already exists (rather
+	// than waiting for the next OnStateChanged), and clears them on the way out - the function itself
+	// checks bIsIn3DPreviewMode, so this one call handles both.
+	RefreshRoute3DVisualization();
+
 	OnPreviewModeChanged.Broadcast(bIsIn3DPreviewMode);
+}
+
+void ANavPlayerController::SetIn3DEditMode(bool bEnable)
+{
+	if (!bIsIn3DPreviewMode || bEnable == bIsIn3DEditMode)
+	{
+		return;
+	}
+
+	if (!bEnable)
+	{
+		// Same reasoning as ExitSelectMode/SetIn3DPreviewMode's own call - switching back to View
+		// mid-drag must still finish (or revert) it and balance SetIgnoreLookInput.
+		OnLeftMouseUp3DEdit();
+	}
+
+	bIsIn3DEditMode = bEnable;
+	OnEdit3DModeChanged.Broadcast(bIsIn3DEditMode);
+}
+
+void ANavPlayerController::RefreshSelectionHighlight()
+{
+	if (AInteriorRoom* PrevRoom = Cast<AInteriorRoom>(HighlightedSelectionActor))
+	{
+		PrevRoom->SetHighlighted(false);
+	}
+	else if (AInteriorConnectorMarker* PrevMarker = Cast<AInteriorConnectorMarker>(HighlightedSelectionActor))
+	{
+		PrevMarker->SetHighlighted(false);
+	}
+	HighlightedSelectionActor = nullptr;
+
+	if (!InteriorGen)
+	{
+		return;
+	}
+
+	if (!SelectedConnectorGroupId.IsEmpty())
+	{
+		const int32 ActiveFloor = InteriorGen->GetActiveFloor();
+		for (const FInteriorNavNode& Node : InteriorGen->GetNavNodes())
+		{
+			if (Node.ConnectorGroupId == SelectedConnectorGroupId && Node.Level == ActiveFloor && Node.MarkerActor)
+			{
+				Node.MarkerActor->SetHighlighted(true);
+				HighlightedSelectionActor = Node.MarkerActor;
+				break;
+			}
+		}
+		return;
+	}
+
+	// A selected door highlights its owning room - there's no separate 3D visual for "just this door".
+	const FString RoomIdToHighlight = !SelectedDoorId.IsEmpty() ? SelectedDoorRoomId : SelectedRoomId;
+	if (RoomIdToHighlight.IsEmpty())
+	{
+		return;
+	}
+
+	for (AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
+	{
+		if (Room && Room->RoomId == RoomIdToHighlight)
+		{
+			Room->SetHighlighted(true);
+			HighlightedSelectionActor = Room;
+			break;
+		}
+	}
+}
+
+bool ANavPlayerController::Get3DFloorFootprintPoint(const FHitResult& Hit, FVector2D& OutPoint) const
+{
+	if (!Generator || !InteriorGen)
+	{
+		return false;
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building)
+	{
+		return false;
+	}
+
+	const float Scale = Generator->GetScale();
+	if (Scale <= KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	if (Hit.bBlockingHit)
+	{
+		OutPoint = FVector2D(Hit.Location.X, Hit.Location.Y) / Scale - Building->BuildingOffset;
+		return true;
+	}
+
+	// Fallback: the trace missed every collidable mesh (e.g. a click just outside the building
+	// outline, or through a gap) - intersect the camera ray with the active floor's own Z-plane
+	// instead of silently doing nothing.
+	FVector RayOrigin, RayDirection;
+	if (!DeprojectMousePositionToWorld(RayOrigin, RayDirection))
+	{
+		return false;
+	}
+
+	if (FMath::IsNearlyZero(RayDirection.Z))
+	{
+		// Ray is parallel to the floor plane - no intersection.
+		return false;
+	}
+
+	const float PlaneZ = (InteriorGen->GetActiveFloor() - 1) * Building->GetFloorHeight();
+	const FVector WorldPoint = FMath::RayPlaneIntersection(RayOrigin, RayDirection, FPlane(FVector(0.f, 0.f, PlaneZ), FVector::UpVector));
+	OutPoint = FVector2D(WorldPoint.X, WorldPoint.Y) / Scale - Building->BuildingOffset;
+	return true;
+}
+
+bool ANavPlayerController::FindNearestRoomEdge3D(AInteriorRoom* Room, const FVector& WorldHit, int32& OutEdgeIndex, float& OutOffsetWorldUnits, float MaxDistanceWorldUnits, bool bCenterOffsetForDoorWidth) const
+{
+	if (!Room || !Generator || !InteriorGen)
+	{
+		return false;
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building)
+	{
+		return false;
+	}
+
+	const TArray<FVector2D>& Footprint = Room->GetFootprint();
+	const int32 N = Footprint.Num();
+	if (N < 2)
+	{
+		return false;
+	}
+
+	const float Scale = Generator->GetScale();
+	TArray<FVector2D> WorldPoints;
+	WorldPoints.Reserve(N);
+	for (const FVector2D& Point : Footprint)
+	{
+		WorldPoints.Add((Point + Building->BuildingOffset) * Scale);
+	}
+
+	constexpr float DoorWidthWorldUnits = 90.f; // matches AInteriorGenerator::AddDoorToRoom's fixed door width
+	const FVector2D HitXY(WorldHit.X, WorldHit.Y);
+	const int32 NumEdges = Room->IsClosedLoop() ? N : N - 1;
+
+	float BestDistance = TNumericLimits<float>::Max();
+	int32 BestEdge = INDEX_NONE;
+	float BestOffset = 0.f;
+
+	for (int32 i = 0; i < NumEdges; i++)
+	{
+		const FVector2D& A = WorldPoints[i];
+		const FVector2D& B = WorldPoints[(i + 1) % N];
+
+		const FVector2D AB = B - A;
+		const float LengthSq = AB.SizeSquared();
+		const float T = (LengthSq > KINDA_SMALL_NUMBER) ? FMath::Clamp(FVector2D::DotProduct(HitXY - A, AB) / LengthSq, 0.f, 1.f) : 0.f;
+		const FVector2D ClosestPoint = A + AB * T;
+		const float Distance = FVector2D::Distance(HitXY, ClosestPoint);
+
+		if (Distance < BestDistance)
+		{
+			BestDistance = Distance;
+			BestEdge = i;
+			const float EdgeLengthWorldUnits = FVector2D::Distance(A, B);
+			const float RawOffsetWorldUnits = T * EdgeLengthWorldUnits;
+			BestOffset = bCenterOffsetForDoorWidth
+				? FMath::Clamp(RawOffsetWorldUnits - DoorWidthWorldUnits * 0.5f, 0.f, FMath::Max(0.f, EdgeLengthWorldUnits - DoorWidthWorldUnits))
+				: RawOffsetWorldUnits;
+		}
+	}
+
+	if (BestEdge == INDEX_NONE || (MaxDistanceWorldUnits >= 0.f && BestDistance > MaxDistanceWorldUnits))
+	{
+		return false;
+	}
+
+	OutEdgeIndex = BestEdge;
+	OutOffsetWorldUnits = BestOffset;
+	return true;
+}
+
+const FInteriorOpening* ANavPlayerController::FindDoorAtEdgeOffset(AInteriorRoom* Room, int32 EdgeIndex, float OffsetWorldUnits) const
+{
+	if (!Room)
+	{
+		return nullptr;
+	}
+
+	for (const FInteriorOpening& Opening : Room->GetOpenings())
+	{
+		if (Opening.Type == EInteriorOpeningType::Door && Opening.EdgeIndex == EdgeIndex &&
+			OffsetWorldUnits >= Opening.Offset && OffsetWorldUnits <= Opening.Offset + Opening.Width)
+		{
+			return &Opening;
+		}
+	}
+
+	return nullptr;
+}
+
+void ANavPlayerController::Select3DEditTarget(const FHitResult& Hit)
+{
+	if (!Hit.bBlockingHit)
+	{
+		SelectRoom(FString());
+		return;
+	}
+
+	if (AInteriorConnectorMarker* Marker = Cast<AInteriorConnectorMarker>(Hit.GetActor()))
+	{
+		SelectConnector(Marker->GetOwnerGroupId());
+		return;
+	}
+
+	if (AInteriorRoom* Room = Cast<AInteriorRoom>(Hit.GetActor()))
+	{
+		int32 EdgeIndex;
+		float OffsetWorldUnits;
+		constexpr float DoorPickToleranceWorldUnits = 15.f;
+		if (FindNearestRoomEdge3D(Room, Hit.Location, EdgeIndex, OffsetWorldUnits, DoorPickToleranceWorldUnits))
+		{
+			if (const FInteriorOpening* Door = FindDoorAtEdgeOffset(Room, EdgeIndex, OffsetWorldUnits))
+			{
+				SelectDoor(Room->RoomId, Door->Id);
+				return;
+			}
+		}
+		SelectRoom(Room->RoomId);
+		return;
+	}
+
+	// Hit the building shell or some other uninteresting actor.
+	SelectRoom(FString());
+}
+
+void ANavPlayerController::Handle3DEditClick()
+{
+	FHitResult Hit;
+	GetHitResultUnderCursor(ECC_Visibility, false, Hit);
+
+	if (bDrawRoomMode || bDrawWallMode)
+	{
+		FVector2D FootprintPoint;
+		if (Get3DFloorFootprintPoint(Hit, FootprintPoint))
+		{
+			const int32 PrevPointCount = PendingRoomFootprint.Num();
+			AddRoomPointAtFootprintPosition(FootprintPoint);
+			if (PendingRoomFootprint.Num() > PrevPointCount)
+			{
+				DrawPendingRoomPointMarker3D();
+			}
+		}
+		return;
+	}
+
+	if (ActivePrefabShape != 0)
+	{
+		FVector2D FootprintPoint;
+		if (Get3DFloorFootprintPoint(Hit, FootprintPoint))
+		{
+			PlacePrefabRoomAt(FootprintPoint);
+		}
+		return;
+	}
+
+	if (ActiveConnectorType != 0)
+	{
+		FVector2D FootprintPoint;
+		if (Get3DFloorFootprintPoint(Hit, FootprintPoint))
+		{
+			PlaceConnectorAt(FootprintPoint);
+		}
+		return;
+	}
+
+	if (bAddDoorMode)
+	{
+		if (AInteriorRoom* Room = Cast<AInteriorRoom>(Hit.GetActor()))
+		{
+			int32 EdgeIndex;
+			float OffsetWorldUnits;
+			if (FindNearestRoomEdge3D(Room, Hit.Location, EdgeIndex, OffsetWorldUnits, /*MaxDistanceWorldUnits=*/-1.f, /*bCenterOffsetForDoorWidth=*/true))
+			{
+				AddDoorToWall(Room->RoomId, EdgeIndex, OffsetWorldUnits);
+			}
+		}
+		return;
+	}
+
+	if (bSelectMode)
+	{
+		Select3DEditTarget(Hit);
+	}
+}
+
+void ANavPlayerController::DrawPendingRoomPointMarker3D()
+{
+	if (!Generator || !InteriorGen || PendingRoomFootprint.Num() == 0)
+	{
+		return;
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building)
+	{
+		return;
+	}
+
+	const float Scale = Generator->GetScale();
+	// A little above the floor slab (see AInteriorRoom::RebuildMesh's own FloorSlabZOffset) so the
+	// marker doesn't z-fight with it and stays visible from the 3D preview's oblique angle.
+	const float Z = (InteriorGen->GetActiveFloor() - 1) * Building->GetFloorHeight() + 10.f;
+
+	auto ToWorld = [&](const FVector2D& FootprintPoint) -> FVector
+	{
+		return FVector((FootprintPoint.X + Building->BuildingOffset.X) * Scale, (FootprintPoint.Y + Building->BuildingOffset.Y) * Scale, Z);
+	};
+
+	const FVector NewWorld = ToWorld(PendingRoomFootprint.Last());
+	if (PendingRoomFootprint.Num() > 1)
+	{
+		const FVector PrevWorld = ToWorld(PendingRoomFootprint[PendingRoomFootprint.Num() - 2]);
+		DrawDebugLine(GetWorld(), PrevWorld, NewWorld, FColor::Green, true, -1.f, 0, 5.f);
+	}
+	DrawDebugSphere(GetWorld(), NewWorld, 20.f, 8, FColor::Green, true);
+}
+
+void ANavPlayerController::RefreshRoute3DVisualization()
+{
+	FlushPersistentDebugLines(GetWorld());
+
+	if (!bIsIn3DPreviewMode || !Generator || !InteriorGen || !NavigationPanel)
+	{
+		return;
+	}
+
+	APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building)
+	{
+		return;
+	}
+
+	const float Scale = Generator->GetScale();
+	const int32 ActiveFloor = InteriorGen->GetActiveFloor();
+	// A little above the floor slab (see AInteriorRoom::RebuildMesh's own FloorSlabZOffset and
+	// DrawPendingRoomPointMarker3D's own Z) so the route doesn't z-fight with it.
+	const float Z = (ActiveFloor - 1) * Building->GetFloorHeight() + 15.f;
+
+	auto ToWorld = [&](const FVector2D& FootprintPoint) -> FVector
+	{
+		return FVector((FootprintPoint.X + Building->BuildingOffset.X) * Scale, (FootprintPoint.Y + Building->BuildingOffset.Y) * Scale, Z);
+	};
+
+	// Mirrors InteriorFloorPlanWidget::NativePaint's own route-drawing exactly: a segment only draws
+	// if BOTH endpoints are on the active floor (a floor-crossing segment, e.g. through an elevator,
+	// simply isn't drawn on either floor - same as 2D).
+	const TArray<FNavigationRoutePoint>& Route = NavigationPanel->GetRoutePoints();
+	for (int32 i = 1; i < Route.Num(); i++)
+	{
+		if (Route[i - 1].Floor != ActiveFloor || Route[i].Floor != ActiveFloor)
+		{
+			continue;
+		}
+		// FColor(255, 140, 0) - orange, matching the 2D route line's own FLinearColor(1.f, 0.55f, 0.f, 1.f).
+		DrawDebugLine(GetWorld(), ToWorld(Route[i - 1].Position), ToWorld(Route[i].Position), FColor(255, 140, 0), true, -1.f, 0, 8.f);
+	}
+
+	auto DrawEndpoint = [&](const FNavigationRoutePoint& Point, const FColor& Color)
+	{
+		if (Point.Floor != ActiveFloor)
+		{
+			return;
+		}
+		DrawDebugSphere(GetWorld(), ToWorld(Point.Position), 30.f, 12, Color, true);
+	};
+	if (NavigationPanel->HasStart())
+	{
+		DrawEndpoint(NavigationPanel->GetStart(), FColor::Green);
+	}
+	if (NavigationPanel->HasDestination())
+	{
+		DrawEndpoint(NavigationPanel->GetDestination(), FColor::Red);
+	}
+}
+
+void ANavPlayerController::OnLeftMouseDown3DEdit()
+{
+	if (!bIsIn3DPreviewMode || !bIsIn3DEditMode || !bSelectMode || !InteriorGen)
+	{
+		return;
+	}
+
+	FHitResult Hit;
+	GetHitResultUnderCursor(ECC_Visibility, false, Hit);
+
+	AInteriorRoom* Room = Hit.bBlockingHit ? Cast<AInteriorRoom>(Hit.GetActor()) : nullptr;
+	if (!Room)
+	{
+		return;
+	}
+
+	FVector2D StartFootprintPosition;
+	if (!Get3DFloorFootprintPoint(Hit, StartFootprintPosition))
+	{
+		return;
+	}
+
+	// The free-fly pawn's own mouse-look (see SetIn3DPreviewMode's own comment on why it's left
+	// enabled) turns the camera on any mouse movement, not just while a dedicated look button is held
+	// - without suppressing it here, dragging a room (which moves the mouse while holding the same
+	// LeftMouseButton) would also spin the camera underneath the drag. Balanced by the matching
+	// SetIgnoreLookInput(false) in OnLeftMouseUp3DEdit below.
+	SetIgnoreLookInput(true);
+
+	bIsDragging3DRoom = true;
+	Dragging3DRoomId = Room->RoomId;
+	DragStart3DRoomFootprint = Room->GetFootprint();
+	DragStart3DFootprintPosition = StartFootprintPosition;
+}
+
+void ANavPlayerController::OnLeftMouseUp3DEdit()
+{
+	if (!bIsDragging3DRoom)
+	{
+		return;
+	}
+
+	bIsDragging3DRoom = false;
+	SetIgnoreLookInput(false);
+	CommitRoomMove(Dragging3DRoomId, DragStart3DRoomFootprint);
+	Dragging3DRoomId.Empty();
+	DragStart3DRoomFootprint.Reset();
 }
 
 void ANavPlayerController::RepositionCameraToActiveFloor()
@@ -2367,6 +2888,14 @@ void ANavPlayerController::SetActiveFloor(int32 Level)
 
 	InteriorGen->SetActiveFloor(Level);
 	RepositionCameraToActiveFloor();
+	// A selected connector's marker is a separate actor per floor (see
+	// AInteriorGenerator::SetActiveFloor's own per-floor hide/show) - re-sync which one is tinted so
+	// the 3D Edit mode highlight follows the connector onto whichever of its floors is now visible,
+	// instead of staying stuck on the floor it was originally selected on.
+	RefreshSelectionHighlight();
+	// The route/start/destination markers are per-floor too (see RefreshRoute3DVisualization's own
+	// active-floor filtering) - redraw for whichever floor is now active.
+	RefreshRoute3DVisualization();
 	OnActiveFloorChanged.Broadcast();
 }
 
@@ -2606,6 +3135,28 @@ void ANavPlayerController::ShrinkSelectedRoom()
 
 void ANavPlayerController::NudgeSelectedRoomSize(float Delta)
 {
+	// 3D View mode is genuinely edit-proof, not just "safe because the 2D widget that would trigger
+	// this is hidden" - a room/connector selected before entering 3D preview would otherwise still
+	// respond to a stray =/- press with nothing on screen to show it happened.
+	if (bIsIn3DPreviewMode && !bIsIn3DEditMode)
+	{
+		return;
+	}
+
+	// Grow/Shrink work on whichever kind of thing is currently selected - a connector (elevator/
+	// stairs/escalator) has no width/depth of its own, just a uniform SizeScale multiplier, so this
+	// branches off to a completely different code path (Delta's 20-unit convention below doesn't
+	// apply there at all - ConnectorScaleStep is its own, separate step size).
+	if (!SelectedConnectorGroupId.IsEmpty() && InteriorGen)
+	{
+		const float ScaleDelta = (Delta > 0.f) ? ConnectorScaleStep : -ConnectorScaleStep;
+		if (InteriorGen->ScaleConnectorGroup(SelectedConnectorGroupId, ScaleDelta))
+		{
+			bHasUnsavedChanges = true;
+		}
+		return;
+	}
+
 	if (SelectedRoomId.IsEmpty() || !InteriorGen)
 	{
 		return;
@@ -2645,6 +3196,32 @@ void ANavPlayerController::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	if (ActiveAudioPlaybacks.Num() > 0)
+	{
+		PruneFinishedAudioPlaybacks();
+	}
+
+	if (bIsDragging3DRoom)
+	{
+		FHitResult Hit;
+		GetHitResultUnderCursor(ECC_Visibility, false, Hit);
+
+		FVector2D CurrentFootprintPosition;
+		if (Get3DFloorFootprintPoint(Hit, CurrentFootprintPosition))
+		{
+			const FVector2D Delta = CurrentFootprintPosition - DragStart3DFootprintPosition;
+
+			TArray<FVector2D> NewFootprint;
+			NewFootprint.Reserve(DragStart3DRoomFootprint.Num());
+			for (const FVector2D& Point : DragStart3DRoomFootprint)
+			{
+				NewFootprint.Add(Point + Delta);
+			}
+
+			MoveRoomTo(Dragging3DRoomId, NewFootprint);
+		}
+	}
+
 	if (bRotatingCCW == bRotatingCW)
 	{
 		// Neither held, or both held at once (cancel out) - nothing to do.
@@ -2657,6 +3234,26 @@ void ANavPlayerController::Tick(float DeltaSeconds)
 
 void ANavPlayerController::RotateSelectedRoom(float DeltaDegrees)
 {
+	// See NudgeSelectedRoomSize's own comment - same View-mode edit-proofing.
+	if (bIsIn3DPreviewMode && !bIsIn3DEditMode)
+	{
+		return;
+	}
+
+	// Same room-vs-connector branch as NudgeSelectedRoomSize - see its own comment. Unlike room
+	// rotation, connector rotation has no deferred/mid-gesture-allowed check (see
+	// AInteriorGenerator::RotateConnectorGroup's own comment), so there's no snapshot/commit dance to
+	// set up here - BeginRotationGestureIfNeeded/EndRotationGestureIfFinished simply don't do
+	// anything when a connector (not a room) is selected.
+	if (!SelectedConnectorGroupId.IsEmpty() && InteriorGen)
+	{
+		if (InteriorGen->RotateConnectorGroup(SelectedConnectorGroupId, DeltaDegrees))
+		{
+			bHasUnsavedChanges = true;
+		}
+		return;
+	}
+
 	if (SelectedRoomId.IsEmpty() || !InteriorGen)
 	{
 		return;
@@ -2696,7 +3293,22 @@ void ANavPlayerController::BeginRotationGestureIfNeeded()
 {
 	// Only snapshot at the true start of a gesture (neither key held yet) - if the other rotation
 	// key is already down, we're still mid-gesture and the original snapshot must be kept.
-	if (bRotatingCCW || bRotatingCW || SelectedRoomId.IsEmpty() || !InteriorGen)
+	if (bRotatingCCW || bRotatingCW || !InteriorGen)
+	{
+		return;
+	}
+
+	// Connector rotation is fully validated every tick (see RotateConnectorGroup), nothing deferred
+	// to check on release, so there's no snapshot to take - and SelectedRoomId is empty whenever a
+	// connector is selected anyway (the two are mutually exclusive, see SelectConnector), so the
+	// SelectedRoomId.IsEmpty() check below would already no-op here regardless. This explicit branch
+	// just makes that reasoning obvious rather than relying on it silently falling through.
+	if (!SelectedConnectorGroupId.IsEmpty())
+	{
+		return;
+	}
+
+	if (SelectedRoomId.IsEmpty())
 	{
 		return;
 	}
@@ -2797,5 +3409,198 @@ void ANavPlayerController::ConfirmShapeTest()
 	if (!NewBuilding)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Could not create building - see error above. Edit the id in test_shape_params.json and try again."));
+	}
+}
+
+FString ANavPlayerController::GetAudioFolderPath()
+{
+	// FPaths::ProjectDir() is relative (something like "../../../InNavi/"), not absolute -
+	// ConvertRelativePathToFull isn't strictly required by FFileHelper::LoadFileToArray (which
+	// resolves a relative path against the working directory just fine), but costs nothing and keeps
+	// this robust against whatever future code ends up needing a real absolute path here too.
+	return FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("Data") / TEXT("Audio"));
+}
+
+TArray<FString> ANavPlayerController::GetAvailableAudioFiles() const
+{
+	TArray<FString> FoundFiles;
+	// Not "FolderPath" - that name collides with a class member somewhere in this class's own
+	// inheritance chain (C4458 hides-class-member, a compile error in this project).
+	const FString AudioFolder = GetAudioFolderPath();
+	IFileManager::Get().FindFiles(FoundFiles, *(AudioFolder / TEXT("*.wav")), true, false);
+	FoundFiles.Sort();
+	return FoundFiles;
+}
+
+bool ANavPlayerController::PlayAudioFile(const FString& FileName)
+{
+	if (IsAudioFilePlaying(FileName))
+	{
+		return false;
+	}
+
+	UAudioComponent* AudioComponent = PlayWavFile(FileName, /*bDestroyWhenFinished=*/false);
+	if (!AudioComponent)
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not play audio file '%s'."), *FileName));
+		return false;
+	}
+
+	FActiveAudioPlayback& Playback = ActiveAudioPlaybacks.AddDefaulted_GetRef();
+	Playback.FileName = FileName;
+	Playback.AudioComponent = AudioComponent;
+	return true;
+}
+
+void ANavPlayerController::StopAllAudio()
+{
+	for (FActiveAudioPlayback& Playback : ActiveAudioPlaybacks)
+	{
+		if (Playback.AudioComponent)
+		{
+			Playback.AudioComponent->Stop();
+			Playback.AudioComponent->DestroyComponent();
+		}
+	}
+	ActiveAudioPlaybacks.Reset();
+}
+
+bool ANavPlayerController::IsAudioFilePlaying(const FString& FileName) const
+{
+	for (const FActiveAudioPlayback& Playback : ActiveAudioPlaybacks)
+	{
+		if (Playback.FileName == FileName)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void ANavPlayerController::PlayButtonClickSound()
+{
+	if (!bButtonClickSoundEnabled)
+	{
+		return;
+	}
+
+	PlayShortSoundEffect(TEXT("click_button.wav"));
+}
+
+void ANavPlayerController::PlayBuildingSelectSound()
+{
+	if (!bBuildingSelectSoundEnabled)
+	{
+		return;
+	}
+
+	PlayShortSoundEffect(TEXT("select_ui.wav"));
+}
+
+void ANavPlayerController::PlayQuitConfirmSound()
+{
+	if (!bQuitConfirmSoundEnabled)
+	{
+		return;
+	}
+
+	PlayShortSoundEffect(TEXT("quit_confirm.wav"));
+}
+
+void ANavPlayerController::SetAllUiSoundsEnabled(bool bEnabled)
+{
+	bButtonClickSoundEnabled = bEnabled;
+	bBuildingSelectSoundEnabled = bEnabled;
+	bQuitConfirmSoundEnabled = bEnabled;
+}
+
+void ANavPlayerController::SetMasterVolume(float NewVolume)
+{
+	MasterVolume = FMath::Clamp(NewVolume, 0.f, 1.f);
+
+	for (const FActiveAudioPlayback& Playback : ActiveAudioPlaybacks)
+	{
+		if (Playback.AudioComponent)
+		{
+			Playback.AudioComponent->SetVolumeMultiplier(MasterVolume);
+		}
+	}
+}
+
+void ANavPlayerController::PlayShortSoundEffect(const TCHAR* FileName)
+{
+	PlayWavFile(FileName, /*bDestroyWhenFinished=*/true);
+}
+
+UAudioComponent* ANavPlayerController::PlayWavFile(const FString& FileName, bool bDestroyWhenFinished)
+{
+	const FString FullPath = GetAudioFolderPath() / FileName;
+	if (!FPaths::FileExists(FullPath))
+	{
+		return nullptr;
+	}
+
+	USoundWaveProcedural* SoundWave = LoadWavFileAsSoundWave(FullPath, this);
+	if (!SoundWave)
+	{
+		return nullptr;
+	}
+
+	if (!AudioActor)
+	{
+		AudioActor = GetWorld()->SpawnActor<AActor>();
+	}
+	if (!AudioActor)
+	{
+		return nullptr;
+	}
+
+	UAudioComponent* AudioComponent = NewObject<UAudioComponent>(AudioActor);
+	AudioComponent->bAutoActivate = false;
+	// AudioActor sits at the world origin (see its own comment) - miles from wherever the camera
+	// actually is on this campus-scale map. A spatialized 3D sound would attenuate with distance from
+	// the listener and be effectively silent from way out here; this is a UI/global sound (BGM,
+	// button click, ...), not something tied to a position in the world, so play it at a flat volume
+	// regardless of where AudioActor happens to be.
+	AudioComponent->bAllowSpatialization = false;
+	AudioComponent->SetSound(SoundWave);
+	AudioComponent->SetVolumeMultiplier(MasterVolume);
+	AudioComponent->RegisterComponent();
+	AudioComponent->Play();
+
+	// See this function's own header comment - USoundWaveProcedural never signals "finished" on its
+	// own, so this is what actually stops the voice (and, for a fire-and-forget effect, frees the
+	// component) once the clip's real length has elapsed.
+	const float Duration = FMath::Max(SoundWave->Duration, 0.05f);
+	FTimerHandle StopTimerHandle;
+	TWeakObjectPtr<UAudioComponent> WeakAudioComponent = AudioComponent;
+	GetWorldTimerManager().SetTimer(StopTimerHandle, [WeakAudioComponent, bDestroyWhenFinished]()
+	{
+		if (!WeakAudioComponent.IsValid())
+		{
+			return;
+		}
+		WeakAudioComponent->Stop();
+		if (bDestroyWhenFinished)
+		{
+			WeakAudioComponent->DestroyComponent();
+		}
+	}, Duration, false);
+
+	return AudioComponent;
+}
+
+void ANavPlayerController::PruneFinishedAudioPlaybacks()
+{
+	for (int32 i = ActiveAudioPlaybacks.Num() - 1; i >= 0; i--)
+	{
+		FActiveAudioPlayback& Playback = ActiveAudioPlaybacks[i];
+		if (!Playback.AudioComponent || Playback.AudioComponent->IsPlaying())
+		{
+			continue;
+		}
+
+		Playback.AudioComponent->DestroyComponent();
+		ActiveAudioPlaybacks.RemoveAt(i);
 	}
 }
