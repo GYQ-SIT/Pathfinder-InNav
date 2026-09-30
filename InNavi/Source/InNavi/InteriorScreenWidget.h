@@ -271,6 +271,14 @@ private:
 	UFUNCTION()
 	void OnSnapToggleClicked();
 
+	// Calls PC->UndoInteriorEdit()/RedoInteriorEdit() - same row as Snap, always visible in both 2D
+	// and 3D (mirrors the Ctrl+Z/Ctrl+Y key bindings, doesn't replace them).
+	UFUNCTION()
+	void OnUndoClicked();
+
+	UFUNCTION()
+	void OnRedoClicked();
+
 	// Calls PC->ResetCamera3DPreview() - only shown while in 3D preview (see ResetView3DButton).
 	UFUNCTION()
 	void OnResetView3DClicked();
@@ -1132,6 +1140,14 @@ private:
 
 	UPROPERTY()
 	UImage* SnapToggleIcon = nullptr;
+
+	// Undo/Redo - same row as Snap, always visible in both 2D and 3D (this row isn't hidden by
+	// preview mode) - see OnUndoClicked/OnRedoClicked.
+	UPROPERTY()
+	UButton* UndoButton = nullptr;
+
+	UPROPERTY()
+	UButton* RedoButton = nullptr;
 
 	// Only shown while in 3D preview (see HandlePreviewModeChanged). 3D preview leaves WASD/mouse-look
 	// free rather than locked to a fixed angle, so this is the "un-lose yourself" button - see
