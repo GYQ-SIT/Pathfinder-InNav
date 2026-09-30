@@ -2178,6 +2178,153 @@ AInteriorRoom* AInteriorGenerator::GetRoomById(const FString& RoomId) const
 
 	return nullptr;
 }
+TSharedPtr<FJsonObject> AInteriorGenerator::CreateTranslatedInteriorCopy(
+	const TSharedPtr<FJsonObject>& SourceInterior,
+	const FVector2D& MoveOffset
+) const
+{
+	if (!SourceInterior.IsValid())
+	{
+		return nullptr;
+	}
+
+	// Deep-copy the JSON first so the pasted building does not
+	// share its interior JSON with the original building.
+	FString JsonString;
+
+	TSharedRef<TJsonWriter<>> Writer =
+		TJsonWriterFactory<>::Create(&JsonString);
+
+	if (!FJsonSerializer::Serialize(SourceInterior.ToSharedRef(), Writer))
+	{
+		return nullptr;
+	}
+
+	TSharedPtr<FJsonObject> NewInterior;
+
+	TSharedRef<TJsonReader<>> Reader =
+		TJsonReaderFactory<>::Create(JsonString);
+
+	if (!FJsonSerializer::Deserialize(Reader, NewInterior) ||
+		!NewInterior.IsValid())
+	{
+		return nullptr;
+	}
+
+	// Get all floors.
+	const TArray<TSharedPtr<FJsonValue>>* FloorsArray = nullptr;
+
+	if (!NewInterior->TryGetArrayField(TEXT("floors"), FloorsArray))
+	{
+		return NewInterior;
+	}
+
+	for (const TSharedPtr<FJsonValue>& FloorValue : *FloorsArray)
+	{
+		TSharedPtr<FJsonObject> FloorObject = FloorValue->AsObject();
+
+		if (!FloorObject.IsValid())
+		{
+			continue;
+		}
+
+		// -------------------------
+		// Move rooms / walls
+		// -------------------------
+		const TArray<TSharedPtr<FJsonValue>>* RoomsArray = nullptr;
+
+		if (FloorObject->TryGetArrayField(TEXT("rooms"), RoomsArray))
+		{
+			for (const TSharedPtr<FJsonValue>& RoomValue : *RoomsArray)
+			{
+				TSharedPtr<FJsonObject> RoomObject = RoomValue->AsObject();
+
+				if (!RoomObject.IsValid())
+				{
+					continue;
+				}
+
+				const TArray<TSharedPtr<FJsonValue>>* FootprintArray = nullptr;
+
+				if (!RoomObject->TryGetArrayField(
+					TEXT("footprint"),
+					FootprintArray))
+				{
+					continue;
+				}
+
+				TArray<TSharedPtr<FJsonValue>> NewFootprint;
+
+				for (const TSharedPtr<FJsonValue>& PointValue : *FootprintArray)
+				{
+					const TArray<TSharedPtr<FJsonValue>>* Pair = nullptr;
+
+					if (PointValue->TryGetArray(Pair) && Pair->Num() >= 2)
+					{
+						TArray<TSharedPtr<FJsonValue>> NewPair;
+
+						NewPair.Add(
+							MakeShared<FJsonValueNumber>(
+								(*Pair)[0]->AsNumber() + MoveOffset.X));
+
+						NewPair.Add(
+							MakeShared<FJsonValueNumber>(
+								(*Pair)[1]->AsNumber() + MoveOffset.Y));
+
+						NewFootprint.Add(
+							MakeShared<FJsonValueArray>(NewPair));
+					}
+				}
+
+				RoomObject->SetArrayField(
+					TEXT("footprint"),
+					NewFootprint);
+			}
+		}
+
+		// -------------------------
+		// Move nav nodes/connectors
+		// -------------------------
+		const TArray<TSharedPtr<FJsonValue>>* NavNodesArray = nullptr;
+
+		if (FloorObject->TryGetArrayField(TEXT("navNodes"), NavNodesArray))
+		{
+			for (const TSharedPtr<FJsonValue>& NodeValue : *NavNodesArray)
+			{
+				TSharedPtr<FJsonObject> NodeObject = NodeValue->AsObject();
+
+				if (!NodeObject.IsValid())
+				{
+					continue;
+				}
+
+				const TArray<TSharedPtr<FJsonValue>>* PositionArray = nullptr;
+
+				if (NodeObject->TryGetArrayField(
+					TEXT("position"),
+					PositionArray) &&
+					PositionArray->Num() >= 2)
+				{
+					TArray<TSharedPtr<FJsonValue>> NewPosition;
+
+					NewPosition.Add(
+						MakeShared<FJsonValueNumber>(
+							(*PositionArray)[0]->AsNumber() + MoveOffset.X));
+
+					NewPosition.Add(
+						MakeShared<FJsonValueNumber>(
+							(*PositionArray)[1]->AsNumber() + MoveOffset.Y));
+
+					NodeObject->SetArrayField(
+						TEXT("position"),
+						NewPosition);
+				}
+			}
+		}
+	}
+
+	return NewInterior;
+}
 void AInteriorGenerator::SyncInteriorToBuildingGenerator()
 {
 	if (LoadedBuildingId.IsEmpty() || !Generator)

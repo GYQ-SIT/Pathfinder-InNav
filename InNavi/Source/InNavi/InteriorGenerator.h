@@ -58,7 +58,7 @@ public:
 	// otherwise in-progress interior edits aren't reflected in the save. No-op if nothing is loaded.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void SyncInteriorToBuildingGenerator();
-
+	TSharedPtr<FJsonObject> CreateTranslatedInteriorCopy(const TSharedPtr<FJsonObject>& SourceInterior,const FVector2D& MoveOffset) const;
 	// Destroys every currently-spawned room and forgets all floor/nav-node state, without loading
 	// anything new - back to the state right after BeginPlay. Call this before starting a New
 	// project or before BuildingGenerator::ClearAllBuildings, so this generator doesn't keep pointing

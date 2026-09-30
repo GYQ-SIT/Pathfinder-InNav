@@ -3318,12 +3318,21 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 			return;
 		}
 
-		if (CopiedBuildingInterior.IsValid())
+		if (CopiedBuildingInterior.IsValid() && InteriorGen)
 		{
-			Generator->SetInteriorDataForBuilding(
-				NewId,
-				CopiedBuildingInterior
-			);
+			TSharedPtr<FJsonObject> TranslatedInterior =
+				InteriorGen->CreateTranslatedInteriorCopy(
+					CopiedBuildingInterior,
+					MoveOffset
+				);
+
+			if (TranslatedInterior.IsValid())
+			{
+				Generator->SetInteriorDataForBuilding(
+					NewId,
+					TranslatedInterior
+				);
+			}
 		}
 
 		bHasUnsavedChanges = true;
