@@ -3,6 +3,8 @@
 
 #include "BuildingGenerator.h"
 #include "PolyBuilding.h"
+#include "RoadSegmentActor.h"
+#include "POIMarkerActor.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
@@ -236,6 +238,12 @@ int32 ABuildingGenerator::LoadBuildingsFromDatabase(const FString& DatabasePath)
 	const double RefLat = SumLat / TotalPoints;
 	const double RefLon = SumLon / TotalPoints;
 
+	// Stashed for LoadRoadsAndPOIsFromDatabase - see its own comment on why it needs this exact same
+	// reference point rather than computing its own.
+	DatabaseRefLat = RefLat;
+	DatabaseRefLon = RefLon;
+	bHasDatabaseRefPoint = true;
+
 	constexpr double MetersPerDegreeLat = 111320.0;
 	const double MetersPerDegreeLon = MetersPerDegreeLat * FMath::Cos(FMath::DegreesToRadians(RefLat));
 
@@ -275,6 +283,229 @@ int32 ABuildingGenerator::LoadBuildingsFromDatabase(const FString& DatabasePath)
 	}
 
 	return SpawnedCount;
+}
+
+namespace
+{
+	// OSM's own highway= tagging, as this sample dataset uses it, bucketed into the coarser
+	// ERoadCategory a filter panel actually shows checkboxes for - not an exhaustive OSM vocabulary,
+	// just what LoadRoadsAndPOIsFromDatabase's own inspection of this dataset found. Anything not
+	// called out explicitly (service, track, ...) falls into Other.
+	ERoadCategory GetRoadCategory(const FString& HighwayType)
+	{
+		if (HighwayType == TEXT("primary") || HighwayType == TEXT("primary_link"))
+		{
+			return ERoadCategory::Primary;
+		}
+		if (HighwayType == TEXT("secondary") || HighwayType == TEXT("secondary_link"))
+		{
+			return ERoadCategory::Secondary;
+		}
+		if (HighwayType == TEXT("tertiary") || HighwayType == TEXT("tertiary_link") || HighwayType == TEXT("residential"))
+		{
+			return ERoadCategory::Residential;
+		}
+		if (HighwayType == TEXT("cycleway"))
+		{
+			return ERoadCategory::Cycleway;
+		}
+		if (HighwayType == TEXT("footway") || HighwayType == TEXT("pedestrian") || HighwayType == TEXT("path"))
+		{
+			return ERoadCategory::Footway;
+		}
+		return ERoadCategory::Other;
+	}
+
+	// Width in real-world meters (still pre-Scale, like everything else in this loading path) and a
+	// rough asphalt/pavement/path tint so the different road categories are at least distinguishable
+	// at a glance.
+	void GetRoadCategoryStyle(ERoadCategory Category, float& OutWidthMeters, FLinearColor& OutColor)
+	{
+		switch (Category)
+		{
+		case ERoadCategory::Primary:
+			OutWidthMeters = 9.f;
+			OutColor = FLinearColor(0.55f, 0.15f, 0.12f);
+			break;
+		case ERoadCategory::Secondary:
+			OutWidthMeters = 7.f;
+			OutColor = FLinearColor(0.6f, 0.4f, 0.1f);
+			break;
+		case ERoadCategory::Residential:
+			OutWidthMeters = 5.5f;
+			OutColor = FLinearColor(0.35f, 0.35f, 0.38f);
+			break;
+		case ERoadCategory::Cycleway:
+			OutWidthMeters = 2.f;
+			OutColor = FLinearColor(0.15f, 0.5f, 0.2f);
+			break;
+		case ERoadCategory::Footway:
+			OutWidthMeters = 1.8f;
+			OutColor = FLinearColor(0.62f, 0.56f, 0.45f);
+			break;
+		default:
+			// service, track, and anything else not called out above.
+			OutWidthMeters = 3.f;
+			OutColor = FLinearColor(0.45f, 0.45f, 0.45f);
+			break;
+		}
+	}
+
+	FLinearColor GetPOIColor(const FString& POIType)
+	{
+		if (POIType == TEXT("amenity")) return FLinearColor(0.2f, 0.4f, 0.9f);
+		if (POIType == TEXT("shop")) return FLinearColor(0.85f, 0.2f, 0.65f);
+		if (POIType == TEXT("leisure")) return FLinearColor(0.25f, 0.75f, 0.3f);
+		if (POIType == TEXT("tourism")) return FLinearColor(0.9f, 0.75f, 0.15f);
+		return FLinearColor::White;
+	}
+}
+
+int32 ABuildingGenerator::LoadRoadsAndPOIsFromDatabase(const FString& DatabasePath)
+{
+	if (!bHasDatabaseRefPoint)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LoadRoadsAndPOIsFromDatabase: call LoadBuildingsFromDatabase first (same path) to establish the shared lat/lon reference point"));
+		return 0;
+	}
+	if (!GetWorld())
+	{
+		return 0;
+	}
+
+	FSQLiteDatabase Database;
+	if (!Database.Open(*DatabasePath, ESQLiteDatabaseOpenMode::ReadOnly))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Could not open SQLite database at: %s"), *DatabasePath);
+		return 0;
+	}
+
+	constexpr double MetersPerDegreeLat = 111320.0;
+	const double MetersPerDegreeLon = MetersPerDegreeLat * FMath::Cos(FMath::DegreesToRadians(DatabaseRefLat));
+	const double CapturedRefLat = DatabaseRefLat;
+	const double CapturedRefLon = DatabaseRefLon;
+	auto ProjectToWorldXY = [CapturedRefLat, CapturedRefLon, MetersPerDegreeLat, MetersPerDegreeLon, this](double Lat, double Lon) -> FVector2D
+	{
+		const double MetersX = (Lon - CapturedRefLon) * MetersPerDegreeLon;
+		const double MetersY = (Lat - CapturedRefLat) * MetersPerDegreeLat;
+		// Scale=100 (see LoadBuildingsFromDatabase) turns real-world meters directly into UE's
+		// cm-per-unit world space - the exact same conversion every road/POI position needs too.
+		return FVector2D((float)(MetersX * Scale), (float)(MetersY * Scale));
+	};
+
+	ClearAllRoadsAndPOIs();
+
+	struct FDatabaseRoadRow
+	{
+		FString HighwayType;
+		TArray<FVector2D> Points;
+	};
+	TMap<int64, FDatabaseRoadRow> RoadsById;
+
+	Database.Execute(
+		TEXT("SELECT r.road_id, r.highway_type, n.lat, n.lon FROM roads r ")
+		TEXT("JOIN road_nodes rn ON r.road_id = rn.road_id ")
+		TEXT("JOIN nodes n ON rn.node_id = n.node_id ")
+		TEXT("ORDER BY r.road_id, rn.sequence"),
+		[&RoadsById, &ProjectToWorldXY](const FSQLitePreparedStatement& Statement) -> ESQLitePreparedStatementExecuteRowResult
+		{
+			int64 RoadId = 0;
+			FString HighwayType;
+			double Lat = 0.0, Lon = 0.0;
+			if (!Statement.GetColumnValueByName(TEXT("road_id"), RoadId)
+				|| !Statement.GetColumnValueByName(TEXT("highway_type"), HighwayType)
+				|| !Statement.GetColumnValueByName(TEXT("lat"), Lat)
+				|| !Statement.GetColumnValueByName(TEXT("lon"), Lon))
+			{
+				return ESQLitePreparedStatementExecuteRowResult::Error;
+			}
+			FDatabaseRoadRow& Row = RoadsById.FindOrAdd(RoadId);
+			Row.HighwayType = HighwayType;
+			Row.Points.Add(ProjectToWorldXY(Lat, Lon));
+			return ESQLitePreparedStatementExecuteRowResult::Continue;
+		});
+
+	int32 SpawnedCount = 0;
+	for (const TPair<int64, FDatabaseRoadRow>& Pair : RoadsById)
+	{
+		const ERoadCategory Category = GetRoadCategory(Pair.Value.HighwayType);
+		float WidthMeters = 3.f;
+		FLinearColor Color = FLinearColor::Gray;
+		GetRoadCategoryStyle(Category, WidthMeters, Color);
+
+		ARoadSegmentActor* RoadActor = GetWorld()->SpawnActor<ARoadSegmentActor>();
+		if (!RoadActor)
+		{
+			continue;
+		}
+		RoadActor->BuildRoad(Pair.Value.Points, WidthMeters * Scale, /*WorldZ=*/2.f, Color);
+		RoadActor->SetCategory(Category);
+		SpawnedRoadActors.Add(RoadActor);
+		SpawnedCount++;
+	}
+
+	Database.Execute(
+		TEXT("SELECT poi_id, lat, lon, poi_type FROM pois"),
+		[this, &ProjectToWorldXY, &SpawnedCount](const FSQLitePreparedStatement& Statement) -> ESQLitePreparedStatementExecuteRowResult
+		{
+			double Lat = 0.0, Lon = 0.0;
+			FString POIType;
+			if (!Statement.GetColumnValueByName(TEXT("lat"), Lat)
+				|| !Statement.GetColumnValueByName(TEXT("lon"), Lon)
+				|| !Statement.GetColumnValueByName(TEXT("poi_type"), POIType))
+			{
+				return ESQLitePreparedStatementExecuteRowResult::Error;
+			}
+
+			APOIMarkerActor* POIActor = GetWorld()->SpawnActor<APOIMarkerActor>();
+			if (POIActor)
+			{
+				constexpr float POIMarkerRadiusWorld = 60.f;
+				POIActor->BuildMarker(ProjectToWorldXY(Lat, Lon), POIMarkerRadiusWorld, GetPOIColor(POIType));
+				SpawnedPOIActors.Add(POIActor);
+				SpawnedCount++;
+			}
+			return ESQLitePreparedStatementExecuteRowResult::Continue;
+		});
+
+	Database.Close();
+
+	UE_LOG(LogTemp, Warning, TEXT("LoadRoadsAndPOIsFromDatabase: spawned %d road(s) and %d POI(s) from %s"),
+		SpawnedRoadActors.Num(), SpawnedPOIActors.Num(), *DatabasePath);
+	return SpawnedCount;
+}
+
+void ABuildingGenerator::ClearAllRoadsAndPOIs()
+{
+	for (AActor* Actor : SpawnedRoadActors)
+	{
+		if (Actor)
+		{
+			Actor->Destroy();
+		}
+	}
+	SpawnedRoadActors.Reset();
+
+	for (AActor* Actor : SpawnedPOIActors)
+	{
+		if (Actor)
+		{
+			Actor->Destroy();
+		}
+	}
+	SpawnedPOIActors.Reset();
+}
+
+void ABuildingGenerator::SetRoadCategoryVisible(ERoadCategory Category, bool bVisible)
+{
+	for (AActor* Actor : SpawnedRoadActors)
+	{
+		ARoadSegmentActor* RoadActor = Cast<ARoadSegmentActor>(Actor);
+		if (RoadActor && RoadActor->GetCategory() == Category)
+		{
+			RoadActor->SetActorHiddenInGame(!bVisible);
+		}
+	}
 }
 
 APolyBuilding* ABuildingGenerator::SpawnBuildingFromData(const FString& Id, const FString& Name, const TArray<FVector2D>& Footprint, int32 FloorCount, float FloorHeight, FVector2D Offset)

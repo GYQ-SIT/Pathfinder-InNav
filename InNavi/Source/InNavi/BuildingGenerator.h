@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "RoadSegmentActor.h"
 #include "BuildingGenerator.generated.h"
 
 class APolyBuilding;
@@ -67,6 +68,28 @@ public:
 	// real campus at real scale). Returns how many buildings were successfully spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingsFromDatabase(const FString& DatabasePath);
+
+	// Loads roads (as flat ribbon actors) and points of interest (as small marker actors) from the
+	// SAME database LoadBuildingsFromDatabase reads buildings from - must be called AFTER a
+	// successful LoadBuildingsFromDatabase(DatabasePath) using that exact same path, since it reuses
+	// that call's own lat/lon reference point (see bHasDatabaseRefPoint) so roads/POIs/buildings all
+	// line up in the same local-meters space instead of each projecting around their own centroid.
+	// Loads every road/POI in the database, not just ones near whatever the buildings query filtered
+	// to (this sample dataset covers the whole surrounding neighborhood, not just the campus) - purely
+	// a first look at what's in the data, not tuned for how much clutter that turns out to be.
+	// Clears any previously-loaded roads/POIs first. Returns how many actors were spawned.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	int32 LoadRoadsAndPOIsFromDatabase(const FString& DatabasePath);
+
+	// Destroys every currently-spawned road/POI actor - same idea as ClearAllBuildings.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void ClearAllRoadsAndPOIs();
+
+	// Shows/hides every currently-spawned road actor in Category at once - what a road-visibility
+	// filter panel's checkboxes call. Takes effect immediately (no reload/re-query needed) since
+	// every road actor already remembers its own category (see ARoadSegmentActor::GetCategory).
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetRoadCategoryVisible(ERoadCategory Category, bool bVisible);
 
 	// Looks up an already-spawned building by id (e.g. for InteriorGenerator to find which
 	// building's shell a piece of interior data belongs to). Returns nullptr if not found.
@@ -142,4 +165,17 @@ private:
 	TMap<FString, APolyBuilding*> BuildingsById;
 
 	TMap<FString, TSharedPtr<FJsonObject>> InteriorDataById;
+
+	// The lat/lon centroid LoadBuildingsFromDatabase projects around, stashed so
+	// LoadRoadsAndPOIsFromDatabase can project roads/POIs into that exact same local-meters space
+	// (see its own comment). bHasDatabaseRefPoint is false until a database load actually succeeds.
+	bool bHasDatabaseRefPoint = false;
+	double DatabaseRefLat = 0.0;
+	double DatabaseRefLon = 0.0;
+
+	UPROPERTY()
+	TArray<AActor*> SpawnedRoadActors;
+
+	UPROPERTY()
+	TArray<AActor*> SpawnedPOIActors;
 };

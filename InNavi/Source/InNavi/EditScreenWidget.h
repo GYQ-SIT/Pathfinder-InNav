@@ -167,6 +167,53 @@ private:
 	UFUNCTION()
 	void OnWindowAudioCheckChanged(bool bIsChecked);
 
+	// Window > Roads - toggles RoadFilterPanel's own visibility. Fixed position, not draggable/
+	// resizable like AudioPanel - a 6-checkbox list has no reason to need either.
+	UFUNCTION()
+	void OnWindowRoadsCheckChanged(bool bIsChecked);
+
+	// --- Road filter panel (Window > Roads) --- one handler per ERoadCategory, since
+	// UCheckBox::OnCheckStateChanged only carries the new bool, not which row it came from. Each
+	// forwards to PC->SetRoadCategoryVisible with its own hardcoded category.
+	UFUNCTION()
+	void OnRoadPrimaryCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadSecondaryCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadResidentialCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadCyclewayCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadFootwayCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadOtherCheckChanged(bool bIsChecked);
+
+	// RoadFilterPanel's own small corner drag handle - same idea as AudioDragHandle (reuses its
+	// AudioDragHandleSize/AudioPanelPadding/AudioPanelDragMinY constants, generic enough for either
+	// panel), just move-only - this panel's content never resizes, so there's no bottom-resize handle
+	// to go with it.
+	void RefreshRoadFilterDragHandle();
+
+	// The actual rendered size of the root canvas - NOT UWidgetLayoutLibrary::GetViewportSize, which
+	// returns the platform's raw pixel resolution and only matches this Slate-local coordinate space
+	// at DPI scale 1 (see UInteriorScreenWidget::GetReliableCanvasSize's own comment for the same
+	// reasoning). Returns false (leaving OutSize untouched) if RebuildWidget hasn't had a real Slate
+	// paint pass yet - see PositionRoadFilterPanelInitially's own retry.
+	bool GetReliableCanvasSize(FVector2D& OutSize) const;
+
+	// Places RoadFilterPanel a fixed margin in from the canvas' own actual right edge (screen-size/
+	// resolution independent, unlike a hardcoded X) - called every tick from NativeTick until it
+	// succeeds once (both the canvas' and the panel's own CachedGeometry need a real paint pass
+	// first, so this can't just run once at construction), then never again (the user's own drag
+	// takes over from there - see bHasPositionedRoadFilterPanelInitially).
+	void PositionRoadFilterPanelInitially();
+	UFUNCTION()
+	FEventReply OnRoadFilterDragHandleMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION()
+	FEventReply OnRoadFilterPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION()
+	FEventReply OnRoadFilterPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
 	// --- Audio panel (Window > Audio) ---
 	// Same Play/Stop All/mute-click-sound/file-list layout as UInteriorScreenWidget's own Audio
 	// panel (reuses the same UAudioFileRowWidget class for rows, and the same PC-level
@@ -272,6 +319,42 @@ private:
 
 	UPROPERTY()
 	UBorder* WindowMenuDropdown = nullptr;
+
+	UPROPERTY()
+	UCheckBox* WindowRoadsCheckbox = nullptr;
+
+	// Freely-draggable panel (see RoadFilterDragHandle), Visible by default (unlike AudioPanel) - just
+	// 6 checkboxes, one per ERoadCategory, each toggling PC->SetRoadCategoryVisible.
+	UPROPERTY()
+	UBorder* RoadFilterPanel = nullptr;
+
+	UPROPERTY()
+	UCanvasPanelSlot* RoadFilterPanelSlot = nullptr;
+
+	// RoadFilterPanel's own title UTextBlock - RefreshRoadFilterDragHandle sizes the drag handle off
+	// its rendered size, same reasoning as AudioTitleText/RefreshAudioDragHandle.
+	UPROPERTY()
+	UTextBlock* RoadFilterTitleText = nullptr;
+
+	UPROPERTY()
+	UBorder* RoadFilterDragHandle = nullptr;
+
+	UPROPERTY()
+	UCanvasPanelSlot* RoadFilterDragHandleSlot = nullptr;
+
+	bool bIsDraggingRoadFilterPanel = false;
+	FVector2D RoadFilterPanelDragStartMouse = FVector2D::ZeroVector;
+	FVector2D RoadFilterPanelDragStartPosition = FVector2D::ZeroVector;
+
+	// See RefreshAudioDragHandle's own comment on why more than one retry is needed - a separate
+	// counter from AudioDragHandleSettleFramesRemaining since the two panels' refreshes are
+	// independent (sharing one counter would make one panel's visibility change reset the other's
+	// in-progress retry).
+	int32 RoadFilterDragHandleSettleFramesRemaining = 0;
+
+	// See PositionRoadFilterPanelInitially - true once that one-time repositioning has actually run,
+	// so NativeTick stops retrying (and doesn't fight the user's own drag afterward).
+	bool bHasPositionedRoadFilterPanelInitially = false;
 
 	// Full-screen, fully transparent, Collapsed by default - see
 	// UInteriorScreenWidget::OnMenuClickCatcherMouseButtonDown's own comment for why this is how

@@ -1790,6 +1790,9 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 		InteriorGen->ClearLoadedInterior();
 	}
 	Generator->ClearAllBuildings();
+	// A previous database-loaded project could have left roads/POIs behind - LoadBuildingsFromFile
+	// (below) has no concept of either, so nothing else would clear them.
+	Generator->ClearAllRoadsAndPOIs();
 	// ClearAllBuildings() just destroyed whatever SelectedBuilding was pointing at - same reasoning as
 	// StartNewProject's own reset, just missing here until now (SelectBuildingUnderCursor/
 	// GetSelectedBuildingId would otherwise dereference a stale pointer if called right after an Open).
@@ -1854,6 +1857,9 @@ int32 ANavPlayerController::LoadBuildingDataFromDatabase(const FString& Database
 		// SaveBuildingsToFile serializes whatever APolyBuilding actors currently exist regardless of
 		// how they were spawned.
 		bHasUnsavedChanges = false;
+		// Best-effort, first-look visualization (see LoadRoadsAndPOIsFromDatabase's own comment on
+		// scope) - a failure here shouldn't block the buildings that DID load from showing up.
+		Generator->LoadRoadsAndPOIsFromDatabase(DatabasePath);
 		FocusCameraOnAllBuildings();
 	}
 	return Count;
@@ -1882,6 +1888,7 @@ void ANavPlayerController::StartNewProject()
 	if (Generator)
 	{
 		Generator->ClearAllBuildings();
+		Generator->ClearAllRoadsAndPOIs();
 	}
 
 	CurrentProjectFilePath.Empty();
@@ -2726,6 +2733,14 @@ void ANavPlayerController::RepositionCameraToActiveFloor()
 		{
 			PositionCameraForFloor(Building, InteriorGen->GetActiveFloor());
 		}
+	}
+}
+
+void ANavPlayerController::SetRoadCategoryVisible(ERoadCategory Category, bool bVisible)
+{
+	if (Generator)
+	{
+		Generator->SetRoadCategoryVisible(Category, bVisible);
 	}
 }
 

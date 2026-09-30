@@ -356,6 +356,11 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		WindowAudioCheckbox->SetIsChecked(false);
 		WindowAudioCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowAudioCheckChanged);
 
+		WindowRoadsCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowRoads"), TEXT("Roads"));
+		// Unlike WindowAudioCheckbox, starts checked - RoadFilterPanel starts Visible.
+		WindowRoadsCheckbox->SetIsChecked(true);
+		WindowRoadsCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowRoadsCheckChanged);
+
 		MenuClickCatcher = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("MenuClickCatcher"));
 		MenuClickCatcher->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
 		MenuClickCatcher->SetVisibility(ESlateVisibility::Collapsed);
@@ -537,6 +542,76 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		RefreshAudioDragHandle();
 		RefreshAudioBottomResizeHandle();
 		AudioDragHandleSettleFramesRemaining = AudioDragHandleSettleFrameCount;
+
+		// --- Road filter panel (Window > Roads) --- freely draggable by its own small corner handle
+		// (see RoadFilterDragHandle), same idea as AudioPanel but move-only (this panel's content never
+		// resizes, so no bottom-resize handle) and Visible by default instead of starting hidden.
+		RoadFilterPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_RoadFilter"));
+		RoadFilterPanel->SetBrushColor(EditMenuBarColor);
+		RoadFilterPanel->SetPadding(FMargin(AudioPanelPadding));
+		RoadFilterPanel->SetVisibility(ESlateVisibility::Visible);
+		RoadFilterPanel->SetClipping(EWidgetClipping::ClipToBoundsAlways);
+		RoadFilterPanel->OnMouseMoveEvent.BindDynamic(this, &UEditScreenWidget::OnRoadFilterPanelMouseMove);
+		RoadFilterPanel->OnMouseButtonUpEvent.BindDynamic(this, &UEditScreenWidget::OnRoadFilterPanelMouseButtonUp);
+		// Top-left anchored, same convention as AudioPanelSlot/RoadFilterDragHandleSlot (NOT a
+		// right-anchor, even though the starting X below happens to land it near the right side) - the
+		// drag handle reads this slot's own GetPosition() directly in RefreshRoadFilterDragHandle,
+		// which only gives an absolute left-origin pixel offset if both slots share the same anchor/
+		// alignment convention. A right-anchored panel paired with a left-anchored handle was tried
+		// first and put the handle nowhere near the panel, since GetPosition() then means something
+		// different in each coordinate system.
+		RoadFilterPanelSlot = Canvas->AddChildToCanvas(RoadFilterPanel);
+		RoadFilterPanelSlot->SetAnchors(FAnchors(0.f, 0.f));
+		RoadFilterPanelSlot->SetAlignment(FVector2D(0.f, 0.f));
+		// Placeholder position only - neither the canvas' nor this panel's own CachedGeometry is
+		// reliable yet at this point (no real Slate paint pass has happened), so PositionRoadFilterPanelInitially
+		// (called every tick from NativeTick until it succeeds once) immediately replaces this with a
+		// real screen-size-relative position instead.
+		RoadFilterPanelSlot->SetPosition(FVector2D(0.f, EditMenuBarHeight + ExteriorToolbarBarHeight + 10.f));
+		RoadFilterPanelSlot->SetAutoSize(true);
+		RoadFilterPanelSlot->SetZOrder(6);
+
+		UVerticalBox* RoadFilterStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RoadFilterStack"));
+		RoadFilterPanel->SetContent(RoadFilterStack);
+
+		RoadFilterTitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_RoadFilterTitle"));
+		RoadFilterTitleText->SetText(FText::FromString(TEXT("Roads")));
+		RoadFilterTitleText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(RoadFilterTitleText);
+		UVerticalBoxSlot* RoadFilterTitleSlot = RoadFilterStack->AddChildToVerticalBox(RoadFilterTitleText);
+		RoadFilterTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+
+		UCheckBox* RoadPrimaryCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadPrimary"), TEXT("Primary"));
+		RoadPrimaryCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadPrimaryCheckChanged);
+		UCheckBox* RoadSecondaryCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadSecondary"), TEXT("Secondary"));
+		RoadSecondaryCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadSecondaryCheckChanged);
+		UCheckBox* RoadResidentialCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadResidential"), TEXT("Residential/Tertiary"));
+		RoadResidentialCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadResidentialCheckChanged);
+		UCheckBox* RoadCyclewayCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadCycleway"), TEXT("Cycleway"));
+		RoadCyclewayCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadCyclewayCheckChanged);
+		UCheckBox* RoadFootwayCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadFootway"), TEXT("Footway/Path"));
+		RoadFootwayCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadFootwayCheckChanged);
+		UCheckBox* RoadOtherCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadOther"), TEXT("Other"));
+		RoadOtherCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadOtherCheckChanged);
+
+		// The move-drag handle - only a click landing on THIS starts a drag, same reasoning as
+		// AudioDragHandle. Starts Visible, matching RoadFilterPanel's own initial visibility (unlike
+		// AudioDragHandle, which starts Collapsed to match AudioPanel starting hidden).
+		RoadFilterDragHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_RoadFilterDragHandle"));
+		RoadFilterDragHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
+		RoadFilterDragHandle->SetCursor(EMouseCursor::CardinalCross);
+		RoadFilterDragHandle->OnMouseButtonDownEvent.BindDynamic(this, &UEditScreenWidget::OnRoadFilterDragHandleMouseButtonDown);
+		RoadFilterDragHandleSlot = Canvas->AddChildToCanvas(RoadFilterDragHandle);
+		RoadFilterDragHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
+		RoadFilterDragHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
+		RoadFilterDragHandleSlot->SetAutoSize(false);
+		RoadFilterDragHandleSlot->SetSize(FVector2D(AudioDragHandleSize, AudioDragHandleSize));
+		RoadFilterDragHandleSlot->SetZOrder(7);
+
+		// Same reasoning as RefreshAudioDragHandle's own post-construct call - RoadFilterTitleText's
+		// GetCachedGeometry is still stale this first time (no real Slate paint pass has happened yet).
+		RefreshRoadFilterDragHandle();
+		RoadFilterDragHandleSettleFramesRemaining = AudioDragHandleSettleFrameCount;
 	}
 
 	return Super::RebuildWidget();
@@ -606,6 +681,15 @@ void UEditScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 		--AudioDragHandleSettleFramesRemaining;
 		RefreshAudioDragHandle();
 		RefreshAudioBottomResizeHandle();
+	}
+	if (RoadFilterDragHandleSettleFramesRemaining > 0)
+	{
+		--RoadFilterDragHandleSettleFramesRemaining;
+		RefreshRoadFilterDragHandle();
+	}
+	if (!bHasPositionedRoadFilterPanelInitially)
+	{
+		PositionRoadFilterPanelInitially();
 	}
 }
 
@@ -954,6 +1038,195 @@ void UEditScreenWidget::OnWindowAudioCheckChanged(bool bIsChecked)
 		RefreshAudioDragHandle();
 		RefreshAudioBottomResizeHandle();
 		AudioDragHandleSettleFramesRemaining = AudioDragHandleSettleFrameCount;
+	}
+}
+
+void UEditScreenWidget::OnWindowRoadsCheckChanged(bool bIsChecked)
+{
+	if (RoadFilterPanel)
+	{
+		RoadFilterPanel->SetVisibility(bIsChecked ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (RoadFilterDragHandle)
+	{
+		RoadFilterDragHandle->SetVisibility(bIsChecked ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (bIsChecked)
+	{
+		// Same reasoning as OnWindowAudioCheckChanged's own re-reveal retry - if this panel had been
+		// hidden, its geometry may be stale until a real paint pass happens again.
+		RefreshRoadFilterDragHandle();
+		RoadFilterDragHandleSettleFramesRemaining = AudioDragHandleSettleFrameCount;
+	}
+}
+
+void UEditScreenWidget::RefreshRoadFilterDragHandle()
+{
+	if (!RoadFilterDragHandleSlot || !RoadFilterPanelSlot)
+	{
+		return;
+	}
+
+	FVector2D HandleSize(AudioDragHandleSize, AudioDragHandleSize);
+	if (RoadFilterTitleText)
+	{
+		const FVector2D TextSize = RoadFilterTitleText->GetCachedGeometry().GetLocalSize();
+		HandleSize = FVector2D(FMath::Max(TextSize.X, AudioDragHandleSize), FMath::Max(TextSize.Y, AudioDragHandleSize));
+	}
+	RoadFilterDragHandleSlot->SetSize(HandleSize);
+
+	const FVector2D PanelPos = RoadFilterPanelSlot->GetPosition();
+	RoadFilterDragHandleSlot->SetPosition(FVector2D(PanelPos.X + AudioPanelPadding, PanelPos.Y + AudioPanelPadding));
+}
+
+bool UEditScreenWidget::GetReliableCanvasSize(FVector2D& OutSize) const
+{
+	UCanvasPanel* RootCanvas = WidgetTree ? Cast<UCanvasPanel>(WidgetTree->RootWidget) : nullptr;
+	if (!RootCanvas)
+	{
+		return false;
+	}
+	const FVector2D LocalSize = RootCanvas->GetCachedGeometry().GetLocalSize();
+	if (LocalSize.X <= 0.f || LocalSize.Y <= 0.f)
+	{
+		return false;
+	}
+	OutSize = LocalSize;
+	return true;
+}
+
+void UEditScreenWidget::PositionRoadFilterPanelInitially()
+{
+	if (!RoadFilterPanelSlot || !RoadFilterPanel)
+	{
+		return;
+	}
+
+	FVector2D CanvasSize;
+	const FVector2D PanelSize = RoadFilterPanel->GetCachedGeometry().GetLocalSize();
+	if (!GetReliableCanvasSize(CanvasSize) || PanelSize.X <= 0.f)
+	{
+		return; // no real Slate paint pass yet - NativeTick will try again next frame
+	}
+
+	constexpr float RightMargin = 10.f;
+	RoadFilterPanelSlot->SetPosition(FVector2D(
+		FMath::Max(0.f, CanvasSize.X - PanelSize.X - RightMargin),
+		EditMenuBarHeight + ExteriorToolbarBarHeight + 10.f));
+	bHasPositionedRoadFilterPanelInitially = true;
+	RefreshRoadFilterDragHandle();
+}
+
+FEventReply UEditScreenWidget::OnRoadFilterDragHandleMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+{
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !RoadFilterPanel || !RoadFilterPanelSlot)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	UPanelWidget* CanvasParent = RoadFilterPanel->GetParent();
+	if (!CanvasParent)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	bIsDraggingRoadFilterPanel = true;
+	const FVector2D ScreenPosition = MouseEvent.GetScreenSpacePosition();
+	RoadFilterPanelDragStartMouse = CanvasParent->GetCachedGeometry().AbsoluteToLocal(ScreenPosition);
+	RoadFilterPanelDragStartPosition = RoadFilterPanelSlot->GetPosition();
+
+	// Bound to RoadFilterPanel (not the handle) so mouse capture keeps receiving move/up events even
+	// once the cursor moves off the handle's own small bounds mid-drag - same reasoning as
+	// OnAudioDragHandleMouseButtonDown's own CaptureMouse call.
+	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+	return UWidgetBlueprintLibrary::CaptureMouse(Reply, RoadFilterPanel);
+}
+
+FEventReply UEditScreenWidget::OnRoadFilterPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+{
+	if (!bIsDraggingRoadFilterPanel || !RoadFilterPanel || !RoadFilterPanelSlot)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	UPanelWidget* CanvasParent = RoadFilterPanel->GetParent();
+	if (!CanvasParent)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	const FGeometry& ParentGeometry = CanvasParent->GetCachedGeometry();
+	const FVector2D CurrentMousePosition = ParentGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
+	const FVector2D NewPosition = RoadFilterPanelDragStartPosition + (CurrentMousePosition - RoadFilterPanelDragStartMouse);
+
+	const FVector2D ViewportSize = ParentGeometry.GetLocalSize();
+	const FVector2D PanelSize = RoadFilterPanel->GetCachedGeometry().GetLocalSize();
+	const float ClampedX = FMath::Clamp(NewPosition.X, 0.f, FMath::Max(0.f, ViewportSize.X - PanelSize.X));
+	const float ClampedY = FMath::Clamp(NewPosition.Y, AudioPanelDragMinY, FMath::Max(AudioPanelDragMinY, ViewportSize.Y - PanelSize.Y));
+	RoadFilterPanelSlot->SetPosition(FVector2D(ClampedX, ClampedY));
+
+	RefreshRoadFilterDragHandle();
+
+	return UWidgetBlueprintLibrary::Handled();
+}
+
+FEventReply UEditScreenWidget::OnRoadFilterPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+{
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	bIsDraggingRoadFilterPanel = false;
+	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+	return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
+}
+
+void UEditScreenWidget::OnRoadPrimaryCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Primary, bIsChecked);
+	}
+}
+
+void UEditScreenWidget::OnRoadSecondaryCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Secondary, bIsChecked);
+	}
+}
+
+void UEditScreenWidget::OnRoadResidentialCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Residential, bIsChecked);
+	}
+}
+
+void UEditScreenWidget::OnRoadCyclewayCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Cycleway, bIsChecked);
+	}
+}
+
+void UEditScreenWidget::OnRoadFootwayCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Footway, bIsChecked);
+	}
+}
+
+void UEditScreenWidget::OnRoadOtherCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Other, bIsChecked);
 	}
 }
 

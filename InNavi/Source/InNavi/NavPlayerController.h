@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "InteriorTypes.h"
+#include "RoadSegmentActor.h"
 #include "NavPlayerController.generated.h"
 
 class APolyBuilding;
@@ -436,6 +437,11 @@ public:
 	// picks them up from then on. No-op (with OnActionFailed) if nothing is loaded to measure against.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void SetCurrentViewAsDefaultExterior();
+
+	// Passthrough to Generator->SetRoadCategoryVisible - what the exterior page's road-filter panel
+	// checkboxes call.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetRoadCategoryVisible(ERoadCategory Category, bool bVisible);
 
 	UPROPERTY(BlueprintAssignable, Category = "Interior")
 	FOnSelectModeChanged OnSelectModeChanged;
