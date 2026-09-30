@@ -209,6 +209,12 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsDraggingDoor)
 	{
 		bIsDraggingDoor = false;
+
+		if (InteriorGen)
+		{
+			InteriorGen->RecordHistorySnapshot();
+		}
+
 		return FReply::Handled().ReleaseMouseCapture();
 	}
 

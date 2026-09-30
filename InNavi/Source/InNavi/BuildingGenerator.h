@@ -147,7 +147,7 @@ public:
 	// dropdown to list, since ids (not names) are what LoadInteriorForBuilding takes.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	TArray<FString> GetAllBuildingIds() const;
-
+	FString GenerateUniqueBuildingId(const FString& BaseId) const;
 	// Reads a building's current human-readable name - mirrors AInteriorGenerator::GetRoomName.
 	// Returns an empty string if no building with that id exists.
 	UFUNCTION(BlueprintPure, Category = "Building")

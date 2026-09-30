@@ -8,6 +8,8 @@
 #include "PolyBuilding.h"
 #include "EngineUtils.h"
 #include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+#include "Serialization/JsonReader.h"
 
 // How close two footprints' edges/corners have to be to count as "just touching" rather than
 // "overlapping" (DoFootprintsOverlap's own ToleranceUnits parameter) - a fixed WORLD distance. Most
@@ -335,6 +337,14 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 		SetActiveFloor(ActiveFloor);
 
 		UE_LOG(LogTemp, Warning, TEXT("No interior data yet for %s - starting blank with %d floor(s) matching the exterior"), *BuildingId, ExistingFloorCount);
+
+		// Start a fresh Undo/Redo history for this building.
+		if (!bIsRestoringHistory)
+		{
+			ClearHistory();
+			RecordHistorySnapshot();
+		}
+
 		return 0;
 	}
 
@@ -514,6 +524,14 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 	SetActiveFloor(ActiveFloor);
 
 	UE_LOG(LogTemp, Warning, TEXT("Loaded interior for %s: %d floors, %d rooms"), *BuildingId, FloorsArray->Num(), SpawnedCount);
+
+	// Start a fresh Undo/Redo history for this building.
+	if (!bIsRestoringHistory)
+	{
+		ClearHistory();
+		RecordHistorySnapshot();
+	}
+
 	return SpawnedCount;
 }
 
@@ -628,6 +646,7 @@ int32 AInteriorGenerator::AddFloor()
 	SetActiveFloor(NewLevel);
 
 	UE_LOG(LogTemp, Warning, TEXT("Added floor %d to %s (wallHeight=%.0f, wallThickness=%.0f)"), NewLevel, *LoadedBuildingId, NewFloorInfo.WallHeight, NewFloorInfo.WallThickness);
+	RecordHistorySnapshot();
 	return NewLevel;
 }
 
@@ -720,7 +739,9 @@ bool AInteriorGenerator::RemoveFloor(int32 Level)
 
 	SetActiveFloor(FMath::Clamp(ActiveFloor, 1, NewFloorCount));
 
-	UE_LOG(LogTemp, Warning, TEXT("Removed floor %d from %s, now %d floors"), Level, *LoadedBuildingId, NewFloorCount);
+	UE_LOG(LogTemp, Warning,TEXT("Removed floor %d from %s, now %d floors"),Level, *LoadedBuildingId, NewFloorCount);
+
+	RecordHistorySnapshot();
 	return true;
 }
 
@@ -746,7 +767,7 @@ FString AInteriorGenerator::PeekNextRoomId() const
 	}
 }
 
-AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2D>& Footprint, const FString& RoomId, const FString& RoomName, bool bIsPublic, bool bRequiresKey)
+AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2D>& Footprint,const FString& RoomId,const FString& RoomName,bool bIsPublic,bool bRequiresKey,bool bAllowOverlap)
 {
 	if (LoadedBuildingId.IsEmpty() || !Generator)
 	{
@@ -835,8 +856,8 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2
 
 		RoomsByFloor.FindOrAdd(ActiveFloor).Rooms.Add(Room);
 		UsedRoomIds.Add(ResolvedId);
+		RecordHistorySnapshot();
 	}
-
 	return Room;
 }
 
@@ -920,6 +941,7 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 
 		RoomsByFloor.FindOrAdd(ActiveFloor).Rooms.Add(Wall);
 		UsedRoomIds.Add(ResolvedId);
+		RecordHistorySnapshot();
 	}
 
 	return Wall;
@@ -1204,6 +1226,8 @@ FString AInteriorGenerator::PlaceConnectorNode(EInteriorNavNodeType Type, FVecto
 	}
 
 	UE_LOG(LogTemp, Warning, TEXT("Placed connector '%s' on %d floor(s)"), *GroupId, ConnectsToFloors.Num());
+
+	RecordHistorySnapshot();
 	return GroupId;
 }
 
@@ -1224,7 +1248,11 @@ bool AInteriorGenerator::DeleteConnectorGroup(const FString& GroupId)
 
 	if (RemovedCount > 0)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Deleted connector '%s' (%d node(s))"), *GroupId, RemovedCount);
+		UE_LOG(LogTemp, Warning,
+			TEXT("Deleted connector '%s' (%d node(s))"),
+			*GroupId, RemovedCount);
+
+		RecordHistorySnapshot();
 		return true;
 	}
 
@@ -1319,8 +1347,11 @@ bool AInteriorGenerator::SetConnectorFloors(const FString& GroupId, const TArray
 		NavNodes.Add(NewNode);
 		SpawnConnectorMarker(NavNodes.Last(), Building);
 	}
+	UE_LOG(LogTemp, Warning,
+		TEXT("Updated connector '%s' floors"),
+		*GroupId);
 
-	UE_LOG(LogTemp, Warning, TEXT("Connector '%s' now on %d floor(s)"), *GroupId, NewConnectsToFloors.Num());
+	RecordHistorySnapshot();
 	return true;
 }
 
@@ -1408,6 +1439,7 @@ bool AInteriorGenerator::ScaleConnectorGroup(const FString& GroupId, float Delta
 		Node->SizeScale = NewScale;
 		RebuildConnectorMarker(*Node, Building);
 	}
+	RecordHistorySnapshot();
 	return true;
 }
 
@@ -1424,6 +1456,8 @@ bool AInteriorGenerator::DeleteRoom(const FString& RoomId)
 				Rooms.RemoveAt(i);
 				UsedRoomIds.Remove(RoomId);
 				UE_LOG(LogTemp, Warning, TEXT("Deleted room/wall %s"), *RoomId);
+
+				RecordHistorySnapshot();
 				return true;
 			}
 		}
@@ -1497,6 +1531,7 @@ bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float
 
 			Room->ResizeFootprint(NewFootprint);
 			UE_LOG(LogTemp, Warning, TEXT("Resized %s to %.1f x %.1f"), *RoomId, NewWidth, NewDepth);
+			RecordHistorySnapshot();
 			return true;
 		}
 	}
@@ -1593,7 +1628,7 @@ bool AInteriorGenerator::CommitRoomRotation(const FString& RoomId, const TArray<
 				UE_LOG(LogTemp, Warning, TEXT("CommitRoomRotation: '%s' would wall in an elevator/stairs/escalator - reverted to its position before the rotation"), *RoomId);
 				return false;
 			}
-
+			RecordHistorySnapshot();
 			return true;
 		}
 	}
@@ -1670,6 +1705,7 @@ bool AInteriorGenerator::CommitRoomMove(const FString& RoomId, const TArray<FVec
 				return false;
 			}
 
+			RecordHistorySnapshot();
 			return true;
 		}
 	}
@@ -1796,6 +1832,8 @@ FString AInteriorGenerator::AddDoorToRoom(const FString& RoomId, int32 EdgeIndex
 
 			Room->AddOpening(Opening);
 			UE_LOG(LogTemp, Warning, TEXT("Added door %s to %s edge %d"), *Opening.Id, *RoomId, EdgeIndex);
+
+			RecordHistorySnapshot();
 			return Opening.Id;
 		}
 	}
@@ -1821,6 +1859,8 @@ bool AInteriorGenerator::DeleteDoor(const FString& RoomId, const FString& DoorId
 				{
 					Room->RemoveOpening(DoorId);
 					UE_LOG(LogTemp, Warning, TEXT("Deleted door %s from %s"), *DoorId, *RoomId);
+
+					RecordHistorySnapshot();
 					return true;
 				}
 			}
@@ -1902,6 +1942,8 @@ bool AInteriorGenerator::SetDoorConnectsTo(const FString& RoomId, const FString&
 				if (Opening.Id == DoorId)
 				{
 					Room->SetOpeningConnectsTo(DoorId, NewConnectsTo);
+
+					RecordHistorySnapshot();
 					return true;
 				}
 			}
@@ -1940,6 +1982,7 @@ bool AInteriorGenerator::SetRoomName(const FString& RoomId, const FString& NewNa
 
 			Room->RoomName = NewName;
 			UE_LOG(LogTemp, Warning, TEXT("Renamed %s to '%s'"), *RoomId, *NewName);
+			RecordHistorySnapshot();
 			return true;
 		}
 	}
@@ -2120,7 +2163,21 @@ const TArray<AInteriorRoom*>& AInteriorGenerator::GetRoomsOnFloor(int32 Level) c
 	const FInteriorRoomList* List = RoomsByFloor.Find(Level);
 	return List ? List->Rooms : Empty;
 }
+AInteriorRoom* AInteriorGenerator::GetRoomById(const FString& RoomId) const
+{
+	for (const auto& FloorPair : RoomsByFloor)
+	{
+		for (AInteriorRoom* Room : FloorPair.Value.Rooms)
+		{
+			if (Room && Room->RoomId == RoomId)
+			{
+				return Room;
+			}
+		}
+	}
 
+	return nullptr;
+}
 void AInteriorGenerator::SyncInteriorToBuildingGenerator()
 {
 	if (LoadedBuildingId.IsEmpty() || !Generator)
@@ -2129,4 +2186,203 @@ void AInteriorGenerator::SyncInteriorToBuildingGenerator()
 	}
 
 	Generator->SetInteriorDataForBuilding(LoadedBuildingId, SerializeCurrentInterior());
+}
+void AInteriorGenerator::RecordHistorySnapshot()
+{
+	if (bIsRestoringHistory || LoadedBuildingId.IsEmpty())
+	{
+		return;
+	}
+
+	// Convert the current live interior into JSON.
+	TSharedRef<FJsonObject> InteriorObject = SerializeCurrentInterior();
+
+	FString Snapshot;
+	TSharedRef<TJsonWriter<>> Writer =
+		TJsonWriterFactory<>::Create(&Snapshot);
+
+	if (!FJsonSerializer::Serialize(InteriorObject, Writer))
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("RecordHistorySnapshot: failed to serialize interior"));
+		return;
+	}
+
+	// Don't store the exact same state twice.
+	if (HistoryIndex >= 0 &&
+		InteriorHistory.IsValidIndex(HistoryIndex) &&
+		InteriorHistory[HistoryIndex] == Snapshot)
+	{
+		return;
+	}
+
+	// If we Undo and then make a new edit, the old Redo path
+	// must be discarded.
+	if (HistoryIndex < InteriorHistory.Num() - 1)
+	{
+		InteriorHistory.RemoveAt(
+			HistoryIndex + 1,
+			InteriorHistory.Num() - HistoryIndex - 1);
+	}
+
+	InteriorHistory.Add(Snapshot);
+	HistoryIndex = InteriorHistory.Num() - 1;
+
+	UE_LOG(LogTemp, Log,
+		TEXT("History snapshot recorded. Index=%d Total=%d"),
+		HistoryIndex,
+		InteriorHistory.Num());
+}
+
+
+bool AInteriorGenerator::Undo()
+{
+	// Need an earlier state to go back to.
+	if (HistoryIndex <= 0 ||
+		!InteriorHistory.IsValidIndex(HistoryIndex - 1))
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("Undo: nothing to undo"));
+		return false;
+	}
+
+	if (!Generator || LoadedBuildingId.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("Undo: no interior is currently loaded"));
+		return false;
+	}
+
+	const FString BuildingId = LoadedBuildingId;
+	const int32 PreviousActiveFloor = ActiveFloor;
+
+	const int32 TargetIndex = HistoryIndex - 1;
+	const FString& Snapshot = InteriorHistory[TargetIndex];
+
+	TSharedPtr<FJsonObject> RestoredInterior;
+	TSharedRef<TJsonReader<>> Reader =
+		TJsonReaderFactory<>::Create(Snapshot);
+
+	if (!FJsonSerializer::Deserialize(Reader, RestoredInterior) ||
+		!RestoredInterior.IsValid())
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("Undo: failed to deserialize history snapshot"));
+		return false;
+	}
+
+	bIsRestoringHistory = true;
+
+	Generator->SetInteriorDataForBuilding(
+		BuildingId,
+		RestoredInterior);
+
+	const int32 LoadResult =
+		LoadInteriorForBuilding(BuildingId);
+
+	if (LoadResult < 0)
+	{
+		bIsRestoringHistory = false;
+
+		UE_LOG(LogTemp, Error,
+			TEXT("Undo: failed to restore interior"));
+		return false;
+	}
+
+	HistoryIndex = TargetIndex;
+
+	// Try to remain on the same floor.
+	if (FloorInfoByLevel.Contains(PreviousActiveFloor))
+	{
+		SetActiveFloor(PreviousActiveFloor);
+	}
+
+	bIsRestoringHistory = false;
+
+	UE_LOG(LogTemp, Log,
+		TEXT("Undo complete. Index=%d"),
+		HistoryIndex);
+
+	return true;
+}
+
+
+bool AInteriorGenerator::Redo()
+{
+	const int32 TargetIndex = HistoryIndex + 1;
+
+	if (!InteriorHistory.IsValidIndex(TargetIndex))
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("Redo: nothing to redo"));
+		return false;
+	}
+
+	if (!Generator || LoadedBuildingId.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("Redo: no interior is currently loaded"));
+		return false;
+	}
+
+	const FString BuildingId = LoadedBuildingId;
+	const int32 PreviousActiveFloor = ActiveFloor;
+
+	const FString& Snapshot = InteriorHistory[TargetIndex];
+
+	TSharedPtr<FJsonObject> RestoredInterior;
+	TSharedRef<TJsonReader<>> Reader =
+		TJsonReaderFactory<>::Create(Snapshot);
+
+	if (!FJsonSerializer::Deserialize(Reader, RestoredInterior) ||
+		!RestoredInterior.IsValid())
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("Redo: failed to deserialize history snapshot"));
+		return false;
+	}
+
+	bIsRestoringHistory = true;
+
+	Generator->SetInteriorDataForBuilding(
+		BuildingId,
+		RestoredInterior);
+
+	const int32 LoadResult =
+		LoadInteriorForBuilding(BuildingId);
+
+	if (LoadResult < 0)
+	{
+		bIsRestoringHistory = false;
+
+		UE_LOG(LogTemp, Error,
+			TEXT("Redo: failed to restore interior"));
+		return false;
+	}
+
+	HistoryIndex = TargetIndex;
+
+	if (FloorInfoByLevel.Contains(PreviousActiveFloor))
+	{
+		SetActiveFloor(PreviousActiveFloor);
+	}
+
+	bIsRestoringHistory = false;
+
+	UE_LOG(LogTemp, Log,
+		TEXT("Redo complete. Index=%d"),
+		HistoryIndex);
+
+	return true;
+}
+
+
+void AInteriorGenerator::ClearHistory()
+{
+	InteriorHistory.Empty();
+	HistoryIndex = -1;
+	bIsRestoringHistory = false;
+
+	UE_LOG(LogTemp, Log,
+		TEXT("Undo/Redo history cleared"));
 }

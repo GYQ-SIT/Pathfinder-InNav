@@ -867,7 +867,19 @@ TArray<FString> ABuildingGenerator::GetAllBuildingIds() const
 	BuildingsById.GenerateKeyArray(Result);
 	return Result;
 }
+FString ABuildingGenerator::GenerateUniqueBuildingId(const FString& BaseId) const
+{
+	FString NewId = BaseId + TEXT("_Copy");
+	int32 CopyNumber = 1;
 
+	while (UsedBuildingIds.Contains(NewId))
+	{
+		NewId = FString::Printf(TEXT("%s_Copy%d"), *BaseId, CopyNumber);
+		CopyNumber++;
+	}
+
+	return NewId;
+}
 FString ABuildingGenerator::GetBuildingName(const FString& BuildingId) const
 {
 	const APolyBuilding* const* Found = BuildingsById.Find(BuildingId);

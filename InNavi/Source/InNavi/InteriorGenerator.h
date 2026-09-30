@@ -284,7 +284,8 @@ public:
 	// (see UInteriorFloorPlanWidget). Empty if that floor doesn't exist.
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	const TArray<AInteriorRoom*>& GetRoomsOnFloor(int32 Level) const;
-
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	AInteriorRoom* GetRoomById(const FString& RoomId) const;
 	// ---- Undo / Redo ----
 
 // Save the current interior state into the undo history.
