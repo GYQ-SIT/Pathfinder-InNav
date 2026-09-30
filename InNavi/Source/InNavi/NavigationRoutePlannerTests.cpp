@@ -9,6 +9,67 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
 
+namespace
+{
+	constexpr double TestGeometryEpsilon = 0.0001;
+
+	// Named distinctly (Test... prefix) rather than the more obvious Cross2D/IsOnSegment -
+	// NavigationPanelWidget.cpp already has its own same-named, same-signature pair in its own
+	// anonymous namespace. Both being anonymous-namespace/internal-linkage normally keeps them
+	// apart, but Unreal's adaptive-unity build only excludes files with local uncommitted changes
+	// from unity batching - a from-clean CI checkout has nothing to exclude, so both land in the
+	// same merged translation unit and collide (first caught by CI, not any local build, since a
+	// local build's own working set is rarely "completely clean").
+	double TestCross2D(const FVector2D& A, const FVector2D& B, const FVector2D& C)
+	{
+		return static_cast<double>(B.X - A.X) * (C.Y - A.Y)
+			- static_cast<double>(B.Y - A.Y) * (C.X - A.X);
+	}
+
+	bool TestIsOnSegment(const FVector2D& Point, const FVector2D& A, const FVector2D& B)
+	{
+		return FMath::Abs(TestCross2D(A, B, Point)) <= TestGeometryEpsilon
+			&& Point.X >= FMath::Min(A.X, B.X) - TestGeometryEpsilon
+			&& Point.X <= FMath::Max(A.X, B.X) + TestGeometryEpsilon
+			&& Point.Y >= FMath::Min(A.Y, B.Y) - TestGeometryEpsilon
+			&& Point.Y <= FMath::Max(A.Y, B.Y) + TestGeometryEpsilon;
+	}
+
+	bool SegmentsIntersect(const FVector2D& A, const FVector2D& B,
+		const FVector2D& C, const FVector2D& D)
+	{
+		const double C1 = TestCross2D(A, B, C);
+		const double C2 = TestCross2D(A, B, D);
+		const double C3 = TestCross2D(C, D, A);
+		const double C4 = TestCross2D(C, D, B);
+		if (((C1 > TestGeometryEpsilon && C2 < -TestGeometryEpsilon)
+			|| (C1 < -TestGeometryEpsilon && C2 > TestGeometryEpsilon))
+			&& ((C3 > TestGeometryEpsilon && C4 < -TestGeometryEpsilon)
+				|| (C3 < -TestGeometryEpsilon && C4 > TestGeometryEpsilon)))
+		{
+			return true;
+		}
+		return TestIsOnSegment(C, A, B) || TestIsOnSegment(D, A, B)
+			|| TestIsOnSegment(A, C, D) || TestIsOnSegment(B, C, D);
+	}
+
+	double SegmentDistance(const FVector2D& A, const FVector2D& B,
+		const FVector2D& C, const FVector2D& D)
+	{
+		if (SegmentsIntersect(A, B, C, D))
+		{
+			return 0.0;
+		}
+		auto PointDistance = [](const FVector2D& Point, const FVector2D& S0, const FVector2D& S1)
+		{
+			return FVector2D::Distance(Point, FMath::ClosestPointOnSegment2D(Point, S0, S1));
+		};
+		return FMath::Min(
+			FMath::Min(PointDistance(A, C, D), PointDistance(B, C, D)),
+			FMath::Min(PointDistance(C, A, B), PointDistance(D, A, B)));
+	}
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationRoutePlannerIntegrationTest,
 	"InNavi.Navigation.RoutePlanner", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
@@ -21,18 +82,19 @@ bool FNavigationRoutePlannerIntegrationTest::RunTest(const FString& Parameters)
 
 	const FString DataPath = FPaths::ProjectDir() / TEXT("Data") / TEXT("buildings.json");
 	TestTrue(TEXT("Example building data loads"), Generator->LoadBuildingsFromFile(DataPath) > 0);
-	TestTrue(TEXT("E1 interior loads"), Interior->LoadInteriorForBuilding(TEXT("E1")) >= 0);
-	APolyBuilding* Building = Generator->FindBuildingById(TEXT("E1"));
-	TestNotNull(TEXT("E1 exists"), Building);
+	TestTrue(TEXT("E2 interior loads"), Interior->LoadInteriorForBuilding(TEXT("E2")) >= 0);
+	APolyBuilding* Building = Generator->FindBuildingById(TEXT("E2"));
+	TestNotNull(TEXT("E2 exists"), Building);
 	if (Building)
 	{
 		FNavigationRouteResult Route;
-		TestTrue(TEXT("Same-floor route"), FNavigationRoutePlanner::FindRoute(*Building, *Interior,
-			Generator->GetScale(), 1, FVector2D(100, 300), 1, FVector2D(110, 350), Route));
-		TestTrue(TEXT("Same-floor route has endpoints"), Route.Points.Num() >= 2);
+		TestTrue(TEXT("Unobstructed same-floor route"), FNavigationRoutePlanner::FindRoute(*Building, *Interior,
+			Generator->GetScale(), 1, FVector2D(120.f, 70.f), 1, FVector2D(150.f, 70.f), Route));
+		TestEqual(TEXT("Unobstructed route is direct"), Route.Points.Num(), 2);
 
-		TestTrue(TEXT("Cross-floor route uses E1 elevator"), FNavigationRoutePlanner::FindRoute(*Building, *Interior,
-			Generator->GetScale(), 1, FVector2D(100, 300), 2, FVector2D(100, 300), Route));
+		const FVector2D Elevator(348.4473f, 99.6574f);
+		TestTrue(TEXT("Cross-floor route uses the E2 elevator"), FNavigationRoutePlanner::FindRoute(
+			*Building, *Interior, Generator->GetScale(), 1, Elevator, 2, Elevator, Route));
 		bool bChangedFloor = false;
 		for (int32 I = 1; I < Route.Points.Num(); ++I)
 		{
@@ -40,20 +102,45 @@ bool FNavigationRoutePlannerIntegrationTest::RunTest(const FString& Parameters)
 		}
 		TestTrue(TEXT("Cross-floor route contains a floor transition"), bChangedFloor);
 
-		TestFalse(TEXT("No connection to E1 floor 3"), FNavigationRoutePlanner::FindRoute(*Building, *Interior,
-			Generator->GetScale(), 1, FVector2D(100, 300), 3, FVector2D(100, 300), Route));
-		TestTrue(TEXT("No-route reason is present"), !Route.Error.IsEmpty());
+		// E2-01-02 is a sealed rectangular room. A straight route from left to right would cross it,
+		// so the visibility graph must use the expanded wall boundary and travel around it.
+		TestTrue(TEXT("Route around sealed room"), FNavigationRoutePlanner::FindRoute(*Building, *Interior,
+			Generator->GetScale(), 1, FVector2D(250.f, 125.f), 1, FVector2D(350.f, 125.f), Route));
+		TestTrue(TEXT("Blocked route contains safe turns"), Route.Points.Num() > 2);
 
-		TestTrue(TEXT("Room-to-corridor route"), FNavigationRoutePlanner::FindRoute(*Building, *Interior,
-			Generator->GetScale(), 2, FVector2D(100, 300), 2, FVector2D(100, 230), Route));
-		TestTrue(TEXT("Route bends around the room wall"), Route.Points.Num() > 2);
-		bool bUsesDoor = false;
-		const FVector2D DoorMidpoint(60.f + 34.5f / Generator->GetScale(), 240.f);
-		for (const FNavigationRoutePoint& Point : Route.Points)
+		const FVector2D RoomCorners[] =
 		{
-			bUsesDoor |= Point.Floor == 2 && Point.Position.Equals(DoorMidpoint, 0.01f);
+			FVector2D(274.1677f, 106.1657f), FVector2D(334.1677f, 106.1657f),
+			FVector2D(334.1677f, 151.1657f), FVector2D(274.1677f, 151.1657f)
+		};
+		constexpr double ExpectedClearance = 2.99; // (20 cm / 2 wall + 20 cm gap) / scale 10
+		for (int32 RouteIndex = 1; RouteIndex < Route.Points.Num(); ++RouteIndex)
+		{
+			for (int32 WallIndex = 0; WallIndex < 4; ++WallIndex)
+			{
+				const double Distance = SegmentDistance(Route.Points[RouteIndex - 1].Position,
+					Route.Points[RouteIndex].Position, RoomCorners[WallIndex], RoomCorners[(WallIndex + 1) % 4]);
+				TestTrue(FString::Printf(TEXT("Route segment %d clears sealed-room wall %d"),
+					RouteIndex - 1, WallIndex), Distance >= ExpectedClearance);
+			}
 		}
-		TestTrue(TEXT("Room exit passes through the authored door"), bUsesDoor);
+
+		FString ValidationError;
+		TestFalse(TEXT("Point inside expanded wall boundary is rejected"),
+			FNavigationRoutePlanner::IsValidPoint(*Building, *Interior, Generator->GetScale(),
+				1, FVector2D(272.f, 125.f), ValidationError));
+		TestTrue(TEXT("Wall-boundary validation explains the problem"),
+			ValidationError.Contains(TEXT("safety boundary")));
+
+		// E2-01-01 has a 90 cm door in its right wall. Inflating solid wall pieces must leave the
+		// centre of that opening traversable.
+		TestTrue(TEXT("Room exit still passes through its door"), FNavigationRoutePlanner::FindRoute(
+			*Building, *Interior, Generator->GetScale(), 1, FVector2D(200.f, 110.f),
+			1, FVector2D(250.f, 110.f), Route));
+		const FVector2D DoorMidpoint(231.8666f, 111.8725f);
+		const bool bUsesDoor = Route.Points.ContainsByPredicate([&DoorMidpoint](const FNavigationRoutePoint& Point)
+			{ return Point.Floor == 1 && Point.Position.Equals(DoorMidpoint, 0.02f); });
+		TestTrue(TEXT("Door route uses the authored opening"), bUsesDoor);
 	}
 	World->DestroyWorld(false);
 	return true;

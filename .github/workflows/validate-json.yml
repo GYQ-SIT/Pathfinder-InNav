@@ -2,7 +2,7 @@ name: Validate data JSON
 
 on:
   push:
-    branches: [main, YQ-ui-backup]
+    branches: [main]
     paths:
       - 'InNavi/Data/**.json'
       - '.github/workflows/validate-json.yml'

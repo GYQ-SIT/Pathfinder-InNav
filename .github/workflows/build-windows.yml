@@ -1,0 +1,22 @@
+name: Build UE5 Windows Editor
+
+# Runs on the team's own self-hosted Windows runner (has UE5.8 + Visual Studio
+# already installed) - the team12 Ubuntu VM can't do this (wrong OS/underpowered),
+# see validate-json.yml's own runner for that one.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: [self-hosted, windows]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build InNaviEditor (Win64, Development)
+        shell: cmd
+        run: |
+          "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" InNaviEditor Win64 Development -Project="%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -WaitMutex

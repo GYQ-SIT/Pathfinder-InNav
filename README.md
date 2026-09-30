@@ -19,6 +19,7 @@ generate a schematic interior in 3D, and navigate inside — including across fl
     - `interior-editor-guide.md` — **how to use the interior editor** (controls/workflow, current as of the `YQ-ui-backup` branch)
     - `ui-ux/` — wireframes, user flows, mockups
   - `architecture.md` — system architecture + tech stack
+  - `toolchain-decision.md` — stack/platform decisions and why
   - `deliverables.md` — ownership + M1/M2/M3 targets
   - `planning/` — Feature Plan + Technical Deliverable Plan
 

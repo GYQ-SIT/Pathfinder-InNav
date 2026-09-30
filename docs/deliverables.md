@@ -4,10 +4,8 @@
 > Owned by: **Tech Lead.** This is the `Deliverables & Ownership => M1/M2/M3` step
 > of the engineering workflow. Each deliverable maps to a Jira Epic.
 >
-> **Status of this document:** draft.
-> - `Supports (Fxx)` references are placeholders until the Feature Plan is approved.
-> - Owners are role placeholders until the team assigns members.
-> - Platform scope (single desktop app vs. desktop + mobile) is **pending confirmation with the professor** — see note under "Open decisions".
+> **Status of this document:** confirmed for M1 — the Feature Plan is approved and
+> platform scope is locked (see "Decisions" below); this is no longer a draft.
 
 ---
 
@@ -15,14 +13,14 @@
 
 Proposal → Architecture → **Deliverables & Ownership → M1/M2/M3** → Jira → Implementation + CI/CD → GitHub/PR → Integration
 
-## Open decisions (to confirm before locking scope)
+## Decisions (locked for M1)
 
 1. **App structure & platform.** Our proposal originally split an editor (desktop)
-   and a navigation app (mobile). We are proposing to **combine both into a single
-   application with an Edit/Navigation mode toggle**, and to **target desktop first
-   for M1**, extending to mobile in M2/M3. Pending confirmation with the professor.
-2. **Feature Plan.** Feature IDs (Fxx) below are placeholders; they will be filled
-   once the PM's Feature Plan is approved and F↔T mapping is agreed.
+   and a navigation app (mobile). **Confirmed with the professor:** combine both into
+   a single application with an Edit/Navigation mode toggle, desktop-first for M1,
+   extending to mobile in M2/M3.
+2. **Feature Plan.** Feature IDs (Fxx) below match the approved M1 Feature Plan (see
+   `docs/planning/M1_Feature_Plan.xlsx`) — F01-F04, not placeholders.
 
 ---
 
@@ -33,7 +31,7 @@ demonstrable check — not "it exists".
 
 ### T01 — Model Import & Building Selection
 - **What it is:** Import the school model into UE; let the user select a building at runtime.
-- **Supports:** _(building selection / interior generation — F01 TBD)_
+- **Supports:** F01 (Campus Building Selection)
 - **Owner:** Yongqi
 - **Jira Epic:** `INNAVI-T01`
 - **M1 target:** School model loads in UE; user can click a building and it is highlighted/selected. **Done** — real SIT Punggol campus footprints (E1–E6) load from `buildings.json`; click-to-select/highlight working.
@@ -42,7 +40,7 @@ demonstrable check — not "it exists".
 
 ### T02 — Data Input & JSON System
 - **What it is:** Interface to enter/manage interior data (rooms, room types, floors, elevators, stairs, corridors); save and load as JSON.
-- **Supports:** _(data entry / save-load — F02 TBD)_
+- **Supports:** F02 (Custom Building Layout Editor)
 - **Owner:** Split three ways —
   - **Yongqi**: backend/data model (C++ room/door/connector CRUD, validation, JSON
     save/load) and the panels/dialogs already in UMG (door/room/connector property
@@ -61,7 +59,7 @@ demonstrable check — not "it exists".
 
 ### T03 — Procedural Interior Generator
 - **What it is:** Read JSON and spawn a schematic interior at runtime from a modular kit (walls, windows, doors, corridors, stairs, elevators). Elevators/doors recorded as input/output nodes.
-- **Supports:** _(interior generation — F03 TBD)_
+- **Supports:** F03 (Instant 3D Interior Visualization)
 - **Owner:** Yongqi
 - **Jira Epic:** `INNAVI-T03`
 - **M1 target:** Given a JSON file, generate the corresponding rooms, corridors, and stairs for at least one multi-floor building. **Done** — `AInteriorGenerator` reads the JSON and spawns real 3D procedural-mesh rooms/walls/doors per floor (tested on multi-floor buildings, e.g. a 10-floor building with rooms/doors/elevators/stairs/escalators across floors). Elevators/stairs/escalators are recorded as `FInteriorNavNode`s with a `ConnectorGroupId` tying each connector's per-floor instances together, and doors carry `InputId`/`ConnectsTo` — the input/output-node format was shared with the T04 owners (ws/jh) before implementation.
@@ -70,10 +68,10 @@ demonstrable check — not "it exists".
 
 ### T04 — Indoor Navigation System
 - **What it is:** Runtime navigation over the generated interior, including cross-floor routing via elevators/stairs as abstract connectors (runtime NavMesh + NavLinks).
-- **Supports:** _(navigation / routing — F04 TBD)_
+- **Supports:** F04 (Indoor Navigation System)
 - **Owner:** ws / jh
 - **Jira Epic:** `INNAVI-T04`
-- **M1 target:** Compute and display a route from one room to another, including at least one cross-floor path (e.g. Level 1 → elevator → Level 8 → target room). **Confirmed working as of 2026-09-25** — `NavigationRoutePlanner` (merged to `main`) builds a visibility graph (walls, doors, room-corner turn points, building boundary, plus every `FInteriorNavNode`) directly from the real `AInteriorGenerator`/`APolyBuilding` data - not a test/placeholder graph - and runs Dijkstra's over it. Cross-floor routing works via matching elevator/stairs/escalator connector pairs (`ConnectorGroupId`). Start/destination aren't limited to room centers - any valid point inside the building, away from walls, works as an endpoint, so this already covers point-to-point navigation, not just room-to-room (no separate "PathNode" tool needed for that - see `HANDOFF.md`). Navigation UI (`NavigationPanelWidget`) is hand-built in C++ rather than UMG, picking start/destination by clicking the 2D floor plan - there's no "pick a room by name" dropdown yet.
+- **M1 target:** Compute and display a route from one room to another, including at least one cross-floor path (e.g. Level 1 → elevator → Level 8 → target room). **Confirmed working as of 2026-09-25** — `NavigationRoutePlanner` (merged to `main`) builds a visibility graph (walls, doors, room-corner turn points, building boundary, plus every `FInteriorNavNode`) directly from the real `AInteriorGenerator`/`APolyBuilding` data - not a test/placeholder graph - and runs Dijkstra's over it. Cross-floor routing works via matching elevator/stairs/escalator connector pairs (`ConnectorGroupId`). Start/destination aren't limited to room centers - any valid point inside the building, away from walls, works as an endpoint, so this already covers point-to-point navigation, not just room-to-room (no separate "PathNode" tool needed for that). Navigation UI (`NavigationPanelWidget`) is hand-built in C++ rather than UMG, picking start/destination by clicking the 2D floor plan - there's no "pick a room by name" dropdown yet.
 - **M2 target:** Multiple destinations; more reliable cross-floor logic; clearer route visualization. The found route (and Start/Destination markers) now also draws in the interior editor's 3D preview, not just the 2D floor plan (debug-line rendering for now, see `docs/design/interior-editor-guide.md`).
 - **M3 target:** Polished navigation UX; (stretch) mobile navigation experience.
 
