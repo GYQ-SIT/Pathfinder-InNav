@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "RoadSegmentActor.h"
 #include "BuildingGenerator.generated.h"
 
 class APolyBuilding;
@@ -53,6 +54,84 @@ public:
 	// Returns how many buildings were successfully spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingsFromFile(const FString& FilePath);
+
+	// Second, database-backed way to load exterior buildings - queries a SQLite file (schema:
+	// buildings(building_id, building_type), building_nodes(building_id, node_id, sequence, lat,
+	// lon), matching the "Map Viewer" project's own schema - see project memory) instead of parsing
+	// JSON. Each building's ordered lat/lon nodes are projected to local meters around the centroid
+	// of every point read (so the cluster lands near the world origin regardless of where on Earth it
+	// actually is), then spawned via the same SpawnBuildingFromData every other loading path uses -
+	// no interior data is involved here at all, unlike LoadBuildingsFromFile's "interior" field:
+	// interiors are always hand-authored through the interior editor regardless of where a building's
+	// exterior came from. Sets Scale to 100 (footprint units become real-world meters directly, since
+	// this data - unlike buildings.json's hand-authored, non-geographic footprints - already IS the
+	// real campus at real scale). Returns how many buildings were successfully spawned.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	int32 LoadBuildingsFromDatabase(const FString& DatabasePath);
+
+	// Loads roads (as flat ribbon actors) and points of interest (as small marker actors) from the
+	// SAME database LoadBuildingsFromDatabase reads buildings from - must be called AFTER a
+	// successful LoadBuildingsFromDatabase(DatabasePath) using that exact same path, since it reuses
+	// that call's own lat/lon reference point (see bHasDatabaseRefPoint) so roads/POIs/buildings all
+	// line up in the same local-meters space instead of each projecting around their own centroid.
+	// Loads every road/POI in the database, not just ones near whatever the buildings query filtered
+	// to (this sample dataset covers the whole surrounding neighborhood, not just the campus) - purely
+	// a first look at what's in the data, not tuned for how much clutter that turns out to be.
+	// Clears any previously-loaded roads/POIs first. Returns how many actors were spawned.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	int32 LoadRoadsAndPOIsFromDatabase(const FString& DatabasePath);
+
+	// Destroys every currently-spawned road/POI actor - same idea as ClearAllBuildings.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void ClearAllRoadsAndPOIs();
+
+	// Loads every OTHER building in the database (building_type != 'university') as a simple,
+	// visual-only extruded-block placeholder (AContextBuildingActor) - context for the surrounding
+	// neighborhood, not a real APolyBuilding: no floors, no interior editing, not part of
+	// GetAllBuildings() (so it can't be entered, switched to, or mistaken for one of the real campus
+	// buildings camera-framing/bounds code already relies on GetAllBuildings() meaning "the campus").
+	// Must be called AFTER LoadBuildingsFromDatabase (same path) for the same shared-reference-point
+	// reason as LoadRoadsAndPOIsFromDatabase. Clears any previously-loaded context buildings first.
+	// Returns how many actors were spawned.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	int32 LoadContextBuildingsFromDatabase(const FString& DatabasePath);
+
+	// Destroys every currently-spawned context-building actor - same idea as ClearAllRoadsAndPOIs.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void ClearAllContextBuildings();
+
+	// Shows/hides every REAL campus building at once (the ones in GetAllBuildings()/BuildingsById) -
+	// the filter panel's "Campus" building-visibility checkbox. Also toggles collision, so a hidden
+	// building can't still be clicked to select/enter (mirrors the reasoning anywhere else in this
+	// codebase hides a whole building, e.g. NavPlayerController's other-buildings-hidden-in-3D-preview).
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetCampusBuildingsVisible(bool bVisible);
+
+	// Shows/hides every spawned context-building actor at once - the filter panel's "Non-Campus"
+	// building-visibility checkbox. These are visual-only placeholders (see
+	// LoadContextBuildingsFromDatabase), so no collision toggle is needed.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetNonCampusBuildingsVisible(bool bVisible);
+
+	// Shows/hides every currently-spawned road actor in Category at once - what a road-visibility
+	// filter panel's checkboxes call. Takes effect immediately (no reload/re-query needed) since
+	// every road actor already remembers its own category (see ARoadSegmentActor::GetCategory).
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetRoadCategoryVisible(ERoadCategory Category, bool bVisible);
+
+	// Shows/hides every spawned road actor at once, regardless of category - the filter panel's
+	// master "Hide All" checkbox. Goes through the same SetCategoryVisible flag SetRoadCategoryVisible
+	// uses (not a second, competing visibility path), so it still combines correctly with the campus-
+	// range filter (SetRoadsAndPOIsWithinCampusOnly).
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetAllRoadsVisible(bool bVisible);
+
+	// Hides every spawned road/POI actor farther than Radius (world units) from Center; shows the rest
+	// again (subject to their own category filter, for roads) when bEnable is false. Center/Radius are
+	// computed by the caller (ANavPlayerController::SetRoadsAndPOIsWithinCampusOnly, from the loaded
+	// buildings' own extent) - this function just applies them.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetRoadsAndPOIsWithinCampusOnly(bool bEnable, const FVector2D& Center, float Radius);
 
 	// Looks up an already-spawned building by id (e.g. for InteriorGenerator to find which
 	// building's shell a piece of interior data belongs to). Returns nullptr if not found.
@@ -118,8 +197,36 @@ private:
 	float Scale = 1.f;
 	TSet<FString> UsedBuildingIds;
 
+	// LoadBuildingsFromDatabase's fallback FloorCount/FloorHeight - the buildings/building_nodes
+	// schema has no floor data at all (it's OSM footprint+type only), unlike buildings.json's
+	// per-building "floorCount"/"floorHeight" fields.
+	static constexpr int32 DefaultFloorCountForDatabaseBuildings = 5;
+	static constexpr float DefaultFloorHeightForDatabaseBuildings = 300.f;
+
 	UPROPERTY()
 	TMap<FString, APolyBuilding*> BuildingsById;
 
 	TMap<FString, TSharedPtr<FJsonObject>> InteriorDataById;
+
+	// The lat/lon centroid LoadBuildingsFromDatabase projects around, stashed so
+	// LoadRoadsAndPOIsFromDatabase can project roads/POIs into that exact same local-meters space
+	// (see its own comment). bHasDatabaseRefPoint is false until a database load actually succeeds.
+	bool bHasDatabaseRefPoint = false;
+	double DatabaseRefLat = 0.0;
+	double DatabaseRefLon = 0.0;
+
+	// Every database building_id LoadBuildingsFromDatabase decided belongs to the campus - the
+	// 'university'-tagged seed plus anything pulled in by its own adjacency pass (see that function's
+	// comment). LoadContextBuildingsFromDatabase reads this to skip spawning a context placeholder for
+	// a building that's already a real, interior-capable campus building.
+	TSet<int64> DatabaseCampusBuildingIds;
+
+	UPROPERTY()
+	TArray<AActor*> SpawnedRoadActors;
+
+	UPROPERTY()
+	TArray<AActor*> SpawnedPOIActors;
+
+	UPROPERTY()
+	TArray<AActor*> SpawnedContextBuildingActors;
 };

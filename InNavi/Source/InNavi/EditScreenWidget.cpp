@@ -12,8 +12,10 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/CheckBox.h"
+#include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
 #include "Components/PanelWidget.h"
 #include "Components/ScrollBox.h"
 #include "Components/ScrollBoxSlot.h"
@@ -34,11 +36,21 @@ namespace
 	// translation unit - two unrelated same-named locals across files then trip C4459 "hides global
 	// declaration"), since this screen has no dock system of its own to also key off them.
 	const FLinearColor EditMenuBarColor(0.03f, 0.03f, 0.03f, 0.88f);
-	constexpr float EditMenuBarHeight = 32.f;
+	// Matches UInteriorScreenWidget::StandardTextBoxBackgroundColor/StandardTextBoxTextColor exactly -
+	// see that pair's own comment for why (engine default editable-text-box colors read as nearly the
+	// same gray against this app's dark chrome). Duplicated rather than shared for the same Unity
+	// Build reason as EditMenuBarColor above.
+	const FLinearColor EditTextBoxBackgroundColor(0.149f, 0.149f, 0.169f, 1.f);
+	const FLinearColor EditTextBoxTextColor(1.f, 1.f, 1.f, 1.f);
+	constexpr float EditMenuBarHeight = 40.f;
 	constexpr float EditMenuButtonWidth = 50.f;
 	constexpr float EditMenuBarLeftMargin = 10.f;
 	constexpr float EditAudioPanelWidth = 220.f;
 	constexpr float EditAudioFileListHeight = 150.f;
+
+	// Second bar under the menu bar, matching UInteriorScreenWidget's own BuildingSwitcherBarHeight -
+	// see the toolbar row's own construction comment in RebuildWidget for why it exists here.
+	constexpr float ExteriorToolbarBarHeight = 52.f;
 }
 
 UEditScreenWidget::UEditScreenWidget(const FObjectInitializer& ObjectInitializer)
@@ -55,6 +67,20 @@ void UEditScreenWidget::ApplyStandardFont(UTextBlock* TextBlock)
 	FSlateFontInfo Font = TextBlock->GetFont();
 	Font.Size = StandardFontSize;
 	TextBlock->SetFont(Font);
+}
+
+void UEditScreenWidget::ApplyStandardFont(UEditableTextBox* TextBox)
+{
+	if (!TextBox)
+	{
+		return;
+	}
+	FEditableTextBoxStyle Style = TextBox->GetWidgetStyle();
+	Style.TextStyle.Font.Size = StandardFontSize;
+	Style.BackgroundColor = FSlateColor(EditTextBoxBackgroundColor);
+	Style.ForegroundColor = FSlateColor(EditTextBoxTextColor);
+	Style.FocusedForegroundColor = FSlateColor(EditTextBoxTextColor);
+	TextBox->SetWidgetStyle(Style);
 }
 
 TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
@@ -105,17 +131,34 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			return Button;
 		};
 
+		// Save icon button, left of File - see UInteriorScreenWidget::OnSaveClicked's own comment
+		// (mirrors it exactly, just without that class's MakeToolTipWidget helper).
+		SaveButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Save"));
+		SaveButton->SetBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
+		SaveButton->SetToolTipText(FText::FromString(TEXT("Save [Ctrl+S]")));
+		SaveButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnSaveClicked);
+		SaveButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::PlayButtonClickSound);
+		UImage* SaveIcon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("Img_Save"));
+		if (UTexture2D* SaveTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/ImageAssets/Icon_Save.Icon_Save")))
+		{
+			SaveIcon->SetBrushFromTexture(SaveTexture, false);
+			SaveIcon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
+		}
+		USizeBox* SaveSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		SaveSizeBox->SetWidthOverride(EditMenuBarHeight);
+		SaveSizeBox->SetHeightOverride(EditMenuBarHeight);
+		if (USizeBoxSlot* SaveIconSlot = Cast<USizeBoxSlot>(SaveSizeBox->SetContent(SaveIcon)))
+		{
+			SaveIconSlot->SetHorizontalAlignment(HAlign_Center);
+			SaveIconSlot->SetVerticalAlignment(VAlign_Center);
+		}
+		SaveButton->SetContent(SaveSizeBox);
+		MenuBarRow->AddChildToHorizontalBox(SaveButton);
+
 		FileMenuButton = AddMenuButton(TEXT("Btn_FileMenu"), TEXT("File"));
 		FileMenuButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnFileMenuClicked);
 		WindowMenuButton = AddMenuButton(TEXT("Btn_WindowMenu"), TEXT("Window"));
 		WindowMenuButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowMenuClicked);
-
-		// Eats all remaining row width so Enter Interior/Back land flush against the bar's right edge.
-		USpacer* MenuBarSpacer = WidgetTree->ConstructWidget<USpacer>(USpacer::StaticClass());
-		if (UHorizontalBoxSlot* SpacerSlot = Cast<UHorizontalBoxSlot>(MenuBarRow->AddChildToHorizontalBox(MenuBarSpacer)))
-		{
-			SpacerSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-		}
 
 		auto AddBarButton = [this, MenuBarRow](const TCHAR* Name, const TCHAR* Label, float Width) -> UButton*
 		{
@@ -128,7 +171,7 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			ApplyStandardFont(Text);
 			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 			SizeBox->SetWidthOverride(Width);
-			SizeBox->SetHeightOverride(28.f); // shorter than EditMenuBarHeight so it visibly sits inside the bar
+			SizeBox->SetHeightOverride(34.f); // shorter than EditMenuBarHeight so it visibly sits inside the bar
 			if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(SizeBox->SetContent(Text)))
 			{
 				TextSlot->SetHorizontalAlignment(HAlign_Center);
@@ -143,6 +186,13 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			return Button;
 		};
 
+		// Eats all remaining row width so Enter Interior/Back land flush against the bar's right edge.
+		USpacer* MenuBarSpacer = WidgetTree->ConstructWidget<USpacer>(USpacer::StaticClass());
+		if (UHorizontalBoxSlot* SpacerSlot = Cast<UHorizontalBoxSlot>(MenuBarRow->AddChildToHorizontalBox(MenuBarSpacer)))
+		{
+			SpacerSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		}
+
 		EnterInteriorButton = AddBarButton(TEXT("Btn_EnterInterior"), TEXT("Enter Interior"), 120.f);
 		EnterInteriorButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnEnterInteriorClicked);
 		EnterInteriorButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::PlayButtonClickSound);
@@ -153,6 +203,85 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		BackButton = AddBarButton(TEXT("Btn_Back"), TEXT("Back"), 60.f);
 		BackButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnBackClicked);
 		BackButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::PlayButtonClickSound);
+
+		// --- Toolbar bar: fixed chrome directly under the menu bar, same vertical position as
+		// UInteriorScreenWidget's own BuildingSwitcherBarBackground+SwitcherRow - this screen has
+		// nothing else to put there (no building switcher, 2D/3D toggle, Reset, or View/Edit of its
+		// own), so it only ever holds the camera speed controls, centered in the bar.
+		UBorder* ToolbarBarBackground = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_ToolbarBar"));
+		ToolbarBarBackground->SetBrushColor(EditMenuBarColor);
+		ToolbarBarBackground->SetPadding(FMargin(10.f, 8.f));
+		ToolbarBarBackground->SetHorizontalAlignment(HAlign_Center);
+		ToolbarBarBackground->SetVerticalAlignment(VAlign_Center);
+		UCanvasPanelSlot* ToolbarBarSlot = Canvas->AddChildToCanvas(ToolbarBarBackground);
+		ToolbarBarSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
+		ToolbarBarSlot->SetAlignment(FVector2D(0.f, 0.f));
+		ToolbarBarSlot->SetOffsets(FMargin(0.f, EditMenuBarHeight, 0.f, ExteriorToolbarBarHeight));
+		ToolbarBarSlot->SetZOrder(6);
+
+		UHorizontalBox* ToolbarRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ToolbarRow"));
+		ToolbarBarBackground->SetContent(ToolbarRow);
+
+		auto AddToolbarButton = [this, ToolbarRow](const TCHAR* Name, const TCHAR* Label, float Width, float LeftPadding) -> UButton*
+		{
+			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+			Button->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::PlayButtonClickSound);
+			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+			Text->SetText(FText::FromString(FString(Label)));
+			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			Text->SetJustification(ETextJustify::Center);
+			ApplyStandardFont(Text);
+			USizeBox* ButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+			ButtonSizeBox->SetWidthOverride(Width);
+			ButtonSizeBox->SetHeightOverride(36.f);
+			if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(ButtonSizeBox->SetContent(Text)))
+			{
+				TextSlot->SetHorizontalAlignment(HAlign_Center);
+				TextSlot->SetVerticalAlignment(VAlign_Center);
+			}
+			Button->SetContent(ButtonSizeBox);
+			if (UHorizontalBoxSlot* RowSlot = Cast<UHorizontalBoxSlot>(ToolbarRow->AddChildToHorizontalBox(Button)))
+			{
+				RowSlot->SetVerticalAlignment(VAlign_Center);
+				RowSlot->SetPadding(FMargin(LeftPadding, 0.f, 0.f, 0.f));
+			}
+			return Button;
+		};
+
+		ResetCameraViewButton = AddToolbarButton(TEXT("Btn_ResetCameraView"), TEXT("Reset"), 64.f, 0.f);
+		ResetCameraViewButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnResetCameraViewClicked);
+		ResetCameraViewButton->SetToolTipText(FText::FromString(TEXT("Reset camera to the default view")));
+
+		DecreaseCameraSpeedButton = AddToolbarButton(TEXT("Btn_DecreaseCameraSpeed"), TEXT("-"), 48.f, 6.f);
+		DecreaseCameraSpeedButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnDecreaseCameraSpeedClicked);
+		DecreaseCameraSpeedButton->SetToolTipText(FText::FromString(TEXT("Decrease Camera Speed")));
+
+		// Typed speed entry, between the -/+ buttons - see OnCameraSpeedTextCommitted. Shows/accepts
+		// the raw speed value directly (matching UInteriorScreenWidget's own 3D-preview speed box,
+		// which does the same) - up to 6 digits at ExteriorCameraMaxSpeed=300000, hence the wider box.
+		CameraSpeedTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_CameraSpeed"));
+		CameraSpeedTextBox->SetJustification(ETextJustify::Center);
+		CameraSpeedTextBox->SetToolTipText(FText::FromString(TEXT("Camera Speed (type a value, then press Enter or click away)")));
+		CameraSpeedTextBox->OnTextCommitted.AddUniqueDynamic(this, &UEditScreenWidget::OnCameraSpeedTextCommitted);
+		ApplyStandardFont(CameraSpeedTextBox);
+		USizeBox* CameraSpeedSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		CameraSpeedSizeBox->SetWidthOverride(68.f);
+		CameraSpeedSizeBox->SetHeightOverride(36.f);
+		CameraSpeedSizeBox->SetContent(CameraSpeedTextBox);
+		if (UHorizontalBoxSlot* CameraSpeedRowSlot = Cast<UHorizontalBoxSlot>(ToolbarRow->AddChildToHorizontalBox(CameraSpeedSizeBox)))
+		{
+			CameraSpeedRowSlot->SetVerticalAlignment(VAlign_Center);
+			CameraSpeedRowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
+		}
+
+		IncreaseCameraSpeedButton = AddToolbarButton(TEXT("Btn_IncreaseCameraSpeed"), TEXT("+"), 48.f, 6.f);
+		IncreaseCameraSpeedButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnIncreaseCameraSpeedClicked);
+		IncreaseCameraSpeedButton->SetToolTipText(FText::FromString(TEXT("Increase Camera Speed")));
+
+		SetDefaultViewButton = AddToolbarButton(TEXT("Btn_SetDefaultView"), TEXT("Set Default"), 84.f, 6.f);
+		SetDefaultViewButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnSetDefaultViewClicked);
+		SetDefaultViewButton->SetToolTipText(FText::FromString(TEXT("Save the current camera view as the default")));
 
 		// --- Dropdowns (File, Window) + the click-catcher that closes them on an outside click ---
 		auto ConstructDropdown = [this, Canvas](const TCHAR* Name, float PositionX) -> UBorder*
@@ -211,6 +340,18 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			return CheckBox;
 		};
 
+		// A small non-interactive sub-header row (e.g. "Roads"/"Buildings"/"Region" within the Map
+		// panel) - just a styled UTextBlock, extra top padding to separate it from the section above.
+		auto AddSectionHeaderRow = [this](UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label)
+		{
+			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(Name));
+			Text->SetText(FText::FromString(FString(Label)));
+			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			ApplyStandardFont(Text);
+			UVerticalBoxSlot* RowSlot = Stack->AddChildToVerticalBox(Text);
+			RowSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 2.f));
+		};
+
 		FileMenuDropdown = ConstructDropdown(TEXT("Pnl_FileDropdown"), EditMenuBarLeftMargin);
 		UVerticalBox* FileDropdownStack = Cast<UVerticalBox>(FileMenuDropdown->GetContent());
 		UButton* FileNewButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileNew"), TEXT("New"));
@@ -226,6 +367,11 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		// unchecked - the Audio panel starts hidden, matching the interior editor's own Audio panel.
 		WindowAudioCheckbox->SetIsChecked(false);
 		WindowAudioCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowAudioCheckChanged);
+
+		WindowRoadsCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowRoads"), TEXT("Map"));
+		// Unlike WindowAudioCheckbox, starts checked - RoadFilterPanel starts Visible.
+		WindowRoadsCheckbox->SetIsChecked(true);
+		WindowRoadsCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowRoadsCheckChanged);
 
 		MenuClickCatcher = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("MenuClickCatcher"));
 		MenuClickCatcher->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
@@ -263,7 +409,9 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		AudioPanelSlot = Canvas->AddChildToCanvas(AudioPanelWrapper);
 		AudioPanelSlot->SetAnchors(FAnchors(0.f, 0.f));
 		AudioPanelSlot->SetAlignment(FVector2D(0.f, 0.f));
-		AudioPanelSlot->SetPosition(FVector2D(EditMenuBarLeftMargin, EditMenuBarHeight + 10.f));
+		// Below the toolbar bar (EditMenuBarHeight + ExteriorToolbarBarHeight), not just the menu bar -
+		// otherwise this panel's own default spawn position would sit on top of it.
+		AudioPanelSlot->SetPosition(FVector2D(EditMenuBarLeftMargin, EditMenuBarHeight + ExteriorToolbarBarHeight + 10.f));
 		AudioPanelSlot->SetAutoSize(true);
 		AudioPanelSlot->SetZOrder(6);
 
@@ -406,6 +554,99 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		RefreshAudioDragHandle();
 		RefreshAudioBottomResizeHandle();
 		AudioDragHandleSettleFramesRemaining = AudioDragHandleSettleFrameCount;
+
+		// --- Road filter panel (Window > Roads) --- freely draggable by its own small corner handle
+		// (see RoadFilterDragHandle), same idea as AudioPanel but move-only (this panel's content never
+		// resizes, so no bottom-resize handle) and Visible by default instead of starting hidden.
+		RoadFilterPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_RoadFilter"));
+		RoadFilterPanel->SetBrushColor(EditMenuBarColor);
+		RoadFilterPanel->SetPadding(FMargin(AudioPanelPadding));
+		RoadFilterPanel->SetVisibility(ESlateVisibility::Visible);
+		RoadFilterPanel->SetClipping(EWidgetClipping::ClipToBoundsAlways);
+		RoadFilterPanel->OnMouseMoveEvent.BindDynamic(this, &UEditScreenWidget::OnRoadFilterPanelMouseMove);
+		RoadFilterPanel->OnMouseButtonUpEvent.BindDynamic(this, &UEditScreenWidget::OnRoadFilterPanelMouseButtonUp);
+		// Top-left anchored, same convention as AudioPanelSlot/RoadFilterDragHandleSlot (NOT a
+		// right-anchor, even though the starting X below happens to land it near the right side) - the
+		// drag handle reads this slot's own GetPosition() directly in RefreshRoadFilterDragHandle,
+		// which only gives an absolute left-origin pixel offset if both slots share the same anchor/
+		// alignment convention. A right-anchored panel paired with a left-anchored handle was tried
+		// first and put the handle nowhere near the panel, since GetPosition() then means something
+		// different in each coordinate system.
+		RoadFilterPanelSlot = Canvas->AddChildToCanvas(RoadFilterPanel);
+		RoadFilterPanelSlot->SetAnchors(FAnchors(0.f, 0.f));
+		RoadFilterPanelSlot->SetAlignment(FVector2D(0.f, 0.f));
+		// Placeholder position only - neither the canvas' nor this panel's own CachedGeometry is
+		// reliable yet at this point (no real Slate paint pass has happened), so PositionRoadFilterPanelInitially
+		// (called every tick from NativeTick until it succeeds once) immediately replaces this with a
+		// real screen-size-relative position instead.
+		RoadFilterPanelSlot->SetPosition(FVector2D(0.f, EditMenuBarHeight + ExteriorToolbarBarHeight + 10.f));
+		RoadFilterPanelSlot->SetAutoSize(true);
+		RoadFilterPanelSlot->SetZOrder(6);
+
+		UVerticalBox* RoadFilterStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RoadFilterStack"));
+		RoadFilterPanel->SetContent(RoadFilterStack);
+
+		RoadFilterTitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_RoadFilterTitle"));
+		RoadFilterTitleText->SetText(FText::FromString(TEXT("Map")));
+		RoadFilterTitleText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(RoadFilterTitleText);
+		UVerticalBoxSlot* RoadFilterTitleSlot = RoadFilterStack->AddChildToVerticalBox(RoadFilterTitleText);
+		RoadFilterTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+
+		AddSectionHeaderRow(RoadFilterStack, TEXT("Txt_RoadFilterRoads"), TEXT("Roads"));
+		RoadHideAllCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadHideAll"), TEXT("Hide All"));
+		RoadHideAllCheckbox->SetIsChecked(false);
+		RoadHideAllCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadHideAllCheckChanged);
+		RoadPrimaryCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadPrimary"), TEXT("Primary"));
+		RoadPrimaryCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadPrimaryCheckChanged);
+		RoadSecondaryCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadSecondary"), TEXT("Secondary"));
+		RoadSecondaryCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadSecondaryCheckChanged);
+		RoadResidentialCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadResidential"), TEXT("Residential/Tertiary"));
+		RoadResidentialCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadResidentialCheckChanged);
+		RoadCyclewayCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadCycleway"), TEXT("Cycleway"));
+		RoadCyclewayCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadCyclewayCheckChanged);
+		RoadFootwayCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadFootway"), TEXT("Footway/Path"));
+		RoadFootwayCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadFootwayCheckChanged);
+		RoadOtherCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadOther"), TEXT("Other"));
+		RoadOtherCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadOtherCheckChanged);
+		// Region/distance filter, folded into the Roads section (not its own "Region" header) - it only
+		// ever affects roads/POIs, so it reads as a 7th road-filter row, not a separate concept.
+		RoadCampusOnlyCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadCampusOnly"), TEXT("Campus Only"));
+		// Starts checked - OnRoadCampusOnlyCheckChanged isn't bound yet at this point in RebuildWidget,
+		// so this alone doesn't apply the filter - see the PC->SetRoadsAndPOIsWithinCampusOnly(true)
+		// call in NativeConstruct that actually turns it on once a PC/Generator exists.
+		RoadCampusOnlyCheckbox->SetIsChecked(true);
+		RoadCampusOnlyCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadCampusOnlyCheckChanged);
+
+		AddSectionHeaderRow(RoadFilterStack, TEXT("Txt_RoadFilterBuildings"), TEXT("Buildings"));
+		BuildingCampusCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_BuildingCampus"), TEXT("Campus"));
+		BuildingCampusCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnBuildingCampusCheckChanged);
+		BuildingNonCampusCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_BuildingNonCampus"), TEXT("Non-Campus"));
+		// Starts unchecked (unlike BuildingCampusCheckbox) - non-campus buildings are hidden by
+		// default. OnBuildingNonCampusCheckChanged isn't bound yet at this point in RebuildWidget, so
+		// this alone doesn't hide anything - see the PC->SetNonCampusBuildingsVisible(false) call in
+		// NativeConstruct that actually applies it once a PC/Generator exists.
+		BuildingNonCampusCheckbox->SetIsChecked(false);
+		BuildingNonCampusCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnBuildingNonCampusCheckChanged);
+
+		// The move-drag handle - only a click landing on THIS starts a drag, same reasoning as
+		// AudioDragHandle. Starts Visible, matching RoadFilterPanel's own initial visibility (unlike
+		// AudioDragHandle, which starts Collapsed to match AudioPanel starting hidden).
+		RoadFilterDragHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_RoadFilterDragHandle"));
+		RoadFilterDragHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
+		RoadFilterDragHandle->SetCursor(EMouseCursor::CardinalCross);
+		RoadFilterDragHandle->OnMouseButtonDownEvent.BindDynamic(this, &UEditScreenWidget::OnRoadFilterDragHandleMouseButtonDown);
+		RoadFilterDragHandleSlot = Canvas->AddChildToCanvas(RoadFilterDragHandle);
+		RoadFilterDragHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
+		RoadFilterDragHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
+		RoadFilterDragHandleSlot->SetAutoSize(false);
+		RoadFilterDragHandleSlot->SetSize(FVector2D(AudioDragHandleSize, AudioDragHandleSize));
+		RoadFilterDragHandleSlot->SetZOrder(7);
+
+		// Same reasoning as RefreshAudioDragHandle's own post-construct call - RoadFilterTitleText's
+		// GetCachedGeometry is still stale this first time (no real Slate paint pass has happened yet).
+		RefreshRoadFilterDragHandle();
+		RoadFilterDragHandleSettleFramesRemaining = AudioDragHandleSettleFrameCount;
 	}
 
 	return Super::RebuildWidget();
@@ -442,9 +683,18 @@ void UEditScreenWidget::NativeConstruct()
 		{
 			AudioVolumeSlider->SetValue(PC->GetMasterVolume());
 		}
+
+		// RoadCampusOnlyCheckbox defaults to checked (set in RebuildWidget), but that alone doesn't hide
+		// anything - actually apply it now that a PC/Generator exists (by the time this screen is
+		// constructed, LoadBuildingDataFromPath has already loaded any roads/POIs to filter).
+		PC->SetRoadsAndPOIsWithinCampusOnly(true);
+		// Same reasoning for BuildingNonCampusCheckbox, which defaults to UNCHECKED - actually hide the
+		// context buildings now that a PC/Generator exists.
+		PC->SetNonCampusBuildingsVisible(false);
 	}
 
 	RefreshAudioList();
+	RefreshCameraSpeedDisplay();
 }
 
 void UEditScreenWidget::PlayButtonClickSound()
@@ -475,6 +725,15 @@ void UEditScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 		RefreshAudioDragHandle();
 		RefreshAudioBottomResizeHandle();
 	}
+	if (RoadFilterDragHandleSettleFramesRemaining > 0)
+	{
+		--RoadFilterDragHandleSettleFramesRemaining;
+		RefreshRoadFilterDragHandle();
+	}
+	if (!bHasPositionedRoadFilterPanelInitially)
+	{
+		PositionRoadFilterPanelInitially();
+	}
 }
 
 void UEditScreenWidget::HandleBuildingSelected(FString BuildingId)
@@ -502,6 +761,71 @@ void UEditScreenWidget::OnEnterInteriorClicked()
 	{
 		InteriorScreen->AddToViewport();
 		RemoveFromParent();
+	}
+}
+
+void UEditScreenWidget::OnIncreaseCameraSpeedClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->IncreaseCameraSpeedExterior();
+	}
+	RefreshCameraSpeedDisplay();
+}
+
+void UEditScreenWidget::OnDecreaseCameraSpeedClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->DecreaseCameraSpeedExterior();
+	}
+	RefreshCameraSpeedDisplay();
+}
+
+void UEditScreenWidget::OnResetCameraViewClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->ResetExteriorCameraToDefaultView();
+	}
+	RefreshCameraSpeedDisplay();
+}
+
+void UEditScreenWidget::OnSetDefaultViewClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetCurrentViewAsDefaultExterior();
+	}
+}
+
+void UEditScreenWidget::OnCameraSpeedTextCommitted(const FText& NewText, ETextCommit::Type CommitType)
+{
+	if (CommitType != ETextCommit::OnEnter && CommitType != ETextCommit::OnUserMovedFocus)
+	{
+		return;
+	}
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetCameraSpeedExterior(FCString::Atof(*NewText.ToString()));
+	}
+	// Re-reads the actual (possibly clamped) value back in, so a garbage or out-of-range entry
+	// doesn't stay displayed as if it had taken effect.
+	RefreshCameraSpeedDisplay();
+}
+
+void UEditScreenWidget::RefreshCameraSpeedDisplay()
+{
+	if (!CameraSpeedTextBox)
+	{
+		return;
+	}
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		// Plain FString::FromInt, not FText::AsNumber - the latter can insert locale thousands
+		// separators (e.g. "12,500"), which FCString::Atof would then misparse as just "12" if the
+		// user committed the box without editing it.
+		CameraSpeedTextBox->SetText(FText::FromString(FString::FromInt(FMath::RoundToInt(PC->GetCameraMoveSpeed()))));
 	}
 }
 
@@ -609,6 +933,14 @@ FEventReply UEditScreenWidget::OnMenuClickCatcherMouseButtonDown(FGeometry MyGeo
 	return UWidgetBlueprintLibrary::Handled();
 }
 
+void UEditScreenWidget::OnSaveClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SaveCurrentProject();
+	}
+}
+
 void UEditScreenWidget::OnFileMenuClicked()
 {
 	OpenMenuDropdown(FileMenuDropdown);
@@ -684,7 +1016,7 @@ void UEditScreenWidget::OnFileLoadClicked()
 	}
 	if (!PC->HasUnsavedChanges())
 	{
-		PC->LoadBuildingDataFromPath(FilePath);
+		PC->LoadBuildingDataFromPathOrDatabase(FilePath);
 		HandleBuildingSelected(FString());
 		return;
 	}
@@ -703,7 +1035,7 @@ void UEditScreenWidget::HandleFileLoadSave()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->SaveCurrentProject();
-		PC->LoadBuildingDataFromPath(PendingLoadFilePath);
+		PC->LoadBuildingDataFromPathOrDatabase(PendingLoadFilePath);
 	}
 	HandleBuildingSelected(FString());
 }
@@ -713,7 +1045,7 @@ void UEditScreenWidget::HandleFileLoadDiscard()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->DiscardUnsavedChanges();
-		PC->LoadBuildingDataFromPath(PendingLoadFilePath);
+		PC->LoadBuildingDataFromPathOrDatabase(PendingLoadFilePath);
 	}
 	HandleBuildingSelected(FString());
 }
@@ -749,6 +1081,236 @@ void UEditScreenWidget::OnWindowAudioCheckChanged(bool bIsChecked)
 		RefreshAudioDragHandle();
 		RefreshAudioBottomResizeHandle();
 		AudioDragHandleSettleFramesRemaining = AudioDragHandleSettleFrameCount;
+	}
+}
+
+void UEditScreenWidget::OnWindowRoadsCheckChanged(bool bIsChecked)
+{
+	if (RoadFilterPanel)
+	{
+		RoadFilterPanel->SetVisibility(bIsChecked ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (RoadFilterDragHandle)
+	{
+		RoadFilterDragHandle->SetVisibility(bIsChecked ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (bIsChecked)
+	{
+		// Same reasoning as OnWindowAudioCheckChanged's own re-reveal retry - if this panel had been
+		// hidden, its geometry may be stale until a real paint pass happens again.
+		RefreshRoadFilterDragHandle();
+		RoadFilterDragHandleSettleFramesRemaining = AudioDragHandleSettleFrameCount;
+	}
+}
+
+void UEditScreenWidget::RefreshRoadFilterDragHandle()
+{
+	if (!RoadFilterDragHandleSlot || !RoadFilterPanelSlot)
+	{
+		return;
+	}
+
+	FVector2D HandleSize(AudioDragHandleSize, AudioDragHandleSize);
+	if (RoadFilterTitleText)
+	{
+		const FVector2D TextSize = RoadFilterTitleText->GetCachedGeometry().GetLocalSize();
+		HandleSize = FVector2D(FMath::Max(TextSize.X, AudioDragHandleSize), FMath::Max(TextSize.Y, AudioDragHandleSize));
+	}
+	RoadFilterDragHandleSlot->SetSize(HandleSize);
+
+	const FVector2D PanelPos = RoadFilterPanelSlot->GetPosition();
+	RoadFilterDragHandleSlot->SetPosition(FVector2D(PanelPos.X + AudioPanelPadding, PanelPos.Y + AudioPanelPadding));
+}
+
+bool UEditScreenWidget::GetReliableCanvasSize(FVector2D& OutSize) const
+{
+	UCanvasPanel* RootCanvas = WidgetTree ? Cast<UCanvasPanel>(WidgetTree->RootWidget) : nullptr;
+	if (!RootCanvas)
+	{
+		return false;
+	}
+	const FVector2D LocalSize = RootCanvas->GetCachedGeometry().GetLocalSize();
+	if (LocalSize.X <= 0.f || LocalSize.Y <= 0.f)
+	{
+		return false;
+	}
+	OutSize = LocalSize;
+	return true;
+}
+
+void UEditScreenWidget::PositionRoadFilterPanelInitially()
+{
+	if (!RoadFilterPanelSlot || !RoadFilterPanel)
+	{
+		return;
+	}
+
+	FVector2D CanvasSize;
+	const FVector2D PanelSize = RoadFilterPanel->GetCachedGeometry().GetLocalSize();
+	if (!GetReliableCanvasSize(CanvasSize) || PanelSize.X <= 0.f)
+	{
+		return; // no real Slate paint pass yet - NativeTick will try again next frame
+	}
+
+	constexpr float RightMargin = 10.f;
+	RoadFilterPanelSlot->SetPosition(FVector2D(
+		FMath::Max(0.f, CanvasSize.X - PanelSize.X - RightMargin),
+		EditMenuBarHeight + ExteriorToolbarBarHeight + 10.f));
+	bHasPositionedRoadFilterPanelInitially = true;
+	RefreshRoadFilterDragHandle();
+}
+
+FEventReply UEditScreenWidget::OnRoadFilterDragHandleMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+{
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !RoadFilterPanel || !RoadFilterPanelSlot)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	UPanelWidget* CanvasParent = RoadFilterPanel->GetParent();
+	if (!CanvasParent)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	bIsDraggingRoadFilterPanel = true;
+	const FVector2D ScreenPosition = MouseEvent.GetScreenSpacePosition();
+	RoadFilterPanelDragStartMouse = CanvasParent->GetCachedGeometry().AbsoluteToLocal(ScreenPosition);
+	RoadFilterPanelDragStartPosition = RoadFilterPanelSlot->GetPosition();
+
+	// Bound to RoadFilterPanel (not the handle) so mouse capture keeps receiving move/up events even
+	// once the cursor moves off the handle's own small bounds mid-drag - same reasoning as
+	// OnAudioDragHandleMouseButtonDown's own CaptureMouse call.
+	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+	return UWidgetBlueprintLibrary::CaptureMouse(Reply, RoadFilterPanel);
+}
+
+FEventReply UEditScreenWidget::OnRoadFilterPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+{
+	if (!bIsDraggingRoadFilterPanel || !RoadFilterPanel || !RoadFilterPanelSlot)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	UPanelWidget* CanvasParent = RoadFilterPanel->GetParent();
+	if (!CanvasParent)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	const FGeometry& ParentGeometry = CanvasParent->GetCachedGeometry();
+	const FVector2D CurrentMousePosition = ParentGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
+	const FVector2D NewPosition = RoadFilterPanelDragStartPosition + (CurrentMousePosition - RoadFilterPanelDragStartMouse);
+
+	const FVector2D ViewportSize = ParentGeometry.GetLocalSize();
+	const FVector2D PanelSize = RoadFilterPanel->GetCachedGeometry().GetLocalSize();
+	const float ClampedX = FMath::Clamp(NewPosition.X, 0.f, FMath::Max(0.f, ViewportSize.X - PanelSize.X));
+	const float ClampedY = FMath::Clamp(NewPosition.Y, AudioPanelDragMinY, FMath::Max(AudioPanelDragMinY, ViewportSize.Y - PanelSize.Y));
+	RoadFilterPanelSlot->SetPosition(FVector2D(ClampedX, ClampedY));
+
+	RefreshRoadFilterDragHandle();
+
+	return UWidgetBlueprintLibrary::Handled();
+}
+
+FEventReply UEditScreenWidget::OnRoadFilterPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
+{
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	bIsDraggingRoadFilterPanel = false;
+	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+	return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
+}
+
+void UEditScreenWidget::OnRoadHideAllCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetAllRoadsVisible(!bIsChecked);
+	}
+	// Visually sync the 6 category checkboxes to match (checked = shown) - SetIsChecked doesn't re-fire
+	// OnCheckStateChanged, same pattern as OnAudioMuteAllCheckChanged.
+	const bool bCategoriesChecked = !bIsChecked;
+	if (RoadPrimaryCheckbox) RoadPrimaryCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadSecondaryCheckbox) RoadSecondaryCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadResidentialCheckbox) RoadResidentialCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadCyclewayCheckbox) RoadCyclewayCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadFootwayCheckbox) RoadFootwayCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadOtherCheckbox) RoadOtherCheckbox->SetIsChecked(bCategoriesChecked);
+}
+
+void UEditScreenWidget::OnRoadPrimaryCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Primary, bIsChecked);
+	}
+}
+
+void UEditScreenWidget::OnRoadSecondaryCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Secondary, bIsChecked);
+	}
+}
+
+void UEditScreenWidget::OnRoadResidentialCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Residential, bIsChecked);
+	}
+}
+
+void UEditScreenWidget::OnRoadCyclewayCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Cycleway, bIsChecked);
+	}
+}
+
+void UEditScreenWidget::OnRoadFootwayCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Footway, bIsChecked);
+	}
+}
+
+void UEditScreenWidget::OnRoadOtherCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Other, bIsChecked);
+	}
+}
+
+void UEditScreenWidget::OnRoadCampusOnlyCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadsAndPOIsWithinCampusOnly(bIsChecked);
+	}
+}
+
+void UEditScreenWidget::OnBuildingCampusCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetCampusBuildingsVisible(bIsChecked);
+	}
+}
+
+void UEditScreenWidget::OnBuildingNonCampusCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetNonCampusBuildingsVisible(bIsChecked);
 	}
 }
 

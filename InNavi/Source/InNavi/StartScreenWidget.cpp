@@ -153,8 +153,8 @@ void UStartScreenWidget::BrowseAndLoadBuildingData()
 		return;
 	}
 
-	// LoadBuildingDataFromPath already broadcasts OnActionFailed itself if the file doesn't parse.
-	const int32 Count = PC->LoadBuildingDataFromPath(FilePath);
+	// LoadBuildingDataFromPathOrDatabase already broadcasts OnActionFailed itself if the file doesn't parse.
+	const int32 Count = PC->LoadBuildingDataFromPathOrDatabase(FilePath);
 	if (Count > 0)
 	{
 		GoToEditScreen();

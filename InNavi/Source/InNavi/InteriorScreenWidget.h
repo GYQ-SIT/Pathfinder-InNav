@@ -14,6 +14,7 @@ class UCheckBox;
 class UComboBoxString;
 class UEditableTextBox;
 class FJsonObject;
+class UImage;
 class UInteriorFloorPlanWidget;
 class ULayerRowWidget;
 class UAudioFileRowWidget;
@@ -142,6 +143,12 @@ private:
 	UFUNCTION()
 	void HandleEdit3DModeChanged(bool bIsEditMode);
 
+	// Bound to ANavPlayerController::OnSnapEnabledChanged - swaps SnapToggleIcon between
+	// Icon_SnappingOn/Icon_SnappingOff so it stays correct even when toggled via the N key.
+	// Parameter isn't called bIsEnabled - that shadows UWidget's own bIsEnabled property.
+	UFUNCTION()
+	void HandleSnapEnabledChanged(bool bNewSnapEnabled);
+
 	void RefreshModeButtonHighlights();
 
 	// Door/Room/Connector properties all share one PropertiesPanel (see RebuildWidget) instead of
@@ -223,6 +230,11 @@ private:
 
 	void GoToEditScreen();
 
+	// Save icon button, just left of File - calls PC->SaveCurrentProject() directly (same as Ctrl+S),
+	// no confirm dialog needed since saving is never destructive.
+	UFUNCTION()
+	void OnSaveClicked();
+
 	// Top menu bar (File/Window) - fixed chrome, same reasoning as Back (see RebuildWidget), not
 	// part of the dock system. File and Window each toggle their own dropdown open/closed via these,
 	// closing the other one's dropdown at the same time (only one open at a time).
@@ -243,6 +255,12 @@ private:
 	UFUNCTION()
 	void OnSwitch3DClicked();
 
+	// Toggles PC->IsSnapEnabled() via PC->ToggleSnapEnabled() - next to the 3D button, always visible
+	// (unlike Reset/speed/View-Edit, snapping matters in 2D too). Icon itself is refreshed by
+	// HandleSnapEnabledChanged, not here, since the N key can toggle it too.
+	UFUNCTION()
+	void OnSnapToggleClicked();
+
 	// Calls PC->ResetCamera3DPreview() - only shown while in 3D preview (see ResetView3DButton).
 	UFUNCTION()
 	void OnResetView3DClicked();
@@ -254,6 +272,15 @@ private:
 
 	UFUNCTION()
 	void OnIncreaseSpeedClicked();
+
+	// Lets 3D preview's own speed be typed directly - same reasoning/commit behavior as
+	// UEditScreenWidget::OnCameraSpeedTextCommitted (Enter or clicking away both commit it).
+	UFUNCTION()
+	void OnCameraSpeedTextCommitted(const FText& NewText, ETextCommit::Type CommitType);
+
+	// Syncs CameraSpeedTextBox to PC->GetCameraMoveSpeed() - see UEditScreenWidget's own
+	// RefreshCameraSpeedDisplay for the full reasoning.
+	void RefreshCameraSpeedDisplay();
 
 	// Toggles PC's View/Edit sub-mode (PC->SetIn3DEditMode(!PC->IsIn3DEditMode())) - only shown while
 	// in 3D preview (see Edit3DModeToggleButton).
@@ -328,6 +355,31 @@ private:
 	// the screen for every project that isn't using audio.
 	UFUNCTION()
 	void OnWindowAudioCheckChanged(bool bIsChecked);
+
+	// Map panel (road filter) - starts checked, matching UEditScreenWidget's own "Map" panel default.
+	UFUNCTION()
+	void OnWindowMapCheckChanged(bool bIsChecked);
+
+	// --- Map panel (Window > Map) --- Roads section only, ported from UEditScreenWidget's own "Map"
+	// panel - same PC functions (SetRoadCategoryVisible/SetAllRoadsVisible/
+	// SetRoadsAndPOIsWithinCampusOnly), no Buildings section (this screen has no exterior building-
+	// visibility concept).
+	UFUNCTION()
+	void OnRoadHideAllCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadPrimaryCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadSecondaryCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadResidentialCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadCyclewayCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadFootwayCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadOtherCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadCampusOnlyCheckChanged(bool bIsChecked);
 
 	// Floor panel - lists every floor of the loaded building (top first, matching the mockup),
 	// highlighting the active one; clicking a row switches to it. "+Add floor"/"Delete floor" call
@@ -466,11 +518,14 @@ private:
 	// them together into a shared "column" that fills the screen height end to end, splitting that
 	// height among the column's members (adjustable per-boundary via a splitter handle, mirrors
 	// dragging the divider between two stacked panels in a real editor). Back is deliberately NOT
-	// part of this system (see RebuildWidget) - it's fixed chrome, not a dockable panel. Audio starts
-	// user-hidden (see bDockPanelUserHidden's own init) unlike the other 5 - see the Window menu.
-	enum class EDockPanelId : uint8 { Toolbar, Floor, Properties, Layers, Navigation, Audio };
-	static constexpr int32 NumDockPanels = 6;
-	static constexpr int32 MaxDockSplitters = NumDockPanels - 1; // worst case: all 6 panels in one column
+	// part of this system (see RebuildWidget) - it's fixed chrome, not a dockable panel. Audio and
+	// Navigation both start user-hidden (see bDockPanelUserHidden's own init) unlike the other 4 -
+	// see the Window menu. Map (the road-filter panel ported from UEditScreenWidget's own "Map" panel,
+	// Roads section only - no Buildings section, since this screen has no exterior building-visibility
+	// concept) starts VISIBLE, matching that panel's own default there.
+	enum class EDockPanelId : uint8 { Toolbar, Floor, Properties, Layers, Navigation, Audio, Map };
+	static constexpr int32 NumDockPanels = 7;
+	static constexpr int32 MaxDockSplitters = NumDockPanels - 1; // worst case: all 7 panels in one column
 
 	struct FDockColumn
 	{
@@ -561,9 +616,9 @@ private:
 	bool LoadDockLayoutFromDisk();
 
 	// Shared by LoadDockLayoutFromDisk for both the per-user save (InteriorEditorLayout.json under
-	// Saved/) and the team's shipped default (DefaultInteriorLayout.json under Data/) - same file
-	// format, same layoutVersion check, same ApplyLayoutSaveData/PendingSavedLayoutToReapply handling
-	// either way, just a different path.
+	// Saved/) and the team's shipped default (DefaultInteriorLayout.json under Data/DefaultLayouts/) -
+	// same file format, same layoutVersion check, same ApplyLayoutSaveData/
+	// PendingSavedLayoutToReapply handling either way, just a different path.
 	bool TryLoadDockLayoutFromFile(const FString& FilePath);
 
 	TSharedPtr<FJsonObject> BuildLayoutSaveData() const;
@@ -594,6 +649,14 @@ private:
 	// Same, for a UEditableTextBox (the building name field, room name field, Layers search box) -
 	// its font lives on its WidgetStyle.TextStyle rather than being a direct SetFont() call.
 	static void ApplyStandardFont(UEditableTextBox* TextBox);
+
+	// SetToolTipText's default tooltip renders at the engine's small default font size with no way to
+	// resize just that text. SetToolTip(Widget) takes over the whole tooltip instead, but its SToolTip
+	// wrapper is built with no border/background of its own (BorderImage(nullptr)) - this builds a
+	// small light box to replicate the default tooltip's look, just with the font doubled. A plain
+	// member function (not a RebuildWidget-local lambda) since HandleSnapEnabledChanged needs to
+	// rebuild SnapToggleButton's tooltip after construction too, not just at construction time.
+	UWidget* MakeToolTipWidget(const TCHAR* TooltipLabel);
 
 	FVector2D GetPanelPosition(EDockPanelId Id) const;
 	FVector2D GetPanelSize(EDockPanelId Id) const;
@@ -667,6 +730,9 @@ private:
 	UFUNCTION() FEventReply OnAudioPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnToolbarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -686,6 +752,9 @@ private:
 	UFUNCTION() FEventReply OnAudioResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -705,6 +774,9 @@ private:
 	UFUNCTION() FEventReply OnAudioLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnToolbarBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -724,6 +796,9 @@ private:
 	UFUNCTION() FEventReply OnAudioBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnSplitter0MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter0MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -905,8 +980,18 @@ private:
 	UPROPERTY()
 	UComboBoxString* NavStartRoomComboBox = nullptr;
 
+	// Frame around NavStartRoomComboBox, tinted green only when Start was set by picking this
+	// dropdown (as opposed to clicking a point on the floor plan) - see RefreshNavigationPanelDisplay.
+	// Transparent otherwise, so it doesn't read as a permanent gray box.
+	UPROPERTY()
+	UBorder* NavStartRoomBorder = nullptr;
+
 	UPROPERTY()
 	UComboBoxString* NavDestinationRoomComboBox = nullptr;
+
+	// Same as NavStartRoomBorder, tinted red for Destination.
+	UPROPERTY()
+	UBorder* NavDestinationRoomBorder = nullptr;
 
 	UPROPERTY()
 	UButton* NavSetStartButton = nullptr;
@@ -936,6 +1021,26 @@ private:
 	// in NativeConstruct) unlike every other dock panel.
 	UPROPERTY()
 	UBorder* AudioPanel = nullptr;
+
+	// Map panel (road filter, Roads section only) - see EDockPanelId::Map's own comment.
+	UPROPERTY()
+	UBorder* MapPanel = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadHideAllCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadPrimaryCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadSecondaryCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadResidentialCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadCyclewayCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadFootwayCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadOtherCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadCampusOnlyCheckbox = nullptr;
 
 	UPROPERTY()
 	UButton* AudioStopAllButton = nullptr;
@@ -986,6 +1091,14 @@ private:
 	UPROPERTY()
 	UButton* Switch3DButton = nullptr;
 
+	// Next to Switch3DButton, always visible (unlike the 3D-preview-only controls after it) - see
+	// OnSnapToggleClicked/HandleSnapEnabledChanged.
+	UPROPERTY()
+	UButton* SnapToggleButton = nullptr;
+
+	UPROPERTY()
+	UImage* SnapToggleIcon = nullptr;
+
 	// Only shown while in 3D preview (see HandlePreviewModeChanged). 3D preview leaves WASD/mouse-look
 	// free rather than locked to a fixed angle, so this is the "un-lose yourself" button - see
 	// PC->ResetCamera3DPreview's own comment.
@@ -999,6 +1112,11 @@ private:
 
 	UPROPERTY()
 	UButton* IncreaseSpeedButton = nullptr;
+
+	// Typed speed entry, between DecreaseSpeedButton/IncreaseSpeedButton - see
+	// OnCameraSpeedTextCommitted. Shown/hidden together with the other 3D-preview-only controls.
+	UPROPERTY()
+	UEditableTextBox* CameraSpeedTextBox = nullptr;
 
 	// Toggles 3D preview's View/Edit sub-mode (see PC->SetIn3DEditMode) - "View" in yellow by default,
 	// "Edit" in green once toggled. Shown/hidden together with ResetView3DButton; always shows "View"
@@ -1029,6 +1147,9 @@ private:
 	UBorder* Background = nullptr;
 
 	// Top menu bar widgets - see the comment above OnFileMenuClicked/OnWindowToolbarCheckChanged.
+	UPROPERTY()
+	UButton* SaveButton = nullptr;
+
 	UPROPERTY()
 	UButton* FileMenuButton = nullptr;
 
@@ -1062,9 +1183,13 @@ private:
 	UPROPERTY()
 	UCheckBox* WindowAudioCheckbox = nullptr;
 
+	UPROPERTY()
+	UCheckBox* WindowMapCheckbox = nullptr;
+
 	// Parallel to EDockPanelId, sized NumDockPanels - see SetDockPanelUserHidden. False by default
-	// (visible) for every panel except Audio, which InitializeDockRuntimeArrays sets true right after
-	// initializing this array - Audio only shows once the user actually checks it in the Window menu.
+	// (visible) for every panel except Audio and Navigation, which InitializeDockRuntimeArrays sets
+	// true right after initializing this array - each only shows once the user actually checks it in
+	// the Window menu.
 	TArray<bool> bDockPanelUserHidden;
 
 	// Shared width bounds for every dock panel, and the snap/splitter tuning constants - also used
@@ -1080,13 +1205,22 @@ private:
 	// at each text's construction site, since UMG has no single "default style" to override once for
 	// every independently-constructed UTextBlock.
 	static constexpr int32 StandardFontSize = 15;
+
+	// Every editable text box's background/typed-text color (see ApplyStandardFont's UEditableTextBox
+	// overload) - the engine default background/foreground read as nearly the same gray against this
+	// app's dark panel chrome, making typed text hard to read. A shade lighter than the panel
+	// background (0.03) but darker than a normal button (0.6) so a text box reads as its own distinct
+	// "this is editable" element rather than blending into either.
+	static const FLinearColor StandardTextBoxBackgroundColor;
+	static const FLinearColor StandardTextBoxTextColor;
+
 	static constexpr float SidebarMaxWidth = 600.f;
 	// Heights of the two fixed bars pinned across the top of the canvas (File/Window menu, then the
 	// building switcher bar directly below it) - dock panels' top boundary (SidebarTopMargin, below)
 	// sits flush under both, same as every panel's left/right edges already sit flush against the
 	// screen's own edges.
-	static constexpr float MenuBarHeight = 32.f;
-	static constexpr float BuildingSwitcherBarHeight = 40.f;
+	static constexpr float MenuBarHeight = 40.f;
+	static constexpr float BuildingSwitcherBarHeight = 52.f;
 	static constexpr float SidebarTopMargin = MenuBarHeight + BuildingSwitcherBarHeight;
 	static constexpr float SidebarBottomMargin = 10.f;
 	static constexpr float SidebarResizeHandleWidth = 8.f;

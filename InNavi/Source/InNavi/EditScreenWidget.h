@@ -10,6 +10,7 @@ class UBorder;
 class UButton;
 class UCanvasPanelSlot;
 class UCheckBox;
+class UEditableTextBox;
 class UScrollBox;
 class USlider;
 class UTextBlock;
@@ -54,6 +55,38 @@ private:
 	UFUNCTION()
 	void OnEnterInteriorClicked();
 
+	// Calls PC->Increase/DecreaseCameraSpeedExterior() - the exterior free-fly camera's default speed
+	// auto-scales to the loaded campus's span (see FocusCameraOnAllBuildings), but these let the user
+	// tune it further either way without waiting for a reload.
+	UFUNCTION()
+	void OnIncreaseCameraSpeedClicked();
+
+	UFUNCTION()
+	void OnDecreaseCameraSpeedClicked();
+
+	// Calls PC->ResetExteriorCameraToDefaultView() - snaps back to whatever the current default view
+	// is (the shipped one, or a saved override - see OnSetDefaultViewClicked).
+	UFUNCTION()
+	void OnResetCameraViewClicked();
+
+	// Calls PC->SetCurrentViewAsDefaultExterior() - saves the free-fly camera's current pose as the
+	// new default (persisted, see ANavPlayerController::SaveExteriorCameraDefaultToDisk), so Reset and
+	// every future New/Open land here from now on.
+	UFUNCTION()
+	void OnSetDefaultViewClicked();
+
+	// Lets the speed be typed directly instead of only nudged by +/- - fires on both Enter and
+	// clicking away (ETextCommit::OnEnter / OnUserMovedFocus), matching how a plain number field is
+	// expected to behave. Re-reads the actual (possibly clamped) speed back into the box afterward via
+	// RefreshCameraSpeedDisplay, so an out-of-range value the user typed doesn't linger displayed.
+	UFUNCTION()
+	void OnCameraSpeedTextCommitted(const FText& NewText, ETextCommit::Type CommitType);
+
+	// Syncs CameraSpeedTextBox to PC->GetCameraMoveSpeed() - called after construction and after
+	// anything that can change the speed (+/-, typing a new value) so the box never shows a stale
+	// number.
+	void RefreshCameraSpeedDisplay();
+
 	// Bound alongside every button's own OnClicked so clicking anything plays the same click sound -
 	// see ANavPlayerController::PlayButtonClickSound, which owns the actual caching/playback.
 	UFUNCTION()
@@ -79,6 +112,11 @@ private:
 	// Mirrors UInteriorScreenWidget's own menu bar layout/behavior exactly (own dropdown per menu
 	// button, MenuClickCatcher for click-elsewhere-closes-it) - see that class's own header comments
 	// for the full reasoning, not repeated here.
+
+	// Save icon button, just left of File - calls PC->SaveCurrentProject() directly (same as Ctrl+S),
+	// no confirm dialog needed since saving is never destructive.
+	UFUNCTION()
+	void OnSaveClicked();
 
 	UFUNCTION()
 	void OnFileMenuClicked();
@@ -128,6 +166,73 @@ private:
 	// for). Toggles AudioPanel's own visibility.
 	UFUNCTION()
 	void OnWindowAudioCheckChanged(bool bIsChecked);
+
+	// Window > Map - toggles RoadFilterPanel's own visibility. Labeled "Map" (not "Roads") since the
+	// panel now also filters buildings, not just roads/POIs - the variable/function names underneath
+	// keep their original "Road..." names (cosmetic rename only, not worth the churn of renaming every
+	// symbol that reads them).
+	UFUNCTION()
+	void OnWindowRoadsCheckChanged(bool bIsChecked);
+
+	// Master switch, above the 6 category rows - forwards to PC->SetAllRoadsVisible and visually syncs
+	// the 6 category checkboxes to match (same pattern as OnAudioMuteAllCheckChanged).
+	UFUNCTION()
+	void OnRoadHideAllCheckChanged(bool bIsChecked);
+
+	// --- Map filter panel (Window > Map) --- one handler per ERoadCategory, since
+	// UCheckBox::OnCheckStateChanged only carries the new bool, not which row it came from. Each
+	// forwards to PC->SetRoadCategoryVisible with its own hardcoded category.
+	UFUNCTION()
+	void OnRoadPrimaryCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadSecondaryCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadResidentialCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadCyclewayCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadFootwayCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadOtherCheckChanged(bool bIsChecked);
+
+	// Region filter, below the 6 category checkboxes - forwards to PC->SetRoadsAndPOIsWithinCampusOnly.
+	// Starts unchecked (shows everything, matching today's behavior with no region filter at all).
+	UFUNCTION()
+	void OnRoadCampusOnlyCheckChanged(bool bIsChecked);
+
+	// Building-visibility filter (Map panel's "Buildings" section) - one handler per bucket, same
+	// reasoning as the 6 road-category handlers above. Both start checked (everything shown, matching
+	// today's behavior before this filter existed).
+	UFUNCTION()
+	void OnBuildingCampusCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnBuildingNonCampusCheckChanged(bool bIsChecked);
+
+	// RoadFilterPanel's own small corner drag handle - same idea as AudioDragHandle (reuses its
+	// AudioDragHandleSize/AudioPanelPadding/AudioPanelDragMinY constants, generic enough for either
+	// panel), just move-only - this panel's content never resizes, so there's no bottom-resize handle
+	// to go with it.
+	void RefreshRoadFilterDragHandle();
+
+	// The actual rendered size of the root canvas - NOT UWidgetLayoutLibrary::GetViewportSize, which
+	// returns the platform's raw pixel resolution and only matches this Slate-local coordinate space
+	// at DPI scale 1 (see UInteriorScreenWidget::GetReliableCanvasSize's own comment for the same
+	// reasoning). Returns false (leaving OutSize untouched) if RebuildWidget hasn't had a real Slate
+	// paint pass yet - see PositionRoadFilterPanelInitially's own retry.
+	bool GetReliableCanvasSize(FVector2D& OutSize) const;
+
+	// Places RoadFilterPanel a fixed margin in from the canvas' own actual right edge (screen-size/
+	// resolution independent, unlike a hardcoded X) - called every tick from NativeTick until it
+	// succeeds once (both the canvas' and the panel's own CachedGeometry need a real paint pass
+	// first, so this can't just run once at construction), then never again (the user's own drag
+	// takes over from there - see bHasPositionedRoadFilterPanelInitially).
+	void PositionRoadFilterPanelInitially();
+	UFUNCTION()
+	FEventReply OnRoadFilterDragHandleMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION()
+	FEventReply OnRoadFilterPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION()
+	FEventReply OnRoadFilterPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	// --- Audio panel (Window > Audio) ---
 	// Same Play/Stop All/mute-click-sound/file-list layout as UInteriorScreenWidget's own Audio
@@ -206,6 +311,24 @@ private:
 	UButton* EnterInteriorButton = nullptr;
 
 	UPROPERTY()
+	UButton* ResetCameraViewButton = nullptr;
+
+	UPROPERTY()
+	UButton* DecreaseCameraSpeedButton = nullptr;
+
+	UPROPERTY()
+	UButton* IncreaseCameraSpeedButton = nullptr;
+
+	UPROPERTY()
+	UButton* SetDefaultViewButton = nullptr;
+
+	UPROPERTY()
+	UEditableTextBox* CameraSpeedTextBox = nullptr;
+
+	UPROPERTY()
+	UButton* SaveButton = nullptr;
+
+	UPROPERTY()
 	UButton* FileMenuButton = nullptr;
 
 	UPROPERTY()
@@ -216,6 +339,72 @@ private:
 
 	UPROPERTY()
 	UBorder* WindowMenuDropdown = nullptr;
+
+	UPROPERTY()
+	UCheckBox* WindowRoadsCheckbox = nullptr;
+
+	// Freely-draggable panel (see RoadFilterDragHandle), Visible by default (unlike AudioPanel) - just
+	// 6 checkboxes, one per ERoadCategory, each toggling PC->SetRoadCategoryVisible.
+	UPROPERTY()
+	UBorder* RoadFilterPanel = nullptr;
+
+	UPROPERTY()
+	UCanvasPanelSlot* RoadFilterPanelSlot = nullptr;
+
+	// RoadFilterPanel's own title UTextBlock - RefreshRoadFilterDragHandle sizes the drag handle off
+	// its rendered size, same reasoning as AudioTitleText/RefreshAudioDragHandle.
+	UPROPERTY()
+	UTextBlock* RoadFilterTitleText = nullptr;
+
+	// Master "Hide All" checkbox, above the 6 category rows.
+	UPROPERTY()
+	UCheckBox* RoadHideAllCheckbox = nullptr;
+
+	// The 6 category checkboxes themselves - stored (not just local RebuildWidget variables) so
+	// OnRoadHideAllCheckChanged can visually sync them later.
+	UPROPERTY()
+	UCheckBox* RoadPrimaryCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadSecondaryCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadResidentialCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadCyclewayCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadFootwayCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadOtherCheckbox = nullptr;
+
+	// Region/distance filter's own checkbox - the 7th row in the Roads section (see
+	// OnRoadCampusOnlyCheckChanged).
+	UPROPERTY()
+	UCheckBox* RoadCampusOnlyCheckbox = nullptr;
+
+	// Building-visibility filter's own checkboxes ("Buildings" section).
+	UPROPERTY()
+	UCheckBox* BuildingCampusCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* BuildingNonCampusCheckbox = nullptr;
+
+	UPROPERTY()
+	UBorder* RoadFilterDragHandle = nullptr;
+
+	UPROPERTY()
+	UCanvasPanelSlot* RoadFilterDragHandleSlot = nullptr;
+
+	bool bIsDraggingRoadFilterPanel = false;
+	FVector2D RoadFilterPanelDragStartMouse = FVector2D::ZeroVector;
+	FVector2D RoadFilterPanelDragStartPosition = FVector2D::ZeroVector;
+
+	// See RefreshAudioDragHandle's own comment on why more than one retry is needed - a separate
+	// counter from AudioDragHandleSettleFramesRemaining since the two panels' refreshes are
+	// independent (sharing one counter would make one panel's visibility change reset the other's
+	// in-progress retry).
+	int32 RoadFilterDragHandleSettleFramesRemaining = 0;
+
+	// See PositionRoadFilterPanelInitially - true once that one-time repositioning has actually run,
+	// so NativeTick stops retrying (and doesn't fight the user's own drag afterward).
+	bool bHasPositionedRoadFilterPanelInitially = false;
 
 	// Full-screen, fully transparent, Collapsed by default - see
 	// UInteriorScreenWidget::OnMenuClickCatcherMouseButtonDown's own comment for why this is how
@@ -319,4 +508,5 @@ private:
 	// 15pt, matching the rest of the app's UI text (see UInteriorScreenWidget::StandardFontSize).
 	static constexpr int32 StandardFontSize = 15;
 	static void ApplyStandardFont(UTextBlock* TextBlock);
+	static void ApplyStandardFont(UEditableTextBox* TextBox);
 };

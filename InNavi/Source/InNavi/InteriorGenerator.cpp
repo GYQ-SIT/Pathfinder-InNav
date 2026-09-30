@@ -9,6 +9,13 @@
 #include "EngineUtils.h"
 #include "Serialization/JsonSerializer.h"
 
+// How close two footprints' edges/corners have to be to count as "just touching" rather than
+// "overlapping" (DoFootprintsOverlap's own ToleranceUnits parameter) - a fixed WORLD distance. Most
+// DoFootprintsOverlap callers work in footprint-space (pre-scale) points, so they divide this by
+// Generator->GetScale() to convert it down; the one caller that already converted both footprints to
+// world space first (CanPlaceConnectorOnFloor's building-vs-building check) uses it bare.
+static constexpr float OverlapToleranceWorldUnits = 5.f;
+
 AInteriorGenerator::AInteriorGenerator()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -187,14 +194,15 @@ static float InteriorGen_DistanceSegmentToSegment2D(const FVector2D& A, const FV
 // exactly on an edge (e.g. two vertices snapped together - see FindSnapOffset) isn't guaranteed to
 // land at bit-identical float coordinates, and that tiny noise can flip which side the ray-cast
 // thinks it's on. Anything within BoundaryDeadZone of an edge is treated as "on the boundary,
-// therefore not inside" up front, before ever asking the ray-cast. ----
-static bool IsPointClearlyInsidePolygon(const FVector2D& Point, const TArray<FVector2D>& Poly)
+// therefore not inside" up front, before ever asking the ray-cast. BoundaryDeadZone is in
+// FootprintA/FootprintB's own units, whatever those happen to be for this call - see
+// DoFootprintsOverlap's own comment on why this can't be a bare constant. ----
+static bool IsPointClearlyInsidePolygon(const FVector2D& Point, const TArray<FVector2D>& Poly, float BoundaryDeadZone)
 {
-	constexpr float BoundaryDeadZoneFootprintUnits = 0.5f;
 	const int32 N = Poly.Num();
 	for (int32 i = 0; i < N; i++)
 	{
-		if (InteriorGen_DistancePointToSegment2D(Point, Poly[i], Poly[(i + 1) % N]) < BoundaryDeadZoneFootprintUnits)
+		if (InteriorGen_DistancePointToSegment2D(Point, Poly[i], Poly[(i + 1) % N]) < BoundaryDeadZone)
 		{
 			return false;
 		}
@@ -206,8 +214,17 @@ static bool IsPointClearlyInsidePolygon(const FVector2D& Point, const TArray<FVe
 // overlaps, works for open walls too) plus containment (one shape's vertex landing fully inside the
 // other's closed loop - edge crossings alone miss this when one shape sits entirely within another).
 // bBClosed only matters for the edge-count/wrap-around and the containment check - an open wall has
-// no interior to be "inside". ----
-static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClosed, const TArray<FVector2D>& FootprintB, bool bBClosed)
+// no interior to be "inside".
+//
+// ToleranceUnits is a "how close counts as touching, not overlapping" distance, in FootprintA/
+// FootprintB's OWN units - most callers pass footprint-space (pre-scale) points, in which case this
+// should be a small WORLD distance divided by Generator->GetScale() (not a bare constant - a
+// footprint-unit value calibrated for buildings.json's own Scale~10 reads as 10x too generous for a
+// database-loaded building's Scale~100, which is exactly what let two connectors' footprints overlap
+// without being caught - see project memory), but at least one caller (CanPlaceConnectorOnFloor's
+// building-vs-building check) already converts both footprints to world space first, and should pass
+// a bare world distance instead. ----
+static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClosed, const TArray<FVector2D>& FootprintB, bool bBClosed, float ToleranceUnits)
 {
 	const int32 NumA = FootprintA.Num();
 	const int32 NumB = FootprintB.Num();
@@ -232,10 +249,9 @@ static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClos
 	// either side of ">0" - depending on the angle, that can spuriously read as "crossing" even
 	// though the edges only touch at the one shared corner. So a shared endpoint is checked for and
 	// excluded up front, the same way the containment check below treats it as boundary, not inside.
-	constexpr float SharedEndpointEpsilonFootprintUnits = 0.5f;
-	auto NearlySamePoint = [](const FVector2D& P, const FVector2D& Q)
+	auto NearlySamePoint = [ToleranceUnits](const FVector2D& P, const FVector2D& Q)
 	{
-		return FVector2D::DistSquared(P, Q) < SharedEndpointEpsilonFootprintUnits * SharedEndpointEpsilonFootprintUnits;
+		return FVector2D::DistSquared(P, Q) < ToleranceUnits * ToleranceUnits;
 	};
 
 	for (int32 i = 0; i < NumEdgesA; i++)
@@ -262,7 +278,7 @@ static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClos
 	{
 		for (const FVector2D& Point : FootprintB)
 		{
-			if (IsPointClearlyInsidePolygon(Point, FootprintA))
+			if (IsPointClearlyInsidePolygon(Point, FootprintA, ToleranceUnits))
 			{
 				return true;
 			}
@@ -272,7 +288,7 @@ static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClos
 	{
 		for (const FVector2D& Point : FootprintA)
 		{
-			if (IsPointClearlyInsidePolygon(Point, FootprintB))
+			if (IsPointClearlyInsidePolygon(Point, FootprintB, ToleranceUnits))
 			{
 				return true;
 			}
@@ -778,7 +794,7 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2
 	{
 		for (const AInteriorRoom* Other : ExistingRooms->Rooms)
 		{
-			if (Other && DoFootprintsOverlap(Footprint, true, Other->GetFootprint(), Other->IsClosedLoop()))
+			if (Other && DoFootprintsOverlap(Footprint, true, Other->GetFootprint(), Other->IsClosedLoop(), OverlapToleranceWorldUnits / Generator->GetScale()))
 			{
 				UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: footprint overlaps existing room/wall '%s'"), *Other->RoomId);
 				return nullptr;
@@ -861,7 +877,7 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 	{
 		for (const AInteriorRoom* Other : ExistingRooms->Rooms)
 		{
-			if (Other && DoFootprintsOverlap(Points, false, Other->GetFootprint(), Other->IsClosedLoop()))
+			if (Other && DoFootprintsOverlap(Points, false, Other->GetFootprint(), Other->IsClosedLoop(), OverlapToleranceWorldUnits / Generator->GetScale()))
 			{
 				UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: wall overlaps existing room/wall '%s'"), *Other->RoomId);
 				return nullptr;
@@ -917,8 +933,14 @@ bool AInteriorGenerator::DoesFootprintBlockConnector(const TArray<FVector2D>& Fo
 		return false;
 	}
 
-	const float HalfWallThickness = FloorInfo->WallThickness * 0.5f;
 	const float Scale = Generator ? Generator->GetScale() : 1.f;
+	// FloorInfo->WallThickness is world-space cm, but EdgeA/EdgeB/NodeCorners below are all footprint-
+	// space (pre-scale) points - dividing by Scale converts the threshold down to match, instead of
+	// comparing a world-space distance directly against a footprint-space one (a straight unit
+	// mismatch, not just a "Scale~10 assumption" - see project memory). At Scale=10 this happened to
+	// read as a plausible ~1m real tolerance by coincidence; at Scale=100 the undivided version
+	// ballooned to ~10m.
+	const float HalfWallThickness = (FloorInfo->WallThickness * 0.5f) / Scale;
 	const int32 NumPoints = Footprint.Num();
 	const int32 NumEdges = bClosedLoop ? NumPoints : NumPoints - 1;
 
@@ -1009,7 +1031,9 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVe
 	// real 3D geometry can be considerably bigger than the single point this used to validate.
 	if (const FInteriorRoomList* RoomList = RoomsByFloor.Find(Level))
 	{
-		const float HalfWallThickness = FloorInfo->WallThickness * 0.5f;
+		// See DoesFootprintBlockConnector's own comment on why this divides by Scale - WallThickness
+		// is world-space cm, but Corners/EdgeA/EdgeB below are all footprint-space.
+		const float HalfWallThickness = (FloorInfo->WallThickness * 0.5f) / Scale;
 		for (const AInteriorRoom* Room : RoomList->Rooms)
 		{
 			if (!Room)
@@ -1060,7 +1084,7 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVe
 			OtherCorners.Add(Node.Position + Local / FMath::Max(Scale, KINDA_SMALL_NUMBER));
 		}
 
-		if (DoFootprintsOverlap(Corners, true, OtherCorners, true))
+		if (DoFootprintsOverlap(Corners, true, OtherCorners, true, OverlapToleranceWorldUnits / Scale))
 		{
 			UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint overlaps another connector ('%s') on floor %d"), *Node.ConnectorGroupId, Level);
 			return false;
@@ -1089,7 +1113,9 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVe
 			OtherWorldFootprint.Add((Point + OtherBuilding->BuildingOffset) * Scale);
 		}
 
-		if (DoFootprintsOverlap(WorldCorners, true, OtherWorldFootprint, true))
+		// Already world-space (both footprints were converted just above) - the bare world tolerance,
+		// not divided by Scale again.
+		if (DoFootprintsOverlap(WorldCorners, true, OtherWorldFootprint, true, OverlapToleranceWorldUnits))
 		{
 			UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint overlaps building '%s'"), *OtherBuilding->BuildingId);
 			return false;
@@ -1531,7 +1557,7 @@ bool AInteriorGenerator::RotateRoom(const FString& RoomId, float DeltaDegrees)
 
 			for (const AInteriorRoom* Other : Pair.Value.Rooms)
 			{
-				if (Other && Other != Room && DoFootprintsOverlap(NewFootprint, Room->IsClosedLoop(), Other->GetFootprint(), Other->IsClosedLoop()))
+				if (Other && Other != Room && DoFootprintsOverlap(NewFootprint, Room->IsClosedLoop(), Other->GetFootprint(), Other->IsClosedLoop(), OverlapToleranceWorldUnits / (Generator ? Generator->GetScale() : 1.f)))
 				{
 					// Same "no log spam" reasoning as the containment check above.
 					return false;
@@ -1627,7 +1653,7 @@ bool AInteriorGenerator::CommitRoomMove(const FString& RoomId, const TArray<FVec
 					continue;
 				}
 
-				if (DoFootprintsOverlap(Room->GetFootprint(), Room->IsClosedLoop(), Other->GetFootprint(), Other->IsClosedLoop()))
+				if (DoFootprintsOverlap(Room->GetFootprint(), Room->IsClosedLoop(), Other->GetFootprint(), Other->IsClosedLoop(), OverlapToleranceWorldUnits / (Generator ? Generator->GetScale() : 1.f)))
 				{
 					Room->ResizeFootprint(FallbackFootprint);
 					UE_LOG(LogTemp, Warning, TEXT("CommitRoomMove: '%s' would overlap '%s' - reverted to its position before the drag"), *RoomId, *Other->RoomId);
