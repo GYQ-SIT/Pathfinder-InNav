@@ -22,6 +22,15 @@ AInteriorGenerator::AInteriorGenerator()
 	Generator = nullptr;
 }
 
+float AInteriorGenerator::GetWallThicknessForFloor(int32 Level) const
+{
+	if (const FInteriorFloorInfo* FloorInfo = FloorInfoByLevel.Find(Level))
+	{
+		return FloorInfo->WallThickness;
+	}
+	return 20.f;
+}
+
 void AInteriorGenerator::BeginPlay()
 {
 	Super::BeginPlay();
