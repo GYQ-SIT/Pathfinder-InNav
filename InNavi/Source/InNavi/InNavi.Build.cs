@@ -8,18 +8,20 @@ public class InNavi : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		// RuntimeAudioImporter: URuntimeAudioImporterLibrary/UImportedSoundWave, used by the Audio panel
-		// to decode mp3/wav files read at runtime from Data/Audio/. The engine's own built-in Media
-		// Framework (WmfMedia) was tried first (no third-party plugin needed) but UE 5.8's WmfMedia has
-		// dropped mp3 support entirely (a known engine regression, confirmed via the Output Log
-		// rejecting every .mp3 as "URI scheme or file extension not supported") - this vendored plugin
-		// (InNavi/Plugins/RuntimeAudioImporter/, MIT licensed) decodes mp3 itself instead of relying on
-		// the OS's media framework, so it isn't affected by that regression.
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "Json", "JsonUtilities", "ProceduralMeshComponent", "UMG", "RuntimeAudioImporter" });
+		// Runtime audio (see WavFileLoader.h and ANavPlayerController::PlayWavFile) reads/decodes .wav
+		// files itself via FFileHelper + USoundWaveProcedural, both already covered by Engine - no
+		// audio-specific module needed. (An earlier pass vendored a third-party mp3-decoding plugin
+		// here, back when mp3 support was a hard requirement; removed once wav-only was confirmed
+		// sufficient - see docs/deliverables.md.)
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "Json", "JsonUtilities", "ProceduralMeshComponent", "UMG" });
 
 		// DesktopPlatform: native "open file" dialog for importing building data.
 		// Slate/SlateCore: needed to get the active window handle to parent that dialog to.
-		PrivateDependencyModuleNames.AddRange(new string[] { "DesktopPlatform", "Slate", "SlateCore" });
+		// SQLiteCore: Epic's own built-in SQLite wrapper (FSQLiteDatabase/FSQLitePreparedStatement) -
+		// the second, database-backed way to load exterior buildings (see
+		// ABuildingGenerator::LoadBuildingsFromDatabase), alongside the existing JSON path. Must also be
+		// enabled in InNavi.uproject's Plugins list (EnabledByDefault: false upstream).
+		PrivateDependencyModuleNames.AddRange(new string[] { "DesktopPlatform", "Slate", "SlateCore", "SQLiteCore" });
 
 		// Uncomment if you are using online features
 		// PrivateDependencyModuleNames.Add("OnlineSubsystem");

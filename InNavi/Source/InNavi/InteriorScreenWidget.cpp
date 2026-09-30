@@ -29,6 +29,7 @@
 #include "Components/ScrollBoxSlot.h"
 #include "Components/SizeBox.h"
 #include "Components/SizeBoxSlot.h"
+#include "Components/Slider.h"
 #include "Components/Spacer.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -56,15 +57,25 @@ void UInteriorScreenWidget::InitializeDockRuntimeArrays()
 	DockResizeHandleSlots.Init(nullptr, NumDockPanels);
 	DockLeftResizeHandles.Init(nullptr, NumDockPanels);
 	DockLeftResizeHandleSlots.Init(nullptr, NumDockPanels);
+	DockDragHandles.Init(nullptr, NumDockPanels);
+	DockDragHandleSlots.Init(nullptr, NumDockPanels);
+	DockPanelTitleTexts.Init(nullptr, NumDockPanels);
+	DockBottomResizeHandles.Init(nullptr, NumDockPanels);
+	DockBottomResizeHandleSlots.Init(nullptr, NumDockPanels);
 	SplitterHandles.Init(nullptr, MaxDockSplitters);
 	SplitterCanvasSlots.Init(nullptr, MaxDockSplitters);
 
 	DockPanelWidths.Init(SidebarMinWidth, NumDockPanels);
 	DockPanelColumnIndex.Init(INDEX_NONE, NumDockPanels);
+	DockPanelBorderPadding.Init(0.f, NumDockPanels);
 	bDockPanelUserHidden.Init(false, NumDockPanels);
 	// Audio starts hidden - see the enum's own comment. ConstructDockPanel's Audio call site (below)
 	// collapses its actual Border to match.
 	bDockPanelUserHidden[(int32)EDockPanelId::Audio] = true;
+	// Navigation also starts hidden now - most sessions are drawing/editing, not routing, so this
+	// keeps that screen real estate free until the user actually opens it from the Window menu (same
+	// mechanism as Audio above; ConstructDockPanel's Navigation call site collapses its Border to match).
+	bDockPanelUserHidden[(int32)EDockPanelId::Navigation] = true;
 	bDockPanelIsDraggingMove.Init(false, NumDockPanels);
 	DockPanelMoveDragStartMouse.Init(FVector2D::ZeroVector, NumDockPanels);
 	DockPanelMoveDragStartPosition.Init(FVector2D::ZeroVector, NumDockPanels);
@@ -76,6 +87,12 @@ void UInteriorScreenWidget::InitializeDockRuntimeArrays()
 	DockPanelLeftResizeStartMouseX.Init(0.f, NumDockPanels);
 	DockPanelLeftResizeStartWidth.Init(0.f, NumDockPanels);
 	DockPanelLeftResizeStartPanelX.Init(0.f, NumDockPanels);
+
+	// 0.f = "never manually resized, keep the natural/auto height" - see DockPanelHeights' own comment.
+	DockPanelHeights.Init(0.f, NumDockPanels);
+	bDockPanelIsResizingHeight.Init(false, NumDockPanels);
+	DockPanelResizeStartMouseY.Init(0.f, NumDockPanels);
+	DockPanelResizeStartHeight.Init(0.f, NumDockPanels);
 
 	SplitterColumnIndex.Init(INDEX_NONE, MaxDockSplitters);
 	SplitterUpperIndexInColumn.Init(INDEX_NONE, MaxDockSplitters);
@@ -95,6 +112,9 @@ void UInteriorScreenWidget::ApplyStandardFont(UTextBlock* TextBlock)
 	TextBlock->SetFont(Font);
 }
 
+const FLinearColor UInteriorScreenWidget::StandardTextBoxBackgroundColor(0.149f, 0.149f, 0.169f, 1.f);
+const FLinearColor UInteriorScreenWidget::StandardTextBoxTextColor(1.f, 1.f, 1.f, 1.f);
+
 void UInteriorScreenWidget::ApplyStandardFont(UEditableTextBox* TextBox)
 {
 	if (!TextBox)
@@ -103,7 +123,62 @@ void UInteriorScreenWidget::ApplyStandardFont(UEditableTextBox* TextBox)
 	}
 	FEditableTextBoxStyle Style = TextBox->GetWidgetStyle();
 	Style.TextStyle.Font.Size = StandardFontSize;
+	Style.BackgroundColor = FSlateColor(StandardTextBoxBackgroundColor);
+	Style.ForegroundColor = FSlateColor(StandardTextBoxTextColor);
+	Style.FocusedForegroundColor = FSlateColor(StandardTextBoxTextColor);
 	TextBox->SetWidgetStyle(Style);
+}
+
+UWidget* UInteriorScreenWidget::MakeToolTipWidget(const TCHAR* TooltipLabel)
+{
+	UTextBlock* TooltipText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+	TooltipText->SetText(FText::FromString(FString(TooltipLabel)));
+	TooltipText->SetColorAndOpacity(FSlateColor(FLinearColor::Black));
+	TooltipText->SetAutoWrapText(true);
+	// Left-justified text in a fixed-width box left a ragged, lopsided-looking gap on the
+	// right of every line shorter than the longest one - centering each wrapped line reads as
+	// a balanced block instead.
+	TooltipText->SetJustification(ETextJustify::Center);
+	FSlateFontInfo TooltipFont = TooltipText->GetFont();
+	TooltipFont.TypefaceFontName = TEXT("Regular"); // the default font style otherwise renders bold
+	TooltipText->SetFont(TooltipFont);
+
+	// Descriptions are full sentences now (how to actually use the mode, not just its name) -
+	// wide enough for about 7 words a line before wrapping, instead of stretching edge to
+	// edge. MaxDesiredWidth alone let the wrap collapse to one word per line (nothing gave
+	// AutoWrapText an actual width to wrap against) - WidthOverride is a hard width, so
+	// wrapping has something real to measure against.
+	USizeBox* TooltipSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+	TooltipSizeBox->SetWidthOverride(1000.f);
+	TooltipSizeBox->SetContent(TooltipText);
+
+	UBorder* TooltipBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	TooltipBorder->SetBrushColor(FLinearColor::White);
+	TooltipBorder->SetPadding(FMargin(10.f, 6.f));
+	TooltipBorder->SetContent(TooltipSizeBox);
+
+	// UWidget::SetToolTip (below) builds its SToolTip with no border/background of its own
+	// (BorderImage(nullptr)), unlike the engine's native default tooltip (SetToolTipText),
+	// which has a soft drop shadow baked into its brush. Faking that here with a second,
+	// darker copy of the same box behind the real one, offset a few px down-right - an Overlay
+	// stretches every child to match its largest sibling by default, so the shadow layer ends
+	// up the same size as the real box even though it has no text of its own.
+	UBorder* ShadowBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	ShadowBorder->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.35f));
+
+	// Overlay slots default to Left/Top, not Fill - without Fill on both, the empty shadow
+	// layer would just collapse to zero size instead of stretching to match its sibling.
+	UOverlay* TooltipOverlay = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass());
+	UOverlaySlot* ShadowSlot = TooltipOverlay->AddChildToOverlay(ShadowBorder);
+	ShadowSlot->SetHorizontalAlignment(HAlign_Fill);
+	ShadowSlot->SetVerticalAlignment(VAlign_Fill);
+	ShadowSlot->SetPadding(FMargin(3.f, 3.f, 0.f, 0.f));
+	UOverlaySlot* ForegroundSlot = TooltipOverlay->AddChildToOverlay(TooltipBorder);
+	ForegroundSlot->SetHorizontalAlignment(HAlign_Fill);
+	ForegroundSlot->SetVerticalAlignment(VAlign_Fill);
+	ForegroundSlot->SetPadding(FMargin(0.f, 0.f, 3.f, 3.f));
+
+	return TooltipOverlay;
 }
 
 TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
@@ -163,6 +238,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		auto ConstructDockPanel = [this, Canvas](EDockPanelId Id, const TCHAR* BorderName, const FLinearColor& BrushColor, float BorderPadding) -> UBorder*
 		{
 			const int32 Index = (int32)Id;
+			DockPanelBorderPadding[Index] = BorderPadding;
 
 			UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(BorderName));
 			Border->SetBrushColor(BrushColor);
@@ -217,6 +293,36 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			LeftHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
 			LeftHandleSlot->SetZOrder(3);
 			DockLeftResizeHandleSlots[Index] = LeftHandleSlot;
+
+			// The move-drag handle - see DockDragHandleSize's own comment. Same muted tone as the resize
+			// handles (not brighter) so it reads as part of the same UI language instead of looking like
+			// a stray highlighted square sitting on top of the title.
+			UBorder* DragHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(BorderName) + TEXT("DragHandle")));
+			DragHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
+			DragHandle->SetCursor(EMouseCursor::CardinalCross);
+			DockDragHandles[Index] = DragHandle;
+
+			UCanvasPanelSlot* DragHandleSlot = Canvas->AddChildToCanvas(DragHandle);
+			DragHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
+			DragHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
+			DragHandleSlot->SetAutoSize(false);
+			DragHandleSlot->SetSize(FVector2D(DockDragHandleSize, DockDragHandleSize));
+			DragHandleSlot->SetZOrder(3);
+			DockDragHandleSlots[Index] = DragHandleSlot;
+
+			// BOTTOM-edge height handle - see DockBottomResizeHandles' own comment (RefreshDockLayout
+			// only ever shows this while floating). Same style/thickness as the right/left width
+			// handles, just horizontal instead.
+			UBorder* BottomHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(BorderName) + TEXT("BottomResizeHandle")));
+			BottomHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
+			BottomHandle->SetCursor(EMouseCursor::ResizeUpDown);
+			DockBottomResizeHandles[Index] = BottomHandle;
+
+			UCanvasPanelSlot* BottomHandleSlot = Canvas->AddChildToCanvas(BottomHandle);
+			BottomHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
+			BottomHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
+			BottomHandleSlot->SetZOrder(3);
+			DockBottomResizeHandleSlots[Index] = BottomHandleSlot;
 
 			return Border;
 		};
@@ -279,7 +385,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// now its own fixed bar below the menu bar instead (see BuildingSwitcherBarBackground further
 		// down) so it stays put regardless of how this panel gets dragged/resized/hidden.
 		ToolbarPanel = ConstructDockPanel(EDockPanelId::Toolbar, TEXT("Pnl_Toolbar"), DockPanelColor, 10.f);
-		ToolbarPanel->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarPanelMouseButtonDown);
+		// Bound to the drag handle, not ToolbarPanel itself - see DockDragHandleSize's own comment.
+		DockDragHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarPanelMouseButtonDown);
 		ToolbarPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarPanelMouseMove);
 		ToolbarPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarPanelMouseButtonUp);
 		DockResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarResizeMouseButtonDown);
@@ -288,11 +395,14 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		DockLeftResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarLeftResizeMouseButtonDown);
 		DockLeftResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarLeftResizeMouseMove);
 		DockLeftResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarLeftResizeMouseButtonUp);
+		DockBottomResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarBottomResizeMouseButtonDown);
+		DockBottomResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarBottomResizeMouseMove);
+		DockBottomResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarBottomResizeMouseButtonUp);
 
 		UVerticalBox* LeftSidebar = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LeftSidebar"));
 		ToolbarPanel->SetContent(LeftSidebar);
 
-		auto AddToolGroupLabel = [this, LeftSidebar](const TCHAR* Name, const TCHAR* Label)
+		auto AddToolGroupLabel = [this, LeftSidebar](const TCHAR* Name, const TCHAR* Label) -> UTextBlock*
 		{
 			UTextBlock* GroupLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(Name));
 			GroupLabel->SetText(FText::FromString(FString(Label)));
@@ -300,6 +410,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			ApplyStandardFont(GroupLabel);
 			UVerticalBoxSlot* GroupLabelSlot = LeftSidebar->AddChildToVerticalBox(GroupLabel);
 			GroupLabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+			return GroupLabel;
 		};
 
 		// Icon-only now instead of a text label - sidesteps the font-size/overflow fight entirely
@@ -310,64 +421,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// in InteriorFloorPlanWidget).
 		constexpr float ModeButtonSize = 36.f;
 
-		// SetToolTipText's default tooltip renders at the engine's small default font size with no
-		// way to resize just that text. SetToolTip(Widget) takes over the whole tooltip instead, but
-		// its SToolTip wrapper is built with no border/background of its own (BorderImage(nullptr)) -
-		// so this builds a small light box to replicate the default tooltip's look, just with the
-		// font doubled.
-		auto MakeToolTipWidget = [this](const TCHAR* TooltipLabel) -> UWidget*
-		{
-			UTextBlock* TooltipText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-			TooltipText->SetText(FText::FromString(FString(TooltipLabel)));
-			TooltipText->SetColorAndOpacity(FSlateColor(FLinearColor::Black));
-			TooltipText->SetAutoWrapText(true);
-			// Left-justified text in a fixed-width box left a ragged, lopsided-looking gap on the
-			// right of every line shorter than the longest one - centering each wrapped line reads as
-			// a balanced block instead.
-			TooltipText->SetJustification(ETextJustify::Center);
-			FSlateFontInfo TooltipFont = TooltipText->GetFont();
-			TooltipFont.TypefaceFontName = TEXT("Regular"); // the default font style otherwise renders bold
-			TooltipText->SetFont(TooltipFont);
-
-			// Descriptions are full sentences now (how to actually use the mode, not just its name) -
-			// wide enough for about 7 words a line before wrapping, instead of stretching edge to
-			// edge. MaxDesiredWidth alone let the wrap collapse to one word per line (nothing gave
-			// AutoWrapText an actual width to wrap against) - WidthOverride is a hard width, so
-			// wrapping has something real to measure against.
-			USizeBox* TooltipSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-			TooltipSizeBox->SetWidthOverride(1000.f);
-			TooltipSizeBox->SetContent(TooltipText);
-
-			UBorder* TooltipBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-			TooltipBorder->SetBrushColor(FLinearColor::White);
-			TooltipBorder->SetPadding(FMargin(10.f, 6.f));
-			TooltipBorder->SetContent(TooltipSizeBox);
-
-			// UWidget::SetToolTip (below) builds its SToolTip with no border/background of its own
-			// (BorderImage(nullptr)), unlike the engine's native default tooltip (SetToolTipText),
-			// which has a soft drop shadow baked into its brush. Faking that here with a second,
-			// darker copy of the same box behind the real one, offset a few px down-right - an Overlay
-			// stretches every child to match its largest sibling by default, so the shadow layer ends
-			// up the same size as the real box even though it has no text of its own.
-			UBorder* ShadowBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-			ShadowBorder->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.35f));
-
-			// Overlay slots default to Left/Top, not Fill - without Fill on both, the empty shadow
-			// layer would just collapse to zero size instead of stretching to match its sibling.
-			UOverlay* TooltipOverlay = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass());
-			UOverlaySlot* ShadowSlot = TooltipOverlay->AddChildToOverlay(ShadowBorder);
-			ShadowSlot->SetHorizontalAlignment(HAlign_Fill);
-			ShadowSlot->SetVerticalAlignment(VAlign_Fill);
-			ShadowSlot->SetPadding(FMargin(3.f, 3.f, 0.f, 0.f));
-			UOverlaySlot* ForegroundSlot = TooltipOverlay->AddChildToOverlay(TooltipBorder);
-			ForegroundSlot->SetHorizontalAlignment(HAlign_Fill);
-			ForegroundSlot->SetVerticalAlignment(VAlign_Fill);
-			ForegroundSlot->SetPadding(FMargin(0.f, 0.f, 3.f, 3.f));
-
-			return TooltipOverlay;
-		};
-
-		auto AddModeButton = [this, LeftSidebar, MakeToolTipWidget](const TCHAR* Name, const TCHAR* IconAssetName, const TCHAR* TooltipLabel) -> UButton*
+		auto AddModeButton = [this, LeftSidebar](const TCHAR* Name, const TCHAR* IconAssetName, const TCHAR* TooltipLabel) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
@@ -405,44 +459,45 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// Default/Draw/Navigate sections - no new tools added. Tooltips describe the actual
 		// interaction (click count, confirm key, defaults), not just the mode's name - matches
 		// docs/design/interior-editor-guide.md.
-		AddToolGroupLabel(TEXT("Txt_GroupDefault"), TEXT("Default"));
-		SelectModeButton = AddModeButton(TEXT("Select_Mode_Button"), TEXT("Icon_Select"), TEXT("Select Mode (click a room, door, or connector to select it; drag to move it; Backspace to delete)"));
+		// Toolbar has no separate panel-level title (see DockPanelTitleTexts' own comment) - its first
+		// group label doubles as the text the drag handle sizes itself off.
+		DockPanelTitleTexts[(int32)EDockPanelId::Toolbar] = AddToolGroupLabel(TEXT("Txt_GroupDefault"), TEXT("Default"));
+		SelectModeButton = AddModeButton(TEXT("Select_Mode_Button"), TEXT("Icon_Select"), TEXT("Select Mode [Q] (click a room, door, or connector to select it; drag to move it; Backspace to delete)"));
 		SelectModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSelectModeClicked);
 
 		AddToolGroupLabel(TEXT("Txt_GroupDraw"), TEXT("Draw"));
-		DrawRoomModeButton = AddModeButton(TEXT("Draw_Mode_Button"), TEXT("Icon_DrawRoom"), TEXT("Draw Room Mode (click at least 3 points to outline a room, then press Enter to finish; Esc cancels)"));
+		DrawRoomModeButton = AddModeButton(TEXT("Draw_Mode_Button"), TEXT("Icon_DrawRoom"), TEXT("Draw Room Mode [P] (click at least 3 points to outline a room, then press Enter to finish; Esc cancels)"));
 		DrawRoomModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnDrawRoomModeClicked);
-		DrawWallModeButton = AddModeButton(TEXT("Draw_Wall_Button"), TEXT("Icon_DrawWall"), TEXT("Draw Wall Mode (click points to draw a standalone wall, then press Enter to finish; Esc cancels)"));
+		DrawWallModeButton = AddModeButton(TEXT("Draw_Wall_Button"), TEXT("Icon_DrawWall"), TEXT("Draw Wall Mode [L] (click points to draw a standalone wall, then press Enter to finish; Esc cancels)"));
 		DrawWallModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnDrawWallModeClicked);
-		AddRectModeButton = AddModeButton(TEXT("Add_Rect_Button"), TEXT("Icon_AddRectangle"), TEXT("Add Rectangle (click a point to place a rectangular room centered there)"));
+		AddRectModeButton = AddModeButton(TEXT("Add_Rect_Button"), TEXT("Icon_AddRectangle"), TEXT("Add Rectangle [1] (click a point to place a rectangular room centered there)"));
 		AddRectModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddRectangleClicked);
-		AddTriangleModeButton = AddModeButton(TEXT("Add_Triangle_Button"), TEXT("Icon_AddTriangle"), TEXT("Add Triangle (click a point to place a triangular room centered there)"));
+		AddTriangleModeButton = AddModeButton(TEXT("Add_Triangle_Button"), TEXT("Icon_AddTriangle"), TEXT("Add Triangle [2] (click a point to place a triangular room centered there)"));
 		AddTriangleModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddTriangleClicked);
-		AddCircleModeButton = AddModeButton(TEXT("Add_Circle_Button"), TEXT("Icon_AddCircle"), TEXT("Add Circle (click a point to place a circular room centered there)"));
+		AddCircleModeButton = AddModeButton(TEXT("Add_Circle_Button"), TEXT("Icon_AddCircle"), TEXT("Add Circle [3] (click a point to place a circular room centered there)"));
 		AddCircleModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddCircleClicked);
 
 		AddToolGroupLabel(TEXT("Txt_GroupNavigate"), TEXT("Navigate"));
-		AddDoorModeButton = AddModeButton(TEXT("Add_Door_Button"), TEXT("Icon_AddDoor"), TEXT("Add Door Mode (click a wall edge to cut a fixed-size door into it)"));
+		AddDoorModeButton = AddModeButton(TEXT("Add_Door_Button"), TEXT("Icon_AddDoor"), TEXT("Add Door Mode [K] (click a wall edge to cut a fixed-size door into it)"));
 		AddDoorModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddDoorModeClicked);
-		AddStairsModeButton = AddModeButton(TEXT("Add_Stairs_Button"), TEXT("Icon_AddStairs"), TEXT("Add Stairs Mode (click a point to place stairs, connecting the floor above and below by default)"));
+		AddStairsModeButton = AddModeButton(TEXT("Add_Stairs_Button"), TEXT("Icon_AddStairs"), TEXT("Add Stairs Mode [5] (click a point to place stairs, connecting the floor above and below by default)"));
 		AddStairsModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddStairsModeClicked);
-		AddElevatorModeButton = AddModeButton(TEXT("Add_Elevator_Button"), TEXT("Icon_AddElevator"), TEXT("Add Elevator Mode (click a point to place an elevator, connecting every floor by default)"));
+		AddElevatorModeButton = AddModeButton(TEXT("Add_Elevator_Button"), TEXT("Icon_AddElevator"), TEXT("Add Elevator Mode [4] (click a point to place an elevator, connecting every floor by default)"));
 		AddElevatorModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddElevatorModeClicked);
-		AddEscalatorModeButton = AddModeButton(TEXT("Add_Escalator_Button"), TEXT("Icon_AddEscalator"), TEXT("Add Escalator Mode (click a point to place an escalator, connecting the floor above and below by default)"));
+		AddEscalatorModeButton = AddModeButton(TEXT("Add_Escalator_Button"), TEXT("Icon_AddEscalator"), TEXT("Add Escalator Mode [6] (click a point to place an escalator, connecting the floor above and below by default)"));
 		AddEscalatorModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddEscalatorModeClicked);
 
 		AddToolGroupLabel(TEXT("Txt_GroupGizmos"), TEXT("Gizmos"));
-		// One icon asset each, reused for both buttons in its row rather than needing 4 separate
-		// images: Icon_GizmoMove is drawn at two different sizes (Grow full-size, Shrink shrunk down)
-		// so the icon's own size mirrors what the button does; Icon_GizmoRotate is drawn at two
-		// different rotations (CW as-authored, CCW rotated 180) so the two read as opposite
-		// directions. Grow/Shrink and Rotate CW/CCW mirror PC's existing =/- and 9/0 keys exactly (see
-		// OnGrowRoomClicked etc.) rather than introducing any new interaction - small square buttons,
-		// two per row, per the hand-drawn layout.
+		// Grow/Shrink and Rotate CW/CCW each have their own dedicated icon now (UX-provided
+		// Icon_IncreaseSize/Icon_DecreaseSize/Icon_RotateCW/Icon_RotateCCW) - previously Grow/Shrink
+		// reused one Icon_GizmoMove asset at two different sizes, and Rotate CW/CCW reused one
+		// Icon_GizmoRotate asset with CCW rotated 180 degrees, since a 180-degree rotation of a
+		// hand-drawn arrow icon isn't a true mirror image of it. Grow/Shrink and Rotate CW/CCW mirror
+		// PC's existing =/- and 9/0 keys exactly (see OnGrowRoomClicked etc.) rather than introducing
+		// any new interaction - small square buttons, two per row, per the hand-drawn layout.
 		constexpr float GizmoButtonSize = 26.f;
 		constexpr float GizmoIconSizeLarge = 18.f;
-		constexpr float GizmoIconSizeSmall = 11.f; // Shrink reuses Icon_GizmoMove at this smaller size instead of its own asset
-		auto AddGizmoIconButton = [this, MakeToolTipWidget, GizmoButtonSize](UHorizontalBox* Row, const TCHAR* Name, const TCHAR* IconAssetName, float IconSize, float IconRotationDegrees, const TCHAR* TooltipLabel) -> UButton*
+		auto AddGizmoIconButton = [this, GizmoButtonSize](UHorizontalBox* Row, const TCHAR* Name, const TCHAR* IconAssetName, float IconSize, float IconRotationDegrees, const TCHAR* TooltipLabel) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
@@ -483,9 +538,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// default a VerticalBoxSlot stretches/left-aligns it, leaving it hugging the left edge. Center
 		// it instead, matching the hand-drawn layout.
 		GizmoScaleRowSlot->SetHorizontalAlignment(HAlign_Center);
-		GrowRoomButton = AddGizmoIconButton(GizmoScaleRow, TEXT("Btn_GrowRoom"), TEXT("Icon_GizmoMove"), GizmoIconSizeLarge, 0.f, TEXT("Grow (increase the selected room's size)"));
+		GrowRoomButton = AddGizmoIconButton(GizmoScaleRow, TEXT("Btn_GrowRoom"), TEXT("Icon_IncreaseSize"), GizmoIconSizeLarge, 0.f, TEXT("Grow (increase the selected room's size)"));
 		GrowRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnGrowRoomClicked);
-		ShrinkRoomButton = AddGizmoIconButton(GizmoScaleRow, TEXT("Btn_ShrinkRoom"), TEXT("Icon_GizmoMove"), GizmoIconSizeSmall, 0.f, TEXT("Shrink (decrease the selected room's size)"));
+		ShrinkRoomButton = AddGizmoIconButton(GizmoScaleRow, TEXT("Btn_ShrinkRoom"), TEXT("Icon_DecreaseSize"), GizmoIconSizeLarge, 0.f, TEXT("Shrink (decrease the selected room's size)"));
 		ShrinkRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnShrinkRoomClicked);
 
 		UHorizontalBox* GizmoRotateRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("GizmoRotateRow"));
@@ -493,16 +548,17 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		{
 			GizmoRotateRowSlot->SetHorizontalAlignment(HAlign_Center);
 		}
-		RotateCCWButton = AddGizmoIconButton(GizmoRotateRow, TEXT("Btn_RotateCCW"), TEXT("Icon_GizmoRotate"), GizmoIconSizeLarge, 180.f, TEXT("Rotate Left (hold to keep rotating the selected room counter-clockwise)"));
+		RotateCCWButton = AddGizmoIconButton(GizmoRotateRow, TEXT("Btn_RotateCCW"), TEXT("Icon_RotateCCW"), GizmoIconSizeLarge, 0.f, TEXT("Rotate Left (hold to keep rotating the selected room counter-clockwise)"));
 		RotateCCWButton->OnPressed.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCCWPressed);
 		RotateCCWButton->OnReleased.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCCWReleased);
-		RotateCWButton = AddGizmoIconButton(GizmoRotateRow, TEXT("Btn_RotateCW"), TEXT("Icon_GizmoRotate"), GizmoIconSizeLarge, 0.f, TEXT("Rotate Right (hold to keep rotating the selected room clockwise)"));
+		RotateCWButton = AddGizmoIconButton(GizmoRotateRow, TEXT("Btn_RotateCW"), TEXT("Icon_RotateCW"), GizmoIconSizeLarge, 0.f, TEXT("Rotate Right (hold to keep rotating the selected room clockwise)"));
 		RotateCWButton->OnPressed.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCWPressed);
 		RotateCWButton->OnReleased.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCWReleased);
 
 		// -- Floor panel --
 		FloorPanel = ConstructDockPanel(EDockPanelId::Floor, TEXT("Pnl_Floor"), DockPanelColor, 14.f);
-		FloorPanel->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorPanelMouseButtonDown);
+		// Bound to the drag handle, not FloorPanel itself - see DockDragHandleSize's own comment.
+		DockDragHandles[(int32)EDockPanelId::Floor]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorPanelMouseButtonDown);
 		FloorPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorPanelMouseMove);
 		FloorPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorPanelMouseButtonUp);
 		DockResizeHandles[(int32)EDockPanelId::Floor]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorResizeMouseButtonDown);
@@ -511,6 +567,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		DockLeftResizeHandles[(int32)EDockPanelId::Floor]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorLeftResizeMouseButtonDown);
 		DockLeftResizeHandles[(int32)EDockPanelId::Floor]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorLeftResizeMouseMove);
 		DockLeftResizeHandles[(int32)EDockPanelId::Floor]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorLeftResizeMouseButtonUp);
+		DockBottomResizeHandles[(int32)EDockPanelId::Floor]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorBottomResizeMouseButtonDown);
+		DockBottomResizeHandles[(int32)EDockPanelId::Floor]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorBottomResizeMouseMove);
+		DockBottomResizeHandles[(int32)EDockPanelId::Floor]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorBottomResizeMouseButtonUp);
 
 		UVerticalBox* FloorStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("FloorStack"));
 		FloorPanel->SetContent(FloorStack);
@@ -521,6 +580,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		ApplyStandardFont(FloorTitle);
 		UVerticalBoxSlot* FloorTitleSlot = FloorStack->AddChildToVerticalBox(FloorTitle);
 		FloorTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+		DockPanelTitleTexts[(int32)EDockPanelId::Floor] = FloorTitle;
 
 		FloorListBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("FloorListBox"));
 		// 3 rows tall (row height + 4px padding each, see RefreshFloorList) caps the list without
@@ -631,6 +691,31 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			MenuBarRow->AddChildToHorizontalBox(Button);
 			return Button;
 		};
+
+		// Save icon button, left of File - a plain icon rather than a labeled AddMenuButton, since it
+		// takes no dropdown of its own (unlike File/Window) and just fires PC->SaveCurrentProject()
+		// on click. Square, matching the bar's own height.
+		SaveButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Save"));
+		SaveButton->SetBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
+		SaveButton->SetToolTip(MakeToolTipWidget(TEXT("Save [Ctrl+S]")));
+		SaveButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSaveClicked);
+		SaveButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+		UImage* SaveIcon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("Img_Save"));
+		if (UTexture2D* SaveTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/ImageAssets/Icon_Save.Icon_Save")))
+		{
+			SaveIcon->SetBrushFromTexture(SaveTexture, false);
+			SaveIcon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
+		}
+		USizeBox* SaveSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		SaveSizeBox->SetWidthOverride(MenuBarHeight);
+		SaveSizeBox->SetHeightOverride(MenuBarHeight);
+		if (USizeBoxSlot* SaveIconSlot = Cast<USizeBoxSlot>(SaveSizeBox->SetContent(SaveIcon)))
+		{
+			SaveIconSlot->SetHorizontalAlignment(HAlign_Center);
+			SaveIconSlot->SetVerticalAlignment(VAlign_Center);
+		}
+		SaveButton->SetContent(SaveSizeBox);
+		MenuBarRow->AddChildToHorizontalBox(SaveButton);
 
 		FileMenuButton = AddMenuButton(TEXT("Btn_FileMenu"), TEXT("File"));
 		FileMenuButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileMenuClicked);
@@ -749,11 +834,17 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		WindowLayersCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowLayers"), TEXT("Layers"));
 		WindowLayersCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowLayersCheckChanged);
 		WindowNavigationCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowNavigation"), TEXT("Navigation"));
+		// Unlike every row besides Audio, starts unchecked - see EDockPanelId::Navigation's own comment.
+		WindowNavigationCheckbox->SetIsChecked(false);
 		WindowNavigationCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowNavigationCheckChanged);
 		WindowAudioCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowAudio"), TEXT("Audio"));
 		// Unlike every other row, starts unchecked - see EDockPanelId::Audio's own comment.
 		WindowAudioCheckbox->SetIsChecked(false);
 		WindowAudioCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowAudioCheckChanged);
+		WindowMapCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowMap"), TEXT("Map"));
+		// Starts checked, matching UEditScreenWidget's own "Map" panel default.
+		WindowMapCheckbox->SetIsChecked(true);
+		WindowMapCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowMapCheckChanged);
 
 		// Full-screen, fully transparent, Collapsed by default - see the comment on
 		// OnMenuClickCatcherMouseButtonDown for why this is how "click elsewhere closes the dropdown"
@@ -787,10 +878,39 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UHorizontalBox* SwitcherRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BuildingSwitcherRow"));
 		BuildingSwitcherBarBackground->SetContent(SwitcherRow);
 
+		// CameraControlsGroup (Reset/-/speed/+, added below once built) lives in its OWN separate Border,
+		// laid over the same row/Y-band as BuildingSwitcherBarBackground but with its own CanvasPanelSlot
+		// centered against the WHOLE bar width - exactly UEditScreenWidget's own ToolbarBarBackground
+		// recipe (HAlign_Center on a full-width-anchored Border), not nested inside
+		// BuildingSwitcherBarBackground/SwitcherRow at all. Nesting it there was tried first (an Overlay
+		// sibling of SwitcherRow) but BuildingSwitcherBarBackground's own SetHorizontalAlignment(HAlign_Left)
+		// below shrink-wraps ITS content to the icons' own width instead of stretching it to the bar's
+		// full width, so anything centered inside that content lands centered against the ICONS' width,
+		// not the bar's - a separate Border sidesteps that entirely.
+		UBorder* CameraControlsBarBackground = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_CameraControlsBar"));
+		CameraControlsBarBackground->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
+		CameraControlsBarBackground->SetHorizontalAlignment(HAlign_Center);
+		CameraControlsBarBackground->SetVerticalAlignment(VAlign_Center);
+		// The stretching X anchor below (0 to 1) makes this Border's own layout bounds span the FULL bar
+		// width regardless of HAlign_Center (that only centers its CONTENT within those bounds) - at a
+		// higher Z than BuildingSwitcherBarBackground, a transparent full-width Border left at the
+		// default Visible would still capture every click across the whole row, blocking the
+		// combo/pencil/2D/3D/Snap icons underneath even where this Border's own (empty, transparent)
+		// area renders nothing. SelfHitTestInvisible lets clicks fall through to whatever's beneath
+		// EXCEPT where an actual child widget (a camera control button, once visible) sits.
+		CameraControlsBarBackground->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		UCanvasPanelSlot* CameraControlsBarSlot = Canvas->AddChildToCanvas(CameraControlsBarBackground);
+		CameraControlsBarSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
+		CameraControlsBarSlot->SetAlignment(FVector2D(0.f, 0.f));
+		CameraControlsBarSlot->SetOffsets(FMargin(0.f, MenuBarHeight, 0.f, BuildingSwitcherBarHeight));
+		CameraControlsBarSlot->SetZOrder(7);
+
 		BuildingSwitcherComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_BuildingSwitcher"));
 		BuildingSwitcherComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
 		USizeBox* BuildingSwitcherSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		BuildingSwitcherSizeBox->SetWidthOverride(260.f); // fixed now - this bar no longer resizes with any dock panel
+		// A floor, not a fixed width, so a long building name (e.g. a database-loaded one) isn't
+		// clipped/cramped - it grows with the name instead of staying stuck at one width for everyone.
+		BuildingSwitcherSizeBox->SetMinDesiredWidth(140.f);
 		BuildingSwitcherSizeBox->SetContent(BuildingSwitcherComboBox);
 		UHorizontalBoxSlot* SwitcherComboSlot = SwitcherRow->AddChildToHorizontalBox(BuildingSwitcherSizeBox);
 		SwitcherComboSlot->SetVerticalAlignment(VAlign_Center);
@@ -831,9 +951,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		// 2D/3D toggle + "Reset View"/move-speed +/-, same row as EditBuildingNameButton - see the
 		// comment on Switch2DButton in the header for why these live here instead of the menu bar.
-		constexpr float SwitcherButtonWidth = 44.f;
-		constexpr float SwitcherButtonHeight = 32.f;
-		auto AddSwitcherButton = [this, SwitcherRow, SwitcherButtonWidth, SwitcherButtonHeight](const TCHAR* Name, const TCHAR* Label) -> UButton*
+		constexpr float SwitcherButtonWidth = 48.f;
+		constexpr float SwitcherButtonHeight = 36.f;
+		auto AddSwitcherButton = [this, SwitcherButtonWidth, SwitcherButtonHeight](UHorizontalBox* TargetRow, const TCHAR* Name, const TCHAR* Label) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
@@ -852,39 +972,24 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 				TextSlot->SetVerticalAlignment(VAlign_Center);
 			}
 			Button->SetContent(ButtonSizeBox);
-			UHorizontalBoxSlot* RowSlot = SwitcherRow->AddChildToHorizontalBox(Button);
+			UHorizontalBoxSlot* RowSlot = TargetRow->AddChildToHorizontalBox(Button);
 			RowSlot->SetVerticalAlignment(VAlign_Center);
 			RowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
 			return Button;
 		};
 
-		Switch2DButton = AddSwitcherButton(TEXT("Btn_Switch2D"), TEXT("2D"));
+		Switch2DButton = AddSwitcherButton(SwitcherRow, TEXT("Btn_Switch2D"), TEXT("2D"));
 		Switch2DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSwitch2DClicked);
-		Switch3DButton = AddSwitcherButton(TEXT("Btn_Switch3D"), TEXT("3D"));
+		Switch3DButton = AddSwitcherButton(SwitcherRow, TEXT("Btn_Switch3D"), TEXT("3D"));
 		Switch3DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSwitch3DClicked);
 
-		// Only shown while in 3D preview (see HandlePreviewModeChanged).
-		ResetView3DButton = AddSwitcherButton(TEXT("Btn_ResetView3D"), TEXT("Reset"));
-		ResetView3DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnResetView3DClicked);
-		ResetView3DButton->SetToolTipText(FText::FromString(TEXT("Reset View")));
-		ResetView3DButton->SetVisibility(ESlateVisibility::Collapsed);
-
-		DecreaseSpeedButton = AddSwitcherButton(TEXT("Btn_DecreaseSpeed"), TEXT("-"));
-		DecreaseSpeedButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnDecreaseSpeedClicked);
-		DecreaseSpeedButton->SetToolTipText(FText::FromString(TEXT("Decrease Move Speed")));
-		DecreaseSpeedButton->SetVisibility(ESlateVisibility::Collapsed);
-
-		IncreaseSpeedButton = AddSwitcherButton(TEXT("Btn_IncreaseSpeed"), TEXT("+"));
-		IncreaseSpeedButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnIncreaseSpeedClicked);
-		IncreaseSpeedButton->SetToolTipText(FText::FromString(TEXT("Increase Move Speed")));
-		IncreaseSpeedButton->SetVisibility(ESlateVisibility::Collapsed);
-
-		// "View"/"Edit" toggle - starts as "View" (yellow), matching PC's own default (see
-		// ANavPlayerController::bIsIn3DEditMode). AddSwitcherButton doesn't hand back its inner
-		// UTextBlock (every other button built with it has a fixed label), so this one reaches it back
-		// out through the widget tree instead, same "don't return every intermediate" convention used
-		// elsewhere in this function (e.g. the File/Window dropdowns).
-		Edit3DModeToggleButton = AddSwitcherButton(TEXT("Btn_Edit3DModeToggle"), TEXT("View"));
+		// "View"/"Edit" toggle - right after 3D now (was after the speed controls) - starts as "View"
+		// (yellow), matching PC's own default (see ANavPlayerController::bIsIn3DEditMode).
+		// AddSwitcherButton doesn't hand back its inner UTextBlock (every other button built with it has
+		// a fixed label), so this one reaches it back out through the widget tree instead, same "don't
+		// return every intermediate" convention used elsewhere in this function (e.g. the File/Window
+		// dropdowns).
+		Edit3DModeToggleButton = AddSwitcherButton(SwitcherRow, TEXT("Btn_Edit3DModeToggle"), TEXT("View"));
 		Edit3DModeToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnEdit3DModeToggleClicked);
 		Edit3DModeToggleButton->SetBackgroundColor(FLinearColor(0.8f, 0.7f, 0.1f, 1.f));
 		Edit3DModeToggleButton->SetVisibility(ESlateVisibility::Collapsed);
@@ -892,6 +997,69 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		{
 			Edit3DModeToggleButtonText = Cast<UTextBlock>(Edit3DModeSizeBox->GetContent());
 		}
+
+		// Snap toggle - icon-only, next to 3D, always visible (snapping matters in 2D too, unlike
+		// Reset/speed/View-Edit which are 3D-preview-only). Icon itself is set by HandleSnapEnabledChanged
+		// once PC is available (RebuildWidget has no reliable PC access yet - see NativeConstruct).
+		SnapToggleButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_SnapToggle"));
+		SnapToggleButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+		SnapToggleButton->SetToolTip(MakeToolTipWidget(TEXT("Toggle Snapping [N]")));
+		SnapToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSnapToggleClicked);
+		SnapToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+		SnapToggleIcon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("Img_SnapToggle"));
+		SnapToggleIcon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
+		USizeBox* SnapToggleSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		SnapToggleSizeBox->SetWidthOverride(SwitcherButtonWidth);
+		SnapToggleSizeBox->SetHeightOverride(SwitcherButtonHeight);
+		if (USizeBoxSlot* SnapToggleIconSlot = Cast<USizeBoxSlot>(SnapToggleSizeBox->SetContent(SnapToggleIcon)))
+		{
+			SnapToggleIconSlot->SetHorizontalAlignment(HAlign_Center);
+			SnapToggleIconSlot->SetVerticalAlignment(VAlign_Center);
+		}
+		SnapToggleButton->SetContent(SnapToggleSizeBox);
+		if (UHorizontalBoxSlot* SnapToggleRowSlot = Cast<UHorizontalBoxSlot>(SwitcherRow->AddChildToHorizontalBox(SnapToggleButton)))
+		{
+			SnapToggleRowSlot->SetVerticalAlignment(VAlign_Center);
+			SnapToggleRowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
+		}
+
+		// Reset/-/speed/+ - see CameraControlsBarBackground's own comment for why this is its own Border
+		// instead of living inside SwitcherRow.
+		UHorizontalBox* CameraControlsGroup = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("CameraControlsGroup"));
+		CameraControlsBarBackground->SetContent(CameraControlsGroup);
+
+		// Only shown while in 3D preview (see HandlePreviewModeChanged).
+		ResetView3DButton = AddSwitcherButton(CameraControlsGroup, TEXT("Btn_ResetView3D"), TEXT("Reset"));
+		ResetView3DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnResetView3DClicked);
+		ResetView3DButton->SetToolTipText(FText::FromString(TEXT("Reset View")));
+		ResetView3DButton->SetVisibility(ESlateVisibility::Collapsed);
+
+		DecreaseSpeedButton = AddSwitcherButton(CameraControlsGroup, TEXT("Btn_DecreaseSpeed"), TEXT("-"));
+		DecreaseSpeedButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnDecreaseSpeedClicked);
+		DecreaseSpeedButton->SetToolTipText(FText::FromString(TEXT("Decrease Camera Speed")));
+		DecreaseSpeedButton->SetVisibility(ESlateVisibility::Collapsed);
+
+		// Typed speed entry, between the -/+ buttons - see OnCameraSpeedTextCommitted.
+		CameraSpeedTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_CameraSpeed"));
+		CameraSpeedTextBox->SetJustification(ETextJustify::Center);
+		CameraSpeedTextBox->SetToolTipText(FText::FromString(TEXT("Camera Speed (type a value, then press Enter or click away)")));
+		CameraSpeedTextBox->OnTextCommitted.AddUniqueDynamic(this, &UInteriorScreenWidget::OnCameraSpeedTextCommitted);
+		CameraSpeedTextBox->SetVisibility(ESlateVisibility::Collapsed);
+		ApplyStandardFont(CameraSpeedTextBox);
+		USizeBox* CameraSpeedSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		CameraSpeedSizeBox->SetWidthOverride(64.f);
+		CameraSpeedSizeBox->SetHeightOverride(SwitcherButtonHeight);
+		CameraSpeedSizeBox->SetContent(CameraSpeedTextBox);
+		if (UHorizontalBoxSlot* CameraSpeedRowSlot = Cast<UHorizontalBoxSlot>(CameraControlsGroup->AddChildToHorizontalBox(CameraSpeedSizeBox)))
+		{
+			CameraSpeedRowSlot->SetVerticalAlignment(VAlign_Center);
+			CameraSpeedRowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
+		}
+
+		IncreaseSpeedButton = AddSwitcherButton(CameraControlsGroup, TEXT("Btn_IncreaseSpeed"), TEXT("+"));
+		IncreaseSpeedButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnIncreaseSpeedClicked);
+		IncreaseSpeedButton->SetToolTipText(FText::FromString(TEXT("Increase Camera Speed")));
+		IncreaseSpeedButton->SetVisibility(ESlateVisibility::Collapsed);
 
 		// Thin separator lines at the seam between the menu bar and the switcher bar, and again below
 		// the switcher bar - both bars (and the panels below) share the same dark background color, so
@@ -915,7 +1083,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// level); only one of DoorFieldsBox/RoomFieldsBox/ConnectorFieldsBox is ever visible at a
 		// time - see HandleSelectedDoorChanged/HandleSelectedRoomChanged/HandleSelectedConnectorChanged.
 		PropertiesPanel = ConstructDockPanel(EDockPanelId::Properties, TEXT("Pnl_Properties"), DockPanelColor, 14.f);
-		PropertiesPanel->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesPanelMouseButtonDown);
+		// Bound to the drag handle, not PropertiesPanel itself - see DockDragHandleSize's own comment.
+		DockDragHandles[(int32)EDockPanelId::Properties]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesPanelMouseButtonDown);
 		PropertiesPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesPanelMouseMove);
 		PropertiesPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesPanelMouseButtonUp);
 		DockResizeHandles[(int32)EDockPanelId::Properties]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesResizeMouseButtonDown);
@@ -924,6 +1093,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		DockLeftResizeHandles[(int32)EDockPanelId::Properties]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesLeftResizeMouseButtonDown);
 		DockLeftResizeHandles[(int32)EDockPanelId::Properties]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesLeftResizeMouseMove);
 		DockLeftResizeHandles[(int32)EDockPanelId::Properties]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesLeftResizeMouseButtonUp);
+		DockBottomResizeHandles[(int32)EDockPanelId::Properties]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesBottomResizeMouseButtonDown);
+		DockBottomResizeHandles[(int32)EDockPanelId::Properties]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesBottomResizeMouseMove);
+		DockBottomResizeHandles[(int32)EDockPanelId::Properties]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesBottomResizeMouseButtonUp);
 
 		UVerticalBox* PropertiesStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("PropertiesStack"));
 		PropertiesPanel->SetContent(PropertiesStack);
@@ -933,6 +1105,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		ApplyStandardFont(PropertiesTitleText);
 		UVerticalBoxSlot* PropertiesTitleSlot = PropertiesStack->AddChildToVerticalBox(WrapLabelToPanelWidth(PropertiesTitleText, TEXT("Txt_PropertiesTitleSize")));
 		PropertiesTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+		DockPanelTitleTexts[(int32)EDockPanelId::Properties] = PropertiesTitleText;
 
 		// -- Door fields --
 		DoorFieldsBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DoorFieldsBox"));
@@ -1106,7 +1279,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// HandleLayerRowExpandClicked. Rows are ULayerRowWidget instances, built fresh each time by
 		// RefreshLayersList rather than laid out here (same reasoning as FloorListBox's rows).
 		LayersPanel = ConstructDockPanel(EDockPanelId::Layers, TEXT("Pnl_Layers"), DockPanelColor, 14.f);
-		LayersPanel->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersPanelMouseButtonDown);
+		// Bound to the drag handle, not LayersPanel itself - see DockDragHandleSize's own comment.
+		DockDragHandles[(int32)EDockPanelId::Layers]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersPanelMouseButtonDown);
 		LayersPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersPanelMouseMove);
 		LayersPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersPanelMouseButtonUp);
 		DockResizeHandles[(int32)EDockPanelId::Layers]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersResizeMouseButtonDown);
@@ -1115,6 +1289,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		DockLeftResizeHandles[(int32)EDockPanelId::Layers]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersLeftResizeMouseButtonDown);
 		DockLeftResizeHandles[(int32)EDockPanelId::Layers]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersLeftResizeMouseMove);
 		DockLeftResizeHandles[(int32)EDockPanelId::Layers]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersLeftResizeMouseButtonUp);
+		DockBottomResizeHandles[(int32)EDockPanelId::Layers]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersBottomResizeMouseButtonDown);
+		DockBottomResizeHandles[(int32)EDockPanelId::Layers]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersBottomResizeMouseMove);
+		DockBottomResizeHandles[(int32)EDockPanelId::Layers]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersBottomResizeMouseButtonUp);
 
 		UVerticalBox* LayersStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LayersStack"));
 		LayersPanel->SetContent(LayersStack);
@@ -1125,6 +1302,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		ApplyStandardFont(LayersTitle);
 		UVerticalBoxSlot* LayersTitleSlot = LayersStack->AddChildToVerticalBox(LayersTitle);
 		LayersTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+		DockPanelTitleTexts[(int32)EDockPanelId::Layers] = LayersTitle;
 
 		LayersSearchBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_LayersSearch"));
 		LayersSearchBox->SetHintText(FText::FromString(TEXT("Search")));
@@ -1152,7 +1330,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// original bespoke draggable-overlay look; RefreshNavigationPanelDisplay fills in the dynamic
 		// bits (button colors/labels/enablement, status/route text) once NativeConstruct hooks it up.
 		NavigationPanel = ConstructDockPanel(EDockPanelId::Navigation, TEXT("Pnl_Navigation"), DockPanelColor, 14.f);
-		NavigationPanel->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationPanelMouseButtonDown);
+		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
+		// Bound to the drag handle, not NavigationPanel itself - see DockDragHandleSize's own comment.
+		DockDragHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationPanelMouseButtonDown);
 		NavigationPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationPanelMouseMove);
 		NavigationPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationPanelMouseButtonUp);
 		DockResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationResizeMouseButtonDown);
@@ -1161,6 +1341,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		DockLeftResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationLeftResizeMouseButtonDown);
 		DockLeftResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationLeftResizeMouseMove);
 		DockLeftResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationLeftResizeMouseButtonUp);
+		DockBottomResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationBottomResizeMouseButtonDown);
+		DockBottomResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationBottomResizeMouseMove);
+		DockBottomResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationBottomResizeMouseButtonUp);
 
 		UVerticalBox* NavStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("NavStack"));
 		NavigationPanel->SetContent(NavStack);
@@ -1171,6 +1354,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		ApplyStandardFont(NavTitle);
 		UVerticalBoxSlot* NavTitleSlot = NavStack->AddChildToVerticalBox(NavTitle);
 		NavTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+		DockPanelTitleTexts[(int32)EDockPanelId::Navigation] = NavTitle;
 
 		NavContextText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_NavContext"));
 		NavContextText->SetColorAndOpacity(FSlateColor(FLinearColor(0.7f, 0.78f, 0.88f, 1.f)));
@@ -1178,17 +1362,10 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UVerticalBoxSlot* NavContextSlot = NavStack->AddChildToVerticalBox(NavContextText);
 		NavContextSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
 
-		UTextBlock* NavAreaLegend = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_NavAreaLegend"));
-		NavAreaLegend->SetText(FText::FromString(TEXT("Floor 1 map:  BLUE = OUTSIDE  |  GRAY = INDOORS")));
-		NavAreaLegend->SetColorAndOpacity(FSlateColor(FLinearColor(0.45f, 0.82f, 1.f, 1.f)));
-		ApplyStandardTextWrap(NavAreaLegend);
-		UVerticalBoxSlot* NavAreaLegendSlot = NavStack->AddChildToVerticalBox(NavAreaLegend);
-		NavAreaLegendSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
-
 		// Room dropdowns - an alternative to clicking a point on the floor plan (see the comment
 		// above HandleNavStartRoomChanged). Populated with every real room across every floor, so
 		// picking one can jump straight to a room on a different floor than the one currently shown.
-		auto AddNavRoomDropdown = [this, NavStack](const TCHAR* Name, const TCHAR* LabelText) -> UComboBoxString*
+		auto AddNavRoomDropdown = [this, NavStack](const TCHAR* Name, const TCHAR* LabelText, UBorder*& OutBorder) -> UComboBoxString*
 		{
 			UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
 			Label->SetText(FText::FromString(FString(LabelText)));
@@ -1202,14 +1379,23 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			USizeBox* ComboSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
 			ComboSizeBox->SetWidthOverride(StandardButtonWidth);
 			ComboSizeBox->SetContent(ComboBox);
-			UVerticalBoxSlot* ComboSlot = NavStack->AddChildToVerticalBox(ComboSizeBox);
+
+			// Frame that tints green/red when this endpoint was set by picking from THIS dropdown,
+			// rather than by clicking a point on the floor plan - see RefreshNavigationPanelDisplay.
+			// Transparent by default so an unset/click-set dropdown shows no frame at all.
+			UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(Name) + TEXT("Border")));
+			Border->SetPadding(FMargin(3.f));
+			Border->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
+			Border->SetContent(ComboSizeBox);
+			UVerticalBoxSlot* ComboSlot = NavStack->AddChildToVerticalBox(Border);
 			ComboSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+			OutBorder = Border;
 			return ComboBox;
 		};
 
-		NavStartRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavStartRoom"), TEXT("Indoor Start Room"));
+		NavStartRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavStartRoom"), TEXT("Start Room"), NavStartRoomBorder);
 		NavStartRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavStartRoomChanged);
-		NavDestinationRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavDestinationRoom"), TEXT("Indoor Destination Room"));
+		NavDestinationRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavDestinationRoom"), TEXT("Destination Room"), NavDestinationRoomBorder);
 		NavDestinationRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavDestinationRoomChanged);
 
 		auto AddNavButton = [this, NavStack, ApplyStandardTextWrap](const TCHAR* Name, const TCHAR* Label, UTextBlock*& OutLabel) -> UButton*
@@ -1235,9 +1421,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		UTextBlock* UnusedFindRouteLabel = nullptr;
 		UTextBlock* UnusedClearRouteLabel = nullptr;
-		NavSetStartButton = AddNavButton(TEXT("Btn_NavSetStart"), TEXT("Set Start"), NavSetStartButtonLabel);
+		NavSetStartButton = AddNavButton(TEXT("Btn_NavSetStart"), TEXT("Click to Set Start"), NavSetStartButtonLabel);
 		NavSetStartButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavSetStartClicked);
-		NavSetDestinationButton = AddNavButton(TEXT("Btn_NavSetDestination"), TEXT("Set Destination"), NavSetDestinationButtonLabel);
+		NavSetDestinationButton = AddNavButton(TEXT("Btn_NavSetDestination"), TEXT("Click to Set Destination"), NavSetDestinationButtonLabel);
 		NavSetDestinationButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavSetDestinationClicked);
 		NavFindRouteButton = AddNavButton(TEXT("Btn_NavFindRoute"), TEXT("Find Route"), UnusedFindRouteLabel);
 		NavFindRouteButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavFindRouteClicked);
@@ -1261,7 +1447,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// panel, just inverted for its starting state.
 		AudioPanel = ConstructDockPanel(EDockPanelId::Audio, TEXT("Pnl_Audio"), DockPanelColor, 14.f);
 		AudioPanel->SetVisibility(ESlateVisibility::Collapsed);
-		AudioPanel->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioPanelMouseButtonDown);
+		// Bound to the drag handle, not AudioPanel itself - see DockDragHandleSize's own comment.
+		DockDragHandles[(int32)EDockPanelId::Audio]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioPanelMouseButtonDown);
 		AudioPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioPanelMouseMove);
 		AudioPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioPanelMouseButtonUp);
 		DockResizeHandles[(int32)EDockPanelId::Audio]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioResizeMouseButtonDown);
@@ -1270,6 +1457,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		DockLeftResizeHandles[(int32)EDockPanelId::Audio]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioLeftResizeMouseButtonDown);
 		DockLeftResizeHandles[(int32)EDockPanelId::Audio]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioLeftResizeMouseMove);
 		DockLeftResizeHandles[(int32)EDockPanelId::Audio]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioLeftResizeMouseButtonUp);
+		DockBottomResizeHandles[(int32)EDockPanelId::Audio]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioBottomResizeMouseButtonDown);
+		DockBottomResizeHandles[(int32)EDockPanelId::Audio]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioBottomResizeMouseMove);
+		DockBottomResizeHandles[(int32)EDockPanelId::Audio]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioBottomResizeMouseButtonUp);
 
 		UVerticalBox* AudioStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("AudioStack"));
 		AudioPanel->SetContent(AudioStack);
@@ -1280,6 +1470,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		ApplyStandardFont(AudioTitle);
 		UVerticalBoxSlot* AudioTitleSlot = AudioStack->AddChildToVerticalBox(AudioTitle);
 		AudioTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+		DockPanelTitleTexts[(int32)EDockPanelId::Audio] = AudioTitle;
 
 		AudioStopAllButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_AudioStopAll"));
 		AudioStopAllButton->SetBackgroundColor(FLinearColor(0.75f, 0.2f, 0.2f, 1.f));
@@ -1298,24 +1489,65 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UVerticalBoxSlot* AudioStopAllSlot = AudioStack->AddChildToVerticalBox(AudioStopAllButton);
 		AudioStopAllSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 
-		// Lets the user mute every button's click sound at once (see ANavPlayerController::
-		// SetButtonClickSoundEnabled) without touching the Audio files below - own row, not a
-		// UAudioFileRowWidget, since it's a setting rather than a playable file.
-		UHorizontalBox* AudioClickSoundRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("AudioClickSoundRow"));
-		AudioClickSoundCheckbox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), TEXT("Chk_AudioClickSound"));
-		AudioClickSoundCheckbox->SetIsChecked(true);
+		// Lets the user mute each UI sound at once (see ANavPlayerController::SetButtonClickSoundEnabled/
+		// SetBuildingSelectSoundEnabled/SetQuitConfirmSoundEnabled) without touching the Audio files
+		// below - own rows, not UAudioFileRowWidgets, since these are settings rather than playable
+		// files.
+		auto AddAudioCheckRow = [this, AudioStack](const TCHAR* Name, const TCHAR* Label, bool bDefaultChecked) -> UCheckBox*
+		{
+			UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+			UCheckBox* CheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), FName(Name));
+			CheckBox->SetIsChecked(bDefaultChecked);
+			UHorizontalBoxSlot* CheckSlot = Row->AddChildToHorizontalBox(CheckBox);
+			CheckSlot->SetVerticalAlignment(VAlign_Center);
+			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+			Text->SetText(FText::FromString(FString(Label)));
+			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			ApplyStandardFont(Text);
+			UHorizontalBoxSlot* TextSlot = Row->AddChildToHorizontalBox(Text);
+			TextSlot->SetPadding(FMargin(4.f, 0.f, 0.f, 0.f));
+			TextSlot->SetVerticalAlignment(VAlign_Center);
+			UVerticalBoxSlot* RowSlot = AudioStack->AddChildToVerticalBox(Row);
+			RowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+			return CheckBox;
+		};
+
+		AudioClickSoundCheckbox = AddAudioCheckRow(TEXT("Chk_AudioClickSound"), TEXT("Button Click Sound"), true);
 		AudioClickSoundCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioClickSoundCheckChanged);
-		UHorizontalBoxSlot* AudioClickSoundCheckSlot = AudioClickSoundRow->AddChildToHorizontalBox(AudioClickSoundCheckbox);
-		AudioClickSoundCheckSlot->SetVerticalAlignment(VAlign_Center);
-		UTextBlock* AudioClickSoundText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_AudioClickSound"));
-		AudioClickSoundText->SetText(FText::FromString(TEXT("Button Click Sound")));
-		AudioClickSoundText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(AudioClickSoundText);
-		UHorizontalBoxSlot* AudioClickSoundTextSlot = AudioClickSoundRow->AddChildToHorizontalBox(AudioClickSoundText);
-		AudioClickSoundTextSlot->SetPadding(FMargin(4.f, 0.f, 0.f, 0.f));
-		AudioClickSoundTextSlot->SetVerticalAlignment(VAlign_Center);
-		UVerticalBoxSlot* AudioClickSoundRowSlot = AudioStack->AddChildToVerticalBox(AudioClickSoundRow);
-		AudioClickSoundRowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+
+		AudioSelectSoundCheckbox = AddAudioCheckRow(TEXT("Chk_AudioSelectSound"), TEXT("Building Select Sound"), true);
+		AudioSelectSoundCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioSelectSoundCheckChanged);
+
+		AudioQuitConfirmSoundCheckbox = AddAudioCheckRow(TEXT("Chk_AudioQuitConfirmSound"), TEXT("Confirm Dialog Sound"), true);
+		AudioQuitConfirmSoundCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioQuitConfirmSoundCheckChanged);
+
+		// Checked = everything muted (opposite sense from the three rows above) - unchecked by default,
+		// matching nothing being muted at first.
+		AudioMuteAllCheckbox = AddAudioCheckRow(TEXT("Chk_AudioMuteAll"), TEXT("Mute All"), false);
+		AudioMuteAllCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioMuteAllCheckChanged);
+
+		// Volume slider - ANavPlayerController::MasterVolume, applied to every sound this class plays.
+		UHorizontalBox* AudioVolumeRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("AudioVolumeRow"));
+		UTextBlock* AudioVolumeLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_AudioVolume"));
+		AudioVolumeLabel->SetText(FText::FromString(TEXT("Volume")));
+		AudioVolumeLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(AudioVolumeLabel);
+		UHorizontalBoxSlot* AudioVolumeLabelSlot = AudioVolumeRow->AddChildToHorizontalBox(AudioVolumeLabel);
+		AudioVolumeLabelSlot->SetVerticalAlignment(VAlign_Center);
+		AudioVolumeLabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+
+		AudioVolumeSlider = WidgetTree->ConstructWidget<USlider>(USlider::StaticClass(), TEXT("Slider_AudioVolume"));
+		AudioVolumeSlider->SetMinValue(0.f);
+		AudioVolumeSlider->SetMaxValue(1.f);
+		AudioVolumeSlider->SetValue(1.f);
+		AudioVolumeSlider->OnValueChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioVolumeChanged);
+		USizeBox* AudioVolumeSliderSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		AudioVolumeSliderSizeBox->SetWidthOverride(StandardButtonWidth - 60.f);
+		AudioVolumeSliderSizeBox->SetContent(AudioVolumeSlider);
+		UHorizontalBoxSlot* AudioVolumeSliderSlot = AudioVolumeRow->AddChildToHorizontalBox(AudioVolumeSliderSizeBox);
+		AudioVolumeSliderSlot->SetVerticalAlignment(VAlign_Center);
+		UVerticalBoxSlot* AudioVolumeRowSlot = AudioStack->AddChildToVerticalBox(AudioVolumeRow);
+		AudioVolumeRowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 
 		// Rows themselves are built by RefreshAudioList (one UAudioFileRowWidget per file under
 		// Data/Audio/), same reasoning as FloorListBox/LayersListBox not being laid out here.
@@ -1325,6 +1557,54 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		AudioFileListSizeBox->SetWidthOverride(StandardButtonWidth);
 		AudioFileListSizeBox->SetContent(AudioFileListBox);
 		AudioStack->AddChildToVerticalBox(AudioFileListSizeBox);
+
+		// -- Map panel: road-filter panel ported from UEditScreenWidget's own "Map" panel, Roads
+		// section only (no Buildings section - this screen has no exterior building-visibility
+		// concept). Same PC functions as there (SetRoadCategoryVisible/SetAllRoadsVisible/
+		// SetRoadsAndPOIsWithinCampusOnly). Starts VISIBLE (unlike Audio/Navigation above).
+		MapPanel = ConstructDockPanel(EDockPanelId::Map, TEXT("Pnl_Map"), DockPanelColor, 14.f);
+		DockDragHandles[(int32)EDockPanelId::Map]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapPanelMouseButtonDown);
+		MapPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapPanelMouseMove);
+		MapPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapPanelMouseButtonUp);
+		DockResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapResizeMouseButtonDown);
+		DockResizeHandles[(int32)EDockPanelId::Map]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapResizeMouseMove);
+		DockResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapResizeMouseButtonUp);
+		DockLeftResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapLeftResizeMouseButtonDown);
+		DockLeftResizeHandles[(int32)EDockPanelId::Map]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapLeftResizeMouseMove);
+		DockLeftResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapLeftResizeMouseButtonUp);
+		DockBottomResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapBottomResizeMouseButtonDown);
+		DockBottomResizeHandles[(int32)EDockPanelId::Map]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapBottomResizeMouseMove);
+		DockBottomResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapBottomResizeMouseButtonUp);
+
+		UVerticalBox* MapStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("MapStack"));
+		MapPanel->SetContent(MapStack);
+
+		UTextBlock* MapTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_MapTitle"));
+		MapTitle->SetText(FText::FromString(TEXT("Map")));
+		MapTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(MapTitle);
+		UVerticalBoxSlot* MapTitleSlot = MapStack->AddChildToVerticalBox(MapTitle);
+		MapTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+		DockPanelTitleTexts[(int32)EDockPanelId::Map] = MapTitle;
+
+		RoadHideAllCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadHideAll"), TEXT("Hide All"));
+		RoadHideAllCheckbox->SetIsChecked(false);
+		RoadHideAllCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadHideAllCheckChanged);
+		RoadPrimaryCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadPrimary"), TEXT("Primary"));
+		RoadPrimaryCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadPrimaryCheckChanged);
+		RoadSecondaryCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadSecondary"), TEXT("Secondary"));
+		RoadSecondaryCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadSecondaryCheckChanged);
+		RoadResidentialCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadResidential"), TEXT("Residential/Tertiary"));
+		RoadResidentialCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadResidentialCheckChanged);
+		RoadCyclewayCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadCycleway"), TEXT("Cycleway"));
+		RoadCyclewayCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadCyclewayCheckChanged);
+		RoadFootwayCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadFootway"), TEXT("Footway/Path"));
+		RoadFootwayCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadFootwayCheckChanged);
+		RoadOtherCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadOther"), TEXT("Other"));
+		RoadOtherCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadOtherCheckChanged);
+		RoadCampusOnlyCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadCampusOnly"), TEXT("Campus Only"));
+		RoadCampusOnlyCheckbox->SetIsChecked(true);
+		RoadCampusOnlyCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadCampusOnlyCheckChanged);
 	}
 
 	return Super::RebuildWidget();
@@ -1397,6 +1677,10 @@ void UInteriorScreenWidget::NativeConstruct()
 		HandlePreviewModeChanged(PC->IsIn3DPreviewMode());
 		PC->OnEdit3DModeChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleEdit3DModeChanged);
 		HandleEdit3DModeChanged(PC->IsIn3DEditMode());
+		// Snapping can also be toggled by the N key, not just SnapToggleButton (defensive symmetry,
+		// matching every other PC-state delegate above).
+		PC->OnSnapEnabledChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSnapEnabledChanged);
+		HandleSnapEnabledChanged(PC->IsSnapEnabled());
 
 		// Navigation panel: hand ws/jh's UNavigationPanelWidget this screen's own Navigation Border to
 		// hit-test against (see SetPanelBorderForHitTest's own comment) and subscribe to its
@@ -1408,14 +1692,28 @@ void UInteriorScreenWidget::NativeConstruct()
 			Nav->OnStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavigationStateChanged);
 		}
 
-		// bButtonClickSoundEnabled lives on the PC, not this widget, so it survives this screen being
-		// torn down and rebuilt (e.g. Back to the start screen and in again) - the checkbox was
-		// hardcoded to SetIsChecked(true) at construction (RebuildWidget has no reliable PC access yet),
-		// which showed "on" here even after the user had turned it off, despite the real setting
-		// correctly staying off. Sync it to the actual state now that PC is available.
+		// bButtonClickSoundEnabled (and the two flags below) live on the PC, not this widget, so they
+		// survive this screen being torn down and rebuilt (e.g. Back to the start screen and in again) -
+		// these checkboxes were hardcoded to SetIsChecked(true/false) at construction (RebuildWidget has
+		// no reliable PC access yet), which could show stale state even after the user had changed the
+		// real setting. Sync them to the actual state now that PC is available. Mute All has no backing
+		// flag of its own (see SetAllUiSoundsEnabled's own comment) so there's nothing to sync it to
+		// here - it always starts unchecked.
 		if (AudioClickSoundCheckbox)
 		{
 			AudioClickSoundCheckbox->SetIsChecked(PC->IsButtonClickSoundEnabled());
+		}
+		if (AudioSelectSoundCheckbox)
+		{
+			AudioSelectSoundCheckbox->SetIsChecked(PC->IsBuildingSelectSoundEnabled());
+		}
+		if (AudioQuitConfirmSoundCheckbox)
+		{
+			AudioQuitConfirmSoundCheckbox->SetIsChecked(PC->IsQuitConfirmSoundEnabled());
+		}
+		if (AudioVolumeSlider)
+		{
+			AudioVolumeSlider->SetValue(PC->GetMasterVolume());
 		}
 	}
 
@@ -1447,6 +1745,7 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnInteriorContentChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleInteriorContentChanged);
 		PC->OnPreviewModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandlePreviewModeChanged);
 		PC->OnEdit3DModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleEdit3DModeChanged);
+		PC->OnSnapEnabledChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSnapEnabledChanged);
 
 		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
 		{
@@ -1462,16 +1761,26 @@ void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 
-	if (bNeedsPostConstructLayoutRefresh)
+	// Keeps retrying every tick, not just once - RootCanvas's cached geometry (what
+	// ApplyLayoutSaveData actually needs, see GetReliableCanvasSize's own comment) turned out to
+	// still not be valid a tick or two after construction in practice, not just on the literal first
+	// call, so a single one-shot retry (the previous approach) wasn't reliably enough. Cheap to poll -
+	// ApplyLayoutSaveData returns immediately without doing any work once RootCanvas isn't ready.
+	if (PendingSavedLayoutToReapply.IsValid() && ApplyLayoutSaveData(PendingSavedLayoutToReapply))
 	{
-		bNeedsPostConstructLayoutRefresh = false;
-		RefreshDockLayout();
+		PendingSavedLayoutToReapply.Reset();
 	}
 
 	if (PropertiesFractionRecalcFramesRemaining > 0)
 	{
 		--PropertiesFractionRecalcFramesRemaining;
 		RecomputeColumnFractionsFromNaturalSizes(DockPanelColumnIndex[(int32)EDockPanelId::Properties]);
+		RefreshDockLayout();
+	}
+
+	if (LayoutGeometrySettleFramesRemaining > 0)
+	{
+		--LayoutGeometrySettleFramesRemaining;
 		RefreshDockLayout();
 	}
 }
@@ -1502,15 +1811,27 @@ FReply UInteriorScreenWidget::NativeOnMouseWheel(const FGeometry& InGeometry, co
 
 FVector2D UInteriorScreenWidget::GetCanvasSize() const
 {
-	if (RootCanvas)
+	FVector2D ReliableSize;
+	if (GetReliableCanvasSize(ReliableSize))
 	{
-		const FVector2D LocalSize = RootCanvas->GetCachedGeometry().GetLocalSize();
-		if (LocalSize.X > 0.f && LocalSize.Y > 0.f)
-		{
-			return LocalSize;
-		}
+		return ReliableSize;
 	}
 	return UWidgetLayoutLibrary::GetViewportSize(this);
+}
+
+bool UInteriorScreenWidget::GetReliableCanvasSize(FVector2D& OutSize) const
+{
+	if (!RootCanvas)
+	{
+		return false;
+	}
+	const FVector2D LocalSize = RootCanvas->GetCachedGeometry().GetLocalSize();
+	if (LocalSize.X <= 0.f || LocalSize.Y <= 0.f)
+	{
+		return false;
+	}
+	OutSize = LocalSize;
+	return true;
 }
 
 FVector2D UInteriorScreenWidget::GetDefaultPanelPosition(EDockPanelId Id, const FVector2D& ViewportSize) const
@@ -1535,6 +1856,13 @@ FVector2D UInteriorScreenWidget::GetDefaultPanelPosition(EDockPanelId Id, const 
 		// Below Layers on the left side - starts hidden anyway (see bDockPanelUserHidden), this only
 		// matters for the very first time the user checks it in the Window menu.
 		return FVector2D(10.f, ViewportSize.Y * 0.75f);
+	case EDockPanelId::Map:
+		// Left side, at the same spot as Audio (which starts hidden) rather than the right side -
+		// Floor+Properties dock into one column there, and that column's real height depends on their
+		// actual content, not a fixed fraction, so a fixed right-side Y here can (and did, in a short
+		// viewport) land underneath/overlapping Properties. Sharing Audio's own default spot is safe
+		// since Audio isn't visible yet at this point.
+		return FVector2D(10.f, ViewportSize.Y * 0.75f);
 	default:
 		return FVector2D(10.f, SidebarTopMargin);
 	}
@@ -1553,7 +1881,7 @@ void UInteriorScreenWidget::InitializeDefaultDockLayout()
 	// default placement below to do.
 	if (LoadDockLayoutFromDisk())
 	{
-		bNeedsPostConstructLayoutRefresh = true;
+		LayoutGeometrySettleFramesRemaining = LayoutGeometrySettleFrameCount;
 		return;
 	}
 
@@ -1576,9 +1904,10 @@ void UInteriorScreenWidget::InitializeDefaultDockLayout()
 	AutoDockPropertiesBelowFloor();
 
 	// This all just ran before the widget's had even one real Slate layout/paint pass, which can
-	// leave a docked panel's background border a frame stale (see NativeTick) - queue one more pass
-	// for the first real tick, once everything has actually settled.
-	bNeedsPostConstructLayoutRefresh = true;
+	// leave a docked panel's background border a frame stale, or a drag handle sized off a title
+	// text's still-unmeasured GetDesiredSize() (see LayoutGeometrySettleFramesRemaining) - queue
+	// several more passes, not just one, for the next real ticks, once everything has actually settled.
+	LayoutGeometrySettleFramesRemaining = LayoutGeometrySettleFrameCount;
 }
 
 FVector2D UInteriorScreenWidget::GetPanelPosition(EDockPanelId Id) const
@@ -1593,49 +1922,27 @@ FVector2D UInteriorScreenWidget::GetPanelSize(EDockPanelId Id) const
 	return Border ? Border->GetCachedGeometry().GetLocalSize() : FVector2D::ZeroVector;
 }
 
-bool UInteriorScreenWidget::IsScreenPositionOverPanelButton(EDockPanelId Id, const FVector2D& ScreenPosition) const
+FVector2D UInteriorScreenWidget::GetDockDragHandleSize(EDockPanelId Id) const
 {
-	TArray<UWidget*> Widgets;
-	switch (Id)
+	const UTextBlock* TitleText = DockPanelTitleTexts[(int32)Id];
+	if (!TitleText)
 	{
-	case EDockPanelId::Toolbar:
-		// The building switcher used to be part of this panel's own hit-test list - it's now its own
-		// fixed bar outside the dock system entirely, so it's no longer relevant here.
-		Widgets = { SelectModeButton, DrawRoomModeButton, DrawWallModeButton, AddRectModeButton,
-			AddTriangleModeButton, AddCircleModeButton, AddDoorModeButton, AddStairsModeButton,
-			AddElevatorModeButton, AddEscalatorModeButton, GrowRoomButton, ShrinkRoomButton,
-			RotateCCWButton, RotateCWButton };
-		break;
-	case EDockPanelId::Floor:
-		Widgets = { AddFloorButton, RemoveFloorButton, FloorListBox };
-		break;
-	case EDockPanelId::Properties:
-		Widgets = { ConnectsToComboBox, ApplyDoorButton, RoomNameTextBox, ApplyRoomButton, ApplyConnectorButton };
-		for (UCheckBox* CheckBox : FloorCheckboxes)
-		{
-			Widgets.Add(CheckBox);
-		}
-		break;
-	case EDockPanelId::Layers:
-		Widgets = { LayersSearchBox, LayersListBox };
-		break;
-	case EDockPanelId::Navigation:
-		Widgets = { NavSetStartButton, NavSetDestinationButton, NavFindRouteButton, NavClearRouteButton,
-			NavStartRoomComboBox, NavDestinationRoomComboBox };
-		break;
-	case EDockPanelId::Audio:
-		Widgets = { AudioStopAllButton, AudioClickSoundCheckbox, AudioFileListBox };
-		break;
+		// No title text to measure (shouldn't normally happen - every panel including Toolbar now
+		// registers one) - fall back to a plain square.
+		return FVector2D(DockDragHandleSize, DockDragHandleSize);
 	}
-
-	for (const UWidget* Widget : Widgets)
-	{
-		if (Widget && Widget->GetCachedGeometry().IsUnderLocation(ScreenPosition))
-		{
-			return true;
-		}
-	}
-	return false;
+	// GetDesiredSize() is a pre-paint LAYOUT estimate, not what the text actually painted at - it
+	// consistently came in a few pixels narrower/shorter than the real rendered size (observed
+	// cropping the last character or two horizontally, e.g. "Navigation" reading as "Navigatio", and
+	// the text's ascenders poking out above the handle vertically). GetCachedGeometry instead reads
+	// back the text's own actual painted size - same reasoning GetPanelSize already uses
+	// GetCachedGeometry over a layout estimate for the panel Border itself - so this is the real
+	// measured size on both axes, not a guess padded to compensate for one. Clamped to
+	// (DockDragHandleSize, DockDragHandleSize) as a floor purely so a very short title (or one not
+	// painted yet - GetCachedGeometry can still report zero for a few frames right after construction,
+	// see LayoutGeometrySettleFramesRemaining) never shrinks the handle down to something unclickable.
+	const FVector2D TextSize = TitleText->GetCachedGeometry().GetLocalSize();
+	return FVector2D(FMath::Max(TextSize.X, DockDragHandleSize), FMath::Max(TextSize.Y, DockDragHandleSize));
 }
 
 void UInteriorScreenWidget::SetPanelWidth(EDockPanelId Id, float NewWidth)
@@ -1794,6 +2101,15 @@ void UInteriorScreenWidget::TrySnapPanel(EDockPanelId Id)
 
 		DockPanelColumnIndex[(int32)Id] = ColumnIdx;
 		SetPanelWidth(Id, DockPanelWidths[OtherIndex]); // also refreshes content widths + layout
+
+		// See LayoutGeometrySettleFramesRemaining's own comment - Other's Border (e.g. Layers, when
+		// Properties is the one joining) just had its height overridden smaller by the RefreshDockLayout
+		// call inside SetPanelWidth above, and RefreshSplitterLayout (called in that same pass) already
+		// tried to position the new splitter off Other's GetPanelSize - but that still reads whatever
+		// Slate last actually painted, not the just-set override, so the splitter lands off Other's OLD
+		// size. Keep re-running RefreshDockLayout for the next several ticks until Other's geometry has
+		// actually settled to its new size.
+		LayoutGeometrySettleFramesRemaining = LayoutGeometrySettleFrameCount;
 		return;
 	}
 
@@ -1926,6 +2242,21 @@ void UInteriorScreenWidget::RefreshDockLayout()
 				LeftHandleSlot->SetSize(FVector2D(SidebarResizeHandleWidth, PanelHeight));
 				LeftHandleSlot->SetPosition(FVector2D(Column.X - SidebarResizeHandleWidth, RunningY));
 			}
+			if (UBorder* DragHandle = DockDragHandles[Index])
+			{
+				DragHandle->SetVisibility(bPanelVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+			}
+			if (UCanvasPanelSlot* DragHandleSlot = DockDragHandleSlots[Index])
+			{
+				DragHandleSlot->SetSize(GetDockDragHandleSize(PanelId));
+				DragHandleSlot->SetPosition(FVector2D(Column.X + DockPanelBorderPadding[Index], RunningY + DockPanelBorderPadding[Index]));
+			}
+			// Height resize doesn't apply while docked - a column's height always comes from its own
+			// splitter(s)/HeightFractions instead (see DockBottomResizeHandles' own comment).
+			if (UBorder* BottomHandle = DockBottomResizeHandles[Index])
+			{
+				BottomHandle->SetVisibility(ESlateVisibility::Collapsed);
+			}
 
 			RunningY += PanelHeight;
 		}
@@ -1945,7 +2276,17 @@ void UInteriorScreenWidget::RefreshDockLayout()
 			if (USizeBox* Wrapper = Cast<USizeBox>(Border->GetParent()))
 			{
 				Wrapper->SetWidthOverride(DockPanelWidths[Index]);
-				Wrapper->ClearHeightOverride();
+				// DockPanelHeights[Index] > 0 means the user has dragged DockBottomResizeHandles[Index]
+				// at least once - otherwise keep sizing to natural content height, same as before this
+				// existed.
+				if (DockPanelHeights[Index] > 0.f)
+				{
+					Wrapper->SetHeightOverride(DockPanelHeights[Index]);
+				}
+				else
+				{
+					Wrapper->ClearHeightOverride();
+				}
 			}
 		}
 		if ((EDockPanelId)Index == EDockPanelId::Layers)
@@ -1964,7 +2305,11 @@ void UInteriorScreenWidget::RefreshDockLayout()
 		}
 		const FVector2D PanelPos = GetPanelPosition((EDockPanelId)Index);
 		const FVector2D PanelSize = GetPanelSize((EDockPanelId)Index);
-		const float HandleHeight = FMath::Max(PanelSize.Y, DockPanelMinHeight);
+		// Prefers the explicit override (deterministic, just set above) over PanelSize.Y - that reads
+		// Border->GetCachedGeometry(), which is a frame stale right after SetHeightOverride like every
+		// other GetCachedGeometry read in this file, so it wouldn't yet reflect a height just changed
+		// by dragging DockBottomResizeHandles[Index] this same frame.
+		const float HandleHeight = DockPanelHeights[Index] > 0.f ? DockPanelHeights[Index] : FMath::Max(PanelSize.Y, DockPanelMinHeight);
 		if (UCanvasPanelSlot* HandleSlot = DockResizeHandleSlots[Index])
 		{
 			HandleSlot->SetAutoSize(false);
@@ -1980,6 +2325,25 @@ void UInteriorScreenWidget::RefreshDockLayout()
 			LeftHandleSlot->SetAutoSize(false);
 			LeftHandleSlot->SetSize(FVector2D(SidebarResizeHandleWidth, HandleHeight));
 			LeftHandleSlot->SetPosition(FVector2D(PanelPos.X - SidebarResizeHandleWidth, PanelPos.Y));
+		}
+		if (UBorder* DragHandle = DockDragHandles[Index])
+		{
+			DragHandle->SetVisibility(bPanelVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		}
+		if (UCanvasPanelSlot* DragHandleSlot = DockDragHandleSlots[Index])
+		{
+			DragHandleSlot->SetSize(GetDockDragHandleSize((EDockPanelId)Index));
+			DragHandleSlot->SetPosition(FVector2D(PanelPos.X + DockPanelBorderPadding[Index], PanelPos.Y + DockPanelBorderPadding[Index]));
+		}
+		if (UBorder* BottomHandle = DockBottomResizeHandles[Index])
+		{
+			BottomHandle->SetVisibility(bPanelVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		}
+		if (UCanvasPanelSlot* BottomHandleSlot = DockBottomResizeHandleSlots[Index])
+		{
+			BottomHandleSlot->SetAutoSize(false);
+			BottomHandleSlot->SetSize(FVector2D(DockPanelWidths[Index], SidebarResizeHandleWidth));
+			BottomHandleSlot->SetPosition(FVector2D(PanelPos.X, PanelPos.Y + HandleHeight - SidebarResizeHandleWidth * 0.5f));
 		}
 	}
 
@@ -2103,6 +2467,7 @@ const TCHAR* UInteriorScreenWidget::GetDockPanelName(EDockPanelId Id)
 	case EDockPanelId::Layers:     return TEXT("Layers");
 	case EDockPanelId::Navigation: return TEXT("Navigation");
 	case EDockPanelId::Audio:      return TEXT("Audio");
+	case EDockPanelId::Map:        return TEXT("Map");
 	default:                       return TEXT("");
 	}
 }
@@ -2124,14 +2489,35 @@ TSharedPtr<FJsonObject> UInteriorScreenWidget::BuildLayoutSaveData() const
 {
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
 
+	// LayoutVersion 2: every x/y/width/Column.X below is saved as a FRACTION of the viewport size at
+	// save time (x/width relative to ViewportSize.X, y relative to ViewportSize.Y), not raw pixels -
+	// version 1 saved raw pixels, so a layout arranged on one screen and reopened on a different
+	// resolution/aspect ratio (e.g. desktop -> laptop) restored panels at the literal same pixel
+	// coordinates, which could land off-screen or badly overlapping on a smaller/differently-shaped
+	// viewport. ApplyLayoutSaveData/LoadDockLayoutFromDisk key off this field to tell an old-format
+	// (unversioned) save apart from this one - an old save's raw pixels would otherwise be
+	// misinterpreted as fractions (e.g. a saved x of 1850 read as "1850x the viewport width").
+	Root->SetNumberField(TEXT("layoutVersion"), 2);
+
+	// GetReliableCanvasSize, not GetCanvasSize - this specifically must not silently fall back to
+	// GetViewportSize's different coordinate system (see GetReliableCanvasSize's own comment); saving
+	// is always user-triggered well after this screen has painted, so RootCanvas's geometry should
+	// always be valid by then, but if it somehow isn't, skipping the save (matching a version-1 file's
+	// own shape) is far safer than silently writing fractions in the wrong basis.
+	FVector2D ViewportSize;
+	if (!GetReliableCanvasSize(ViewportSize))
+	{
+		return Root;
+	}
+
 	TSharedPtr<FJsonObject> PanelsObject = MakeShared<FJsonObject>();
 	for (int32 Index = 0; Index < NumDockPanels; ++Index)
 	{
 		const FVector2D Position = GetPanelPosition((EDockPanelId)Index);
 		TSharedPtr<FJsonObject> PanelObject = MakeShared<FJsonObject>();
-		PanelObject->SetNumberField(TEXT("x"), Position.X);
-		PanelObject->SetNumberField(TEXT("y"), Position.Y);
-		PanelObject->SetNumberField(TEXT("width"), DockPanelWidths[Index]);
+		PanelObject->SetNumberField(TEXT("x"), Position.X / ViewportSize.X);
+		PanelObject->SetNumberField(TEXT("y"), Position.Y / ViewportSize.Y);
+		PanelObject->SetNumberField(TEXT("width"), DockPanelWidths[Index] / ViewportSize.X);
 		PanelsObject->SetObjectField(GetDockPanelName((EDockPanelId)Index), PanelObject);
 	}
 	Root->SetObjectField(TEXT("panels"), PanelsObject);
@@ -2150,7 +2536,7 @@ TSharedPtr<FJsonObject> UInteriorScreenWidget::BuildLayoutSaveData() const
 		TSharedPtr<FJsonObject> ColumnObject = MakeShared<FJsonObject>();
 		ColumnObject->SetArrayField(TEXT("panels"), PanelNameArray);
 		ColumnObject->SetArrayField(TEXT("fractions"), FractionArray);
-		ColumnObject->SetNumberField(TEXT("x"), Column.X);
+		ColumnObject->SetNumberField(TEXT("x"), Column.X / ViewportSize.X);
 		ColumnsArray.Add(MakeShared<FJsonValueObject>(ColumnObject));
 	}
 	Root->SetArrayField(TEXT("columns"), ColumnsArray);
@@ -2158,14 +2544,23 @@ TSharedPtr<FJsonObject> UInteriorScreenWidget::BuildLayoutSaveData() const
 	return Root;
 }
 
-void UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& Root)
+bool UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& Root)
 {
 	if (!Root.IsValid())
 	{
-		return;
+		return true; // nothing to apply, and nothing worth retrying later either
 	}
 
-	const FVector2D ViewportSize = GetCanvasSize();
+	// GetReliableCanvasSize, not GetCanvasSize - see this function's own header comment for why the
+	// fallback specifically breaks this round trip. Returning false here (instead of falling back)
+	// is what lets the caller retry on a later tick instead of applying positions computed in the
+	// wrong coordinate system.
+	FVector2D ViewportSize;
+	if (!GetReliableCanvasSize(ViewportSize))
+	{
+		return false;
+	}
+
 	const TSharedPtr<FJsonObject>* PanelsObject = nullptr;
 	const bool bHasPanelsObject = Root->TryGetObjectField(TEXT("panels"), PanelsObject);
 	for (int32 Index = 0; Index < NumDockPanels; ++Index)
@@ -2184,20 +2579,46 @@ void UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 			continue;
 		}
 
-		double X = 0.0, Y = 0.0, Width = SidebarMinWidth;
-		(*PanelObject)->TryGetNumberField(TEXT("x"), X);
-		(*PanelObject)->TryGetNumberField(TEXT("y"), Y);
-		(*PanelObject)->TryGetNumberField(TEXT("width"), Width);
+		double XFraction = 0.0, YFraction = 0.0, WidthFraction = SidebarMinWidth / ViewportSize.X;
+		(*PanelObject)->TryGetNumberField(TEXT("x"), XFraction);
+		(*PanelObject)->TryGetNumberField(TEXT("y"), YFraction);
+		(*PanelObject)->TryGetNumberField(TEXT("width"), WidthFraction);
+
+		// Fractions of the CURRENT viewport size (see BuildLayoutSaveData's own comment) - this is what
+		// actually makes a layout saved on one screen reopen sensibly on a different resolution/aspect
+		// ratio, instead of landing at the same raw pixel coordinates.
+		const float Y = (float)(YFraction * ViewportSize.Y);
+		const float ClampedWidth = FMath::Clamp((float)(WidthFraction * ViewportSize.X), SidebarMinWidth, SidebarMaxWidth);
+
+		// XFraction and WidthFraction alone reproduce the exact same right-edge position on any
+		// screen (X/Vp + Width/Vp is scale-invariant) - UNLESS ClampedWidth above actually changed the
+		// width from what WidthFraction*ViewportSize.X would've been (e.g. the same proportional width
+		// that fit on a laptop exceeds SidebarMaxWidth on a much wider desktop monitor and gets clamped
+		// down), which breaks that invariant and opens a gap between the panel and the screen edge it
+		// was touching. IsRightEdgeAnchored recognizes "was touching (or within a hair of) the right
+		// edge when saved" from the fractions alone, and recomputes X from the CURRENT ClampedWidth so
+		// it stays flush - the usual case (no clamping needed) leaves X unchanged either way, since
+		// then ViewportSize.X - ClampedWidth already equals XFraction*ViewportSize.X exactly.
+		constexpr double RightEdgeFractionEpsilon = 0.03;
+		const bool bIsRightEdgeAnchored = (XFraction + WidthFraction) >= (1.0 - RightEdgeFractionEpsilon);
+		const float X = bIsRightEdgeAnchored ? (ViewportSize.X - ClampedWidth) : (float)(XFraction * ViewportSize.X);
 
 		if (UCanvasPanelSlot* PanelSlot = DockPanelCanvasSlots[Index])
 		{
-			// A layout saved before the menu bar existed can have a Y above it but under the bar's
-			// current height (e.g. the old default of 10px) - clamp so a floating panel from an old
-			// save never loads in underneath the bar. Docked panels get repositioned by RefreshDockLayout
-			// right after this anyway, so this only actually matters for floating ones.
-			PanelSlot->SetPosition(FVector2D((float)X, FMath::Max((float)Y, SidebarTopMargin)));
+			// Clamped to stay reachable within the CURRENT viewport regardless of how different its
+			// aspect ratio is from the one this was saved under (fractional scaling alone narrows the
+			// gap but doesn't guarantee it for an extreme ratio change, e.g. ultrawide -> 4:3) -
+			// MinVisiblePanelMargin is how much of the panel must stay on-screen so it's always
+			// draggable back into full view. Also keeps a floating panel below the menu bar, same as
+			// before (a layout saved before the menu bar existed can have a Y above it) - docked panels
+			// get repositioned by RefreshDockLayout right after this anyway, so this only actually
+			// matters for floating ones.
+			constexpr float MinVisiblePanelMargin = 40.f;
+			const float ClampedX = FMath::Clamp(X, 0.f, FMath::Max(0.f, ViewportSize.X - MinVisiblePanelMargin));
+			const float ClampedY = FMath::Clamp(Y, SidebarTopMargin, FMath::Max(SidebarTopMargin, ViewportSize.Y - MinVisiblePanelMargin));
+			PanelSlot->SetPosition(FVector2D(ClampedX, ClampedY));
 		}
-		DockPanelWidths[Index] = FMath::Clamp((float)Width, SidebarMinWidth, SidebarMaxWidth);
+		DockPanelWidths[Index] = ClampedWidth;
 	}
 
 	DockColumns.Reset();
@@ -2245,9 +2666,37 @@ void UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 				continue;
 			}
 
-			double ColumnX = 0.0;
-			(*ColumnObject)->TryGetNumberField(TEXT("x"), ColumnX);
-			NewColumn.X = (float)ColumnX;
+			double ColumnXFraction = 0.0;
+			(*ColumnObject)->TryGetNumberField(TEXT("x"), ColumnXFraction);
+
+			// Same right-edge-anchor reasoning as the floating panel X above (see its own comment) -
+			// the column's rendered width is its first member's (all members share one width via
+			// SetPanelWidth's sibling-sync), already resolved to its final clamped pixel value by the
+			// per-panel loop above. Re-reads that same member's saved width fraction here (not carried
+			// over from that loop, which is scoped per-panel) purely to test whether the column was
+			// flush against the right edge when saved.
+			float ColumnWidth = SidebarMinWidth;
+			bool bColumnIsRightEdgeAnchored = false;
+			if (NewColumn.Panels.Num() > 0)
+			{
+				const EDockPanelId FirstMemberId = NewColumn.Panels[0];
+				ColumnWidth = DockPanelWidths[(int32)FirstMemberId];
+
+				double MemberWidthFraction = 0.0;
+				const TSharedPtr<FJsonObject>* MemberPanelObject = nullptr;
+				if (bHasPanelsObject && (*PanelsObject)->TryGetObjectField(GetDockPanelName(FirstMemberId), MemberPanelObject))
+				{
+					(*MemberPanelObject)->TryGetNumberField(TEXT("width"), MemberWidthFraction);
+				}
+				constexpr double RightEdgeFractionEpsilon = 0.03;
+				bColumnIsRightEdgeAnchored = (ColumnXFraction + MemberWidthFraction) >= (1.0 - RightEdgeFractionEpsilon);
+			}
+			const float ColumnX = bColumnIsRightEdgeAnchored ? (ViewportSize.X - ColumnWidth) : (float)(ColumnXFraction * ViewportSize.X);
+
+			// Same on-screen clamp as the floating panel X above - RefreshDockLayout applies this
+			// directly to every panel docked in the column with no clamping of its own.
+			constexpr float MinVisibleColumnMargin = 40.f;
+			NewColumn.X = FMath::Clamp(ColumnX, 0.f, FMath::Max(0.f, ViewportSize.X - MinVisibleColumnMargin));
 
 			const int32 NewColumnIndex = DockColumns.Add(NewColumn);
 			for (EDockPanelId PanelId : NewColumn.Panels)
@@ -2263,6 +2712,7 @@ void UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 
 	RefreshDockPanelContentWidths();
 	RefreshDockLayout();
+	return true;
 }
 
 void UInteriorScreenWidget::SaveDockLayoutToDisk() const
@@ -2276,12 +2726,12 @@ void UInteriorScreenWidget::SaveDockLayoutToDisk() const
 	FFileHelper::SaveStringToFile(OutputString, *(FPaths::ProjectSavedDir() / TEXT("InteriorEditorLayout.json")));
 }
 
-bool UInteriorScreenWidget::LoadDockLayoutFromDisk()
+bool UInteriorScreenWidget::TryLoadDockLayoutFromFile(const FString& FilePath)
 {
 	FString FileContents;
-	if (!FFileHelper::LoadFileToString(FileContents, *(FPaths::ProjectSavedDir() / TEXT("InteriorEditorLayout.json"))))
+	if (!FFileHelper::LoadFileToString(FileContents, *FilePath))
 	{
-		return false; // nothing saved yet
+		return false; // nothing there
 	}
 
 	TSharedPtr<FJsonObject> Root;
@@ -2291,8 +2741,46 @@ bool UInteriorScreenWidget::LoadDockLayoutFromDisk()
 		return false;
 	}
 
-	ApplyLayoutSaveData(Root);
+	// A file saved before layoutVersion 2 (see BuildLayoutSaveData's own comment) stored raw pixel
+	// positions instead of viewport-relative fractions - reinterpreting those old raw values as
+	// fractions here would be actively wrong (e.g. a saved x of 1850 read as "1850x the viewport
+	// width"), not just imprecise. Treating it as if nothing were saved and falling back to fresh,
+	// resolution-aware defaults (see InitializeDefaultDockLayout's own caller) is the safe choice, and
+	// the layout gets re-saved in the new format the next time it changes anyway.
+	double LayoutVersion = 0.0;
+	if (!Root->TryGetNumberField(TEXT("layoutVersion"), LayoutVersion) || LayoutVersion < 2.0)
+	{
+		return false;
+	}
+
+	// Called this early (from NativeConstruct), RootCanvas's cached geometry is essentially never
+	// valid yet in practice, so this first attempt is expected to return false - held onto so
+	// NativeTick can keep retrying every tick until GetReliableCanvasSize actually succeeds (see
+	// PendingSavedLayoutToReapply's own comment). Skipped entirely on the rare chance this first
+	// attempt already succeeded - nothing left to retry.
+	if (!ApplyLayoutSaveData(Root))
+	{
+		PendingSavedLayoutToReapply = Root;
+	}
+
 	return true;
+}
+
+bool UInteriorScreenWidget::LoadDockLayoutFromDisk()
+{
+	if (TryLoadDockLayoutFromFile(FPaths::ProjectSavedDir() / TEXT("InteriorEditorLayout.json")))
+	{
+		return true;
+	}
+
+	// No per-user save yet (first launch on this machine) - fall back to the team's own shipped
+	// arrangement instead of GetDefaultPanelPosition's generic spread, so a first-time user already
+	// sees the layout the team actually works with. Committed under Data/DefaultLayouts/ (unlike
+	// Saved/, which is gitignored and per-machine) specifically so every machine ships with it, and
+	// stored in the exact same viewport-fraction format as a real save, so it already adapts to
+	// whatever screen this first launch happens to be on rather than being tied to whichever screen it
+	// was originally arranged on.
+	return TryLoadDockLayoutFromFile(FPaths::ProjectDir() / TEXT("Data") / TEXT("DefaultLayouts") / TEXT("DefaultInteriorLayout.json"));
 }
 
 FEventReply UInteriorScreenWidget::HandlePanelMouseButtonDown(EDockPanelId Id, const FPointerEvent& MouseEvent)
@@ -2305,11 +2793,10 @@ FEventReply UInteriorScreenWidget::HandlePanelMouseButtonDown(EDockPanelId Id, c
 		return UWidgetBlueprintLibrary::Unhandled();
 	}
 
+	// No content-vs-background exclusion check needed here any more - this is only ever invoked from
+	// the drag handle's own OnMouseButtonDownEvent (see its bind site, right after ConstructDockPanel),
+	// so reaching this point already means the click landed on the handle, not panel content.
 	const FVector2D ScreenPosition = MouseEvent.GetScreenSpacePosition();
-	if (!Border->GetCachedGeometry().IsUnderLocation(ScreenPosition) || IsScreenPositionOverPanelButton(Id, ScreenPosition))
-	{
-		return UWidgetBlueprintLibrary::Unhandled();
-	}
 
 	USizeBox* Wrapper = Cast<USizeBox>(Border->GetParent());
 	UPanelWidget* CanvasParent = Wrapper ? Wrapper->GetParent() : nullptr;
@@ -2331,7 +2818,9 @@ FEventReply UInteriorScreenWidget::HandlePanelMouseButtonDown(EDockPanelId Id, c
 	// won't reflect that until the next paint - sizing the handle off it right now would use the
 	// stale (still-docked) height for one frame, showing as a gray sliver poking out past the
 	// panel's real new edge. Simplest fix: just hide this panel's own handles for the drag's
-	// duration - HandlePanelMouseButtonUp restores them once the drop has settled.
+	// duration - HandlePanelMouseButtonUp restores them once the drop has settled. Bottom handle
+	// included (previously missed here) - it's exactly as prone to this stale-geometry sliver as the
+	// left/right ones, since it also sizes/positions itself off the panel's own cached geometry.
 	if (UBorder* Handle = DockResizeHandles[Index])
 	{
 		Handle->SetVisibility(ESlateVisibility::Collapsed);
@@ -2339,6 +2828,10 @@ FEventReply UInteriorScreenWidget::HandlePanelMouseButtonDown(EDockPanelId Id, c
 	if (UBorder* LeftHandle = DockLeftResizeHandles[Index])
 	{
 		LeftHandle->SetVisibility(ESlateVisibility::Collapsed);
+	}
+	if (UBorder* BottomHandle = DockBottomResizeHandles[Index])
+	{
+		BottomHandle->SetVisibility(ESlateVisibility::Collapsed);
 	}
 
 	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
@@ -2384,6 +2877,10 @@ FEventReply UInteriorScreenWidget::HandlePanelMouseMove(EDockPanelId Id, const F
 	{
 		LeftHandleSlot->SetPosition(FVector2D(ClampedX - SidebarResizeHandleWidth, ClampedY));
 	}
+	if (UCanvasPanelSlot* DragHandleSlot = DockDragHandleSlots[Index])
+	{
+		DragHandleSlot->SetPosition(FVector2D(ClampedX + DockPanelBorderPadding[Index], ClampedY + DockPanelBorderPadding[Index]));
+	}
 
 	return UWidgetBlueprintLibrary::Handled();
 }
@@ -2405,6 +2902,10 @@ FEventReply UInteriorScreenWidget::HandlePanelMouseButtonUp(EDockPanelId Id, con
 		if (UBorder* LeftHandle = DockLeftResizeHandles[Index])
 		{
 			LeftHandle->SetVisibility(ESlateVisibility::Visible);
+		}
+		if (UBorder* BottomHandle = DockBottomResizeHandles[Index])
+		{
+			BottomHandle->SetVisibility(ESlateVisibility::Visible);
 		}
 		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
 		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
@@ -2531,6 +3032,64 @@ FEventReply UInteriorScreenWidget::HandleLeftResizeMouseButtonUp(EDockPanelId Id
 	return UWidgetBlueprintLibrary::Unhandled();
 }
 
+FEventReply UInteriorScreenWidget::HandleBottomResizeMouseButtonDown(EDockPanelId Id, const FPointerEvent& MouseEvent)
+{
+	const int32 Index = (int32)Id;
+	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !DockBottomResizeHandles[Index])
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	bDockPanelIsResizingHeight[Index] = true;
+	DockPanelResizeStartMouseY[Index] = MouseEvent.GetScreenSpacePosition().Y;
+	// Starts from whatever height the panel is ACTUALLY showing right now (its real painted size),
+	// not DockPanelHeights[Index] directly - that's still 0 ("auto") until this is the panel's first
+	// ever height drag, in which case the natural content height is the only sensible starting point.
+	DockPanelResizeStartHeight[Index] = GetPanelSize(Id).Y;
+	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+	return UWidgetBlueprintLibrary::CaptureMouse(Reply, DockBottomResizeHandles[Index]);
+}
+
+FEventReply UInteriorScreenWidget::HandleBottomResizeMouseMove(EDockPanelId Id, const FPointerEvent& MouseEvent)
+{
+	const int32 Index = (int32)Id;
+	if (!bDockPanelIsResizingHeight[Index])
+	{
+		return UWidgetBlueprintLibrary::Unhandled();
+	}
+
+	if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+	{
+		bDockPanelIsResizingHeight[Index] = false;
+		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
+	}
+
+	// Clamped so the panel's bottom edge can never be dragged past the bottom of the screen, same
+	// on-screen-margin reasoning as HandlePanelMouseMove's own ClampedY.
+	const float ViewportHeight = GetCanvasSize().Y;
+	const float PanelTop = GetPanelPosition(Id).Y;
+	const float MaxHeight = FMath::Max(DockPanelMinHeight, ViewportHeight - PanelTop - SidebarBottomMargin);
+	const float DeltaY = MouseEvent.GetScreenSpacePosition().Y - DockPanelResizeStartMouseY[Index];
+	DockPanelHeights[Index] = FMath::Clamp(DockPanelResizeStartHeight[Index] + DeltaY, DockPanelMinHeight, MaxHeight);
+	RefreshDockLayout();
+
+	return UWidgetBlueprintLibrary::Handled();
+}
+
+FEventReply UInteriorScreenWidget::HandleBottomResizeMouseButtonUp(EDockPanelId Id, const FPointerEvent& MouseEvent)
+{
+	const int32 Index = (int32)Id;
+	if (bDockPanelIsResizingHeight[Index] && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		bDockPanelIsResizingHeight[Index] = false;
+		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
+		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
+	}
+
+	return UWidgetBlueprintLibrary::Unhandled();
+}
+
 FEventReply UInteriorScreenWidget::HandleSplitterMouseButtonDown(int32 SplitterIndex, const FPointerEvent& MouseEvent)
 {
 	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !SplitterHandles.IsValidIndex(SplitterIndex)
@@ -2624,6 +3183,10 @@ FEventReply UInteriorScreenWidget::OnAudioPanelMouseButtonDown(FGeometry MyGeome
 FEventReply UInteriorScreenWidget::OnAudioPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseMove(EDockPanelId::Audio, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnAudioPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonUp(EDockPanelId::Audio, MouseEvent); }
 
+FEventReply UInteriorScreenWidget::OnMapPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonDown(EDockPanelId::Map, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnMapPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseMove(EDockPanelId::Map, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnMapPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonUp(EDockPanelId::Map, MouseEvent); }
+
 FEventReply UInteriorScreenWidget::OnToolbarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Toolbar, MouseEvent); }
@@ -2643,6 +3206,10 @@ FEventReply UInteriorScreenWidget::OnAudioResizeMouseButtonDown(FGeometry MyGeom
 FEventReply UInteriorScreenWidget::OnAudioResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Audio, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnAudioResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Audio, MouseEvent); }
 
+FEventReply UInteriorScreenWidget::OnMapResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Map, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnMapResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Map, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnMapResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Map, MouseEvent); }
+
 FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Toolbar, MouseEvent); }
@@ -2661,6 +3228,33 @@ FEventReply UInteriorScreenWidget::OnNavigationLeftResizeMouseButtonUp(FGeometry
 FEventReply UInteriorScreenWidget::OnAudioLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Audio, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnAudioLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Audio, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnAudioLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Audio, MouseEvent); }
+
+FEventReply UInteriorScreenWidget::OnMapLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Map, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnMapLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Map, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnMapLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Map, MouseEvent); }
+
+FEventReply UInteriorScreenWidget::OnToolbarBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnToolbarBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnToolbarBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonUp(EDockPanelId::Toolbar, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnFloorBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonDown(EDockPanelId::Floor, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnFloorBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseMove(EDockPanelId::Floor, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnFloorBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonUp(EDockPanelId::Floor, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnPropertiesBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonDown(EDockPanelId::Properties, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnPropertiesBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseMove(EDockPanelId::Properties, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnPropertiesBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonUp(EDockPanelId::Properties, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnLayersBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonDown(EDockPanelId::Layers, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnLayersBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseMove(EDockPanelId::Layers, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnLayersBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonUp(EDockPanelId::Layers, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnNavigationBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonDown(EDockPanelId::Navigation, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnNavigationBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseMove(EDockPanelId::Navigation, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnNavigationBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonUp(EDockPanelId::Navigation, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnAudioBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonDown(EDockPanelId::Audio, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnAudioBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseMove(EDockPanelId::Audio, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnAudioBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonUp(EDockPanelId::Audio, MouseEvent); }
+
+FEventReply UInteriorScreenWidget::OnMapBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonDown(EDockPanelId::Map, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnMapBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseMove(EDockPanelId::Map, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnMapBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonUp(EDockPanelId::Map, MouseEvent); }
 
 FEventReply UInteriorScreenWidget::OnSplitter0MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonDown(0, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnSplitter0MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseMove(0, MouseEvent); }
@@ -2734,6 +3328,14 @@ void UInteriorScreenWidget::HandlePreviewModeChanged(bool bIsActive)
 	{
 		IncreaseSpeedButton->SetVisibility(bIsActive ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
+	if (CameraSpeedTextBox)
+	{
+		CameraSpeedTextBox->SetVisibility(bIsActive ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (bIsActive)
+	{
+		RefreshCameraSpeedDisplay();
+	}
 	if (Edit3DModeToggleButton)
 	{
 		Edit3DModeToggleButton->SetVisibility(bIsActive ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
@@ -2763,6 +3365,23 @@ void UInteriorScreenWidget::HandleEdit3DModeChanged(bool bIsEditMode)
 		// View: yellow. Edit: green (same green used elsewhere for an "active" state, e.g.
 		// RefreshModeButtonHighlights/HandlePreviewModeChanged's own ActiveColor).
 		Edit3DModeToggleButton->SetBackgroundColor(bIsEditMode ? FLinearColor(0.2f, 0.75f, 0.3f, 1.f) : FLinearColor(0.8f, 0.7f, 0.1f, 1.f));
+	}
+}
+
+void UInteriorScreenWidget::HandleSnapEnabledChanged(bool bNewSnapEnabled)
+{
+	if (SnapToggleIcon)
+	{
+		const TCHAR* AssetName = bNewSnapEnabled ? TEXT("Icon_SnappingOn") : TEXT("Icon_SnappingOff");
+		const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), AssetName, AssetName);
+		if (UTexture2D* IconTexture = LoadObject<UTexture2D>(nullptr, *IconPath))
+		{
+			SnapToggleIcon->SetBrushFromTexture(IconTexture, false);
+		}
+	}
+	if (SnapToggleButton)
+	{
+		SnapToggleButton->SetToolTip(MakeToolTipWidget(bNewSnapEnabled ? TEXT("Snapping ON [N]") : TEXT("Snapping OFF [N]")));
 	}
 }
 
@@ -3524,6 +4143,19 @@ void UInteriorScreenWidget::OnNavClearRouteClicked()
 			Nav->RequestClearRoute();
 		}
 	}
+
+	// A ComboBoxString only fires OnSelectionChanged when the picked option actually changes - if we
+	// left the old room name showing, picking that SAME room again after Clear Route would silently
+	// do nothing. Clearing the visible selection here lets any room (including the one just cleared)
+	// be picked again right away.
+	if (NavStartRoomComboBox)
+	{
+		NavStartRoomComboBox->ClearSelection();
+	}
+	if (NavDestinationRoomComboBox)
+	{
+		NavDestinationRoomComboBox->ClearSelection();
+	}
 }
 
 void UInteriorScreenWidget::HandleNavigationStateChanged()
@@ -3544,31 +4176,43 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 	static const FLinearColor InactiveButtonColor(0.6f, 0.6f, 0.6f, 1.f);
 	static const FLinearColor ActiveStartColor(0.08f, 0.55f, 0.22f, 1.f);
 	static const FLinearColor ActiveDestinationColor(0.72f, 0.12f, 0.12f, 1.f);
+	static const FLinearColor DropdownUnsetColor(0.f, 0.f, 0.f, 0.f);
 
+	// Whichever of the button / dropdown-frame actually set the point gets the color; the other one
+	// stays neutral, so a glance says whether the current Start/Destination came from clicking the
+	// floor plan or from the room dropdown (see NavStartRoomBorder's own comment).
+	const bool bStartActivelyPicking = Mode == ENavigationSelectionMode::Start;
+	const bool bStartSetViaDropdown = Nav->WasStartSetViaDropdown();
+	const bool bStartSetViaClick = Nav->HasStart() && !bStartSetViaDropdown;
 	if (NavSetStartButton)
 	{
-		// Green while actively picking a start point, and stays green afterward too (once one's
-		// actually set) rather than reverting to gray the instant the point is accepted.
-		const bool bShowSet = Mode == ENavigationSelectionMode::Start || Nav->HasStart();
-		NavSetStartButton->SetBackgroundColor(bShowSet ? ActiveStartColor : InactiveButtonColor);
+		NavSetStartButton->SetBackgroundColor(bStartActivelyPicking || bStartSetViaClick ? ActiveStartColor : InactiveButtonColor);
 	}
 	if (NavSetStartButtonLabel)
 	{
-		NavSetStartButtonLabel->SetText(FText::FromString(Mode == ENavigationSelectionMode::Start
-			? TEXT("Click a Start Location (Cancel)") : TEXT("Set Start")));
+		NavSetStartButtonLabel->SetText(FText::FromString(bStartActivelyPicking
+			? TEXT("Click a Start Location (Cancel)") : TEXT("Click to Set Start")));
 	}
+	if (NavStartRoomBorder)
+	{
+		NavStartRoomBorder->SetBrushColor(bStartSetViaDropdown ? ActiveStartColor : DropdownUnsetColor);
+	}
+
+	const bool bDestActivelyPicking = Mode == ENavigationSelectionMode::Destination;
+	const bool bDestSetViaDropdown = Nav->WasDestinationSetViaDropdown();
+	const bool bDestSetViaClick = Nav->HasDestination() && !bDestSetViaDropdown;
 	if (NavSetDestinationButton)
 	{
-		// Red while actively picking (unchanged), but green (not red) once a destination is actually
-		// set - both buttons read as "green = set" once their own point is in place.
-		const FLinearColor SetColor = Mode == ENavigationSelectionMode::Destination ? ActiveDestinationColor : ActiveStartColor;
-		const bool bShowSet = Mode == ENavigationSelectionMode::Destination || Nav->HasDestination();
-		NavSetDestinationButton->SetBackgroundColor(bShowSet ? SetColor : InactiveButtonColor);
+		NavSetDestinationButton->SetBackgroundColor(bDestActivelyPicking || bDestSetViaClick ? ActiveDestinationColor : InactiveButtonColor);
 	}
 	if (NavSetDestinationButtonLabel)
 	{
-		NavSetDestinationButtonLabel->SetText(FText::FromString(Mode == ENavigationSelectionMode::Destination
-			? TEXT("Click a Destination (Cancel)") : TEXT("Set Destination")));
+		NavSetDestinationButtonLabel->SetText(FText::FromString(bDestActivelyPicking
+			? TEXT("Click a Destination (Cancel)") : TEXT("Click to Set Destination")));
+	}
+	if (NavDestinationRoomBorder)
+	{
+		NavDestinationRoomBorder->SetBrushColor(bDestSetViaDropdown ? ActiveDestinationColor : DropdownUnsetColor);
 	}
 	if (NavFindRouteButton)
 	{
@@ -3595,9 +4239,7 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 		const FString BuildingId = PC->GetLoadedBuildingId();
 		NavContextText->SetText(FText::FromString(BuildingId.IsEmpty()
 			? TEXT("No building loaded")
-			: PC->GetActiveFloor() == 1
-				? FString::Printf(TEXT("Building: %s  |  Viewing Floor 1 + Outside"), *BuildingId)
-				: FString::Printf(TEXT("Building: %s  |  Viewing Floor: %d"), *BuildingId, PC->GetActiveFloor())));
+			: FString::Printf(TEXT("Building: %s  |  Viewing Floor: %d"), *BuildingId, PC->GetActiveFloor())));
 	}
 	if (NavStatusText)
 	{
@@ -3653,6 +4295,52 @@ void UInteriorScreenWidget::OnAudioClickSoundCheckChanged(bool bIsChecked)
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->SetButtonClickSoundEnabled(bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnAudioSelectSoundCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetBuildingSelectSoundEnabled(bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnAudioQuitConfirmSoundCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetQuitConfirmSoundEnabled(bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnAudioMuteAllCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		// bIsChecked means "muted" here, opposite of the three individual "X Sound" checkboxes (which
+		// are checked when ENABLED) - so the three get the inverse, and get visually synced to match.
+		PC->SetAllUiSoundsEnabled(!bIsChecked);
+	}
+	if (AudioClickSoundCheckbox)
+	{
+		AudioClickSoundCheckbox->SetIsChecked(!bIsChecked);
+	}
+	if (AudioSelectSoundCheckbox)
+	{
+		AudioSelectSoundCheckbox->SetIsChecked(!bIsChecked);
+	}
+	if (AudioQuitConfirmSoundCheckbox)
+	{
+		AudioQuitConfirmSoundCheckbox->SetIsChecked(!bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnAudioVolumeChanged(float NewValue)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetMasterVolume(NewValue);
 	}
 }
 
@@ -3996,6 +4684,14 @@ void UInteriorScreenWidget::OnRotateCWReleased()
 	}
 }
 
+void UInteriorScreenWidget::OnSaveClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SaveCurrentProject();
+	}
+}
+
 void UInteriorScreenWidget::OnFileMenuClicked()
 {
 	if (!FileMenuDropdown)
@@ -4044,6 +4740,14 @@ void UInteriorScreenWidget::OnSwitch3DClicked()
 	}
 }
 
+void UInteriorScreenWidget::OnSnapToggleClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->ToggleSnapEnabled();
+	}
+}
+
 void UInteriorScreenWidget::OnResetView3DClicked()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
@@ -4058,6 +4762,7 @@ void UInteriorScreenWidget::OnDecreaseSpeedClicked()
 	{
 		PC->DecreaseMoveSpeed3DPreview();
 	}
+	RefreshCameraSpeedDisplay();
 }
 
 void UInteriorScreenWidget::OnIncreaseSpeedClicked()
@@ -4065,6 +4770,32 @@ void UInteriorScreenWidget::OnIncreaseSpeedClicked()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->IncreaseMoveSpeed3DPreview();
+	}
+	RefreshCameraSpeedDisplay();
+}
+
+void UInteriorScreenWidget::OnCameraSpeedTextCommitted(const FText& NewText, ETextCommit::Type CommitType)
+{
+	if (CommitType != ETextCommit::OnEnter && CommitType != ETextCommit::OnUserMovedFocus)
+	{
+		return;
+	}
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetMoveSpeed3DPreview(FCString::Atof(*NewText.ToString()));
+	}
+	RefreshCameraSpeedDisplay();
+}
+
+void UInteriorScreenWidget::RefreshCameraSpeedDisplay()
+{
+	if (!CameraSpeedTextBox)
+	{
+		return;
+	}
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		CameraSpeedTextBox->SetText(FText::FromString(FString::FromInt(FMath::RoundToInt(PC->GetCameraMoveSpeed()))));
 	}
 }
 
@@ -4193,7 +4924,7 @@ void UInteriorScreenWidget::OnFileLoadClicked()
 	if (!PC->HasUnsavedChanges())
 	{
 		PC->RestoreExteriorCameraView();
-		PC->LoadBuildingDataFromPath(FilePath);
+		PC->LoadBuildingDataFromPathOrDatabase(FilePath);
 		GoToEditScreen();
 		return;
 	}
@@ -4214,7 +4945,7 @@ void UInteriorScreenWidget::HandleFileLoadSave()
 	{
 		PC->SaveCurrentProject();
 		PC->RestoreExteriorCameraView();
-		PC->LoadBuildingDataFromPath(PendingLoadFilePath);
+		PC->LoadBuildingDataFromPathOrDatabase(PendingLoadFilePath);
 	}
 	GoToEditScreen();
 }
@@ -4225,7 +4956,7 @@ void UInteriorScreenWidget::HandleFileLoadDiscard()
 	{
 		PC->DiscardUnsavedChanges();
 		PC->RestoreExteriorCameraView();
-		PC->LoadBuildingDataFromPath(PendingLoadFilePath);
+		PC->LoadBuildingDataFromPathOrDatabase(PendingLoadFilePath);
 	}
 	GoToEditScreen();
 }
@@ -4272,6 +5003,84 @@ void UInteriorScreenWidget::OnWindowAudioCheckChanged(bool bIsChecked)
 	}
 }
 
+void UInteriorScreenWidget::OnWindowMapCheckChanged(bool bIsChecked)
+{
+	SetDockPanelUserHidden(EDockPanelId::Map, !bIsChecked);
+}
+
+void UInteriorScreenWidget::OnRoadHideAllCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetAllRoadsVisible(!bIsChecked);
+	}
+	// Visually sync the 6 category checkboxes to match (checked = shown) - SetIsChecked doesn't
+	// re-fire OnCheckStateChanged, same pattern as OnAudioMuteAllCheckChanged.
+	const bool bCategoriesChecked = !bIsChecked;
+	if (RoadPrimaryCheckbox) RoadPrimaryCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadSecondaryCheckbox) RoadSecondaryCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadResidentialCheckbox) RoadResidentialCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadCyclewayCheckbox) RoadCyclewayCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadFootwayCheckbox) RoadFootwayCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadOtherCheckbox) RoadOtherCheckbox->SetIsChecked(bCategoriesChecked);
+}
+
+void UInteriorScreenWidget::OnRoadPrimaryCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Primary, bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnRoadSecondaryCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Secondary, bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnRoadResidentialCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Residential, bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnRoadCyclewayCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Cycleway, bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnRoadFootwayCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Footway, bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnRoadOtherCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Other, bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnRoadCampusOnlyCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadsAndPOIsWithinCampusOnly(bIsChecked);
+	}
+}
+
 void UInteriorScreenWidget::SetDockPanelUserHidden(EDockPanelId Id, bool bHidden)
 {
 	const int32 Index = (int32)Id;
@@ -4294,6 +5103,14 @@ void UInteriorScreenWidget::SetDockPanelUserHidden(EDockPanelId Id, bool bHidden
 	}
 
 	RefreshDockLayout();
+
+	// A panel that was Collapsed (Audio starts this way - see bDockPanelUserHidden's own init) never
+	// got a real Slate paint pass while hidden, so its title text's GetCachedGeometry is still stale
+	// the FIRST time it's revealed - same underlying cause as LayoutGeometrySettleFramesRemaining's own
+	// comment, just triggered by a visibility change instead of construction. Queue the same retry so
+	// the drag handle picks up the text's real size once it's actually been painted, instead of only
+	// self-correcting on whatever LATER interaction happens to trigger another RefreshDockLayout.
+	LayoutGeometrySettleFramesRemaining = LayoutGeometrySettleFrameCount;
 }
 
 void UInteriorScreenWidget::OnBackClicked()

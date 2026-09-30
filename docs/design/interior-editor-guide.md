@@ -1,13 +1,15 @@
 # Interior Editor — How to Use It
 
-> Current state as of 2026-09-27, branch `YQ_CUI`. The editor now has a real UMG UI
+> Current state as of 2026-09-30, branch `YQ_CUI`. The editor now has a real UMG UI
 > (menu bar, dockable panels, buttons) - every action below also still has a keyboard
 > shortcut, and both do the same thing under the hood.
 
 ## Getting to the interior editor
 
-1. Launch the project, pick **New** (blank) or **Open** (load an existing
-   `buildings.json`) from the start screen.
+1. Launch the project, pick **New** (blank), **Open** (load an existing
+   `buildings.json` or a SQLite `.db` map export - the file picker shows both, and
+   which loader runs is picked automatically from the extension), or **Quit**, from
+   the start screen.
 2. Click a building in the 3D exterior view to select it (plays a short selection
    sound) and **Enter Interior** appears in the exterior screen's own top menu bar
    (see below). Clicking empty space, or clicking the already-selected building again,
@@ -25,22 +27,66 @@ menu bar, same look as the interior editor's:
 
 - **File** — **New**/**Load**, same behavior and unsaved-changes check as the interior
   editor's own File menu below.
-- **Window** — just **Audio** (this screen has no dockable panels to list) — see Audio
-  panel below.
+- **Window** — **Audio** (see Audio panel below) and **Map** (see Map panel below).
+- **Save** — same as `Ctrl+S`, left of File.
 - **Enter Interior**, then **Back** on the far right — Enter Interior only appears once
   a building is selected; Back here returns to the start screen (not to be confused
   with the interior editor's own Back, which returns to *this* screen instead).
+
+Camera: WASD + mouse-look to free-fly, scroll to zoom, **-**/**+** buttons adjust move
+speed. **Reset** snaps the camera back to a framed view of every loaded building;
+**Set Default View** stores the camera's *current* position/angle as that reset target
+instead (persisted to disk, so it survives closing and reopening the project) — for
+tuning what "Reset" snaps back to once you've found an angle you like.
+
+### Map panel (roads, POIs, buildings)
+
+Hidden or shown via Window > Map. Only appears once a database (`.db`) has been loaded
+(roads/POIs/context buildings only come from that loading path - a plain
+`buildings.json` project has nothing for this panel to filter).
+
+**Roads** section:
+
+- **Hide All** — hides every road at once, and visually unchecks the six category
+  boxes below to match. Unchecking it again shows everything (categories reset to
+  checked).
+- **Primary** / **Secondary** / **Residential/Tertiary** / **Cycleway** /
+  **Footway/Path** / **Other** — one checkbox per road category (bucketed from OSM's
+  own finer `highway=` tags); toggling one shows/hides just that category's roads.
+- **Campus Only** — a region/distance filter (not a category): hides every road *and*
+  POI farther than a padded radius from the loaded campus buildings' own extent.
+  Checked by default.
+
+**Buildings** section (exterior screen's Map panel only - the interior editor's own
+copy of this panel is Roads-only, see below):
+
+- **Campus** — shows/hides the real, university-tagged (or adjacency-linked, see
+  below) campus buildings - the ones you can actually enter and edit the interior of.
+- **Non-Campus** — shows/hides every other building loaded from the database, as
+  flat gray placeholder blocks (visual context for the surrounding area only - not
+  interior-editable, not clickable to enter). Unchecked by default.
+
+**Why some non-`university`-tagged buildings are still enterable:** loading a
+database doesn't just take the buildings tagged `university` - it also pulls in any
+building whose footprint physically touches (or nearly touches, within a small
+tolerance) one already in the campus set, repeating until nothing new joins. This
+catches covered walkways/bridges and a few buildings mapped under a different OSM
+type that are really part of the same connected campus structure, so they don't get
+left out as inert placeholder blocks.
 
 ## Top menu bar
 
 Pinned across the very top of the interior editor screen.
 
+- **Save** — same as `Ctrl+S`, left of File.
 - **File** — **New** clears everything and starts a blank project; **Load** opens the
-  OS file picker for an existing `buildings.json`. Both check for unsaved changes first
-  and prompt to save/discard/cancel, exactly like leaving to the exterior does.
-- **Window** — a checklist of the six dockable panels (Toolbar/Floor/Properties/
-  Layers/Navigation/Audio, see below). Unchecking one hides it; re-checking shows it
-  again. Audio (unlike the other five) starts unchecked/hidden.
+  OS file picker for an existing `buildings.json` or `.db`. Both check for unsaved
+  changes first and prompt to save/discard/cancel, exactly like leaving to the
+  exterior does.
+- **Window** — a checklist of the seven dockable panels (Toolbar/Floor/Properties/
+  Layers/Navigation/Audio/Map, see below). Unchecking one hides it; re-checking shows
+  it again. Audio and Navigation start unchecked/hidden; the other five (Map included)
+  start visible.
 - **Back**, on the right — same as described above.
 
 ## Building switcher bar
@@ -50,14 +96,16 @@ loaded project — pick one to jump straight into its interior without going bac
 exterior first (switching buildings while in 3D preview exits back to 2D first). The
 pencil icon next to it lets you rename the currently-loaded building in place.
 
-Further right on the same row: **2D**/**3D** toggles the preview mode (see below);
-**Reset** and the **-**/**+** move-speed buttons, and a **View**/**Edit** toggle, only
-appear while in 3D preview (View/Edit is covered in the 3D preview section below).
+Further right on the same row: **2D**/**3D** toggles the preview mode (see below); a
+**Snapping** toggle icon button (same on/off as pressing `N` - see Snapping below), only
+here, not on the exterior screen; **Reset** and the **-**/**+** move-speed buttons, and
+a **View**/**Edit** toggle, only appear while in 3D preview (View/Edit is covered in the
+3D preview section below).
 
 ## Dockable panels
 
-Six panels — **Toolbar**, **Floor**, **Properties**, **Layers**, **Navigation**,
-**Audio** — can each be:
+Seven panels — **Toolbar**, **Floor**, **Properties**, **Layers**, **Navigation**,
+**Audio**, **Map** — can each be:
 
 - **Moved**: drag by the panel's own background (not one of its buttons).
 - **Resized**: drag either its left or right edge.
@@ -128,8 +176,8 @@ resets both endpoints.
 
 ### Audio panel
 
-Hidden by default (Window > Audio to show it). Lists every file under
-`InNavi/Data/Audio/` (mp3 or wav) with its own **Play** button — click to start it,
+Hidden by default (Window > Audio to show it). Lists every wav file under
+`InNavi/Data/Audio/` with its own **Play** button — click to start it,
 click again while it's playing to see it highlighted green; **Stop All** halts
 everything at once. Multiple files can play together (e.g. background music plus an
 effect). A **Button Click Sound** checkbox mutes/unmutes the short click sound every
@@ -138,6 +186,13 @@ here and the identical one in the exterior edit screen's own Audio panel both re
 write the same underlying flag, so toggling it in one place is reflected in the other
 next time that panel is opened). Leaving all the way back to the start screen stops any
 audio still playing.
+
+### Map panel
+
+Same Roads section as the exterior screen's own Map panel (Hide All, the six road
+categories, Campus Only) - see its description under **Exterior edit screen** above.
+No Buildings section here - campus/non-campus building visibility isn't something you'd
+toggle from inside a building's own interior.
 
 ## 3D preview mode
 
@@ -199,16 +254,21 @@ you have unsaved changes.
 
 ## Audio feedback
 
-Two kinds, both backed by mp3 files under `InNavi/Data/Audio/` (playback via a vendored
-third-party plugin, `RuntimeAudioImporter` — UE 5.8's own Media Framework dropped mp3
-support):
+Three kinds, all backed by wav files under `InNavi/Data/Audio/` (read and decoded by
+this project's own small WAV reader, `WavFileLoader.h` — no third-party plugin; an
+earlier pass vendored one for mp3 support, removed once the professor confirmed
+wav-only playback is sufficient, including for the Audio panel's own arbitrary-file
+playback):
 
-- **Button click sound** (`click_button.mp3`) — every button in the app plays this on
+- **Button click sound** (`click_button.wav`) — every button in the app plays this on
   click. Mute it from either screen's own Audio panel (see above) — it's one shared
   setting, not per-screen.
-- **Building selection sound** (`select_ui.mp3`) — plays only when clicking newly
+- **Building selection sound** (`select_ui.wav`) — plays only when clicking newly
   selects a building in the exterior 3D view (not on deselect, and not tied to the
   click-sound mute above).
+- **Unsaved-changes dialog sound** (`quit_confirm.wav`) — plays once, the instant the
+  Save/Discard/Cancel dialog itself appears (Back, File > New, File > Load, switching
+  buildings — anywhere unsaved changes trigger it), not tied to any of its buttons.
 
 Both are separate from the Audio panel's own file list, which is for playing back
 arbitrary files under `Data/Audio/` on demand (background music, effects, etc.).

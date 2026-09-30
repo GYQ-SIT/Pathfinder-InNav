@@ -7,13 +7,6 @@
 #include "KismetProceduralMeshLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
-namespace
-{
-	const FLinearColor WallNormalColor(0.85f, 0.85f, 0.82f);
-	const FLinearColor FloorNormalColor(0.55f, 0.55f, 0.58f);
-	const FLinearColor HighlightColor(0.55f, 1.0f, 0.6f);
-}
-
 AInteriorRoom::AInteriorRoom()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -241,7 +234,7 @@ void AInteriorRoom::RebuildMesh()
 		if (BaseMat)
 		{
 			DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
-			DynMaterial->SetVectorParameterValue(TEXT("Color"), WallNormalColor);
+			DynMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.85f, 0.85f, 0.82f));
 		}
 	}
 	MeshComp->SetMaterial(0, DynMaterial);
@@ -299,7 +292,7 @@ void AInteriorRoom::RebuildMesh()
 			if (BaseMat)
 			{
 				FloorDynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
-				FloorDynMaterial->SetVectorParameterValue(TEXT("Color"), FloorNormalColor);
+				FloorDynMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.55f, 0.55f, 0.58f));
 			}
 		}
 		MeshComp->SetMaterial(1, FloorDynMaterial);
@@ -316,10 +309,10 @@ void AInteriorRoom::SetHighlighted(bool bHighlighted)
 {
 	if (DynMaterial)
 	{
-		DynMaterial->SetVectorParameterValue(TEXT("Color"), bHighlighted ? HighlightColor : WallNormalColor);
+		DynMaterial->SetVectorParameterValue(TEXT("Color"), bHighlighted ? FLinearColor(0.55f, 1.0f, 0.6f) : FLinearColor(0.85f, 0.85f, 0.82f));
 	}
 	if (FloorDynMaterial)
 	{
-		FloorDynMaterial->SetVectorParameterValue(TEXT("Color"), bHighlighted ? HighlightColor : FloorNormalColor);
+		FloorDynMaterial->SetVectorParameterValue(TEXT("Color"), bHighlighted ? FLinearColor(0.55f, 1.0f, 0.6f) : FLinearColor(0.55f, 0.55f, 0.58f));
 	}
 }

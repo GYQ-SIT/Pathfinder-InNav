@@ -7,7 +7,6 @@
 
 class ABuildingGenerator;
 class AInteriorGenerator;
-class APolyBuilding;
 class UBorder;
 
 UENUM(BlueprintType)
@@ -40,11 +39,6 @@ class INNAVI_API UNavigationPanelWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	// Route points on floor zero represent the outside/campus part of a journey. Floors one and
-	// above remain indoor building floors. This is the UI contract Person A's combined planner can
-	// return without adding an Unreal-reflected enum to the existing route data structure.
-	static constexpr int32 OutdoorFloor = 0;
-
 	UFUNCTION(BlueprintPure, Category = "Navigation")
 	ENavigationSelectionMode GetSelectionMode() const { return SelectionMode; }
 
@@ -60,13 +54,13 @@ public:
 	const FNavigationRoutePoint& GetStart() const { return Start.Point; }
 	const FNavigationRoutePoint& GetDestination() const { return Destination.Point; }
 	const TArray<FNavigationRoutePoint>& GetRoutePoints() const { return RoutePoints; }
-	bool IsStartOutside() const { return Start.bValid && Start.Point.Floor == OutdoorFloor; }
-	bool IsDestinationOutside() const { return Destination.bValid && Destination.Point.Floor == OutdoorFloor; }
 
-	// Shared with the floor-plan view so the highlighted outdoor area and the clickable outdoor
-	// area always use the same bounds. Coordinates are unscaled footprint coordinates.
-	static FBox2D GetOutdoorBounds(const APolyBuilding& Building);
-	static bool IsOutdoorPoint(const APolyBuilding& Building, FVector2D Point);
+	// Which of the two equivalent ways of setting an endpoint was used last - the Navigation panel's
+	// room dropdown (SetStartToRoom/SetDestinationToRoom) or clicking a point on the floor plan
+	// (SelectPoint). Lets the panel highlight whichever control actually set it, instead of always
+	// highlighting the button. Meaningless (returns false) if that endpoint isn't set at all.
+	bool WasStartSetViaDropdown() const { return Start.bValid && Start.bSetViaDropdown; }
+	bool WasDestinationSetViaDropdown() const { return Destination.bValid && Destination.bSetViaDropdown; }
 
 	// Former OnXClicked handlers, renamed and made public now that they're called from
 	// UInteriorScreenWidget's own buttons instead of being bound to widgets this class
@@ -79,11 +73,6 @@ public:
 	void RequestFindRoute();
 	UFUNCTION(BlueprintCallable, Category = "Navigation")
 	void RequestClearRoute();
-
-	// Presentation seam for Person A's combined planner. Its result may contain floor-zero outdoor
-	// points and indoor floor points; the floor-plan and directions render both from this one array.
-	// Kept as a C++ method because FNavigationRouteResult is intentionally not a reflected type.
-	void ApplyRouteResult(const FNavigationRouteResult& Result);
 
 	// What UInteriorScreenWidget's Navigation panel needs to display itself - kept here
 	// rather than duplicated on the display side, since some of it (CanFindRoute) needs
@@ -149,19 +138,10 @@ protected:
 	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 
 private:
-	struct FSelectedEndpoint
-	{
-		bool bValid = false;
-		FNavigationRoutePoint Point;
-		FString BuildingId;
-	};
-
 	void SetSelectionMode(ENavigationSelectionMode NewMode);
 	void SetStatusMessage(const FString& Message, ENavigationMessageKind Kind);
 	void BroadcastStateChanged();
 	bool SetEndpointToRoom(const FString& RoomOptionLabel, bool bIsStart);
-	void SetEndpoint(FSelectedEndpoint& Endpoint, const FNavigationRoutePoint& Point,
-		const FString& BuildingId, const FString& EndpointName, const FString& LocationDescription);
 
 	UPROPERTY()
 	UBorder* HitTestBorder = nullptr;
@@ -171,6 +151,14 @@ private:
 
 	UPROPERTY()
 	AInteriorGenerator* Interior = nullptr;
+
+	struct FSelectedEndpoint
+	{
+		bool bValid = false;
+		FNavigationRoutePoint Point;
+		FString BuildingId;
+		bool bSetViaDropdown = false;
+	};
 
 	FSelectedEndpoint Start;
 	FSelectedEndpoint Destination;

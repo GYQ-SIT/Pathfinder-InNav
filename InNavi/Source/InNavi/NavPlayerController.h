@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "InteriorTypes.h"
+#include "RoadSegmentActor.h"
 #include "NavPlayerController.generated.h"
 
 class APolyBuilding;
@@ -13,16 +14,11 @@ class AInteriorGenerator;
 class AInteriorRoom;
 class AInteriorConnectorMarker;
 class UNavigationPanelWidget;
-class UImportedSoundWave;
 class UAudioComponent;
-class URuntimeAudioImporterLibrary;
 
-// One currently-playing (or still-decoding) audio file (see PlayAudioFile/StopAllAudio).
-// SoundWave/AudioComponent stay null between the initial PlayAudioFile call and the async decode
-// actually finishing (see PlayAudioFile's own OnResultNative lambda) - IsAudioFilePlaying and
-// PruneFinishedAudioPlaybacks both treat a null AudioComponent as "still pending", not "finished".
-// UImportedSoundWave is a plain UObject (not an ActorComponent like UAudioComponent), so it needs its
-// own UPROPERTY reference here to survive garbage collection while playing.
+// One currently-playing audio file (see PlayAudioFile/StopAllAudio). AudioComponent already keeps
+// its own USoundWaveProcedural alive via its own Sound UPROPERTY, so there's no need to separately
+// track the sound wave here too.
 USTRUCT()
 struct FActiveAudioPlayback
 {
@@ -30,9 +26,6 @@ struct FActiveAudioPlayback
 
 	UPROPERTY()
 	FString FileName;
-
-	UPROPERTY()
-	UImportedSoundWave* SoundWave = nullptr;
 
 	UPROPERTY()
 	UAudioComponent* AudioComponent = nullptr;
@@ -108,6 +101,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOn3DPreviewModeChanged, bool, bIsAc
 // UInteriorScreenWidget's View/Edit button is already hidden at that point (see
 // HandlePreviewModeChanged) and just re-syncs to View the next time 3D preview is re-entered.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEdit3DModeChanged, bool, bIsEditMode);
+// Broadcast whenever vertex snapping is toggled (see ToggleSnapEnabled) - bIsEnabled is the new
+// state. UInteriorScreenWidget listens to update its snap toggle button's icon, since snapping can
+// also be toggled from the N key, not just that button (defensive symmetry with every other
+// PC-state delegate here).
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSnapEnabledChanged, bool, bIsEnabled);
 
 UCLASS()
 class INNAVI_API ANavPlayerController : public APlayerController
@@ -142,6 +140,10 @@ public:
 	// See FOnEdit3DModeChanged above.
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")
 	FOnEdit3DModeChanged OnEdit3DModeChanged;
+
+	// See FOnSnapEnabledChanged above.
+	UPROPERTY(BlueprintAssignable, Category = "Feedback")
+	FOnSnapEnabledChanged OnSnapEnabledChanged;
 
 	// Whether the interior editor is currently showing the 3D preview (an oblique view of the real
 	// spawned geometry, current building/floor only) instead of the 2D floor-plan overlay. View-only
@@ -185,6 +187,32 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void DecreaseMoveSpeed3DPreview();
 
+	// Same idea as IncreaseMoveSpeed3DPreview/DecreaseMoveSpeed3DPreview, but for the exterior view's
+	// own free-fly camera (see FocusCameraOnAllBuildings) - a separate pair, not a reuse of those two,
+	// because the exterior's usable speed range is far wider (a hand-placed campus vs. a real-world-
+	// scale database-loaded one can differ by 40x) and steps multiplicatively instead of by a fixed
+	// amount so a single click still feels meaningful at either end of that range.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void IncreaseCameraSpeedExterior();
+
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void DecreaseCameraSpeedExterior();
+
+	// Sets the exterior camera's speed to an exact value (typed into a speed box) rather than
+	// stepping it - clamped the same as IncreaseCameraSpeedExterior/DecreaseCameraSpeedExterior.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetCameraSpeedExterior(float NewSpeed);
+
+	// Same idea for 3D preview's own speed box.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void SetMoveSpeed3DPreview(float NewSpeed);
+
+	// Reads the free-fly pawn's current WASD/camera speed - shared by both the exterior page's and
+	// 3D preview's speed display so each stays in sync with whatever last changed it (+/-, typing a
+	// value, or the auto-computed default on load). 0 if there's no pawn/movement component yet.
+	UFUNCTION(BlueprintPure, Category = "Camera")
+	float GetCameraMoveSpeed() const;
+
 	// Plan A (freehand footprint). Callable from Blueprint/UMG as well as the B key, so a UI
 	// button can drive this directly once one exists (e.g. for mobile, where there's no keyboard).
 	UFUNCTION(BlueprintCallable, Category = "Building")
@@ -208,9 +236,11 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Building")
 	FOnFootprintPointCountChanged OnFootprintPointCountChanged;
 
-	// Opens the OS "open file" dialog filtered to .json and returns the path the user picked (empty
-	// string if they cancelled). Doesn't load anything - pairs with LoadBuildingDataFromPath so UI
-	// can show the picked path (e.g. in a text box) before the user commits to loading it.
+	// Opens the OS "open file" dialog filtered to .json and .db (one combined filter, not a format
+	// picker) and returns the path the user picked (empty string if they cancelled). Doesn't load
+	// anything - pairs with LoadBuildingDataFromPathOrDatabase, which dispatches on the picked path's
+	// own extension, so UI can show the picked path (e.g. in a text box) before the user commits to
+	// loading it.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	FString BrowseForBuildingDataFile();
 
@@ -222,6 +252,31 @@ public:
 	// Returns how many buildings were spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingDataFromPath(const FString& FilePath);
+
+	// Second, database-backed way to load exterior buildings - see
+	// ABuildingGenerator::LoadBuildingsFromDatabase for the schema/coordinate-conversion details.
+	// Same clear-first behavior as LoadBuildingDataFromPath, but does NOT set CurrentProjectFilePath
+	// (see its own comment for why) - a database-loaded project needs an explicit Save As before
+	// Ctrl+S has anywhere to write. Returns how many buildings were spawned.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	int32 LoadBuildingDataFromDatabase(const FString& DatabasePath);
+
+	// What BrowseForBuildingDataFile's callers should call with whatever path the (now dual-format)
+	// file picker returned, instead of picking a loader themselves - dispatches to
+	// LoadBuildingDataFromDatabase for a ".db" path, LoadBuildingDataFromPath for anything else (kept
+	// as the default so an unrecognized/missing extension still gets the same "not valid JSON" error
+	// it always did, rather than a new, less informative failure mode). Returns how many buildings
+	// were spawned.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	int32 LoadBuildingDataFromPathOrDatabase(const FString& FilePath);
+
+	// ABuildingGenerator::GetScale() pass-through, defaulting to 1 if no BuildingGenerator is placed
+	// in the level - what any footprint-space size/distance constant (snap tolerance, prefab room
+	// size, etc.) should divide by to convert to a fixed WORLD size, instead of assuming footprint
+	// units are already sanely sized (see PlacePrefabRoomAt's own comment - that assumption breaks
+	// for a database-loaded building, where Scale is much larger than buildings.json's own ~10).
+	UFUNCTION(BlueprintPure, Category = "Building")
+	float GetBuildingScale() const;
 
 	// The "New" button should call this before switching to the edit screen: destroys every
 	// currently-spawned building/interior and resets back to a blank project (no file path, no
@@ -359,6 +414,53 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	bool IsSnapEnabled() const { return bSnapEnabled; }
+
+	// Debug helper for tuning FocusCameraOnAllBuildings' default exterior view - fly the free-fly
+	// camera to wherever looks right, press G, and read the pawn's Location/Rotation off the Output
+	// Log (and on-screen) to hardcode as the new default. Not gated to any particular screen/mode.
+	UFUNCTION(BlueprintCallable, Category = "Camera")
+	void LogCameraTransform();
+
+	// What the exterior page's Reset button calls - just FocusCameraOnAllBuildings under a public
+	// name, since that's private (also called automatically after New/Open). Not named
+	// ResetExteriorCameraView to avoid confusion with the existing, unrelated
+	// RestoreExteriorCameraView (unwinds interior-editing camera/mode state on Back, not a "reset to
+	// default view" at all despite the similar name).
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void ResetExteriorCameraToDefaultView();
+
+	// What the exterior page's "set current as default" button calls - reads back the free-fly
+	// camera's current pitch/yaw and its distance from the loaded campus's own center as a fraction of
+	// the campus's own span (not a raw world position, which would only make sense for this exact
+	// campus - see ApplyExteriorCameraSpeed's own reasoning for the same "ratio, not raw value" idea),
+	// stores them as the new ExteriorDefaultView.../persists to disk, and FocusCameraOnAllBuildings
+	// picks them up from then on. No-op (with OnActionFailed) if nothing is loaded to measure against.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetCurrentViewAsDefaultExterior();
+
+	// Passthrough to Generator->SetRoadCategoryVisible - what the exterior page's road-filter panel
+	// checkboxes call.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetRoadCategoryVisible(ERoadCategory Category, bool bVisible);
+
+	// Passthrough to Generator->SetAllRoadsVisible - what the filter panel's master "Hide All"
+	// checkbox calls.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetAllRoadsVisible(bool bVisible);
+
+	// What the exterior page's "Campus Only" checkbox calls. Computes the campus's own bounding
+	// center/radius from the loaded (university-only) buildings via ComputeAllBuildingsBounds, then
+	// forwards Center and a padded radius to Generator->SetRoadsAndPOIsWithinCampusOnly. No-op if
+	// nothing is loaded yet.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetRoadsAndPOIsWithinCampusOnly(bool bEnable);
+
+	// Passthroughs to Generator->SetCampusBuildingsVisible/SetNonCampusBuildingsVisible - what the
+	// filter panel's two building-visibility checkboxes call.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetCampusBuildingsVisible(bool bVisible);
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetNonCampusBuildingsVisible(bool bVisible);
 
 	UPROPERTY(BlueprintAssignable, Category = "Interior")
 	FOnSelectModeChanged OnSelectModeChanged;
@@ -791,7 +893,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Room")
 	void StopRotateCW();
 
-	// Lists every playable audio file (.mp3/.wav) currently sitting in InNavi/Data/Audio/ - just
+	// Lists every playable audio file (.wav) currently sitting in InNavi/Data/Audio/ - just
 	// filenames, sorted, for the Audio panel to list (mirrors the Data/ folder convention
 	// buildings.json already uses - a raw folder next to the .uproject, not imported UE assets).
 	// Rescans the folder on every call rather than caching it, so a file dropped in while the app is
@@ -800,14 +902,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	TArray<FString> GetAvailableAudioFiles() const;
 
-	// Starts playing FileName (one of GetAvailableAudioFiles' own results) - decoded asynchronously by
-	// the vendored RuntimeAudioImporter plugin (InNavi/Plugins/RuntimeAudioImporter/, MIT licensed; see
-	// InNavi.uproject) into a UImportedSoundWave, then played through a UAudioComponent. Not the
-	// engine's own Media Framework (WmfMedia) - that was tried first but UE 5.8's WmfMedia has dropped
-	// mp3 support entirely (a known engine regression). No-op (returns false) if FileName is already
-	// playing/decoding (see IsAudioFilePlaying) or doesn't exist. Multiple different files can play at
-	// once, each with its own UAudioComponent (see FActiveAudioPlayback) - Play the same file again
-	// once it's finished (or after StopAllAudio) to replay it.
+	// Starts playing FileName (one of GetAvailableAudioFiles' own results) - see PlayWavFile, which
+	// does the actual loading/playing. No-op (returns false) if FileName is already playing (see
+	// IsAudioFilePlaying) or doesn't exist. Multiple different files can play at once, each with its
+	// own UAudioComponent (see FActiveAudioPlayback) - Play the same file again once it's finished
+	// (or after StopAllAudio) to replay it.
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	bool PlayAudioFile(const FString& FileName);
 
@@ -818,16 +917,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Audio")
 	bool IsAudioFilePlaying(const FString& FileName) const;
 
-	// Plays a short click sound (InNavi/Data/Audio/click_button.mp3) - bound to every button's own
+	// Plays a short click sound (InNavi/Data/Audio/click_button.wav) - bound to every button's own
 	// OnClicked across the app (see each screen/row widget's own PlayButtonClickSound wrapper method,
 	// which forwards here, bound right alongside that button's own specific handler) so clicking
-	// anything gives the same audible feedback. Decodes a fresh, independent UImportedSoundWave on
-	// every call via PlaySound2D (same pattern as PlayAudioFile, just without tracking it in
-	// ActiveAudioPlaybacks - a click sound is fire-and-forget, nothing to stop early or list as
-	// "playing"). Deliberately does NOT cache/reuse one decoded instance across clicks - an earlier
-	// version did, and it crashed the editor: UImportedSoundWave tracks its own playback
-	// read-position internally, so two overlapping plays sharing one instance (e.g. rapid clicking)
-	// corrupt that state.
+	// anything gives the same audible feedback. Fire-and-forget - see PlayWavFile/PlayShortSoundEffect,
+	// which auto-destroy the UAudioComponent once the clip finishes, nothing to stop early or list as
+	// "playing".
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void PlayButtonClickSound();
 
@@ -841,15 +936,52 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void SetButtonClickSoundEnabled(bool bEnabled) { bButtonClickSoundEnabled = bEnabled; }
 
-	// Plays a short selection sound (InNavi/Data/Audio/select_ui.mp3) - called from
+	// Plays a short selection sound (InNavi/Data/Audio/select_ui.wav) - called from
 	// SelectBuildingUnderCursor only when a click newly selects an exterior building (not on deselect,
 	// and not for anything selected inside the interior editor - rooms/doors/connectors have their own
 	// selection flow entirely separate from this one). Same fresh-decode-every-call pattern as
-	// PlayButtonClickSound (see its own comment for why), and likewise not gated by
-	// bButtonClickSoundEnabled - that flag is specifically the button-click-sound mute, not a general
-	// UI-sound mute.
+	// PlayButtonClickSound (see its own comment for why).
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void PlayBuildingSelectSound();
+
+	// See IsButtonClickSoundEnabled/SetButtonClickSoundEnabled's own comment - same idea, own flag.
+	UFUNCTION(BlueprintPure, Category = "Audio")
+	bool IsBuildingSelectSoundEnabled() const { return bBuildingSelectSoundEnabled; }
+
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void SetBuildingSelectSoundEnabled(bool bEnabled) { bBuildingSelectSoundEnabled = bEnabled; }
+
+	// Plays a short notification sound (InNavi/Data/Audio/quit_confirm.wav) - called once from
+	// UConfirmDialogWidget::NativeConstruct, so it plays the instant the Save/Discard/Cancel dialog
+	// appears (leaving via Back, File > New, File > Load, switching buildings - anywhere
+	// HasUnsavedChanges() triggers it), not tied to any button click inside it. Same fresh-decode-
+	// every-call pattern as the other short sound effects.
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void PlayQuitConfirmSound();
+
+	// See IsButtonClickSoundEnabled/SetButtonClickSoundEnabled's own comment - same idea, own flag.
+	UFUNCTION(BlueprintPure, Category = "Audio")
+	bool IsQuitConfirmSoundEnabled() const { return bQuitConfirmSoundEnabled; }
+
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void SetQuitConfirmSoundEnabled(bool bEnabled) { bQuitConfirmSoundEnabled = bEnabled; }
+
+	// Backs the Audio panel's "Mute All" checkbox - sets all three UI-sound flags
+	// (click/select/quit-confirm) to bEnabled at once, e.g. SetAllUiSoundsEnabled(false) to mute
+	// everything in one call. Deliberately doesn't track "what was on before" - un-muting always turns
+	// all three back on, rather than restoring whatever subset was on before muting.
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void SetAllUiSoundsEnabled(bool bEnabled);
+
+	// Multiplies the volume of every sound this class plays (the Audio panel's own file playback and
+	// all three short UI effects) - see PlayWavFile, which applies this to every UAudioComponent it
+	// creates. Clamped to [0, 1]. Live-updates every currently-playing ActiveAudioPlaybacks entry too,
+	// so dragging the Audio panel's volume slider is heard immediately, not just on the next play.
+	UFUNCTION(BlueprintPure, Category = "Audio")
+	float GetMasterVolume() const { return MasterVolume; }
+
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void SetMasterVolume(float NewVolume);
 
 protected:
 	virtual void BeginPlay() override;
@@ -1074,6 +1206,36 @@ private:
 	// buildings yet (a blank new project), just raises the camera above the origin instead.
 	void FocusCameraOnAllBuildings();
 
+	// Shared by FocusCameraOnAllBuildings/IncreaseCameraSpeedExterior/DecreaseCameraSpeedExterior/
+	// SetCameraSpeedExterior - clamps NewSpeed and applies it as MaxSpeed, and scales
+	// Acceleration/Deceleration to match (see its own .cpp comment for why that second part matters).
+	void ApplyExteriorCameraSpeed(float NewSpeed);
+
+	// The footprint-bounds-to-world-space Center/Span computation FocusCameraOnAllBuildings and
+	// SetCurrentViewAsDefaultExterior both need (the same math GetBuildingFootprintBounds does for a
+	// single building, just across every loaded one). Returns false (leaving OutCenter/OutSpan
+	// untouched) if Generator is unset or nothing is loaded.
+	bool ComputeAllBuildingsBounds(FVector2D& OutCenter, float& OutSpan) const;
+
+	// See SetCurrentViewAsDefaultExterior's own comment - loaded once in BeginPlay, saved by that
+	// function. Tries Saved/ExteriorEditorLayout.json first (same Saved-dir/per-machine convention as
+	// UInteriorScreenWidget's own InteriorEditorLayout.json), then falls back to the team's shipped
+	// Data/DefaultLayouts/DefaultExteriorLayout.json if no per-user save exists yet.
+	void LoadExteriorCameraDefaultFromDisk();
+	void SaveExteriorCameraDefaultToDisk() const;
+
+	// Shared by LoadExteriorCameraDefaultFromDisk for both paths above - same file format either way,
+	// just a different path. Returns false (leaving the ExteriorDefaultView... members untouched) if
+	// FilePath doesn't exist or doesn't parse.
+	bool TryLoadExteriorCameraDefaultFromFile(const FString& FilePath);
+
+	// Defaults match the values FocusCameraOnAllBuildings shipped with before this became overridable
+	// (see its own history) - overwritten by LoadExteriorCameraDefaultFromDisk if a save exists.
+	float ExteriorDefaultViewPitch = -40.3f;
+	float ExteriorDefaultViewYaw = 270.1f;
+	float ExteriorDefaultViewDistanceRatio = 0.38f;
+	static constexpr float ExteriorDefaultViewMinDistance = 2000.f;
+
 	// Shared by PositionCameraForFloor and PositionCameraFor3DPreview - both need the same
 	// footprint-bounds-to-world-space Center/Span computation, just for different camera poses.
 	void GetBuildingFootprintBounds(APolyBuilding* Building, FVector2D& OutCenter, float& OutSpan) const;
@@ -1199,6 +1361,13 @@ private:
 	static constexpr float ThreeDPreviewMinMoveSpeed = 200.f;
 	static constexpr float ThreeDPreviewMaxMoveSpeed = 5000.f;
 
+	// See FocusCameraOnAllBuildings and IncreaseCameraSpeedExterior/DecreaseCameraSpeedExterior's own
+	// comments. Min/max also double as FocusCameraOnAllBuildings' own clamp range, so a manually-tuned
+	// speed and the auto-computed default always agree on the same floor/ceiling.
+	static constexpr float ExteriorCameraSpeedFactor = 1.25f;
+	static constexpr float ExteriorCameraMinSpeed = 2000.f;
+	static constexpr float ExteriorCameraMaxSpeed = 300000.f;
+
 	FVector SavedCameraLocation = FVector::ZeroVector;
 	FRotator SavedCameraRotation = FRotator::ZeroRotator;
 	bool bHasSavedCameraView = false;
@@ -1212,30 +1381,45 @@ private:
 
 	// Hosts every currently-playing UAudioComponent - one small persistent actor with no visible mesh,
 	// rather than attaching to the possessed Pawn (which gets destroyed/swapped when entering/leaving
-	// interiors), spawned lazily on the first PlayAudioFile call.
+	// interiors), spawned lazily on the first PlayWavFile call.
 	UPROPERTY()
 	AActor* AudioActor = nullptr;
 
 	UPROPERTY()
 	TArray<FActiveAudioPlayback> ActiveAudioPlaybacks;
 
-	// Keeps each in-flight URuntimeAudioImporterLibrary alive (it's a plain UObject with no other
-	// owner) between PlayAudioFile's ImportAudioFromFile call and its OnResultNative lambda firing -
-	// without this it could be garbage collected mid-decode. Entries are removed by that same lambda
-	// once the import finishes (successfully or not).
-	UPROPERTY()
-	TArray<URuntimeAudioImporterLibrary*> PendingAudioImports;
-
-	// Removes any playback whose UAudioComponent has actually finished (IsPlaying() false) - a null
-	// AudioComponent (still decoding, see FActiveAudioPlayback's own comment) is left alone, not
-	// treated as finished.
+	// Removes any playback whose UAudioComponent has actually finished (IsPlaying() false) - see
+	// PlayWavFile's own comment for what makes that actually happen for a USoundWaveProcedural.
 	void PruneFinishedAudioPlaybacks();
 
-	// Shared by PlayButtonClickSound/PlayBuildingSelectSound - decodes FileName (a name under
-	// GetAudioFolderPath(), e.g. "click_button.mp3") fresh and plays it via PlaySound2D once decoded.
-	// See PlayButtonClickSound's own comment for why this deliberately doesn't cache/reuse instances.
+	// Loads FileName (a name under GetAudioFolderPath()) via LoadWavFileAsSoundWave and plays it
+	// through a fresh UAudioComponent on AudioActor - the shared core behind both PlayAudioFile
+	// (bDestroyWhenFinished=false; the caller tracks/stops it via ActiveAudioPlaybacks) and
+	// PlayShortSoundEffect (bDestroyWhenFinished=true; nothing else references it). Returns
+	// nullptr if the file doesn't exist or isn't a WAV this understands.
+	//
+	// USoundWaveProcedural doesn't signal "finished" on its own - once the audio it was queued with
+	// (see LoadWavFileAsSoundWave) runs out, it just pads silence forever rather than ending the
+	// voice, so a component playing one would otherwise report IsPlaying()==true indefinitely. This
+	// schedules an explicit Stop() (and DestroyComponent() if bDestroyWhenFinished) at the clip's
+	// own Duration instead of relying on that, which is what actually makes IsAudioFilePlaying/
+	// PruneFinishedAudioPlaybacks see it as finished, and what stops a fire-and-forget effect from
+	// occupying a voice forever.
+	UAudioComponent* PlayWavFile(const FString& FileName, bool bDestroyWhenFinished);
+
+	// Thin wrapper over PlayWavFile for the short, fire-and-forget UI sound effects (click/select/
+	// quit-confirm) - see PlayButtonClickSound's own comment for why nothing needs to track these.
 	void PlayShortSoundEffect(const TCHAR* FileName);
 
 	// See IsButtonClickSoundEnabled/SetButtonClickSoundEnabled's own comment.
 	bool bButtonClickSoundEnabled = true;
+
+	// See IsBuildingSelectSoundEnabled/SetBuildingSelectSoundEnabled's own comment.
+	bool bBuildingSelectSoundEnabled = true;
+
+	// See IsQuitConfirmSoundEnabled/SetQuitConfirmSoundEnabled's own comment.
+	bool bQuitConfirmSoundEnabled = true;
+
+	// See GetMasterVolume/SetMasterVolume's own comment.
+	float MasterVolume = 1.f;
 };

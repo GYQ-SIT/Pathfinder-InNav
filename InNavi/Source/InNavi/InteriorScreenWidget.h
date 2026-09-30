@@ -14,12 +14,14 @@ class UCheckBox;
 class UComboBoxString;
 class UEditableTextBox;
 class FJsonObject;
+class UImage;
 class UInteriorFloorPlanWidget;
 class ULayerRowWidget;
 class UAudioFileRowWidget;
 class UPanelWidget;
 class UScrollBox;
 class USizeBox;
+class USlider;
 class UTextBlock;
 class UVerticalBox;
 
@@ -141,6 +143,12 @@ private:
 	UFUNCTION()
 	void HandleEdit3DModeChanged(bool bIsEditMode);
 
+	// Bound to ANavPlayerController::OnSnapEnabledChanged - swaps SnapToggleIcon between
+	// Icon_SnappingOn/Icon_SnappingOff so it stays correct even when toggled via the N key.
+	// Parameter isn't called bIsEnabled - that shadows UWidget's own bIsEnabled property.
+	UFUNCTION()
+	void HandleSnapEnabledChanged(bool bNewSnapEnabled);
+
 	void RefreshModeButtonHighlights();
 
 	// Door/Room/Connector properties all share one PropertiesPanel (see RebuildWidget) instead of
@@ -222,6 +230,11 @@ private:
 
 	void GoToEditScreen();
 
+	// Save icon button, just left of File - calls PC->SaveCurrentProject() directly (same as Ctrl+S),
+	// no confirm dialog needed since saving is never destructive.
+	UFUNCTION()
+	void OnSaveClicked();
+
 	// Top menu bar (File/Window) - fixed chrome, same reasoning as Back (see RebuildWidget), not
 	// part of the dock system. File and Window each toggle their own dropdown open/closed via these,
 	// closing the other one's dropdown at the same time (only one open at a time).
@@ -242,6 +255,12 @@ private:
 	UFUNCTION()
 	void OnSwitch3DClicked();
 
+	// Toggles PC->IsSnapEnabled() via PC->ToggleSnapEnabled() - next to the 3D button, always visible
+	// (unlike Reset/speed/View-Edit, snapping matters in 2D too). Icon itself is refreshed by
+	// HandleSnapEnabledChanged, not here, since the N key can toggle it too.
+	UFUNCTION()
+	void OnSnapToggleClicked();
+
 	// Calls PC->ResetCamera3DPreview() - only shown while in 3D preview (see ResetView3DButton).
 	UFUNCTION()
 	void OnResetView3DClicked();
@@ -253,6 +272,15 @@ private:
 
 	UFUNCTION()
 	void OnIncreaseSpeedClicked();
+
+	// Lets 3D preview's own speed be typed directly - same reasoning/commit behavior as
+	// UEditScreenWidget::OnCameraSpeedTextCommitted (Enter or clicking away both commit it).
+	UFUNCTION()
+	void OnCameraSpeedTextCommitted(const FText& NewText, ETextCommit::Type CommitType);
+
+	// Syncs CameraSpeedTextBox to PC->GetCameraMoveSpeed() - see UEditScreenWidget's own
+	// RefreshCameraSpeedDisplay for the full reasoning.
+	void RefreshCameraSpeedDisplay();
 
 	// Toggles PC's View/Edit sub-mode (PC->SetIn3DEditMode(!PC->IsIn3DEditMode())) - only shown while
 	// in 3D preview (see Edit3DModeToggleButton).
@@ -327,6 +355,31 @@ private:
 	// the screen for every project that isn't using audio.
 	UFUNCTION()
 	void OnWindowAudioCheckChanged(bool bIsChecked);
+
+	// Map panel (road filter) - starts checked, matching UEditScreenWidget's own "Map" panel default.
+	UFUNCTION()
+	void OnWindowMapCheckChanged(bool bIsChecked);
+
+	// --- Map panel (Window > Map) --- Roads section only, ported from UEditScreenWidget's own "Map"
+	// panel - same PC functions (SetRoadCategoryVisible/SetAllRoadsVisible/
+	// SetRoadsAndPOIsWithinCampusOnly), no Buildings section (this screen has no exterior building-
+	// visibility concept).
+	UFUNCTION()
+	void OnRoadHideAllCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadPrimaryCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadSecondaryCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadResidentialCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadCyclewayCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadFootwayCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadOtherCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadCampusOnlyCheckChanged(bool bIsChecked);
 
 	// Floor panel - lists every floor of the loaded building (top first, matching the mockup),
 	// highlighting the active one; clicking a row switches to it. "+Add floor"/"Delete floor" call
@@ -417,6 +470,25 @@ private:
 	UFUNCTION()
 	void OnAudioClickSoundCheckChanged(bool bIsChecked);
 
+	// AudioSelectSoundCheckbox/AudioQuitConfirmSoundCheckbox's own handlers - same idea as
+	// OnAudioClickSoundCheckChanged, one per sound.
+	UFUNCTION()
+	void OnAudioSelectSoundCheckChanged(bool bIsChecked);
+
+	UFUNCTION()
+	void OnAudioQuitConfirmSoundCheckChanged(bool bIsChecked);
+
+	// AudioMuteAllCheckbox's own handler - checked means everything's muted (opposite sense from the
+	// three "X Sound" checkboxes above, which are checked when their sound is ENABLED) - forwards to
+	// ANavPlayerController::SetAllUiSoundsEnabled(!bIsChecked) and syncs the three individual
+	// checkboxes to match (all unchecked while muted, all checked once un-muted).
+	UFUNCTION()
+	void OnAudioMuteAllCheckChanged(bool bIsChecked);
+
+	// AudioVolumeSlider's own handler - forwards to ANavPlayerController::SetMasterVolume.
+	UFUNCTION()
+	void OnAudioVolumeChanged(float NewValue);
+
 	// Bound alongside every button's own OnClicked across this whole screen (see each button's
 	// construction site in RebuildWidget()/NativeConstruct()) so clicking anything plays the same
 	// click sound - forwards to ANavPlayerController::PlayButtonClickSound, which owns the actual
@@ -441,16 +513,19 @@ private:
 	// --- Docking system for the Toolbar/Floor/Properties/Layers/Navigation/Audio panels ---
 	// Each of the 6 panels below is an independently draggable UBorder placed directly on the root
 	// canvas (not nested in a shared bar/VerticalBox like the old Left/Right sidebar bars). Dragging
-	// a panel by its own background (not one of its buttons - see IsScreenPositionOverPanelButton)
-	// moves it freely; releasing it with an edge close to another panel's edge (TrySnapPanel) snaps
+	// a panel by its own small top-left drag handle (see DockDragHandleSize) moves it freely;
+	// releasing it with an edge close to another panel's edge (TrySnapPanel) snaps
 	// them together into a shared "column" that fills the screen height end to end, splitting that
 	// height among the column's members (adjustable per-boundary via a splitter handle, mirrors
 	// dragging the divider between two stacked panels in a real editor). Back is deliberately NOT
-	// part of this system (see RebuildWidget) - it's fixed chrome, not a dockable panel. Audio starts
-	// user-hidden (see bDockPanelUserHidden's own init) unlike the other 5 - see the Window menu.
-	enum class EDockPanelId : uint8 { Toolbar, Floor, Properties, Layers, Navigation, Audio };
-	static constexpr int32 NumDockPanels = 6;
-	static constexpr int32 MaxDockSplitters = NumDockPanels - 1; // worst case: all 6 panels in one column
+	// part of this system (see RebuildWidget) - it's fixed chrome, not a dockable panel. Audio and
+	// Navigation both start user-hidden (see bDockPanelUserHidden's own init) unlike the other 4 -
+	// see the Window menu. Map (the road-filter panel ported from UEditScreenWidget's own "Map" panel,
+	// Roads section only - no Buildings section, since this screen has no exterior building-visibility
+	// concept) starts VISIBLE, matching that panel's own default there.
+	enum class EDockPanelId : uint8 { Toolbar, Floor, Properties, Layers, Navigation, Audio, Map };
+	static constexpr int32 NumDockPanels = 7;
+	static constexpr int32 MaxDockSplitters = NumDockPanels - 1; // worst case: all 7 panels in one column
 
 	struct FDockColumn
 	{
@@ -468,6 +543,21 @@ private:
 	// box visibly smaller than the real screen. Falls back to GetViewportSize only on the very first
 	// call, before the canvas has painted even once and its cached geometry is still zero.
 	FVector2D GetCanvasSize() const;
+
+	// Like GetCanvasSize, but never falls back to GetViewportSize - returns false (OutSize untouched)
+	// if RootCanvas's cached geometry isn't valid yet, rather than silently returning a value in the
+	// wrong coordinate system. GetCanvasSize's own fallback turned out to not be a one-frame thing in
+	// practice (confirmed via temporary logging - RootCanvas's geometry can still be unset several
+	// ticks into a freshly-constructed screen, not just on the literal first call), which broke the
+	// dock-layout save/restore fraction math specifically: it round-trips a panel's Position through
+	// division-then-multiplication by this size, so using the raw-pixel fallback for either half of
+	// that round trip (even just once) introduces a real, visible drift by the DPI scale factor - a
+	// panel saved flush against the right edge would restore short of it (or past it) by however many
+	// pixels that scale factor represents at the panel's own distance from center. Used by
+	// BuildLayoutSaveData/ApplyLayoutSaveData for exactly this reason; every other caller of
+	// GetCanvasSize (default panel positions, live drag clamping, etc.) tolerates the fallback fine,
+	// since those don't require this round-trip precision.
+	bool GetReliableCanvasSize(FVector2D& OutSize) const;
 
 	// Called once from NativeConstruct - places Toolbar floating top-left and pre-docks Floor +
 	// Properties into one column top-right, matching today's default look (nothing should appear
@@ -518,14 +608,29 @@ private:
 	// action the user already performs, not saved continuously on every drag.
 	void SaveDockLayoutToDisk() const;
 
-	// Called once from InitializeDefaultDockLayout - if a previously-saved layout file exists,
-	// applies it and returns true (InitializeDefaultDockLayout then skips its own placement guesses
-	// entirely); returns false if there's nothing saved yet (first-ever run), leaving
-	// InitializeDefaultDockLayout to fall back to its normal default placement.
+	// Called once from InitializeDefaultDockLayout - tries the user's own saved layout first, then
+	// falls back to the team's shipped default arrangement (see TryLoadDockLayoutFromFile's own
+	// comment), applying whichever one actually exists and returning true; returns false only if
+	// neither file is usable, leaving InitializeDefaultDockLayout to fall back to
+	// GetDefaultPanelPosition's per-panel guesses.
 	bool LoadDockLayoutFromDisk();
 
+	// Shared by LoadDockLayoutFromDisk for both the per-user save (InteriorEditorLayout.json under
+	// Saved/) and the team's shipped default (DefaultInteriorLayout.json under Data/DefaultLayouts/) -
+	// same file format, same layoutVersion check, same ApplyLayoutSaveData/
+	// PendingSavedLayoutToReapply handling either way, just a different path.
+	bool TryLoadDockLayoutFromFile(const FString& FilePath);
+
 	TSharedPtr<FJsonObject> BuildLayoutSaveData() const;
-	void ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& Root);
+
+	// Converts Root's saved viewport-relative fractions back to pixel positions and applies them.
+	// Returns false (applying nothing) without RootCanvas's REAL cached Slate geometry to convert
+	// against - GetViewportSize()'s raw-platform-pixel fallback is a different coordinate system than
+	// what UCanvasPanelSlot positions are actually in whenever the platform's DPI scale isn't 1.0 (see
+	// GetReliableCanvasSize's own comment), so unlike every other caller of GetCanvasSize() in this
+	// file, this one specifically cannot tolerate that fallback - the caller (NativeTick, the only
+	// caller of this on the restore path) keeps retrying on a later tick instead.
+	bool ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& Root);
 
 	static const TCHAR* GetDockPanelName(EDockPanelId Id);
 	static bool FindDockPanelIdByName(const FString& Name, EDockPanelId& OutId);
@@ -545,9 +650,21 @@ private:
 	// its font lives on its WidgetStyle.TextStyle rather than being a direct SetFont() call.
 	static void ApplyStandardFont(UEditableTextBox* TextBox);
 
+	// SetToolTipText's default tooltip renders at the engine's small default font size with no way to
+	// resize just that text. SetToolTip(Widget) takes over the whole tooltip instead, but its SToolTip
+	// wrapper is built with no border/background of its own (BorderImage(nullptr)) - this builds a
+	// small light box to replicate the default tooltip's look, just with the font doubled. A plain
+	// member function (not a RebuildWidget-local lambda) since HandleSnapEnabledChanged needs to
+	// rebuild SnapToggleButton's tooltip after construction too, not just at construction time.
+	UWidget* MakeToolTipWidget(const TCHAR* TooltipLabel);
+
 	FVector2D GetPanelPosition(EDockPanelId Id) const;
 	FVector2D GetPanelSize(EDockPanelId Id) const;
-	bool IsScreenPositionOverPanelButton(EDockPanelId Id, const FVector2D& ScreenPosition) const;
+
+	// DockPanelTitleTexts[Id]'s own rendered size (clamped to a sane minimum on each axis), or
+	// (DockDragHandleSize, DockDragHandleSize) if that entry is somehow still null - see
+	// DockPanelTitleTexts' own comment.
+	FVector2D GetDockDragHandleSize(EDockPanelId Id) const;
 
 	// Applies NewWidth to Id, and to every sibling in Id's column too (a docked column always stays
 	// a uniform width, like a real docked group), then refreshes content widths + layout.
@@ -578,6 +695,15 @@ private:
 	FEventReply HandleLeftResizeMouseMove(EDockPanelId Id, const FPointerEvent& MouseEvent);
 	FEventReply HandleLeftResizeMouseButtonUp(EDockPanelId Id, const FPointerEvent& MouseEvent);
 
+	// BOTTOM-edge HEIGHT handle - only meaningful while Id is floating (DockBottomResizeHandles[Id]
+	// stays Collapsed, and this never gets a mouse-down to start from, while docked - see
+	// DockBottomResizeHandles' own comment). Sets DockPanelHeights[Id] to an explicit value instead of
+	// leaving it auto/natural, same idea as HandleResizeMouseMove but for height instead of width, and
+	// with no docked-column sibling-sync to do (DockPanelHeights is per-panel only, never shared).
+	FEventReply HandleBottomResizeMouseButtonDown(EDockPanelId Id, const FPointerEvent& MouseEvent);
+	FEventReply HandleBottomResizeMouseMove(EDockPanelId Id, const FPointerEvent& MouseEvent);
+	FEventReply HandleBottomResizeMouseButtonUp(EDockPanelId Id, const FPointerEvent& MouseEvent);
+
 	FEventReply HandleSplitterMouseButtonDown(int32 SplitterIndex, const FPointerEvent& MouseEvent);
 	FEventReply HandleSplitterMouseMove(int32 SplitterIndex, const FPointerEvent& MouseEvent);
 	FEventReply HandleSplitterMouseButtonUp(int32 SplitterIndex, const FPointerEvent& MouseEvent);
@@ -604,6 +730,9 @@ private:
 	UFUNCTION() FEventReply OnAudioPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnToolbarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -623,6 +752,9 @@ private:
 	UFUNCTION() FEventReply OnAudioResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -642,6 +774,31 @@ private:
 	UFUNCTION() FEventReply OnAudioLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+	UFUNCTION() FEventReply OnToolbarBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnToolbarBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnToolbarBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnFloorBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnFloorBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnFloorBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnPropertiesBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnPropertiesBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnPropertiesBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnLayersBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnLayersBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnLayersBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnNavigationBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnNavigationBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnNavigationBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnAudioBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnAudioBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnAudioBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnSplitter0MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter0MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -823,8 +980,18 @@ private:
 	UPROPERTY()
 	UComboBoxString* NavStartRoomComboBox = nullptr;
 
+	// Frame around NavStartRoomComboBox, tinted green only when Start was set by picking this
+	// dropdown (as opposed to clicking a point on the floor plan) - see RefreshNavigationPanelDisplay.
+	// Transparent otherwise, so it doesn't read as a permanent gray box.
+	UPROPERTY()
+	UBorder* NavStartRoomBorder = nullptr;
+
 	UPROPERTY()
 	UComboBoxString* NavDestinationRoomComboBox = nullptr;
+
+	// Same as NavStartRoomBorder, tinted red for Destination.
+	UPROPERTY()
+	UBorder* NavDestinationRoomBorder = nullptr;
 
 	UPROPERTY()
 	UButton* NavSetStartButton = nullptr;
@@ -855,6 +1022,26 @@ private:
 	UPROPERTY()
 	UBorder* AudioPanel = nullptr;
 
+	// Map panel (road filter, Roads section only) - see EDockPanelId::Map's own comment.
+	UPROPERTY()
+	UBorder* MapPanel = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadHideAllCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadPrimaryCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadSecondaryCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadResidentialCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadCyclewayCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadFootwayCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadOtherCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadCampusOnlyCheckbox = nullptr;
+
 	UPROPERTY()
 	UButton* AudioStopAllButton = nullptr;
 
@@ -862,6 +1049,22 @@ private:
 	// Checked by default, matching bButtonClickSoundEnabled's own default.
 	UPROPERTY()
 	UCheckBox* AudioClickSoundCheckbox = nullptr;
+
+	// Same as AudioClickSoundCheckbox, one per remaining UI sound - see OnAudioSelectSoundCheckChanged/
+	// OnAudioQuitConfirmSoundCheckChanged.
+	UPROPERTY()
+	UCheckBox* AudioSelectSoundCheckbox = nullptr;
+
+	UPROPERTY()
+	UCheckBox* AudioQuitConfirmSoundCheckbox = nullptr;
+
+	// See OnAudioMuteAllCheckChanged - unchecked by default (nothing's muted at first).
+	UPROPERTY()
+	UCheckBox* AudioMuteAllCheckbox = nullptr;
+
+	// See OnAudioVolumeChanged - ANavPlayerController::MasterVolume as a 0-1 slider.
+	UPROPERTY()
+	USlider* AudioVolumeSlider = nullptr;
 
 	// One UAudioFileRowWidget child per file under Data/Audio/, rebuilt by RefreshAudioList. Scrollable
 	// (same reasoning as LayersListBox) since the folder could hold more files than fit the panel.
@@ -888,6 +1091,14 @@ private:
 	UPROPERTY()
 	UButton* Switch3DButton = nullptr;
 
+	// Next to Switch3DButton, always visible (unlike the 3D-preview-only controls after it) - see
+	// OnSnapToggleClicked/HandleSnapEnabledChanged.
+	UPROPERTY()
+	UButton* SnapToggleButton = nullptr;
+
+	UPROPERTY()
+	UImage* SnapToggleIcon = nullptr;
+
 	// Only shown while in 3D preview (see HandlePreviewModeChanged). 3D preview leaves WASD/mouse-look
 	// free rather than locked to a fixed angle, so this is the "un-lose yourself" button - see
 	// PC->ResetCamera3DPreview's own comment.
@@ -901,6 +1112,11 @@ private:
 
 	UPROPERTY()
 	UButton* IncreaseSpeedButton = nullptr;
+
+	// Typed speed entry, between DecreaseSpeedButton/IncreaseSpeedButton - see
+	// OnCameraSpeedTextCommitted. Shown/hidden together with the other 3D-preview-only controls.
+	UPROPERTY()
+	UEditableTextBox* CameraSpeedTextBox = nullptr;
 
 	// Toggles 3D preview's View/Edit sub-mode (see PC->SetIn3DEditMode) - "View" in yellow by default,
 	// "Edit" in green once toggled. Shown/hidden together with ResetView3DButton; always shows "View"
@@ -931,6 +1147,9 @@ private:
 	UBorder* Background = nullptr;
 
 	// Top menu bar widgets - see the comment above OnFileMenuClicked/OnWindowToolbarCheckChanged.
+	UPROPERTY()
+	UButton* SaveButton = nullptr;
+
 	UPROPERTY()
 	UButton* FileMenuButton = nullptr;
 
@@ -964,9 +1183,13 @@ private:
 	UPROPERTY()
 	UCheckBox* WindowAudioCheckbox = nullptr;
 
+	UPROPERTY()
+	UCheckBox* WindowMapCheckbox = nullptr;
+
 	// Parallel to EDockPanelId, sized NumDockPanels - see SetDockPanelUserHidden. False by default
-	// (visible) for every panel except Audio, which InitializeDockRuntimeArrays sets true right after
-	// initializing this array - Audio only shows once the user actually checks it in the Window menu.
+	// (visible) for every panel except Audio and Navigation, which InitializeDockRuntimeArrays sets
+	// true right after initializing this array - each only shows once the user actually checks it in
+	// the Window menu.
 	TArray<bool> bDockPanelUserHidden;
 
 	// Shared width bounds for every dock panel, and the snap/splitter tuning constants - also used
@@ -982,16 +1205,36 @@ private:
 	// at each text's construction site, since UMG has no single "default style" to override once for
 	// every independently-constructed UTextBlock.
 	static constexpr int32 StandardFontSize = 15;
+
+	// Every editable text box's background/typed-text color (see ApplyStandardFont's UEditableTextBox
+	// overload) - the engine default background/foreground read as nearly the same gray against this
+	// app's dark panel chrome, making typed text hard to read. A shade lighter than the panel
+	// background (0.03) but darker than a normal button (0.6) so a text box reads as its own distinct
+	// "this is editable" element rather than blending into either.
+	static const FLinearColor StandardTextBoxBackgroundColor;
+	static const FLinearColor StandardTextBoxTextColor;
+
 	static constexpr float SidebarMaxWidth = 600.f;
 	// Heights of the two fixed bars pinned across the top of the canvas (File/Window menu, then the
 	// building switcher bar directly below it) - dock panels' top boundary (SidebarTopMargin, below)
 	// sits flush under both, same as every panel's left/right edges already sit flush against the
 	// screen's own edges.
-	static constexpr float MenuBarHeight = 32.f;
-	static constexpr float BuildingSwitcherBarHeight = 40.f;
+	static constexpr float MenuBarHeight = 40.f;
+	static constexpr float BuildingSwitcherBarHeight = 52.f;
 	static constexpr float SidebarTopMargin = MenuBarHeight + BuildingSwitcherBarHeight;
 	static constexpr float SidebarBottomMargin = 10.f;
 	static constexpr float SidebarResizeHandleWidth = 8.f;
+	// A dedicated small box pinned to every panel's top-left corner - HandlePanelMouseButtonDown only
+	// starts a move-drag when the click lands on THIS, not anywhere else on the panel (see its own
+	// comment for why: clicking panel content used to be indistinguishable from clicking empty panel
+	// space, so an ordinary click meant to interact with content could accidentally start a drag).
+	// Inset to roughly sit right where the panel's own title text starts (see DockPanelBorderPadding),
+	// not just some arbitrary corner offset - floating disconnected from the title looked wrong in
+	// practice. The handle's actual on-screen size instead tracks the title text's own rendered size on
+	// both axes (see GetDockDragHandleSize), so "Floor" gets a smaller handle than "Properties" - this
+	// constant is just the floor each axis is clamped to, so a very short/empty title never shrinks it
+	// down to something unclickable.
+	static constexpr float DockDragHandleSize = 12.f;
 	static constexpr float DockSnapThresholdPx = 20.f;
 	static constexpr float SplitterHeight = 8.f;
 	static constexpr float DockPanelMinHeight = 80.f; // floor for a docked panel's height share
@@ -1032,6 +1275,34 @@ private:
 	UPROPERTY()
 	TArray<UCanvasPanelSlot*> DockLeftResizeHandleSlots;
 
+	// BOTTOM-edge HEIGHT handle per panel - see the comment above HandleBottomResizeMouseMove. Only
+	// ever shown for a FLOATING panel (RefreshDockLayout's docked branch keeps this Collapsed) - a
+	// docked panel's height already comes from its column's splitter(s), so there's nothing for this
+	// to control there.
+	UPROPERTY()
+	TArray<UBorder*> DockBottomResizeHandles;
+
+	UPROPERTY()
+	TArray<UCanvasPanelSlot*> DockBottomResizeHandleSlots;
+
+	// The small move-drag handle box in each panel's top-left corner - see DockDragHandleSize's own
+	// comment. Positioned wherever RefreshDockLayout/HandlePanelMouseMove already position that
+	// panel's other handles, so it always tracks the panel it belongs to.
+	UPROPERTY()
+	TArray<UBorder*> DockDragHandles;
+
+	// Each panel's own title UTextBlock (Toolbar has no separate panel-level title - it opens straight
+	// into its Default/Draw/Navigate group labels, so this holds the "Default" group label instead,
+	// the first thing at its own top-left corner) - purely so the drag handle can be sized off this
+	// text's own rendered size (see GetDockDragHandleSize), matching however long/short and tall the
+	// panel's own title happens to be instead of one fixed size for every panel regardless of
+	// "Floor" vs "Properties" vs "Navigation".
+	UPROPERTY()
+	TArray<UTextBlock*> DockPanelTitleTexts;
+
+	UPROPERTY()
+	TArray<UCanvasPanelSlot*> DockDragHandleSlots;
+
 	UPROPERTY()
 	TArray<UBorder*> SplitterHandles;
 
@@ -1042,6 +1313,11 @@ private:
 	// splitter index, same sizing as the widget arrays above. Populated in InitializeDockRuntimeArrays. ---
 	TArray<float> DockPanelWidths;
 	TArray<int32> DockPanelColumnIndex; // INDEX_NONE = floating
+
+	// Each panel's own BorderPadding argument (see ConstructDockPanel), stashed here purely so the
+	// drag handle can be inset by the SAME amount as the panel's own content (that's where the title
+	// text itself starts) instead of some separate arbitrary margin that doesn't line up with it.
+	TArray<float> DockPanelBorderPadding;
 
 	TArray<bool> bDockPanelIsDraggingMove;
 	TArray<FVector2D> DockPanelMoveDragStartMouse;
@@ -1056,6 +1332,18 @@ private:
 	TArray<float> DockPanelLeftResizeStartWidth;
 	TArray<float> DockPanelLeftResizeStartPanelX; // the panel's (or its column's) X when the drag started
 
+	// A FLOATING panel's explicit height, set once the user drags DockBottomResizeHandles[Id] for the
+	// first time - 0 (its InitializeDockRuntimeArrays default) means "never manually resized, keep
+	// sizing to natural content height" (RefreshDockLayout's floating branch only calls
+	// SetHeightOverride once this is actually positive). Meaningless while docked - a docked panel's
+	// height always comes from its column's own HeightFractions/splitters instead, same as
+	// DockPanelWidths already does for width regardless of docked/floating.
+	TArray<float> DockPanelHeights;
+
+	TArray<bool> bDockPanelIsResizingHeight;
+	TArray<float> DockPanelResizeStartMouseY;
+	TArray<float> DockPanelResizeStartHeight;
+
 	TArray<FDockColumn> DockColumns;
 
 	TArray<int32> SplitterColumnIndex;        // INDEX_NONE = this splitter slot is unused right now
@@ -1066,12 +1354,16 @@ private:
 
 	bool bDockLayoutInitialized = false;
 
-	// InitializeDefaultDockLayout runs synchronously from NativeConstruct, before this widget has
-	// been through even one real Slate layout/paint pass - the docked panels' background borders end
-	// up a frame stale as a result (a small chunk of background missing at a panel's bottom edge
-	// until the next unrelated click forces a fresh layout pass). Set there, consumed by the first
-	// real NativeTick to re-run RefreshDockLayout once everything has actually settled.
-	bool bNeedsPostConstructLayoutRefresh = false;
+	// A saved layout loaded via LoadDockLayoutFromDisk, held onto until the first real NativeTick so
+	// it can be RE-applied then (see LayoutGeometrySettleFramesRemaining's own comment on why
+	// NativeConstruct-time is unreliable). ApplyLayoutSaveData converts every saved position from a
+	// viewport-relative fraction back to pixels using GetCanvasSize() at the moment it runs - called
+	// from NativeConstruct (as it normally is), that can return a premature/undersized viewport before
+	// the widget's first real paint, which throws off the fraction math for every panel (not just the
+	// border-staleness NativeTick already re-runs RefreshDockLayout for) - e.g. panels dragged flush
+	// against the right edge and saved would drift left on the very next load, even on the exact same
+	// screen. Null once there's nothing pending to redo (the common case, once NativeTick has run).
+	TSharedPtr<FJsonObject> PendingSavedLayoutToReapply;
 
 	// Set by RefreshPropertiesPanelVisibility on every selection change (Properties is a permanent
 	// panel now - its content, not its own visibility, is what changes: Door/Room/Connector fields
@@ -1086,4 +1378,23 @@ private:
 	// past its box and off the bottom of the screen.
 	int32 PropertiesFractionRecalcFramesRemaining = 0;
 	static constexpr int32 PropertiesFractionRecalcFrameCount = 6;
+
+	// General-purpose "give Slate a few more frames to settle, then re-run RefreshDockLayout" retry -
+	// every use so far is the same underlying cause: something was just set (a Border's height
+	// override, a title UTextBlock's text) that Slate hasn't actually re-measured/re-painted yet, so
+	// reading it back immediately (GetPanelSize's GetCachedGeometry, GetDockDragHandleSize's
+	// GetDesiredSize) returns a stale value - and, per PropertiesFractionRecalcFramesRemaining's own
+	// comment, one retry isn't reliably enough (a WrapBox in particular can take a couple of ticks to
+	// finish reflowing). Set by:
+	// - InitializeDefaultDockLayout, unconditionally, right after it runs synchronously from
+	//   NativeConstruct - before this widget has been through even one real Slate layout/paint pass,
+	//   which left the docked panels' background borders AND every drag handle's title-text-based
+	//   width a frame stale in practice.
+	// - TrySnapPanel, right after a panel joins an EXISTING column (2+ members already) - the member
+	//   it snapped against (e.g. Layers, when Properties joins below it) just had its own Border
+	//   resized smaller via SetHeightOverride to make room, and RefreshSplitterLayout's new splitter
+	//   position (which reads that member's GetPanelSize) needs the resize to have actually painted
+	//   first.
+	int32 LayoutGeometrySettleFramesRemaining = 0;
+	static constexpr int32 LayoutGeometrySettleFrameCount = 6;
 };

@@ -31,6 +31,11 @@ private:
 	UFUNCTION()
 	void OnOpenClicked();
 
+	// Quits the whole application - only meaningful in a packaged build (the editor's own Stop
+	// button/window close covers this during PIE testing, which is why it went unnoticed until now).
+	UFUNCTION()
+	void OnQuitClicked();
+
 	// The actual browse-and-load, deferred a few frames out of OnOpenClicked - see OnOpenClicked's
 	// own comment for why.
 	void BrowseAndLoadBuildingData();
@@ -49,4 +54,7 @@ private:
 
 	UPROPERTY()
 	UButton* OpenButton = nullptr;
+
+	UPROPERTY()
+	UButton* QuitButton = nullptr;
 };

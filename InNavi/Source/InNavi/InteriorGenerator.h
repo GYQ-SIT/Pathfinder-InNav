@@ -265,11 +265,11 @@ public:
 	// Rotates every floor instance of connector GroupId by DeltaDegrees about its own center
 	// (positive = counter-clockwise, same convention as RotateRoom) - they share one orientation
 	// (see FInteriorNavNode::RotationDegrees), so this validates the new footprint on EVERY floor the
-	// connector reaches (building outline, walls, other buildings - see CanPlaceConnectorOnFloor) and
-	// only applies it if all of them pass; no partial rotation. Unlike RotateRoom, there's no
-	// deferred/mid-gesture-allowed check to speak of (connectors don't currently check against each
-	// other's footprints, only against walls/buildings), so this is fully validated on every call -
-	// safe to call every tick while a rotate key/button is held, same usage pattern as RotateRoom.
+	// connector reaches (building outline, walls, other connectors, other buildings - see
+	// CanPlaceConnectorOnFloor) and only applies it if all of them pass; no partial rotation. Unlike
+	// RotateRoom, there's no deferred/mid-gesture-allowed check to speak of, so this is fully
+	// validated on every call - safe to call every tick while a rotate key/button is held, same usage
+	// pattern as RotateRoom.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool RotateConnectorGroup(const FString& GroupId, float DeltaDegrees);
 
@@ -300,9 +300,16 @@ private:
 	// GetConnectorFootprintCorners, InteriorTypes.h - the same shape AInteriorConnectorMarker actually
 	// builds, so this and the 3D preview never disagree) fits entirely inside the building's own
 	// outline, doesn't come within half the wall thickness of any room/wall on that floor (being
-	// inside a room's open interior is fine, only overlapping a wall itself is rejected), and doesn't
-	// overlap a neighboring building's own footprint. Logs the specific reason on failure.
-	bool CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVector2D Position, int32 Level, float RotationDegrees, float SizeScale) const;
+	// inside a room's open interior is fine, only overlapping a wall itself is rejected), doesn't
+	// overlap another connector's own footprint on that floor, and doesn't overlap a neighboring
+	// building's own footprint. Logs the specific reason on failure.
+	//
+	// IgnoreGroupId skips nodes belonging to that ConnectorGroupId in the connector-vs-connector
+	// check - needed by RotateConnectorGroup/ScaleConnectorGroup, which re-validate a connector's OWN
+	// existing floor instances against everything else; without it, a connector would always overlap
+	// itself and could never be rotated or scaled in place. Left empty (default) for a brand new
+	// placement, which has no group of its own yet to exclude.
+	bool CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVector2D Position, int32 Level, float RotationDegrees, float SizeScale, const FString& IgnoreGroupId = FString()) const;
 
 	// The reverse of CanPlaceConnectorOnFloor's wall-thickness check: would this room/wall
 	// footprint's own walls end up inside a wall's solid thickness of an existing connector
@@ -339,6 +346,11 @@ private:
 	UPROPERTY()
 	TMap<int32, FInteriorRoomList> RoomsByFloor;
 
+	// Elevator/stairs/escalator/path nodes for the currently loaded building. UPROPERTY() so the
+	// struct's own MarkerActor UPROPERTY() (InteriorTypes.h) is actually reachable by GC reflection -
+	// without it on this containing TArray, UHT has no path down into FInteriorNavNode at all (matches
+	// RoomsByFloor's own UPROPERTY() right above, which this had drifted out of sync with).
+	UPROPERTY()
 	TArray<FInteriorNavNode> NavNodes;
 
 	// Wall defaults per loaded floor, keyed by level - kept around after the JSON parse so

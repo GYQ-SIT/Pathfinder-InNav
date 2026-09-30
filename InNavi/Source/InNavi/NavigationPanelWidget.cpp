@@ -12,55 +12,6 @@
 
 namespace
 {
-	constexpr double PointTestEpsilon = 0.0001;
-
-	double Cross2D(const FVector2D& A, const FVector2D& B, const FVector2D& C)
-	{
-		return static_cast<double>(B.X - A.X) * (C.Y - A.Y)
-			- static_cast<double>(B.Y - A.Y) * (C.X - A.X);
-	}
-
-	bool IsOnSegment(const FVector2D& Point, const FVector2D& A, const FVector2D& B)
-	{
-		return FMath::Abs(Cross2D(A, B, Point)) <= PointTestEpsilon
-			&& Point.X >= FMath::Min(A.X, B.X) - PointTestEpsilon
-			&& Point.X <= FMath::Max(A.X, B.X) + PointTestEpsilon
-			&& Point.Y >= FMath::Min(A.Y, B.Y) - PointTestEpsilon
-			&& Point.Y <= FMath::Max(A.Y, B.Y) + PointTestEpsilon;
-	}
-
-	bool IsInsideOrOnFootprint(const FVector2D& Point, const TArray<FVector2D>& Footprint)
-	{
-		if (Footprint.Num() < 3)
-		{
-			return false;
-		}
-
-		bool bInside = false;
-		for (int32 I = 0, J = Footprint.Num() - 1; I < Footprint.Num(); J = I++)
-		{
-			const FVector2D& A = Footprint[J];
-			const FVector2D& B = Footprint[I];
-			if (IsOnSegment(Point, A, B))
-			{
-				return true;
-			}
-			if ((A.Y > Point.Y) != (B.Y > Point.Y)
-				&& Point.X < (B.X - A.X) * (Point.Y - A.Y) / (B.Y - A.Y) + A.X)
-			{
-				bInside = !bInside;
-			}
-		}
-		return bInside;
-	}
-
-	FString LocationName(const FNavigationRoutePoint& Point)
-	{
-		return Point.Floor == UNavigationPanelWidget::OutdoorFloor
-			? TEXT("Outside")
-			: FString::Printf(TEXT("Floor %d (indoors)"), Point.Floor);
-	}
-
 	FString ConnectorTypeName(EInteriorNavNodeType Type)
 	{
 		switch (Type)
@@ -121,32 +72,6 @@ namespace
 		Cy /= (6.0 * SignedArea);
 		return FVector2D((float)Cx, (float)Cy);
 	}
-}
-
-FBox2D UNavigationPanelWidget::GetOutdoorBounds(const APolyBuilding& Building)
-{
-	FBox2D Bounds(EForceInit::ForceInit);
-	for (const FVector2D& Point : Building.GetFootprint())
-	{
-		Bounds += Point;
-	}
-	if (!Bounds.bIsValid)
-	{
-		return Bounds;
-	}
-
-	// Keep enough campus space around small and large buildings without making a large building
-	// tiny in the floor-plan view.
-	const FVector2D Size = Bounds.GetSize();
-	const float Padding = FMath::Max(40.f, FMath::Max(Size.X, Size.Y) * 0.25f);
-	return Bounds.ExpandBy(Padding);
-}
-
-bool UNavigationPanelWidget::IsOutdoorPoint(const APolyBuilding& Building, FVector2D Point)
-{
-	const FBox2D OutdoorBounds = GetOutdoorBounds(Building);
-	return OutdoorBounds.bIsValid && OutdoorBounds.IsInsideOrOn(Point)
-		&& !IsInsideOrOnFootprint(Point, Building.GetFootprint());
 }
 
 TSharedRef<SWidget> UNavigationPanelWidget::RebuildWidget()
@@ -252,61 +177,33 @@ void UNavigationPanelWidget::SelectPoint(FVector2D FootprintPosition, int32 Floo
 		SetStatusMessage(TEXT("The selected building is unavailable."), ENavigationMessageKind::Error);
 		return;
 	}
-	const bool bInsideBuilding = IsInsideOrOnFootprint(FootprintPosition, Building->GetFootprint());
-	int32 SelectedFloor = Floor;
 	FString Error;
-	if (bInsideBuilding)
+	if (!FNavigationRoutePlanner::IsValidPoint(*Building, *Interior, Generator->GetScale(), Floor,
+		FootprintPosition, Error))
 	{
-		if (!FNavigationRoutePlanner::IsValidPoint(*Building, *Interior, Generator->GetScale(), Floor,
-			FootprintPosition, Error))
-		{
-			UE_LOG(LogTemp, Warning, TEXT("[Navigation] Indoor point rejected by validation: %s"), *Error);
-			SetStatusMessage(FString::Printf(TEXT("Invalid indoor area: %s"), *Error), ENavigationMessageKind::Error);
-			return;
-		}
-	}
-	else if (Floor == 1 && IsOutdoorPoint(*Building, FootprintPosition))
-	{
-		SelectedFloor = OutdoorFloor;
-	}
-	else
-	{
-		const FString Message = Floor == 1
-			? TEXT("Invalid area. Select inside the building or within the highlighted outside area.")
-			: TEXT("Invalid area. Outdoor points can only be selected from the Floor 1 map.");
-		UE_LOG(LogTemp, Warning, TEXT("[Navigation] Point rejected: %s"), *Message);
-		SetStatusMessage(Message, ENavigationMessageKind::Error);
+		UE_LOG(LogTemp, Warning, TEXT("[Navigation] SelectPoint rejected by validation: %s"), *Error);
+		SetStatusMessage(Error, ENavigationMessageKind::Error);
 		return;
 	}
 
 	FSelectedEndpoint& Endpoint = SelectionMode == ENavigationSelectionMode::Start ? Start : Destination;
-	const bool bWasSelectingStart = SelectionMode == ENavigationSelectionMode::Start;
-	const FString EndpointName = bWasSelectingStart ? TEXT("Start") : TEXT("Destination");
-	FNavigationRoutePoint SelectedPoint;
-	SelectedPoint.Position = FootprintPosition;
-	SelectedPoint.Floor = SelectedFloor;
-	SelectionMode = ENavigationSelectionMode::None;
-	SetEndpoint(Endpoint, SelectedPoint, Building->BuildingId, EndpointName,
-		SelectedFloor == OutdoorFloor ? TEXT("outside") : FString::Printf(TEXT("indoors on Floor %d"), SelectedFloor));
-	UE_LOG(LogTemp, Warning, TEXT("[Navigation] Point accepted as %s: position=(%.2f, %.2f), floor=%d"),
-		*EndpointName,
-		FootprintPosition.X, FootprintPosition.Y, SelectedFloor);
-}
-
-void UNavigationPanelWidget::SetEndpoint(FSelectedEndpoint& Endpoint, const FNavigationRoutePoint& Point,
-	const FString& BuildingId, const FString& EndpointName, const FString& LocationDescription)
-{
-	const bool bRouteWasVisible = !RoutePoints.IsEmpty();
 	Endpoint.bValid = true;
-	Endpoint.Point = Point;
-	Endpoint.BuildingId = BuildingId;
+	Endpoint.Point.Position = FootprintPosition;
+	Endpoint.Point.Floor = Floor;
+	Endpoint.BuildingId = Building->BuildingId;
+	Endpoint.bSetViaDropdown = false;
 	RoutePoints.Reset();
 	bLastFindRouteFailed = false;
-	const FString Message = bRouteWasVisible
-		? FString::Printf(TEXT("%s changed to %s. Route cleared; press Find Route again."),
-			*EndpointName, *LocationDescription)
-		: FString::Printf(TEXT("%s set %s."), *EndpointName, *LocationDescription);
-	SetStatusMessage(Message, bRouteWasVisible ? ENavigationMessageKind::Warning : ENavigationMessageKind::Success);
+	const bool bWasSelectingStart = SelectionMode == ENavigationSelectionMode::Start;
+	const FString EndpointName = bWasSelectingStart ? TEXT("Start") : TEXT("Destination");
+	const FString AcceptedMessage = bWasSelectingStart
+		? FString::Printf(TEXT("Start set on Floor %d."), Floor)
+		: FString::Printf(TEXT("Destination set on Floor %d."), Floor);
+	SelectionMode = ENavigationSelectionMode::None;
+	UE_LOG(LogTemp, Warning, TEXT("[Navigation] Point accepted as %s: position=(%.2f, %.2f), floor=%d"),
+		*EndpointName,
+		FootprintPosition.X, FootprintPosition.Y, Floor);
+	SetStatusMessage(AcceptedMessage, ENavigationMessageKind::Success);
 }
 
 TArray<UNavigationPanelWidget::FNavigationRoomOption> UNavigationPanelWidget::GetSelectableRooms() const
@@ -381,12 +278,15 @@ bool UNavigationPanelWidget::SetEndpointToRoom(const FString& RoomOptionLabel, b
 	SelectionMode = ENavigationSelectionMode::None;
 
 	FSelectedEndpoint& Endpoint = bIsStart ? Start : Destination;
-	FNavigationRoutePoint SelectedPoint;
-	SelectedPoint.Position = Found->Centroid;
-	SelectedPoint.Floor = Found->Floor;
-	SetEndpoint(Endpoint, SelectedPoint, Building->BuildingId,
-		bIsStart ? TEXT("Start") : TEXT("Destination"),
-		FString::Printf(TEXT("to '%s' indoors on Floor %d"), *Found->RoomName, Found->Floor));
+	Endpoint.bValid = true;
+	Endpoint.Point.Position = Found->Centroid;
+	Endpoint.Point.Floor = Found->Floor;
+	Endpoint.BuildingId = Building->BuildingId;
+	Endpoint.bSetViaDropdown = true;
+	RoutePoints.Reset();
+	bLastFindRouteFailed = false;
+	SetStatusMessage(FString::Printf(TEXT("%s set to '%s'."), bIsStart ? TEXT("Start") : TEXT("Destination"), *Found->RoomName),
+		ENavigationMessageKind::Success);
 	return true;
 }
 
@@ -414,28 +314,11 @@ void UNavigationPanelWidget::RequestFindRoute()
 	{
 		RoutePoints.Reset();
 		bLastFindRouteFailed = true;
-		const bool bIncludesOutside = Start.Point.Floor == OutdoorFloor || Destination.Point.Floor == OutdoorFloor;
-		SetStatusMessage(bIncludesOutside
-			? TEXT("Indoor/outdoor route data is not available yet. The points are saved; connect the combined planner and press Find Route again.")
-			: Result.Error, ENavigationMessageKind::Warning);
+		SetStatusMessage(Result.Error, ENavigationMessageKind::Warning);
 		return;
 	}
 
-	ApplyRouteResult(Result);
-}
-
-void UNavigationPanelWidget::ApplyRouteResult(const FNavigationRouteResult& Result)
-{
-	if (Result.Points.IsEmpty())
-	{
-		RoutePoints.Reset();
-		bLastFindRouteFailed = true;
-		SetStatusMessage(Result.Error.IsEmpty() ? TEXT("No route was returned.") : Result.Error,
-			ENavigationMessageKind::Warning);
-		return;
-	}
-
-	RoutePoints = Result.Points;
+	RoutePoints = MoveTemp(Result.Points);
 	bLastFindRouteFailed = false;
 	SetStatusMessage(FString::Printf(TEXT("Route found: %d points."), RoutePoints.Num()),
 		ENavigationMessageKind::Success);
@@ -503,9 +386,9 @@ FString UNavigationPanelWidget::GetDisplayStatusMessage() const
 	switch (SelectionMode)
 	{
 	case ENavigationSelectionMode::Start:
-		return TEXT("Select a start indoors, or in the blue outside area on Floor 1.");
+		return TEXT("Select a start on the current floor.");
 	case ENavigationSelectionMode::Destination:
-		return TEXT("Select a destination indoors, or in the blue outside area on Floor 1.");
+		return TEXT("Select a destination on the current floor.");
 	default:
 		return TEXT("Choose Set Start or Set Destination.");
 	}
@@ -516,11 +399,11 @@ FString UNavigationPanelWidget::BuildRouteDetails() const
 	FString Details;
 	if (Start.bValid)
 	{
-		Details += FString::Printf(TEXT("Start: %s\n"), *LocationName(Start.Point));
+		Details += FString::Printf(TEXT("Start: Floor %d\n"), Start.Point.Floor);
 	}
 	if (Destination.bValid)
 	{
-		Details += FString::Printf(TEXT("Destination: %s\n"), *LocationName(Destination.Point));
+		Details += FString::Printf(TEXT("Destination: Floor %d\n"), Destination.Point.Floor);
 	}
 
 	const int32 ActiveFloor = Interior ? Interior->GetActiveFloor() : INDEX_NONE;
@@ -534,22 +417,11 @@ FString UNavigationPanelWidget::BuildRouteDetails() const
 		{
 			continue;
 		}
-		if (From.Floor == OutdoorFloor)
-		{
-			Details += TEXT("Enter the building, then continue on Floor 1.\n");
-		}
-		else if (To.Floor == OutdoorFloor)
-		{
-			Details += TEXT("Exit the building, then continue outside.\n");
-		}
-		else
-		{
-			const FString Connector = ConnectorTypeName(To.ConnectorType);
-			const FString ConnectorLabel = To.ConnectorId.IsEmpty()
-				? Connector : Connector + TEXT(" ") + To.ConnectorId;
-			Details += FString::Printf(TEXT("Take %s from Floor %d to Floor %d.\n"),
-				*ConnectorLabel, From.Floor, To.Floor);
-		}
+		const FString Connector = ConnectorTypeName(To.ConnectorType);
+		const FString ConnectorLabel = To.ConnectorId.IsEmpty()
+			? Connector : Connector + TEXT(" ") + To.ConnectorId;
+		Details += FString::Printf(TEXT("Take %s from Floor %d to Floor %d.\n"),
+			*ConnectorLabel, From.Floor, To.Floor);
 		if (From.Floor == ActiveFloor && NextFloor == INDEX_NONE)
 		{
 			NextFloor = To.Floor;
@@ -561,15 +433,11 @@ FString UNavigationPanelWidget::BuildRouteDetails() const
 	}
 	if (NextFloor != INDEX_NONE)
 	{
-		Details += NextFloor == OutdoorFloor
-			? TEXT("Route continues outside.")
-			: FString::Printf(TEXT("Route continues to Floor %d."), NextFloor);
+		Details += FString::Printf(TEXT("Route continues to Floor %d."), NextFloor);
 	}
 	else if (PreviousFloor != INDEX_NONE)
 	{
-		Details += PreviousFloor == OutdoorFloor
-			? TEXT("Route arrives from outside.")
-			: FString::Printf(TEXT("Route arrives from Floor %d."), PreviousFloor);
+		Details += FString::Printf(TEXT("Route arrives from Floor %d."), PreviousFloor);
 	}
 	Details.RemoveFromEnd(TEXT("\n"));
 	return Details;

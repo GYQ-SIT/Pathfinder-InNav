@@ -17,16 +17,16 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
+#include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
 #include "Framework/Application/SlateApplication.h"
 #include "UObject/UObjectIterator.h"
 #include "HAL/FileManager.h"
-#include "RuntimeAudioImporterLibrary.h"
-#include "Sound/ImportedSoundWave.h"
+#include "WavFileLoader.h"
+#include "Sound/SoundWaveProcedural.h"
 #include "Components/AudioComponent.h"
-#include "Kismet/GameplayStatics.h"
 
 // ---- Helper: is Point inside the (possibly concave) polygon Poly? (even-odd ray-casting test) ----
 static bool IsPointInPolygon(const FVector2D& Point, const TArray<FVector2D>& Poly)
@@ -60,6 +60,8 @@ void ANavPlayerController::BeginPlay()
 	bShowMouseCursor = true;
 	bEnableClickEvents = true;
 	bEnableMouseOverEvents = true;
+
+	LoadExteriorCameraDefaultFromDisk();
 
 	NavigationPanel = CreateWidget<UNavigationPanelWidget>(this, UNavigationPanelWidget::StaticClass());
 	if (NavigationPanel)
@@ -147,6 +149,7 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
 	InputComponent->BindKey(EKeys::N, IE_Pressed, this, &ANavPlayerController::ToggleSnapEnabled);
 	InputComponent->BindKey(FInputChord(EKeys::S, /*Shift*/false, /*Ctrl*/true, /*Alt*/false, /*Cmd*/false), IE_Pressed, this, &ANavPlayerController::SaveCurrentProjectKeyHandler);
+	InputComponent->BindKey(EKeys::G, IE_Pressed, this, &ANavPlayerController::LogCameraTransform);
 	InputComponent->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &ANavPlayerController::ZoomIn3DPreview);
 	InputComponent->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &ANavPlayerController::ZoomOut3DPreview);
 	// Separate from the "SelectBuilding" action above - carries the 3D Edit mode room-drag gesture
@@ -256,12 +259,26 @@ void ANavPlayerController::OnClick()
 		ActivePrefabShape != 0 ||
 		ActiveConnectorType != 0)
 	{
-		// In 2D, interior-editing clicks are handled by InteriorFloorPlanWidget; in plain 3D View
-		// mode, they're an intentional no-op (see IsIn3DPreviewMode's own comment). Only 3D Edit mode
-		// routes them anywhere.
-		if (bIsIn3DPreviewMode && bIsIn3DEditMode)
+		// In 2D, interior-editing clicks are handled by InteriorFloorPlanWidget. In 3D, Edit mode
+		// routes a click through the full dispatch (draw/prefab/connector/door/select - see
+		// Handle3DEditClick). View mode is more restricted - looking without editing is still useful
+		// (Select mode lets you click a room/door/connector to see it in the Properties panel), but
+		// none of the mutating modes make sense there, so it goes straight to selection instead of
+		// Handle3DEditClick's full dispatch. bSelectMode is the only mode flag not itself gated to
+		// Edit mode (see the mode toolbar buttons), so a stray click while some other mode happens to
+		// still be active from before switching to View is correctly still a no-op here.
+		if (bIsIn3DPreviewMode)
 		{
-			Handle3DEditClick();
+			if (bIsIn3DEditMode)
+			{
+				Handle3DEditClick();
+			}
+			else if (bSelectMode)
+			{
+				FHitResult Hit;
+				GetHitResultUnderCursor(ECC_Visibility, false, Hit);
+				Select3DEditTarget(Hit);
+			}
 		}
 	}
 	else
@@ -559,6 +576,7 @@ void ANavPlayerController::ToggleSnapEnabled()
 {
 	bSnapEnabled = !bSnapEnabled;
 	UE_LOG(LogTemp, Warning, TEXT("Snapping %s"), bSnapEnabled ? TEXT("ON") : TEXT("OFF"));
+	OnSnapEnabledChanged.Broadcast(bSnapEnabled);
 }
 
 void ANavPlayerController::ExitPrefabRoomMode()
@@ -954,7 +972,10 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 	// rescue a click that's genuinely outside the building.
 	if (InteriorGen && bSnapEnabled)
 	{
-		constexpr float SnapToleranceFootprintUnits = 8.f;
+		// Fixed WORLD distance (80cm) divided by Scale, not a bare footprint-unit constant - same
+		// "footprint units assumed Scale~10" reasoning as PlacePrefabRoomAt (see its own comment); a
+		// bare constant here would snap across nearly a whole room's width at Scale=100.
+		const float SnapToleranceFootprintUnits = 80.f / GetBuildingScale();
 		FVector2D SnapOffset;
 		if (InteriorGen->FindSnapOffset(InteriorGen->GetActiveFloor(), { FootprintPoint }, FString(), SnapToleranceFootprintUnits, SnapOffset))
 		{
@@ -1412,6 +1433,11 @@ bool ANavPlayerController::CommitRoomMove(const FString& RoomId, const TArray<FV
 	return bSuccess;
 }
 
+float ANavPlayerController::GetBuildingScale() const
+{
+	return Generator ? Generator->GetScale() : 1.f;
+}
+
 AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter)
 {
 	if (ActivePrefabShape == 0)
@@ -1438,23 +1464,29 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter
 		}
 	}
 
-	// Default sizes are deliberately small - ResizeRoom (below) is how they grow from here.
+	// Default sizes are deliberately small - ResizeRoom (below) is how they grow from here. Expressed
+	// as a fixed WORLD size (cm) divided by the building's own Scale, not a bare footprint-unit
+	// constant - footprint-space is pre-scale, so a bare constant here would produce a room 10x too
+	// big for a database-loaded building (Scale=100) versus a hand-authored JSON one (Scale=10). See
+	// project memory for the full audit of this "footprint units assumed Scale~10" bug family.
+	const float Scale = GetBuildingScale();
+
 	TArray<FVector2D> Footprint;
 	switch (ActivePrefabShape)
 	{
-	case 1: // Rectangle: 60 x 45, axis-aligned.
+	case 1: // Rectangle: 6m x 4.5m in world space.
 	{
-		constexpr float HalfWidth = 30.f;
-		constexpr float HalfDepth = 22.5f;
+		const float HalfWidth = 300.f / Scale;
+		const float HalfDepth = 225.f / Scale;
 		Footprint.Add(FootprintCenter + FVector2D(-HalfWidth, -HalfDepth));
 		Footprint.Add(FootprintCenter + FVector2D(HalfWidth, -HalfDepth));
 		Footprint.Add(FootprintCenter + FVector2D(HalfWidth, HalfDepth));
 		Footprint.Add(FootprintCenter + FVector2D(-HalfWidth, HalfDepth));
 		break;
 	}
-	case 2: // Triangle: equilateral, radius 30, pointing up.
+	case 2: // Triangle: equilateral, 3m radius in world space, pointing up.
 	{
-		constexpr float Radius = 30.f;
+		const float Radius = 300.f / Scale;
 		constexpr int32 Sides = 3;
 		for (int32 i = 0; i < Sides; i++)
 		{
@@ -1464,9 +1496,9 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter
 		}
 		break;
 	}
-	case 3: // Circle: approximated as a 24-sided regular polygon, radius 30.
+	case 3: // Circle: approximated as a 24-sided regular polygon, 3m radius in world space.
 	{
-		constexpr float Radius = 30.f;
+		const float Radius = 300.f / Scale;
 		constexpr int32 Sides = 24;
 		for (int32 i = 0; i < Sides; i++)
 		{
@@ -1716,7 +1748,11 @@ FString ANavPlayerController::BrowseForBuildingDataFile()
 		TEXT("Import building data"),
 		TEXT(""),
 		TEXT(""),
-		TEXT("JSON files (*.json)|*.json"),
+		// Both formats in one filter (not two separate filter entries) so this stays a single "Open"
+		// flow the user doesn't have to pre-choose a format for - see
+		// LoadBuildingDataFromPathOrDatabase, which the picked path should be handed to instead of
+		// either format-specific loader directly.
+		TEXT("Building data (*.json, *.db)|*.json;*.db"),
 		EFileDialogFlags::None,
 		OutFiles);
 
@@ -1754,6 +1790,14 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 		InteriorGen->ClearLoadedInterior();
 	}
 	Generator->ClearAllBuildings();
+	// A previous database-loaded project could have left roads/POIs/context buildings behind -
+	// LoadBuildingsFromFile (below) has no concept of any of them, so nothing else would clear them.
+	Generator->ClearAllRoadsAndPOIs();
+	Generator->ClearAllContextBuildings();
+	// ClearAllBuildings() just destroyed whatever SelectedBuilding was pointing at - same reasoning as
+	// StartNewProject's own reset, just missing here until now (SelectBuildingUnderCursor/
+	// GetSelectedBuildingId would otherwise dereference a stale pointer if called right after an Open).
+	SelectedBuilding = nullptr;
 
 	const int32 Count = Generator->LoadBuildingsFromFile(FilePath);
 	UE_LOG(LogTemp, Warning, TEXT("LoadBuildingDataFromPath: loaded %d buildings from %s"), Count, *FilePath);
@@ -1771,6 +1815,67 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 	return Count;
 }
 
+int32 ANavPlayerController::LoadBuildingDataFromDatabase(const FString& DatabasePath)
+{
+	if (!Generator)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LoadBuildingDataFromDatabase: no BuildingGenerator found in the level"));
+		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."));
+		return 0;
+	}
+
+	if (DatabasePath.IsEmpty())
+	{
+		OnActionFailed.Broadcast(TEXT("No database file selected."));
+		return 0;
+	}
+	if (NavigationPanel)
+	{
+		NavigationPanel->ClearAll();
+		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
+	}
+
+	if (InteriorGen)
+	{
+		InteriorGen->ClearLoadedInterior();
+	}
+	Generator->ClearAllBuildings();
+	SelectedBuilding = nullptr;
+
+	const int32 Count = Generator->LoadBuildingsFromDatabase(DatabasePath);
+	UE_LOG(LogTemp, Warning, TEXT("LoadBuildingDataFromDatabase: loaded %d buildings from %s"), Count, *DatabasePath);
+	if (Count == 0)
+	{
+		OnActionFailed.Broadcast(TEXT("No buildings were loaded from that database - check that it has 'buildings'/'building_nodes' tables."));
+	}
+	else
+	{
+		// Deliberately NOT setting CurrentProjectFilePath to DatabasePath - Ctrl+S writes JSON via
+		// SaveBuildingsToFile, and pointing that at the .db file would overwrite it with JSON text.
+		// A database-loaded project has no "file to save back to" yet; the existing Save-As flow
+		// (whatever prompts for a path when CurrentProjectFilePath is empty) is what should kick in if
+		// the user wants to persist it - interiors drawn afterward still save fine once they do, since
+		// SaveBuildingsToFile serializes whatever APolyBuilding actors currently exist regardless of
+		// how they were spawned.
+		bHasUnsavedChanges = false;
+		// Best-effort, first-look visualization (see LoadRoadsAndPOIsFromDatabase's own comment on
+		// scope) - a failure here shouldn't block the buildings that DID load from showing up.
+		Generator->LoadRoadsAndPOIsFromDatabase(DatabasePath);
+		Generator->LoadContextBuildingsFromDatabase(DatabasePath);
+		FocusCameraOnAllBuildings();
+	}
+	return Count;
+}
+
+int32 ANavPlayerController::LoadBuildingDataFromPathOrDatabase(const FString& FilePath)
+{
+	if (FPaths::GetExtension(FilePath).Equals(TEXT("db"), ESearchCase::IgnoreCase))
+	{
+		return LoadBuildingDataFromDatabase(FilePath);
+	}
+	return LoadBuildingDataFromPath(FilePath);
+}
+
 void ANavPlayerController::StartNewProject()
 {
 	if (NavigationPanel)
@@ -1785,6 +1890,8 @@ void ANavPlayerController::StartNewProject()
 	if (Generator)
 	{
 		Generator->ClearAllBuildings();
+		Generator->ClearAllRoadsAndPOIs();
+		Generator->ClearAllContextBuildings();
 	}
 
 	CurrentProjectFilePath.Empty();
@@ -2058,6 +2165,69 @@ void ANavPlayerController::DecreaseMoveSpeed3DPreview()
 				ThreeDPreviewMinMoveSpeed, ThreeDPreviewMaxMoveSpeed);
 		}
 	}
+}
+
+void ANavPlayerController::ApplyExteriorCameraSpeed(float NewSpeed)
+{
+	APawn* ControlledPawn = GetPawn();
+	UFloatingPawnMovement* Movement = ControlledPawn ? Cast<UFloatingPawnMovement>(ControlledPawn->GetMovementComponent()) : nullptr;
+	if (!Movement)
+	{
+		return;
+	}
+	Movement->MaxSpeed = FMath::Clamp(NewSpeed, ExteriorCameraMinSpeed, ExteriorCameraMaxSpeed);
+
+	// UFloatingPawnMovement's Acceleration/Deceleration are flat values (engine default 4000/8000,
+	// tuned for the stock 1200 MaxSpeed) - NOT scaled to MaxSpeed automatically. Left alone, reaching
+	// a much higher MaxSpeed (this screen's campus-span-scaled default, or a manually typed value) at
+	// a flat 4000 accel takes far longer than anyone actually holds a WASD key for, so raising MaxSpeed
+	// alone made no felt difference. Scale both proportionally so the pawn keeps reaching full speed in
+	// the same ~0.3s/0.15s the engine default itself implies (1200/4000 and 1200/8000) no matter what
+	// MaxSpeed is currently set to.
+	Movement->Acceleration = Movement->MaxSpeed / 0.3f;
+	Movement->Deceleration = Movement->MaxSpeed / 0.15f;
+}
+
+void ANavPlayerController::IncreaseCameraSpeedExterior()
+{
+	ApplyExteriorCameraSpeed(GetCameraMoveSpeed() * ExteriorCameraSpeedFactor);
+}
+
+void ANavPlayerController::DecreaseCameraSpeedExterior()
+{
+	ApplyExteriorCameraSpeed(GetCameraMoveSpeed() / ExteriorCameraSpeedFactor);
+}
+
+void ANavPlayerController::SetCameraSpeedExterior(float NewSpeed)
+{
+	ApplyExteriorCameraSpeed(NewSpeed);
+}
+
+void ANavPlayerController::SetMoveSpeed3DPreview(float NewSpeed)
+{
+	if (!bIsIn3DPreviewMode)
+	{
+		return;
+	}
+	if (APawn* ControlledPawn = GetPawn())
+	{
+		if (UFloatingPawnMovement* Movement = Cast<UFloatingPawnMovement>(ControlledPawn->GetMovementComponent()))
+		{
+			Movement->MaxSpeed = FMath::Clamp(NewSpeed, ThreeDPreviewMinMoveSpeed, ThreeDPreviewMaxMoveSpeed);
+		}
+	}
+}
+
+float ANavPlayerController::GetCameraMoveSpeed() const
+{
+	if (const APawn* ControlledPawn = GetPawn())
+	{
+		if (const UFloatingPawnMovement* Movement = Cast<UFloatingPawnMovement>(ControlledPawn->GetMovementComponent()))
+		{
+			return Movement->MaxSpeed;
+		}
+	}
+	return 0.f;
 }
 
 void ANavPlayerController::SetIn3DPreviewMode(bool bEnable)
@@ -2569,24 +2739,93 @@ void ANavPlayerController::RepositionCameraToActiveFloor()
 	}
 }
 
-void ANavPlayerController::FocusCameraOnAllBuildings()
+void ANavPlayerController::SetRoadCategoryVisible(ERoadCategory Category, bool bVisible)
 {
-	APawn* ControlledPawn = GetPawn();
-	if (!ControlledPawn || !Generator)
+	if (Generator)
+	{
+		Generator->SetRoadCategoryVisible(Category, bVisible);
+	}
+}
+
+void ANavPlayerController::SetAllRoadsVisible(bool bVisible)
+{
+	if (Generator)
+	{
+		Generator->SetAllRoadsVisible(bVisible);
+	}
+}
+
+void ANavPlayerController::SetRoadsAndPOIsWithinCampusOnly(bool bEnable)
+{
+	if (!Generator)
+	{
+		return;
+	}
+	if (!bEnable)
+	{
+		Generator->SetRoadsAndPOIsWithinCampusOnly(false, FVector2D::ZeroVector, 0.f);
+		return;
+	}
+
+	FVector2D Center;
+	float Span;
+	if (!ComputeAllBuildingsBounds(Center, Span))
 	{
 		return;
 	}
 
+	// First-pass radius: half the campus's own bounding span, plus a fixed buffer so roads/POIs right
+	// at the campus edge (entrances, perimeter paths) aren't clipped off - tune
+	// CampusFilterPaddingWorldUnits if this feels too tight/loose once tried in the editor.
+	constexpr float CampusFilterPaddingWorldUnits = 5000.f; // 50m at Scale=100
+	const float Radius = Span * 0.5f + CampusFilterPaddingWorldUnits;
+	Generator->SetRoadsAndPOIsWithinCampusOnly(true, Center, Radius);
+}
+
+void ANavPlayerController::SetCampusBuildingsVisible(bool bVisible)
+{
+	if (Generator)
+	{
+		Generator->SetCampusBuildingsVisible(bVisible);
+	}
+}
+
+void ANavPlayerController::SetNonCampusBuildingsVisible(bool bVisible)
+{
+	if (Generator)
+	{
+		Generator->SetNonCampusBuildingsVisible(bVisible);
+	}
+}
+
+void ANavPlayerController::LogCameraTransform()
+{
+	const APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn)
+	{
+		return;
+	}
+	const FVector Location = ControlledPawn->GetActorLocation();
+	const FRotator Rotation = GetControlRotation();
+	const FString Message = FString::Printf(TEXT("Camera Location=(X=%.1f, Y=%.1f, Z=%.1f) Rotation=(Pitch=%.1f, Yaw=%.1f, Roll=%.1f)"),
+		Location.X, Location.Y, Location.Z, Rotation.Pitch, Rotation.Yaw, Rotation.Roll);
+	UE_LOG(LogTemp, Warning, TEXT("%s"), *Message);
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 15.f, FColor::Yellow, Message);
+	}
+}
+
+bool ANavPlayerController::ComputeAllBuildingsBounds(FVector2D& OutCenter, float& OutSpan) const
+{
+	if (!Generator)
+	{
+		return false;
+	}
 	const TArray<APolyBuilding*> Buildings = Generator->GetAllBuildings();
 	if (Buildings.Num() == 0)
 	{
-		// Nothing to frame yet (e.g. a brand new blank project) - just pull the camera up above the
-		// origin instead of leaving it wherever PlayerStart put it.
-		const FVector DefaultLocation(0.f, 0.f, 3000.f);
-		const FRotator DefaultRotation(-50.f, 0.f, 0.f);
-		ControlledPawn->SetActorLocationAndRotation(DefaultLocation, DefaultRotation);
-		SetControlRotation(DefaultRotation);
-		return;
+		return false;
 	}
 
 	const float Scale = Generator->GetScale();
@@ -2608,21 +2847,148 @@ void ANavPlayerController::FocusCameraOnAllBuildings()
 		}
 	}
 
-	const FVector2D Center = (MinPoint + MaxPoint) * 0.5f;
-	const float Span = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
-	const float ViewDistance = FMath::Max(Span * 1.2f, 2000.f);
+	OutCenter = (MinPoint + MaxPoint) * 0.5f;
+	OutSpan = FMath::Max(MaxPoint.X - MinPoint.X, MaxPoint.Y - MinPoint.Y);
+	return true;
+}
+
+void ANavPlayerController::FocusCameraOnAllBuildings()
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn || !Generator)
+	{
+		return;
+	}
+
+	FVector2D Center;
+	float Span;
+	if (!ComputeAllBuildingsBounds(Center, Span))
+	{
+		// Nothing to frame yet (e.g. a brand new blank project) - just pull the camera up above the
+		// origin instead of leaving it wherever PlayerStart put it.
+		const FVector DefaultLocation(0.f, 0.f, 3000.f);
+		const FRotator DefaultRotation(-50.f, 0.f, 0.f);
+		ControlledPawn->SetActorLocationAndRotation(DefaultLocation, DefaultRotation);
+		SetControlRotation(DefaultRotation);
+		return;
+	}
+
+	// The free-fly pawn's WASD speed defaults to whatever ADefaultPawn ships with (1200 cm/s) -
+	// tuned for buildings.json's own small hand-placed campus (spans roughly 1000 units), but a
+	// database-loaded campus at real-world scale (see ABuildingGenerator::LoadBuildingsFromDatabase)
+	// can span hundreds of real meters, at which point that speed reads as "barely moving". Scale it
+	// to cross the whole loaded span in about 4 seconds instead - ApplyExteriorCameraSpeed clamps to
+	// the same range IncreaseCameraSpeedExterior/DecreaseCameraSpeedExterior use (so a manual
+	// adjustment and a fresh load never disagree on the floor/ceiling) and also scales
+	// Acceleration/Deceleration to match, see its own comment.
+	ApplyExteriorCameraSpeed(Span / 4.f);
 
 	// Pull the camera back-and-up along the pitch's own forward vector (same "Target -
 	// Rotation.Vector() * Distance" pattern PositionCameraForFloor/PositionCameraFor3DPreview use) so
-	// the -50 deg pitch actually looks DOWN AT Center - placing it directly above Center with the same
-	// rotation (the old code) points the view down-and-forward from directly overhead, past the
-	// buildings entirely, which reads as "not tilted down" even though the pitch value is right.
+	// the pitch actually looks DOWN AT Center - placing it directly above Center with the same
+	// rotation points the view down-and-forward from directly overhead, past the buildings entirely,
+	// which reads as "not tilted down" even though the pitch value is right. Pitch/Yaw/distance ratio
+	// are user-tunable now (see SetCurrentViewAsDefaultExterior) rather than fixed constants.
 	const FVector Target(Center.X, Center.Y, 0.f);
-	const FRotator NewRotation(-50.f, 0.f, 0.f);
+	const FRotator NewRotation(ExteriorDefaultViewPitch, ExteriorDefaultViewYaw, 0.f);
+	const float ViewDistance = FMath::Max(Span * ExteriorDefaultViewDistanceRatio, ExteriorDefaultViewMinDistance);
 	const FVector NewLocation = Target - NewRotation.Vector() * ViewDistance;
 
 	ControlledPawn->SetActorLocationAndRotation(NewLocation, NewRotation);
 	SetControlRotation(NewRotation);
+}
+
+void ANavPlayerController::ResetExteriorCameraToDefaultView()
+{
+	FocusCameraOnAllBuildings();
+}
+
+void ANavPlayerController::SetCurrentViewAsDefaultExterior()
+{
+	const APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn)
+	{
+		return;
+	}
+
+	FVector2D Center;
+	float Span;
+	if (!ComputeAllBuildingsBounds(Center, Span) || Span <= KINDA_SMALL_NUMBER)
+	{
+		OnActionFailed.Broadcast(TEXT("Load some buildings first, then set the current view as the default."));
+		return;
+	}
+
+	const FRotator Rotation = GetControlRotation();
+	const FVector Target(Center.X, Center.Y, 0.f);
+	const float Distance = FVector::Dist(ControlledPawn->GetActorLocation(), Target);
+
+	ExteriorDefaultViewPitch = Rotation.Pitch;
+	ExteriorDefaultViewYaw = Rotation.Yaw;
+	ExteriorDefaultViewDistanceRatio = Distance / Span;
+
+	SaveExteriorCameraDefaultToDisk();
+	UE_LOG(LogTemp, Warning, TEXT("Set exterior default view: Pitch=%.2f Yaw=%.2f DistanceRatio=%.3f"),
+		ExteriorDefaultViewPitch, ExteriorDefaultViewYaw, ExteriorDefaultViewDistanceRatio);
+}
+
+bool ANavPlayerController::TryLoadExteriorCameraDefaultFromFile(const FString& FilePath)
+{
+	FString FileContents;
+	if (!FFileHelper::LoadFileToString(FileContents, *FilePath))
+	{
+		return false;
+	}
+
+	TSharedPtr<FJsonObject> Root;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(FileContents);
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		return false;
+	}
+
+	double Pitch = 0.0, Yaw = 0.0, Ratio = 0.0;
+	if (Root->TryGetNumberField(TEXT("defaultViewPitch"), Pitch))
+	{
+		ExteriorDefaultViewPitch = static_cast<float>(Pitch);
+	}
+	if (Root->TryGetNumberField(TEXT("defaultViewYaw"), Yaw))
+	{
+		ExteriorDefaultViewYaw = static_cast<float>(Yaw);
+	}
+	if (Root->TryGetNumberField(TEXT("defaultViewDistanceRatio"), Ratio) && Ratio > 0.0)
+	{
+		ExteriorDefaultViewDistanceRatio = static_cast<float>(Ratio);
+	}
+	return true;
+}
+
+void ANavPlayerController::LoadExteriorCameraDefaultFromDisk()
+{
+	if (TryLoadExteriorCameraDefaultFromFile(FPaths::ProjectSavedDir() / TEXT("ExteriorEditorLayout.json")))
+	{
+		return;
+	}
+
+	// No per-user save yet (first launch on this machine) - fall back to the team's own shipped
+	// default instead of the hardcoded ExteriorDefaultView.../member-initializer values, same
+	// Data/DefaultLayouts/ convention UInteriorScreenWidget::LoadDockLayoutFromDisk already uses for
+	// its own team-default fallback.
+	TryLoadExteriorCameraDefaultFromFile(FPaths::ProjectDir() / TEXT("Data") / TEXT("DefaultLayouts") / TEXT("DefaultExteriorLayout.json"));
+}
+
+void ANavPlayerController::SaveExteriorCameraDefaultToDisk() const
+{
+	const TSharedRef<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetNumberField(TEXT("defaultViewPitch"), ExteriorDefaultViewPitch);
+	Root->SetNumberField(TEXT("defaultViewYaw"), ExteriorDefaultViewYaw);
+	Root->SetNumberField(TEXT("defaultViewDistanceRatio"), ExteriorDefaultViewDistanceRatio);
+
+	FString OutputString;
+	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
+	FJsonSerializer::Serialize(Root, Writer);
+
+	FFileHelper::SaveStringToFile(OutputString, *(FPaths::ProjectSavedDir() / TEXT("ExteriorEditorLayout.json")));
 }
 
 void ANavPlayerController::RestoreExteriorCameraView()
@@ -2835,6 +3201,18 @@ int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 	if (bIsIn3DPreviewMode)
 	{
 		SetIn3DPreviewMode(false);
+	}
+
+	// The exterior "this building is selected" yellow tint (APolyBuilding::SetHighlighted) never
+	// meant anything once you're inside editing/viewing that building's own interior - clearing it
+	// here (not just on deselect/reselect in SelectBuildingUnderCursor) was invisible in the 2D floor
+	// plan (its opaque Background border hides the real exterior mesh underneath entirely), so this
+	// went unnoticed until 3D preview mode exposed the same still-tinted wall mesh directly.
+	if (SelectedBuilding)
+	{
+		SelectedBuilding->SetHighlighted(false);
+		SelectedBuilding = nullptr;
+		OnBuildingSelected.Broadcast(FString());
 	}
 
 	const int32 Result = InteriorGen->LoadInteriorForBuilding(BuildingId);
@@ -3397,12 +3775,10 @@ void ANavPlayerController::ConfirmShapeTest()
 
 FString ANavPlayerController::GetAudioFolderPath()
 {
-	// FPaths::ProjectDir() is relative (something like "../../../InNavi/"), not absolute - fine for
-	// FFileHelper::LoadFileToString elsewhere in this file (which resolves relative to the working
-	// directory), but PlayAudioFile builds a file:// URL from this, and a relative path there produces
-	// an invalid URI (every media player plugin then rejects it as unsupported, not just a "file not
-	// found" - confirmed via the Output Log, which showed the literal unresolved "../../../.." in the
-	// URL it tried to open). ConvertRelativePathToFull makes this a real absolute path first.
+	// FPaths::ProjectDir() is relative (something like "../../../InNavi/"), not absolute -
+	// ConvertRelativePathToFull isn't strictly required by FFileHelper::LoadFileToArray (which
+	// resolves a relative path against the working directory just fine), but costs nothing and keeps
+	// this robust against whatever future code ends up needing a real absolute path here too.
 	return FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("Data") / TEXT("Audio"));
 }
 
@@ -3412,7 +3788,6 @@ TArray<FString> ANavPlayerController::GetAvailableAudioFiles() const
 	// Not "FolderPath" - that name collides with a class member somewhere in this class's own
 	// inheritance chain (C4458 hides-class-member, a compile error in this project).
 	const FString AudioFolder = GetAudioFolderPath();
-	IFileManager::Get().FindFiles(FoundFiles, *(AudioFolder / TEXT("*.mp3")), true, false);
 	IFileManager::Get().FindFiles(FoundFiles, *(AudioFolder / TEXT("*.wav")), true, false);
 	FoundFiles.Sort();
 	return FoundFiles;
@@ -3425,107 +3800,16 @@ bool ANavPlayerController::PlayAudioFile(const FString& FileName)
 		return false;
 	}
 
-	const FString FullPath = GetAudioFolderPath() / FileName;
-	if (!FPaths::FileExists(FullPath))
+	UAudioComponent* AudioComponent = PlayWavFile(FileName, /*bDestroyWhenFinished=*/false);
+	if (!AudioComponent)
 	{
-		OnActionFailed.Broadcast(FString::Printf(TEXT("Audio file '%s' not found."), *FileName));
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not play audio file '%s'."), *FileName));
 		return false;
 	}
 
-	URuntimeAudioImporterLibrary* Importer = URuntimeAudioImporterLibrary::CreateRuntimeAudioImporter();
-	if (!Importer)
-	{
-		OnActionFailed.Broadcast(TEXT("Could not create the audio importer."));
-		return false;
-	}
-	PendingAudioImports.Add(Importer);
-
-	// Added immediately (SoundWave/AudioComponent still null) so a second click on the same row while
-	// it's still decoding is a no-op via IsAudioFilePlaying's own check above, instead of kicking off a
-	// duplicate import. The lambda below fills in SoundWave/AudioComponent once decoding finishes.
 	FActiveAudioPlayback& Playback = ActiveAudioPlaybacks.AddDefaulted_GetRef();
 	Playback.FileName = FileName;
-
-	Importer->OnResultNative.AddLambda([this, FileName](URuntimeAudioImporterLibrary* CompletedImporter, UImportedSoundWave* ImportedSoundWave, ERuntimeImportStatus Status)
-	{
-		PendingAudioImports.RemoveSingleSwap(CompletedImporter);
-
-		FActiveAudioPlayback* Found = ActiveAudioPlaybacks.FindByPredicate([&FileName](const FActiveAudioPlayback& P) { return P.FileName == FileName; });
-		if (!Found)
-		{
-			// Stopped (StopAllAudio clears ActiveAudioPlaybacks) before the async decode finished -
-			// nothing left to attach the result to.
-			return;
-		}
-
-		if (Status != ERuntimeImportStatus::SuccessfulImport || !ImportedSoundWave)
-		{
-			OnActionFailed.Broadcast(FString::Printf(TEXT("Could not decode audio file '%s'."), *FileName));
-			ActiveAudioPlaybacks.RemoveAll([&FileName](const FActiveAudioPlayback& P) { return P.FileName == FileName; });
-			return;
-		}
-
-		if (!AudioActor)
-		{
-			AudioActor = GetWorld()->SpawnActor<AActor>();
-		}
-		if (!AudioActor)
-		{
-			OnActionFailed.Broadcast(TEXT("Could not create the audio player actor."));
-			ActiveAudioPlaybacks.RemoveAll([&FileName](const FActiveAudioPlayback& P) { return P.FileName == FileName; });
-			return;
-		}
-
-		UAudioComponent* AudioComponent = NewObject<UAudioComponent>(AudioActor);
-		AudioComponent->bAutoActivate = false;
-		// AudioActor sits at the world origin (see its own comment) - miles from wherever the camera
-		// actually is on this campus-scale map. A spatialized 3D sound would attenuate with distance
-		// from the listener and be effectively silent from way out here; this is a UI/global sound
-		// (BGM, button click, ...), not something tied to a position in the world, so play it at a flat
-		// volume regardless of where AudioActor happens to be.
-		AudioComponent->bAllowSpatialization = false;
-		AudioComponent->SetSound(ImportedSoundWave);
-		AudioComponent->RegisterComponent();
-		AudioComponent->Play();
-
-		// TEMPORARY diagnostic logging (no sound was audible on the last test pass despite a clean
-		// decode) - prints immediately, then again after a short delay, so the Output Log shows
-		// whether IsPlaying() ever actually goes true, and what the component's own volume/sound
-		// state looks like. Remove once the root cause is confirmed fixed.
-		UE_LOG(LogTemp, Warning, TEXT("[AudioDebug] '%s' right after Play(): AudioComponent->IsPlaying()=%s, VolumeMultiplier=%.2f, Sound=%s, bIsActive=%s, SoundWave->IsPlaying()=%s, Duration=%.2f"),
-			*FileName,
-			AudioComponent->IsPlaying() ? TEXT("true") : TEXT("false"),
-			AudioComponent->VolumeMultiplier,
-			AudioComponent->Sound ? *AudioComponent->Sound->GetName() : TEXT("null"),
-			AudioComponent->IsActive() ? TEXT("true") : TEXT("false"),
-			ImportedSoundWave->IsPlaying(this) ? TEXT("true") : TEXT("false"),
-			ImportedSoundWave->GetDuration());
-		FTimerHandle DebugTimerHandle;
-		TWeakObjectPtr<UAudioComponent> WeakAudioComponent = AudioComponent;
-		TWeakObjectPtr<UImportedSoundWave> WeakSoundWave = ImportedSoundWave;
-		GetWorldTimerManager().SetTimer(DebugTimerHandle, [WeakAudioComponent, WeakSoundWave, FileName, this]()
-		{
-			if (WeakAudioComponent.IsValid() && WeakSoundWave.IsValid())
-			{
-				UE_LOG(LogTemp, Warning, TEXT("[AudioDebug] '%s' 1s later: AudioComponent->IsPlaying()=%s, IsActive()=%s, SoundWave->IsPlaying()=%s"),
-					*FileName,
-					WeakAudioComponent->IsPlaying() ? TEXT("true") : TEXT("false"),
-					WeakAudioComponent->IsActive() ? TEXT("true") : TEXT("false"),
-					WeakSoundWave->IsPlaying(this) ? TEXT("true") : TEXT("false"));
-			}
-			else
-			{
-				UE_LOG(LogTemp, Warning, TEXT("[AudioDebug] '%s' 1s later: component or sound wave no longer valid"), *FileName);
-			}
-		}, 1.0f, false);
-
-		Found->SoundWave = ImportedSoundWave;
-		Found->AudioComponent = AudioComponent;
-	});
-
-	// Auto: determine mp3/wav/etc. from the file extension - GetAvailableAudioFiles only ever lists
-	// .mp3/.wav, so there's nothing ambiguous to disambiguate here.
-	Importer->ImportAudioFromFile(FullPath, ERuntimeAudioFormat::Auto);
+	Playback.AudioComponent = AudioComponent;
 	return true;
 }
 
@@ -3540,11 +3824,6 @@ void ANavPlayerController::StopAllAudio()
 		}
 	}
 	ActiveAudioPlaybacks.Reset();
-
-	// Anything still decoding has nothing left to attach to once it finishes (see PlayAudioFile's own
-	// OnResultNative lambda, which checks ActiveAudioPlaybacks and no-ops if its entry is gone) - clear
-	// this too so those importers aren't kept alive for no reason.
-	PendingAudioImports.Reset();
 }
 
 bool ANavPlayerController::IsAudioFilePlaying(const FString& FileName) const
@@ -3566,44 +3845,110 @@ void ANavPlayerController::PlayButtonClickSound()
 		return;
 	}
 
-	PlayShortSoundEffect(TEXT("click_button.mp3"));
+	PlayShortSoundEffect(TEXT("click_button.wav"));
 }
 
 void ANavPlayerController::PlayBuildingSelectSound()
 {
-	PlayShortSoundEffect(TEXT("select_ui.mp3"));
+	if (!bBuildingSelectSoundEnabled)
+	{
+		return;
+	}
+
+	PlayShortSoundEffect(TEXT("select_ui.wav"));
+}
+
+void ANavPlayerController::PlayQuitConfirmSound()
+{
+	if (!bQuitConfirmSoundEnabled)
+	{
+		return;
+	}
+
+	PlayShortSoundEffect(TEXT("quit_confirm.wav"));
+}
+
+void ANavPlayerController::SetAllUiSoundsEnabled(bool bEnabled)
+{
+	bButtonClickSoundEnabled = bEnabled;
+	bBuildingSelectSoundEnabled = bEnabled;
+	bQuitConfirmSoundEnabled = bEnabled;
+}
+
+void ANavPlayerController::SetMasterVolume(float NewVolume)
+{
+	MasterVolume = FMath::Clamp(NewVolume, 0.f, 1.f);
+
+	for (const FActiveAudioPlayback& Playback : ActiveAudioPlaybacks)
+	{
+		if (Playback.AudioComponent)
+		{
+			Playback.AudioComponent->SetVolumeMultiplier(MasterVolume);
+		}
+	}
 }
 
 void ANavPlayerController::PlayShortSoundEffect(const TCHAR* FileName)
 {
-	// Deliberately NOT cached/reused across calls (an earlier version of PlayButtonClickSound was, and
-	// it crashed the editor: UImportedSoundWave tracks its own playback read-position internally, so
-	// two overlapping plays sharing one instance - e.g. rapid clicking - corrupted that state and hit
-	// an ensure failure in SoundWaveProcedural, "generated more bytes than expected"). Each call gets
-	// its own freshly-decoded, independent instance instead, same as PlayAudioFile - these files are
-	// tiny (a fraction of a second of audio), so decoding fresh every time is not noticeable.
+	PlayWavFile(FileName, /*bDestroyWhenFinished=*/true);
+}
+
+UAudioComponent* ANavPlayerController::PlayWavFile(const FString& FileName, bool bDestroyWhenFinished)
+{
 	const FString FullPath = GetAudioFolderPath() / FileName;
 	if (!FPaths::FileExists(FullPath))
 	{
-		return;
+		return nullptr;
 	}
 
-	URuntimeAudioImporterLibrary* Importer = URuntimeAudioImporterLibrary::CreateRuntimeAudioImporter();
-	if (!Importer)
+	USoundWaveProcedural* SoundWave = LoadWavFileAsSoundWave(FullPath, this);
+	if (!SoundWave)
 	{
-		return;
+		return nullptr;
 	}
-	PendingAudioImports.Add(Importer);
 
-	Importer->OnResultNative.AddLambda([this](URuntimeAudioImporterLibrary* CompletedImporter, UImportedSoundWave* ImportedSoundWave, ERuntimeImportStatus Status)
+	if (!AudioActor)
 	{
-		PendingAudioImports.RemoveSingleSwap(CompletedImporter);
-		if (Status == ERuntimeImportStatus::SuccessfulImport && ImportedSoundWave)
+		AudioActor = GetWorld()->SpawnActor<AActor>();
+	}
+	if (!AudioActor)
+	{
+		return nullptr;
+	}
+
+	UAudioComponent* AudioComponent = NewObject<UAudioComponent>(AudioActor);
+	AudioComponent->bAutoActivate = false;
+	// AudioActor sits at the world origin (see its own comment) - miles from wherever the camera
+	// actually is on this campus-scale map. A spatialized 3D sound would attenuate with distance from
+	// the listener and be effectively silent from way out here; this is a UI/global sound (BGM,
+	// button click, ...), not something tied to a position in the world, so play it at a flat volume
+	// regardless of where AudioActor happens to be.
+	AudioComponent->bAllowSpatialization = false;
+	AudioComponent->SetSound(SoundWave);
+	AudioComponent->SetVolumeMultiplier(MasterVolume);
+	AudioComponent->RegisterComponent();
+	AudioComponent->Play();
+
+	// See this function's own header comment - USoundWaveProcedural never signals "finished" on its
+	// own, so this is what actually stops the voice (and, for a fire-and-forget effect, frees the
+	// component) once the clip's real length has elapsed.
+	const float Duration = FMath::Max(SoundWave->Duration, 0.05f);
+	FTimerHandle StopTimerHandle;
+	TWeakObjectPtr<UAudioComponent> WeakAudioComponent = AudioComponent;
+	GetWorldTimerManager().SetTimer(StopTimerHandle, [WeakAudioComponent, bDestroyWhenFinished]()
+	{
+		if (!WeakAudioComponent.IsValid())
 		{
-			UGameplayStatics::PlaySound2D(this, ImportedSoundWave);
+			return;
 		}
-	});
-	Importer->ImportAudioFromFile(FullPath, ERuntimeAudioFormat::Auto);
+		WeakAudioComponent->Stop();
+		if (bDestroyWhenFinished)
+		{
+			WeakAudioComponent->DestroyComponent();
+		}
+	}, Duration, false);
+
+	return AudioComponent;
 }
 
 void ANavPlayerController::PruneFinishedAudioPlaybacks()
@@ -3613,8 +3958,6 @@ void ANavPlayerController::PruneFinishedAudioPlaybacks()
 		FActiveAudioPlayback& Playback = ActiveAudioPlaybacks[i];
 		if (!Playback.AudioComponent || Playback.AudioComponent->IsPlaying())
 		{
-			// Null AudioComponent means still decoding (see FActiveAudioPlayback's own comment) - not
-			// finished, just not started yet.
 			continue;
 		}
 

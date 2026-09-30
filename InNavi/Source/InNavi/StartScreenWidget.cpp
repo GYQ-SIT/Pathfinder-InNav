@@ -3,6 +3,7 @@
 #include "EditScreenWidget.h"
 #include "NavPlayerController.h"
 #include "TimerManager.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
@@ -73,6 +74,7 @@ TSharedRef<SWidget> UStartScreenWidget::RebuildWidget()
 
 		NewButton = AddButton(TEXT("Btn_New"), TEXT("New"));
 		OpenButton = AddButton(TEXT("Btn_Open"), TEXT("Open"));
+		QuitButton = AddButton(TEXT("Btn_Quit"), TEXT("Quit"));
 	}
 
 	return Super::RebuildWidget();
@@ -95,6 +97,11 @@ void UStartScreenWidget::NativeConstruct()
 		// click sound wouldn't play until the dialog closed and the user had already picked a file.
 		OpenButton->OnClicked.AddUniqueDynamic(this, &UStartScreenWidget::PlayButtonClickSound);
 		OpenButton->OnClicked.AddUniqueDynamic(this, &UStartScreenWidget::OnOpenClicked);
+	}
+	if (QuitButton)
+	{
+		QuitButton->OnClicked.AddUniqueDynamic(this, &UStartScreenWidget::PlayButtonClickSound);
+		QuitButton->OnClicked.AddUniqueDynamic(this, &UStartScreenWidget::OnQuitClicked);
 	}
 }
 
@@ -153,12 +160,22 @@ void UStartScreenWidget::BrowseAndLoadBuildingData()
 		return;
 	}
 
-	// LoadBuildingDataFromPath already broadcasts OnActionFailed itself if the file doesn't parse.
-	const int32 Count = PC->LoadBuildingDataFromPath(FilePath);
+	// LoadBuildingDataFromPathOrDatabase already broadcasts OnActionFailed itself if the file doesn't parse.
+	const int32 Count = PC->LoadBuildingDataFromPathOrDatabase(FilePath);
 	if (Count > 0)
 	{
 		GoToEditScreen();
 	}
+}
+
+void UStartScreenWidget::OnQuitClicked()
+{
+	APlayerController* PC = GetOwningPlayer();
+	if (!PC)
+	{
+		return;
+	}
+	UKismetSystemLibrary::QuitGame(this, PC, EQuitPreference::Quit, /*bIgnorePlatformRestrictions=*/false);
 }
 
 void UStartScreenWidget::GoToEditScreen()
