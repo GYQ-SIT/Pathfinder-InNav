@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "InteriorTypes.h"
 #include "InteriorScreenWidget.generated.h"
 
 class UBorder;
@@ -116,6 +117,15 @@ private:
 	// widget's own Back/building-switch handlers.
 	UFUNCTION()
 	void HandleProjectSaved();
+
+	// Bound to ANavPlayerController::OnActionFailed - that delegate already covers every rejected
+	// action across the whole app (room/door/connector validation, save/load, renames, ...) with a
+	// human-readable reason, but until now nothing displayed it: it only ever reached the Output
+	// Log, which isn't visible in a packaged build. Stores the message/severity into
+	// LastActionFailedMessage/LastActionFailedSeverity so the Debug panel can show it, coloured by
+	// severity (see NativeTick's DebugLastErrorText).
+	UFUNCTION()
+	void HandleActionFailed(FString Reason, EActionFailureSeverity Severity);
 
 	// Bound to ANavPlayerController::OnActiveFloorChanged - see the comment on that delegate. Covers
 	// the [/]/F/X keyboard shortcuts (and anything else that changes the active floor or its content)
@@ -1040,7 +1050,15 @@ private:
 	UBorder* DebugPanel = nullptr;
 	UPROPERTY()
 	UTextBlock* DebugInfoText = nullptr;
+	// Separate text block (own colour) for the Last Error line - see its own construction comment.
+	UPROPERTY()
+	UTextBlock* DebugLastErrorText = nullptr;
 	float DebugSmoothedDeltaTime = 0.f;
+	// Last message/severity broadcast by ANavPlayerController::OnActionFailed (see
+	// HandleActionFailed's own comment); shown as a coloured "Last Error" line in the Debug panel.
+	// Message is empty until the first failure.
+	FString LastActionFailedMessage;
+	EActionFailureSeverity LastActionFailedSeverity = EActionFailureSeverity::Warning;
 	UPROPERTY()
 	UCheckBox* RoadHideAllCheckbox = nullptr;
 	UPROPERTY()

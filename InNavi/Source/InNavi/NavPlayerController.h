@@ -73,10 +73,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildingSelected, FString, Buildi
 // which of these actually triggered it.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnActiveFloorChanged);
 // Broadcast whenever a user-triggered action fails (a button press that did nothing), with a
-// short human-readable reason. UE_LOG still gets the detailed message for developers; this is
-// the same idea aimed at UI - bind it once to show a toast/message, since a packaged game has no
-// visible Output Log. Not exhaustive, but covers the common "why didn't anything happen" cases.
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnActionFailed, FString, Reason);
+// short human-readable reason and how serious it is (see EActionFailureSeverity in InteriorTypes.h).
+// UE_LOG still gets the detailed message for developers; this is the same idea aimed at UI - bind
+// it once to show a toast/message, since a packaged game has no visible Output Log. Not
+// exhaustive, but covers the common "why didn't anything happen" cases.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnActionFailed, FString, Reason, EActionFailureSeverity, Severity);
 // Broadcast whenever a project save actually succeeds - both from SaveCurrentProject (Ctrl+S, or
 // any UI button that calls it) and SaveCurrentProjectAs (Save As, or the very first save of a
 // brand-new project that had no file yet). No params - a listener just needs to know "a save just

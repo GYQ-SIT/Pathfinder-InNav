@@ -1641,7 +1641,16 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		DebugInfoText->SetText(FText::FromString(TEXT("Debug information")));
 		DebugInfoText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		ApplyStandardFont(DebugInfoText);
+		ApplyStandardTextWrap(DebugInfoText);
 		DebugStack->AddChildToVerticalBox(DebugInfoText);
+		// Separate from DebugInfoText so it can carry its own colour (red once an action has failed)
+		// independently of the rest of the panel, which stays a single white block.
+		DebugLastErrorText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_DebugLastError"));
+		DebugLastErrorText->SetText(FText::FromString(TEXT("Last Error: None")));
+		DebugLastErrorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(DebugLastErrorText);
+		ApplyStandardTextWrap(DebugLastErrorText);
+		DebugStack->AddChildToVerticalBox(DebugLastErrorText);
 	}
 
 	return Super::RebuildWidget();
@@ -1701,6 +1710,7 @@ void UInteriorScreenWidget::NativeConstruct()
 		// through this widget at all - this is what lets the dock layout still get saved when the
 		// user saves that way instead of through Back's own confirm dialog.
 		PC->OnProjectSaved.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
+		PC->OnActionFailed.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleActionFailed);
 		// Same reasoning - the [/]/F/X floor keyboard shortcuts change the active floor without ever
 		// going through this screen's own Floor panel handlers.
 		PC->OnActiveFloorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
@@ -1778,6 +1788,7 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnSelectedConnectorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedConnectorChanged);
 		PC->OnEditModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleEditModeChanged);
 		PC->OnProjectSaved.RemoveDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
+		PC->OnActionFailed.RemoveDynamic(this, &UInteriorScreenWidget::HandleActionFailed);
 		PC->OnActiveFloorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
 		PC->OnInteriorContentChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleInteriorContentChanged);
 		PC->OnPreviewModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandlePreviewModeChanged);
@@ -1936,6 +1947,25 @@ void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 		);
 
 		DebugInfoText->SetText(FText::FromString(DebugText));
+
+		if (DebugLastErrorText)
+		{
+			if (LastActionFailedMessage.IsEmpty())
+			{
+				DebugLastErrorText->SetText(FText::FromString(TEXT("Last Error: None")));
+				DebugLastErrorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			}
+			else
+			{
+				DebugLastErrorText->SetText(FText::FromString(TEXT("Last Error: ") + LastActionFailedMessage));
+				// Yellow: the action was rejected but nothing was lost. Red: existing data may have
+				// been cleared, or a save may have silently failed - see EActionFailureSeverity.
+				DebugLastErrorText->SetColorAndOpacity(FSlateColor(
+					LastActionFailedSeverity == EActionFailureSeverity::Critical
+						? FLinearColor::Red
+						: FLinearColor::Yellow));
+			}
+		}
 	}
 	// Keeps retrying every tick, not just once - RootCanvas's cached geometry (what
 	// ApplyLayoutSaveData actually needs, see GetReliableCanvasSize's own comment) turned out to
@@ -3468,6 +3498,12 @@ void UInteriorScreenWidget::HandleEditModeChanged()
 void UInteriorScreenWidget::HandleProjectSaved()
 {
 	SaveDockLayoutToDisk();
+}
+
+void UInteriorScreenWidget::HandleActionFailed(FString Reason, EActionFailureSeverity Severity)
+{
+	LastActionFailedMessage = Reason;
+	LastActionFailedSeverity = Severity;
 }
 
 void UInteriorScreenWidget::HandleActiveFloorChanged()
