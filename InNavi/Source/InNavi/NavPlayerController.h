@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
 #include "InteriorTypes.h"
+#include "RoadSegmentActor.h"
 #include "NavPlayerController.generated.h"
 
 class APolyBuilding;
@@ -436,6 +437,30 @@ public:
 	// picks them up from then on. No-op (with OnActionFailed) if nothing is loaded to measure against.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void SetCurrentViewAsDefaultExterior();
+
+	// Passthrough to Generator->SetRoadCategoryVisible - what the exterior page's road-filter panel
+	// checkboxes call.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetRoadCategoryVisible(ERoadCategory Category, bool bVisible);
+
+	// Passthrough to Generator->SetAllRoadsVisible - what the filter panel's master "Hide All"
+	// checkbox calls.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetAllRoadsVisible(bool bVisible);
+
+	// What the exterior page's "Campus Only" checkbox calls. Computes the campus's own bounding
+	// center/radius from the loaded (university-only) buildings via ComputeAllBuildingsBounds, then
+	// forwards Center and a padded radius to Generator->SetRoadsAndPOIsWithinCampusOnly. No-op if
+	// nothing is loaded yet.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetRoadsAndPOIsWithinCampusOnly(bool bEnable);
+
+	// Passthroughs to Generator->SetCampusBuildingsVisible/SetNonCampusBuildingsVisible - what the
+	// filter panel's two building-visibility checkboxes call.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetCampusBuildingsVisible(bool bVisible);
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetNonCampusBuildingsVisible(bool bVisible);
 
 	UPROPERTY(BlueprintAssignable, Category = "Interior")
 	FOnSelectModeChanged OnSelectModeChanged;
@@ -1193,10 +1218,16 @@ private:
 	bool ComputeAllBuildingsBounds(FVector2D& OutCenter, float& OutSpan) const;
 
 	// See SetCurrentViewAsDefaultExterior's own comment - loaded once in BeginPlay, saved by that
-	// function. Saved/ExteriorEditorLayout.json, same Saved-dir/per-machine convention as
-	// UInteriorScreenWidget's own InteriorEditorLayout.json.
+	// function. Tries Saved/ExteriorEditorLayout.json first (same Saved-dir/per-machine convention as
+	// UInteriorScreenWidget's own InteriorEditorLayout.json), then falls back to the team's shipped
+	// Data/DefaultLayouts/DefaultExteriorLayout.json if no per-user save exists yet.
 	void LoadExteriorCameraDefaultFromDisk();
 	void SaveExteriorCameraDefaultToDisk() const;
+
+	// Shared by LoadExteriorCameraDefaultFromDisk for both paths above - same file format either way,
+	// just a different path. Returns false (leaving the ExteriorDefaultView... members untouched) if
+	// FilePath doesn't exist or doesn't parse.
+	bool TryLoadExteriorCameraDefaultFromFile(const FString& FilePath);
 
 	// Defaults match the values FocusCameraOnAllBuildings shipped with before this became overridable
 	// (see its own history) - overwritten by LoadExteriorCameraDefaultFromDisk if a save exists.
