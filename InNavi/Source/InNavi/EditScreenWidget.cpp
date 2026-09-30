@@ -340,6 +340,18 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			return CheckBox;
 		};
 
+		// A small non-interactive sub-header row (e.g. "Roads"/"Buildings"/"Region" within the Map
+		// panel) - just a styled UTextBlock, extra top padding to separate it from the section above.
+		auto AddSectionHeaderRow = [this](UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label)
+		{
+			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(Name));
+			Text->SetText(FText::FromString(FString(Label)));
+			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			ApplyStandardFont(Text);
+			UVerticalBoxSlot* RowSlot = Stack->AddChildToVerticalBox(Text);
+			RowSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 2.f));
+		};
+
 		FileMenuDropdown = ConstructDropdown(TEXT("Pnl_FileDropdown"), EditMenuBarLeftMargin);
 		UVerticalBox* FileDropdownStack = Cast<UVerticalBox>(FileMenuDropdown->GetContent());
 		UButton* FileNewButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileNew"), TEXT("New"));
@@ -356,7 +368,7 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		WindowAudioCheckbox->SetIsChecked(false);
 		WindowAudioCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowAudioCheckChanged);
 
-		WindowRoadsCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowRoads"), TEXT("Roads"));
+		WindowRoadsCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowRoads"), TEXT("Map"));
 		// Unlike WindowAudioCheckbox, starts checked - RoadFilterPanel starts Visible.
 		WindowRoadsCheckbox->SetIsChecked(true);
 		WindowRoadsCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowRoadsCheckChanged);
@@ -575,24 +587,47 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		RoadFilterPanel->SetContent(RoadFilterStack);
 
 		RoadFilterTitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_RoadFilterTitle"));
-		RoadFilterTitleText->SetText(FText::FromString(TEXT("Roads")));
+		RoadFilterTitleText->SetText(FText::FromString(TEXT("Map")));
 		RoadFilterTitleText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 		ApplyStandardFont(RoadFilterTitleText);
 		UVerticalBoxSlot* RoadFilterTitleSlot = RoadFilterStack->AddChildToVerticalBox(RoadFilterTitleText);
 		RoadFilterTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 
-		UCheckBox* RoadPrimaryCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadPrimary"), TEXT("Primary"));
+		AddSectionHeaderRow(RoadFilterStack, TEXT("Txt_RoadFilterRoads"), TEXT("Roads"));
+		RoadHideAllCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadHideAll"), TEXT("Hide All"));
+		RoadHideAllCheckbox->SetIsChecked(false);
+		RoadHideAllCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadHideAllCheckChanged);
+		RoadPrimaryCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadPrimary"), TEXT("Primary"));
 		RoadPrimaryCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadPrimaryCheckChanged);
-		UCheckBox* RoadSecondaryCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadSecondary"), TEXT("Secondary"));
+		RoadSecondaryCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadSecondary"), TEXT("Secondary"));
 		RoadSecondaryCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadSecondaryCheckChanged);
-		UCheckBox* RoadResidentialCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadResidential"), TEXT("Residential/Tertiary"));
+		RoadResidentialCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadResidential"), TEXT("Residential/Tertiary"));
 		RoadResidentialCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadResidentialCheckChanged);
-		UCheckBox* RoadCyclewayCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadCycleway"), TEXT("Cycleway"));
+		RoadCyclewayCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadCycleway"), TEXT("Cycleway"));
 		RoadCyclewayCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadCyclewayCheckChanged);
-		UCheckBox* RoadFootwayCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadFootway"), TEXT("Footway/Path"));
+		RoadFootwayCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadFootway"), TEXT("Footway/Path"));
 		RoadFootwayCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadFootwayCheckChanged);
-		UCheckBox* RoadOtherCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadOther"), TEXT("Other"));
+		RoadOtherCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadOther"), TEXT("Other"));
 		RoadOtherCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadOtherCheckChanged);
+		// Region/distance filter, folded into the Roads section (not its own "Region" header) - it only
+		// ever affects roads/POIs, so it reads as a 7th road-filter row, not a separate concept.
+		RoadCampusOnlyCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadCampusOnly"), TEXT("Campus Only"));
+		// Starts checked - OnRoadCampusOnlyCheckChanged isn't bound yet at this point in RebuildWidget,
+		// so this alone doesn't apply the filter - see the PC->SetRoadsAndPOIsWithinCampusOnly(true)
+		// call in NativeConstruct that actually turns it on once a PC/Generator exists.
+		RoadCampusOnlyCheckbox->SetIsChecked(true);
+		RoadCampusOnlyCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadCampusOnlyCheckChanged);
+
+		AddSectionHeaderRow(RoadFilterStack, TEXT("Txt_RoadFilterBuildings"), TEXT("Buildings"));
+		BuildingCampusCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_BuildingCampus"), TEXT("Campus"));
+		BuildingCampusCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnBuildingCampusCheckChanged);
+		BuildingNonCampusCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_BuildingNonCampus"), TEXT("Non-Campus"));
+		// Starts unchecked (unlike BuildingCampusCheckbox) - non-campus buildings are hidden by
+		// default. OnBuildingNonCampusCheckChanged isn't bound yet at this point in RebuildWidget, so
+		// this alone doesn't hide anything - see the PC->SetNonCampusBuildingsVisible(false) call in
+		// NativeConstruct that actually applies it once a PC/Generator exists.
+		BuildingNonCampusCheckbox->SetIsChecked(false);
+		BuildingNonCampusCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnBuildingNonCampusCheckChanged);
 
 		// The move-drag handle - only a click landing on THIS starts a drag, same reasoning as
 		// AudioDragHandle. Starts Visible, matching RoadFilterPanel's own initial visibility (unlike
@@ -648,6 +683,14 @@ void UEditScreenWidget::NativeConstruct()
 		{
 			AudioVolumeSlider->SetValue(PC->GetMasterVolume());
 		}
+
+		// RoadCampusOnlyCheckbox defaults to checked (set in RebuildWidget), but that alone doesn't hide
+		// anything - actually apply it now that a PC/Generator exists (by the time this screen is
+		// constructed, LoadBuildingDataFromPath has already loaded any roads/POIs to filter).
+		PC->SetRoadsAndPOIsWithinCampusOnly(true);
+		// Same reasoning for BuildingNonCampusCheckbox, which defaults to UNCHECKED - actually hide the
+		// context buildings now that a PC/Generator exists.
+		PC->SetNonCampusBuildingsVisible(false);
 	}
 
 	RefreshAudioList();
@@ -1182,6 +1225,23 @@ FEventReply UEditScreenWidget::OnRoadFilterPanelMouseButtonUp(FGeometry MyGeomet
 	return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
 }
 
+void UEditScreenWidget::OnRoadHideAllCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetAllRoadsVisible(!bIsChecked);
+	}
+	// Visually sync the 6 category checkboxes to match (checked = shown) - SetIsChecked doesn't re-fire
+	// OnCheckStateChanged, same pattern as OnAudioMuteAllCheckChanged.
+	const bool bCategoriesChecked = !bIsChecked;
+	if (RoadPrimaryCheckbox) RoadPrimaryCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadSecondaryCheckbox) RoadSecondaryCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadResidentialCheckbox) RoadResidentialCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadCyclewayCheckbox) RoadCyclewayCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadFootwayCheckbox) RoadFootwayCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadOtherCheckbox) RoadOtherCheckbox->SetIsChecked(bCategoriesChecked);
+}
+
 void UEditScreenWidget::OnRoadPrimaryCheckChanged(bool bIsChecked)
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
@@ -1227,6 +1287,30 @@ void UEditScreenWidget::OnRoadOtherCheckChanged(bool bIsChecked)
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->SetRoadCategoryVisible(ERoadCategory::Other, bIsChecked);
+	}
+}
+
+void UEditScreenWidget::OnRoadCampusOnlyCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadsAndPOIsWithinCampusOnly(bIsChecked);
+	}
+}
+
+void UEditScreenWidget::OnBuildingCampusCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetCampusBuildingsVisible(bIsChecked);
+	}
+}
+
+void UEditScreenWidget::OnBuildingNonCampusCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetNonCampusBuildingsVisible(bIsChecked);
 	}
 }
 

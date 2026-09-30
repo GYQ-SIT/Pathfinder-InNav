@@ -60,6 +60,13 @@ void ARoadSegmentActor::BuildRoad(const TArray<FVector2D>& Points, float Width, 
 		return;
 	}
 
+	FVector2D PointSum = FVector2D::ZeroVector;
+	for (const FVector2D& Point : Points)
+	{
+		PointSum += Point;
+	}
+	MidpointPosition = PointSum / Points.Num();
+
 	TArray<FVector> Normals;
 	TArray<FVector2D> UV0;
 	TArray<FProcMeshTangent> Tangents;

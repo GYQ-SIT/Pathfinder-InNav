@@ -1790,9 +1790,10 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 		InteriorGen->ClearLoadedInterior();
 	}
 	Generator->ClearAllBuildings();
-	// A previous database-loaded project could have left roads/POIs behind - LoadBuildingsFromFile
-	// (below) has no concept of either, so nothing else would clear them.
+	// A previous database-loaded project could have left roads/POIs/context buildings behind -
+	// LoadBuildingsFromFile (below) has no concept of any of them, so nothing else would clear them.
 	Generator->ClearAllRoadsAndPOIs();
+	Generator->ClearAllContextBuildings();
 	// ClearAllBuildings() just destroyed whatever SelectedBuilding was pointing at - same reasoning as
 	// StartNewProject's own reset, just missing here until now (SelectBuildingUnderCursor/
 	// GetSelectedBuildingId would otherwise dereference a stale pointer if called right after an Open).
@@ -1860,6 +1861,7 @@ int32 ANavPlayerController::LoadBuildingDataFromDatabase(const FString& Database
 		// Best-effort, first-look visualization (see LoadRoadsAndPOIsFromDatabase's own comment on
 		// scope) - a failure here shouldn't block the buildings that DID load from showing up.
 		Generator->LoadRoadsAndPOIsFromDatabase(DatabasePath);
+		Generator->LoadContextBuildingsFromDatabase(DatabasePath);
 		FocusCameraOnAllBuildings();
 	}
 	return Count;
@@ -1889,6 +1891,7 @@ void ANavPlayerController::StartNewProject()
 	{
 		Generator->ClearAllBuildings();
 		Generator->ClearAllRoadsAndPOIs();
+		Generator->ClearAllContextBuildings();
 	}
 
 	CurrentProjectFilePath.Empty();
@@ -2744,6 +2747,57 @@ void ANavPlayerController::SetRoadCategoryVisible(ERoadCategory Category, bool b
 	}
 }
 
+void ANavPlayerController::SetAllRoadsVisible(bool bVisible)
+{
+	if (Generator)
+	{
+		Generator->SetAllRoadsVisible(bVisible);
+	}
+}
+
+void ANavPlayerController::SetRoadsAndPOIsWithinCampusOnly(bool bEnable)
+{
+	if (!Generator)
+	{
+		return;
+	}
+	if (!bEnable)
+	{
+		Generator->SetRoadsAndPOIsWithinCampusOnly(false, FVector2D::ZeroVector, 0.f);
+		return;
+	}
+
+	FVector2D Center;
+	float Span;
+	if (!ComputeAllBuildingsBounds(Center, Span))
+	{
+		return;
+	}
+
+	// First-pass radius: half the campus's own bounding span, plus a fixed buffer so roads/POIs right
+	// at the campus edge (entrances, perimeter paths) aren't clipped off - tune
+	// CampusFilterPaddingWorldUnits if this feels too tight/loose once tried in the editor.
+	constexpr float CampusFilterPaddingWorldUnits = 5000.f; // 50m at Scale=100
+	const float Radius = Span * 0.5f + CampusFilterPaddingWorldUnits;
+	Generator->SetRoadsAndPOIsWithinCampusOnly(true, Center, Radius);
+}
+
+void ANavPlayerController::SetCampusBuildingsVisible(bool bVisible)
+{
+	if (Generator)
+	{
+		Generator->SetCampusBuildingsVisible(bVisible);
+	}
+}
+
+void ANavPlayerController::SetNonCampusBuildingsVisible(bool bVisible)
+{
+	if (Generator)
+	{
+		Generator->SetNonCampusBuildingsVisible(bVisible);
+	}
+}
+
 void ANavPlayerController::LogCameraTransform()
 {
 	const APawn* ControlledPawn = GetPawn();
@@ -2878,19 +2932,19 @@ void ANavPlayerController::SetCurrentViewAsDefaultExterior()
 		ExteriorDefaultViewPitch, ExteriorDefaultViewYaw, ExteriorDefaultViewDistanceRatio);
 }
 
-void ANavPlayerController::LoadExteriorCameraDefaultFromDisk()
+bool ANavPlayerController::TryLoadExteriorCameraDefaultFromFile(const FString& FilePath)
 {
 	FString FileContents;
-	if (!FFileHelper::LoadFileToString(FileContents, *(FPaths::ProjectSavedDir() / TEXT("ExteriorEditorLayout.json"))))
+	if (!FFileHelper::LoadFileToString(FileContents, *FilePath))
 	{
-		return; // nothing saved yet - keep the shipped defaults
+		return false;
 	}
 
 	TSharedPtr<FJsonObject> Root;
 	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(FileContents);
 	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
 	{
-		return;
+		return false;
 	}
 
 	double Pitch = 0.0, Yaw = 0.0, Ratio = 0.0;
@@ -2906,6 +2960,21 @@ void ANavPlayerController::LoadExteriorCameraDefaultFromDisk()
 	{
 		ExteriorDefaultViewDistanceRatio = static_cast<float>(Ratio);
 	}
+	return true;
+}
+
+void ANavPlayerController::LoadExteriorCameraDefaultFromDisk()
+{
+	if (TryLoadExteriorCameraDefaultFromFile(FPaths::ProjectSavedDir() / TEXT("ExteriorEditorLayout.json")))
+	{
+		return;
+	}
+
+	// No per-user save yet (first launch on this machine) - fall back to the team's own shipped
+	// default instead of the hardcoded ExteriorDefaultView.../member-initializer values, same
+	// Data/DefaultLayouts/ convention UInteriorScreenWidget::LoadDockLayoutFromDisk already uses for
+	// its own team-default fallback.
+	TryLoadExteriorCameraDefaultFromFile(FPaths::ProjectDir() / TEXT("Data") / TEXT("DefaultLayouts") / TEXT("DefaultExteriorLayout.json"));
 }
 
 void ANavPlayerController::SaveExteriorCameraDefaultToDisk() const

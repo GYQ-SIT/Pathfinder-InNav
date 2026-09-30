@@ -841,6 +841,10 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// Unlike every other row, starts unchecked - see EDockPanelId::Audio's own comment.
 		WindowAudioCheckbox->SetIsChecked(false);
 		WindowAudioCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowAudioCheckChanged);
+		WindowMapCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowMap"), TEXT("Map"));
+		// Starts checked, matching UEditScreenWidget's own "Map" panel default.
+		WindowMapCheckbox->SetIsChecked(true);
+		WindowMapCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowMapCheckChanged);
 
 		// Full-screen, fully transparent, Collapsed by default - see the comment on
 		// OnMenuClickCatcherMouseButtonDown for why this is how "click elsewhere closes the dropdown"
@@ -904,7 +908,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		BuildingSwitcherComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_BuildingSwitcher"));
 		BuildingSwitcherComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
 		USizeBox* BuildingSwitcherSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		BuildingSwitcherSizeBox->SetWidthOverride(260.f); // fixed now - this bar no longer resizes with any dock panel
+		// A floor, not a fixed width, so a long building name (e.g. a database-loaded one) isn't
+		// clipped/cramped - it grows with the name instead of staying stuck at one width for everyone.
+		BuildingSwitcherSizeBox->SetMinDesiredWidth(140.f);
 		BuildingSwitcherSizeBox->SetContent(BuildingSwitcherComboBox);
 		UHorizontalBoxSlot* SwitcherComboSlot = SwitcherRow->AddChildToHorizontalBox(BuildingSwitcherSizeBox);
 		SwitcherComboSlot->SetVerticalAlignment(VAlign_Center);
@@ -1551,6 +1557,54 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		AudioFileListSizeBox->SetWidthOverride(StandardButtonWidth);
 		AudioFileListSizeBox->SetContent(AudioFileListBox);
 		AudioStack->AddChildToVerticalBox(AudioFileListSizeBox);
+
+		// -- Map panel: road-filter panel ported from UEditScreenWidget's own "Map" panel, Roads
+		// section only (no Buildings section - this screen has no exterior building-visibility
+		// concept). Same PC functions as there (SetRoadCategoryVisible/SetAllRoadsVisible/
+		// SetRoadsAndPOIsWithinCampusOnly). Starts VISIBLE (unlike Audio/Navigation above).
+		MapPanel = ConstructDockPanel(EDockPanelId::Map, TEXT("Pnl_Map"), DockPanelColor, 14.f);
+		DockDragHandles[(int32)EDockPanelId::Map]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapPanelMouseButtonDown);
+		MapPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapPanelMouseMove);
+		MapPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapPanelMouseButtonUp);
+		DockResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapResizeMouseButtonDown);
+		DockResizeHandles[(int32)EDockPanelId::Map]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapResizeMouseMove);
+		DockResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapResizeMouseButtonUp);
+		DockLeftResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapLeftResizeMouseButtonDown);
+		DockLeftResizeHandles[(int32)EDockPanelId::Map]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapLeftResizeMouseMove);
+		DockLeftResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapLeftResizeMouseButtonUp);
+		DockBottomResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapBottomResizeMouseButtonDown);
+		DockBottomResizeHandles[(int32)EDockPanelId::Map]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapBottomResizeMouseMove);
+		DockBottomResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapBottomResizeMouseButtonUp);
+
+		UVerticalBox* MapStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("MapStack"));
+		MapPanel->SetContent(MapStack);
+
+		UTextBlock* MapTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_MapTitle"));
+		MapTitle->SetText(FText::FromString(TEXT("Map")));
+		MapTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(MapTitle);
+		UVerticalBoxSlot* MapTitleSlot = MapStack->AddChildToVerticalBox(MapTitle);
+		MapTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+		DockPanelTitleTexts[(int32)EDockPanelId::Map] = MapTitle;
+
+		RoadHideAllCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadHideAll"), TEXT("Hide All"));
+		RoadHideAllCheckbox->SetIsChecked(false);
+		RoadHideAllCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadHideAllCheckChanged);
+		RoadPrimaryCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadPrimary"), TEXT("Primary"));
+		RoadPrimaryCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadPrimaryCheckChanged);
+		RoadSecondaryCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadSecondary"), TEXT("Secondary"));
+		RoadSecondaryCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadSecondaryCheckChanged);
+		RoadResidentialCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadResidential"), TEXT("Residential/Tertiary"));
+		RoadResidentialCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadResidentialCheckChanged);
+		RoadCyclewayCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadCycleway"), TEXT("Cycleway"));
+		RoadCyclewayCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadCyclewayCheckChanged);
+		RoadFootwayCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadFootway"), TEXT("Footway/Path"));
+		RoadFootwayCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadFootwayCheckChanged);
+		RoadOtherCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadOther"), TEXT("Other"));
+		RoadOtherCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadOtherCheckChanged);
+		RoadCampusOnlyCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadCampusOnly"), TEXT("Campus Only"));
+		RoadCampusOnlyCheckbox->SetIsChecked(true);
+		RoadCampusOnlyCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadCampusOnlyCheckChanged);
 	}
 
 	return Super::RebuildWidget();
@@ -1801,6 +1855,13 @@ FVector2D UInteriorScreenWidget::GetDefaultPanelPosition(EDockPanelId Id, const 
 	case EDockPanelId::Audio:
 		// Below Layers on the left side - starts hidden anyway (see bDockPanelUserHidden), this only
 		// matters for the very first time the user checks it in the Window menu.
+		return FVector2D(10.f, ViewportSize.Y * 0.75f);
+	case EDockPanelId::Map:
+		// Left side, at the same spot as Audio (which starts hidden) rather than the right side -
+		// Floor+Properties dock into one column there, and that column's real height depends on their
+		// actual content, not a fixed fraction, so a fixed right-side Y here can (and did, in a short
+		// viewport) land underneath/overlapping Properties. Sharing Audio's own default spot is safe
+		// since Audio isn't visible yet at this point.
 		return FVector2D(10.f, ViewportSize.Y * 0.75f);
 	default:
 		return FVector2D(10.f, SidebarTopMargin);
@@ -2406,6 +2467,7 @@ const TCHAR* UInteriorScreenWidget::GetDockPanelName(EDockPanelId Id)
 	case EDockPanelId::Layers:     return TEXT("Layers");
 	case EDockPanelId::Navigation: return TEXT("Navigation");
 	case EDockPanelId::Audio:      return TEXT("Audio");
+	case EDockPanelId::Map:        return TEXT("Map");
 	default:                       return TEXT("");
 	}
 }
@@ -2713,11 +2775,12 @@ bool UInteriorScreenWidget::LoadDockLayoutFromDisk()
 
 	// No per-user save yet (first launch on this machine) - fall back to the team's own shipped
 	// arrangement instead of GetDefaultPanelPosition's generic spread, so a first-time user already
-	// sees the layout the team actually works with. Committed under Data/ (unlike Saved/, which is
-	// gitignored and per-machine) specifically so every machine ships with it, and stored in the exact
-	// same viewport-fraction format as a real save, so it already adapts to whatever screen this first
-	// launch happens to be on rather than being tied to whichever screen it was originally arranged on.
-	return TryLoadDockLayoutFromFile(FPaths::ProjectDir() / TEXT("Data") / TEXT("DefaultInteriorLayout.json"));
+	// sees the layout the team actually works with. Committed under Data/DefaultLayouts/ (unlike
+	// Saved/, which is gitignored and per-machine) specifically so every machine ships with it, and
+	// stored in the exact same viewport-fraction format as a real save, so it already adapts to
+	// whatever screen this first launch happens to be on rather than being tied to whichever screen it
+	// was originally arranged on.
+	return TryLoadDockLayoutFromFile(FPaths::ProjectDir() / TEXT("Data") / TEXT("DefaultLayouts") / TEXT("DefaultInteriorLayout.json"));
 }
 
 FEventReply UInteriorScreenWidget::HandlePanelMouseButtonDown(EDockPanelId Id, const FPointerEvent& MouseEvent)
@@ -2755,7 +2818,9 @@ FEventReply UInteriorScreenWidget::HandlePanelMouseButtonDown(EDockPanelId Id, c
 	// won't reflect that until the next paint - sizing the handle off it right now would use the
 	// stale (still-docked) height for one frame, showing as a gray sliver poking out past the
 	// panel's real new edge. Simplest fix: just hide this panel's own handles for the drag's
-	// duration - HandlePanelMouseButtonUp restores them once the drop has settled.
+	// duration - HandlePanelMouseButtonUp restores them once the drop has settled. Bottom handle
+	// included (previously missed here) - it's exactly as prone to this stale-geometry sliver as the
+	// left/right ones, since it also sizes/positions itself off the panel's own cached geometry.
 	if (UBorder* Handle = DockResizeHandles[Index])
 	{
 		Handle->SetVisibility(ESlateVisibility::Collapsed);
@@ -2763,6 +2828,10 @@ FEventReply UInteriorScreenWidget::HandlePanelMouseButtonDown(EDockPanelId Id, c
 	if (UBorder* LeftHandle = DockLeftResizeHandles[Index])
 	{
 		LeftHandle->SetVisibility(ESlateVisibility::Collapsed);
+	}
+	if (UBorder* BottomHandle = DockBottomResizeHandles[Index])
+	{
+		BottomHandle->SetVisibility(ESlateVisibility::Collapsed);
 	}
 
 	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
@@ -2833,6 +2902,10 @@ FEventReply UInteriorScreenWidget::HandlePanelMouseButtonUp(EDockPanelId Id, con
 		if (UBorder* LeftHandle = DockLeftResizeHandles[Index])
 		{
 			LeftHandle->SetVisibility(ESlateVisibility::Visible);
+		}
+		if (UBorder* BottomHandle = DockBottomResizeHandles[Index])
+		{
+			BottomHandle->SetVisibility(ESlateVisibility::Visible);
 		}
 		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
 		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
@@ -3110,6 +3183,10 @@ FEventReply UInteriorScreenWidget::OnAudioPanelMouseButtonDown(FGeometry MyGeome
 FEventReply UInteriorScreenWidget::OnAudioPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseMove(EDockPanelId::Audio, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnAudioPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonUp(EDockPanelId::Audio, MouseEvent); }
 
+FEventReply UInteriorScreenWidget::OnMapPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonDown(EDockPanelId::Map, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnMapPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseMove(EDockPanelId::Map, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnMapPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonUp(EDockPanelId::Map, MouseEvent); }
+
 FEventReply UInteriorScreenWidget::OnToolbarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Toolbar, MouseEvent); }
@@ -3128,6 +3205,10 @@ FEventReply UInteriorScreenWidget::OnNavigationResizeMouseButtonUp(FGeometry MyG
 FEventReply UInteriorScreenWidget::OnAudioResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Audio, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnAudioResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Audio, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnAudioResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Audio, MouseEvent); }
+
+FEventReply UInteriorScreenWidget::OnMapResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Map, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnMapResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Map, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnMapResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Map, MouseEvent); }
 
 FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
@@ -3148,6 +3229,10 @@ FEventReply UInteriorScreenWidget::OnAudioLeftResizeMouseButtonDown(FGeometry My
 FEventReply UInteriorScreenWidget::OnAudioLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Audio, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnAudioLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Audio, MouseEvent); }
 
+FEventReply UInteriorScreenWidget::OnMapLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Map, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnMapLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Map, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnMapLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Map, MouseEvent); }
+
 FEventReply UInteriorScreenWidget::OnToolbarBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonUp(EDockPanelId::Toolbar, MouseEvent); }
@@ -3166,6 +3251,10 @@ FEventReply UInteriorScreenWidget::OnNavigationBottomResizeMouseButtonUp(FGeomet
 FEventReply UInteriorScreenWidget::OnAudioBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonDown(EDockPanelId::Audio, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnAudioBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseMove(EDockPanelId::Audio, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnAudioBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonUp(EDockPanelId::Audio, MouseEvent); }
+
+FEventReply UInteriorScreenWidget::OnMapBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonDown(EDockPanelId::Map, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnMapBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseMove(EDockPanelId::Map, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnMapBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonUp(EDockPanelId::Map, MouseEvent); }
 
 FEventReply UInteriorScreenWidget::OnSplitter0MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonDown(0, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnSplitter0MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseMove(0, MouseEvent); }
@@ -4911,6 +5000,84 @@ void UInteriorScreenWidget::OnWindowAudioCheckChanged(bool bIsChecked)
 		// something finishing/starting playback) - refresh right as it becomes visible instead of
 		// waiting for some other trigger.
 		RefreshAudioList();
+	}
+}
+
+void UInteriorScreenWidget::OnWindowMapCheckChanged(bool bIsChecked)
+{
+	SetDockPanelUserHidden(EDockPanelId::Map, !bIsChecked);
+}
+
+void UInteriorScreenWidget::OnRoadHideAllCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetAllRoadsVisible(!bIsChecked);
+	}
+	// Visually sync the 6 category checkboxes to match (checked = shown) - SetIsChecked doesn't
+	// re-fire OnCheckStateChanged, same pattern as OnAudioMuteAllCheckChanged.
+	const bool bCategoriesChecked = !bIsChecked;
+	if (RoadPrimaryCheckbox) RoadPrimaryCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadSecondaryCheckbox) RoadSecondaryCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadResidentialCheckbox) RoadResidentialCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadCyclewayCheckbox) RoadCyclewayCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadFootwayCheckbox) RoadFootwayCheckbox->SetIsChecked(bCategoriesChecked);
+	if (RoadOtherCheckbox) RoadOtherCheckbox->SetIsChecked(bCategoriesChecked);
+}
+
+void UInteriorScreenWidget::OnRoadPrimaryCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Primary, bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnRoadSecondaryCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Secondary, bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnRoadResidentialCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Residential, bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnRoadCyclewayCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Cycleway, bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnRoadFootwayCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Footway, bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnRoadOtherCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadCategoryVisible(ERoadCategory::Other, bIsChecked);
+	}
+}
+
+void UInteriorScreenWidget::OnRoadCampusOnlyCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetRoadsAndPOIsWithinCampusOnly(bIsChecked);
 	}
 }
 

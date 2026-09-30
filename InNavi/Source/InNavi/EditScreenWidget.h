@@ -167,12 +167,19 @@ private:
 	UFUNCTION()
 	void OnWindowAudioCheckChanged(bool bIsChecked);
 
-	// Window > Roads - toggles RoadFilterPanel's own visibility. Fixed position, not draggable/
-	// resizable like AudioPanel - a 6-checkbox list has no reason to need either.
+	// Window > Map - toggles RoadFilterPanel's own visibility. Labeled "Map" (not "Roads") since the
+	// panel now also filters buildings, not just roads/POIs - the variable/function names underneath
+	// keep their original "Road..." names (cosmetic rename only, not worth the churn of renaming every
+	// symbol that reads them).
 	UFUNCTION()
 	void OnWindowRoadsCheckChanged(bool bIsChecked);
 
-	// --- Road filter panel (Window > Roads) --- one handler per ERoadCategory, since
+	// Master switch, above the 6 category rows - forwards to PC->SetAllRoadsVisible and visually syncs
+	// the 6 category checkboxes to match (same pattern as OnAudioMuteAllCheckChanged).
+	UFUNCTION()
+	void OnRoadHideAllCheckChanged(bool bIsChecked);
+
+	// --- Map filter panel (Window > Map) --- one handler per ERoadCategory, since
 	// UCheckBox::OnCheckStateChanged only carries the new bool, not which row it came from. Each
 	// forwards to PC->SetRoadCategoryVisible with its own hardcoded category.
 	UFUNCTION()
@@ -187,6 +194,19 @@ private:
 	void OnRoadFootwayCheckChanged(bool bIsChecked);
 	UFUNCTION()
 	void OnRoadOtherCheckChanged(bool bIsChecked);
+
+	// Region filter, below the 6 category checkboxes - forwards to PC->SetRoadsAndPOIsWithinCampusOnly.
+	// Starts unchecked (shows everything, matching today's behavior with no region filter at all).
+	UFUNCTION()
+	void OnRoadCampusOnlyCheckChanged(bool bIsChecked);
+
+	// Building-visibility filter (Map panel's "Buildings" section) - one handler per bucket, same
+	// reasoning as the 6 road-category handlers above. Both start checked (everything shown, matching
+	// today's behavior before this filter existed).
+	UFUNCTION()
+	void OnBuildingCampusCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnBuildingNonCampusCheckChanged(bool bIsChecked);
 
 	// RoadFilterPanel's own small corner drag handle - same idea as AudioDragHandle (reuses its
 	// AudioDragHandleSize/AudioPanelPadding/AudioPanelDragMinY constants, generic enough for either
@@ -335,6 +355,36 @@ private:
 	// its rendered size, same reasoning as AudioTitleText/RefreshAudioDragHandle.
 	UPROPERTY()
 	UTextBlock* RoadFilterTitleText = nullptr;
+
+	// Master "Hide All" checkbox, above the 6 category rows.
+	UPROPERTY()
+	UCheckBox* RoadHideAllCheckbox = nullptr;
+
+	// The 6 category checkboxes themselves - stored (not just local RebuildWidget variables) so
+	// OnRoadHideAllCheckChanged can visually sync them later.
+	UPROPERTY()
+	UCheckBox* RoadPrimaryCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadSecondaryCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadResidentialCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadCyclewayCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadFootwayCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadOtherCheckbox = nullptr;
+
+	// Region/distance filter's own checkbox - the 7th row in the Roads section (see
+	// OnRoadCampusOnlyCheckChanged).
+	UPROPERTY()
+	UCheckBox* RoadCampusOnlyCheckbox = nullptr;
+
+	// Building-visibility filter's own checkboxes ("Buildings" section).
+	UPROPERTY()
+	UCheckBox* BuildingCampusCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* BuildingNonCampusCheckbox = nullptr;
 
 	UPROPERTY()
 	UBorder* RoadFilterDragHandle = nullptr;

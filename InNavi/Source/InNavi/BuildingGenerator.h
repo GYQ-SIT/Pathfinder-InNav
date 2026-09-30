@@ -85,11 +85,53 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void ClearAllRoadsAndPOIs();
 
+	// Loads every OTHER building in the database (building_type != 'university') as a simple,
+	// visual-only extruded-block placeholder (AContextBuildingActor) - context for the surrounding
+	// neighborhood, not a real APolyBuilding: no floors, no interior editing, not part of
+	// GetAllBuildings() (so it can't be entered, switched to, or mistaken for one of the real campus
+	// buildings camera-framing/bounds code already relies on GetAllBuildings() meaning "the campus").
+	// Must be called AFTER LoadBuildingsFromDatabase (same path) for the same shared-reference-point
+	// reason as LoadRoadsAndPOIsFromDatabase. Clears any previously-loaded context buildings first.
+	// Returns how many actors were spawned.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	int32 LoadContextBuildingsFromDatabase(const FString& DatabasePath);
+
+	// Destroys every currently-spawned context-building actor - same idea as ClearAllRoadsAndPOIs.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void ClearAllContextBuildings();
+
+	// Shows/hides every REAL campus building at once (the ones in GetAllBuildings()/BuildingsById) -
+	// the filter panel's "Campus" building-visibility checkbox. Also toggles collision, so a hidden
+	// building can't still be clicked to select/enter (mirrors the reasoning anywhere else in this
+	// codebase hides a whole building, e.g. NavPlayerController's other-buildings-hidden-in-3D-preview).
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetCampusBuildingsVisible(bool bVisible);
+
+	// Shows/hides every spawned context-building actor at once - the filter panel's "Non-Campus"
+	// building-visibility checkbox. These are visual-only placeholders (see
+	// LoadContextBuildingsFromDatabase), so no collision toggle is needed.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetNonCampusBuildingsVisible(bool bVisible);
+
 	// Shows/hides every currently-spawned road actor in Category at once - what a road-visibility
 	// filter panel's checkboxes call. Takes effect immediately (no reload/re-query needed) since
 	// every road actor already remembers its own category (see ARoadSegmentActor::GetCategory).
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void SetRoadCategoryVisible(ERoadCategory Category, bool bVisible);
+
+	// Shows/hides every spawned road actor at once, regardless of category - the filter panel's
+	// master "Hide All" checkbox. Goes through the same SetCategoryVisible flag SetRoadCategoryVisible
+	// uses (not a second, competing visibility path), so it still combines correctly with the campus-
+	// range filter (SetRoadsAndPOIsWithinCampusOnly).
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetAllRoadsVisible(bool bVisible);
+
+	// Hides every spawned road/POI actor farther than Radius (world units) from Center; shows the rest
+	// again (subject to their own category filter, for roads) when bEnable is false. Center/Radius are
+	// computed by the caller (ANavPlayerController::SetRoadsAndPOIsWithinCampusOnly, from the loaded
+	// buildings' own extent) - this function just applies them.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetRoadsAndPOIsWithinCampusOnly(bool bEnable, const FVector2D& Center, float Radius);
 
 	// Looks up an already-spawned building by id (e.g. for InteriorGenerator to find which
 	// building's shell a piece of interior data belongs to). Returns nullptr if not found.
@@ -173,9 +215,18 @@ private:
 	double DatabaseRefLat = 0.0;
 	double DatabaseRefLon = 0.0;
 
+	// Every database building_id LoadBuildingsFromDatabase decided belongs to the campus - the
+	// 'university'-tagged seed plus anything pulled in by its own adjacency pass (see that function's
+	// comment). LoadContextBuildingsFromDatabase reads this to skip spawning a context placeholder for
+	// a building that's already a real, interior-capable campus building.
+	TSet<int64> DatabaseCampusBuildingIds;
+
 	UPROPERTY()
 	TArray<AActor*> SpawnedRoadActors;
 
 	UPROPERTY()
 	TArray<AActor*> SpawnedPOIActors;
+
+	UPROPERTY()
+	TArray<AActor*> SpawnedContextBuildingActors;
 };

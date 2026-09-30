@@ -5,6 +5,7 @@
 #include "PolyBuilding.h"
 #include "RoadSegmentActor.h"
 #include "POIMarkerActor.h"
+#include "ContextBuildingActor.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
@@ -26,6 +27,52 @@ static bool SegmentsIntersect(const FVector2D& A, const FVector2D& B, const FVec
 	const float d4 = Cross(A, B, D);
 
 	return ((d1 > 0.f) != (d2 > 0.f)) && ((d3 > 0.f) != (d4 > 0.f));
+}
+
+// ---- Helper: shortest distance from point P to segment AB ----
+static float PointToSegmentDistance(const FVector2D& P, const FVector2D& A, const FVector2D& B)
+{
+	const FVector2D AB = B - A;
+	const float LenSq = AB.SizeSquared();
+	if (LenSq <= KINDA_SMALL_NUMBER)
+	{
+		return FVector2D::Distance(P, A);
+	}
+	const float T = FMath::Clamp(FVector2D::DotProduct(P - A, AB) / LenSq, 0.f, 1.f);
+	return FVector2D::Distance(P, A + AB * T);
+}
+
+// ---- Helper: shortest distance between segments AB and CD (0 if they cross) ----
+static float SegmentToSegmentDistance(const FVector2D& A, const FVector2D& B, const FVector2D& C, const FVector2D& D)
+{
+	if (SegmentsIntersect(A, B, C, D))
+	{
+		return 0.f;
+	}
+	return FMath::Min(
+		FMath::Min(PointToSegmentDistance(A, C, D), PointToSegmentDistance(B, C, D)),
+		FMath::Min(PointToSegmentDistance(C, A, B), PointToSegmentDistance(D, A, B)));
+}
+
+// ---- Helper: are two building footprints (same world-space frame) physically the same connected
+// structure - touching/overlapping, or close enough to cover a tiny OSM mapping gap? ----
+static bool FootprintsAreLinked(const TArray<FVector2D>& FootprintA, const TArray<FVector2D>& FootprintB, float ToleranceWorldUnits)
+{
+	for (int32 i = 0; i < FootprintA.Num(); ++i)
+	{
+		const FVector2D& A0 = FootprintA[i];
+		const FVector2D& A1 = FootprintA[(i + 1) % FootprintA.Num()];
+		for (int32 j = 0; j < FootprintB.Num(); ++j)
+		{
+			const FVector2D& B0 = FootprintB[j];
+			const FVector2D& B1 = FootprintB[(j + 1) % FootprintB.Num()];
+			if (SegmentToSegmentDistance(A0, A1, B0, B1) <= ToleranceWorldUnits)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 // ---- Helper: does this polygon's outline cross itself? (non-adjacent edges only) ----
@@ -173,15 +220,12 @@ int32 ABuildingGenerator::LoadBuildingsFromDatabase(const FString& DatabasePath)
 	};
 	TMap<int64, FDatabaseBuildingRow> RowsById;
 
-	// Filtered to building_type='university' - this sample database (see project memory) covers the
-	// whole surrounding Punggol neighborhood, not just the SIT campus, and 'university' is the OSM tag
-	// that happens to land on the ~10 buildings actually inside the campus footprint. This is specific
-	// to this particular demo dataset's own tagging convention, not a general rule - revisit once the
-	// real database/schema is confirmed (it may not use OSM-style type tags at all).
+	// Every building, regardless of type - unlike an earlier, WHERE-filtered version of this query, a
+	// building not tagged 'university' can still turn out to be part of the real campus (see the
+	// adjacency pass below), so classification now happens here in C++, not in the query itself.
 	const int64 NumRowsRead = Database.Execute(
 		TEXT("SELECT b.building_id, b.building_type, bn.lat, bn.lon FROM buildings b ")
 		TEXT("JOIN building_nodes bn ON b.building_id = bn.building_id ")
-		TEXT("WHERE b.building_type = 'university' ")
 		TEXT("ORDER BY b.building_id, bn.sequence"),
 		[&RowsById](const FSQLitePreparedStatement& Statement) -> ESQLitePreparedStatementExecuteRowResult
 		{
@@ -220,14 +264,18 @@ int32 ABuildingGenerator::LoadBuildingsFromDatabase(const FString& DatabasePath)
 		return 0;
 	}
 
-	// Reference point for the local-meters projection: the centroid of every node just read, so the
-	// whole cluster lands near the world origin regardless of where on Earth it actually sits (same
-	// equirectangular approximation already validated by hand against this exact dataset - see
-	// project memory).
+	// Reference point for the local-meters projection: the centroid of the 'university'-tagged nodes
+	// only (not every building now being read), so the campus still lands near the world origin
+	// regardless of where on Earth it actually sits (same equirectangular approximation already
+	// validated by hand against this exact dataset - see project memory).
 	double SumLat = 0.0, SumLon = 0.0;
 	int32 TotalPoints = 0;
 	for (const TPair<int64, FDatabaseBuildingRow>& Pair : RowsById)
 	{
+		if (Pair.Value.BuildingType != TEXT("university"))
+		{
+			continue;
+		}
 		for (const FVector2D& LonLat : Pair.Value.LatLonPoints)
 		{
 			SumLon += LonLat.X;
@@ -235,11 +283,16 @@ int32 ABuildingGenerator::LoadBuildingsFromDatabase(const FString& DatabasePath)
 			TotalPoints++;
 		}
 	}
+	if (TotalPoints == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Database at %s contained no 'university'-tagged buildings to anchor the campus on"), *DatabasePath);
+		return 0;
+	}
 	const double RefLat = SumLat / TotalPoints;
 	const double RefLon = SumLon / TotalPoints;
 
-	// Stashed for LoadRoadsAndPOIsFromDatabase - see its own comment on why it needs this exact same
-	// reference point rather than computing its own.
+	// Stashed for LoadRoadsAndPOIsFromDatabase/LoadContextBuildingsFromDatabase - see their own
+	// comments on why they need this exact same reference point rather than computing their own.
 	DatabaseRefLat = RefLat;
 	DatabaseRefLon = RefLon;
 	bHasDatabaseRefPoint = true;
@@ -253,35 +306,100 @@ int32 ABuildingGenerator::LoadBuildingsFromDatabase(const FString& DatabasePath)
 	// no further distortion.
 	Scale = 100.f;
 
-	int32 SpawnedCount = 0;
+	// Project every building's footprint into the same world-space frame up front - needed for the
+	// adjacency test below regardless of a building's own type, and reused again when actually
+	// spawning the ones that make the cut.
+	TMap<int64, TArray<FVector2D>> WorldFootprintsById;
+	WorldFootprintsById.Reserve(RowsById.Num());
 	for (const TPair<int64, FDatabaseBuildingRow>& Pair : RowsById)
 	{
-		const FDatabaseBuildingRow& Row = Pair.Value;
-
 		TArray<FVector2D> Footprint;
-		Footprint.Reserve(Row.LatLonPoints.Num());
-		for (const FVector2D& LonLat : Row.LatLonPoints)
+		Footprint.Reserve(Pair.Value.LatLonPoints.Num());
+		for (const FVector2D& LonLat : Pair.Value.LatLonPoints)
 		{
 			const double X = (LonLat.X - RefLon) * MetersPerDegreeLon;
 			const double Y = (LonLat.Y - RefLat) * MetersPerDegreeLat;
 			Footprint.Add(FVector2D((float)X, (float)Y));
 		}
-
-		// OSM closes a way by repeating its first node as the last one - SpawnBuildingFromData treats
-		// its input as an already-open polygon and closes it itself, so strip that duplicate first.
+		// OSM closes a way by repeating its first node as the last one - SpawnBuildingFromData (and
+		// the adjacency test's own edge-wrapping) treat this as an already-open polygon, so strip the
+		// duplicate first.
 		if (Footprint.Num() > 1 && Footprint[0].Equals(Footprint.Last(), 0.5f))
 		{
 			Footprint.RemoveAt(Footprint.Num() - 1);
 		}
+		WorldFootprintsById.Add(Pair.Key, MoveTemp(Footprint));
+	}
 
-		const FString Id = FString::Printf(TEXT("SQL-%lld"), Pair.Key);
-		const FString Name = FString::Printf(TEXT("%s %lld"), *Row.BuildingType, Pair.Key);
-		if (SpawnBuildingFromData(Id, Name, Footprint, DefaultFloorCountForDatabaseBuildings, DefaultFloorHeightForDatabaseBuildings, FVector2D::ZeroVector))
+	// 'university' is the OSM tag that happens to land on the buildings actually inside the campus
+	// footprint (see project memory) - but it doesn't cover every building that's really part of the
+	// same physical campus structure: covered walkways/bridges between buildings, and a handful of
+	// buildings mapped under a different type, come back untagged even though they visually belong to
+	// the same connected complex. Grow the campus set from the tagged seed by following physical
+	// adjacency instead: any building touching (or nearly touching - see
+	// LinkAdjacencyToleranceMeters, which covers small OSM mapping gaps) something already in the
+	// campus set joins it too, repeated until a full pass adds nothing new - so a whole chain of
+	// several linked buildings/walkways gets pulled in, not just ones directly touching a
+	// 'university'-tagged building.
+	TSet<int64> CampusIds;
+	for (const TPair<int64, FDatabaseBuildingRow>& Pair : RowsById)
+	{
+		if (Pair.Value.BuildingType == TEXT("university"))
+		{
+			CampusIds.Add(Pair.Key);
+		}
+	}
+	const int32 TaggedCampusCount = CampusIds.Num();
+
+	// WorldFootprintsById is still in real meters here (Scale is only applied later, inside
+	// SpawnBuildingFromData/BuildFromFootprint) - this tolerance must match that same unit, NOT
+	// world/cm-scale units, or it ends up 100x too generous and the flood-fill never stops.
+	constexpr float LinkAdjacencyToleranceMeters = 3.f;
+	bool bAddedAny = true;
+	while (bAddedAny)
+	{
+		bAddedAny = false;
+		TArray<int64> NewlyLinkedIds;
+		for (const TPair<int64, FDatabaseBuildingRow>& CandidatePair : RowsById)
+		{
+			const int64 CandidateId = CandidatePair.Key;
+			if (CampusIds.Contains(CandidateId))
+			{
+				continue;
+			}
+			const TArray<FVector2D>& CandidateFootprint = WorldFootprintsById.FindChecked(CandidateId);
+			for (int64 CampusId : CampusIds)
+			{
+				if (FootprintsAreLinked(CandidateFootprint, WorldFootprintsById.FindChecked(CampusId), LinkAdjacencyToleranceMeters))
+				{
+					NewlyLinkedIds.Add(CandidateId);
+					break;
+				}
+			}
+		}
+		for (int64 NewId : NewlyLinkedIds)
+		{
+			CampusIds.Add(NewId);
+			bAddedAny = true;
+		}
+	}
+
+	DatabaseCampusBuildingIds = CampusIds;
+
+	int32 SpawnedCount = 0;
+	for (int64 CampusId : CampusIds)
+	{
+		const FDatabaseBuildingRow& Row = RowsById.FindChecked(CampusId);
+		const FString Id = FString::Printf(TEXT("SQL-%lld"), CampusId);
+		const FString Name = FString::Printf(TEXT("%s %lld"), *Row.BuildingType, CampusId);
+		if (SpawnBuildingFromData(Id, Name, WorldFootprintsById.FindChecked(CampusId), DefaultFloorCountForDatabaseBuildings, DefaultFloorHeightForDatabaseBuildings, FVector2D::ZeroVector))
 		{
 			SpawnedCount++;
 		}
 	}
 
+	UE_LOG(LogTemp, Warning, TEXT("LoadBuildingsFromDatabase: spawned %d campus building(s) (%d tagged 'university', %d pulled in via adjacency)"),
+		SpawnedCount, TaggedCampusCount, CampusIds.Num() - TaggedCampusCount);
 	return SpawnedCount;
 }
 
@@ -475,6 +593,116 @@ int32 ABuildingGenerator::LoadRoadsAndPOIsFromDatabase(const FString& DatabasePa
 	return SpawnedCount;
 }
 
+int32 ABuildingGenerator::LoadContextBuildingsFromDatabase(const FString& DatabasePath)
+{
+	if (!bHasDatabaseRefPoint)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LoadContextBuildingsFromDatabase: call LoadBuildingsFromDatabase first (same path) to establish the shared lat/lon reference point"));
+		return 0;
+	}
+	if (!GetWorld())
+	{
+		return 0;
+	}
+
+	FSQLiteDatabase Database;
+	if (!Database.Open(*DatabasePath, ESQLiteDatabaseOpenMode::ReadOnly))
+	{
+		UE_LOG(LogTemp, Error, TEXT("Could not open SQLite database at: %s"), *DatabasePath);
+		return 0;
+	}
+
+	constexpr double MetersPerDegreeLat = 111320.0;
+	const double MetersPerDegreeLon = MetersPerDegreeLat * FMath::Cos(FMath::DegreesToRadians(DatabaseRefLat));
+	const double CapturedRefLat = DatabaseRefLat;
+	const double CapturedRefLon = DatabaseRefLon;
+	auto ProjectToWorldXY = [CapturedRefLat, CapturedRefLon, MetersPerDegreeLat, MetersPerDegreeLon, this](double Lat, double Lon) -> FVector2D
+	{
+		const double MetersX = (Lon - CapturedRefLon) * MetersPerDegreeLon;
+		const double MetersY = (Lat - CapturedRefLat) * MetersPerDegreeLat;
+		return FVector2D((float)(MetersX * Scale), (float)(MetersY * Scale));
+	};
+
+	ClearAllContextBuildings();
+
+	struct FDatabaseContextBuildingRow
+	{
+		TArray<FVector2D> Points;
+	};
+	TMap<int64, FDatabaseContextBuildingRow> RowsById;
+
+	// Same schema as LoadBuildingsFromDatabase's own query, no type filter here either - which
+	// buildings are "campus" vs "context" is decided by that function's own adjacency pass (not just
+	// its building_type tag), and DatabaseCampusBuildingIds is that decision. Skipping by id below
+	// (not by re-filtering on type) is what keeps a building pulled into the campus by adjacency from
+	// ALSO getting spawned here as a second, non-interactive placeholder copy.
+	Database.Execute(
+		TEXT("SELECT b.building_id, bn.lat, bn.lon FROM buildings b ")
+		TEXT("JOIN building_nodes bn ON b.building_id = bn.building_id ")
+		TEXT("ORDER BY b.building_id, bn.sequence"),
+		[this, &RowsById](const FSQLitePreparedStatement& Statement) -> ESQLitePreparedStatementExecuteRowResult
+		{
+			int64 BuildingId = 0;
+			double Lat = 0.0, Lon = 0.0;
+			if (!Statement.GetColumnValueByName(TEXT("building_id"), BuildingId)
+				|| !Statement.GetColumnValueByName(TEXT("lat"), Lat)
+				|| !Statement.GetColumnValueByName(TEXT("lon"), Lon))
+			{
+				return ESQLitePreparedStatementExecuteRowResult::Error;
+			}
+			if (DatabaseCampusBuildingIds.Contains(BuildingId))
+			{
+				return ESQLitePreparedStatementExecuteRowResult::Continue;
+			}
+			RowsById.FindOrAdd(BuildingId).Points.Add(FVector2D((float)Lon, (float)Lat));
+			return ESQLitePreparedStatementExecuteRowResult::Continue;
+		});
+
+	Database.Close();
+
+	// Flat, uniform placeholder height/tint for every context building regardless of its own OSM
+	// type - this dataset's building_type is far more varied than roads' highway_type (bridge, house,
+	// school, parking, ...) and none of it is being shown as a filter category yet, just a single
+	// "Non-Campus" on/off toggle, so there's no reason to style it beyond "clearly not a real,
+	// enterable campus building".
+	constexpr float ContextBuildingHeightWorldUnits = 900.f; // 9m at Scale=100
+	const FLinearColor ContextBuildingColor(0.5f, 0.5f, 0.52f, 1.f);
+
+	int32 SpawnedCount = 0;
+	for (const TPair<int64, FDatabaseContextBuildingRow>& Pair : RowsById)
+	{
+		TArray<FVector2D> Footprint;
+		Footprint.Reserve(Pair.Value.Points.Num());
+		for (const FVector2D& LonLat : Pair.Value.Points)
+		{
+			Footprint.Add(ProjectToWorldXY(LonLat.Y, LonLat.X));
+		}
+		// OSM closes a way by repeating its first node as the last one - strip that duplicate so
+		// BuildFromFootprint's own edge loop (which wraps last-to-first itself) doesn't double it up.
+		if (Footprint.Num() > 1 && Footprint[0].Equals(Footprint.Last(), 0.5f))
+		{
+			Footprint.RemoveAt(Footprint.Num() - 1);
+		}
+		if (Footprint.Num() < 3)
+		{
+			continue;
+		}
+
+		AContextBuildingActor* ContextActor = GetWorld()->SpawnActor<AContextBuildingActor>();
+		if (!ContextActor)
+		{
+			continue;
+		}
+		ContextActor->BuildFromFootprint(Footprint, ContextBuildingHeightWorldUnits, ContextBuildingColor);
+		SpawnedContextBuildingActors.Add(ContextActor);
+		SpawnedCount++;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("LoadContextBuildingsFromDatabase: spawned %d context building(s) from %s"),
+		SpawnedContextBuildingActors.Num(), *DatabasePath);
+	return SpawnedCount;
+}
+
 void ABuildingGenerator::ClearAllRoadsAndPOIs()
 {
 	for (AActor* Actor : SpawnedRoadActors)
@@ -496,6 +724,41 @@ void ABuildingGenerator::ClearAllRoadsAndPOIs()
 	SpawnedPOIActors.Reset();
 }
 
+void ABuildingGenerator::ClearAllContextBuildings()
+{
+	for (AActor* Actor : SpawnedContextBuildingActors)
+	{
+		if (Actor)
+		{
+			Actor->Destroy();
+		}
+	}
+	SpawnedContextBuildingActors.Reset();
+}
+
+void ABuildingGenerator::SetCampusBuildingsVisible(bool bVisible)
+{
+	for (const TPair<FString, APolyBuilding*>& Pair : BuildingsById)
+	{
+		if (APolyBuilding* Building = Pair.Value)
+		{
+			Building->SetActorHiddenInGame(!bVisible);
+			Building->SetActorEnableCollision(bVisible);
+		}
+	}
+}
+
+void ABuildingGenerator::SetNonCampusBuildingsVisible(bool bVisible)
+{
+	for (AActor* Actor : SpawnedContextBuildingActors)
+	{
+		if (Actor)
+		{
+			Actor->SetActorHiddenInGame(!bVisible);
+		}
+	}
+}
+
 void ABuildingGenerator::SetRoadCategoryVisible(ERoadCategory Category, bool bVisible)
 {
 	for (AActor* Actor : SpawnedRoadActors)
@@ -503,7 +766,40 @@ void ABuildingGenerator::SetRoadCategoryVisible(ERoadCategory Category, bool bVi
 		ARoadSegmentActor* RoadActor = Cast<ARoadSegmentActor>(Actor);
 		if (RoadActor && RoadActor->GetCategory() == Category)
 		{
-			RoadActor->SetActorHiddenInGame(!bVisible);
+			RoadActor->SetCategoryVisible(bVisible);
+		}
+	}
+}
+
+void ABuildingGenerator::SetAllRoadsVisible(bool bVisible)
+{
+	for (AActor* Actor : SpawnedRoadActors)
+	{
+		if (ARoadSegmentActor* RoadActor = Cast<ARoadSegmentActor>(Actor))
+		{
+			RoadActor->SetCategoryVisible(bVisible);
+		}
+	}
+}
+
+void ABuildingGenerator::SetRoadsAndPOIsWithinCampusOnly(bool bEnable, const FVector2D& Center, float Radius)
+{
+	const float RadiusSquared = Radius * Radius;
+	for (AActor* Actor : SpawnedRoadActors)
+	{
+		if (ARoadSegmentActor* RoadActor = Cast<ARoadSegmentActor>(Actor))
+		{
+			const bool bWithinRange = !bEnable || FVector2D::DistSquared(RoadActor->GetMidpointPosition(), Center) <= RadiusSquared;
+			RoadActor->SetWithinCampusRange(bWithinRange);
+		}
+	}
+	for (AActor* Actor : SpawnedPOIActors)
+	{
+		if (APOIMarkerActor* POIActor = Cast<APOIMarkerActor>(Actor))
+		{
+			const FVector Location = POIActor->GetActorLocation();
+			const bool bWithinRange = !bEnable || FVector2D::DistSquared(FVector2D(Location.X, Location.Y), Center) <= RadiusSquared;
+			POIActor->SetWithinCampusRange(bWithinRange);
 		}
 	}
 }

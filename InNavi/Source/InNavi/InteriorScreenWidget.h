@@ -356,6 +356,31 @@ private:
 	UFUNCTION()
 	void OnWindowAudioCheckChanged(bool bIsChecked);
 
+	// Map panel (road filter) - starts checked, matching UEditScreenWidget's own "Map" panel default.
+	UFUNCTION()
+	void OnWindowMapCheckChanged(bool bIsChecked);
+
+	// --- Map panel (Window > Map) --- Roads section only, ported from UEditScreenWidget's own "Map"
+	// panel - same PC functions (SetRoadCategoryVisible/SetAllRoadsVisible/
+	// SetRoadsAndPOIsWithinCampusOnly), no Buildings section (this screen has no exterior building-
+	// visibility concept).
+	UFUNCTION()
+	void OnRoadHideAllCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadPrimaryCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadSecondaryCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadResidentialCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadCyclewayCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadFootwayCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadOtherCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnRoadCampusOnlyCheckChanged(bool bIsChecked);
+
 	// Floor panel - lists every floor of the loaded building (top first, matching the mockup),
 	// highlighting the active one; clicking a row switches to it. "+Add floor"/"Delete floor" call
 	// straight through to ANavPlayerController::AddFloor/RemoveFloor(GetActiveFloor()), which
@@ -495,10 +520,12 @@ private:
 	// dragging the divider between two stacked panels in a real editor). Back is deliberately NOT
 	// part of this system (see RebuildWidget) - it's fixed chrome, not a dockable panel. Audio and
 	// Navigation both start user-hidden (see bDockPanelUserHidden's own init) unlike the other 4 -
-	// see the Window menu.
-	enum class EDockPanelId : uint8 { Toolbar, Floor, Properties, Layers, Navigation, Audio };
-	static constexpr int32 NumDockPanels = 6;
-	static constexpr int32 MaxDockSplitters = NumDockPanels - 1; // worst case: all 6 panels in one column
+	// see the Window menu. Map (the road-filter panel ported from UEditScreenWidget's own "Map" panel,
+	// Roads section only - no Buildings section, since this screen has no exterior building-visibility
+	// concept) starts VISIBLE, matching that panel's own default there.
+	enum class EDockPanelId : uint8 { Toolbar, Floor, Properties, Layers, Navigation, Audio, Map };
+	static constexpr int32 NumDockPanels = 7;
+	static constexpr int32 MaxDockSplitters = NumDockPanels - 1; // worst case: all 7 panels in one column
 
 	struct FDockColumn
 	{
@@ -589,9 +616,9 @@ private:
 	bool LoadDockLayoutFromDisk();
 
 	// Shared by LoadDockLayoutFromDisk for both the per-user save (InteriorEditorLayout.json under
-	// Saved/) and the team's shipped default (DefaultInteriorLayout.json under Data/) - same file
-	// format, same layoutVersion check, same ApplyLayoutSaveData/PendingSavedLayoutToReapply handling
-	// either way, just a different path.
+	// Saved/) and the team's shipped default (DefaultInteriorLayout.json under Data/DefaultLayouts/) -
+	// same file format, same layoutVersion check, same ApplyLayoutSaveData/
+	// PendingSavedLayoutToReapply handling either way, just a different path.
 	bool TryLoadDockLayoutFromFile(const FString& FilePath);
 
 	TSharedPtr<FJsonObject> BuildLayoutSaveData() const;
@@ -703,6 +730,9 @@ private:
 	UFUNCTION() FEventReply OnAudioPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnToolbarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -722,6 +752,9 @@ private:
 	UFUNCTION() FEventReply OnAudioResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -741,6 +774,9 @@ private:
 	UFUNCTION() FEventReply OnAudioLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnToolbarBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -760,6 +796,9 @@ private:
 	UFUNCTION() FEventReply OnAudioBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnAudioBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnMapBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION() FEventReply OnSplitter0MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter0MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -983,6 +1022,26 @@ private:
 	UPROPERTY()
 	UBorder* AudioPanel = nullptr;
 
+	// Map panel (road filter, Roads section only) - see EDockPanelId::Map's own comment.
+	UPROPERTY()
+	UBorder* MapPanel = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadHideAllCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadPrimaryCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadSecondaryCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadResidentialCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadCyclewayCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadFootwayCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadOtherCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* RoadCampusOnlyCheckbox = nullptr;
+
 	UPROPERTY()
 	UButton* AudioStopAllButton = nullptr;
 
@@ -1123,6 +1182,9 @@ private:
 
 	UPROPERTY()
 	UCheckBox* WindowAudioCheckbox = nullptr;
+
+	UPROPERTY()
+	UCheckBox* WindowMapCheckbox = nullptr;
 
 	// Parallel to EDockPanelId, sized NumDockPanels - see SetDockPanelUserHidden. False by default
 	// (visible) for every panel except Audio and Navigation, which InitializeDockRuntimeArrays sets

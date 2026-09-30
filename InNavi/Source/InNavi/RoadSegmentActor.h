@@ -46,9 +46,27 @@ public:
 	void SetCategory(ERoadCategory InCategory) { Category = InCategory; }
 	ERoadCategory GetCategory() const { return Category; }
 
+	// Average of the points BuildRoad was given - a stand-in "location" for distance-based filtering,
+	// since the actor's own transform stays at the origin (its vertices are baked world-space, see
+	// BuildRoad's own comment) and GetActorLocation() would just be (0,0,0).
+	FVector2D GetMidpointPosition() const { return MidpointPosition; }
+
+	// Two independent visibility inputs, combined by RefreshVisibility - lets the category filter
+	// (ABuildingGenerator::SetRoadCategoryVisible) and the campus-range filter
+	// (ABuildingGenerator::SetRoadsAndPOIsWithinCampusOnly) coexist without either one clobbering
+	// what the other decided (e.g. re-enabling a category shouldn't reveal a road that's still
+	// outside the current campus range).
+	void SetCategoryVisible(bool bVisible) { bCategoryVisible = bVisible; RefreshVisibility(); }
+	void SetWithinCampusRange(bool bVisible) { bWithinCampusRange = bVisible; RefreshVisibility(); }
+
 private:
+	void RefreshVisibility() { SetActorHiddenInGame(!(bCategoryVisible && bWithinCampusRange)); }
+
 	UPROPERTY()
 	UProceduralMeshComponent* MeshComp;
 
 	ERoadCategory Category = ERoadCategory::Other;
+	FVector2D MidpointPosition = FVector2D::ZeroVector;
+	bool bCategoryVisible = true;
+	bool bWithinCampusRange = true;
 };
