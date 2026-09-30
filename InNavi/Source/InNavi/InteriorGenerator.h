@@ -73,6 +73,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	int32 GetActiveFloor() const { return ActiveFloor; }
 
+	// Wall thickness is stored per floor in world units. Navigation uses this to build an accurate
+	// clearance boundary around the authored wall centre lines instead of assuming every floor has
+	// the default thickness.
+	float GetWallThicknessForFloor(int32 Level) const;
+
 	// Adds a new, empty floor above the highest currently-loaded floor for the currently loaded
 	// building, and grows the exterior shell to match (APolyBuilding::SetFloorCount) - the new
 	// floor has no rooms yet, Phase 3's drawing tools are what would populate it.

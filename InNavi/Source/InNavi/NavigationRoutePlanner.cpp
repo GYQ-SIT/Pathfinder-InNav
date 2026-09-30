@@ -7,7 +7,10 @@
 namespace
 {
 	constexpr double GeometryEpsilon = 0.0001;
-	constexpr double SelectionWallClearance = 1.0; // footprint units; avoid selecting a wall line
+	// Extra free space between the physical wall surface and the centre of the route. Unreal world
+	// units are centimetres; the wall's own half thickness is added separately per floor.
+	constexpr double RouteWallGapWorldUnits = 20.0;
+	constexpr double TurnPointMargin = 1.05;
 
 	struct FSegment
 	{
@@ -20,6 +23,7 @@ namespace
 		TArray<FSegment> Walls;
 		TArray<FVector2D> DoorPoints;
 		TArray<FVector2D> TurnPoints;
+		double WallClearance = 0.0;
 	};
 
 	struct FVertex
@@ -74,7 +78,7 @@ namespace
 		return bInside;
 	}
 
-	bool SegmentsCrossAwayFromEnds(const FVector2D& A, const FVector2D& B,
+	bool SegmentsIntersectOrTouch(const FVector2D& A, const FVector2D& B,
 		const FVector2D& C, const FVector2D& D)
 	{
 		const double C1 = Cross(A, B, C);
@@ -89,24 +93,25 @@ namespace
 			return true;
 		}
 
-		// A line may turn at a wall endpoint, but cannot follow a solid wall or touch its middle.
-		if (FMath::Abs(C1) <= GeometryEpsilon && FMath::Abs(C2) <= GeometryEpsilon)
-		{
-			const FVector2D Direction = B - A;
-			const double LengthSquared = Direction.SizeSquared();
-			if (LengthSquared > GeometryEpsilon)
-			{
-				const double T1 = FVector2D::DotProduct(C - A, Direction) / LengthSquared;
-				const double T2 = FVector2D::DotProduct(D - A, Direction) / LengthSquared;
-				return FMath::Min(T1, T2) < 1.0 - GeometryEpsilon
-					&& FMath::Max(T1, T2) > GeometryEpsilon;
-			}
-		}
+		return OnSegment(C, A, B) || OnSegment(D, A, B)
+			|| OnSegment(A, C, D) || OnSegment(B, C, D);
+	}
 
-		return (OnSegment(C, A, B) && !C.Equals(A, GeometryEpsilon) && !C.Equals(B, GeometryEpsilon))
-			|| (OnSegment(D, A, B) && !D.Equals(A, GeometryEpsilon) && !D.Equals(B, GeometryEpsilon))
-			|| (OnSegment(A, C, D) && !A.Equals(C, GeometryEpsilon) && !A.Equals(D, GeometryEpsilon))
-			|| (OnSegment(B, C, D) && !B.Equals(C, GeometryEpsilon) && !B.Equals(D, GeometryEpsilon));
+	double PointToSegmentDistance(const FVector2D& Point, const FVector2D& A, const FVector2D& B)
+	{
+		return FVector2D::Distance(Point, FMath::ClosestPointOnSegment2D(Point, A, B));
+	}
+
+	double SegmentToSegmentDistance(const FVector2D& A, const FVector2D& B,
+		const FVector2D& C, const FVector2D& D)
+	{
+		if (SegmentsIntersectOrTouch(A, B, C, D))
+		{
+			return 0.0;
+		}
+		return FMath::Min(
+			FMath::Min(PointToSegmentDistance(A, C, D), PointToSegmentDistance(B, C, D)),
+			FMath::Min(PointToSegmentDistance(C, A, B), PointToSegmentDistance(D, A, B)));
 	}
 
 	void AddWall(FFloorGeometry& Geometry, FVector2D A, FVector2D B)
@@ -117,31 +122,107 @@ namespace
 		}
 	}
 
-	FFloorGeometry MakeFloorGeometry(const AInteriorGenerator& Interior, float Scale, int32 Floor)
+	bool IsPointClearOfWalls(const FVector2D& Point, const TArray<FVector2D>& BuildingBoundary,
+		const FFloorGeometry& Geometry)
+	{
+		if (!InsideOrOnBoundary(Point, BuildingBoundary))
+		{
+			return false;
+		}
+		const double MinimumDistance = Geometry.WallClearance - GeometryEpsilon;
+		for (int32 I = 0; I < BuildingBoundary.Num(); ++I)
+		{
+			if (PointToSegmentDistance(Point, BuildingBoundary[I],
+				BuildingBoundary[(I + 1) % BuildingBoundary.Num()]) < MinimumDistance)
+			{
+				return false;
+			}
+		}
+		for (const FSegment& Wall : Geometry.Walls)
+		{
+			if (PointToSegmentDistance(Point, Wall.A, Wall.B) < MinimumDistance)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	void TryAddTurnPoint(FFloorGeometry& Geometry, const TArray<FVector2D>& BuildingBoundary,
+		const FVector2D& Candidate)
+	{
+		if (!IsPointClearOfWalls(Candidate, BuildingBoundary, Geometry))
+		{
+			return;
+		}
+		if (!Geometry.TurnPoints.ContainsByPredicate([&Candidate](const FVector2D& Existing)
+			{ return Existing.Equals(Candidate, 0.01f); }))
+		{
+			Geometry.TurnPoints.Add(Candidate);
+		}
+	}
+
+	void AddCornerTurnPoints(FFloorGeometry& Geometry, const TArray<FVector2D>& BuildingBoundary,
+		const FVector2D& Previous, const FVector2D& Corner, const FVector2D& Next)
+	{
+		const FVector2D ToPrevious = (Previous - Corner).GetSafeNormal();
+		const FVector2D ToNext = (Next - Corner).GetSafeNormal();
+		const FVector2D Bisector = (ToPrevious + ToNext).GetSafeNormal();
+		if (Bisector.IsNearlyZero())
+		{
+			return;
+		}
+
+		const double PerpendicularFactor = FMath::Min(
+			FMath::Abs(Cross(FVector2D::ZeroVector, Bisector, ToPrevious)),
+			FMath::Abs(Cross(FVector2D::ZeroVector, Bisector, ToNext)));
+		if (PerpendicularFactor <= GeometryEpsilon)
+		{
+			return;
+		}
+
+		// Offset far enough along the angle bisector that the point is beyond both wall capsules.
+		// Trying both directions supports travel inside and outside a closed room; the building and
+		// other wall boundaries filter whichever candidate is not actually usable.
+		const double Offset = Geometry.WallClearance * TurnPointMargin / PerpendicularFactor;
+		TryAddTurnPoint(Geometry, BuildingBoundary, Corner + Bisector * Offset);
+		TryAddTurnPoint(Geometry, BuildingBoundary, Corner - Bisector * Offset);
+	}
+
+	void AddOpenEndTurnPoints(FFloorGeometry& Geometry, const TArray<FVector2D>& BuildingBoundary,
+		const FVector2D& End, const FVector2D& Neighbour)
+	{
+		const FVector2D Away = (End - Neighbour).GetSafeNormal();
+		if (Away.IsNearlyZero())
+		{
+			return;
+		}
+		const FVector2D Perpendicular(-Away.Y, Away.X);
+		const double Radius = Geometry.WallClearance * TurnPointMargin;
+		for (int32 Step = -4; Step <= 4; ++Step)
+		{
+			const double Angle = Step * PI / 8.0;
+			const FVector2D Direction = Away * FMath::Cos(Angle) + Perpendicular * FMath::Sin(Angle);
+			TryAddTurnPoint(Geometry, BuildingBoundary, End + Direction * Radius);
+		}
+	}
+
+	FFloorGeometry MakeFloorGeometry(const AInteriorGenerator& Interior, float Scale, int32 Floor,
+		const TArray<FVector2D>& BuildingBoundary)
 	{
 		FFloorGeometry Geometry;
-		for (const AInteriorRoom* Room : Interior.GetRoomsOnFloor(Floor))
+		Geometry.WallClearance =
+			(Interior.GetWallThicknessForFloor(Floor) * 0.5 + RouteWallGapWorldUnits)
+			/ FMath::Max(static_cast<double>(Scale), static_cast<double>(KINDA_SMALL_NUMBER));
+
+		const TArray<AInteriorRoom*>& Rooms = Interior.GetRoomsOnFloor(Floor);
+		for (const AInteriorRoom* Room : Rooms)
 		{
 			if (!Room)
 			{
 				continue;
 			}
 			const TArray<FVector2D>& Footprint = Room->GetFootprint();
-			if (Room->IsClosedLoop() && Footprint.Num() >= 3)
-			{
-				FVector2D Center = FVector2D::ZeroVector;
-				for (const FVector2D& Corner : Footprint)
-				{
-					Center += Corner;
-				}
-				Center /= Footprint.Num();
-				for (const FVector2D& Corner : Footprint)
-				{
-					// Keep turns outside closed rooms. A wall corner itself would let a path
-					// change from the room interior to the exterior without using a door.
-					Geometry.TurnPoints.Add(Corner + (Corner - Center).GetSafeNormal() * SelectionWallClearance);
-				}
-			}
 			const int32 NumEdges = Room->IsClosedLoop() ? Footprint.Num() : Footprint.Num() - 1;
 			for (int32 EdgeIndex = 0; EdgeIndex < NumEdges; ++EdgeIndex)
 			{
@@ -171,9 +252,7 @@ namespace
 					}
 				}
 				Gaps.Sort([](const TPair<double, double>& Left, const TPair<double, double>& Right)
-				{
-				return Left.Key < Right.Key;
-				});
+					{ return Left.Key < Right.Key; });
 
 				double Cursor = 0.0;
 				for (const TPair<double, double>& Gap : Gaps)
@@ -189,10 +268,43 @@ namespace
 					AddWall(Geometry, A + Direction * Cursor, B);
 				}
 			}
-			if (!Room->IsClosedLoop())
+		}
+
+		// Generate graph vertices on the clearance boundary, after every wall has been collected so
+		// candidates can be rejected against neighbouring rooms as well as their own wall.
+		for (const AInteriorRoom* Room : Rooms)
+		{
+			if (!Room)
 			{
-				Geometry.TurnPoints.Append(Footprint);
+				continue;
 			}
+			const TArray<FVector2D>& Footprint = Room->GetFootprint();
+			if (Room->IsClosedLoop())
+			{
+				for (int32 I = 0; I < Footprint.Num(); ++I)
+				{
+					AddCornerTurnPoints(Geometry, BuildingBoundary,
+						Footprint[(I + Footprint.Num() - 1) % Footprint.Num()], Footprint[I],
+						Footprint[(I + 1) % Footprint.Num()]);
+				}
+			}
+			else if (Footprint.Num() >= 2)
+			{
+				AddOpenEndTurnPoints(Geometry, BuildingBoundary, Footprint[0], Footprint[1]);
+				for (int32 I = 1; I + 1 < Footprint.Num(); ++I)
+				{
+					AddCornerTurnPoints(Geometry, BuildingBoundary, Footprint[I - 1],
+						Footprint[I], Footprint[I + 1]);
+				}
+				AddOpenEndTurnPoints(Geometry, BuildingBoundary, Footprint.Last(),
+					Footprint[Footprint.Num() - 2]);
+			}
+		}
+		for (int32 I = 0; I < BuildingBoundary.Num(); ++I)
+		{
+			AddCornerTurnPoints(Geometry, BuildingBoundary,
+				BuildingBoundary[(I + BuildingBoundary.Num() - 1) % BuildingBoundary.Num()],
+				BuildingBoundary[I], BuildingBoundary[(I + 1) % BuildingBoundary.Num()]);
 		}
 		return Geometry;
 	}
@@ -207,16 +319,18 @@ namespace
 				return false;
 			}
 		}
+		const double MinimumDistance = Geometry.WallClearance - GeometryEpsilon;
 		for (int32 I = 0; I < BuildingBoundary.Num(); ++I)
 		{
-			if (SegmentsCrossAwayFromEnds(A, B, BuildingBoundary[I], BuildingBoundary[(I + 1) % BuildingBoundary.Num()]))
+			if (SegmentToSegmentDistance(A, B, BuildingBoundary[I],
+				BuildingBoundary[(I + 1) % BuildingBoundary.Num()]) < MinimumDistance)
 			{
 				return false;
 			}
 		}
 		for (const FSegment& Wall : Geometry.Walls)
 		{
-			if (SegmentsCrossAwayFromEnds(A, B, Wall.A, Wall.B))
+			if (SegmentToSegmentDistance(A, B, Wall.A, Wall.B) < MinimumDistance)
 			{
 				return false;
 			}
@@ -307,6 +421,7 @@ bool FNavigationRoutePlanner::IsValidPoint(const APolyBuilding& Building,
 		return false;
 	}
 	const TArray<FVector2D>& Boundary = Building.GetFootprint();
+	const FFloorGeometry Geometry = MakeFloorGeometry(Interior, Scale, Floor, Boundary);
 
 	for (int32 Index = 0; Index < Boundary.Num(); ++Index)
 	{
@@ -316,20 +431,19 @@ bool FNavigationRoutePlanner::IsValidPoint(const APolyBuilding& Building,
 		const FVector2D Closest =
 			FMath::ClosestPointOnSegment2D(Point, A, B);
 
-		if (FVector2D::Distance(Point, Closest) < SelectionWallClearance)
+		if (FVector2D::Distance(Point, Closest) < Geometry.WallClearance - GeometryEpsilon)
 		{
-			OutError = TEXT("Select a point away from the building wall.");
+			OutError = TEXT("Select a point outside the building wall's safety boundary.");
 			return false;
 		}
 	}
 
-	const FFloorGeometry Geometry = MakeFloorGeometry(Interior, Scale, Floor);
 	for (const FSegment& Wall : Geometry.Walls)
 	{
 		const FVector2D Closest = FMath::ClosestPointOnSegment2D(Point, Wall.A, Wall.B);
-		if (FVector2D::Distance(Point, Closest) < SelectionWallClearance)
+		if (FVector2D::Distance(Point, Closest) < Geometry.WallClearance - GeometryEpsilon)
 		{
-			OutError = TEXT("Select a point away from a wall.");
+			OutError = TEXT("Select a point outside the wall's safety boundary.");
 			return false;
 		}
 	}
@@ -416,7 +530,7 @@ bool FNavigationRoutePlanner::FindRoute(
 	{
 		// Get walls, doors, and possible turning points on this floor.
 		FFloorGeometry Geometry =
-			MakeFloorGeometry(Interior, Scale, Floor);
+			MakeFloorGeometry(Interior, Scale, Floor, Building.GetFootprint());
 
 		// Add every door as a possible route point.
 		for (const FVector2D& Door : Geometry.DoorPoints)
@@ -440,22 +554,6 @@ bool FNavigationRoutePlanner::FindRoute(
 				{
 					{
 						Turn,
-						Floor,
-						FString(),
-						EInteriorNavNodeType::PathNode
-					},
-					{}
-				});
-		}
-
-		// Add the building boundary corners.
-		for (const FVector2D& Corner :
-			Building.GetFootprint())
-		{
-			Vertices.Add(
-				{
-					{
-						Corner,
 						Floor,
 						FString(),
 						EInteriorNavNodeType::PathNode
