@@ -3190,19 +3190,33 @@ void ANavPlayerController::SaveCurrentProjectKeyHandler()
 }
 void ANavPlayerController::UndoInteriorKeyHandler()
 {
+	UndoInteriorEdit();
+}
+void ANavPlayerController::RedoInteriorKeyHandler()
+{
+	RedoInteriorEdit();
+}
+
+bool ANavPlayerController::UndoInteriorEdit()
+{
 	if (InteriorGen && InteriorGen->Undo())
 	{
 		SelectRoom(FString());
 		bHasUnsavedChanges = true;
+		return true;
 	}
+	return false;
 }
-void ANavPlayerController::RedoInteriorKeyHandler()
+
+bool ANavPlayerController::RedoInteriorEdit()
 {
 	if (InteriorGen && InteriorGen->Redo())
 	{
 		SelectRoom(FString());
 		bHasUnsavedChanges = true;
+		return true;
 	}
+	return false;
 }
 void ANavPlayerController::CopyInteriorKeyHandler()
 {

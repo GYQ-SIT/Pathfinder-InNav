@@ -986,21 +986,6 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		Switch3DButton = AddSwitcherButton(SwitcherRow, TEXT("Btn_Switch3D"), TEXT("3D"));
 		Switch3DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSwitch3DClicked);
 
-		// "View"/"Edit" toggle - right after 3D now (was after the speed controls) - starts as "View"
-		// (yellow), matching PC's own default (see ANavPlayerController::bIsIn3DEditMode).
-		// AddSwitcherButton doesn't hand back its inner UTextBlock (every other button built with it has
-		// a fixed label), so this one reaches it back out through the widget tree instead, same "don't
-		// return every intermediate" convention used elsewhere in this function (e.g. the File/Window
-		// dropdowns).
-		Edit3DModeToggleButton = AddSwitcherButton(SwitcherRow, TEXT("Btn_Edit3DModeToggle"), TEXT("View"));
-		Edit3DModeToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnEdit3DModeToggleClicked);
-		Edit3DModeToggleButton->SetBackgroundColor(FLinearColor(0.8f, 0.7f, 0.1f, 1.f));
-		Edit3DModeToggleButton->SetVisibility(ESlateVisibility::Collapsed);
-		if (USizeBox* Edit3DModeSizeBox = Cast<USizeBox>(Edit3DModeToggleButton->GetContent()))
-		{
-			Edit3DModeToggleButtonText = Cast<UTextBlock>(Edit3DModeSizeBox->GetContent());
-		}
-
 		// Snap toggle - icon-only, next to 3D, always visible (snapping matters in 2D too, unlike
 		// Reset/speed/View-Edit which are 3D-preview-only). Icon itself is set by HandleSnapEnabledChanged
 		// once PC is available (RebuildWidget has no reliable PC access yet - see NativeConstruct).
@@ -1024,6 +1009,59 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		{
 			SnapToggleRowSlot->SetVerticalAlignment(VAlign_Center);
 			SnapToggleRowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
+		}
+
+		// Undo/Redo - icon-only, same row as Snap, always visible in both 2D and 3D (this row isn't
+		// hidden by preview mode) - forwards to PC->UndoInteriorEdit()/RedoInteriorEdit() (also bound
+		// to Ctrl+Z/Ctrl+Y). Icons are static (unlike SnapToggleIcon, which swaps between two states).
+		auto AddSwitcherIconButton = [this, SwitcherButtonWidth, SwitcherButtonHeight](UHorizontalBox* TargetRow, const TCHAR* Name, const TCHAR* IconAssetName, const TCHAR* TooltipLabel) -> UButton*
+		{
+			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+			Button->SetToolTip(MakeToolTipWidget(TooltipLabel));
+			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+
+			UImage* Icon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), FName(FString(Name) + TEXT("Icon")));
+			const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), IconAssetName, IconAssetName);
+			if (UTexture2D* IconTexture = LoadObject<UTexture2D>(nullptr, *IconPath))
+			{
+				Icon->SetBrushFromTexture(IconTexture, false);
+				Icon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
+			}
+			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
+			SizeBox->SetWidthOverride(SwitcherButtonWidth);
+			SizeBox->SetHeightOverride(SwitcherButtonHeight);
+			if (USizeBoxSlot* IconSlot = Cast<USizeBoxSlot>(SizeBox->SetContent(Icon)))
+			{
+				IconSlot->SetHorizontalAlignment(HAlign_Center);
+				IconSlot->SetVerticalAlignment(VAlign_Center);
+			}
+			Button->SetContent(SizeBox);
+			if (UHorizontalBoxSlot* RowSlot = Cast<UHorizontalBoxSlot>(TargetRow->AddChildToHorizontalBox(Button)))
+			{
+				RowSlot->SetVerticalAlignment(VAlign_Center);
+				RowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
+			}
+			return Button;
+		};
+
+		UndoButton = AddSwitcherIconButton(SwitcherRow, TEXT("Btn_Undo"), TEXT("Icon_Undo"), TEXT("Undo [Ctrl+Z]"));
+		UndoButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnUndoClicked);
+		RedoButton = AddSwitcherIconButton(SwitcherRow, TEXT("Btn_Redo"), TEXT("Icon_Redo"), TEXT("Redo [Ctrl+Y]"));
+		RedoButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRedoClicked);
+
+		// "View"/"Edit" toggle - after Undo/Redo now (was right after 3D) - starts as "View" (yellow),
+		// matching PC's own default (see ANavPlayerController::bIsIn3DEditMode). AddSwitcherButton
+		// doesn't hand back its inner UTextBlock (every other button built with it has a fixed label),
+		// so this one reaches it back out through the widget tree instead, same "don't return every
+		// intermediate" convention used elsewhere in this function (e.g. the File/Window dropdowns).
+		Edit3DModeToggleButton = AddSwitcherButton(SwitcherRow, TEXT("Btn_Edit3DModeToggle"), TEXT("View"));
+		Edit3DModeToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnEdit3DModeToggleClicked);
+		Edit3DModeToggleButton->SetBackgroundColor(FLinearColor(0.8f, 0.7f, 0.1f, 1.f));
+		Edit3DModeToggleButton->SetVisibility(ESlateVisibility::Collapsed);
+		if (USizeBox* Edit3DModeSizeBox = Cast<USizeBox>(Edit3DModeToggleButton->GetContent()))
+		{
+			Edit3DModeToggleButtonText = Cast<UTextBlock>(Edit3DModeSizeBox->GetContent());
 		}
 
 		// Reset/-/speed/+ - see CameraControlsBarBackground's own comment for why this is its own Border
@@ -4969,6 +5007,22 @@ void UInteriorScreenWidget::OnSnapToggleClicked()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->ToggleSnapEnabled();
+	}
+}
+
+void UInteriorScreenWidget::OnUndoClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->UndoInteriorEdit();
+	}
+}
+
+void UInteriorScreenWidget::OnRedoClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->RedoInteriorEdit();
 	}
 }
 

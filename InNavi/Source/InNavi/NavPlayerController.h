@@ -607,6 +607,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool DeleteSelection();
 
+	// Steps the interior back to its previous state (see AInteriorGenerator::Undo) and clears the
+	// current room selection, since the undone state may no longer contain the selected room. Bound
+	// to Ctrl+Z (see UndoInteriorKeyHandler) and to the interior editor's own Undo button. No-op
+	// (returns false) if there's nothing to undo.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool UndoInteriorEdit();
+
+	// Steps the interior forward again after an Undo (see AInteriorGenerator::Redo) - same
+	// selection-clearing reasoning as UndoInteriorEdit. Bound to Ctrl+Y and to the interior editor's
+	// own Redo button. No-op (returns false) if there's nothing to redo.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool RedoInteriorEdit();
+
 	// Rescales a room/wall to fit new Width (X) / Depth (Y) dimensions, keeping it centered where
 	// it is (see AInteriorGenerator::ResizeRoom) - general-purpose, explicit-id version. See also
 	// GrowSelectedRoom/ShrinkSelectedRoom. Not wired into UMG yet.
