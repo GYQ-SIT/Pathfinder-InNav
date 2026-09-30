@@ -13,8 +13,15 @@
 #include "Serialization/JsonSerializer.h"
 #include "SQLiteDatabase.h"
 
-// ---- Helper: do segments AB and CD properly cross each other? ----
-static bool SegmentsIntersect(const FVector2D& A, const FVector2D& B, const FVector2D& C, const FVector2D& D)
+// ---- Helper: do segments AB and CD properly cross each other? ---- Named distinctly (not just
+// "SegmentsIntersect") because NavigationRoutePlannerTests.cpp defines its own same-named,
+// same-signature helper in its own anonymous namespace - both being `static`/internal-linkage
+// normally keeps them apart, but Unreal's adaptive-unity build can still merge unrelated .cpp files
+// into one translation unit (it only excludes files with LOCAL uncommitted changes, which is why
+// this went unnoticed until a from-clean CI build - the fresh checkout has nothing "changed" to
+// exclude), and two same-named functions landing in one merged unity file is a real, if easy to
+// miss, redefinition error.
+static bool FootprintSegmentsIntersect(const FVector2D& A, const FVector2D& B, const FVector2D& C, const FVector2D& D)
 {
 	auto Cross = [](const FVector2D& O, const FVector2D& P1, const FVector2D& P2)
 	{
@@ -45,7 +52,7 @@ static float PointToSegmentDistance(const FVector2D& P, const FVector2D& A, cons
 // ---- Helper: shortest distance between segments AB and CD (0 if they cross) ----
 static float SegmentToSegmentDistance(const FVector2D& A, const FVector2D& B, const FVector2D& C, const FVector2D& D)
 {
-	if (SegmentsIntersect(A, B, C, D))
+	if (FootprintSegmentsIntersect(A, B, C, D))
 	{
 		return 0.f;
 	}
@@ -91,7 +98,7 @@ static bool PolygonSelfIntersects(const TArray<FVector2D>& Poly)
 				continue;
 			}
 
-			if (SegmentsIntersect(Poly[i], Poly[iNext], Poly[j], Poly[jNext]))
+			if (FootprintSegmentsIntersect(Poly[i], Poly[iNext], Poly[j], Poly[jNext]))
 			{
 				return true;
 			}
