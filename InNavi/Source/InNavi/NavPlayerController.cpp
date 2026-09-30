@@ -1515,11 +1515,12 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter
 		return nullptr;
 	}
 	
-	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(Footprint, FString(), FString(), true, false);
+	FString CreateError;
+	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(Footprint, FString(), FString(), true, false, /*bAllowOverlap=*/false, CreateError);
 	if (!NewRoom)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Could not place the prefab room - it may overlap an existing one."));
-		OnActionFailed.Broadcast(TEXT("Could not place the room there - check that it doesn't overlap an existing one."), EActionFailureSeverity::Warning);
+		UE_LOG(LogTemp, Warning, TEXT("Could not place the prefab room: %s"), *CreateError);
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not place the room there - %s"), *CreateError), EActionFailureSeverity::Warning);
 		return nullptr;
 	}
 
@@ -1612,14 +1613,15 @@ AInteriorRoom* ANavPlayerController::FinishRoom(const FString& RoomId, const FSt
 		return nullptr;
 	}
 
-	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(PendingRoomFootprint, RoomId, RoomName, bIsPublic, bRequiresKey);
+	FString CreateError;
+	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(PendingRoomFootprint, RoomId, RoomName, bIsPublic, bRequiresKey, /*bAllowOverlap=*/false, CreateError);
 
 	if (!NewRoom)
 	{
-		// Spawn was rejected (e.g. self-intersecting outline, or a typed-in id that's already
-		// taken) - keep the drawn points and preview so the user can see what's there; Esc cancels.
-		UE_LOG(LogTemp, Warning, TEXT("Could not finish this room - see error above. Press Esc to discard and redraw."));
-		OnActionFailed.Broadcast(TEXT("Could not create the room - check that it stays inside the building, doesn't overlap another room/wall, doesn't cross itself, and that the id isn't already used."), EActionFailureSeverity::Warning);
+		// Spawn was rejected - keep the drawn points and preview so the user can see what's there;
+		// Esc cancels.
+		UE_LOG(LogTemp, Warning, TEXT("Could not finish this room: %s Press Esc to discard and redraw."), *CreateError);
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not create the room - %s"), *CreateError), EActionFailureSeverity::Warning);
 		return nullptr;
 	}
 
@@ -1659,14 +1661,15 @@ AInteriorRoom* ANavPlayerController::FinishWall(const FString& WallId)
 		return nullptr;
 	}
 
-	AInteriorRoom* NewWall = InteriorGen->CreateWallFromPoints(PendingRoomFootprint, WallId);
+	FString CreateError;
+	AInteriorRoom* NewWall = InteriorGen->CreateWallFromPoints(PendingRoomFootprint, WallId, CreateError);
 
 	if (!NewWall)
 	{
-		// Spawn was rejected (e.g. a typed-in id that's already taken) - keep the drawn points and
-		// preview so the user can see what's there; Esc cancels.
-		UE_LOG(LogTemp, Warning, TEXT("Could not finish this wall - see error above. Press Esc to discard and redraw."));
-		OnActionFailed.Broadcast(TEXT("Could not create the wall - check that the id isn't already used."), EActionFailureSeverity::Warning);
+		// Spawn was rejected - keep the drawn points and preview so the user can see what's there;
+		// Esc cancels.
+		UE_LOG(LogTemp, Warning, TEXT("Could not finish this wall: %s Press Esc to discard and redraw."), *CreateError);
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not create the wall - %s"), *CreateError), EActionFailureSeverity::Warning);
 		return nullptr;
 	}
 
@@ -3397,12 +3400,15 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 		bFoundPastePosition = true;
 		break;
 	}
+	FString CreateError;
 	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(
 		NewFootprint,
 		FString(),                 // Empty = generate a new unique ID
 		CopiedRoomName,
 		bCopiedRoomIsPublic,
-		bCopiedRoomRequiresKey
+		bCopiedRoomRequiresKey,
+		/*bAllowOverlap=*/false,
+		CreateError
 	);
 
 	if (NewRoom)
@@ -3413,6 +3419,14 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 		UE_LOG(LogTemp, Log,
 			TEXT("Pasted room: %s"),
 			*NewRoom->RoomId);
+	}
+	else
+	{
+		// Previously silent on failure (e.g. pasting on top of the copied room's own old spot, or
+		// anything else CreateRoomFromFootprint rejects) - the user would see nothing happen with no
+		// indication why.
+		UE_LOG(LogTemp, Warning, TEXT("Could not paste the room: %s"), *CreateError);
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not paste the room - %s"), *CreateError), EActionFailureSeverity::Warning);
 	}
 }
 // ---- Permanent Interior pass-throughs (see header) ----
