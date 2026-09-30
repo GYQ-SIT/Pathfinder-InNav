@@ -359,7 +359,8 @@ private:
 	// Map panel (road filter) - starts checked, matching UEditScreenWidget's own "Map" panel default.
 	UFUNCTION()
 	void OnWindowMapCheckChanged(bool bIsChecked);
-
+	UFUNCTION()
+	void OnWindowDebugCheckChanged(bool bIsChecked);
 	// --- Map panel (Window > Map) --- Roads section only, ported from UEditScreenWidget's own "Map"
 	// panel - same PC functions (SetRoadCategoryVisible/SetAllRoadsVisible/
 	// SetRoadsAndPOIsWithinCampusOnly), no Buildings section (this screen has no exterior building-
@@ -523,8 +524,10 @@ private:
 	// see the Window menu. Map (the road-filter panel ported from UEditScreenWidget's own "Map" panel,
 	// Roads section only - no Buildings section, since this screen has no exterior building-visibility
 	// concept) starts VISIBLE, matching that panel's own default there.
-	enum class EDockPanelId : uint8 { Toolbar, Floor, Properties, Layers, Navigation, Audio, Map };
-	static constexpr int32 NumDockPanels = 7;
+	enum class EDockPanelId : uint8{Toolbar,Floor,Properties,Layers,Navigation,Audio,Map,Debug
+};
+
+	static constexpr int32 NumDockPanels = 8;
 	static constexpr int32 MaxDockSplitters = NumDockPanels - 1; // worst case: all 7 panels in one column
 
 	struct FDockColumn
@@ -733,7 +736,9 @@ private:
 	UFUNCTION() FEventReply OnMapPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnMapPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnMapPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
-
+	UFUNCTION() FEventReply OnDebugPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnDebugPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnDebugPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -755,7 +760,9 @@ private:
 	UFUNCTION() FEventReply OnMapResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnMapResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnMapResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
-
+	UFUNCTION() FEventReply OnDebugResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnDebugResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnDebugResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -777,7 +784,9 @@ private:
 	UFUNCTION() FEventReply OnMapLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnMapLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnMapLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
-
+	UFUNCTION() FEventReply OnDebugLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnDebugLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnDebugLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -799,7 +808,9 @@ private:
 	UFUNCTION() FEventReply OnMapBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnMapBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnMapBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
-
+	UFUNCTION() FEventReply OnDebugBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnDebugBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnDebugBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter0MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter0MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter0MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -1026,6 +1037,11 @@ private:
 	UPROPERTY()
 	UBorder* MapPanel = nullptr;
 	UPROPERTY()
+	UBorder* DebugPanel = nullptr;
+	UPROPERTY()
+	UTextBlock* DebugInfoText = nullptr;
+	float DebugSmoothedDeltaTime = 0.f;
+	UPROPERTY()
 	UCheckBox* RoadHideAllCheckbox = nullptr;
 	UPROPERTY()
 	UCheckBox* RoadPrimaryCheckbox = nullptr;
@@ -1185,7 +1201,8 @@ private:
 
 	UPROPERTY()
 	UCheckBox* WindowMapCheckbox = nullptr;
-
+	UPROPERTY()
+	UCheckBox* WindowDebugCheckbox = nullptr;
 	// Parallel to EDockPanelId, sized NumDockPanels - see SetDockPanelUserHidden. False by default
 	// (visible) for every panel except Audio and Navigation, which InitializeDockRuntimeArrays sets
 	// true right after initializing this array - each only shows once the user actually checks it in

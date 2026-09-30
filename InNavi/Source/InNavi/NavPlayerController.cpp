@@ -149,6 +149,10 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(EKeys::Escape, IE_Pressed, this, &ANavPlayerController::OnCancelPressed);
 	InputComponent->BindKey(EKeys::N, IE_Pressed, this, &ANavPlayerController::ToggleSnapEnabled);
 	InputComponent->BindKey(FInputChord(EKeys::S, /*Shift*/false, /*Ctrl*/true, /*Alt*/false, /*Cmd*/false), IE_Pressed, this, &ANavPlayerController::SaveCurrentProjectKeyHandler);
+	InputComponent->BindKey(FInputChord(EKeys::Z, false, true, false, false), IE_Pressed, this, &ANavPlayerController::UndoInteriorKeyHandler);
+	InputComponent->BindKey(FInputChord(EKeys::Y, false, true, false, false), IE_Pressed, this, &ANavPlayerController::RedoInteriorKeyHandler);
+	InputComponent->BindKey(FInputChord(EKeys::C, false, true, false, false),IE_Pressed,this,&ANavPlayerController::CopyInteriorKeyHandler);
+	InputComponent->BindKey(FInputChord(EKeys::V, false, true, false, false), IE_Pressed, this, &ANavPlayerController::PasteInteriorKeyHandler);
 	InputComponent->BindKey(EKeys::G, IE_Pressed, this, &ANavPlayerController::LogCameraTransform);
 	InputComponent->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &ANavPlayerController::ZoomIn3DPreview);
 	InputComponent->BindKey(EKeys::MouseScrollDown, IE_Pressed, this, &ANavPlayerController::ZoomOut3DPreview);
@@ -236,7 +240,7 @@ void ANavPlayerController::OnClick()
 			SelectNavigationPoint(FootprintPosition, Floor);
 			return;
 		}
-
+	
 		// Do not fall back to the 3D camera for a 2D floor-plan click. If the
 		// widget cannot be found or the cursor is outside it, report the problem
 		// instead of producing a misleading random footprint position.
@@ -1510,7 +1514,7 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter
 	default:
 		return nullptr;
 	}
-
+	
 	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(Footprint, FString(), FString(), true, false);
 	if (!NewRoom)
 	{
@@ -3181,7 +3185,236 @@ void ANavPlayerController::SaveCurrentProjectKeyHandler()
 {
 	SaveCurrentProject();
 }
+void ANavPlayerController::UndoInteriorKeyHandler()
+{
+	if (InteriorGen && InteriorGen->Undo())
+	{
+		SelectRoom(FString());
+		bHasUnsavedChanges = true;
+	}
+}
+void ANavPlayerController::RedoInteriorKeyHandler()
+{
+	if (InteriorGen && InteriorGen->Redo())
+	{
+		SelectRoom(FString());
+		bHasUnsavedChanges = true;
+	}
+}
+void ANavPlayerController::CopyInteriorKeyHandler()
+{
+	// If no room is selected, copy the selected whole building instead.
+	if (SelectedRoomId.IsEmpty() && SelectedBuilding && Generator)
+	{
+		// Make sure the latest interior edits are stored in BuildingGenerator
+		// before copying the whole building.
+		if (InteriorGen)
+		{
+			InteriorGen->SyncInteriorToBuildingGenerator();
+		}
 
+		CopiedBuildingId = SelectedBuilding->BuildingId;
+		CopiedBuildingName = SelectedBuilding->BuildingName;
+		CopiedBuildingFootprint = SelectedBuilding->GetFootprint();
+		CopiedBuildingFloorCount = SelectedBuilding->GetFloorCount();
+		CopiedBuildingFloorHeight = SelectedBuilding->GetFloorHeight();
+		CopiedBuildingOffset = SelectedBuilding->BuildingOffset;
+		CopiedBuildingInterior =
+			Generator->GetInteriorDataForBuilding(CopiedBuildingId);
+
+		bHasCopiedBuilding = true;
+		bHasCopiedRoom = false;
+
+		UE_LOG(LogTemp, Log,
+			TEXT("Copied whole building: %s"),
+			*CopiedBuildingId);
+
+		return;
+	}
+	if (!InteriorGen || SelectedRoomId.IsEmpty())
+	{
+		return;
+	}
+
+	AInteriorRoom* Room = InteriorGen->GetRoomById(SelectedRoomId);
+
+	if (!Room)
+	{
+		return;
+	}
+
+	CopiedRoomId = Room->RoomId;
+	CopiedRoomFootprint = Room->GetFootprint();
+	CopiedRoomName = Room->RoomName;
+	bCopiedRoomIsPublic = Room->bIsPublic;
+	bCopiedRoomRequiresKey = Room->bRequiresKey;
+	bHasCopiedRoom = true;
+
+	UE_LOG(LogTemp, Log, TEXT("Copied room: %s"), *CopiedRoomId);
+}
+
+void ANavPlayerController::PasteInteriorKeyHandler()
+{
+	// Paste a whole building when the building clipboard is active.
+	if (bHasCopiedBuilding && Generator && !CopiedBuildingFootprint.IsEmpty())
+	{
+		FHitResult Hit;
+		GetHitResultUnderCursor(ECC_Visibility, false, Hit);
+
+		if (!Hit.bBlockingHit)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Building paste failed: cursor did not hit the ground."));
+			return;
+		}
+
+		const float Scale = Generator->GetScale();
+
+		// Convert mouse world position into the same footprint-space
+		// used by SpawnBuildingFromData.
+		const FVector2D PastePosition(
+			Hit.Location.X / Scale,
+			Hit.Location.Y / Scale
+		);
+
+		TArray<FVector2D> NewFootprint = CopiedBuildingFootprint;
+
+		// Find the center of the copied building.
+		FVector2D Center = FVector2D::ZeroVector;
+
+		for (const FVector2D& Point : NewFootprint)
+		{
+			Center += Point;
+		}
+
+		Center /= NewFootprint.Num();
+
+		// Move the copied footprint so its center follows the mouse.
+		const FVector2D MoveOffset = PastePosition - Center;
+
+		for (FVector2D& Point : NewFootprint)
+		{
+			Point += MoveOffset;
+		}
+
+		const FString NewId =
+			Generator->GenerateUniqueBuildingId(CopiedBuildingId);
+
+		const FString NewName =
+			CopiedBuildingName + TEXT(" Copy");
+
+		APolyBuilding* NewBuilding =
+			Generator->SpawnBuildingFromData(
+				NewId,
+				NewName,
+				NewFootprint,
+				CopiedBuildingFloorCount,
+				CopiedBuildingFloorHeight,
+				CopiedBuildingOffset
+			);
+
+		if (!NewBuilding)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Building paste failed."));
+			return;
+		}
+
+		if (CopiedBuildingInterior.IsValid() && InteriorGen)
+		{
+			TSharedPtr<FJsonObject> TranslatedInterior =
+				InteriorGen->CreateTranslatedInteriorCopy(
+					CopiedBuildingInterior,
+					MoveOffset
+				);
+
+			if (TranslatedInterior.IsValid())
+			{
+				Generator->SetInteriorDataForBuilding(
+					NewId,
+					TranslatedInterior
+				);
+			}
+		}
+
+		bHasUnsavedChanges = true;
+
+		UE_LOG(LogTemp, Log,
+			TEXT("Pasted whole building: %s"),
+			*NewId);
+
+		return;
+	}
+	if (!InteriorGen || !bHasCopiedRoom || CopiedRoomFootprint.IsEmpty())
+	{
+		return;
+	}
+
+	TArray<FVector2D> NewFootprint = CopiedRoomFootprint;
+	bool bFoundPastePosition = false;
+	// Move the pasted copy slightly so it does not sit exactly on top.
+	const FVector2D CursorScreenPosition = FSlateApplication::Get().GetCursorPos();
+
+	for (TObjectIterator<UInteriorFloorPlanWidget> It; It; ++It)
+	{
+		UInteriorFloorPlanWidget* FloorPlan = *It;
+
+		if (!FloorPlan ||
+			FloorPlan->GetWorld() != GetWorld() ||
+			!FloorPlan->IsVisible())
+		{
+			continue;
+		}
+
+		const FGeometry& FloorGeometry = FloorPlan->GetCachedGeometry();
+
+		if (!FloorGeometry.IsUnderLocation(CursorScreenPosition))
+		{
+			continue;
+		}
+
+		const FVector2D LocalPosition =
+			FloorGeometry.AbsoluteToLocal(CursorScreenPosition);
+
+		const FVector2D PastePosition =
+			FloorPlan->LocalPositionToFootprintPoint(
+				LocalPosition,
+				FloorGeometry.GetLocalSize());
+		FVector2D Center = FVector2D::ZeroVector;
+
+		for (const FVector2D& Point : NewFootprint)
+		{
+			Center += Point;
+		}
+
+		Center /= NewFootprint.Num();
+
+		const FVector2D Offset = PastePosition - Center;
+
+		for (FVector2D& Point : NewFootprint)
+		{
+			Point += Offset;
+			
+		}
+		bFoundPastePosition = true;
+		break;
+	}
+	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(
+		NewFootprint,
+		FString(),                 // Empty = generate a new unique ID
+		CopiedRoomName,
+		bCopiedRoomIsPublic,
+		bCopiedRoomRequiresKey
+	);
+
+	if (NewRoom)
+	{
+		SelectRoom(NewRoom->RoomId);
+		bHasUnsavedChanges = true;
+
+		UE_LOG(LogTemp, Log,
+			TEXT("Pasted room: %s"),
+			*NewRoom->RoomId);
+	}
+}
 // ---- Permanent Interior pass-throughs (see header) ----
 
 int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
@@ -3664,10 +3897,6 @@ void ANavPlayerController::BeginRotationGestureIfNeeded()
 	// connector is selected anyway (the two are mutually exclusive, see SelectConnector), so the
 	// SelectedRoomId.IsEmpty() check below would already no-op here regardless. This explicit branch
 	// just makes that reasoning obvious rather than relying on it silently falling through.
-	if (!SelectedConnectorGroupId.IsEmpty())
-	{
-		return;
-	}
 
 	if (SelectedRoomId.IsEmpty())
 	{
@@ -3686,6 +3915,13 @@ void ANavPlayerController::BeginRotationGestureIfNeeded()
 
 void ANavPlayerController::EndRotationGestureIfFinished()
 {
+	if (!bRotatingCCW && !bRotatingCW &&
+		!SelectedConnectorGroupId.IsEmpty() &&
+		InteriorGen)
+	{
+		InteriorGen->RecordHistorySnapshot();
+		return;
+	}
 	// Only commit once both keys are up - releasing one while the other is still held just means
 	// switching direction mid-gesture, not the end of it.
 	if (bRotatingCCW || bRotatingCW || SelectedRoomId.IsEmpty() || !InteriorGen || RotationStartFootprint.Num() == 0)

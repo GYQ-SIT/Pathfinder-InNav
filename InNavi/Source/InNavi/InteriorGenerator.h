@@ -58,7 +58,7 @@ public:
 	// otherwise in-progress interior edits aren't reflected in the save. No-op if nothing is loaded.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void SyncInteriorToBuildingGenerator();
-
+	TSharedPtr<FJsonObject> CreateTranslatedInteriorCopy(const TSharedPtr<FJsonObject>& SourceInterior,const FVector2D& MoveOffset) const;
 	// Destroys every currently-spawned room and forgets all floor/nav-node state, without loading
 	// anything new - back to the state right after BeginPlay. Call this before starting a New
 	// project or before BuildingGenerator::ClearAllBuildings, so this generator doesn't keep pointing
@@ -105,7 +105,7 @@ public:
 	// Fails (returns nullptr) if nothing is loaded, the footprint is invalid/self-intersecting, or
 	// RoomId is already taken.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
-	AInteriorRoom* CreateRoomFromFootprint(const TArray<FVector2D>& Footprint, const FString& RoomId, const FString& RoomName, bool bIsPublic, bool bRequiresKey);
+	AInteriorRoom* CreateRoomFromFootprint(const TArray<FVector2D>& Footprint,const FString& RoomId,const FString& RoomName,bool bIsPublic,bool bRequiresKey,bool bAllowOverlap = false);
 
 	// Builds a standalone open wall/partition line on the active floor - same id/floor rules as
 	// CreateRoomFromFootprint, but the points aren't closed into a loop (at least 2 points, not 3)
@@ -289,7 +289,25 @@ public:
 	// (see UInteriorFloorPlanWidget). Empty if that floor doesn't exist.
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	const TArray<AInteriorRoom*>& GetRoomsOnFloor(int32 Level) const;
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	AInteriorRoom* GetRoomById(const FString& RoomId) const;
+	// ---- Undo / Redo ----
 
+// Save the current interior state into the undo history.
+	UFUNCTION(BlueprintCallable, Category = "Interior|History")
+	void RecordHistorySnapshot();
+
+	// Go back to the previous interior state.
+	UFUNCTION(BlueprintCallable, Category = "Interior|History")
+	bool Undo();
+
+	// Go forward to the next interior state.
+	UFUNCTION(BlueprintCallable, Category = "Interior|History")
+	bool Redo();
+
+	// Remove all stored undo/redo history.
+	UFUNCTION(BlueprintCallable, Category = "Interior|History")
+	void ClearHistory();
 protected:
 	virtual void BeginPlay() override;
 
@@ -365,4 +383,12 @@ private:
 	// Room ids in use for the currently loaded building, for CreateRoomFromFootprint's uniqueness
 	// check. Cleared whenever a different building is loaded.
 	TSet<FString> UsedRoomIds;
+
+	// ---- Undo / Redo History ----
+
+	TArray<FString> InteriorHistory;
+
+	int32 HistoryIndex = -1;
+
+	bool bIsRestoringHistory = false;
 };

@@ -1,0 +1,20 @@
+{
+	"interiorNavNodes": [
+		{
+			"id": "elevator_A_L1",
+			"type": "elevator",
+			"level": 1,
+			"position":
+			{
+				"x": 250,
+				"y": 400
+			},
+			"connectsFloors": [
+				1,
+				2,
+				3
+			],
+			"connectorGroupId": "elevator_A"
+		}
+	]
+}

@@ -1003,7 +1003,10 @@ private:
 
 	// Ctrl+S handler - wraps SaveCurrentProject() because key bindings require a void() signature.
 	void SaveCurrentProjectKeyHandler();
-
+	void UndoInteriorKeyHandler();
+	void RedoInteriorKeyHandler();
+	void CopyInteriorKeyHandler();
+	void PasteInteriorKeyHandler();
 	// Shape test mode (Plan B): TEMPORARY stand-in for Padre's UI form. Reads
 	// Data/test_shape_params.json (a "shape" field picks rectangle vs regular polygon) and calls
 	// the matching Generator->Create...Building(...). Delete ConfirmShapeTest + the R-key/shape-mode
@@ -1100,7 +1103,21 @@ private:
 	// See SelectRoom/GetSelectedRoomId - persists across mode changes, cleared on deselect (empty
 	// id), StartNewProject, or once deleted.
 	FString SelectedRoomId;
-
+	FString CopiedRoomId;
+	TArray<FVector2D> CopiedRoomFootprint;
+	FString CopiedRoomName;
+	bool bHasCopiedRoom = false;
+	bool bCopiedRoomIsPublic = true;
+	bool bCopiedRoomRequiresKey = false;
+	// Whole-building copy/paste
+	bool bHasCopiedBuilding = false;
+	FString CopiedBuildingId;
+	FString CopiedBuildingName;
+	TArray<FVector2D> CopiedBuildingFootprint;
+	int32 CopiedBuildingFloorCount = 0;
+	float CopiedBuildingFloorHeight = 300.f;
+	FVector2D CopiedBuildingOffset = FVector2D::ZeroVector;
+	TSharedPtr<FJsonObject> CopiedBuildingInterior;
 	// See SelectDoor/GetSelectedDoorRoomId/GetSelectedDoorId - same lifetime rules as
 	// SelectedRoomId, and mutually exclusive with it (selecting one clears the other).
 	FString SelectedDoorRoomId;
