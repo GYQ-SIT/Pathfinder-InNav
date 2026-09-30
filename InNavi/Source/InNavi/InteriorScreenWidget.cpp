@@ -72,6 +72,7 @@ void UInteriorScreenWidget::InitializeDockRuntimeArrays()
 	// Audio starts hidden - see the enum's own comment. ConstructDockPanel's Audio call site (below)
 	// collapses its actual Border to match.
 	bDockPanelUserHidden[(int32)EDockPanelId::Audio] = true;
+	bDockPanelUserHidden[(int32)EDockPanelId::Debug] = true;
 	// Navigation also starts hidden now - most sessions are drawing/editing, not routing, so this
 	// keeps that screen real estate free until the user actually opens it from the Window menu (same
 	// mechanism as Audio above; ConstructDockPanel's Navigation call site collapses its Border to match).
@@ -845,7 +846,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// Starts checked, matching UEditScreenWidget's own "Map" panel default.
 		WindowMapCheckbox->SetIsChecked(true);
 		WindowMapCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowMapCheckChanged);
-
+		WindowDebugCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowDebug"), TEXT("Debug"));
+		WindowDebugCheckbox->SetIsChecked(false);
+		WindowDebugCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowDebugCheckChanged);
 		// Full-screen, fully transparent, Collapsed by default - see the comment on
 		// OnMenuClickCatcherMouseButtonDown for why this is how "click elsewhere closes the dropdown"
 		// works. Z=5 sits above every dock panel/handle/splitter (2-4) but below the menu bar and
@@ -1604,7 +1607,50 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		RoadOtherCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadOtherCheckChanged);
 		RoadCampusOnlyCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadCampusOnly"), TEXT("Campus Only"));
 		RoadCampusOnlyCheckbox->SetIsChecked(true);
-		RoadCampusOnlyCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadCampusOnlyCheckChanged);
+		RoadCampusOnlyCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadCampusOnlyCheckChanged); RoadCampusOnlyCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadCampusOnlyCheckChanged);
+
+		// -- Debug panel --
+		DebugPanel = ConstructDockPanel(EDockPanelId::Debug, TEXT("Pnl_Debug"), DockPanelColor, 14.f);
+		DockDragHandles[(int32)EDockPanelId::Debug]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugPanelMouseButtonDown);
+		DebugPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugPanelMouseMove);
+		DebugPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugPanelMouseButtonUp);
+
+		DockResizeHandles[(int32)EDockPanelId::Debug]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugResizeMouseButtonDown);
+		DockResizeHandles[(int32)EDockPanelId::Debug]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugResizeMouseMove);
+		DockResizeHandles[(int32)EDockPanelId::Debug]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugResizeMouseButtonUp);
+
+		DockLeftResizeHandles[(int32)EDockPanelId::Debug]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugLeftResizeMouseButtonDown);
+		DockLeftResizeHandles[(int32)EDockPanelId::Debug]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugLeftResizeMouseMove);
+		DockLeftResizeHandles[(int32)EDockPanelId::Debug]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugLeftResizeMouseButtonUp);
+
+		DockBottomResizeHandles[(int32)EDockPanelId::Debug]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugBottomResizeMouseButtonDown);
+		DockBottomResizeHandles[(int32)EDockPanelId::Debug]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugBottomResizeMouseMove);
+		DockBottomResizeHandles[(int32)EDockPanelId::Debug]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugBottomResizeMouseButtonUp);
+		DebugPanel->SetVisibility(ESlateVisibility::Collapsed);
+
+		UVerticalBox* DebugStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DebugStack"));
+		DebugPanel->SetContent(DebugStack);
+
+		UTextBlock* DebugTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_DebugTitle"));
+		DebugTitle->SetText(FText::FromString(TEXT("Debug")));
+		DebugTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(DebugTitle);
+		DebugStack->AddChildToVerticalBox(DebugTitle);
+		DockPanelTitleTexts[(int32)EDockPanelId::Debug] = DebugTitle;
+		DebugInfoText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_DebugInfo"));
+		DebugInfoText->SetText(FText::FromString(TEXT("Debug information")));
+		DebugInfoText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(DebugInfoText);
+		ApplyStandardTextWrap(DebugInfoText);
+		DebugStack->AddChildToVerticalBox(DebugInfoText);
+		// Separate from DebugInfoText so it can carry its own colour (red once an action has failed)
+		// independently of the rest of the panel, which stays a single white block.
+		DebugLastErrorText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_DebugLastError"));
+		DebugLastErrorText->SetText(FText::FromString(TEXT("Last Error: None")));
+		DebugLastErrorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(DebugLastErrorText);
+		ApplyStandardTextWrap(DebugLastErrorText);
+		DebugStack->AddChildToVerticalBox(DebugLastErrorText);
 	}
 
 	return Super::RebuildWidget();
@@ -1664,6 +1710,7 @@ void UInteriorScreenWidget::NativeConstruct()
 		// through this widget at all - this is what lets the dock layout still get saved when the
 		// user saves that way instead of through Back's own confirm dialog.
 		PC->OnProjectSaved.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
+		PC->OnActionFailed.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleActionFailed);
 		// Same reasoning - the [/]/F/X floor keyboard shortcuts change the active floor without ever
 		// going through this screen's own Floor panel handlers.
 		PC->OnActiveFloorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
@@ -1741,6 +1788,7 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnSelectedConnectorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedConnectorChanged);
 		PC->OnEditModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleEditModeChanged);
 		PC->OnProjectSaved.RemoveDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
+		PC->OnActionFailed.RemoveDynamic(this, &UInteriorScreenWidget::HandleActionFailed);
 		PC->OnActiveFloorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
 		PC->OnInteriorContentChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleInteriorContentChanged);
 		PC->OnPreviewModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandlePreviewModeChanged);
@@ -1760,7 +1808,165 @@ void UInteriorScreenWidget::NativeDestruct()
 void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	if (DebugInfoText)
+	{
+		// Smooth frame time / FPS
+		if (DebugSmoothedDeltaTime <= 0.f)
+		{
+			DebugSmoothedDeltaTime = InDeltaTime;
+		}
+		else
+		{
+			DebugSmoothedDeltaTime = FMath::Lerp(
+				DebugSmoothedDeltaTime,
+				InDeltaTime,
+				0.1f
+			);
+		}
 
+		const float FPS = DebugSmoothedDeltaTime > 0.f
+			? 1.f / DebugSmoothedDeltaTime
+			: 0.f;
+
+		FString ActiveBuildingId = TEXT("None");
+		int32 ActiveFloor = 0;
+		int32 TotalFloors = 0;
+
+		FString ToolMode = TEXT("None");
+		FString ViewType = TEXT("2D");
+
+		FString SelectedRoom = TEXT("None");
+		FString SelectedDoor = TEXT("None");
+		FString SelectedConnector = TEXT("None");
+
+		FString UnsavedChanges = TEXT("No");
+
+		if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+		{
+			// Building
+			const FString BuildingId = PC->GetSelectedBuildingId();
+			if (!BuildingId.IsEmpty())
+			{
+				ActiveBuildingId = BuildingId;
+			}
+
+			// Floor
+			ActiveFloor = PC->GetActiveFloor();
+			TotalFloors = PC->GetLoadedBuildingFloorCount();
+
+			// Tool mode
+			if (PC->IsInDrawRoomMode())
+			{
+				ToolMode = TEXT("Draw Room");
+			}
+			else if (PC->IsInDrawWallMode())
+			{
+				ToolMode = TEXT("Draw Wall");
+			}
+			else if (PC->IsInAddDoorMode())
+			{
+				ToolMode = TEXT("Add Door");
+			}
+			else if (PC->GetActivePrefabShape() != 0)
+			{
+				ToolMode = FString::Printf(
+					TEXT("Prefab (%d)"),
+					PC->GetActivePrefabShape()
+				);
+			}
+			else if (PC->GetActiveConnectorType() != 0)
+			{
+				ToolMode = FString::Printf(
+					TEXT("Connector (%d)"),
+					PC->GetActiveConnectorType()
+				);
+			}
+			else if (PC->IsInSelectMode())
+			{
+				ToolMode = TEXT("Select");
+			}
+
+			// View
+			if (PC->IsIn3DPreviewMode())
+			{
+				ViewType = PC->IsIn3DEditMode()
+					? TEXT("3D Edit")
+					: TEXT("3D View");
+			}
+
+			// Selection
+			const FString RoomId = PC->GetSelectedRoomId();
+			const FString DoorId = PC->GetSelectedDoorId();
+			const FString ConnectorId = PC->GetSelectedConnectorGroupId();
+
+			if (!RoomId.IsEmpty())
+			{
+				SelectedRoom = RoomId;
+			}
+
+			if (!DoorId.IsEmpty())
+			{
+				SelectedDoor = DoorId;
+			}
+
+			if (!ConnectorId.IsEmpty())
+			{
+				SelectedConnector = ConnectorId;
+			}
+
+			// Unsaved state
+			UnsavedChanges = PC->HasUnsavedChanges()
+				? TEXT("Yes")
+				: TEXT("No");
+		}
+
+		const FString DebugText = FString::Printf(
+			TEXT(
+				"Building: %s\n"
+				"Floor: %d / %d\n"
+				"Tool Mode: %s\n"
+				"View: %s\n"
+				"Selected Room: %s\n"
+				"Selected Door: %s\n"
+				"Selected Connector: %s\n"
+				"Unsaved Changes: %s\n"
+				"FPS: %.1f\n"
+				"Frame Time: %.2f ms"
+			),
+			*ActiveBuildingId,
+			ActiveFloor,
+			TotalFloors,
+			*ToolMode,
+			*ViewType,
+			*SelectedRoom,
+			*SelectedDoor,
+			*SelectedConnector,
+			*UnsavedChanges,
+			FPS,
+			DebugSmoothedDeltaTime * 1000.f
+		);
+
+		DebugInfoText->SetText(FText::FromString(DebugText));
+
+		if (DebugLastErrorText)
+		{
+			if (LastActionFailedMessage.IsEmpty())
+			{
+				DebugLastErrorText->SetText(FText::FromString(TEXT("Last Error: None")));
+				DebugLastErrorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			}
+			else
+			{
+				DebugLastErrorText->SetText(FText::FromString(TEXT("Last Error: ") + LastActionFailedMessage));
+				// Yellow: the action was rejected but nothing was lost. Red: existing data may have
+				// been cleared, or a save may have silently failed - see EActionFailureSeverity.
+				DebugLastErrorText->SetColorAndOpacity(FSlateColor(
+					LastActionFailedSeverity == EActionFailureSeverity::Critical
+						? FLinearColor::Red
+						: FLinearColor::Yellow));
+			}
+		}
+	}
 	// Keeps retrying every tick, not just once - RootCanvas's cached geometry (what
 	// ApplyLayoutSaveData actually needs, see GetReliableCanvasSize's own comment) turned out to
 	// still not be valid a tick or two after construction in practice, not just on the literal first
@@ -1857,12 +2063,15 @@ FVector2D UInteriorScreenWidget::GetDefaultPanelPosition(EDockPanelId Id, const 
 		// matters for the very first time the user checks it in the Window menu.
 		return FVector2D(10.f, ViewportSize.Y * 0.75f);
 	case EDockPanelId::Map:
+
 		// Left side, at the same spot as Audio (which starts hidden) rather than the right side -
 		// Floor+Properties dock into one column there, and that column's real height depends on their
 		// actual content, not a fixed fraction, so a fixed right-side Y here can (and did, in a short
 		// viewport) land underneath/overlapping Properties. Sharing Audio's own default spot is safe
 		// since Audio isn't visible yet at this point.
 		return FVector2D(10.f, ViewportSize.Y * 0.75f);
+	case EDockPanelId::Debug:
+		return FVector2D(FMath::Max(10.f, ViewportSize.X - DockPanelWidths[(int32)EDockPanelId::Debug] - 20.f), ViewportSize.Y * 0.75f);
 	default:
 		return FVector2D(10.f, SidebarTopMargin);
 	}
@@ -2468,6 +2677,7 @@ const TCHAR* UInteriorScreenWidget::GetDockPanelName(EDockPanelId Id)
 	case EDockPanelId::Navigation: return TEXT("Navigation");
 	case EDockPanelId::Audio:      return TEXT("Audio");
 	case EDockPanelId::Map:        return TEXT("Map");
+	case EDockPanelId::Debug:      return TEXT("Debug");
 	default:                       return TEXT("");
 	}
 }
@@ -3186,7 +3396,9 @@ FEventReply UInteriorScreenWidget::OnAudioPanelMouseButtonUp(FGeometry MyGeometr
 FEventReply UInteriorScreenWidget::OnMapPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonDown(EDockPanelId::Map, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnMapPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseMove(EDockPanelId::Map, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnMapPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonUp(EDockPanelId::Map, MouseEvent); }
-
+FEventReply UInteriorScreenWidget::OnDebugPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonDown(EDockPanelId::Debug, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnDebugPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseMove(EDockPanelId::Debug, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnDebugPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandlePanelMouseButtonUp(EDockPanelId::Debug, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Toolbar, MouseEvent); }
@@ -3209,7 +3421,9 @@ FEventReply UInteriorScreenWidget::OnAudioResizeMouseButtonUp(FGeometry MyGeomet
 FEventReply UInteriorScreenWidget::OnMapResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Map, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnMapResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Map, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnMapResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Map, MouseEvent); }
-
+FEventReply UInteriorScreenWidget::OnDebugResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonDown(EDockPanelId::Debug, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnDebugResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseMove(EDockPanelId::Debug, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnDebugResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleResizeMouseButtonUp(EDockPanelId::Debug, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Toolbar, MouseEvent); }
@@ -3232,7 +3446,9 @@ FEventReply UInteriorScreenWidget::OnAudioLeftResizeMouseButtonUp(FGeometry MyGe
 FEventReply UInteriorScreenWidget::OnMapLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Map, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnMapLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Map, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnMapLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Map, MouseEvent); }
-
+FEventReply UInteriorScreenWidget::OnDebugLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonDown(EDockPanelId::Debug, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnDebugLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseMove(EDockPanelId::Debug, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnDebugLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleLeftResizeMouseButtonUp(EDockPanelId::Debug, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonDown(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseMove(EDockPanelId::Toolbar, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnToolbarBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonUp(EDockPanelId::Toolbar, MouseEvent); }
@@ -3255,7 +3471,9 @@ FEventReply UInteriorScreenWidget::OnAudioBottomResizeMouseButtonUp(FGeometry My
 FEventReply UInteriorScreenWidget::OnMapBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonDown(EDockPanelId::Map, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnMapBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseMove(EDockPanelId::Map, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnMapBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonUp(EDockPanelId::Map, MouseEvent); }
-
+FEventReply UInteriorScreenWidget::OnDebugBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonDown(EDockPanelId::Debug, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnDebugBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseMove(EDockPanelId::Debug, MouseEvent); }
+FEventReply UInteriorScreenWidget::OnDebugBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleBottomResizeMouseButtonUp(EDockPanelId::Debug, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnSplitter0MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonDown(0, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnSplitter0MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseMove(0, MouseEvent); }
 FEventReply UInteriorScreenWidget::OnSplitter0MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent) { return HandleSplitterMouseButtonUp(0, MouseEvent); }
@@ -3280,6 +3498,12 @@ void UInteriorScreenWidget::HandleEditModeChanged()
 void UInteriorScreenWidget::HandleProjectSaved()
 {
 	SaveDockLayoutToDisk();
+}
+
+void UInteriorScreenWidget::HandleActionFailed(FString Reason, EActionFailureSeverity Severity)
+{
+	LastActionFailedMessage = Reason;
+	LastActionFailedSeverity = Severity;
 }
 
 void UInteriorScreenWidget::HandleActiveFloorChanged()
@@ -5007,7 +5231,10 @@ void UInteriorScreenWidget::OnWindowMapCheckChanged(bool bIsChecked)
 {
 	SetDockPanelUserHidden(EDockPanelId::Map, !bIsChecked);
 }
-
+void UInteriorScreenWidget::OnWindowDebugCheckChanged(bool bIsChecked)
+{
+	SetDockPanelUserHidden(EDockPanelId::Debug, !bIsChecked);
+}
 void UInteriorScreenWidget::OnRoadHideAllCheckChanged(bool bIsChecked)
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())

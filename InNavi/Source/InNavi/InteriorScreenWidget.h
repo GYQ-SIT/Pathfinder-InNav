@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "InteriorTypes.h"
 #include "InteriorScreenWidget.generated.h"
 
 class UBorder;
@@ -116,6 +117,15 @@ private:
 	// widget's own Back/building-switch handlers.
 	UFUNCTION()
 	void HandleProjectSaved();
+
+	// Bound to ANavPlayerController::OnActionFailed - that delegate already covers every rejected
+	// action across the whole app (room/door/connector validation, save/load, renames, ...) with a
+	// human-readable reason, but until now nothing displayed it: it only ever reached the Output
+	// Log, which isn't visible in a packaged build. Stores the message/severity into
+	// LastActionFailedMessage/LastActionFailedSeverity so the Debug panel can show it, coloured by
+	// severity (see NativeTick's DebugLastErrorText).
+	UFUNCTION()
+	void HandleActionFailed(FString Reason, EActionFailureSeverity Severity);
 
 	// Bound to ANavPlayerController::OnActiveFloorChanged - see the comment on that delegate. Covers
 	// the [/]/F/X keyboard shortcuts (and anything else that changes the active floor or its content)
@@ -359,7 +369,8 @@ private:
 	// Map panel (road filter) - starts checked, matching UEditScreenWidget's own "Map" panel default.
 	UFUNCTION()
 	void OnWindowMapCheckChanged(bool bIsChecked);
-
+	UFUNCTION()
+	void OnWindowDebugCheckChanged(bool bIsChecked);
 	// --- Map panel (Window > Map) --- Roads section only, ported from UEditScreenWidget's own "Map"
 	// panel - same PC functions (SetRoadCategoryVisible/SetAllRoadsVisible/
 	// SetRoadsAndPOIsWithinCampusOnly), no Buildings section (this screen has no exterior building-
@@ -523,8 +534,10 @@ private:
 	// see the Window menu. Map (the road-filter panel ported from UEditScreenWidget's own "Map" panel,
 	// Roads section only - no Buildings section, since this screen has no exterior building-visibility
 	// concept) starts VISIBLE, matching that panel's own default there.
-	enum class EDockPanelId : uint8 { Toolbar, Floor, Properties, Layers, Navigation, Audio, Map };
-	static constexpr int32 NumDockPanels = 7;
+	enum class EDockPanelId : uint8{Toolbar,Floor,Properties,Layers,Navigation,Audio,Map,Debug
+};
+
+	static constexpr int32 NumDockPanels = 8;
 	static constexpr int32 MaxDockSplitters = NumDockPanels - 1; // worst case: all 7 panels in one column
 
 	struct FDockColumn
@@ -733,7 +746,9 @@ private:
 	UFUNCTION() FEventReply OnMapPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnMapPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnMapPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
-
+	UFUNCTION() FEventReply OnDebugPanelMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnDebugPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnDebugPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -755,7 +770,9 @@ private:
 	UFUNCTION() FEventReply OnMapResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnMapResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnMapResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
-
+	UFUNCTION() FEventReply OnDebugResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnDebugResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnDebugResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -777,7 +794,9 @@ private:
 	UFUNCTION() FEventReply OnMapLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnMapLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnMapLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
-
+	UFUNCTION() FEventReply OnDebugLeftResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnDebugLeftResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnDebugLeftResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnToolbarBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -799,7 +818,9 @@ private:
 	UFUNCTION() FEventReply OnMapBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnMapBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnMapBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
-
+	UFUNCTION() FEventReply OnDebugBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnDebugBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	UFUNCTION() FEventReply OnDebugBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter0MouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter0MouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 	UFUNCTION() FEventReply OnSplitter0MouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
@@ -1026,6 +1047,19 @@ private:
 	UPROPERTY()
 	UBorder* MapPanel = nullptr;
 	UPROPERTY()
+	UBorder* DebugPanel = nullptr;
+	UPROPERTY()
+	UTextBlock* DebugInfoText = nullptr;
+	// Separate text block (own colour) for the Last Error line - see its own construction comment.
+	UPROPERTY()
+	UTextBlock* DebugLastErrorText = nullptr;
+	float DebugSmoothedDeltaTime = 0.f;
+	// Last message/severity broadcast by ANavPlayerController::OnActionFailed (see
+	// HandleActionFailed's own comment); shown as a coloured "Last Error" line in the Debug panel.
+	// Message is empty until the first failure.
+	FString LastActionFailedMessage;
+	EActionFailureSeverity LastActionFailedSeverity = EActionFailureSeverity::Warning;
+	UPROPERTY()
 	UCheckBox* RoadHideAllCheckbox = nullptr;
 	UPROPERTY()
 	UCheckBox* RoadPrimaryCheckbox = nullptr;
@@ -1185,7 +1219,8 @@ private:
 
 	UPROPERTY()
 	UCheckBox* WindowMapCheckbox = nullptr;
-
+	UPROPERTY()
+	UCheckBox* WindowDebugCheckbox = nullptr;
 	// Parallel to EDockPanelId, sized NumDockPanels - see SetDockPanelUserHidden. False by default
 	// (visible) for every panel except Audio and Navigation, which InitializeDockRuntimeArrays sets
 	// true right after initializing this array - each only shows once the user actually checks it in
