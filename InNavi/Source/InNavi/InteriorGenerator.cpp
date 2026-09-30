@@ -776,11 +776,14 @@ FString AInteriorGenerator::PeekNextRoomId() const
 	}
 }
 
-AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2D>& Footprint,const FString& RoomId,const FString& RoomName,bool bIsPublic,bool bRequiresKey,bool bAllowOverlap)
+AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2D>& Footprint,const FString& RoomId,const FString& RoomName,bool bIsPublic,bool bRequiresKey,bool bAllowOverlap, FString& OutError)
 {
+	OutError.Empty();
+
 	if (LoadedBuildingId.IsEmpty() || !Generator)
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: no building interior currently loaded"));
+		OutError = TEXT("No building interior is currently loaded.");
 		return nullptr;
 	}
 
@@ -788,6 +791,7 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2
 	if (!FloorInfo)
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: active floor %d doesn't exist"), ActiveFloor);
+		OutError = TEXT("The active floor doesn't exist.");
 		return nullptr;
 	}
 
@@ -795,18 +799,21 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2
 	if (!Building)
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: building '%s' no longer exists"), *LoadedBuildingId);
+		OutError = TEXT("The building no longer exists.");
 		return nullptr;
 	}
 
 	if (Footprint.Num() < 3)
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: needs at least 3 footprint points (has %d)"), Footprint.Num());
+		OutError = TEXT("A room needs at least 3 points.");
 		return nullptr;
 	}
 
 	if (InteriorGen_PolygonSelfIntersects(Footprint))
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: footprint crosses itself - fix the outline before finishing"));
+		OutError = TEXT("The outline crosses itself - fix it before finishing.");
 		return nullptr;
 	}
 
@@ -815,6 +822,7 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2
 	if (!IsFootprintFullyInsidePolygon(Footprint, Building->GetFootprint()))
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: footprint extends outside the building's outline"));
+		OutError = TEXT("It extends outside the building's outline.");
 		return nullptr;
 	}
 
@@ -827,6 +835,7 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2
 			if (Other && DoFootprintsOverlap(Footprint, true, Other->GetFootprint(), Other->IsClosedLoop(), OverlapToleranceWorldUnits / Generator->GetScale()))
 			{
 				UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: footprint overlaps existing room/wall '%s'"), *Other->RoomId);
+				OutError = FString::Printf(TEXT("It overlaps an existing room/wall ('%s')."), *Other->RoomId);
 				return nullptr;
 			}
 		}
@@ -835,6 +844,7 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2
 	if (DoesFootprintBlockConnector(Footprint, /*bClosedLoop=*/true, ActiveFloor))
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: footprint would wall in an elevator/stairs/escalator"));
+		OutError = TEXT("It would wall in an elevator/stairs/escalator.");
 		return nullptr;
 	}
 
@@ -842,11 +852,13 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2
 	if (UsedRoomIds.Contains(ResolvedId))
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateRoomFromFootprint: room id '%s' is already in use"), *ResolvedId);
+		OutError = FString::Printf(TEXT("The room id '%s' is already in use."), *ResolvedId);
 		return nullptr;
 	}
 
 	if (!GetWorld())
 	{
+		OutError = TEXT("No world to spawn the room into.");
 		return nullptr;
 	}
 
@@ -870,11 +882,14 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2
 	return Room;
 }
 
-AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>& Points, const FString& WallId)
+AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>& Points, const FString& WallId, FString& OutError)
 {
+	OutError.Empty();
+
 	if (LoadedBuildingId.IsEmpty() || !Generator)
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: no building interior currently loaded"));
+		OutError = TEXT("No building interior is currently loaded.");
 		return nullptr;
 	}
 
@@ -882,6 +897,7 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 	if (!FloorInfo)
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: active floor %d doesn't exist"), ActiveFloor);
+		OutError = TEXT("The active floor doesn't exist.");
 		return nullptr;
 	}
 
@@ -889,12 +905,14 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 	if (!Building)
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: building '%s' no longer exists"), *LoadedBuildingId);
+		OutError = TEXT("The building no longer exists.");
 		return nullptr;
 	}
 
 	if (Points.Num() < 2)
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: needs at least 2 points (has %d)"), Points.Num());
+		OutError = TEXT("A wall needs at least 2 points.");
 		return nullptr;
 	}
 
@@ -910,6 +928,7 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 			if (Other && DoFootprintsOverlap(Points, false, Other->GetFootprint(), Other->IsClosedLoop(), OverlapToleranceWorldUnits / Generator->GetScale()))
 			{
 				UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: wall overlaps existing room/wall '%s'"), *Other->RoomId);
+				OutError = FString::Printf(TEXT("It overlaps an existing room/wall ('%s')."), *Other->RoomId);
 				return nullptr;
 			}
 		}
@@ -918,6 +937,7 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 	if (DoesFootprintBlockConnector(Points, /*bClosedLoop=*/false, ActiveFloor))
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: wall would cut through an elevator/stairs/escalator"));
+		OutError = TEXT("It would cut through an elevator/stairs/escalator.");
 		return nullptr;
 	}
 
@@ -927,11 +947,13 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 	if (UsedRoomIds.Contains(ResolvedId))
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: id '%s' is already in use"), *ResolvedId);
+		OutError = FString::Printf(TEXT("The wall id '%s' is already in use."), *ResolvedId);
 		return nullptr;
 	}
 
 	if (!GetWorld())
 	{
+		OutError = TEXT("No world to spawn the wall into.");
 		return nullptr;
 	}
 
