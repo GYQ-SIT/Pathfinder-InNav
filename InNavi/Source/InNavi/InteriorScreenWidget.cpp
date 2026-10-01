@@ -4459,6 +4459,20 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 	{
 		NavStartRoomBorder->SetBrushColor(bStartSetViaDropdown ? ActiveStartColor : DropdownUnsetColor);
 	}
+	// Keep the dropdown's own displayed text in sync with who actually set Start last - without this,
+	// picking a room from the dropdown and then overwriting Start by clicking the floor plan left the
+	// old room's name still showing, as if Start were still that room.
+	if (NavStartRoomComboBox)
+	{
+		if (bStartSetViaDropdown)
+		{
+			NavStartRoomComboBox->SetSelectedOption(Nav->GetStartRoomLabel());
+		}
+		else
+		{
+			NavStartRoomComboBox->ClearSelection();
+		}
+	}
 
 	const bool bDestActivelyPicking = Mode == ENavigationSelectionMode::Destination;
 	const bool bDestSetViaDropdown = Nav->WasDestinationSetViaDropdown();
@@ -4475,6 +4489,17 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 	if (NavDestinationRoomBorder)
 	{
 		NavDestinationRoomBorder->SetBrushColor(bDestSetViaDropdown ? ActiveDestinationColor : DropdownUnsetColor);
+	}
+	if (NavDestinationRoomComboBox)
+	{
+		if (bDestSetViaDropdown)
+		{
+			NavDestinationRoomComboBox->SetSelectedOption(Nav->GetDestinationRoomLabel());
+		}
+		else
+		{
+			NavDestinationRoomComboBox->ClearSelection();
+		}
 	}
 	if (NavFindRouteButton)
 	{
@@ -4676,6 +4701,21 @@ void UInteriorScreenWidget::RefreshNavRoomDropdowns()
 		const FString Label = Option.GetDisplayLabel();
 		NavStartRoomComboBox->AddOption(Label);
 		NavDestinationRoomComboBox->AddOption(Label);
+	}
+
+	// ClearOptions() above also wipes the combo box's displayed text, even though it doesn't touch
+	// Nav's own Start/Destination state - without this, deleting any room (not just the one that was
+	// picked) makes an already-set Start/Destination room silently vanish from the dropdown's text
+	// while routing still works off the untouched underlying state. Restore the text when the
+	// room is still valid (it's simply absent from the rebuilt option list, so SetSelectedOption is a
+	// no-op, correctly leaving the dropdown blank, if the room itself was the one just deleted).
+	if (Nav->WasStartSetViaDropdown())
+	{
+		NavStartRoomComboBox->SetSelectedOption(Nav->GetStartRoomLabel());
+	}
+	if (Nav->WasDestinationSetViaDropdown())
+	{
+		NavDestinationRoomComboBox->SetSelectedOption(Nav->GetDestinationRoomLabel());
 	}
 }
 

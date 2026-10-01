@@ -65,6 +65,14 @@ public:
 	bool WasStartSetViaDropdown() const { return Start.bValid && Start.bSetViaDropdown; }
 	bool WasDestinationSetViaDropdown() const { return Destination.bValid && Destination.bSetViaDropdown; }
 
+	// The FNavigationRoomOption::GetDisplayLabel() string the room dropdowns should show for the
+	// current Start/Destination, if it was set via that dropdown (empty otherwise) - lets
+	// UInteriorScreenWidget::RefreshNavRoomDropdowns restore the combo box's visible text after
+	// rebuilding its option list (ClearOptions() wipes the displayed text, but doesn't touch this
+	// class's own Start/Destination state - see that function's own comment for the full bug).
+	FString GetStartRoomLabel() const { return WasStartSetViaDropdown() ? Start.RoomOptionLabel : FString(); }
+	FString GetDestinationRoomLabel() const { return WasDestinationSetViaDropdown() ? Destination.RoomOptionLabel : FString(); }
+
 	// Shared with the floor-plan view so the highlighted outdoor area and the clickable outdoor
 	// area always use the same bounds. Coordinates are unscaled footprint coordinates.
 	static FBox2D GetOutdoorBounds(const APolyBuilding& Building);
@@ -157,6 +165,7 @@ private:
 		FNavigationRoutePoint Point;
 		FString BuildingId;
 		bool bSetViaDropdown = false;
+		FString RoomOptionLabel;
 	};
 
 	void SetSelectionMode(ENavigationSelectionMode NewMode);
@@ -165,7 +174,7 @@ private:
 	bool SetEndpointToRoom(const FString& RoomOptionLabel, bool bIsStart);
 	void SetEndpoint(FSelectedEndpoint& Endpoint, const FNavigationRoutePoint& Point,
 		const FString& BuildingId, const FString& EndpointName, const FString& LocationDescription,
-		bool bSetViaDropdown);
+		bool bSetViaDropdown, const FString& RoomOptionLabel = FString());
 
 	UPROPERTY()
 	UBorder* HitTestBorder = nullptr;

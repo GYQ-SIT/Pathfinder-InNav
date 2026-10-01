@@ -296,13 +296,14 @@ void UNavigationPanelWidget::SelectPoint(FVector2D FootprintPosition, int32 Floo
 
 void UNavigationPanelWidget::SetEndpoint(FSelectedEndpoint& Endpoint, const FNavigationRoutePoint& Point,
 	const FString& BuildingId, const FString& EndpointName, const FString& LocationDescription,
-	bool bSetViaDropdown)
+	bool bSetViaDropdown, const FString& RoomOptionLabel)
 {
 	const bool bRouteWasVisible = !RoutePoints.IsEmpty();
 	Endpoint.bValid = true;
 	Endpoint.Point = Point;
 	Endpoint.BuildingId = BuildingId;
 	Endpoint.bSetViaDropdown = bSetViaDropdown;
+	Endpoint.RoomOptionLabel = RoomOptionLabel;
 	RoutePoints.Reset();
 	bLastFindRouteFailed = false;
 	const FString Message = bRouteWasVisible
@@ -390,7 +391,7 @@ bool UNavigationPanelWidget::SetEndpointToRoom(const FString& RoomOptionLabel, b
 	SetEndpoint(Endpoint, SelectedPoint, Building->BuildingId,
 		bIsStart ? TEXT("Start") : TEXT("Destination"),
 		FString::Printf(TEXT("to '%s' indoors on Floor %d"), *Found->RoomName, Found->Floor),
-		true);
+		true, RoomOptionLabel);
 	return true;
 }
 
