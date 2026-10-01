@@ -49,6 +49,31 @@ CORE FLOW / CONTROLS
    first.
 
 ================================================================================
+FEATURES IMPLEMENTED (M1)
+================================================================================
+- Campus Building Selection: the real SIT Punggol campus (buildings, roads,
+  POIs) loads from a SQL-backed database; click a building in 3D to
+  select/highlight it.
+- Custom Building Layout Editor: a full 2D floor-plan editor - draw rooms and
+  walls, prefab room shapes, doors with connection properties, elevators/
+  stairs/escalators with cross-floor data, room/door naming, snapping, and
+  boundary/overlap validation. Save/load round-trips through JSON. A
+  dockable Toolbar/Floor/Properties/Layers/Navigation/Audio panel layout, a
+  top menu bar (File/Window), and a building switcher are all in place.
+- Instant 3D Interior Visualization: the generator spawns a real 3D
+  procedural-mesh interior per floor from the saved data (tested on
+  multi-floor buildings). A 2D/3D toggle switches to a real 3D view of the
+  current floor, with a View/Edit sub-mode giving the 3D view the same
+  editing capability as the 2D one (select, move/resize/rotate, delete,
+  draw, add door, place connector).
+- Indoor Navigation System: pick a start point and a destination (any valid
+  point inside the building, not just room centers) and compute a route,
+  including cross-floor transitions via elevators/stairs/escalators. The
+  route draws on both the 2D floor plan and the 3D preview.
+- Audio: UI click sounds and a building-selection sound, adjustable/mutable
+  from an Audio panel.
+
+================================================================================
 KNOWN ISSUES / LIMITATIONS (M1)
 ================================================================================
 - Buildings loaded from a database (.db) get a fixed placeholder floor count
@@ -71,6 +96,12 @@ Team Pathfinder
 - Ong Wei Song
 - Zhou Jiahao
 - Yeo Zhi Ming
+
+================================================================================
+CREDITS / THIRD-PARTY ASSETS
+================================================================================
+No third-party assets used - all icons, audio, and other assets were made
+in-house by the team.
 
 ================================================================================
 SOURCE / DEVELOPMENT SETUP
