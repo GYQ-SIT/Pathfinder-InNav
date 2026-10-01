@@ -13,15 +13,22 @@ namespace
 {
 	constexpr double TestGeometryEpsilon = 0.0001;
 
-	double Cross2D(const FVector2D& A, const FVector2D& B, const FVector2D& C)
+	// Named distinctly (Test... prefix) rather than the more obvious Cross2D/IsOnSegment -
+	// NavigationPanelWidget.cpp already has its own same-named, same-signature pair in its own
+	// anonymous namespace. Both being anonymous-namespace/internal-linkage normally keeps them
+	// apart, but Unreal's adaptive-unity build only excludes files with local uncommitted changes
+	// from unity batching - a from-clean CI checkout has nothing to exclude, so both land in the
+	// same merged translation unit and collide (first caught by CI, not any local build, since a
+	// local build's own working set is rarely "completely clean").
+	double TestCross2D(const FVector2D& A, const FVector2D& B, const FVector2D& C)
 	{
 		return static_cast<double>(B.X - A.X) * (C.Y - A.Y)
 			- static_cast<double>(B.Y - A.Y) * (C.X - A.X);
 	}
 
-	bool IsOnSegment(const FVector2D& Point, const FVector2D& A, const FVector2D& B)
+	bool TestIsOnSegment(const FVector2D& Point, const FVector2D& A, const FVector2D& B)
 	{
-		return FMath::Abs(Cross2D(A, B, Point)) <= TestGeometryEpsilon
+		return FMath::Abs(TestCross2D(A, B, Point)) <= TestGeometryEpsilon
 			&& Point.X >= FMath::Min(A.X, B.X) - TestGeometryEpsilon
 			&& Point.X <= FMath::Max(A.X, B.X) + TestGeometryEpsilon
 			&& Point.Y >= FMath::Min(A.Y, B.Y) - TestGeometryEpsilon
@@ -31,10 +38,10 @@ namespace
 	bool SegmentsIntersect(const FVector2D& A, const FVector2D& B,
 		const FVector2D& C, const FVector2D& D)
 	{
-		const double C1 = Cross2D(A, B, C);
-		const double C2 = Cross2D(A, B, D);
-		const double C3 = Cross2D(C, D, A);
-		const double C4 = Cross2D(C, D, B);
+		const double C1 = TestCross2D(A, B, C);
+		const double C2 = TestCross2D(A, B, D);
+		const double C3 = TestCross2D(C, D, A);
+		const double C4 = TestCross2D(C, D, B);
 		if (((C1 > TestGeometryEpsilon && C2 < -TestGeometryEpsilon)
 			|| (C1 < -TestGeometryEpsilon && C2 > TestGeometryEpsilon))
 			&& ((C3 > TestGeometryEpsilon && C4 < -TestGeometryEpsilon)
@@ -42,8 +49,8 @@ namespace
 		{
 			return true;
 		}
-		return IsOnSegment(C, A, B) || IsOnSegment(D, A, B)
-			|| IsOnSegment(A, C, D) || IsOnSegment(B, C, D);
+		return TestIsOnSegment(C, A, B) || TestIsOnSegment(D, A, B)
+			|| TestIsOnSegment(A, C, D) || TestIsOnSegment(B, C, D);
 	}
 
 	double SegmentDistance(const FVector2D& A, const FVector2D& B,

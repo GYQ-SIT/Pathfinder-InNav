@@ -210,6 +210,12 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsDraggingDoor)
 	{
 		bIsDraggingDoor = false;
+
+		if (InteriorGen)
+		{
+			InteriorGen->RecordHistorySnapshot();
+		}
+
 		return FReply::Handled().ReleaseMouseCapture();
 	}
 
@@ -371,6 +377,21 @@ AInteriorRoom* UInteriorFloorPlanWidget::FindRoomNearLocalPosition(FVector2D Loc
 	constexpr float ClickTolerancePixels = 10.f;
 	constexpr float DoorWidthWorldUnits = 90.f; // matches AInteriorGenerator::AddDoorToRoom's fixed door width
 
+	// Track the CLOSEST edge across every room, not just the first one within tolerance - two rooms
+	// that share a wall both have an edge sitting right on top of each other, so a click near that
+	// shared wall used to always resolve to whichever room happened to come first in
+	// GetRoomsOnFloor's array order, no matter which side the user actually meant. That made it
+	// impossible to ever add/select a door on the "other" room's own wall at a shared boundary (see
+	// the bug report this fixed - a door added on the far side kept landing on the near room instead,
+	// and the nav route planner then had to detour around the far room's still-solid wall).
+	AInteriorRoom* BestRoom = nullptr;
+	int32 BestEdgeIndex = INDEX_NONE;
+	float BestDistance = ClickTolerancePixels;
+	FVector2D BestA = FVector2D::ZeroVector;
+	FVector2D BestB = FVector2D::ZeroVector;
+	FVector2D BestWorldA = FVector2D::ZeroVector;
+	FVector2D BestWorldB = FVector2D::ZeroVector;
+
 	for (AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
 	{
 		if (!Room)
@@ -400,27 +421,39 @@ AInteriorRoom* UInteriorFloorPlanWidget::FindRoomNearLocalPosition(FVector2D Loc
 			const FVector2D A = WorldToLocal(WorldA);
 			const FVector2D B = WorldToLocal(WorldB);
 
-			if (DistancePointToSegment2D(LocalPosition, A, B) <= ClickTolerancePixels)
+			const float Distance = DistancePointToSegment2D(LocalPosition, A, B);
+			if (Distance <= BestDistance)
 			{
-				if (OutEdgeIndex)
-				{
-					*OutEdgeIndex = i;
-				}
-				if (OutOffsetWorldUnits)
-				{
-					const FVector2D LocalAB = B - A;
-					const float LocalLengthSq = LocalAB.SizeSquared();
-					const float T = (LocalLengthSq > KINDA_SMALL_NUMBER) ? FMath::Clamp(FVector2D::DotProduct(LocalPosition - A, LocalAB) / LocalLengthSq, 0.f, 1.f) : 0.f;
-					const float EdgeLengthWorldUnits = FVector2D::Distance(WorldA, WorldB);
-					const float ClickOffsetWorldUnits = T * EdgeLengthWorldUnits;
-					*OutOffsetWorldUnits = FMath::Clamp(ClickOffsetWorldUnits - DoorWidthWorldUnits * 0.5f, 0.f, FMath::Max(0.f, EdgeLengthWorldUnits - DoorWidthWorldUnits));
-				}
-				return Room;
+				BestRoom = Room;
+				BestEdgeIndex = i;
+				BestDistance = Distance;
+				BestA = A;
+				BestB = B;
+				BestWorldA = WorldA;
+				BestWorldB = WorldB;
 			}
 		}
 	}
 
-	return nullptr;
+	if (!BestRoom)
+	{
+		return nullptr;
+	}
+
+	if (OutEdgeIndex)
+	{
+		*OutEdgeIndex = BestEdgeIndex;
+	}
+	if (OutOffsetWorldUnits)
+	{
+		const FVector2D LocalAB = BestB - BestA;
+		const float LocalLengthSq = LocalAB.SizeSquared();
+		const float T = (LocalLengthSq > KINDA_SMALL_NUMBER) ? FMath::Clamp(FVector2D::DotProduct(LocalPosition - BestA, LocalAB) / LocalLengthSq, 0.f, 1.f) : 0.f;
+		const float EdgeLengthWorldUnits = FVector2D::Distance(BestWorldA, BestWorldB);
+		const float ClickOffsetWorldUnits = T * EdgeLengthWorldUnits;
+		*OutOffsetWorldUnits = FMath::Clamp(ClickOffsetWorldUnits - DoorWidthWorldUnits * 0.5f, 0.f, FMath::Max(0.f, EdgeLengthWorldUnits - DoorWidthWorldUnits));
+	}
+	return BestRoom;
 }
 
 // ---- Helper: even-odd ray-casting point-in-polygon test, in whatever 2D space Point/Poly are both in ----

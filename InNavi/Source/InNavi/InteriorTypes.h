@@ -24,6 +24,19 @@ enum class EInteriorNavNodeType : uint8
 	Escalator
 };
 
+// Used by ANavPlayerController::OnActionFailed. Warning: the action was rejected before anything
+// changed (validation failed, a precondition wasn't met, the user cancelled a dialog, ...) -
+// nothing was lost. Critical: existing data was already cleared/discarded before the failure was
+// detected (e.g. Open/Load found no buildings in the new file/database, after the previous project
+// was already cleared), or the user's edits may look saved when they aren't (a save silently
+// failed) - the user could lose work if they don't notice.
+UENUM(BlueprintType)
+enum class EActionFailureSeverity : uint8
+{
+	Warning,
+	Critical
+};
+
 // One opening (door/window/void) cut into a specific edge of a room's wall loop.
 USTRUCT(BlueprintType)
 struct FInteriorOpening

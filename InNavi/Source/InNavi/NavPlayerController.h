@@ -73,10 +73,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBuildingSelected, FString, Buildi
 // which of these actually triggered it.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnActiveFloorChanged);
 // Broadcast whenever a user-triggered action fails (a button press that did nothing), with a
-// short human-readable reason. UE_LOG still gets the detailed message for developers; this is
-// the same idea aimed at UI - bind it once to show a toast/message, since a packaged game has no
-// visible Output Log. Not exhaustive, but covers the common "why didn't anything happen" cases.
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnActionFailed, FString, Reason);
+// short human-readable reason and how serious it is (see EActionFailureSeverity in InteriorTypes.h).
+// UE_LOG still gets the detailed message for developers; this is the same idea aimed at UI - bind
+// it once to show a toast/message, since a packaged game has no visible Output Log. Not
+// exhaustive, but covers the common "why didn't anything happen" cases.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnActionFailed, FString, Reason, EActionFailureSeverity, Severity);
 // Broadcast whenever a project save actually succeeds - both from SaveCurrentProject (Ctrl+S, or
 // any UI button that calls it) and SaveCurrentProjectAs (Save As, or the very first save of a
 // brand-new project that had no file yet). No params - a listener just needs to know "a save just
@@ -605,6 +606,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool DeleteSelection();
 
+	// Steps the interior back to its previous state (see AInteriorGenerator::Undo) and clears the
+	// current room selection, since the undone state may no longer contain the selected room. Bound
+	// to Ctrl+Z (see UndoInteriorKeyHandler) and to the interior editor's own Undo button. No-op
+	// (returns false) if there's nothing to undo.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool UndoInteriorEdit();
+
+	// Steps the interior forward again after an Undo (see AInteriorGenerator::Redo) - same
+	// selection-clearing reasoning as UndoInteriorEdit. Bound to Ctrl+Y and to the interior editor's
+	// own Redo button. No-op (returns false) if there's nothing to redo.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool RedoInteriorEdit();
+
 	// Rescales a room/wall to fit new Width (X) / Depth (Y) dimensions, keeping it centered where
 	// it is (see AInteriorGenerator::ResizeRoom) - general-purpose, explicit-id version. See also
 	// GrowSelectedRoom/ShrinkSelectedRoom. Not wired into UMG yet.
@@ -1002,7 +1016,10 @@ private:
 
 	// Ctrl+S handler - wraps SaveCurrentProject() because key bindings require a void() signature.
 	void SaveCurrentProjectKeyHandler();
-
+	void UndoInteriorKeyHandler();
+	void RedoInteriorKeyHandler();
+	void CopyInteriorKeyHandler();
+	void PasteInteriorKeyHandler();
 	// Shape test mode (Plan B): TEMPORARY stand-in for Padre's UI form. Reads
 	// Data/test_shape_params.json (a "shape" field picks rectangle vs regular polygon) and calls
 	// the matching Generator->Create...Building(...). Delete ConfirmShapeTest + the R-key/shape-mode
@@ -1099,7 +1116,21 @@ private:
 	// See SelectRoom/GetSelectedRoomId - persists across mode changes, cleared on deselect (empty
 	// id), StartNewProject, or once deleted.
 	FString SelectedRoomId;
-
+	FString CopiedRoomId;
+	TArray<FVector2D> CopiedRoomFootprint;
+	FString CopiedRoomName;
+	bool bHasCopiedRoom = false;
+	bool bCopiedRoomIsPublic = true;
+	bool bCopiedRoomRequiresKey = false;
+	// Whole-building copy/paste
+	bool bHasCopiedBuilding = false;
+	FString CopiedBuildingId;
+	FString CopiedBuildingName;
+	TArray<FVector2D> CopiedBuildingFootprint;
+	int32 CopiedBuildingFloorCount = 0;
+	float CopiedBuildingFloorHeight = 300.f;
+	FVector2D CopiedBuildingOffset = FVector2D::ZeroVector;
+	TSharedPtr<FJsonObject> CopiedBuildingInterior;
 	// See SelectDoor/GetSelectedDoorRoomId/GetSelectedDoorId - same lifetime rules as
 	// SelectedRoomId, and mutually exclusive with it (selecting one clears the other).
 	FString SelectedDoorRoomId;
