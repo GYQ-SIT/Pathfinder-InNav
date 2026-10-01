@@ -1252,24 +1252,34 @@ bool ANavPlayerController::DeleteRoom(const FString& RoomId)
 		return false;
 	}
 
-	const bool bSuccess = InteriorGen->DeleteRoom(RoomId);
+	// RoomId is frequently called as DeleteRoom(SelectedRoomId) - a const FString& binds directly to
+	// that member, not a copy, so SelectRoom(FString()) below (which assigns SelectedRoomId = "" to
+	// clear the selection) would silently clobber RoomId itself out from under this function if it
+	// were used afterwards. Snapshot it by value up front so everything below stays correct.
+	const FString DeletedRoomId = RoomId;
+
+	const bool bSuccess = InteriorGen->DeleteRoom(DeletedRoomId);
 	if (!bSuccess)
 	{
-		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not delete '%s' - it may no longer exist."), *RoomId), EActionFailureSeverity::Warning);
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not delete '%s' - it may no longer exist."), *DeletedRoomId), EActionFailureSeverity::Warning);
 	}
 	else
 	{
 		bHasUnsavedChanges = true;
-		if (SelectedRoomId == RoomId)
+		if (SelectedRoomId == DeletedRoomId)
 		{
 			SelectRoom(FString());
 		}
-		if (SelectedDoorRoomId == RoomId)
+		if (SelectedDoorRoomId == DeletedRoomId)
 		{
 			// The room (and every door on it) is gone - the selected door reference is now stale.
 			SelectedDoorRoomId.Empty();
 			SelectedDoorId.Empty();
 			OnSelectedDoorChanged.Broadcast(FString(), FString());
+		}
+		if (NavigationPanel)
+		{
+			NavigationPanel->NotifyRoomDeleted(DeletedRoomId);
 		}
 		OnInteriorContentChanged.Broadcast();
 	}

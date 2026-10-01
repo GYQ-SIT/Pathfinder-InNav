@@ -115,6 +115,7 @@ public:
 	// room can have more than one door and no single door is "the" point that represents it.
 	struct FNavigationRoomOption
 	{
+		FString RoomId;
 		FString RoomName;
 		int32 Floor = 1;
 		FVector2D Centroid = FVector2D::ZeroVector;
@@ -139,6 +140,13 @@ public:
 	// centroid falls outside its own footprint).
 	bool SetStartToRoom(const FString& RoomOptionLabel);
 	bool SetDestinationToRoom(const FString& RoomOptionLabel);
+
+	// Called by ANavPlayerController::DeleteRoom right after a room is actually removed. A point
+	// picked by clicking the floor plan is an absolute position, independent of any room, so it stays
+	// put even if a nearby room disappears - but a point picked from the Start/Destination room
+	// dropdown conceptually *is* that room, so deleting it should clear the point too, not leave a
+	// dangling reference to a room that no longer exists.
+	void NotifyRoomDeleted(const FString& RoomId);
 
 	// Hit-tests against this instead of a widget of its own now - UInteriorScreenWidget
 	// hands it the Border of its own Navigation dock panel (see SetPanelBorderForHitTest)
@@ -166,6 +174,7 @@ private:
 		FString BuildingId;
 		bool bSetViaDropdown = false;
 		FString RoomOptionLabel;
+		FString RoomId;
 	};
 
 	void SetSelectionMode(ENavigationSelectionMode NewMode);
@@ -174,7 +183,7 @@ private:
 	bool SetEndpointToRoom(const FString& RoomOptionLabel, bool bIsStart);
 	void SetEndpoint(FSelectedEndpoint& Endpoint, const FNavigationRoutePoint& Point,
 		const FString& BuildingId, const FString& EndpointName, const FString& LocationDescription,
-		bool bSetViaDropdown, const FString& RoomOptionLabel = FString());
+		bool bSetViaDropdown, const FString& RoomOptionLabel = FString(), const FString& RoomId = FString());
 
 	UPROPERTY()
 	UBorder* HitTestBorder = nullptr;

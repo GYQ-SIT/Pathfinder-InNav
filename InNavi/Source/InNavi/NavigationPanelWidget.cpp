@@ -296,7 +296,7 @@ void UNavigationPanelWidget::SelectPoint(FVector2D FootprintPosition, int32 Floo
 
 void UNavigationPanelWidget::SetEndpoint(FSelectedEndpoint& Endpoint, const FNavigationRoutePoint& Point,
 	const FString& BuildingId, const FString& EndpointName, const FString& LocationDescription,
-	bool bSetViaDropdown, const FString& RoomOptionLabel)
+	bool bSetViaDropdown, const FString& RoomOptionLabel, const FString& RoomId)
 {
 	const bool bRouteWasVisible = !RoutePoints.IsEmpty();
 	Endpoint.bValid = true;
@@ -304,6 +304,7 @@ void UNavigationPanelWidget::SetEndpoint(FSelectedEndpoint& Endpoint, const FNav
 	Endpoint.BuildingId = BuildingId;
 	Endpoint.bSetViaDropdown = bSetViaDropdown;
 	Endpoint.RoomOptionLabel = RoomOptionLabel;
+	Endpoint.RoomId = RoomId;
 	RoutePoints.Reset();
 	bLastFindRouteFailed = false;
 	const FString Message = bRouteWasVisible
@@ -338,6 +339,7 @@ TArray<UNavigationPanelWidget::FNavigationRoomOption> UNavigationPanelWidget::Ge
 				continue;
 			}
 			FNavigationRoomOption Option;
+			Option.RoomId = Room->RoomId;
 			Option.RoomName = Room->RoomName.IsEmpty() ? Room->RoomId : Room->RoomName;
 			Option.Floor = Floor;
 			Option.Centroid = ComputePolygonCentroid(Room->GetFootprint());
@@ -391,7 +393,7 @@ bool UNavigationPanelWidget::SetEndpointToRoom(const FString& RoomOptionLabel, b
 	SetEndpoint(Endpoint, SelectedPoint, Building->BuildingId,
 		bIsStart ? TEXT("Start") : TEXT("Destination"),
 		FString::Printf(TEXT("to '%s' indoors on Floor %d"), *Found->RoomName, Found->Floor),
-		true, RoomOptionLabel);
+		true, RoomOptionLabel, Found->RoomId);
 	return true;
 }
 
@@ -458,6 +460,27 @@ void UNavigationPanelWidget::ClearAll()
 	StatusMessage.Empty();
 	StatusKind = ENavigationMessageKind::Instruction;
 	BroadcastStateChanged();
+}
+
+void UNavigationPanelWidget::NotifyRoomDeleted(const FString& RoomId)
+{
+	bool bChanged = false;
+	if (Start.bValid && Start.bSetViaDropdown && Start.RoomId == RoomId)
+	{
+		Start = FSelectedEndpoint();
+		bChanged = true;
+	}
+	if (Destination.bValid && Destination.bSetViaDropdown && Destination.RoomId == RoomId)
+	{
+		Destination = FSelectedEndpoint();
+		bChanged = true;
+	}
+	if (bChanged)
+	{
+		RoutePoints.Reset();
+		bLastFindRouteFailed = false;
+		SetStatusMessage(TEXT("Start/Destination cleared - the room it was set to no longer exists."), ENavigationMessageKind::Warning);
+	}
 }
 
 void UNavigationPanelWidget::CancelSelection()
