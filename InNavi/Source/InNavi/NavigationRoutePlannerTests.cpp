@@ -4,6 +4,7 @@
 #include "NavigationPanelWidget.h"
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
+#include "InteriorRoom.h"
 #include "PolyBuilding.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
@@ -137,9 +138,15 @@ bool FNavigationRoutePlannerIntegrationTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Room exit still passes through its door"), FNavigationRoutePlanner::FindRoute(
 			*Building, *Interior, Generator->GetScale(), 1, FVector2D(200.f, 110.f),
 			1, FVector2D(250.f, 110.f), Route));
-		const FVector2D DoorMidpoint(231.8666f, 111.8725f);
-		const bool bUsesDoor = Route.Points.ContainsByPredicate([&DoorMidpoint](const FNavigationRoutePoint& Point)
-			{ return Point.Floor == 1 && Point.Position.Equals(DoorMidpoint, 0.02f); });
+		// The route may cross anywhere in the opening with sufficient clearance; it need not
+		// include the exact midpoint as a vertex when a shorter valid segment exists.
+		bool bUsesDoor = false;
+		for (int32 I = 1; I < Route.Points.Num(); ++I)
+		{
+			bUsesDoor |= Route.Points[I - 1].Floor == 1 && Route.Points[I].Floor == 1
+				&& SegmentsIntersect(Route.Points[I - 1].Position, Route.Points[I].Position,
+					FVector2D(231.8666, 107.3725), FVector2D(231.8666, 116.3725));
+		}
 		TestTrue(TEXT("Door route uses the authored opening"), bUsesDoor);
 		// E2's Floor 1 vestibule has a door marked "outside". Verify outdoor-point validation and
 		// that the indoor/outdoor route crosses through that authored exit.
@@ -168,6 +175,87 @@ bool FNavigationRoutePlannerIntegrationTest::RunTest(const FString& Parameters)
 					&& Point.ConnectorId.StartsWith(TEXT("OutsideExit:"));
 			});
 		TestTrue(TEXT("Outdoor route contains the authored exit connector"), bCrossesExteriorExit);
+
+		// Two doors facing the same corridor must be able to exit normally and turn beside the
+		// rooms, instead of making a long detour to an unrelated building corner.
+		Interior->SetActiveFloor(3);
+		FString CreationError;
+		const float Scale = Generator->GetScale();
+		TArray<AInteriorRoom*> TestRooms;
+		for (int32 RoomIndex = 0; RoomIndex < 2; ++RoomIndex)
+		{
+			const double X = 200.0 + RoomIndex * 100.0;
+			AInteriorRoom* Room = Interior->CreateRoomFromFootprint(
+				{ FVector2D(X, 80), FVector2D(X + 20, 80),
+					FVector2D(X + 20, 100), FVector2D(X, 100) },
+				FString::Printf(TEXT("DoorApproachTest%d"), RoomIndex), TEXT("Test room"),
+				true, false, false, CreationError);
+			TestNotNull(TEXT("Door approach test room created"), Room);
+			if (Room)
+			{
+				FInteriorOpening Opening;
+				Opening.Id = TEXT("TestDoor");
+				Opening.Type = EInteriorOpeningType::Door;
+				Opening.EdgeIndex = 2;
+				Opening.Offset = 5.5f * Scale;
+				Opening.Width = 9.f * Scale;
+				Room->AddOpening(Opening);
+				TestRooms.Add(Room);
+			}
+		}
+		if (TestRooms.Num() == 2)
+		{
+			TestTrue(TEXT("Rooms with parallel doorways connect"),
+				FNavigationRoutePlanner::FindRoute(*Building, *Interior, Scale,
+					3, FVector2D(210, 90), 3, FVector2D(310, 90), Route));
+			double RouteLength = 0.0;
+			for (int32 I = 1; I < Route.Points.Num(); ++I)
+			{
+				RouteLength += FVector2D::Distance(Route.Points[I - 1].Position, Route.Points[I].Position);
+				TestEqual(TEXT("Parallel doorway route stays on its floor"), Route.Points[I].Floor, 3);
+				for (const AInteriorRoom* Room : TestRooms)
+				{
+					const TArray<FVector2D>& Corners = Room->GetFootprint();
+					for (int32 Edge = 0; Edge < 4; ++Edge)
+					{
+						const FVector2D A = Corners[Edge];
+						const FVector2D B = Corners[(Edge + 1) % 4];
+						const FVector2D Direction = (B - A).GetSafeNormal();
+						TArray<TPair<FVector2D, FVector2D>> SolidPieces;
+						if (Edge == 2)
+						{
+							SolidPieces.Add({ A, A + Direction * 5.5 });
+							SolidPieces.Add({ A + Direction * 14.5, B });
+						}
+						else
+						{
+							SolidPieces.Add({ A, B });
+						}
+						for (const auto& Piece : SolidPieces)
+						{
+							TestTrue(TEXT("Door approach route preserves clearance from solid walls"),
+								SegmentDistance(Route.Points[I - 1].Position, Route.Points[I].Position,
+									Piece.Key, Piece.Value) >= ExpectedClearance);
+						}
+					}
+				}
+			}
+			TestTrue(TEXT("Room-to-room route stays near the doors rather than the building boundary"),
+				RouteLength > 100.0 && RouteLength < 145.0);
+			bool bCrossesOpenCorridor = false;
+			for (int32 I = 1; I < Route.Points.Num(); ++I)
+			{
+				const FVector2D A = Route.Points[I - 1].Position;
+				const FVector2D B = Route.Points[I].Position;
+				if (A.X <= 260.0 && B.X >= 260.0 && B.X - A.X > TestGeometryEpsilon)
+				{
+					const FVector2D Crossing = FMath::Lerp(A, B, (260.0 - A.X) / (B.X - A.X));
+					bCrossesOpenCorridor = true;
+					TestTrue(TEXT("Open corridor route favours the comfortable wall gap"), Crossing.Y >= 106.9);
+				}
+			}
+			TestTrue(TEXT("Room route crosses the open corridor"), bCrossesOpenCorridor);
+		}
 	}
 	World->DestroyWorld(false);
 	return true;

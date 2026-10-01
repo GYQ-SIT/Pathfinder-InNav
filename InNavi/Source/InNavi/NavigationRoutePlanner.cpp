@@ -10,6 +10,9 @@ namespace
 	// Extra free space between the physical wall surface and the centre of the route. Unreal world
 	// units are centimetres; the wall's own half thickness is added separately per floor.
 	constexpr double RouteWallGapWorldUnits = 20.0;
+	// Prefer comfortable spacing in open areas without making narrow doors impassable.
+	constexpr double PreferredWallGapWorldUnits = 60.0;
+	constexpr double WallProximityCostWeight = 4.0;
 	constexpr double TurnPointMargin = 1.05;
 	// A turn point at the minimum clearance can itself be covered by a nearby wall. Walk out along
 	// the same ray in small steps and keep the first clear point, rather than dropping that direction
@@ -36,6 +39,7 @@ namespace
 		TArray<FVector2D> TurnPoints;
 		TArray<FExteriorExit> ExteriorExits;
 		double WallClearance = 0.0;
+		double PreferredWallClearance = 0.0;
 	};
 
 	struct FVertex
@@ -289,6 +293,9 @@ namespace
 		const double Offset = Geometry.WallClearance * TurnPointMargin / PerpendicularFactor;
 		AddNearestTurnPointAlongRay(Geometry, BuildingBoundary, Corner, Bisector, Offset);
 		AddNearestTurnPointAlongRay(Geometry, BuildingBoundary, Corner, -Bisector, Offset);
+		const double PreferredOffset = Geometry.PreferredWallClearance * TurnPointMargin / PerpendicularFactor;
+		AddNearestTurnPointAlongRay(Geometry, BuildingBoundary, Corner, Bisector, PreferredOffset);
+		AddNearestTurnPointAlongRay(Geometry, BuildingBoundary, Corner, -Bisector, PreferredOffset);
 	}
 
 	void AddOpenEndTurnPoints(FFloorGeometry& Geometry, const TArray<FVector2D>& BuildingBoundary,
@@ -306,6 +313,8 @@ namespace
 			const double Angle = Step * PI / 8.0;
 			const FVector2D Direction = Away * FMath::Cos(Angle) + Perpendicular * FMath::Sin(Angle);
 			AddNearestTurnPointAlongRay(Geometry, BuildingBoundary, End, Direction, Radius);
+			AddNearestTurnPointAlongRay(Geometry, BuildingBoundary, End, Direction,
+				Geometry.PreferredWallClearance * TurnPointMargin);
 		}
 	}
 
@@ -313,8 +322,12 @@ namespace
 		const TArray<FVector2D>& BuildingBoundary)
 	{
 		FFloorGeometry Geometry;
+		TArray<FSegment> DoorApproaches;
 		Geometry.WallClearance =
 			(Interior.GetWallThicknessForFloor(Floor) * 0.5 + RouteWallGapWorldUnits)
+			/ FMath::Max(static_cast<double>(Scale), static_cast<double>(KINDA_SMALL_NUMBER));
+		Geometry.PreferredWallClearance =
+			(Interior.GetWallThicknessForFloor(Floor) * 0.5 + PreferredWallGapWorldUnits)
 			/ FMath::Max(static_cast<double>(Scale), static_cast<double>(KINDA_SMALL_NUMBER));
 
 		const TArray<AInteriorRoom*>& Rooms = Interior.GetRoomsOnFloor(Floor);
@@ -352,6 +365,13 @@ namespace
 						Gaps.Add(TPair<double, double>(Begin, End));
 						const FVector2D DoorPosition = A + Direction * ((Begin + End) * 0.5);
 						Geometry.DoorPoints.Add(DoorPosition);
+						// Leaving a doorway sideways can intersect the clearance capsules of its jambs.
+						// Supply a point on each side where the route can turn after crossing normally.
+						const FVector2D Normal(-Direction.Y, Direction.X);
+						const FVector2D ApproachOffset = Normal * Geometry.WallClearance * TurnPointMargin;
+						DoorApproaches.Add({ DoorPosition - ApproachOffset, DoorPosition + ApproachOffset });
+						const FVector2D PreferredOffset = Normal * Geometry.PreferredWallClearance * TurnPointMargin;
+						DoorApproaches.Add({ DoorPosition - PreferredOffset, DoorPosition + PreferredOffset });
 
 						if (Floor == 1
 							&& Opening.Type == EInteriorOpeningType::Door
@@ -381,6 +401,14 @@ namespace
 					AddWall(Geometry, A + Direction * Cursor, B);
 				}
 			}
+		}
+
+		// Validate approaches against every room, so a nearby wall cannot be bypassed by an
+		// unchecked doorway vertex. All graph edges still pass the full wall-clearance test.
+		for (const FSegment& Approach : DoorApproaches)
+		{
+			TryAddTurnPoint(Geometry, BuildingBoundary, Approach.A);
+			TryAddTurnPoint(Geometry, BuildingBoundary, Approach.B);
 		}
 
 		// Generate graph vertices on the clearance boundary, after every wall has been collected so
@@ -459,6 +487,33 @@ namespace
 		}
 
 		return true;
+	}
+
+	float IndoorTravelCost(const FVector2D& A, const FVector2D& B,
+		const TArray<FVector2D>& Boundary, const FFloorGeometry& Geometry)
+	{
+		const double Length = FVector2D::Distance(A, B);
+		const int32 Samples = FMath::Clamp(FMath::CeilToInt(
+			Length / (Geometry.PreferredWallClearance * 0.5)), 1, 256);
+		double Penalty = 0.0;
+		for (int32 I = 0; I < Samples; ++I)
+		{
+			const FVector2D Point = FMath::Lerp(A, B, (I + 0.5) / Samples);
+			double Distance = Geometry.PreferredWallClearance;
+			for (int32 Edge = 0; Edge < Boundary.Num(); ++Edge)
+			{
+				Distance = FMath::Min(Distance, PointToSegmentDistance(Point,
+					Boundary[Edge], Boundary[(Edge + 1) % Boundary.Num()]));
+			}
+			for (const FSegment& Wall : Geometry.Walls)
+			{
+				Distance = FMath::Min(Distance, PointToSegmentDistance(Point, Wall.A, Wall.B));
+			}
+			const double Deficit = 1.0 - Distance / Geometry.PreferredWallClearance;
+			Penalty += Deficit * Deficit;
+		}
+		// Charge for sustained travel beside walls, while allowing short doorway crossings.
+		return static_cast<float>(Length * (1.0 + WallProximityCostWeight * Penalty / Samples));
 	}
 
 	bool CanUseConnectorBetween(const FVertex& A, const FVertex& B)
@@ -875,10 +930,8 @@ bool FNavigationRoutePlanner::FindRoute(
 						continue;
 					}
 
-					// The distance between the points is the movement cost.
-					Cost = FVector2D::Distance(
-						A.Point.Position,
-						B.Point.Position);
+					Cost = IndoorTravelCost(A.Point.Position, B.Point.Position,
+						Building.GetFootprint(), *FloorGeometry);
 				}
 			}
 			else
