@@ -1,5 +1,5 @@
 ﻿#include "NavigationRoutePlanner.h"
-
+#include "NavigationPanelWidget.h"
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
 #include "PolyBuilding.h"
@@ -18,11 +18,18 @@ namespace
 		FVector2D B;
 	};
 
+	struct FExteriorExit
+	{
+		FString Id;
+		FVector2D Position = FVector2D::ZeroVector;
+	};
+
 	struct FFloorGeometry
 	{
 		TArray<FSegment> Walls;
 		TArray<FVector2D> DoorPoints;
 		TArray<FVector2D> TurnPoints;
+		TArray<FExteriorExit> ExteriorExits;
 		double WallClearance = 0.0;
 	};
 
@@ -100,6 +107,73 @@ namespace
 	double PointToSegmentDistance(const FVector2D& Point, const FVector2D& A, const FVector2D& B)
 	{
 		return FVector2D::Distance(Point, FMath::ClosestPointOnSegment2D(Point, A, B));
+	}
+
+	int32 FindNearestBoundaryEdge(
+		const FVector2D& Point,
+		const TArray<FVector2D>& Boundary,
+		double& OutDistance)
+	{
+		OutDistance = TNumericLimits<double>::Max();
+
+		if (Boundary.Num() < 2)
+		{
+			return INDEX_NONE;
+		}
+
+		int32 NearestEdge = INDEX_NONE;
+
+		for (int32 I = 0; I < Boundary.Num(); ++I)
+		{
+			const double Distance = PointToSegmentDistance(
+				Point,
+				Boundary[I],
+				Boundary[(I + 1) % Boundary.Num()]);
+
+			if (Distance < OutDistance)
+			{
+				OutDistance = Distance;
+				NearestEdge = I;
+			}
+		}
+
+		return NearestEdge;
+	}
+
+	bool IsExteriorExitVertex(const FNavigationRoutePoint& Point)
+	{
+		return Point.ConnectorId.StartsWith(TEXT("OutsideExit:"));
+	}
+
+	bool CanTravelOutside(
+		const FVector2D& A,
+		const FVector2D& B,
+		const TArray<FVector2D>& BuildingBoundary,
+		bool bAIsExit,
+		bool bBIsExit)
+	{
+		for (int32 I = 0; I < BuildingBoundary.Num(); ++I)
+		{
+			const FVector2D& EdgeA = BuildingBoundary[I];
+			const FVector2D& EdgeB =
+				BuildingBoundary[(I + 1) % BuildingBoundary.Num()];
+
+			if (!SegmentsIntersectOrTouch(A, B, EdgeA, EdgeB))
+			{
+				continue;
+			}
+
+			const bool bTouchesAtAllowedExit =
+				(bAIsExit && PointToSegmentDistance(A, EdgeA, EdgeB) <= GeometryEpsilon)
+				|| (bBIsExit && PointToSegmentDistance(B, EdgeA, EdgeB) <= GeometryEpsilon);
+
+			if (!bTouchesAtAllowedExit)
+			{
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	double SegmentToSegmentDistance(const FVector2D& A, const FVector2D& B,
@@ -248,7 +322,18 @@ namespace
 					if (End > Begin + GeometryEpsilon)
 					{
 						Gaps.Add(TPair<double, double>(Begin, End));
-						Geometry.DoorPoints.Add(A + Direction * ((Begin + End) * 0.5));
+						const FVector2D DoorPosition = A + Direction * ((Begin + End) * 0.5);
+						Geometry.DoorPoints.Add(DoorPosition);
+
+						if (Floor == 1
+							&& Opening.Type == EInteriorOpeningType::Door
+							&& Opening.ConnectsTo.Equals(TEXT("outside"), ESearchCase::IgnoreCase))
+						{
+							FExteriorExit Exit;
+							Exit.Id = Room->RoomId + TEXT(":") + Opening.Id;
+							Exit.Position = DoorPosition;
+							Geometry.ExteriorExits.Add(Exit);
+						}
 					}
 				}
 				Gaps.Sort([](const TPair<double, double>& Left, const TPair<double, double>& Right)
@@ -310,7 +395,8 @@ namespace
 	}
 
 	bool CanTravel(const FVector2D& A, const FVector2D& B,
-		const TArray<FVector2D>& BuildingBoundary, const FFloorGeometry& Geometry)
+		const TArray<FVector2D>& BuildingBoundary, const FFloorGeometry& Geometry,
+		const TArray<int32>& AllowedBoundaryEdges)
 	{
 		for (double T : { 0.25, 0.5, 0.75 })
 		{
@@ -319,15 +405,23 @@ namespace
 				return false;
 			}
 		}
+
 		const double MinimumDistance = Geometry.WallClearance - GeometryEpsilon;
+
 		for (int32 I = 0; I < BuildingBoundary.Num(); ++I)
 		{
+			if (AllowedBoundaryEdges.Contains(I))
+			{
+				continue;
+			}
+
 			if (SegmentToSegmentDistance(A, B, BuildingBoundary[I],
 				BuildingBoundary[(I + 1) % BuildingBoundary.Num()]) < MinimumDistance)
 			{
 				return false;
 			}
 		}
+
 		for (const FSegment& Wall : Geometry.Walls)
 		{
 			if (SegmentToSegmentDistance(A, B, Wall.A, Wall.B) < MinimumDistance)
@@ -335,11 +429,29 @@ namespace
 				return false;
 			}
 		}
+
 		return true;
 	}
 
 	bool CanUseConnectorBetween(const FVertex& A, const FVertex& B)
 	{
+
+		const bool bOnePointIsOutside =
+			A.Point.Floor == UNavigationPanelWidget::OutdoorFloor
+			|| B.Point.Floor == UNavigationPanelWidget::OutdoorFloor;
+
+		if (bOnePointIsOutside)
+		{
+			const bool bCorrectFloorPair =
+				(A.Point.Floor == UNavigationPanelWidget::OutdoorFloor && B.Point.Floor == 1)
+				|| (B.Point.Floor == UNavigationPanelWidget::OutdoorFloor && A.Point.Floor == 1);
+
+			return bCorrectFloorPair
+				&& IsExteriorExitVertex(A.Point)
+				&& IsExteriorExitVertex(B.Point)
+				&& A.Point.ConnectorId == B.Point.ConnectorId;
+		}
+
 		// Both points must be connector points, not normal path points.
 		if (A.Point.ConnectorType == EInteriorNavNodeType::PathNode ||
 			B.Point.ConnectorType == EInteriorNavNodeType::PathNode)
@@ -409,7 +521,24 @@ bool FNavigationRoutePlanner::IsValidPoint(const APolyBuilding& Building,
 	const AInteriorGenerator& Interior, float Scale, int32 Floor, FVector2D Point, FString& OutError)
 {
 	OutError.Empty();
-	if (Scale <= KINDA_SMALL_NUMBER || Floor < 1 || Floor > Building.GetFloorCount())
+	if (Scale <= KINDA_SMALL_NUMBER)
+	{
+		OutError = TEXT("The building scale is invalid.");
+		return false;
+	}
+
+	if (Floor == UNavigationPanelWidget::OutdoorFloor)
+	{
+		if (!UNavigationPanelWidget::IsOutdoorPoint(Building, Point))
+		{
+			OutError = TEXT("Select a point in the highlighted outside area.");
+			return false;
+		}
+
+		return true;
+	}
+
+	if (Floor < 1 || Floor > Building.GetFloorCount())
 	{
 		OutError = TEXT("Choose a floor in the loaded building.");
 		return false;
@@ -562,6 +691,35 @@ bool FNavigationRoutePlanner::FindRoute(
 				});
 		}
 
+		for (const FExteriorExit& Exit : Geometry.ExteriorExits)
+		{
+			const FString ExitConnectorId =
+				FString::Printf(TEXT("OutsideExit:%s"), *Exit.Id);
+
+			// Floor 1 side of the marked exit.
+			Vertices.Add(
+				{
+					{
+						Exit.Position,
+						Floor,
+						ExitConnectorId,
+						EInteriorNavNodeType::PathNode
+					},
+					{}
+				});
+
+			// Outside side of the same exit.
+			Vertices.Add(
+				{
+					{
+						Exit.Position,
+						UNavigationPanelWidget::OutdoorFloor,
+						ExitConnectorId,
+						EInteriorNavNodeType::PathNode
+					},
+					{}
+				});
+		}
 		// Save the geometry so it can be used later
 		// when checking whether two points can see each other.
 		Floors.Add(Floor, MoveTemp(Geometry));
@@ -619,30 +777,81 @@ bool FNavigationRoutePlanner::FindRoute(
 
 			if (A.Point.Floor == B.Point.Floor)
 			{
-				// Find the geometry for this floor.
-				const FFloorGeometry* FloorGeometry =
-					Floors.Find(A.Point.Floor);
-
-				if (!FloorGeometry)
+				if (A.Point.Floor == UNavigationPanelWidget::OutdoorFloor)
 				{
-					continue;
-				}
+					if (!CanTravelOutside(
+						A.Point.Position,
+						B.Point.Position,
+						Building.GetFootprint(),
+						IsExteriorExitVertex(A.Point),
+						IsExteriorExitVertex(B.Point)))
+					{
+						continue;
+					}
 
-				// A route is allowed only when the straight line
-				// stays inside the building and avoids solid walls.
-				if (!CanTravel(
-					A.Point.Position,
-					B.Point.Position,
-					Building.GetFootprint(),
-					*FloorGeometry))
+					Cost = FVector2D::Distance(
+						A.Point.Position,
+						B.Point.Position);
+				}
+				else
 				{
-					continue;
-				}
+					// Find the geometry for this floor.
+					const FFloorGeometry* FloorGeometry =
+						Floors.Find(A.Point.Floor);
 
-				// The distance between the points is the movement cost.
-				Cost = FVector2D::Distance(
-					A.Point.Position,
-					B.Point.Position);
+					if (!FloorGeometry)
+					{
+						continue;
+					}
+
+					TArray<int32> AllowedBoundaryEdges;
+
+					auto AddExitBoundaryEdge = [&](const FNavigationRoutePoint& Point) -> bool
+						{
+							if (!IsExteriorExitVertex(Point))
+							{
+								return true;
+							}
+
+							double DistanceToBoundary = 0.0;
+							const int32 BoundaryEdge = FindNearestBoundaryEdge(
+								Point.Position,
+								Building.GetFootprint(),
+								DistanceToBoundary);
+
+							if (BoundaryEdge == INDEX_NONE
+								|| DistanceToBoundary > FloorGeometry->WallClearance * 1.5)
+							{
+								return false;
+							}
+
+							AllowedBoundaryEdges.AddUnique(BoundaryEdge);
+							return true;
+						};
+
+					if (!AddExitBoundaryEdge(A.Point)
+						|| !AddExitBoundaryEdge(B.Point))
+					{
+						continue;
+					}
+
+					// A route is allowed only when the straight line
+					// stays inside the building and avoids solid walls.
+					if (!CanTravel(
+						A.Point.Position,
+						B.Point.Position,
+						Building.GetFootprint(),
+						*FloorGeometry,
+						AllowedBoundaryEdges))
+					{
+						continue;
+					}
+
+					// The distance between the points is the movement cost.
+					Cost = FVector2D::Distance(
+						A.Point.Position,
+						B.Point.Position);
+				}
 			}
 			else
 			{
@@ -654,12 +863,20 @@ bool FNavigationRoutePlanner::FindRoute(
 				}
 
 				// Vertical movement has a small extra cost.
-				Cost =
-					20.0f +
-					FMath::Abs(
-						A.Point.Floor - B.Point.Floor) *
-					Building.GetFloorHeight() /
-					Scale;
+				if (A.Point.Floor == UNavigationPanelWidget::OutdoorFloor
+					|| B.Point.Floor == UNavigationPanelWidget::OutdoorFloor)
+				{
+					Cost = 5.0f;
+				}
+				else
+				{
+					// Vertical movement has a small extra cost.
+					Cost =
+						20.0f +
+						FMath::Abs(A.Point.Floor - B.Point.Floor)
+						* Building.GetFloorHeight()
+						/ Scale;
+				}
 			}
 
 			// Add the connection in both directions.

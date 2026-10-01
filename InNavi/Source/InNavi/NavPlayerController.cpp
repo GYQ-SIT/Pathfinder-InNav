@@ -1133,13 +1133,28 @@ bool ANavPlayerController::SetSelectedDoorConnectsTo(const FString& NewConnectsT
 	}
 
 	// NewConnectsToLabel is whatever the dropdown showed (see GetConnectableTargetIds) - a room's
-	// current name, or "corridor". Resolve it back to the stable room id that actually gets stored,
-	// so a later rename doesn't silently break this door's connection.
+	// current name, "corridor", or the special "Outside" target. Resolve room names back to stable
+	// room ids, so a later rename doesn't silently break this door's connection.
 	FString ResolvedConnectsTo = NewConnectsToLabel;
-	if (NewConnectsToLabel != TEXT("corridor"))
+
+	if (NewConnectsToLabel.Equals(TEXT("Outside"), ESearchCase::IgnoreCase))
+	{
+		if (InteriorGen->GetActiveFloor() != 1)
+		{
+			OnActionFailed.Broadcast(
+				TEXT("An outside exit must be assigned to a Floor 1 door."));
+			return false;
+		}
+
+		// Store a stable value for the route planner and JSON.
+		ResolvedConnectsTo = TEXT("outside");
+	}
+	else if (NewConnectsToLabel != TEXT("corridor"))
 	{
 		bool bResolved = false;
-		for (const AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
+
+		for (const AInteriorRoom* Room :
+			InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
 		{
 			if (Room && Room->RoomName == NewConnectsToLabel)
 			{
@@ -1148,22 +1163,32 @@ bool ANavPlayerController::SetSelectedDoorConnectsTo(const FString& NewConnectsT
 				break;
 			}
 		}
+
 		if (!bResolved)
 		{
-			OnActionFailed.Broadcast(FString::Printf(TEXT("Could not find a room named '%s'."), *NewConnectsToLabel));
+			OnActionFailed.Broadcast(FString::Printf(
+				TEXT("Could not find a room named '%s'."),
+				*NewConnectsToLabel));
 			return false;
 		}
 	}
 
-	const bool bSuccess = InteriorGen->SetDoorConnectsTo(SelectedDoorRoomId, SelectedDoorId, ResolvedConnectsTo);
+	const bool bSuccess = InteriorGen->SetDoorConnectsTo(
+		SelectedDoorRoomId,
+		SelectedDoorId,
+		ResolvedConnectsTo);
+
 	if (bSuccess)
 	{
 		bHasUnsavedChanges = true;
 	}
 	else
 	{
-		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not update door '%s'."), *SelectedDoorId));
+		OnActionFailed.Broadcast(FString::Printf(
+			TEXT("Could not update door '%s'."),
+			*SelectedDoorId));
 	}
+
 	return bSuccess;
 }
 
@@ -1177,7 +1202,14 @@ TArray<FString> ANavPlayerController::GetConnectableTargetIds() const
 
 	Result.Add(TEXT("corridor"));
 
-	for (const AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
+	// A door on Floor 1 can also connect to the outside.
+	if (InteriorGen->GetActiveFloor() == 1)
+	{
+		Result.Add(TEXT("Outside"));
+	}
+
+	for (const AInteriorRoom* Room :
+		InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
 	{
 		if (Room && Room->IsClosedLoop() && Room->RoomId != SelectedDoorRoomId)
 		{
@@ -1192,8 +1224,14 @@ TArray<FString> ANavPlayerController::GetConnectableTargetIds() const
 	return Result;
 }
 
-FString ANavPlayerController::ResolveConnectsToDisplayName(const FString& ConnectsToId) const
+FString ANavPlayerController::ResolveConnectsToDisplayName(
+	const FString& ConnectsToId) const
 {
+	if (ConnectsToId.Equals(TEXT("outside"), ESearchCase::IgnoreCase))
+	{
+		return TEXT("Outside");
+	}
+
 	if (ConnectsToId.IsEmpty() || ConnectsToId == TEXT("corridor") || !InteriorGen)
 	{
 		return ConnectsToId;

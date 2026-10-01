@@ -1,4 +1,4 @@
-#include "NavigationPanelWidget.h"
+﻿#include "NavigationPanelWidget.h"
 
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
@@ -418,10 +418,12 @@ void UNavigationPanelWidget::RequestFindRoute()
 	{
 		RoutePoints.Reset();
 		bLastFindRouteFailed = true;
-		const bool bIncludesOutside = Start.Point.Floor == OutdoorFloor || Destination.Point.Floor == OutdoorFloor;
-		SetStatusMessage(bIncludesOutside
-			? TEXT("Indoor/outdoor route data is not available yet. The points are saved; connect the combined planner and press Find Route again.")
-			: Result.Error, ENavigationMessageKind::Warning);
+
+		const FString FailureMessage = !Result.Error.IsEmpty()
+			? Result.Error
+			: TEXT("No route found. Check that a Floor 1 door is marked as Outside.");
+
+		SetStatusMessage(FailureMessage, ENavigationMessageKind::Warning);
 		return;
 	}
 

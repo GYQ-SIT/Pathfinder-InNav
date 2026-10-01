@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -532,14 +532,13 @@ public:
 	bool SetSelectedDoorConnectsTo(const FString& NewConnectsToLabel);
 
 	// The valid ConnectsTo targets for the currently-selected door, for a door properties panel to
-	// populate a dropdown with: "corridor" (the building's shared circulation space, for a door
-	// that doesn't lead into another specific room) followed by every other closed room's CURRENT
-	// NAME (not its id) on the door's own floor - excluding the door's own room (InputId), since a
-	// door can't connect to the room it's already in, and excluding open walls, since only closed
-	// rooms are valid targets. Shown/picked by name since that's what a user actually remembers a
-	// room by (it's user-editable, unlike the auto-generated id) - SetSelectedDoorConnectsTo
-	// resolves the picked name back to the room's stable id before storing it. Empty if no door is
-	// selected.
+	// populate a dropdown with: "corridor", "Outside" on Floor 1, followed by every other closed
+	// room's CURRENT NAME (not its id) on the door's own floor - excluding the door's own room
+	// (InputId), since a door can't connect to the room it's already in, and excluding open walls,
+	// since only closed rooms are valid targets. Shown/picked by name since that's what a user
+	// actually remembers a room by (it's user-editable, unlike the auto-generated id) -
+	// SetSelectedDoorConnectsTo resolves the picked name back to the room's stable id before storing
+	// it. Empty if no door is selected.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	TArray<FString> GetConnectableTargetIds() const;
 

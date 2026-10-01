@@ -1,4 +1,4 @@
-{
+﻿{
 	"scale": 10,
 	"floorHeight": 300,
 	"buildings": [
@@ -222,6 +222,39 @@
 									]
 								],
 								"openings": []
+							},
+							{
+								"id": "E2-01-OUTSIDE-ENTRY",
+								"name": "Outside Entry Vestibule",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[ 95.4285714286, 80 ],
+									[ 125, 80 ],
+									[ 125, 120 ],
+									[ 94.7142857143, 120 ]
+								],
+								"openings": [
+									{
+										"id": "E2-01-OUTSIDE-ENTRY-D01",
+										"type": "door",
+										"edgeIndex": 1,
+										"offset": 155,
+										"width": 90,
+										"inputId": "E2-01-OUTSIDE-ENTRY",
+										"connectsTo": ""
+									},
+									{
+										"id": "E2-01-OUTSIDE-ENTRY-D02",
+										"type": "door",
+										"edgeIndex": 3,
+										"offset": 155.0319,
+										"width": 90,
+										"inputId": "E2-01-OUTSIDE-ENTRY",
+										"connectsTo": "outside"
+									}
+								]
 							}
 						],
 						"navNodes": [

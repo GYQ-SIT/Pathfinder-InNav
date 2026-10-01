@@ -1093,7 +1093,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 						Diamond.Add(MarkerLocal + FVector2D(OutlineSize * 0.5f, 0.f));
 						Diamond.Add(MarkerLocal + FVector2D(0.f, OutlineSize * 0.5f));
 						Diamond.Add(MarkerLocal + FVector2D(-OutlineSize * 0.5f, 0.f));
-						Diamond.Add(Diamond[0]);
+						Diamond.Add(MarkerLocal + FVector2D(0.f, -OutlineSize * 0.5f));
 						FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 5,
 							AllottedGeometry.ToPaintGeometry(), Diamond, ESlateDrawEffect::None,
 							FLinearColor::White, true, 7.f);

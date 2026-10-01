@@ -1,7 +1,7 @@
-#if WITH_DEV_AUTOMATION_TESTS
+﻿#if WITH_DEV_AUTOMATION_TESTS
 
 #include "NavigationRoutePlanner.h"
-
+#include "NavigationPanelWidget.h"
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
 #include "PolyBuilding.h"
@@ -134,6 +134,26 @@ bool FNavigationRoutePlannerIntegrationTest::RunTest(const FString& Parameters)
 		const bool bUsesDoor = Route.Points.ContainsByPredicate([&DoorMidpoint](const FNavigationRoutePoint& Point)
 			{ return Point.Floor == 1 && Point.Position.Equals(DoorMidpoint, 0.02f); });
 		TestTrue(TEXT("Door route uses the authored opening"), bUsesDoor);
+		// E2's sample data has no exterior exit marked yet.
+        // These checks verify outdoor-point validation and that a route is not invented without an exit.
+		const int32 OutsideFloor = UNavigationPanelWidget::OutdoorFloor;
+		const FVector2D OutsidePoint(80.f, 100.f);
+
+		TestTrue(TEXT("Point in the outdoor selection area is valid"),
+			FNavigationRoutePlanner::IsValidPoint(*Building, *Interior, Generator->GetScale(),
+				OutsideFloor, OutsidePoint, ValidationError));
+
+		TestFalse(TEXT("Point inside the building is not valid as an outdoor point"),
+			FNavigationRoutePlanner::IsValidPoint(*Building, *Interior, Generator->GetScale(),
+				OutsideFloor, FVector2D(120.f, 70.f), ValidationError));
+
+		TestTrue(TEXT("Invalid outdoor point explains the problem"),
+			ValidationError.Contains(TEXT("outside area")));
+
+		TestFalse(TEXT("Indoor-to-outdoor route requires a marked exterior exit"),
+			FNavigationRoutePlanner::FindRoute(*Building, *Interior, Generator->GetScale(),
+				1, FVector2D(120.f, 70.f),
+				OutsideFloor, OutsidePoint, Route));
 	}
 	World->DestroyWorld(false);
 	return true;
