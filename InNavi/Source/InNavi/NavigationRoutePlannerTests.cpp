@@ -141,8 +141,8 @@ bool FNavigationRoutePlannerIntegrationTest::RunTest(const FString& Parameters)
 		const bool bUsesDoor = Route.Points.ContainsByPredicate([&DoorMidpoint](const FNavigationRoutePoint& Point)
 			{ return Point.Floor == 1 && Point.Position.Equals(DoorMidpoint, 0.02f); });
 		TestTrue(TEXT("Door route uses the authored opening"), bUsesDoor);
-		// E2's sample data has no exterior exit marked yet.
-        // These checks verify outdoor-point validation and that a route is not invented without an exit.
+		// E2's Floor 1 vestibule has a door marked "outside". Verify outdoor-point validation and
+		// that the indoor/outdoor route crosses through that authored exit.
 		const int32 OutsideFloor = UNavigationPanelWidget::OutdoorFloor;
 		const FVector2D OutsidePoint(80.f, 100.f);
 
@@ -157,10 +157,17 @@ bool FNavigationRoutePlannerIntegrationTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("Invalid outdoor point explains the problem"),
 			ValidationError.Contains(TEXT("outside area")));
 
-		TestFalse(TEXT("Indoor-to-outdoor route requires a marked exterior exit"),
+		TestTrue(TEXT("Indoor-to-outdoor route uses the marked exterior exit"),
 			FNavigationRoutePlanner::FindRoute(*Building, *Interior, Generator->GetScale(),
 				1, FVector2D(120.f, 70.f),
 				OutsideFloor, OutsidePoint, Route));
+		const bool bCrossesExteriorExit = Route.Points.ContainsByPredicate(
+			[OutsideFloor](const FNavigationRoutePoint& Point)
+			{
+				return Point.Floor == OutsideFloor
+					&& Point.ConnectorId.StartsWith(TEXT("OutsideExit:"));
+			});
+		TestTrue(TEXT("Outdoor route contains the authored exit connector"), bCrossesExteriorExit);
 	}
 	World->DestroyWorld(false);
 	return true;

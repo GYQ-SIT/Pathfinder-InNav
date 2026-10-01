@@ -1146,7 +1146,8 @@ bool ANavPlayerController::SetSelectedDoorConnectsTo(const FString& NewConnectsT
 		if (InteriorGen->GetActiveFloor() != 1)
 		{
 			OnActionFailed.Broadcast(
-				TEXT("An outside exit must be assigned to a Floor 1 door."));
+				TEXT("An outside exit must be assigned to a Floor 1 door."),
+				EActionFailureSeverity::Warning);
 			return false;
 		}
 

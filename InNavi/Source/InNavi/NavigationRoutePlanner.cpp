@@ -11,6 +11,11 @@ namespace
 	// units are centimetres; the wall's own half thickness is added separately per floor.
 	constexpr double RouteWallGapWorldUnits = 20.0;
 	constexpr double TurnPointMargin = 1.05;
+	// A turn point at the minimum clearance can itself be covered by a nearby wall. Walk out along
+	// the same ray in small steps and keep the first clear point, rather than dropping that direction
+	// from the visibility graph and forcing Dijkstra to use an unrelated distant corner/connector.
+	constexpr double TurnPointSearchStep = 0.5;
+	constexpr int32 TurnPointSearchAttempts = 16;
 
 	struct FSegment
 	{
@@ -222,17 +227,40 @@ namespace
 		return true;
 	}
 
-	void TryAddTurnPoint(FFloorGeometry& Geometry, const TArray<FVector2D>& BuildingBoundary,
+	bool TryAddTurnPoint(FFloorGeometry& Geometry, const TArray<FVector2D>& BuildingBoundary,
 		const FVector2D& Candidate)
 	{
 		if (!IsPointClearOfWalls(Candidate, BuildingBoundary, Geometry))
 		{
-			return;
+			return false;
 		}
 		if (!Geometry.TurnPoints.ContainsByPredicate([&Candidate](const FVector2D& Existing)
 			{ return Existing.Equals(Candidate, 0.01f); }))
 		{
 			Geometry.TurnPoints.Add(Candidate);
+		}
+		return true;
+	}
+
+	void AddNearestTurnPointAlongRay(FFloorGeometry& Geometry,
+		const TArray<FVector2D>& BuildingBoundary, const FVector2D& Origin,
+		const FVector2D& Direction, double MinimumOffset)
+	{
+		if (Direction.IsNearlyZero() || MinimumOffset <= GeometryEpsilon)
+		{
+			return;
+		}
+
+		const double SearchStep = Geometry.WallClearance * TurnPointSearchStep;
+		for (int32 Attempt = 0; Attempt < TurnPointSearchAttempts; ++Attempt)
+		{
+			const double Offset = MinimumOffset + SearchStep * Attempt;
+			if (TryAddTurnPoint(Geometry, BuildingBoundary, Origin + Direction * Offset))
+			{
+				// The first valid point is the nearest one on this ray. Adding more distant points would
+				// create unnecessary graph choices and can make a route appear to wander away.
+				return;
+			}
 		}
 	}
 
@@ -259,8 +287,8 @@ namespace
 		// Trying both directions supports travel inside and outside a closed room; the building and
 		// other wall boundaries filter whichever candidate is not actually usable.
 		const double Offset = Geometry.WallClearance * TurnPointMargin / PerpendicularFactor;
-		TryAddTurnPoint(Geometry, BuildingBoundary, Corner + Bisector * Offset);
-		TryAddTurnPoint(Geometry, BuildingBoundary, Corner - Bisector * Offset);
+		AddNearestTurnPointAlongRay(Geometry, BuildingBoundary, Corner, Bisector, Offset);
+		AddNearestTurnPointAlongRay(Geometry, BuildingBoundary, Corner, -Bisector, Offset);
 	}
 
 	void AddOpenEndTurnPoints(FFloorGeometry& Geometry, const TArray<FVector2D>& BuildingBoundary,
@@ -277,7 +305,7 @@ namespace
 		{
 			const double Angle = Step * PI / 8.0;
 			const FVector2D Direction = Away * FMath::Cos(Angle) + Perpendicular * FMath::Sin(Angle);
-			TryAddTurnPoint(Geometry, BuildingBoundary, End + Direction * Radius);
+			AddNearestTurnPointAlongRay(Geometry, BuildingBoundary, End, Direction, Radius);
 		}
 	}
 
