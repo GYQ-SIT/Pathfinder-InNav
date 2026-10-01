@@ -3,8 +3,9 @@
 Team **Pathfinder** · Project **InNavi** · CSD3401 / UXG3400 (Fall 2026)
 
 A standalone Unreal Engine application that adds an interior layer to the
-school's 3D model: select a building, enter or import interior data (JSON),
-generate a schematic interior in 3D, and navigate inside — including across floors.
+school's 3D model: select a building (the campus itself loads from a SQL-backed
+database), enter or import interior data (JSON), generate a schematic interior
+in 3D, and navigate inside — including across floors.
 
 ## Repository layout
 
@@ -40,19 +41,21 @@ cd Pathfinder-InNav
    time only, or after pulling a change that adds/removes a C++ class).
 2. Open the generated `.sln` in Visual Studio and build (or just double-click the
    `.uproject` to open directly in the Unreal Editor, which will offer to build for you).
-3. Hit **Play** in the Editor. The building/interior data it loads from lives at
-   `InNavi/Data/buildings.json`.
+3. Hit **Play** in the Editor. Sample data lives under `InNavi/Data/`: the campus/
+   exterior layer loads from `map_extended.db` (SQL-backed), and interior building
+   layouts save/load as JSON (e.g. `buildings.json`).
 
-Most of the current interior-editing functionality (rooms, doors, elevators/stairs/
-escalators, snapping, save/load) is only reachable via keyboard shortcuts right now —
-see `docs/design/interior-editor-guide.md` for the full control list and workflow.
+The interior editor has a full on-screen UI — a dockable Toolbar/Floor/Properties/
+Layers/Navigation/Audio panel layout, a top menu bar (File, Window), and a 2D/3D
+preview toggle with its own View/Edit sub-mode — see
+`docs/design/interior-editor-guide.md` for the full control list and workflow.
 
 ## Supported platforms
 
-Development and build should target:
-- Windows 11
-- Ubuntu 24.04
-- macOS Tahoe
+Windows 11 only, in practice — this is a UE5 project built and packaged on
+Windows; the team's Linux CI runner has no Windows toolchain to compile it
+(see the CI/CD note in `docs/deliverables.md`), and macOS has not been set up
+or tested.
 
 ## Team
 

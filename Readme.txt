@@ -63,10 +63,14 @@ KNOWN ISSUES / LIMITATIONS (M1)
 ================================================================================
 TEAM
 ================================================================================
-Yongqi (Tech Lead) - exterior/interior 3D features, 2D interior editor, and
-  SQL-backed exterior data loading.
-[Kaiming / Padre / Afiq / ws / jh / zhiming - fill in each person's actual M1
-  contribution here before submitting]
+Team Pathfinder
+- Yongqi Ge (Tech Lead)
+- Ang Kai Ming (PM)
+- Padre Lim
+- Mohamad Afiq
+- Ong Wei Song
+- Zhou Jiahao
+- Yeo Zhi Ming
 
 ================================================================================
 SOURCE / DEVELOPMENT SETUP
