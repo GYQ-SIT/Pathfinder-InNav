@@ -1,0 +1,31 @@
+name: Deploy wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - '.github/workflows/deploy-wiki.yml'
+  workflow_dispatch:
+
+env:
+  WIKI_DIR: /var/www/innavi-wiki
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, linux, ovh]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the site with MkDocs
+        run: |
+          python3 -m venv "$RUNNER_TEMP/wiki-venv"
+          "$RUNNER_TEMP/wiki-venv/bin/pip" install --quiet mkdocs
+          "$RUNNER_TEMP/wiki-venv/bin/mkdocs" build --site-dir site
+
+      - name: Publish to the web root
+        run: |
+          mkdir -p "$WIKI_DIR"
+          find "$WIKI_DIR" -mindepth 1 -delete
+          cp -a site/. "$WIKI_DIR"/

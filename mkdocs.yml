@@ -1,0 +1,17 @@
+site_name: InNavi Wiki
+site_description: Team Pathfinder - InNavi project documentation
+docs_dir: docs
+
+theme:
+  name: readthedocs
+
+nav:
+  - Home: index.md
+  - Proposal: proposal.md
+  - Architecture: architecture.md
+  - Toolchain Decision: toolchain-decision.md
+  - Deliverables: deliverables.md
+  - Design:
+      - Product Design: design/product-design.md
+      - Interior Editor Guide: design/interior-editor-guide.md
+      - Interior Editor UI Spec: design/interior-editor-ui-spec.md
