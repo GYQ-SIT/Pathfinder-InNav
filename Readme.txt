@@ -110,3 +110,7 @@ Full source, build instructions, and design docs are in the accompanying
 GitHub repository (see M1 rubrics for the link) - see that repo's own
 README.md and docs/ folder for engine version, Visual Studio setup, and the
 full interior-editor control reference.
+
+Project wiki (the same docs/ content, hosted on the team server and rebuilt
+automatically whenever the team updates docs/ in the repository):
+http://51.79.240.111:5000/
