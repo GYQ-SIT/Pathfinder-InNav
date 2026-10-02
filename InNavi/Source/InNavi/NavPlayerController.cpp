@@ -1794,11 +1794,16 @@ FString ANavPlayerController::BrowseForBuildingDataFile()
 		}
 	}
 
+	// Start in the project's Data folder (where the sample .db ships) instead of wherever the OS
+	// dialog last was - ProjectDir() is a relative path in a packaged build, which the native dialog
+	// can't resolve, so it has to be made absolute first.
+	const FString DefaultDataDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("Data"));
+
 	TArray<FString> OutFiles;
 	const bool bPicked = DesktopPlatform->OpenFileDialog(
 		ParentWindowHandle,
 		TEXT("Import building data"),
-		TEXT(""),
+		DefaultDataDir,
 		TEXT(""),
 		// Both formats in one filter (not two separate filter entries) so this stays a single "Open"
 		// flow the user doesn't have to pre-choose a format for - see

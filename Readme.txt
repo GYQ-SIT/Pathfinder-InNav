@@ -24,6 +24,10 @@ No installation, no external dependencies. Everything the app needs (sample
 building data, audio, default UI layouts) ships alongside the .exe under its
 own Data/ folder - do not separate InNavi.exe from the folders next to it.
 
+If the app fails to start on a clean machine with a missing-DLL error (the
+Microsoft Visual C++ runtime), run Windows\Engine\Extras\Redist\en-us\
+vc_redist.x64.exe once, then launch InNavi.exe again.
+
 ================================================================================
 CORE FLOW / CONTROLS
 ================================================================================
