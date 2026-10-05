@@ -3,6 +3,7 @@
 
 #include "NavPlayerController.h"
 #include "NavigationPanelWidget.h"
+#include "NavigationRouteVisualization.h"
 #include "InteriorFloorPlanWidget.h"
 #include "Blueprint/UserWidget.h"
 #include "GameFramework/Pawn.h"
@@ -48,6 +49,9 @@ static bool IsPointInPolygon(const FVector2D& Point, const TArray<FVector2D>& Po
 
 ANavPlayerController::ANavPlayerController()
 {
+	// AController is hidden by default. This controller now owns visible route components.
+	SetHidden(false);
+	RouteVisualization = CreateDefaultSubobject<UNavigationRouteVisualization>(TEXT("NavigationRouteVisualization"));
 	SelectedBuilding = nullptr;
 	Generator = nullptr;
 	InteriorGen = nullptr;
@@ -2651,7 +2655,7 @@ void ANavPlayerController::DrawPendingRoomPointMarker3D()
 
 void ANavPlayerController::RefreshRoute3DVisualization()
 {
-	FlushPersistentDebugLines(GetWorld());
+	RouteVisualization->ClearRoute();
 
 	if (!bIsIn3DPreviewMode || !Generator || !InteriorGen || !NavigationPanel)
 	{
@@ -2664,47 +2668,11 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 		return;
 	}
 
-	const float Scale = Generator->GetScale();
-	const int32 ActiveFloor = InteriorGen->GetActiveFloor();
-	// A little above the floor slab (see AInteriorRoom::RebuildMesh's own FloorSlabZOffset and
-	// DrawPendingRoomPointMarker3D's own Z) so the route doesn't z-fight with it.
-	const float Z = (ActiveFloor - 1) * Building->GetFloorHeight() + 15.f;
-
-	auto ToWorld = [&](const FVector2D& FootprintPoint) -> FVector
-	{
-		return FVector((FootprintPoint.X + Building->BuildingOffset.X) * Scale, (FootprintPoint.Y + Building->BuildingOffset.Y) * Scale, Z);
-	};
-
-	// Mirrors InteriorFloorPlanWidget::NativePaint's own route-drawing exactly: a segment only draws
-	// if BOTH endpoints are on the active floor (a floor-crossing segment, e.g. through an elevator,
-	// simply isn't drawn on either floor - same as 2D).
-	const TArray<FNavigationRoutePoint>& Route = NavigationPanel->GetRoutePoints();
-	for (int32 i = 1; i < Route.Num(); i++)
-	{
-		if (Route[i - 1].Floor != ActiveFloor || Route[i].Floor != ActiveFloor)
-		{
-			continue;
-		}
-		// FColor(255, 140, 0) - orange, matching the 2D route line's own FLinearColor(1.f, 0.55f, 0.f, 1.f).
-		DrawDebugLine(GetWorld(), ToWorld(Route[i - 1].Position), ToWorld(Route[i].Position), FColor(255, 140, 0), true, -1.f, 0, 8.f);
-	}
-
-	auto DrawEndpoint = [&](const FNavigationRoutePoint& Point, const FColor& Color)
-	{
-		if (Point.Floor != ActiveFloor)
-		{
-			return;
-		}
-		DrawDebugSphere(GetWorld(), ToWorld(Point.Position), 30.f, 12, Color, true);
-	};
-	if (NavigationPanel->HasStart())
-	{
-		DrawEndpoint(NavigationPanel->GetStart(), FColor::Green);
-	}
-	if (NavigationPanel->HasDestination())
-	{
-		DrawEndpoint(NavigationPanel->GetDestination(), FColor::Red);
-	}
+	RouteVisualization->ShowView(UNavigationRouteVisualization::BuildView(
+		NavigationPanel->GetRoutePoints(),
+		NavigationPanel->HasStart() ? &NavigationPanel->GetStart() : nullptr,
+		NavigationPanel->HasDestination() ? &NavigationPanel->GetDestination() : nullptr,
+		Building->BuildingOffset, Generator->GetScale(), Building->GetFloorHeight(), InteriorGen->GetActiveFloor()));
 }
 
 void ANavPlayerController::OnLeftMouseDown3DEdit()

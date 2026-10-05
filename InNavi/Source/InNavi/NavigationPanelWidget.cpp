@@ -447,6 +447,50 @@ void UNavigationPanelWidget::ApplyRouteResult(const FNavigationRouteResult& Resu
 		ENavigationMessageKind::Success);
 }
 
+bool UNavigationPanelWidget::ApplyWorldRouteResult(const FString& BuildingId,
+	const TArray<FNavigationWorldRoutePoint>& Points)
+{
+	APolyBuilding* Building = Generator ? Generator->FindBuildingById(BuildingId) : nullptr;
+	if (!Interior || Interior->GetLoadedBuildingId() != BuildingId || !Building
+		|| Generator->GetScale() <= KINDA_SMALL_NUMBER || Points.Num() < 2)
+	{
+		SetStatusMessage(TEXT("A 3D route needs the loaded building and at least two points."), ENavigationMessageKind::Error);
+		return false;
+	}
+
+	FNavigationRouteResult Result;
+	for (const FNavigationWorldRoutePoint& Input : Points)
+	{
+		if (!FMath::IsFinite(Input.WorldPosition.X) || !FMath::IsFinite(Input.WorldPosition.Y)
+			|| !FMath::IsFinite(Input.WorldPosition.Z) || Input.Floor < OutdoorFloor
+			|| Input.Floor > Building->GetFloorCount())
+		{
+			SetStatusMessage(TEXT("The 3D route contains an invalid position or floor."), ENavigationMessageKind::Error);
+			return false;
+		}
+		FNavigationRoutePoint Point;
+		Point.Position = FVector2D(Input.WorldPosition.X, Input.WorldPosition.Y) / Generator->GetScale()
+			- Building->BuildingOffset;
+		Point.Floor = Input.Floor;
+		Point.ConnectorId = Input.ConnectorId;
+		Point.ConnectorType = Input.ConnectorType;
+		Point.WorldPosition = Input.WorldPosition;
+		Point.bHasWorldPosition = true;
+		Result.Points.Add(Point);
+	}
+	Start = FSelectedEndpoint();
+	Start.bValid = true;
+	Start.BuildingId = BuildingId;
+	Start.Point = Result.Points[0];
+	Destination = FSelectedEndpoint();
+	Destination.bValid = true;
+	Destination.BuildingId = BuildingId;
+	Destination.Point = Result.Points.Last();
+	SelectionMode = ENavigationSelectionMode::None;
+	ApplyRouteResult(Result);
+	return true;
+}
+
 void UNavigationPanelWidget::ClearAll()
 {
 	SelectionMode = ENavigationSelectionMode::None;
@@ -599,10 +643,12 @@ FLinearColor UNavigationPanelWidget::GetStatusColor() const
 
 bool UNavigationPanelWidget::IsPointerOverPanel() const
 {
-	// The full-screen user widget is SelfHitTestInvisible so WBP_InteriorScreen remains
-	// interactive underneath it. Check general visibility rather than requiring the
-	// exact Visible enum value; only HitTestBorder (UInteriorScreenWidget's own Navigation
-	// dock panel Border - see SetPanelBorderForHitTest) should own pointer input.
-	return IsVisible() && HitTestBorder && FSlateApplication::IsInitialized()
-		&& HitTestBorder->GetCachedGeometry().IsUnderLocation(FSlateApplication::Get().GetCursorPos());
+	if (!IsVisible() || !FSlateApplication::IsInitialized()) return false;
+	const FVector2D PointerPosition = FSlateApplication::Get().GetCursorPos();
+	auto IsOverVisibleWidget = [&PointerPosition](const UWidget* Widget)
+	{
+		return Widget && Widget->IsVisible() && Widget->GetCachedGeometry().IsUnderLocation(PointerPosition);
+	};
+	// Hidden docks retain cached geometry. They must not block selection at their former location.
+	return IsOverVisibleWidget(HitTestBorder) || IsOverVisibleWidget(HitTestToggle);
 }

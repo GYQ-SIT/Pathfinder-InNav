@@ -57,6 +57,14 @@ protected:
 
 private:
 	UFUNCTION()
+	void OnNavigationToggleClicked();
+	void RefreshNavigationToggle();
+	UPROPERTY()
+	UButton* NavigationToggleButton = nullptr;
+	UPROPERTY()
+	UTextBlock* NavigationToggleText = nullptr;
+
+	UFUNCTION()
 	void OnBackClicked();
 
 	UFUNCTION()

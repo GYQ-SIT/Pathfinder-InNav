@@ -13,6 +13,10 @@ struct FNavigationRoutePoint
 	int32 Floor = 1;
 	FString ConnectorId;
 	EInteriorNavNodeType ConnectorType = EInteriorNavNodeType::PathNode;
+	// Optional exact position from a 3D planner. Position remains the corresponding 2D footprint
+	// coordinate so the existing map and directions continue to use the same route.
+	FVector WorldPosition = FVector::ZeroVector;
+	bool bHasWorldPosition = false;
 };
 
 struct FNavigationRouteResult

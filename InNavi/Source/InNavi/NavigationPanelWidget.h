@@ -9,6 +9,7 @@ class ABuildingGenerator;
 class AInteriorGenerator;
 class APolyBuilding;
 class UBorder;
+class UWidget;
 
 UENUM(BlueprintType)
 enum class ENavigationSelectionMode : uint8
@@ -28,6 +29,22 @@ enum class ENavigationMessageKind : uint8
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnNavigationStateChanged);
+
+// Person A supplies absolute Unreal world coordinates in centimetres, ordered start to end.
+// Floor 0 is outside; floor changes retain connector metadata for the UI's instructions.
+USTRUCT(BlueprintType)
+struct INNAVI_API FNavigationWorldRoutePoint
+{
+	GENERATED_BODY()
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
+	FVector WorldPosition = FVector::ZeroVector;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
+	int32 Floor = 1;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
+	FString ConnectorId;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
+	EInteriorNavNodeType ConnectorType = EInteriorNavNodeType::PathNode;
+};
 
 // Navigation selection/route-planning state and logic. No UI of its own any more -
 // UInteriorScreenWidget's own Navigation dock panel is the presentation layer; this
@@ -87,6 +104,11 @@ public:
 	// Kept as a C++ method because FNavigationRouteResult is intentionally not a reflected type.
 	void ApplyRouteResult(const FNavigationRouteResult& Result);
 
+	// Replaces the displayed route and endpoints atomically. Does not calculate a NavMesh path.
+	// A failed import leaves the currently displayed route intact and reports the reason.
+	UFUNCTION(BlueprintCallable, Category = "Navigation")
+	bool ApplyWorldRouteResult(const FString& BuildingId, const TArray<FNavigationWorldRoutePoint>& Points);
+
 	// What UInteriorScreenWidget's Navigation panel needs to display itself - kept here
 	// rather than duplicated on the display side, since some of it (CanFindRoute) needs
 	// private state (FSelectedEndpoint::BuildingId) that has no other public accessor.
@@ -139,6 +161,7 @@ public:
 	// working unchanged.
 	bool IsPointerOverPanel() const;
 	void SetPanelBorderForHitTest(UBorder* Border) { HitTestBorder = Border; }
+	void SetToggleForHitTest(UWidget* Toggle) { HitTestToggle = Toggle; }
 
 	// Broadcast whenever anything display-relevant changes (selection mode, a point
 	// accepted/rejected, a route found/cleared, a status message) - UInteriorScreenWidget
@@ -169,6 +192,8 @@ private:
 
 	UPROPERTY()
 	UBorder* HitTestBorder = nullptr;
+	UPROPERTY()
+	UWidget* HitTestToggle = nullptr;
 
 	UPROPERTY()
 	ABuildingGenerator* Generator = nullptr;

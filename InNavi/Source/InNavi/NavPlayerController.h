@@ -119,6 +119,7 @@ public:
 	// Used by the 2D floor plan while a navigation endpoint is armed.
 	bool IsSelectingNavigationPoint() const;
 	void SelectNavigationPoint(FVector2D FootprintPosition, int32 Floor);
+	UFUNCTION(BlueprintPure, Category = "Navigation")
 	UNavigationPanelWidget* GetNavigationPanel() const { return NavigationPanel; }
 
 	// Bind this once to catch every failed action (see FOnActionFailed above) instead of hunting
@@ -1008,6 +1009,9 @@ private:
 	UPROPERTY()
 	UNavigationPanelWidget* NavigationPanel = nullptr;
 
+	UPROPERTY(VisibleAnywhere, Category = "Navigation")
+	class UNavigationRouteVisualization* RouteVisualization = nullptr;
+
 	void SelectBuildingUnderCursor();
 
 	// Build mode (Plan A): click to trace out a new building's footprint on the ground.
@@ -1299,17 +1303,8 @@ private:
 	void ZoomIn3DPreview();
 	void ZoomOut3DPreview();
 
-	// Redraws the navigation route/start/destination markers in the 3D preview as persistent debug
-	// lines/spheres, mirroring InteriorFloorPlanWidget::NativePaint's own route-drawing exactly (same
-	// per-floor filtering - a route segment only draws if BOTH endpoints are on the active floor, an
-	// endpoint marker only draws if it's on the active floor - just in 3D world space instead of Slate
-	// draw elements). Bound to NavigationPanel's own OnStateChanged (see BeginPlay) so it stays live as
-	// the user picks Start/Destination and finds/clears a route, and also called directly from
-	// SetIn3DPreviewMode/SetActiveFloor so entering 3D preview or switching floors immediately shows
-	// whatever route already exists. Flushes and redraws every call rather than tracking individual
-	// primitives to update - simple and correct, at the cost of also clearing
-	// DrawPendingRoomPointMarker3D's own markers if a route redraw happens to land mid-room-drawing (an
-	// edge case not worth solving for a first, "debug line" pass of this feature).
+	// Refreshes the route's dedicated renderer on point/route/preview/floor changes. Includes
+	// direction arrows, endpoints and transition labels without clearing editor drawing guides.
 	UFUNCTION()
 	void RefreshRoute3DVisualization();
 
