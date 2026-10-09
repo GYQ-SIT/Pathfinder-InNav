@@ -731,6 +731,23 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			SpacerSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		}
 
+		NavigationToggleButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_NavigationToggle"));
+		NavigationToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavigationToggleClicked);
+		NavigationToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+		NavigationToggleButton->SetToolTip(MakeToolTipWidget(TEXT("Open or close the navigation panel")));
+		NavigationToggleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_NavigationToggle"));
+		NavigationToggleText->SetJustification(ETextJustify::Center);
+		ApplyStandardFont(NavigationToggleText);
+		USizeBox* NavigationToggleSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		NavigationToggleSize->SetWidthOverride(155.f);
+		NavigationToggleSize->SetHeightOverride(28.f);
+		NavigationToggleSize->SetContent(NavigationToggleText);
+		NavigationToggleButton->SetContent(NavigationToggleSize);
+		UHorizontalBoxSlot* NavigationToggleSlot = MenuBarRow->AddChildToHorizontalBox(NavigationToggleButton);
+		NavigationToggleSlot->SetVerticalAlignment(VAlign_Center);
+		NavigationToggleSlot->SetPadding(FMargin(0.f, 0.f, 10.f, 0.f));
+		RefreshNavigationToggle();
+
 		// A plain text label, not the arrow-glyph icon this used to be - tried the icon-only look, but
 		// after actually using it a text label reads faster/clearer than the arrow, so back to this.
 		BackButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Back"));
@@ -1774,6 +1791,7 @@ void UInteriorScreenWidget::NativeConstruct()
 		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
 		{
 			Nav->SetPanelBorderForHitTest(NavigationPanel);
+			Nav->SetToggleForHitTest(NavigationToggleButton);
 			Nav->OnStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavigationStateChanged);
 		}
 
@@ -1815,6 +1833,7 @@ void UInteriorScreenWidget::NativeConstruct()
 	// Places every dock panel for the first time (Toolbar floating top-left, Floor+Properties
 	// pre-docked top-right) - guarded internally so a later NativeConstruct call (if any) is a no-op.
 	InitializeDefaultDockLayout();
+	RefreshNavigationToggle();
 }
 
 void UInteriorScreenWidget::NativeDestruct()
@@ -1837,6 +1856,7 @@ void UInteriorScreenWidget::NativeDestruct()
 		{
 			Nav->OnStateChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleNavigationStateChanged);
 			Nav->SetPanelBorderForHitTest(nullptr);
+			Nav->SetToggleForHitTest(nullptr);
 		}
 	}
 
@@ -5304,6 +5324,30 @@ void UInteriorScreenWidget::OnWindowLayersCheckChanged(bool bIsChecked)
 	SetDockPanelUserHidden(EDockPanelId::Layers, !bIsChecked);
 }
 
+void UInteriorScreenWidget::OnNavigationToggleClicked()
+{
+	CloseMenuDropdowns();
+	SetDockPanelUserHidden(EDockPanelId::Navigation, !bDockPanelUserHidden[(int32)EDockPanelId::Navigation]);
+}
+
+void UInteriorScreenWidget::RefreshNavigationToggle()
+{
+	const bool bShown = !bDockPanelUserHidden[(int32)EDockPanelId::Navigation];
+	if (NavigationToggleText)
+	{
+		NavigationToggleText->SetText(FText::FromString(bShown ? TEXT("Hide Navigation") : TEXT("Show Navigation")));
+	}
+	if (NavigationToggleButton)
+	{
+		NavigationToggleButton->SetBackgroundColor(bShown
+			? FLinearColor(0.2f, 0.75f, 0.3f, 1.f) : FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+	}
+	if (WindowNavigationCheckbox && WindowNavigationCheckbox->IsChecked() != bShown)
+	{
+		WindowNavigationCheckbox->SetIsChecked(bShown);
+	}
+}
+
 void UInteriorScreenWidget::OnWindowNavigationCheckChanged(bool bIsChecked)
 {
 	SetDockPanelUserHidden(EDockPanelId::Navigation, !bIsChecked);
@@ -5410,6 +5454,17 @@ void UInteriorScreenWidget::SetDockPanelUserHidden(EDockPanelId Id, bool bHidden
 		return;
 	}
 	bDockPanelUserHidden[Index] = bHidden;
+	if (Id == EDockPanelId::Navigation)
+	{
+		if (bHidden)
+		{
+			if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+			{
+				if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel()) Nav->CancelSelection();
+			}
+		}
+		RefreshNavigationToggle();
+	}
 
 	if (Id == EDockPanelId::Properties)
 	{
