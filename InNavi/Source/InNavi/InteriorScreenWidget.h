@@ -537,6 +537,10 @@ private:
 
 	UFUNCTION()
 	void HandleNavDestinationRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+	UFUNCTION()
+	void HandleDestinationSearchChanged(const FText& Text);
+	UFUNCTION()
+	void OnApplyRoomTagsClicked();
 
 	void RefreshNavRoomDropdowns();
 
@@ -967,6 +971,13 @@ private:
 
 	UPROPERTY()
 	UEditableTextBox* RoomNameTextBox = nullptr;
+	UPROPERTY()
+	UVerticalBox* RoomTagsFields = nullptr;
+	UPROPERTY() USizeBox* RoomTagsFieldsSizeBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* RoomTagsTextBox = nullptr;
+	UPROPERTY()
+	UButton* ApplyRoomTagsButton = nullptr;
 
 	UPROPERTY()
 	UButton* ApplyRoomButton = nullptr;
@@ -1028,6 +1039,10 @@ private:
 
 	UPROPERTY()
 	UComboBoxString* NavDestinationRoomComboBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* DestinationSearchBox = nullptr;
+	UPROPERTY()
+	UTextBlock* DestinationSearchResultsText = nullptr;
 
 	// Same as NavStartRoomBorder, tinted red for Destination.
 	UPROPERTY()

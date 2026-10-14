@@ -3,6 +3,7 @@
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
+#include "NavigationSearchUtils.h"
 #include "PolyBuilding.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -355,12 +356,28 @@ TArray<UNavigationPanelWidget::FNavigationRoomOption> UNavigationPanelWidget::Ge
 				continue;
 			}
 			FNavigationRoomOption Option;
+			Option.RoomId = Room->RoomId;
+			Option.Tags = Room->RoomTags;
 			Option.RoomName = Room->RoomName.IsEmpty() ? Room->RoomId : Room->RoomName;
 			Option.Floor = Floor;
 			Option.Centroid = ComputePolygonCentroid(Room->GetFootprint());
 			Options.Add(Option);
 		}
 	}
+	return Options;
+}
+
+TArray<UNavigationPanelWidget::FNavigationRoomOption> UNavigationPanelWidget::SearchDestinations(const FString& Query) const
+{
+	TArray<FNavigationRoomOption> Options = GetSelectableRooms();
+	Options.RemoveAll([&Query](const FNavigationRoomOption& Option)
+	{
+		return !NavigationSearch::Matches(Query, Option.GetDisplayLabel() + TEXT(" ") + FString::Join(Option.Tags, TEXT(" ")));
+	});
+	Options.Sort([](const FNavigationRoomOption& A, const FNavigationRoomOption& B)
+	{
+		return A.GetDisplayLabel().Compare(B.GetDisplayLabel(), ESearchCase::IgnoreCase) < 0;
+	});
 	return Options;
 }
 

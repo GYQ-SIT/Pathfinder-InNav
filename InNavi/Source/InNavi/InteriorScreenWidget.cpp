@@ -1,4 +1,5 @@
 #include "InteriorScreenWidget.h"
+#include "NavigationSearchUtils.h"
 
 #include "AudioFileRowWidget.h"
 #include "ConfirmDialogWidget.h"
@@ -1260,6 +1261,28 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UVerticalBoxSlot* ApplyRoomSlot = RoomFieldsBox->AddChildToVerticalBox(ApplyRoomButton);
 		ApplyRoomSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
 
+		RoomTagsFields = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RoomTagsFields"));
+		RoomTagsFieldsSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		RoomTagsFieldsSizeBox->SetWidthOverride(StandardButtonWidth);
+		RoomTagsFieldsSizeBox->SetContent(RoomTagsFields);
+		RoomFieldsBox->AddChildToVerticalBox(RoomTagsFieldsSizeBox);
+		UTextBlock* TagsLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_RoomTagsLabel"));
+		TagsLabel->SetText(FText::FromString(TEXT("Search tags (comma separated)")));
+		ApplyStandardTextWrap(TagsLabel);
+		RoomTagsFields->AddChildToVerticalBox(TagsLabel)->SetPadding(FMargin(0.f, 8.f, 0.f, 4.f));
+		RoomTagsTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_RoomTags"));
+		ApplyStandardFont(RoomTagsTextBox);
+		RoomTagsTextBox->SetHintText(FText::FromString(TEXT("e.g. laboratory, teaching")));
+		RoomTagsFields->AddChildToVerticalBox(RoomTagsTextBox);
+		ApplyRoomTagsButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_ApplyRoomTags"));
+		UTextBlock* ApplyTagsLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_ApplyRoomTags"));
+		ApplyTagsLabel->SetText(FText::FromString(TEXT("Apply Tags")));
+		ApplyTagsLabel->SetJustification(ETextJustify::Center);
+		ApplyStandardTextWrap(ApplyTagsLabel);
+		ApplyRoomTagsButton->SetContent(ApplyTagsLabel);
+		ApplyRoomTagsButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyRoomTagsClicked);
+		RoomTagsFields->AddChildToVerticalBox(ApplyRoomTagsButton)->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
+
 		// -- Connector (elevator/stairs/escalator) fields --
 		ConnectorFieldsBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ConnectorFieldsBox"));
 		ConnectorFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
@@ -1453,7 +1476,19 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		NavStartRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavStartRoom"), TEXT("Start Room"), NavStartRoomBorder);
 		NavStartRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavStartRoomChanged);
+		// Search the destination list across every floor of the loaded building.
+		DestinationSearchBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_DestinationSearch"));
+		ApplyStandardFont(DestinationSearchBox);
+		DestinationSearchBox->SetHintText(FText::FromString(TEXT("Search destinations by name, ID or tag")));
+		DestinationSearchBox->OnTextChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleDestinationSearchChanged);
+		USizeBox* DestinationSearchSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		DestinationSearchSize->SetWidthOverride(StandardButtonWidth);
+		DestinationSearchSize->SetContent(DestinationSearchBox);
+		NavStack->AddChildToVerticalBox(DestinationSearchSize)->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
 		NavDestinationRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavDestinationRoom"), TEXT("Destination Room"), NavDestinationRoomBorder);
+		DestinationSearchResultsText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_DestinationSearchResults"));
+		ApplyStandardTextWrap(DestinationSearchResultsText);
+		NavStack->AddChildToVerticalBox(DestinationSearchResultsText)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 		NavDestinationRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavDestinationRoomChanged);
 
 		auto AddNavButton = [this, NavStack, ApplyStandardTextWrap](const TCHAR* Name, const TCHAR* Label, UTextBlock*& OutLabel) -> UButton*
@@ -3579,6 +3614,10 @@ void UInteriorScreenWidget::HandleInteriorContentChanged()
 {
 	RefreshLayersList();
 	RefreshNavRoomDropdowns();
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (RoomTagsTextBox) RoomTagsTextBox->SetText(FText::FromString(FString::Join(PC->GetSelectedRoomTags(), TEXT(", "))));
+	}
 }
 
 void UInteriorScreenWidget::HandlePreviewModeChanged(bool bIsActive)
@@ -3682,6 +3721,7 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 	// a-side padding) - see ComputePanelButtonWidth.
 	const float FloorButtonWidth = ComputePanelButtonWidth(EDockPanelId::Floor);
 	const float PropertiesButtonWidth = ComputePanelButtonWidth(EDockPanelId::Properties);
+	if (RoomTagsFieldsSizeBox) RoomTagsFieldsSizeBox->SetWidthOverride(PropertiesButtonWidth);
 
 	auto ResizeButton = [](UButton* Button, float Width)
 	{
@@ -3776,6 +3816,10 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 	ResizeButton(NavFindRouteButton, NavigationButtonWidth);
 	ResizeButton(NavClearRouteButton, NavigationButtonWidth);
 	ResizeButton(NavToggleRouteButton, NavigationButtonWidth);
+	if (DestinationSearchBox)
+	{
+		if (USizeBox* Size = Cast<USizeBox>(DestinationSearchBox->GetParent())) Size->SetWidthOverride(NavigationButtonWidth);
+	}
 	if (NavStartRoomComboBox)
 	{
 		if (USizeBox* SizeBox = Cast<USizeBox>(NavStartRoomComboBox->GetParent()))
@@ -3942,6 +3986,8 @@ void UInteriorScreenWidget::HandleSelectedRoomChanged(FString RoomId)
 	{
 		RoomNameTextBox->SetText(FText::FromString(PC->GetSelectedRoomName()));
 	}
+	if (RoomTagsFields) RoomTagsFields->SetVisibility(PC->IsSelectedRoomClosedLoop() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	if (RoomTagsTextBox) RoomTagsTextBox->SetText(FText::FromString(FString::Join(PC->GetSelectedRoomTags(), TEXT(", "))));
 
 	RefreshPropertiesPanelVisibility();
 }
@@ -3953,6 +3999,17 @@ void UInteriorScreenWidget::OnApplyRoomClicked()
 		if (RoomNameTextBox)
 		{
 			PC->SetSelectedRoomName(RoomNameTextBox->GetText().ToString());
+		}
+	}
+}
+
+void UInteriorScreenWidget::OnApplyRoomTagsClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (RoomTagsTextBox && PC->SetSelectedRoomTags(NavigationSearch::ParseTags(RoomTagsTextBox->GetText().ToString())))
+		{
+			RoomTagsTextBox->SetText(FText::FromString(FString::Join(PC->GetSelectedRoomTags(), TEXT(", "))));
 		}
 	}
 }
@@ -4715,14 +4772,32 @@ void UInteriorScreenWidget::RefreshNavRoomDropdowns()
 		return;
 	}
 
+	const FString PreviousStart = NavStartRoomComboBox->GetSelectedOption();
+	const FString PreviousDestination = NavDestinationRoomComboBox->GetSelectedOption();
 	NavStartRoomComboBox->ClearOptions();
 	NavDestinationRoomComboBox->ClearOptions();
 	for (const UNavigationPanelWidget::FNavigationRoomOption& Option : Nav->GetSelectableRooms())
 	{
 		const FString Label = Option.GetDisplayLabel();
 		NavStartRoomComboBox->AddOption(Label);
-		NavDestinationRoomComboBox->AddOption(Label);
 	}
+	const TArray<UNavigationPanelWidget::FNavigationRoomOption> Matches = Nav->SearchDestinations(
+		DestinationSearchBox ? DestinationSearchBox->GetText().ToString() : FString());
+	for (const auto& Option : Matches) NavDestinationRoomComboBox->AddOption(Option.GetDisplayLabel());
+	if (NavStartRoomComboBox->FindOptionIndex(PreviousStart) != INDEX_NONE) NavStartRoomComboBox->SetSelectedOption(PreviousStart);
+	if (NavDestinationRoomComboBox->FindOptionIndex(PreviousDestination) != INDEX_NONE) NavDestinationRoomComboBox->SetSelectedOption(PreviousDestination);
+	NavDestinationRoomComboBox->SetIsEnabled(!Matches.IsEmpty());
+	if (DestinationSearchResultsText)
+	{
+		DestinationSearchResultsText->SetText(FText::FromString(Matches.IsEmpty()
+			? TEXT("No matching destinations. Try another name or tag.")
+			: FString::Printf(TEXT("%d destinations in this building. Choose a room above."), Matches.Num())));
+	}
+}
+
+void UInteriorScreenWidget::HandleDestinationSearchChanged(const FText& Text)
+{
+	RefreshNavRoomDropdowns();
 }
 
 void UInteriorScreenWidget::RefreshBuildingSwitcher()

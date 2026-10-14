@@ -67,6 +67,9 @@ public:
 	UPROPERTY()
 	FString RoomName;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Room")
+	TArray<FString> RoomTags;
+
 	UPROPERTY()
 	int32 FloorLevel = 1;
 

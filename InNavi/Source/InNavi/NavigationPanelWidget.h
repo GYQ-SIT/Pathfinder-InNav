@@ -137,21 +137,22 @@ public:
 	// room can have more than one door and no single door is "the" point that represents it.
 	struct FNavigationRoomOption
 	{
+		FString RoomId;
 		FString RoomName;
+		TArray<FString> Tags;
 		int32 Floor = 1;
 		FVector2D Centroid = FVector2D::ZeroVector;
 
 		// Shared by both the dropdown's own population (UInteriorScreenWidget) and matching a
-		// selection back to its option (SetStartToRoom/SetDestinationToRoom) - one format, so they
-		// can never drift out of sync with each other. Always includes the floor, not just when
-		// names collide, so the format never has to change and pick a room genuinely still isn't
-		// ambiguous when two floors happen to reuse the same room name.
-		FString GetDisplayLabel() const { return FString::Printf(TEXT("%s (Floor %d)"), *RoomName, Floor); }
+		// selection back to its option (SetStartToRoom/SetDestinationToRoom). Stable room IDs and
+		// floors disambiguate names reused by copied rooms or on different floors.
+		FString GetDisplayLabel() const { return FString::Printf(TEXT("%s [%s] (Floor %d)"), *RoomName, *RoomId, Floor); }
 	};
 
 	// Every closed-loop room (walls/standalone partitions are excluded - see AInteriorRoom::
 	// IsClosedLoop) across every floor of the currently loaded building. Empty if nothing's loaded.
 	TArray<FNavigationRoomOption> GetSelectableRooms() const;
+	TArray<FNavigationRoomOption> SearchDestinations(const FString& Query) const;
 
 	// Sets Start/Destination directly to the named room's centroid, bypassing the click-to-pick flow
 	// (and cancelling one if it was in progress) - what the Navigation panel's room dropdowns call.

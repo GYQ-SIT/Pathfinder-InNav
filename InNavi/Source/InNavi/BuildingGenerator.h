@@ -106,6 +106,14 @@ public:
 	// codebase hides a whole building, e.g. NavPlayerController's other-buildings-hidden-in-3D-preview).
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void SetCampusBuildingsVisible(bool bVisible);
+	void SetBuildingFilter(const FString& Query, int32 MinimumFloors, int32 MaximumFloors);
+	void ApplyBuildingFilter();
+	bool MatchesBuildingFilter(const APolyBuilding& Building) const;
+	TArray<APolyBuilding*> GetFilteredBuildings() const;
+	FString GetBuildingFilterText() const { return BuildingFilterText; }
+	int32 GetBuildingFilterMinimumFloors() const { return BuildingFilterMinimumFloors; }
+	int32 GetBuildingFilterMaximumFloors() const { return BuildingFilterMaximumFloors; }
+	bool AreCampusBuildingsVisible() const { return bCampusBuildingsVisible; }
 
 	// Shows/hides every spawned context-building actor at once - the filter panel's "Non-Campus"
 	// building-visibility checkbox. These are visual-only placeholders (see
@@ -207,6 +215,11 @@ private:
 	TMap<FString, APolyBuilding*> BuildingsById;
 
 	TMap<FString, TSharedPtr<FJsonObject>> InteriorDataById;
+
+	FString BuildingFilterText;
+	int32 BuildingFilterMinimumFloors = 0;
+	int32 BuildingFilterMaximumFloors = 0;
+	bool bCampusBuildingsVisible = true;
 
 	// The lat/lon centroid LoadBuildingsFromDatabase projects around, stashed so
 	// LoadRoadsAndPOIsFromDatabase can project roads/POIs into that exact same local-meters space

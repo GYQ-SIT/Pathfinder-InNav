@@ -2,6 +2,7 @@
 
 
 #include "BuildingGenerator.h"
+#include "NavigationSearchUtils.h"
 #include "PolyBuilding.h"
 #include "RoadSegmentActor.h"
 #include "POIMarkerActor.h"
@@ -745,10 +746,42 @@ void ABuildingGenerator::ClearAllContextBuildings()
 
 void ABuildingGenerator::SetCampusBuildingsVisible(bool bVisible)
 {
+	bCampusBuildingsVisible = bVisible;
+	ApplyBuildingFilter();
+}
+
+void ABuildingGenerator::SetBuildingFilter(const FString& Query, int32 MinimumFloors, int32 MaximumFloors)
+{
+	BuildingFilterText = Query.TrimStartAndEnd();
+	BuildingFilterMinimumFloors = FMath::Max(0, MinimumFloors);
+	BuildingFilterMaximumFloors = MaximumFloors > 0 ? FMath::Max(BuildingFilterMinimumFloors, MaximumFloors) : 0;
+	ApplyBuildingFilter();
+}
+
+bool ABuildingGenerator::MatchesBuildingFilter(const APolyBuilding& Building) const
+{
+	return bCampusBuildingsVisible && Building.GetFloorCount() >= BuildingFilterMinimumFloors
+		&& (BuildingFilterMaximumFloors == 0 || Building.GetFloorCount() <= BuildingFilterMaximumFloors)
+		&& NavigationSearch::Matches(BuildingFilterText, Building.BuildingName + TEXT(" ") + Building.BuildingId);
+}
+
+TArray<APolyBuilding*> ABuildingGenerator::GetFilteredBuildings() const
+{
+	TArray<APolyBuilding*> Result;
+	for (const auto& Pair : BuildingsById)
+	{
+		if (Pair.Value && MatchesBuildingFilter(*Pair.Value)) Result.Add(Pair.Value);
+	}
+	return Result;
+}
+
+void ABuildingGenerator::ApplyBuildingFilter()
+{
 	for (const TPair<FString, APolyBuilding*>& Pair : BuildingsById)
 	{
 		if (APolyBuilding* Building = Pair.Value)
 		{
+			const bool bVisible = MatchesBuildingFilter(*Building);
 			Building->SetActorHiddenInGame(!bVisible);
 			Building->SetActorEnableCollision(bVisible);
 		}
@@ -850,6 +883,9 @@ APolyBuilding* ABuildingGenerator::SpawnBuildingFromData(const FString& Id, cons
 		NewBuilding->BuildFromFootprint(Footprint, Scale, Offset, FloorCount, FloorHeight);
 		UsedBuildingIds.Add(Id);
 		BuildingsById.Add(Id, NewBuilding);
+		const bool bVisible = MatchesBuildingFilter(*NewBuilding);
+		NewBuilding->SetActorHiddenInGame(!bVisible);
+		NewBuilding->SetActorEnableCollision(bVisible);
 	}
 
 	return NewBuilding;

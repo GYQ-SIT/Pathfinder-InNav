@@ -10,6 +10,7 @@ class UBorder;
 class UButton;
 class UCanvasPanelSlot;
 class UCheckBox;
+class UComboBoxString;
 class UEditableTextBox;
 class UScrollBox;
 class USlider;
@@ -205,6 +206,13 @@ private:
 	// today's behavior before this filter existed).
 	UFUNCTION()
 	void OnBuildingCampusCheckChanged(bool bIsChecked);
+	UFUNCTION() void HandleBuildingSearchChanged(const FText& Text);
+	UFUNCTION() void HandleBuildingFloorFilterChanged(FString Item, ESelectInfo::Type Type);
+	UFUNCTION() void HandleFilteredBuildingChanged(FString Item, ESelectInfo::Type Type);
+	UFUNCTION() void OnResetBuildingFiltersClicked();
+	UFUNCTION() UWidget* GenerateBuildingFilterItem(FString Item);
+	void ApplyBuildingFilters();
+	void RefreshBuildingFilterDisplay();
 	UFUNCTION()
 	void OnBuildingNonCampusCheckChanged(bool bIsChecked);
 
@@ -383,6 +391,13 @@ private:
 	// Building-visibility filter's own checkboxes ("Buildings" section).
 	UPROPERTY()
 	UCheckBox* BuildingCampusCheckbox = nullptr;
+	UPROPERTY() UEditableTextBox* BuildingSearchBox = nullptr;
+	UPROPERTY() UComboBoxString* BuildingFloorFilter = nullptr;
+	UPROPERTY() UComboBoxString* FilteredBuildingComboBox = nullptr;
+	UPROPERTY() UTextBlock* BuildingFilterResultsText = nullptr;
+	TMap<FString, FString> CachedBuildingOptions;
+	bool bUpdatingBuildingFilters = false;
+	float BuildingFilterRefreshElapsed = 0.f;
 	UPROPERTY()
 	UCheckBox* BuildingNonCampusCheckbox = nullptr;
 
