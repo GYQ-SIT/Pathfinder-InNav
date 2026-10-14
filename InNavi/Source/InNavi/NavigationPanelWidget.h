@@ -77,6 +77,14 @@ public:
 	const FNavigationRoutePoint& GetStart() const { return Start.Point; }
 	const FNavigationRoutePoint& GetDestination() const { return Destination.Point; }
 	const TArray<FNavigationRoutePoint>& GetRoutePoints() const { return RoutePoints; }
+	// Presentation visibility is independent of the stored route and the navigation dock.
+	UFUNCTION(BlueprintPure, Category = "Navigation")
+	bool IsRouteGuidanceVisible() const { return bRouteGuidanceVisible; }
+	UFUNCTION(BlueprintCallable, Category = "Navigation")
+	void SetRouteGuidanceVisible(bool bVisible);
+	UFUNCTION(BlueprintCallable, Category = "Navigation")
+	void ToggleRouteGuidance();
+	bool CanToggleRouteGuidance() const { return HasStart() || HasDestination() || !RoutePoints.IsEmpty(); }
 	bool IsStartOutside() const { return Start.bValid && Start.Point.Floor == OutdoorFloor; }
 	bool IsDestinationOutside() const { return Destination.bValid && Destination.Point.Floor == OutdoorFloor; }
 	bool WasStartSetViaDropdown() const { return Start.bValid && Start.bSetViaDropdown; }
@@ -208,4 +216,5 @@ private:
 	ENavigationMessageKind StatusKind = ENavigationMessageKind::Instruction;
 	ENavigationSelectionMode SelectionMode = ENavigationSelectionMode::None;
 	bool bLastFindRouteFailed = false;
+	bool bRouteGuidanceVisible = true;
 };

@@ -2672,7 +2672,8 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 		NavigationPanel->GetRoutePoints(),
 		NavigationPanel->HasStart() ? &NavigationPanel->GetStart() : nullptr,
 		NavigationPanel->HasDestination() ? &NavigationPanel->GetDestination() : nullptr,
-		Building->BuildingOffset, Generator->GetScale(), Building->GetFloorHeight(), InteriorGen->GetActiveFloor()));
+		Building->BuildingOffset, Generator->GetScale(), Building->GetFloorHeight(), InteriorGen->GetActiveFloor(),
+		NavigationPanel->IsRouteGuidanceVisible()));
 }
 
 void ANavPlayerController::OnLeftMouseDown3DEdit()

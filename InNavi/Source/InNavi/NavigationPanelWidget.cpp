@@ -211,6 +211,23 @@ void UNavigationPanelWidget::RequestClearRoute()
 	SetStatusMessage(TEXT("Route and selected points cleared."), ENavigationMessageKind::Success);
 }
 
+void UNavigationPanelWidget::SetRouteGuidanceVisible(bool bVisible)
+{
+	if (bRouteGuidanceVisible != bVisible)
+	{
+		bRouteGuidanceVisible = bVisible;
+		BroadcastStateChanged();
+	}
+}
+
+void UNavigationPanelWidget::ToggleRouteGuidance()
+{
+	if (CanToggleRouteGuidance())
+	{
+		SetRouteGuidanceVisible(!bRouteGuidanceVisible);
+	}
+}
+
 void UNavigationPanelWidget::SetNavigationContext(ABuildingGenerator* InGenerator, AInteriorGenerator* InInterior)
 {
 	Generator = InGenerator;
@@ -304,6 +321,7 @@ void UNavigationPanelWidget::SetEndpoint(FSelectedEndpoint& Endpoint, const FNav
 	Endpoint.BuildingId = BuildingId;
 	Endpoint.bSetViaDropdown = bSetViaDropdown;
 	RoutePoints.Reset();
+	bRouteGuidanceVisible = true;
 	bLastFindRouteFailed = false;
 	const FString Message = bRouteWasVisible
 		? FString::Printf(TEXT("%s changed to %s. Route cleared; press Find Route again."),
@@ -442,6 +460,7 @@ void UNavigationPanelWidget::ApplyRouteResult(const FNavigationRouteResult& Resu
 	}
 
 	RoutePoints = Result.Points;
+	bRouteGuidanceVisible = true;
 	bLastFindRouteFailed = false;
 	SetStatusMessage(FString::Printf(TEXT("Route found: %d points."), RoutePoints.Num()),
 		ENavigationMessageKind::Success);
@@ -493,6 +512,7 @@ bool UNavigationPanelWidget::ApplyWorldRouteResult(const FString& BuildingId,
 
 void UNavigationPanelWidget::ClearAll()
 {
+	bRouteGuidanceVisible = true;
 	SelectionMode = ENavigationSelectionMode::None;
 	Start = FSelectedEndpoint();
 	Destination = FSelectedEndpoint();

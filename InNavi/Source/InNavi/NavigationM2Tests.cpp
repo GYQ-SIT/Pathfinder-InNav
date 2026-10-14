@@ -46,6 +46,11 @@ bool FNavigationM2ToggleTest::RunTest(const FString& Parameters)
 	Button->OnClicked.Broadcast();
 	Button->OnClicked.Broadcast();
 	TestEqual(TEXT("Repeated toggle reliably closes the dock"), Panel->GetVisibility(), ESlateVisibility::Collapsed);
+	UButton* RouteToggle = Cast<UButton>(Screen->GetWidgetFromName(TEXT("Btn_NavToggleRoute")));
+	if (TestNotNull(TEXT("Route visibility has its own control"), RouteToggle))
+	{
+		TestFalse(TEXT("Route toggle starts disabled without navigation data"), RouteToggle->GetIsEnabled());
+	}
 	return true;
 }
 

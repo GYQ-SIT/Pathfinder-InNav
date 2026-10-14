@@ -1487,6 +1487,10 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		NavFindRouteButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavFindRouteClicked);
 		NavClearRouteButton = AddNavButton(TEXT("Btn_NavClearRoute"), TEXT("Clear Route"), UnusedClearRouteLabel);
 		NavClearRouteButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavClearRouteClicked);
+		NavToggleRouteButton = AddNavButton(TEXT("Btn_NavToggleRoute"), TEXT("Hide Route"), NavToggleRouteButtonLabel);
+		NavToggleRouteButton->SetIsEnabled(false);
+		NavToggleRouteButton->SetToolTip(MakeToolTipWidget(TEXT("Show or hide route lines, direction arrows, markers and instructions without clearing your route")));
+		NavToggleRouteButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavToggleRouteClicked);
 
 		NavStatusText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_NavStatus"));
 		ApplyStandardTextWrap(NavStatusText);
@@ -3771,6 +3775,7 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 	ResizeButton(NavSetDestinationButton, NavigationButtonWidth);
 	ResizeButton(NavFindRouteButton, NavigationButtonWidth);
 	ResizeButton(NavClearRouteButton, NavigationButtonWidth);
+	ResizeButton(NavToggleRouteButton, NavigationButtonWidth);
 	if (NavStartRoomComboBox)
 	{
 		if (USizeBox* SizeBox = Cast<USizeBox>(NavStartRoomComboBox->GetParent()))
@@ -4445,6 +4450,17 @@ void UInteriorScreenWidget::HandleNavigationStateChanged()
 	RefreshNavigationPanelDisplay();
 }
 
+void UInteriorScreenWidget::OnNavToggleRouteClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->ToggleRouteGuidance();
+		}
+	}
+}
+
 void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 {
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
@@ -4516,6 +4532,15 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 	{
 		NavClearRouteButton->SetIsEnabled(Nav->CanClearRoute());
 	}
+	if (NavToggleRouteButton)
+	{
+		NavToggleRouteButton->SetIsEnabled(Nav->CanToggleRouteGuidance());
+	}
+	if (NavToggleRouteButtonLabel)
+	{
+		NavToggleRouteButtonLabel->SetText(FText::FromString(Nav->IsRouteGuidanceVisible()
+			? TEXT("Hide Route") : TEXT("Show Route")));
+	}
 	if (NavContextText)
 	{
 		const FString BuildingId = PC->GetLoadedBuildingId();
@@ -4531,6 +4556,7 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 	if (NavRouteDetailsText)
 	{
 		NavRouteDetailsText->SetText(FText::FromString(Nav->BuildRouteDetails()));
+		NavRouteDetailsText->SetVisibility(Nav->IsRouteGuidanceVisible() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 }
 

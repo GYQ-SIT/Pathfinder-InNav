@@ -53,9 +53,10 @@ UNavigationRouteVisualization::UNavigationRouteVisualization()
 
 FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigationRoutePoint>& Route,
 	const FNavigationRoutePoint* Start, const FNavigationRoutePoint* Destination,
-	FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor)
+	FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible)
 {
 	FNavigation3DView View;
+	if (!bGuidanceVisible) return View;
 	auto WorldPoint = [&](const FNavigationRoutePoint& Point)
 	{
 		return NavigationWorldPoint(Point, BuildingOffset, Scale, FloorHeight);
@@ -118,6 +119,27 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 		View.Labels.Add({ View.Destination.GetValue() + FVector(0, 0, 55), TEXT("Destination"), FColor::Red });
 	}
 	return View;
+}
+
+TArray<FNavigationDirectionArrow2D> UNavigationRouteVisualization::BuildDirectionArrows2D(FVector2D From, FVector2D To)
+{
+	TArray<FNavigationDirectionArrow2D> Arrows;
+	const FVector2D Delta = To - From;
+	const double Length = Delta.Size();
+	if (!FMath::IsFinite(Length) || Length < 12.0) return Arrows;
+	const FVector2D Direction = Delta / Length;
+	const FVector2D Side(-Direction.Y, Direction.X);
+	const int32 Count = FMath::Clamp(FMath::CeilToInt(Length / 80.0), 1, 32);
+	const double HalfLength = FMath::Min(12.0, Length / (Count * 4.0));
+	const double HeadSize = FMath::Min(8.0, HalfLength);
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		const FVector2D Center = FMath::Lerp(From, To, (Index + 0.5) / Count);
+		const FVector2D Tip = Center + Direction * HalfLength;
+		Arrows.Add({ Tip, Tip - Direction * HeadSize + Side * HeadSize * 0.65,
+			Tip - Direction * HeadSize - Side * HeadSize * 0.65 });
+	}
+	return Arrows;
 }
 
 void UNavigationRouteVisualization::ClearRoute()

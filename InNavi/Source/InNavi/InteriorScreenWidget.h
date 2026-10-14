@@ -475,6 +475,9 @@ private:
 	void OnNavClearRouteClicked();
 
 	UFUNCTION()
+	void OnNavToggleRouteClicked();
+
+	UFUNCTION()
 	void HandleNavigationStateChanged();
 
 	void RefreshNavigationPanelDisplay();
@@ -1047,6 +1050,12 @@ private:
 
 	UPROPERTY()
 	UButton* NavClearRouteButton = nullptr;
+
+	UPROPERTY()
+	UButton* NavToggleRouteButton = nullptr;
+
+	UPROPERTY()
+	UTextBlock* NavToggleRouteButtonLabel = nullptr;
 
 	UPROPERTY()
 	UTextBlock* NavStatusText = nullptr;
