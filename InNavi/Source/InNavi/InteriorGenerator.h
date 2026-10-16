@@ -65,6 +65,8 @@ public:
 	// at rooms whose building actor is about to be destroyed.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void ClearLoadedInterior();
+	// Room search data changes with edits, loads, history restoration, and live geometry previews.
+	uint64 GetRoomSearchRevision() const { return RoomSearchRevision; }
 
 	// Shows only the given floor's rooms, hides the rest.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
@@ -374,6 +376,7 @@ private:
 	FString LoadedBuildingId;
 
 	int32 ActiveFloor = 1;
+	uint64 RoomSearchRevision = 0;
 
 	// Rooms spawned for the currently loaded building, keyed by floor level.
 	UPROPERTY()

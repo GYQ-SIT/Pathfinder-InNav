@@ -466,7 +466,8 @@ public:
 	int32 GetBuildingFilterMinimumFloors() const;
 	int32 GetBuildingFilterMaximumFloors() const;
 	bool AreCampusBuildingsVisible() const;
-	TMap<FString, FString> GetFilteredBuildingOptions() const;
+	const TMap<FString, FString>& GetFilteredBuildingOptions() const;
+	uint64 GetBuildingResultsRevision() const;
 	int32 GetEditableBuildingCount() const;
 	bool SelectBuildingById(const FString& BuildingId);
 	UFUNCTION(BlueprintCallable, Category = "Building")

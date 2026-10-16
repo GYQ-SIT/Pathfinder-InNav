@@ -142,16 +142,20 @@ public:
 		TArray<FString> Tags;
 		int32 Floor = 1;
 		FVector2D Centroid = FVector2D::ZeroVector;
+		// Built with the centroid when the room index changes; queries reuse these strings.
+		FString DisplayLabel;
+		FString SearchableText;
 
 		// Shared by both the dropdown's own population (UInteriorScreenWidget) and matching a
 		// selection back to its option (SetStartToRoom/SetDestinationToRoom). Stable room IDs and
 		// floors disambiguate names reused by copied rooms or on different floors.
-		FString GetDisplayLabel() const { return FString::Printf(TEXT("%s [%s] (Floor %d)"), *RoomName, *RoomId, Floor); }
+		const FString& GetDisplayLabel() const { return DisplayLabel; }
 	};
 
 	// Every closed-loop room (walls/standalone partitions are excluded - see AInteriorRoom::
 	// IsClosedLoop) across every floor of the currently loaded building. Empty if nothing's loaded.
-	TArray<FNavigationRoomOption> GetSelectableRooms() const;
+	// The cached array is refreshed by the next query after an edit; copy it if keeping a snapshot.
+	const TArray<FNavigationRoomOption>& GetSelectableRooms() const;
 	TArray<FNavigationRoomOption> SearchDestinations(const FString& Query) const;
 
 	// Sets Start/Destination directly to the named room's centroid, bypassing the click-to-pick flow
@@ -183,6 +187,13 @@ protected:
 	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 
 private:
+	void RefreshRoomSearchIndex() const;
+	mutable TArray<FNavigationRoomOption> CachedRooms;
+	mutable TArray<int32> SortedDestinationIndices;
+	mutable uint64 IndexedRoomSearchRevision = MAX_uint64;
+	mutable TWeakObjectPtr<APolyBuilding> IndexedBuilding;
+	mutable int32 IndexedFloorCount = 0;
+
 	struct FSelectedEndpoint
 	{
 		bool bValid = false;

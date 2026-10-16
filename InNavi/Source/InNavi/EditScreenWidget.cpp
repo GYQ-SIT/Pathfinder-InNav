@@ -772,10 +772,11 @@ void UEditScreenWidget::NativeDestruct()
 void UEditScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
-	BuildingFilterRefreshElapsed += InDeltaTime;
-	if (BuildingFilterRefreshElapsed >= 0.5f)
+	// Changes only bump a counter. Batch loads therefore cause one UI rebuild on the next frame,
+	// while an idle frame does no building scan, label formatting, sorting, or option comparison.
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+		PC && DisplayedBuildingResultsRevision != PC->GetBuildingResultsRevision())
 	{
-		BuildingFilterRefreshElapsed = 0.f;
 		RefreshBuildingFilterDisplay();
 	}
 
@@ -1389,26 +1390,31 @@ void UEditScreenWidget::RefreshBuildingFilterDisplay()
 {
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
 	if (!PC || !FilteredBuildingComboBox) return;
-	const TMap<FString, FString> Options = PC->GetFilteredBuildingOptions();
-	if (!Options.OrderIndependentCompareEqual(CachedBuildingOptions))
+	if (DisplayedBuildingResultsRevision != PC->GetBuildingResultsRevision())
 	{
-		CachedBuildingOptions = Options;
-		FilteredBuildingComboBox->ClearOptions();
-		TArray<FString> Labels;
-		Options.GetKeys(Labels);
-		Labels.Sort();
-		for (const FString& Label : Labels) FilteredBuildingComboBox->AddOption(Label);
+		const TMap<FString, FString>& Options = PC->GetFilteredBuildingOptions();
+		if (!Options.OrderIndependentCompareEqual(CachedBuildingOptions))
+		{
+			CachedBuildingOptions = Options;
+			FilteredBuildingComboBox->ClearOptions();
+			TArray<FString> Labels;
+			Options.GetKeys(Labels);
+			Labels.Sort();
+			for (const FString& Label : Labels) FilteredBuildingComboBox->AddOption(Label);
+		}
+		FilteredBuildingComboBox->SetIsEnabled(!Options.IsEmpty());
+		if (BuildingFilterResultsText)
+		{
+			BuildingFilterResultsText->SetText(FText::FromString(Options.IsEmpty() ? TEXT("No matching editable buildings.")
+				: FString::Printf(TEXT("%d / %d editable buildings. Select one above."), Options.Num(), PC->GetEditableBuildingCount())));
+		}
+		DisplayedBuildingResultsRevision = PC->GetBuildingResultsRevision();
 	}
-	FilteredBuildingComboBox->SetIsEnabled(!Options.IsEmpty());
 	FString SelectedLabel;
-	for (const auto& Pair : Options) if (Pair.Value == PC->GetSelectedBuildingId()) { SelectedLabel = Pair.Key; break; }
+	const FString SelectedId = PC->GetSelectedBuildingId();
+	for (const auto& Pair : CachedBuildingOptions) if (Pair.Value == SelectedId) { SelectedLabel = Pair.Key; break; }
 	if (SelectedLabel.IsEmpty()) FilteredBuildingComboBox->ClearSelection();
 	else if (FilteredBuildingComboBox->GetSelectedOption() != SelectedLabel) FilteredBuildingComboBox->SetSelectedOption(SelectedLabel);
-	if (BuildingFilterResultsText)
-	{
-		BuildingFilterResultsText->SetText(FText::FromString(Options.IsEmpty() ? TEXT("No matching editable buildings.")
-			: FString::Printf(TEXT("%d / %d editable buildings. Select one above."), Options.Num(), PC->GetEditableBuildingCount())));
-	}
 }
 
 void UEditScreenWidget::HandleFilteredBuildingChanged(FString Item, ESelectInfo::Type Type)

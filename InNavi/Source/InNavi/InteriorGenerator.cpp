@@ -558,6 +558,7 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 
 void AInteriorGenerator::ClearLoadedInterior()
 {
+	++RoomSearchRevision;
 	for (auto& Pair : RoomsByFloor)
 	{
 		for (AInteriorRoom* Room : Pair.Value.Rooms)
@@ -1650,6 +1651,7 @@ bool AInteriorGenerator::RotateRoom(const FString& RoomId, float DeltaDegrees)
 			}
 
 			Room->ResizeFootprint(NewFootprint);
+			++RoomSearchRevision;
 			return true;
 		}
 	}
@@ -1675,6 +1677,7 @@ bool AInteriorGenerator::CommitRoomRotation(const FString& RoomId, const TArray<
 			if (DoesFootprintBlockConnector(Room->GetFootprint(), Room->IsClosedLoop(), Pair.Key))
 			{
 				Room->ResizeFootprint(FallbackFootprint);
+				++RoomSearchRevision;
 				UE_LOG(LogTemp, Warning, TEXT("CommitRoomRotation: '%s' would wall in an elevator/stairs/escalator - reverted to its position before the rotation"), *RoomId);
 				return false;
 			}
@@ -1709,6 +1712,7 @@ bool AInteriorGenerator::MoveRoom(const FString& RoomId, const TArray<FVector2D>
 			}
 
 			Room->ResizeFootprint(NewFootprint);
+			++RoomSearchRevision;
 			return true;
 		}
 	}
@@ -1741,6 +1745,7 @@ bool AInteriorGenerator::CommitRoomMove(const FString& RoomId, const TArray<FVec
 				if (DoFootprintsOverlap(Room->GetFootprint(), Room->IsClosedLoop(), Other->GetFootprint(), Other->IsClosedLoop(), OverlapToleranceWorldUnits / (Generator ? Generator->GetScale() : 1.f)))
 				{
 					Room->ResizeFootprint(FallbackFootprint);
+					++RoomSearchRevision;
 					UE_LOG(LogTemp, Warning, TEXT("CommitRoomMove: '%s' would overlap '%s' - reverted to its position before the drag"), *RoomId, *Other->RoomId);
 					return false;
 				}
@@ -1751,6 +1756,7 @@ bool AInteriorGenerator::CommitRoomMove(const FString& RoomId, const TArray<FVec
 			if (DoesFootprintBlockConnector(Room->GetFootprint(), Room->IsClosedLoop(), Pair.Key))
 			{
 				Room->ResizeFootprint(FallbackFootprint);
+				++RoomSearchRevision;
 				UE_LOG(LogTemp, Warning, TEXT("CommitRoomMove: '%s' would wall in an elevator/stairs/escalator - reverted to its position before the drag"), *RoomId);
 				return false;
 			}
@@ -2408,6 +2414,8 @@ void AInteriorGenerator::SyncInteriorToBuildingGenerator()
 }
 void AInteriorGenerator::RecordHistorySnapshot()
 {
+	// All committed interior edits pass here. Invalidation is cheap and rebuilding stays lazy.
+	++RoomSearchRevision;
 	if (bIsRestoringHistory || LoadedBuildingId.IsEmpty())
 	{
 		return;

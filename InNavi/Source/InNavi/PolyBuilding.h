@@ -16,6 +16,8 @@ class INNAVI_API APolyBuilding : public AActor
 
 public:
 	APolyBuilding();
+	DECLARE_MULTICAST_DELEGATE_OneParam(FOnFloorCountChanged, APolyBuilding*);
+	FOnFloorCountChanged OnFloorCountChanged;
 
 	// Build the 3D mesh by extruding a 2D polygon footprint into FloorCount floors of FloorHeight
 	// each. Offset shifts the whole building in the XY plane (in the same units as the footprint,

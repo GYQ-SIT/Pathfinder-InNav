@@ -4773,18 +4773,26 @@ void UInteriorScreenWidget::RefreshNavRoomDropdowns()
 	}
 
 	const FString PreviousStart = NavStartRoomComboBox->GetSelectedOption();
-	const FString PreviousDestination = NavDestinationRoomComboBox->GetSelectedOption();
 	NavStartRoomComboBox->ClearOptions();
-	NavDestinationRoomComboBox->ClearOptions();
 	for (const UNavigationPanelWidget::FNavigationRoomOption& Option : Nav->GetSelectableRooms())
 	{
 		const FString Label = Option.GetDisplayLabel();
 		NavStartRoomComboBox->AddOption(Label);
 	}
+	if (NavStartRoomComboBox->FindOptionIndex(PreviousStart) != INDEX_NONE) NavStartRoomComboBox->SetSelectedOption(PreviousStart);
+	RefreshDestinationRoomDropdown();
+}
+
+void UInteriorScreenWidget::RefreshDestinationRoomDropdown()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	UNavigationPanelWidget* Nav = PC ? PC->GetNavigationPanel() : nullptr;
+	if (!Nav || !NavDestinationRoomComboBox) return;
+	const FString PreviousDestination = NavDestinationRoomComboBox->GetSelectedOption();
+	NavDestinationRoomComboBox->ClearOptions();
 	const TArray<UNavigationPanelWidget::FNavigationRoomOption> Matches = Nav->SearchDestinations(
 		DestinationSearchBox ? DestinationSearchBox->GetText().ToString() : FString());
 	for (const auto& Option : Matches) NavDestinationRoomComboBox->AddOption(Option.GetDisplayLabel());
-	if (NavStartRoomComboBox->FindOptionIndex(PreviousStart) != INDEX_NONE) NavStartRoomComboBox->SetSelectedOption(PreviousStart);
 	if (NavDestinationRoomComboBox->FindOptionIndex(PreviousDestination) != INDEX_NONE) NavDestinationRoomComboBox->SetSelectedOption(PreviousDestination);
 	NavDestinationRoomComboBox->SetIsEnabled(!Matches.IsEmpty());
 	if (DestinationSearchResultsText)
@@ -4797,7 +4805,7 @@ void UInteriorScreenWidget::RefreshNavRoomDropdowns()
 
 void UInteriorScreenWidget::HandleDestinationSearchChanged(const FText& Text)
 {
-	RefreshNavRoomDropdowns();
+	RefreshDestinationRoomDropdown();
 }
 
 void UInteriorScreenWidget::RefreshBuildingSwitcher()

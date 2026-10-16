@@ -543,6 +543,7 @@ private:
 	void OnApplyRoomTagsClicked();
 
 	void RefreshNavRoomDropdowns();
+	void RefreshDestinationRoomDropdown();
 
 	// --- Docking system for the Toolbar/Floor/Properties/Layers/Navigation/Audio panels ---
 	// Each of the 6 panels below is an independently draggable UBorder placed directly on the root

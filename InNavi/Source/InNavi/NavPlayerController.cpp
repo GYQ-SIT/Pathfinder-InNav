@@ -2837,20 +2837,13 @@ FString ANavPlayerController::GetBuildingFilterText() const { return Generator ?
 int32 ANavPlayerController::GetBuildingFilterMinimumFloors() const { return Generator ? Generator->GetBuildingFilterMinimumFloors() : 0; }
 int32 ANavPlayerController::GetBuildingFilterMaximumFloors() const { return Generator ? Generator->GetBuildingFilterMaximumFloors() : 0; }
 bool ANavPlayerController::AreCampusBuildingsVisible() const { return !Generator || Generator->AreCampusBuildingsVisible(); }
-int32 ANavPlayerController::GetEditableBuildingCount() const { return Generator ? Generator->GetAllBuildings().Num() : 0; }
+int32 ANavPlayerController::GetEditableBuildingCount() const { return Generator ? Generator->GetBuildingCount() : 0; }
+uint64 ANavPlayerController::GetBuildingResultsRevision() const { return Generator ? Generator->GetBuildingResultsRevision() : 0; }
 
-TMap<FString, FString> ANavPlayerController::GetFilteredBuildingOptions() const
+const TMap<FString, FString>& ANavPlayerController::GetFilteredBuildingOptions() const
 {
-	TMap<FString, FString> Result;
-	if (Generator)
-	{
-		for (const APolyBuilding* Building : Generator->GetFilteredBuildings())
-		{
-			Result.Add(FString::Printf(TEXT("%s [%s] - %d floors"), *Building->BuildingName,
-				*Building->BuildingId, Building->GetFloorCount()), Building->BuildingId);
-		}
-	}
-	return Result;
+	static const TMap<FString, FString> Empty;
+	return Generator ? Generator->GetFilteredBuildingOptions() : Empty;
 }
 
 bool ANavPlayerController::SelectBuildingById(const FString& BuildingId)

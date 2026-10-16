@@ -30,6 +30,11 @@ bool NavigationSearch::Matches(const FString& Query, const FString& SearchableTe
 {
 	TArray<FString> Words;
 	Query.ParseIntoArrayWS(Words);
+	return MatchesWords(Words, SearchableText);
+}
+
+bool NavigationSearch::MatchesWords(const TArray<FString>& Words, const FString& SearchableText)
+{
 	for (const FString& Word : Words)
 	{
 		if (!SearchableText.Contains(Word, ESearchCase::IgnoreCase)) return false;

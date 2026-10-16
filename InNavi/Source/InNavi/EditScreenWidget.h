@@ -397,7 +397,7 @@ private:
 	UPROPERTY() UTextBlock* BuildingFilterResultsText = nullptr;
 	TMap<FString, FString> CachedBuildingOptions;
 	bool bUpdatingBuildingFilters = false;
-	float BuildingFilterRefreshElapsed = 0.f;
+	uint64 DisplayedBuildingResultsRevision = MAX_uint64;
 	UPROPERTY()
 	UCheckBox* BuildingNonCampusCheckbox = nullptr;
 
