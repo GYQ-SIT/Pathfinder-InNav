@@ -186,6 +186,28 @@ public:
 	// InteriorGenerator syncing its current in-memory state before a project save).
 	void SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData);
 
+	// --- "Discard unsaved changes" ---
+	// Editing a building's interior changes things that live on the building itself (its floor count -
+	// the exterior shell's height - and its name) as well as its interior data. To be able to throw those
+	// edits away without reloading the whole project (a database can be huge), a small baseline is kept
+	// for each building that has been opened for editing: just those three things, not the project.
+	//
+	// Captures the building's current state as its baseline, unless one is already kept (so entering the
+	// same building twice does not overwrite what the last save/open left behind). Call right before a
+	// building's interior is opened.
+	void CaptureBuildingBaseline(const FString& BuildingId);
+
+	// Re-captures every kept baseline from the current state - call after a successful save, which is
+	// what the baselines are meant to represent.
+	void RefreshBuildingBaselines();
+
+	// Puts every building that has a baseline back to it (floor count, name, interior data). Buildings
+	// that no longer exist are skipped. Does not touch the live InteriorGenerator - callers leave or
+	// reload the interior afterwards.
+	void RestoreBuildingBaselines();
+
+	bool HasBuildingBaseline(const FString& BuildingId) const { return BuildingBaselines.Contains(BuildingId); }
+
 	// Destroys every currently-spawned building and forgets all interior data - back to the state
 	// right after BeginPlay, nothing loaded. Call this before starting a New project or before
 	// LoadBuildingsFromFile, so leftover buildings from whatever was open before don't stick around
@@ -207,6 +229,16 @@ private:
 	TMap<FString, APolyBuilding*> BuildingsById;
 
 	TMap<FString, TSharedPtr<FJsonObject>> InteriorDataById;
+
+	struct FBuildingBaseline
+	{
+		int32 FloorCount = 1;
+		FString Name;
+		bool bHadInterior = false;
+		FString InteriorJson; // the interior data serialized, so later edits to the live object cannot reach it
+	};
+	TMap<FString, FBuildingBaseline> BuildingBaselines;
+	bool CaptureBuildingBaselineInto(const FString& BuildingId, FBuildingBaseline& Out) const;
 
 	// The lat/lon centroid LoadBuildingsFromDatabase projects around, stashed so
 	// LoadRoadsAndPOIsFromDatabase can project roads/POIs into that exact same local-meters space

@@ -316,16 +316,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Building")
 	bool HasUnsavedChanges() const { return bHasUnsavedChanges; }
 
-	// Clears the unsaved-changes flag without actually saving anything - what the confirm
-	// dialog's "Discard" button should call, right before it navigates away (Back to exterior,
-	// Back to start screen, etc.). Without this, HasUnsavedChanges() stayed true forever after a
-	// discard (nothing else ever clears it except an actual save/Open/New), so the very next,
-	// completely unrelated navigation - even with zero new edits - wrongly popped the confirm
-	// dialog again. This does NOT revert any in-memory changes, it only stops the nagging; the
-	// edits the user chose not to save are still sitting in memory until overwritten or the app
-	// truly reloads.
+	// What the confirm dialog's "Discard" button calls, right before it navigates away (Back to
+	// exterior, Back to start screen, etc.): puts every building that was opened for editing back to how
+	// it was at the last save/open - floor count (the exterior shell's height), name and interior data
+	// (see ABuildingGenerator::RestoreBuildingBaselines) - and clears the unsaved-changes flag, so the very
+	// next unrelated navigation does not wrongly prompt again. Edits to the live interior itself are
+	// already gone once it is left (they only reach the building data on a save), so callers must leave or
+	// reload the interior afterwards; this does not touch the interior that is currently loaded. Only
+	// buildings that were opened for editing are covered - it never reloads the project, so it stays cheap
+	// however big the database is.
 	UFUNCTION(BlueprintCallable, Category = "Building")
-	void DiscardUnsavedChanges() { bHasUnsavedChanges = false; }
+	void DiscardUnsavedChanges();
 
 	// Saves every currently-spawned building (bound to Ctrl+S). If there's no current project file
 	// yet (e.g. a New session), this opens the OS "save file" dialog first (same as BrowseForSaveLocation)

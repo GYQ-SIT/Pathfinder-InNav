@@ -1015,7 +1015,88 @@ void ABuildingGenerator::ClearAllBuildings()
 	BuildingsById.Empty();
 	UsedBuildingIds.Empty();
 	InteriorDataById.Empty();
+	BuildingBaselines.Empty();
 	Scale = 1.f;
+}
+
+bool ABuildingGenerator::CaptureBuildingBaselineInto(const FString& BuildingId, FBuildingBaseline& Out) const
+{
+	APolyBuilding* const* Found = BuildingsById.Find(BuildingId);
+	if (!Found || !*Found)
+	{
+		return false;
+	}
+	Out.FloorCount = (*Found)->GetFloorCount();
+	Out.Name = (*Found)->BuildingName;
+	Out.bHadInterior = false;
+	Out.InteriorJson.Reset();
+	const TSharedPtr<FJsonObject> Interior = GetInteriorDataForBuilding(BuildingId);
+	if (Interior.IsValid())
+	{
+		const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Out.InteriorJson);
+		Out.bHadInterior = FJsonSerializer::Serialize(Interior.ToSharedRef(), Writer);
+	}
+	return true;
+}
+
+void ABuildingGenerator::CaptureBuildingBaseline(const FString& BuildingId)
+{
+	if (BuildingBaselines.Contains(BuildingId))
+	{
+		return;
+	}
+	FBuildingBaseline Baseline;
+	if (CaptureBuildingBaselineInto(BuildingId, Baseline))
+	{
+		BuildingBaselines.Add(BuildingId, MoveTemp(Baseline));
+	}
+}
+
+void ABuildingGenerator::RefreshBuildingBaselines()
+{
+	for (TPair<FString, FBuildingBaseline>& Pair : BuildingBaselines)
+	{
+		FBuildingBaseline Fresh;
+		if (CaptureBuildingBaselineInto(Pair.Key, Fresh))
+		{
+			Pair.Value = MoveTemp(Fresh);
+		}
+	}
+}
+
+void ABuildingGenerator::RestoreBuildingBaselines()
+{
+	for (const TPair<FString, FBuildingBaseline>& Pair : BuildingBaselines)
+	{
+		APolyBuilding* const* Found = BuildingsById.Find(Pair.Key);
+		if (!Found || !*Found)
+		{
+			continue;
+		}
+		APolyBuilding* Building = *Found;
+		const FBuildingBaseline& Baseline = Pair.Value;
+
+		if (Building->GetFloorCount() != Baseline.FloorCount)
+		{
+			Building->SetFloorCount(Baseline.FloorCount);
+		}
+		// Straight back to the remembered name - it was valid then, so no uniqueness check is needed.
+		Building->BuildingName = Baseline.Name;
+
+		if (Baseline.bHadInterior)
+		{
+			TSharedPtr<FJsonObject> Restored;
+			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Baseline.InteriorJson);
+			if (FJsonSerializer::Deserialize(Reader, Restored) && Restored.IsValid())
+			{
+				InteriorDataById.Add(Pair.Key, Restored);
+			}
+		}
+		else
+		{
+			InteriorDataById.Remove(Pair.Key);
+		}
+	}
 }
 
 APolyBuilding* ABuildingGenerator::CreateRectangleBuilding(const FString& Id, const FString& Name, FVector2D Position, float Width, float Depth, float RotationDegrees, int32 FloorCount, float FloorHeight)

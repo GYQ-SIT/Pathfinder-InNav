@@ -294,7 +294,10 @@ small tolerance. Press `N` to toggle it off/on.
 `Ctrl+S` saves the current project (and the current panel layout). If there's no file
 yet (a New session), it opens the OS save dialog first. Leaving the interior back to
 the exterior, or exiting to the start screen, will prompt you to save/discard/cancel if
-you have unsaved changes.
+you have unsaved changes. **Discard** really does throw the edits away: every building you
+opened for editing goes back to how it was at the last save (or when you first opened it) -
+its floors (and so the exterior shell's height), its name and its interior - without
+reloading the project, so it stays quick however large the database is.
 
 ## Audio feedback
 

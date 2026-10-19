@@ -3175,6 +3175,7 @@ bool ANavPlayerController::SaveCurrentProject()
 	const bool bSuccess = Generator->SaveBuildingsToFile(CurrentProjectFilePath);
 	if (bSuccess)
 	{
+		Generator->RefreshBuildingBaselines();
 		bHasUnsavedChanges = false;
 		UE_LOG(LogTemp, Warning, TEXT("Saved to %s"), *CurrentProjectFilePath);
 		OnProjectSaved.Broadcast();
@@ -3248,6 +3249,7 @@ bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
 	const bool bSuccess = Generator->SaveBuildingsToFile(FilePath);
 	if (bSuccess)
 	{
+		Generator->RefreshBuildingBaselines();
 		CurrentProjectFilePath = FilePath;
 		bHasUnsavedChanges = false;
 		UE_LOG(LogTemp, Warning, TEXT("Saved to %s"), *FilePath);
@@ -3258,6 +3260,15 @@ bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
 		OnActionFailed.Broadcast(TEXT("Could not save - see the Output Log for details."), EActionFailureSeverity::Critical);
 	}
 	return bSuccess;
+}
+
+void ANavPlayerController::DiscardUnsavedChanges()
+{
+	if (Generator)
+	{
+		Generator->RestoreBuildingBaselines();
+	}
+	bHasUnsavedChanges = false;
 }
 
 void ANavPlayerController::SaveCurrentProjectKeyHandler()
@@ -3550,6 +3561,12 @@ int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 		SelectedBuilding->SetHighlighted(false);
 		SelectedBuilding = nullptr;
 		OnBuildingSelected.Broadcast(FString());
+	}
+
+	// What "Discard" will put this building back to (kept if one already exists - see CaptureBuildingBaseline).
+	if (Generator)
+	{
+		Generator->CaptureBuildingBaseline(BuildingId);
 	}
 
 	const int32 Result = InteriorGen->LoadInteriorForBuilding(BuildingId);
