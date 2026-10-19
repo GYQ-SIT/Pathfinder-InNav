@@ -167,4 +167,152 @@ bool FDockHostDragTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDockHostTabDragTest, "InNavi.Dock.Host.TabDrag", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FDockHostTabDragTest::RunTest(const FString& Parameters)
+{
+	const TSharedRef<FDockLayout> L = MakeShared<FDockLayout>();
+	L->DockPanelToEdge(HP(TEXT("A")), EDockSide::Left);
+	L->DockPanelToEdge(HP(TEXT("B")), EDockSide::Right);
+	L->DockPanel(HP(TEXT("C")), HP(TEXT("B")), EDockDropZone::Center);
+	L->DockPanelToEdge(HP(TEXT("D")), EDockSide::Bottom);
+	L->SetActiveTab(HP(TEXT("B")));
+	const TSharedRef<SDockHost> Host = MakeHost(L, { HP(TEXT("A")), HP(TEXT("B")), HP(TEXT("C")), HP(TEXT("D")) });
+
+	auto Arrange = [&]()
+	{
+		FArrangedChildren Arranged(EVisibility::Visible);
+		Host->ArrangeChildren(RootGeometry, Arranged);
+	};
+	auto GroupOf = [&](const TCHAR* Panel) -> const FDockComputedGroup*
+	{
+		FDockLocation Loc;
+		return L->FindPanel(HP(Panel), Loc) ? Host->GetComputedLayout().FindGroup(Loc.Group) : nullptr;
+	};
+	auto Center = [&](const FBox2D& Box) { return FVector2f((float)((Box.Min.X + Box.Max.X) * 0.5), (float)((Box.Min.Y + Box.Max.Y) * 0.5)); };
+	auto TabCenter = [&](const TCHAR* Panel)
+	{
+		FDockLocation Loc;
+		L->FindPanel(HP(Panel), Loc);
+		const FDockComputedGroup* G = Host->GetComputedLayout().FindGroup(Loc.Group);
+		return Center(G->TabRects[Loc.TabIndex]);
+	};
+	// Presses the tab of Panel, drags to Target and releases.
+	auto Drag = [&](const TCHAR* Panel, const FVector2f& Target, bool bRelease = true)
+	{
+		Arrange();
+		const FVector2f Start = TabCenter(Panel);
+		Host->BeginTabDrag(HP(Panel), MakeMouse(Start.X, Start.Y));
+		Host->OnMouseMove(RootGeometry, MakeMouse(Target.X, Target.Y));
+		if (bRelease)
+		{
+			Host->OnMouseButtonUp(RootGeometry, MakeMouse(Target.X, Target.Y, false));
+		}
+		Arrange();
+	};
+	auto Describe = [&](EDockSide Side)
+	{
+		const TSharedPtr<FDockNode> Root = L->GetAreaRoot(Side);
+		return Root.IsValid() ? FString::Printf(TEXT("%d tabs/children"), Root->IsTabGroup() ? Root->Tabs.Num() : Root->Children.Num()) : FString(TEXT("empty"));
+	};
+
+	Arrange();
+
+	// 1. A click (no real movement) never lifts the panel or changes anything.
+	{
+		const FVector2f Start = TabCenter(TEXT("A"));
+		Host->BeginTabDrag(HP(TEXT("A")), MakeMouse(Start.X, Start.Y));
+		Host->OnMouseMove(RootGeometry, MakeMouse(Start.X + 2.f, Start.Y + 1.f));
+		TestFalse(TEXT("below the threshold nothing is lifted"), Host->IsDraggingPanel());
+		Host->OnMouseButtonUp(RootGeometry, MakeMouse(Start.X, Start.Y, false));
+		TestTrue(TEXT("A is still alone on the left"), L->GetAreaRoot(EDockSide::Left).IsValid() && L->GetAreaRoot(EDockSide::Left)->IsTabGroup());
+	}
+
+	// 2. Drop A onto the middle of the B/C group: it becomes a third tab and the left area disappears.
+	{
+		Arrange();
+		const FDockComputedGroup* Target = GroupOf(TEXT("B"));
+		const FVector2f Point = Center(Target->ContentRect);
+		const FVector2f Start = TabCenter(TEXT("A"));
+		Host->BeginTabDrag(HP(TEXT("A")), MakeMouse(Start.X, Start.Y));
+		Host->OnMouseMove(RootGeometry, MakeMouse(Point.X, Point.Y));
+		TestTrue(TEXT("A is lifted"), Host->IsDraggingPanel());
+		Host->OnMouseButtonUp(RootGeometry, MakeMouse(Point.X, Point.Y, false));
+		Arrange();
+		FDockLocation LocA, LocB;
+		L->FindPanel(HP(TEXT("A")), LocA);
+		L->FindPanel(HP(TEXT("B")), LocB);
+		TestTrue(TEXT("A is now a tab of B's group"), LocA.Group == LocB.Group);
+		TestFalse(TEXT("the emptied left area is gone"), L->GetAreaRoot(EDockSide::Left).IsValid());
+		TestFalse(TEXT("dragging ended"), Host->IsDraggingPanel());
+	}
+
+	// 3. Dragging a tab along its own tab strip reorders it.
+	{
+		Arrange();
+		const FDockComputedGroup* G = GroupOf(TEXT("A"));
+		const FVector2f FirstSlot = Center(G->TabRects[0]);
+		Drag(TEXT("A"), FirstSlot);
+		FDockLocation LocA;
+		L->FindPanel(HP(TEXT("A")), LocA);
+		TestEqual(TEXT("A moved to the first slot"), LocA.TabIndex, 0);
+	}
+
+	// 4. Drop D onto the left side of the tab group: it becomes a column beside it; the bottom area goes away.
+	{
+		Arrange();
+		const FDockComputedGroup* G = GroupOf(TEXT("B"));
+		const FVector2f Point((float)G->Rect.Min.X + 12.f, (float)(G->ContentRect.Min.Y + G->ContentRect.Max.Y) * 0.5f);
+		Drag(TEXT("D"), Point);
+		TestFalse(TEXT("bottom area is empty"), L->GetAreaRoot(EDockSide::Bottom).IsValid());
+		const TSharedPtr<FDockNode> Right = L->GetAreaRoot(EDockSide::Right);
+		TestTrue(TEXT("right area is now a horizontal split"), Right.IsValid() && Right->IsSplit() && Right->Orientation == EDockOrientation::Horizontal);
+		if (Right.IsValid() && Right->IsSplit())
+		{
+			TestTrue(TEXT("D is the left column"), Right->Children[0]->Tabs.Contains(HP(TEXT("D"))));
+		}
+	}
+
+	// 5. Drop C on the empty left screen edge: a new left area appears.
+	{
+		Drag(TEXT("C"), FVector2f(6.f, 500.f));
+		TestTrue(TEXT("left area exists again"), L->GetAreaRoot(EDockSide::Left).IsValid());
+		TestTrue(TEXT("and holds C"), L->GetAreaRoot(EDockSide::Left).IsValid() && L->GetAreaRoot(EDockSide::Left)->Tabs.Contains(HP(TEXT("C"))));
+	}
+
+	// 6. Dropping where nothing is a target changes nothing.
+	{
+		const FString Before = Describe(EDockSide::Left) + Describe(EDockSide::Right) + Describe(EDockSide::Top);
+		Drag(TEXT("B"), FVector2f(960.f, 500.f));
+		TestEqual(TEXT("nothing changed"), Describe(EDockSide::Left) + Describe(EDockSide::Right) + Describe(EDockSide::Top), Before);
+	}
+
+	// 7. Right-click cancels a drag in progress.
+	{
+		const FString Before = Describe(EDockSide::Left) + Describe(EDockSide::Right);
+		Arrange();
+		const FDockComputedGroup* Target = GroupOf(TEXT("C"));
+		const FVector2f Point = Center(Target->ContentRect);
+		Drag(TEXT("B"), Point, false);
+		TestTrue(TEXT("B is being carried"), Host->IsDraggingPanel());
+		FPointerEvent RightClick(0, FVector2f(Point.X, Point.Y), FVector2f(Point.X, Point.Y), TSet<FKey>({ EKeys::RightMouseButton }), EKeys::RightMouseButton, 0.f, FModifierKeysState());
+		Host->OnMouseButtonDown(RootGeometry, RightClick);
+		TestFalse(TEXT("drag cancelled"), Host->IsDraggingPanel());
+		Host->OnMouseButtonUp(RootGeometry, MakeMouse(Point.X, Point.Y, false));
+		TestEqual(TEXT("layout unchanged"), Describe(EDockSide::Left) + Describe(EDockSide::Right), Before);
+	}
+
+	// 8. A lone panel dropped on its own group does nothing.
+	{
+		Arrange();
+		const FDockComputedGroup* Own = GroupOf(TEXT("C"));
+		const FVector2f Point = Center(Own->ContentRect);
+		Drag(TEXT("C"), Point);
+		TestTrue(TEXT("C is still alone on the left"), L->GetAreaRoot(EDockSide::Left).IsValid() && L->GetAreaRoot(EDockSide::Left)->Tabs.Num() == 1);
+	}
+
+	FString Err;
+	TestTrue(TEXT("layout valid after every drop"), L->Validate(Err));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

@@ -53,11 +53,17 @@ public:
 	void HandleTabClosed(FName Panel);
 	FReply BeginSplitterDrag(const FDockNode* Split, int32 DividerIndex, const FPointerEvent& MouseEvent);
 	FReply BeginAreaEdgeDrag(EDockSide Side, const FPointerEvent& MouseEvent);
+	// Pressing a tab: a click just activates it; dragging it past a small threshold lifts the panel so it
+	// can be dropped on a group, a group side, a screen edge, or another slot of its own tab strip.
+	FReply BeginTabDrag(FName Panel, const FPointerEvent& MouseEvent);
+	bool IsDraggingPanel() const { return Drag.Kind == FDragState::EKind::Panel && Drag.bActive; }
 
 	// --- SWidget ---
 	virtual void OnArrangeChildren(const FGeometry& AllottedGeometry, FArrangedChildren& ArrangedChildren) const override;
 	virtual FChildren* GetChildren() override { return &Children; }
 	virtual FVector2D ComputeDesiredSize(float) const override { return FVector2D::ZeroVector; }
+	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
+	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FCursorReply OnCursorQuery(const FGeometry& MyGeometry, const FPointerEvent& CursorEvent) const override;
@@ -92,10 +98,19 @@ private:
 		{
 			None,
 			Splitter,
-			AreaEdge
+			AreaEdge,
+			Panel
 		};
 
 		EKind Kind = EKind::None;
+		// Panel drags only: bActive turns true once the cursor has moved past the click threshold.
+		FName DraggedPanel = NAME_None;
+		bool bActive = false;
+		FVector2D CurrentLocal = FVector2D::ZeroVector;
+		FDockDropTarget Target;
+		int32 ReorderSlot = INDEX_NONE; // >= 0: reorder within the dragged panel's own tab strip
+		FBox2D ReorderPreview;
+
 		const FDockNode* Split = nullptr;
 		int32 DividerIndex = 0;
 		TArray<float> StartRatios;
@@ -108,6 +123,8 @@ private:
 
 	void RebuildChildren();
 	void RefreshFrames();
+	void UpdatePanelDragTarget(const FVector2D& ViewportSize);
+	void FinishPanelDrag();
 
 	TSharedPtr<FDockLayout> Layout;
 	FDockMetrics Metrics;

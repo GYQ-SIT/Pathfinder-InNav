@@ -127,7 +127,7 @@ namespace
 		TSharedRef<SHorizontalBox> Strip = SNew(SHorizontalBox);
 		Strip->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(6.f, 2.f)
 		[
-			SNew(STextBlock).Text(FText::FromString(TEXT("Dock test:")))
+			SNew(STextBlock).Text(FText::FromString(TEXT("Dock test (drag a tab to dock it, right-click cancels):")))
 		];
 		Strip->AddSlot().AutoWidth().Padding(2.f)
 		[

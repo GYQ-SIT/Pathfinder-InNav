@@ -150,14 +150,15 @@ public:
 		}
 		if (const TSharedPtr<SDockHost> Pinned = Host.Pin())
 		{
+			// Copy first: activating/closing refreshes this very tab bar's tab list.
+			const FName PanelId = Tabs[Index].Id;
 			if (bOnClose)
 			{
-				Pinned->HandleTabClosed(Tabs[Index].Id);
+				Pinned->HandleTabClosed(PanelId);
+				return FReply::Handled();
 			}
-			else
-			{
-				Pinned->HandleTabActivated(Tabs[Index].Id);
-			}
+			Pinned->HandleTabActivated(PanelId);
+			return Pinned->BeginTabDrag(PanelId, MouseEvent);
 		}
 		return FReply::Handled();
 	}
@@ -674,6 +675,96 @@ FReply SDockHost::BeginAreaEdgeDrag(EDockSide Side, const FPointerEvent& MouseEv
 	return FReply::Handled().CaptureMouse(SharedThis(this));
 }
 
+FReply SDockHost::BeginTabDrag(FName Panel, const FPointerEvent& MouseEvent)
+{
+	if (!Layout->ContainsPanel(Panel))
+	{
+		return FReply::Handled();
+	}
+	Drag = FDragState();
+	Drag.Kind = FDragState::EKind::Panel;
+	Drag.DraggedPanel = Panel;
+	Drag.StartLocal = FVector2D(GetCachedGeometry().AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()));
+	Drag.CurrentLocal = Drag.StartLocal;
+	return FReply::Handled().CaptureMouse(SharedThis(this));
+}
+
+void SDockHost::UpdatePanelDragTarget(const FVector2D& ViewportSize)
+{
+	Drag.Target = FDockDropTarget();
+	Drag.ReorderSlot = INDEX_NONE;
+
+	FDockLocation Location;
+	if (Layout->FindPanel(Drag.DraggedPanel, Location))
+	{
+		const FDockComputedGroup* Own = Computed.FindGroup(Location.Group);
+		const int32 TabCount = Location.Group->Tabs.Num();
+		const FBox2D* BarRect = Own ? &Own->TabBarRect : nullptr;
+		const bool bOverOwnBar = BarRect
+			&& Drag.CurrentLocal.X >= BarRect->Min.X && Drag.CurrentLocal.X <= BarRect->Max.X
+			&& Drag.CurrentLocal.Y >= BarRect->Min.Y && Drag.CurrentLocal.Y <= BarRect->Max.Y;
+		if (Own && TabCount >= 2 && bOverOwnBar && Own->TabRects.Num() == TabCount)
+		{
+			const float TabWidth = FDockLayout::ComputeTabWidth((float)BarRect->GetSize().X, TabCount, Metrics);
+			const int32 Slot = TabWidth > 0.f
+				? FMath::Clamp((int32)((Drag.CurrentLocal.X - BarRect->Min.X) / TabWidth), 0, TabCount - 1)
+				: 0;
+			Drag.ReorderSlot = Slot;
+			Drag.ReorderPreview = Own->TabRects[Slot];
+			return;
+		}
+	}
+
+	Drag.Target = Layout->HitTestDropTarget(Drag.CurrentLocal, Drag.DraggedPanel, ViewportSize, Metrics, Computed);
+}
+
+void SDockHost::FinishPanelDrag()
+{
+	const bool bWasActive = Drag.bActive;
+	const FName Panel = Drag.DraggedPanel;
+	const int32 Slot = Drag.ReorderSlot;
+	const FDockDropTarget Target = Drag.Target;
+	Drag = FDragState();
+	Invalidate(EInvalidateWidgetReason::Paint);
+
+	if (!bWasActive)
+	{
+		return; // a plain click: the tab was already activated on press
+	}
+
+	bool bChanged = false;
+	if (Slot != INDEX_NONE)
+	{
+		bChanged = Layout->MoveTab(Panel, Slot);
+	}
+	else if (Target.Kind == FDockDropTarget::EKind::Group)
+	{
+		bChanged = Layout->DockPanel(Panel, Target.TargetPanel, Target.Zone);
+	}
+	else if (Target.Kind == FDockDropTarget::EKind::Edge)
+	{
+		bChanged = Layout->DockPanelToEdge(Panel, Target.Side);
+	}
+
+	if (bChanged)
+	{
+		NotifyLayoutChanged();
+		OnLayoutChanged.ExecuteIfBound();
+	}
+}
+
+FReply SDockHost::OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
+{
+	// Right-click while carrying a panel cancels the drop.
+	if (Drag.Kind == FDragState::EKind::Panel && MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
+	{
+		Drag = FDragState();
+		Invalidate(EInvalidateWidgetReason::Paint);
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+	return FReply::Unhandled();
+}
+
 FReply SDockHost::OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
 {
 	if (Drag.Kind == FDragState::EKind::None)
@@ -683,6 +774,24 @@ FReply SDockHost::OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& 
 
 	const FVector2D Local = FVector2D(MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()));
 	const FVector2D Delta = Local - Drag.StartLocal;
+
+	if (Drag.Kind == FDragState::EKind::Panel)
+	{
+		Drag.CurrentLocal = Local;
+		if (!Drag.bActive)
+		{
+			constexpr double DragThresholdPx = 6.0;
+			if (Delta.Size() < DragThresholdPx)
+			{
+				return FReply::Handled();
+			}
+			Drag.bActive = true;
+		}
+		const FVector2f Size = MyGeometry.GetLocalSize();
+		UpdatePanelDragTarget(FVector2D(Size.X, Size.Y));
+		Invalidate(EInvalidateWidgetReason::Paint);
+		return FReply::Handled();
+	}
 
 	if (Drag.Kind == FDragState::EKind::Splitter)
 	{
@@ -713,6 +822,11 @@ FReply SDockHost::OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEve
 	{
 		return FReply::Unhandled();
 	}
+	if (Drag.Kind == FDragState::EKind::Panel)
+	{
+		FinishPanelDrag();
+		return FReply::Handled().ReleaseMouseCapture();
+	}
 	Drag = FDragState();
 	OnLayoutChanged.ExecuteIfBound();
 	return FReply::Handled().ReleaseMouseCapture();
@@ -720,6 +834,14 @@ FReply SDockHost::OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEve
 
 FCursorReply SDockHost::OnCursorQuery(const FGeometry& MyGeometry, const FPointerEvent& CursorEvent) const
 {
+	if (Drag.Kind == FDragState::EKind::Panel)
+	{
+		if (!Drag.bActive)
+		{
+			return FCursorReply::Unhandled();
+		}
+		return FCursorReply::Cursor((Drag.Target.IsValid() || Drag.ReorderSlot != INDEX_NONE) ? EMouseCursor::GrabHandClosed : EMouseCursor::SlashedCircle);
+	}
 	if (Drag.Kind != FDragState::EKind::None)
 	{
 		return FCursorReply::Cursor(Drag.bVerticalBar ? EMouseCursor::ResizeLeftRight : EMouseCursor::ResizeUpDown);
@@ -729,9 +851,74 @@ FCursorReply SDockHost::OnCursorQuery(const FGeometry& MyGeometry, const FPointe
 
 void SDockHost::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
 {
+	if (Drag.Kind == FDragState::EKind::Panel)
+	{
+		Drag = FDragState();
+		Invalidate(EInvalidateWidgetReason::Paint);
+		return;
+	}
 	if (Drag.Kind != FDragState::EKind::None)
 	{
 		Drag = FDragState();
 		OnLayoutChanged.ExecuteIfBound();
 	}
+}
+
+int32 SDockHost::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+{
+	const int32 MaxLayer = SPanel::OnPaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
+	if (!IsDraggingPanel())
+	{
+		return MaxLayer;
+	}
+
+	int32 Layer = MaxLayer + 1;
+
+	// Where the panel would land: a translucent fill with a solid outline.
+	FBox2D Preview;
+	bool bHavePreview = false;
+	if (Drag.ReorderSlot != INDEX_NONE)
+	{
+		Preview = Drag.ReorderPreview;
+		bHavePreview = true;
+	}
+	else if (Drag.Target.IsValid())
+	{
+		Preview = Drag.Target.PreviewRect;
+		bHavePreview = true;
+	}
+	if (bHavePreview)
+	{
+		const FVector2f Pos((float)Preview.Min.X, (float)Preview.Min.Y);
+		const FVector2f Size((float)Preview.GetSize().X, (float)Preview.GetSize().Y);
+		FSlateDrawElement::MakeBox(OutDrawElements, Layer, AllottedGeometry.ToPaintGeometry(Size, FSlateLayoutTransform(Pos)), &WhiteBrush,
+			ESlateDrawEffect::None, FLinearColor(AccentColor.R, AccentColor.G, AccentColor.B, 0.25f));
+		constexpr float Border = 2.f;
+		const FLinearColor Outline(AccentColor.R, AccentColor.G, AccentColor.B, 0.95f);
+		const FVector2f Edges[4][2] = {
+			{ Pos, FVector2f(Size.X, Border) },
+			{ FVector2f(Pos.X, Pos.Y + Size.Y - Border), FVector2f(Size.X, Border) },
+			{ Pos, FVector2f(Border, Size.Y) },
+			{ FVector2f(Pos.X + Size.X - Border, Pos.Y), FVector2f(Border, Size.Y) }
+		};
+		for (const FVector2f (&Edge)[2] : Edges)
+		{
+			FSlateDrawElement::MakeBox(OutDrawElements, Layer + 1, AllottedGeometry.ToPaintGeometry(Edge[1], FSlateLayoutTransform(Edge[0])), &WhiteBrush, ESlateDrawEffect::None, Outline);
+		}
+	}
+
+	// A small label that follows the cursor.
+	const FPanelEntry* Entry = Panels.Find(Drag.DraggedPanel);
+	const FText Title = Entry ? Entry->Title : FText::FromName(Drag.DraggedPanel);
+	const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Regular", 10);
+	const TSharedRef<FSlateFontMeasure> FontMeasure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
+	const FVector2f TextSize = FVector2f(FontMeasure->Measure(Title, Font));
+	const FVector2f ChipSize(TextSize.X + 16.f, TextSize.Y + 8.f);
+	const FVector2f ChipPos((float)Drag.CurrentLocal.X + 14.f, (float)Drag.CurrentLocal.Y + 14.f);
+	FSlateDrawElement::MakeBox(OutDrawElements, Layer + 2, AllottedGeometry.ToPaintGeometry(ChipSize, FSlateLayoutTransform(ChipPos)), &WhiteBrush,
+		ESlateDrawEffect::None, FLinearColor(0.1f, 0.1f, 0.12f, 0.92f));
+	FSlateDrawElement::MakeText(OutDrawElements, Layer + 3,
+		AllottedGeometry.ToPaintGeometry(TextSize, FSlateLayoutTransform(FVector2f(ChipPos.X + 8.f, ChipPos.Y + 4.f))),
+		Title, Font, ESlateDrawEffect::None, TextColor);
+	return Layer + 4;
 }
