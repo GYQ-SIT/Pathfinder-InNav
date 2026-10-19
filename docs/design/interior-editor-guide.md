@@ -132,7 +132,12 @@ are tabs of which, how the space is split, which are hidden) is saved automatica
 global layout per machine, not per project — whenever you save the project or leave the
 interior editor, and restored the next time you open it. Layouts saved by older versions
 of the editor are not compatible; the first run after updating uses the team default.
-Floating panels (dragging a tab out onto empty space) are not available yet.
+
+- **Floating windows**: drop a tab on empty space and it becomes a floating window. Drag the thin
+  strip along its top to move it, drag its outer edge or corner to resize it, and click it to bring
+  it to the front. Dragging the strip of a window that holds a single panel docks it like a tab drag;
+  dropping on another window's strip adds the panel as a tab of that window. Right-click while
+  dragging a tab cancels the drop.
 
 ### Toolbar panel
 
