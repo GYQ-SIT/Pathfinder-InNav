@@ -133,6 +133,11 @@ private:
 	UFUNCTION()
 	void OnWindowMenuClicked();
 
+	// Camera menu, after Window: Reset, the typed move speed, +, -, Set Default View. Same dropdown idea as
+	// File/Window (and the same menu the interior editor has while in 3D preview).
+	UFUNCTION()
+	void OnCameraMenuClicked();
+
 	void OpenMenuDropdown(UBorder* Dropdown);
 	void CloseMenuDropdowns();
 
@@ -316,6 +321,12 @@ private:
 
 	UPROPERTY()
 	UBorder* WindowMenuDropdown = nullptr;
+
+	UPROPERTY()
+	UButton* CameraMenuButton = nullptr;
+
+	UPROPERTY()
+	UBorder* CameraMenuDropdown = nullptr;
 
 	UPROPERTY()
 	UCheckBox* WindowAudioCheckbox = nullptr;

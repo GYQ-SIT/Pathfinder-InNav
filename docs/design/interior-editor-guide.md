@@ -29,14 +29,17 @@ menu bar, same look as the interior editor's:
   editor's own File menu below.
 - **Window** — **Audio** (see Audio panel below), **Map** (see Map panel below) and
   **Debug**, plus **Reset Layout**.
+- **Camera** — the free-fly camera's controls, in a dropdown: **Reset**, the typed move
+  speed (Enter or clicking away commits it), **+** / **-** to nudge it, and **Set Default**
+  (see below). The menu stays open after +/- and closes after Reset/Set Default.
 - **Save** — same as `Ctrl+S`, left of File.
 - **Enter Interior**, then **Back** on the far right — Enter Interior only appears once
   a building is selected; Back here returns to the start screen (not to be confused
   with the interior editor's own Back, which returns to *this* screen instead).
 
-Camera: WASD + mouse-look to free-fly, scroll to zoom, **-**/**+** buttons adjust move
-speed. **Reset** snaps the camera back to a framed view of every loaded building;
-**Set Default View** stores the camera's *current* position/angle as that reset target
+Camera: WASD + mouse-look to free-fly, scroll to zoom; the **Camera** menu's **-**/**+**
+and speed box adjust move speed. **Reset** snaps the camera back to a framed view of every
+loaded building; **Set Default** stores the camera's *current* position/angle as that reset target
 instead (persisted to disk, so it survives closing and reopening the project) — for
 tuning what "Reset" snaps back to once you've found an angle you like.
 
@@ -107,11 +110,15 @@ loaded project — pick one to jump straight into its interior without going bac
 exterior first (switching buildings while in 3D preview exits back to 2D first). The
 pencil icon next to it lets you rename the currently-loaded building in place.
 
-Further right on the same row: **2D**/**3D** toggles the preview mode (see below); a
-**Snapping** toggle icon button (same on/off as pressing `N` - see Snapping below), only
-here, not on the exterior screen; **Reset** and the **-**/**+** move-speed buttons, and
-a **View**/**Edit** toggle, only appear while in 3D preview (View/Edit is covered in the
-3D preview section below).
+Then, in order, on the same row: **2D**/**3D** toggles the preview mode (see below), and
+right after them a **View**/**Edit** toggle that only appears while in 3D preview (it is
+3D's sub-mode - covered in the 3D preview section below); a **Snapping** toggle icon
+button (same on/off as pressing `N` - see Snapping below), only here, not on the
+exterior screen; and **Undo**/**Redo**. The 3D camera controls are not on this bar: while
+in 3D preview a **Camera** menu appears in the menu bar after **Window**. Its dropdown
+holds **Reset** (snaps the view back; closes the menu), the typed move-speed box (Enter
+or clicking away commits it), then **+** and **-** to nudge the speed (the menu stays open
+so you can press them repeatedly). Clicking anywhere else closes it.
 
 ## Dockable panels
 

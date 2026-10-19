@@ -257,6 +257,11 @@ private:
 	UFUNCTION()
 	void OnWindowMenuClicked();
 
+	// Camera menu (after Window, only while in 3D preview): Reset, the typed speed box, +, -. Opens its own
+	// dropdown like File/Window do.
+	UFUNCTION()
+	void OnCameraMenuClicked();
+
 	// Window > Reset Layout: puts every panel back where the team default has it.
 	UFUNCTION()
 	void OnWindowResetLayoutClicked();
@@ -287,12 +292,13 @@ private:
 	UFUNCTION()
 	void OnRedoClicked();
 
-	// Calls PC->ResetCamera3DPreview() - only shown while in 3D preview (see ResetView3DButton).
+	// Calls PC->ResetCamera3DPreview() - a row of the Camera menu, which is only shown while in 3D preview
+	// (see ResetView3DButton).
 	UFUNCTION()
 	void OnResetView3DClicked();
 
-	// Calls PC->Increase/DecreaseMoveSpeed3DPreview() - only shown while in 3D preview (see
-	// DecreaseSpeedButton/IncreaseSpeedButton).
+	// Calls PC->Increase/DecreaseMoveSpeed3DPreview() - rows of the Camera menu (see
+	// IncreaseSpeedButton/DecreaseSpeedButton).
 	UFUNCTION()
 	void OnDecreaseSpeedClicked();
 
@@ -902,14 +908,14 @@ private:
 	UPROPERTY()
 	UButton* RedoButton = nullptr;
 
-	// Only shown while in 3D preview (see HandlePreviewModeChanged). 3D preview leaves WASD/mouse-look
-	// free rather than locked to a fixed angle, so this is the "un-lose yourself" button - see
-	// PC->ResetCamera3DPreview's own comment.
+	// A row of the Camera menu's dropdown (the whole menu only exists while in 3D preview - see
+	// HandlePreviewModeChanged). 3D preview leaves WASD/mouse-look free rather than locked to a fixed angle,
+	// so this is the "un-lose yourself" button - see PC->ResetCamera3DPreview's own comment.
 	UPROPERTY()
 	UButton* ResetView3DButton = nullptr;
 
 	// Adjust the free-fly pawn's WASD move speed - see PC->IncreaseMoveSpeed3DPreview's own comment.
-	// Shown/hidden together with ResetView3DButton.
+	// Also a row of the Camera menu's dropdown.
 	UPROPERTY()
 	UButton* DecreaseSpeedButton = nullptr;
 
@@ -917,7 +923,7 @@ private:
 	UButton* IncreaseSpeedButton = nullptr;
 
 	// Typed speed entry, between DecreaseSpeedButton/IncreaseSpeedButton - see
-	// OnCameraSpeedTextCommitted. Shown/hidden together with the other 3D-preview-only controls.
+	// OnCameraSpeedTextCommitted. Lives in the Camera menu's dropdown with the other camera controls.
 	UPROPERTY()
 	UEditableTextBox* CameraSpeedTextBox = nullptr;
 
@@ -964,6 +970,13 @@ private:
 
 	UPROPERTY()
 	UBorder* WindowMenuDropdown = nullptr;
+
+	// Only visible while in 3D preview (see HandlePreviewModeChanged).
+	UPROPERTY()
+	UButton* CameraMenuButton = nullptr;
+
+	UPROPERTY()
+	UBorder* CameraMenuDropdown = nullptr;
 
 	UPROPERTY()
 	UBorder* MenuClickCatcher = nullptr;

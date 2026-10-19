@@ -47,13 +47,11 @@ namespace
 	const FLinearColor EditTextBoxTextColor(1.f, 1.f, 1.f, 1.f);
 	constexpr float EditMenuBarHeight = 40.f;
 	constexpr float EditMenuButtonWidth = 50.f;
+	constexpr float EditCameraMenuButtonWidth = 72.f;
 	constexpr float EditMenuBarLeftMargin = 10.f;
 	constexpr float EditAudioPanelWidth = 220.f;
 	constexpr float EditAudioFileListHeight = 150.f;
 
-	// Second bar under the menu bar, matching UInteriorScreenWidget's own BuildingSwitcherBarHeight -
-	// see the toolbar row's own construction comment in RebuildWidget for why it exists here.
-	constexpr float ExteriorToolbarBarHeight = 52.f;
 }
 
 UEditScreenWidget::UEditScreenWidget(const FObjectInitializer& ObjectInitializer)
@@ -162,6 +160,14 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		FileMenuButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnFileMenuClicked);
 		WindowMenuButton = AddMenuButton(TEXT("Btn_WindowMenu"), TEXT("Window"));
 		WindowMenuButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowMenuClicked);
+		// Camera menu: the free-fly camera's Reset/speed/Set Default controls, which used to be a bar of their
+		// own under this one. Wider than File/Window since its label is longer.
+		CameraMenuButton = AddMenuButton(TEXT("Btn_CameraMenu"), TEXT("Camera"));
+		CameraMenuButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnCameraMenuClicked);
+		if (USizeBox* CameraMenuSizeBox = Cast<USizeBox>(CameraMenuButton->GetContent()))
+		{
+			CameraMenuSizeBox->SetWidthOverride(EditCameraMenuButtonWidth);
+		}
 
 		auto AddBarButton = [this, MenuBarRow](const TCHAR* Name, const TCHAR* Label, float Width) -> UButton*
 		{
@@ -207,86 +213,7 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		BackButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnBackClicked);
 		BackButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::PlayButtonClickSound);
 
-		// --- Toolbar bar: fixed chrome directly under the menu bar, same vertical position as
-		// UInteriorScreenWidget's own BuildingSwitcherBarBackground+SwitcherRow - this screen has
-		// nothing else to put there (no building switcher, 2D/3D toggle, Reset, or View/Edit of its
-		// own), so it only ever holds the camera speed controls, centered in the bar.
-		UBorder* ToolbarBarBackground = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_ToolbarBar"));
-		ToolbarBarBackground->SetBrushColor(EditMenuBarColor);
-		ToolbarBarBackground->SetPadding(FMargin(10.f, 8.f));
-		ToolbarBarBackground->SetHorizontalAlignment(HAlign_Center);
-		ToolbarBarBackground->SetVerticalAlignment(VAlign_Center);
-		UCanvasPanelSlot* ToolbarBarSlot = Canvas->AddChildToCanvas(ToolbarBarBackground);
-		ToolbarBarSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
-		ToolbarBarSlot->SetAlignment(FVector2D(0.f, 0.f));
-		ToolbarBarSlot->SetOffsets(FMargin(0.f, EditMenuBarHeight, 0.f, ExteriorToolbarBarHeight));
-		ToolbarBarSlot->SetZOrder(6);
-
-		UHorizontalBox* ToolbarRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ToolbarRow"));
-		ToolbarBarBackground->SetContent(ToolbarRow);
-
-		auto AddToolbarButton = [this, ToolbarRow](const TCHAR* Name, const TCHAR* Label, float Width, float LeftPadding) -> UButton*
-		{
-			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-			Button->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::PlayButtonClickSound);
-			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-			Text->SetText(FText::FromString(FString(Label)));
-			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-			Text->SetJustification(ETextJustify::Center);
-			ApplyStandardFont(Text);
-			USizeBox* ButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-			ButtonSizeBox->SetWidthOverride(Width);
-			ButtonSizeBox->SetHeightOverride(36.f);
-			if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(ButtonSizeBox->SetContent(Text)))
-			{
-				TextSlot->SetHorizontalAlignment(HAlign_Center);
-				TextSlot->SetVerticalAlignment(VAlign_Center);
-			}
-			Button->SetContent(ButtonSizeBox);
-			if (UHorizontalBoxSlot* RowSlot = Cast<UHorizontalBoxSlot>(ToolbarRow->AddChildToHorizontalBox(Button)))
-			{
-				RowSlot->SetVerticalAlignment(VAlign_Center);
-				RowSlot->SetPadding(FMargin(LeftPadding, 0.f, 0.f, 0.f));
-			}
-			return Button;
-		};
-
-		ResetCameraViewButton = AddToolbarButton(TEXT("Btn_ResetCameraView"), TEXT("Reset"), 64.f, 0.f);
-		ResetCameraViewButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnResetCameraViewClicked);
-		ResetCameraViewButton->SetToolTipText(FText::FromString(TEXT("Reset camera to the default view")));
-
-		DecreaseCameraSpeedButton = AddToolbarButton(TEXT("Btn_DecreaseCameraSpeed"), TEXT("-"), 48.f, 6.f);
-		DecreaseCameraSpeedButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnDecreaseCameraSpeedClicked);
-		DecreaseCameraSpeedButton->SetToolTipText(FText::FromString(TEXT("Decrease Camera Speed")));
-
-		// Typed speed entry, between the -/+ buttons - see OnCameraSpeedTextCommitted. Shows/accepts
-		// the raw speed value directly (matching UInteriorScreenWidget's own 3D-preview speed box,
-		// which does the same) - up to 6 digits at ExteriorCameraMaxSpeed=300000, hence the wider box.
-		CameraSpeedTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_CameraSpeed"));
-		CameraSpeedTextBox->SetJustification(ETextJustify::Center);
-		CameraSpeedTextBox->SetToolTipText(FText::FromString(TEXT("Camera Speed (type a value, then press Enter or click away)")));
-		CameraSpeedTextBox->OnTextCommitted.AddUniqueDynamic(this, &UEditScreenWidget::OnCameraSpeedTextCommitted);
-		ApplyStandardFont(CameraSpeedTextBox);
-		USizeBox* CameraSpeedSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		CameraSpeedSizeBox->SetWidthOverride(68.f);
-		CameraSpeedSizeBox->SetHeightOverride(36.f);
-		CameraSpeedSizeBox->SetContent(CameraSpeedTextBox);
-		if (UHorizontalBoxSlot* CameraSpeedRowSlot = Cast<UHorizontalBoxSlot>(ToolbarRow->AddChildToHorizontalBox(CameraSpeedSizeBox)))
-		{
-			CameraSpeedRowSlot->SetVerticalAlignment(VAlign_Center);
-			CameraSpeedRowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
-		}
-
-		IncreaseCameraSpeedButton = AddToolbarButton(TEXT("Btn_IncreaseCameraSpeed"), TEXT("+"), 48.f, 6.f);
-		IncreaseCameraSpeedButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnIncreaseCameraSpeedClicked);
-		IncreaseCameraSpeedButton->SetToolTipText(FText::FromString(TEXT("Increase Camera Speed")));
-
-		SetDefaultViewButton = AddToolbarButton(TEXT("Btn_SetDefaultView"), TEXT("Set Default"), 84.f, 6.f);
-		SetDefaultViewButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnSetDefaultViewClicked);
-		SetDefaultViewButton->SetToolTipText(FText::FromString(TEXT("Save the current camera view as the default")));
-
-		// --- Dropdowns (File, Window) + the click-catcher that closes them on an outside click ---
+		// --- Dropdowns (File, Window, Camera) + the click-catcher that closes them on an outside click ---
 		auto ConstructDropdown = [this, Canvas](const TCHAR* Name, float PositionX) -> UBorder*
 		{
 			UVerticalBox* Stack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), FName(FString(Name) + TEXT("Stack")));
@@ -355,14 +282,14 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			RowSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 2.f));
 		};
 
-		FileMenuDropdown = ConstructDropdown(TEXT("Pnl_FileDropdown"), EditMenuBarLeftMargin);
+		FileMenuDropdown = ConstructDropdown(TEXT("Pnl_FileDropdown"), EditMenuBarLeftMargin + EditMenuBarHeight);
 		UVerticalBox* FileDropdownStack = Cast<UVerticalBox>(FileMenuDropdown->GetContent());
 		UButton* FileNewButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileNew"), TEXT("New"));
 		FileNewButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnFileNewClicked);
 		UButton* FileLoadButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileLoad"), TEXT("Load"));
 		FileLoadButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnFileLoadClicked);
 
-		WindowMenuDropdown = ConstructDropdown(TEXT("Pnl_WindowDropdown"), EditMenuBarLeftMargin + EditMenuButtonWidth + 10.f);
+		WindowMenuDropdown = ConstructDropdown(TEXT("Pnl_WindowDropdown"), EditMenuBarLeftMargin + EditMenuBarHeight + EditMenuButtonWidth);
 		UVerticalBox* WindowDropdownStack = Cast<UVerticalBox>(WindowMenuDropdown->GetContent());
 		WindowAudioCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowAudio"), TEXT("Audio"));
 		// Unlike UInteriorScreenWidget's own dock-panel checkboxes (all default checked, since those
@@ -385,6 +312,37 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		UButton* WindowResetLayoutButton = AddDropdownButtonRow(WindowDropdownStack, TEXT("Btn_WindowResetLayout"), TEXT("Reset Layout"));
 		WindowResetLayoutButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowResetLayoutClicked);
 
+		// Camera dropdown: Reset, the typed move speed, +, -, Set Default View. Stays open after +/- so the speed
+		// can be nudged several times; Reset and Set Default close it.
+		CameraMenuDropdown = ConstructDropdown(TEXT("Pnl_CameraDropdown"), EditMenuBarLeftMargin + EditMenuBarHeight + 2.f * EditMenuButtonWidth);
+		UVerticalBox* CameraDropdownStack = Cast<UVerticalBox>(CameraMenuDropdown->GetContent());
+		ResetCameraViewButton = AddDropdownButtonRow(CameraDropdownStack, TEXT("Btn_ResetCameraView"), TEXT("Reset"));
+		ResetCameraViewButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnResetCameraViewClicked);
+		ResetCameraViewButton->SetToolTipText(FText::FromString(TEXT("Reset camera to the default view")));
+
+		// Typed speed entry - see OnCameraSpeedTextCommitted. Shows/accepts the raw speed value directly (up to
+		// 6 digits at ExteriorCameraMaxSpeed=300000).
+		CameraSpeedTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_CameraSpeed"));
+		CameraSpeedTextBox->SetJustification(ETextJustify::Center);
+		CameraSpeedTextBox->SetToolTipText(FText::FromString(TEXT("Camera Speed (type a value, then press Enter or click away)")));
+		CameraSpeedTextBox->OnTextCommitted.AddUniqueDynamic(this, &UEditScreenWidget::OnCameraSpeedTextCommitted);
+		ApplyStandardFont(CameraSpeedTextBox);
+		USizeBox* CameraSpeedSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		CameraSpeedSizeBox->SetWidthOverride(120.f);
+		CameraSpeedSizeBox->SetContent(CameraSpeedTextBox);
+		UVerticalBoxSlot* CameraSpeedSlot = CameraDropdownStack->AddChildToVerticalBox(CameraSpeedSizeBox);
+		CameraSpeedSlot->SetPadding(FMargin(2.f));
+
+		IncreaseCameraSpeedButton = AddDropdownButtonRow(CameraDropdownStack, TEXT("Btn_IncreaseCameraSpeed"), TEXT("+"));
+		IncreaseCameraSpeedButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnIncreaseCameraSpeedClicked);
+		IncreaseCameraSpeedButton->SetToolTipText(FText::FromString(TEXT("Increase Camera Speed")));
+		DecreaseCameraSpeedButton = AddDropdownButtonRow(CameraDropdownStack, TEXT("Btn_DecreaseCameraSpeed"), TEXT("-"));
+		DecreaseCameraSpeedButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnDecreaseCameraSpeedClicked);
+		DecreaseCameraSpeedButton->SetToolTipText(FText::FromString(TEXT("Decrease Camera Speed")));
+		SetDefaultViewButton = AddDropdownButtonRow(CameraDropdownStack, TEXT("Btn_SetDefaultView"), TEXT("Set Default"));
+		SetDefaultViewButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnSetDefaultViewClicked);
+		SetDefaultViewButton->SetToolTipText(FText::FromString(TEXT("Save the current camera view as the default")));
+
 		MenuClickCatcher = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("MenuClickCatcher"));
 		MenuClickCatcher->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
 		MenuClickCatcher->SetVisibility(ESlateVisibility::Collapsed);
@@ -401,7 +359,7 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		DockHost = WidgetTree->ConstructWidget<UDockHostWidget>(UDockHostWidget::StaticClass(), TEXT("DockHost"));
 		{
 			FDockMetrics DockMetrics;
-			DockMetrics.TopMargin = EditMenuBarHeight + ExteriorToolbarBarHeight;
+			DockMetrics.TopMargin = EditMenuBarHeight;
 			DockHost->SetMetrics(DockMetrics);
 		}
 		UCanvasPanelSlot* DockHostSlot = Canvas->AddChildToCanvas(DockHost);
@@ -770,6 +728,7 @@ void UEditScreenWidget::OnDecreaseCameraSpeedClicked()
 
 void UEditScreenWidget::OnResetCameraViewClicked()
 {
+	CloseMenuDropdowns();
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->ResetExteriorCameraToDefaultView();
@@ -779,6 +738,7 @@ void UEditScreenWidget::OnResetCameraViewClicked()
 
 void UEditScreenWidget::OnSetDefaultViewClicked()
 {
+	CloseMenuDropdowns();
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->SetCurrentViewAsDefaultExterior();
@@ -891,6 +851,10 @@ void UEditScreenWidget::OpenMenuDropdown(UBorder* Dropdown)
 	{
 		WindowMenuDropdown->SetVisibility(Dropdown == WindowMenuDropdown ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
+	if (CameraMenuDropdown)
+	{
+		CameraMenuDropdown->SetVisibility(Dropdown == CameraMenuDropdown ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
 	if (MenuClickCatcher)
 	{
 		MenuClickCatcher->SetVisibility(ESlateVisibility::Visible);
@@ -906,6 +870,10 @@ void UEditScreenWidget::CloseMenuDropdowns()
 	if (WindowMenuDropdown)
 	{
 		WindowMenuDropdown->SetVisibility(ESlateVisibility::Collapsed);
+	}
+	if (CameraMenuDropdown)
+	{
+		CameraMenuDropdown->SetVisibility(ESlateVisibility::Collapsed);
 	}
 	if (MenuClickCatcher)
 	{
@@ -936,6 +904,12 @@ void UEditScreenWidget::OnFileMenuClicked()
 void UEditScreenWidget::OnWindowMenuClicked()
 {
 	OpenMenuDropdown(WindowMenuDropdown);
+}
+
+void UEditScreenWidget::OnCameraMenuClicked()
+{
+	RefreshCameraSpeedDisplay();
+	OpenMenuDropdown(CameraMenuDropdown);
 }
 
 void UEditScreenWidget::OnFileNewClicked()
