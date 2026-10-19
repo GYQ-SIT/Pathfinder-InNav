@@ -27,7 +27,8 @@ menu bar, same look as the interior editor's:
 
 - **File** — **New**/**Load**, same behavior and unsaved-changes check as the interior
   editor's own File menu below.
-- **Window** — **Audio** (see Audio panel below) and **Map** (see Map panel below).
+- **Window** — **Audio** (see Audio panel below), **Map** (see Map panel below) and
+  **Debug**, plus **Reset Layout**.
 - **Save** — same as `Ctrl+S`, left of File.
 - **Enter Interior**, then **Back** on the far right — Enter Interior only appears once
   a building is selected; Back here returns to the start screen (not to be confused
@@ -38,6 +39,15 @@ speed. **Reset** snaps the camera back to a framed view of every loaded building
 **Set Default View** stores the camera's *current* position/angle as that reset target
 instead (persisted to disk, so it survives closing and reopening the project) — for
 tuning what "Reset" snaps back to once you've found an angle you like.
+
+This screen's three panels — **Map** (shown by default, docked on the right), **Audio** and
+**Debug** (hidden by default, tabs of one group along the bottom) — use the same docking
+system as the interior editor (see **Dockable panels** below: tabs, splits, screen edges,
+floating windows, Reset Layout). Its arrangement is saved separately, in
+`Saved/ExteriorDockLayout.json`, when you save or leave the screen. The **Debug** panel
+shows the selected building, camera speed, unsaved-changes flag, FPS and frame time, and a
+**Last Error** line for the most recent failed action (yellow: rejected, nothing lost; red:
+data may have been lost) - File > New/Load failures used to be silent on this screen.
 
 ### Map panel (roads, POIs, buildings)
 
