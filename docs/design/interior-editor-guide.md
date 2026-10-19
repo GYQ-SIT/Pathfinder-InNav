@@ -120,6 +120,13 @@ holds **Reset** (snaps the view back; closes the menu), the typed move-speed box
 or clicking away commits it), then **+** and **-** to nudge the speed (the menu stays open
 so you can press them repeatedly). Clicking anywhere else closes it.
 
+## UI scale
+
+Every screen's UI is drawn at a fixed 0.77 scale, whatever the window size (set in
+`Config/DefaultEngine.ini`, `UIScaleCurve`) - so the editor, the packaged build and any
+resolution look the same, rather than the UI growing and shrinking with window height as
+Unreal's default does. A smaller window therefore shows less of the UI, not a smaller UI.
+
 ## Dockable panels
 
 Eight panels — **Toolbar**, **Floor**, **Properties**, **Layers**, **Navigation**,
