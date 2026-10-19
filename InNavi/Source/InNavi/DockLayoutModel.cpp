@@ -379,8 +379,7 @@ namespace
 			const int32 N = Node.Tabs.Num();
 			if (N > 0)
 			{
-				float TabWidth = FMath::Clamp((float)Size.X / (float)N, M.TabMinWidth, M.TabMaxWidth);
-				TabWidth = FMath::Min(TabWidth, (float)Size.X / (float)N);
+				const float TabWidth = FDockLayout::ComputeTabWidth((float)Size.X, N, M);
 				for (int32 i = 0; i < N; ++i)
 				{
 					const float X = (float)Rect.Min.X + TabWidth * (float)i;
@@ -1342,6 +1341,16 @@ int32 FDockLayout::BringFloatingToFront(int32 Index)
 	const FDockFloatingWindow Window = Floating[Index];
 	Floating.RemoveAt(Index);
 	return Floating.Add(Window);
+}
+
+float FDockLayout::ComputeTabWidth(float BarWidth, int32 TabCount, const FDockMetrics& M)
+{
+	if (TabCount <= 0)
+	{
+		return 0.f;
+	}
+	const float Share = BarWidth / (float)TabCount;
+	return FMath::Min(FMath::Clamp(Share, M.TabMinWidth, M.TabMaxWidth), Share);
 }
 
 void FDockLayout::ComputeLayout(const FVector2D& Viewport, const FDockMetrics& M, FDockComputedLayout& Out) const

@@ -226,6 +226,10 @@ public:
 	// Raises a floating window to the top of the stack; returns its new index.
 	int32 BringFloatingToFront(int32 Index);
 
+	// Width of each tab in a tab bar BarWidth wide holding TabCount tabs (tabs are uniform). Shared by
+	// ComputeLayout and the widget that draws the tab bar so they can never disagree.
+	static float ComputeTabWidth(float BarWidth, int32 TabCount, const FDockMetrics& Metrics);
+
 	// --- Layout and hit testing (pure functions of the model + viewport) ---
 	void ComputeLayout(const FVector2D& Viewport, const FDockMetrics& Metrics, FDockComputedLayout& Out) const;
 
