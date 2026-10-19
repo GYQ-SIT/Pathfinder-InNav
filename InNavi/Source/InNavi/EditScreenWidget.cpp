@@ -2,10 +2,13 @@
 
 #include "AudioFileRowWidget.h"
 #include "ConfirmDialogWidget.h"
+#include "DockHostUMG.h"
+#include "ExteriorDockLayout.h"
 #include "InteriorScreenWidget.h"
 #include "NavPlayerController.h"
 #include "StartScreenWidget.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
@@ -312,7 +315,7 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 			ApplyStandardFont(Text);
 			USizeBox* RowSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-			RowSizeBox->SetWidthOverride(90.f);
+			RowSizeBox->SetWidthOverride(120.f);
 			RowSizeBox->SetMinDesiredHeight(24.f);
 			RowSizeBox->SetContent(Text);
 			Button->SetContent(RowSizeBox);
@@ -373,6 +376,15 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		WindowRoadsCheckbox->SetIsChecked(true);
 		WindowRoadsCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowRoadsCheckChanged);
 
+		// Starts unchecked - the Debug panel starts hidden, like the interior editor's own. All three boxes
+		// are re-synced to the real dock state by RefreshWindowMenuChecks once the layout is loaded.
+		WindowDebugCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowDebug"), TEXT("Debug"));
+		WindowDebugCheckbox->SetIsChecked(false);
+		WindowDebugCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowDebugCheckChanged);
+
+		UButton* WindowResetLayoutButton = AddDropdownButtonRow(WindowDropdownStack, TEXT("Btn_WindowResetLayout"), TEXT("Reset Layout"));
+		WindowResetLayoutButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowResetLayoutClicked);
+
 		MenuClickCatcher = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("MenuClickCatcher"));
 		MenuClickCatcher->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
 		MenuClickCatcher->SetVisibility(ESlateVisibility::Collapsed);
@@ -382,84 +394,36 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		MenuClickCatcherSlot->SetOffsets(FMargin(0.f));
 		MenuClickCatcherSlot->SetZOrder(5); // above nothing else on this screen, below menu bar/dropdowns (6-7)
 
+		// --- Dock host: lays out the Audio / Map / Debug panels (tab groups, splits, edge areas, floating
+		// windows) - see DockLayoutModel / DockHostWidget. Panel contents are built here as content-root
+		// UBorders and registered with it; nothing is added to the canvas directly. Below the two fixed bars
+		// (menu bar + toolbar bar) so docked panels start flush under them.
+		DockHost = WidgetTree->ConstructWidget<UDockHostWidget>(UDockHostWidget::StaticClass(), TEXT("DockHost"));
+		{
+			FDockMetrics DockMetrics;
+			DockMetrics.TopMargin = EditMenuBarHeight + ExteriorToolbarBarHeight;
+			DockHost->SetMetrics(DockMetrics);
+		}
+		UCanvasPanelSlot* DockHostSlot = Canvas->AddChildToCanvas(DockHost);
+		DockHostSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
+		DockHostSlot->SetOffsets(FMargin(0.f));
+		DockHostSlot->SetZOrder(2);
+
+		auto ConstructDockPanel = [this](FName Id, const TCHAR* BorderName) -> UBorder*
+		{
+			UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(BorderName));
+			// The dock frame already paints the panel background.
+			Border->SetBrushColor(FLinearColor::Transparent);
+			Border->SetPadding(FMargin(14.f));
+			DockHost->RegisterPanel(Id, FText::FromName(Id), Border);
+			return Border;
+		};
+
 		// --- Audio panel (Window > Audio) - same Play/Stop All/mute-click-sound/file-list layout as
-		// UInteriorScreenWidget's own Audio panel, reusing the same backend and UAudioFileRowWidget
-		// class, freely draggable by its own small corner handle (see AudioDragHandle) and resizable
-		// taller/shorter by its own bottom edge (see AudioBottomResizeHandle) - this screen has no
-		// dock/snap/column system, just the one panel.
-		AudioPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_Audio"));
-		AudioPanel->SetBrushColor(EditMenuBarColor);
-		AudioPanel->SetPadding(FMargin(AudioPanelPadding));
-		AudioPanel->SetVisibility(ESlateVisibility::Collapsed);
-		// Without this, shrinking AudioPanelHeight below the content's natural height (see
-		// RefreshAudioBottomResizeHandle) just let the content keep painting past the Border's own
-		// now-smaller edge instead of actually being contained by it - same reasoning as every one of
-		// UInteriorScreenWidget's own dock panels already setting this.
-		AudioPanel->SetClipping(EWidgetClipping::ClipToBoundsAlways);
-		AudioPanel->OnMouseMoveEvent.BindDynamic(this, &UEditScreenWidget::OnAudioPanelMouseMove);
-		AudioPanel->OnMouseButtonUpEvent.BindDynamic(this, &UEditScreenWidget::OnAudioPanelMouseButtonUp);
-
-		// A HeightOverride needs a wrapping SizeBox (a Border alone has no such concept) - same
-		// established pattern as every one of UInteriorScreenWidget's own dock panels. AudioPanelSlot
-		// belongs to THIS wrapper, not AudioPanel directly; the drag/resize handlers reach the real
-		// Canvas via Cast<USizeBox>(AudioPanel->GetParent())->GetParent(), same two-hop lookup those
-		// panels already use.
-		USizeBox* AudioPanelWrapper = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Size_AudioPanel"));
-		AudioPanelWrapper->SetContent(AudioPanel);
-		AudioPanelSlot = Canvas->AddChildToCanvas(AudioPanelWrapper);
-		AudioPanelSlot->SetAnchors(FAnchors(0.f, 0.f));
-		AudioPanelSlot->SetAlignment(FVector2D(0.f, 0.f));
-		// Below the toolbar bar (EditMenuBarHeight + ExteriorToolbarBarHeight), not just the menu bar -
-		// otherwise this panel's own default spawn position would sit on top of it.
-		AudioPanelSlot->SetPosition(FVector2D(EditMenuBarLeftMargin, EditMenuBarHeight + ExteriorToolbarBarHeight + 10.f));
-		AudioPanelSlot->SetAutoSize(true);
-		AudioPanelSlot->SetZOrder(6);
-
+		// UInteriorScreenWidget's own Audio panel, reusing the same backend and UAudioFileRowWidget class.
+		AudioPanel = ConstructDockPanel(ExteriorDock::Audio, TEXT("Pnl_Audio"));
 		UVerticalBox* AudioStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("AudioStack"));
 		AudioPanel->SetContent(AudioStack);
-
-		AudioTitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_AudioTitle"));
-		AudioTitleText->SetText(FText::FromString(TEXT("Audio")));
-		AudioTitleText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(AudioTitleText);
-		UVerticalBoxSlot* AudioTitleSlot = AudioStack->AddChildToVerticalBox(AudioTitleText);
-		AudioTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-
-		// The move-drag handle - only a click landing on THIS starts a drag (see
-		// OnAudioDragHandleMouseButtonDown), not anywhere else on the panel, same reasoning as
-		// UInteriorScreenWidget::DockDragHandles. Sized/positioned properly by RefreshAudioDragHandle,
-		// called once right after this whole panel is built, below.
-		AudioDragHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_AudioDragHandle"));
-		AudioDragHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
-		AudioDragHandle->SetCursor(EMouseCursor::CardinalCross);
-		// Starts Collapsed, matching AudioPanel's own initial visibility - otherwise this shows up at
-		// its default unrefreshed position (AudioPanel's own starting spot) even before the Audio panel
-		// is ever opened, since nothing else hides it until OnWindowAudioCheckChanged's first toggle.
-		AudioDragHandle->SetVisibility(ESlateVisibility::Collapsed);
-		AudioDragHandle->OnMouseButtonDownEvent.BindDynamic(this, &UEditScreenWidget::OnAudioDragHandleMouseButtonDown);
-		AudioDragHandleSlot = Canvas->AddChildToCanvas(AudioDragHandle);
-		AudioDragHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
-		AudioDragHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
-		AudioDragHandleSlot->SetAutoSize(false);
-		AudioDragHandleSlot->SetSize(FVector2D(AudioDragHandleSize, AudioDragHandleSize));
-		AudioDragHandleSlot->SetZOrder(7);
-
-		// The bottom-edge height handle - only this box starts a height drag (see
-		// OnAudioBottomResizeMouseButtonDown), same reasoning as the move handle above. Sized/
-		// positioned by RefreshAudioBottomResizeHandle, called from the same trigger points as
-		// RefreshAudioDragHandle, below.
-		AudioBottomResizeHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_AudioBottomResizeHandle"));
-		AudioBottomResizeHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
-		AudioBottomResizeHandle->SetCursor(EMouseCursor::ResizeUpDown);
-		// Same reasoning as AudioDragHandle's own SetVisibility(Collapsed) just above.
-		AudioBottomResizeHandle->SetVisibility(ESlateVisibility::Collapsed);
-		AudioBottomResizeHandle->OnMouseButtonDownEvent.BindDynamic(this, &UEditScreenWidget::OnAudioBottomResizeMouseButtonDown);
-		AudioBottomResizeHandle->OnMouseMoveEvent.BindDynamic(this, &UEditScreenWidget::OnAudioBottomResizeMouseMove);
-		AudioBottomResizeHandle->OnMouseButtonUpEvent.BindDynamic(this, &UEditScreenWidget::OnAudioBottomResizeMouseButtonUp);
-		AudioBottomResizeHandleSlot = Canvas->AddChildToCanvas(AudioBottomResizeHandle);
-		AudioBottomResizeHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
-		AudioBottomResizeHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
-		AudioBottomResizeHandleSlot->SetZOrder(7);
 
 		AudioStopAllButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_AudioStopAll"));
 		AudioStopAllButton->SetBackgroundColor(FLinearColor(0.75f, 0.2f, 0.2f, 1.f));
@@ -547,51 +511,11 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		AudioFileListSizeBox->SetContent(AudioFileListBox);
 		AudioStack->AddChildToVerticalBox(AudioFileListSizeBox);
 
-		// This all just ran before the widget's had even one real Slate layout/paint pass, which
-		// leaves AudioTitleText's/AudioPanel's own GetCachedGeometry a frame stale - both refreshes
-		// right now size off whatever that reports (likely zero), then NativeTick re-runs them for the
-		// next several ticks once painting has actually happened (see AudioDragHandleSettleFramesRemaining).
-		RefreshAudioDragHandle();
-		RefreshAudioBottomResizeHandle();
-		AudioDragHandleSettleFramesRemaining = AudioDragHandleSettleFrameCount;
-
-		// --- Road filter panel (Window > Roads) --- freely draggable by its own small corner handle
-		// (see RoadFilterDragHandle), same idea as AudioPanel but move-only (this panel's content never
-		// resizes, so no bottom-resize handle) and Visible by default instead of starting hidden.
-		RoadFilterPanel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_RoadFilter"));
-		RoadFilterPanel->SetBrushColor(EditMenuBarColor);
-		RoadFilterPanel->SetPadding(FMargin(AudioPanelPadding));
-		RoadFilterPanel->SetVisibility(ESlateVisibility::Visible);
-		RoadFilterPanel->SetClipping(EWidgetClipping::ClipToBoundsAlways);
-		RoadFilterPanel->OnMouseMoveEvent.BindDynamic(this, &UEditScreenWidget::OnRoadFilterPanelMouseMove);
-		RoadFilterPanel->OnMouseButtonUpEvent.BindDynamic(this, &UEditScreenWidget::OnRoadFilterPanelMouseButtonUp);
-		// Top-left anchored, same convention as AudioPanelSlot/RoadFilterDragHandleSlot (NOT a
-		// right-anchor, even though the starting X below happens to land it near the right side) - the
-		// drag handle reads this slot's own GetPosition() directly in RefreshRoadFilterDragHandle,
-		// which only gives an absolute left-origin pixel offset if both slots share the same anchor/
-		// alignment convention. A right-anchored panel paired with a left-anchored handle was tried
-		// first and put the handle nowhere near the panel, since GetPosition() then means something
-		// different in each coordinate system.
-		RoadFilterPanelSlot = Canvas->AddChildToCanvas(RoadFilterPanel);
-		RoadFilterPanelSlot->SetAnchors(FAnchors(0.f, 0.f));
-		RoadFilterPanelSlot->SetAlignment(FVector2D(0.f, 0.f));
-		// Placeholder position only - neither the canvas' nor this panel's own CachedGeometry is
-		// reliable yet at this point (no real Slate paint pass has happened), so PositionRoadFilterPanelInitially
-		// (called every tick from NativeTick until it succeeds once) immediately replaces this with a
-		// real screen-size-relative position instead.
-		RoadFilterPanelSlot->SetPosition(FVector2D(0.f, EditMenuBarHeight + ExteriorToolbarBarHeight + 10.f));
-		RoadFilterPanelSlot->SetAutoSize(true);
-		RoadFilterPanelSlot->SetZOrder(6);
+		// --- Map panel (Window > Map): road category/region filters and the building filters.
+		RoadFilterPanel = ConstructDockPanel(ExteriorDock::Map, TEXT("Pnl_RoadFilter"));
 
 		UVerticalBox* RoadFilterStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RoadFilterStack"));
 		RoadFilterPanel->SetContent(RoadFilterStack);
-
-		RoadFilterTitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_RoadFilterTitle"));
-		RoadFilterTitleText->SetText(FText::FromString(TEXT("Map")));
-		RoadFilterTitleText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(RoadFilterTitleText);
-		UVerticalBoxSlot* RoadFilterTitleSlot = RoadFilterStack->AddChildToVerticalBox(RoadFilterTitleText);
-		RoadFilterTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 
 		AddSectionHeaderRow(RoadFilterStack, TEXT("Txt_RoadFilterRoads"), TEXT("Roads"));
 		RoadHideAllCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadHideAll"), TEXT("Hide All"));
@@ -629,24 +553,27 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		BuildingNonCampusCheckbox->SetIsChecked(false);
 		BuildingNonCampusCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnBuildingNonCampusCheckChanged);
 
-		// The move-drag handle - only a click landing on THIS starts a drag, same reasoning as
-		// AudioDragHandle. Starts Visible, matching RoadFilterPanel's own initial visibility (unlike
-		// AudioDragHandle, which starts Collapsed to match AudioPanel starting hidden).
-		RoadFilterDragHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_RoadFilterDragHandle"));
-		RoadFilterDragHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
-		RoadFilterDragHandle->SetCursor(EMouseCursor::CardinalCross);
-		RoadFilterDragHandle->OnMouseButtonDownEvent.BindDynamic(this, &UEditScreenWidget::OnRoadFilterDragHandleMouseButtonDown);
-		RoadFilterDragHandleSlot = Canvas->AddChildToCanvas(RoadFilterDragHandle);
-		RoadFilterDragHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
-		RoadFilterDragHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
-		RoadFilterDragHandleSlot->SetAutoSize(false);
-		RoadFilterDragHandleSlot->SetSize(FVector2D(AudioDragHandleSize, AudioDragHandleSize));
-		RoadFilterDragHandleSlot->SetZOrder(7);
+		// --- Debug panel (Window > Debug): live info plus the last failed action. Starts hidden.
+		DebugPanel = ConstructDockPanel(ExteriorDock::Debug, TEXT("Pnl_Debug"));
+		UVerticalBox* DebugStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DebugStack"));
+		DebugPanel->SetContent(DebugStack);
 
-		// Same reasoning as RefreshAudioDragHandle's own post-construct call - RoadFilterTitleText's
-		// GetCachedGeometry is still stale this first time (no real Slate paint pass has happened yet).
-		RefreshRoadFilterDragHandle();
-		RoadFilterDragHandleSettleFramesRemaining = AudioDragHandleSettleFrameCount;
+		DebugInfoText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_DebugInfo"));
+		DebugInfoText->SetText(FText::FromString(TEXT("Debug information")));
+		DebugInfoText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(DebugInfoText);
+		DebugInfoText->SetAutoWrapText(true);
+		DebugStack->AddChildToVerticalBox(DebugInfoText);
+
+		// Separate from DebugInfoText so it can carry its own colour (yellow/red once an action has failed)
+		// independently of the rest of the panel.
+		DebugLastErrorText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_DebugLastError"));
+		DebugLastErrorText->SetText(FText::FromString(TEXT("Last Error: None")));
+		DebugLastErrorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ApplyStandardFont(DebugLastErrorText);
+		DebugLastErrorText->SetAutoWrapText(true);
+		UVerticalBoxSlot* DebugErrorSlot = DebugStack->AddChildToVerticalBox(DebugLastErrorText);
+		DebugErrorSlot->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
 	}
 
 	return Super::RebuildWidget();
@@ -659,6 +586,7 @@ void UEditScreenWidget::NativeConstruct()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->OnBuildingSelected.AddUniqueDynamic(this, &UEditScreenWidget::HandleBuildingSelected);
+		PC->OnActionFailed.AddUniqueDynamic(this, &UEditScreenWidget::HandleActionFailed);
 
 		// bButtonClickSoundEnabled (and the two flags below) live on the PC, not this widget, so they
 		// survive this screen being torn down and rebuilt (e.g. Back to the start screen and in again) -
@@ -695,6 +623,8 @@ void UEditScreenWidget::NativeConstruct()
 
 	RefreshAudioList();
 	RefreshCameraSpeedDisplay();
+	// Arranges every dock panel for the first time: the user's saved layout, else the team default.
+	InitializeDockLayout();
 }
 
 void UEditScreenWidget::PlayButtonClickSound()
@@ -710,6 +640,16 @@ void UEditScreenWidget::NativeDestruct()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->OnBuildingSelected.RemoveDynamic(this, &UEditScreenWidget::HandleBuildingSelected);
+		PC->OnActionFailed.RemoveDynamic(this, &UEditScreenWidget::HandleActionFailed);
+		PC->ClearPointerOverUICallback(this);
+	}
+
+	// Leaving this screen (Back, Enter Interior, quitting) keeps the arrangement for next time.
+	SaveDockLayoutToDisk();
+	if (DockHost)
+	{
+		DockHost->OnPanelClosedNative.Unbind();
+		DockHost->OnLayoutChangedNative.Unbind();
 	}
 
 	Super::NativeDestruct();
@@ -719,21 +659,67 @@ void UEditScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 
-	if (AudioDragHandleSettleFramesRemaining > 0)
+	FVector2D ReliableSize;
+	if (GetReliableCanvasSize(ReliableSize))
 	{
-		--AudioDragHandleSettleFramesRemaining;
-		RefreshAudioDragHandle();
-		RefreshAudioBottomResizeHandle();
+		LastKnownCanvasSize = ReliableSize;
 	}
-	if (RoadFilterDragHandleSettleFramesRemaining > 0)
+
+	if (DebugInfoText)
 	{
-		--RoadFilterDragHandleSettleFramesRemaining;
-		RefreshRoadFilterDragHandle();
+		// Smooth frame time / FPS
+		DebugSmoothedDeltaTime = DebugSmoothedDeltaTime <= 0.f ? InDeltaTime : FMath::Lerp(DebugSmoothedDeltaTime, InDeltaTime, 0.1f);
+		const float FPS = DebugSmoothedDeltaTime > 0.f ? 1.f / DebugSmoothedDeltaTime : 0.f;
+
+		FString SelectedBuilding = TEXT("None");
+		FString CameraSpeed = TEXT("-");
+		FString UnsavedChanges = TEXT("No");
+		if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+		{
+			const FString BuildingId = PC->GetSelectedBuildingId();
+			if (!BuildingId.IsEmpty())
+			{
+				SelectedBuilding = BuildingId;
+			}
+			CameraSpeed = FString::FromInt(FMath::RoundToInt(PC->GetCameraMoveSpeed()));
+			UnsavedChanges = PC->HasUnsavedChanges() ? TEXT("Yes") : TEXT("No");
+		}
+
+		DebugInfoText->SetText(FText::FromString(FString::Printf(
+			TEXT("Selected Building: %s\nCamera Speed: %s\nUnsaved Changes: %s\nFPS: %.1f\nFrame Time: %.2f ms"),
+			*SelectedBuilding, *CameraSpeed, *UnsavedChanges, FPS, DebugSmoothedDeltaTime * 1000.f)));
+
+		if (DebugLastErrorText)
+		{
+			if (LastActionFailedMessage.IsEmpty())
+			{
+				DebugLastErrorText->SetText(FText::FromString(TEXT("Last Error: None")));
+				DebugLastErrorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			}
+			else
+			{
+				DebugLastErrorText->SetText(FText::FromString(TEXT("Last Error: ") + LastActionFailedMessage));
+				// Yellow: the action was rejected but nothing was lost. Red: existing data may have been
+				// cleared, or a save may have silently failed - see EActionFailureSeverity.
+				DebugLastErrorText->SetColorAndOpacity(FSlateColor(
+					LastActionFailedSeverity == EActionFailureSeverity::Critical ? FLinearColor::Red : FLinearColor::Yellow));
+			}
+		}
 	}
-	if (!bHasPositionedRoadFilterPanelInitially)
+
+	// The Audio panel's controls size themselves from its panel's width, which the user can change at any time.
+	SyncAudioPanelWidth();
+}
+
+FReply UEditScreenWidget::NativeOnMouseWheel(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	// Scrollable panel content already got first crack at this via normal event bubbling; this just stops
+	// whatever it did not consume from falling through to the scene and changing the camera speed/zoom.
+	if (DockHost && DockHost->IsScreenPositionOverDock(InMouseEvent.GetScreenSpacePosition()))
 	{
-		PositionRoadFilterPanelInitially();
+		return FReply::Handled();
 	}
+	return Super::NativeOnMouseWheel(InGeometry, InMouseEvent);
 }
 
 void UEditScreenWidget::HandleBuildingSelected(FString BuildingId)
@@ -935,6 +921,7 @@ FEventReply UEditScreenWidget::OnMenuClickCatcherMouseButtonDown(FGeometry MyGeo
 
 void UEditScreenWidget::OnSaveClicked()
 {
+	SaveDockLayoutToDisk();
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->SaveCurrentProject();
@@ -1055,176 +1042,6 @@ void UEditScreenWidget::HandleFileLoadCancel()
 	// Nothing to do - the dialog already removed itself.
 }
 
-void UEditScreenWidget::OnWindowAudioCheckChanged(bool bIsChecked)
-{
-	if (AudioPanel)
-	{
-		AudioPanel->SetVisibility(bIsChecked ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	}
-	if (AudioDragHandle)
-	{
-		AudioDragHandle->SetVisibility(bIsChecked ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	}
-	if (AudioBottomResizeHandle)
-	{
-		AudioBottomResizeHandle->SetVisibility(bIsChecked ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	}
-	if (bIsChecked)
-	{
-		RefreshAudioList();
-
-		// AudioPanel was Collapsed until just now, so it never had a real Slate paint pass while
-		// hidden - AudioTitleText's/AudioPanel's own GetCachedGeometry is still stale THIS first time
-		// it's revealed (same underlying cause as RebuildWidget's own post-construct comment, just
-		// triggered by a visibility change instead). Queue the same retry so both handles pick up
-		// their real size once painting has actually happened.
-		RefreshAudioDragHandle();
-		RefreshAudioBottomResizeHandle();
-		AudioDragHandleSettleFramesRemaining = AudioDragHandleSettleFrameCount;
-	}
-}
-
-void UEditScreenWidget::OnWindowRoadsCheckChanged(bool bIsChecked)
-{
-	if (RoadFilterPanel)
-	{
-		RoadFilterPanel->SetVisibility(bIsChecked ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	}
-	if (RoadFilterDragHandle)
-	{
-		RoadFilterDragHandle->SetVisibility(bIsChecked ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	}
-	if (bIsChecked)
-	{
-		// Same reasoning as OnWindowAudioCheckChanged's own re-reveal retry - if this panel had been
-		// hidden, its geometry may be stale until a real paint pass happens again.
-		RefreshRoadFilterDragHandle();
-		RoadFilterDragHandleSettleFramesRemaining = AudioDragHandleSettleFrameCount;
-	}
-}
-
-void UEditScreenWidget::RefreshRoadFilterDragHandle()
-{
-	if (!RoadFilterDragHandleSlot || !RoadFilterPanelSlot)
-	{
-		return;
-	}
-
-	FVector2D HandleSize(AudioDragHandleSize, AudioDragHandleSize);
-	if (RoadFilterTitleText)
-	{
-		const FVector2D TextSize = RoadFilterTitleText->GetCachedGeometry().GetLocalSize();
-		HandleSize = FVector2D(FMath::Max(TextSize.X, AudioDragHandleSize), FMath::Max(TextSize.Y, AudioDragHandleSize));
-	}
-	RoadFilterDragHandleSlot->SetSize(HandleSize);
-
-	const FVector2D PanelPos = RoadFilterPanelSlot->GetPosition();
-	RoadFilterDragHandleSlot->SetPosition(FVector2D(PanelPos.X + AudioPanelPadding, PanelPos.Y + AudioPanelPadding));
-}
-
-bool UEditScreenWidget::GetReliableCanvasSize(FVector2D& OutSize) const
-{
-	UCanvasPanel* RootCanvas = WidgetTree ? Cast<UCanvasPanel>(WidgetTree->RootWidget) : nullptr;
-	if (!RootCanvas)
-	{
-		return false;
-	}
-	const FVector2D LocalSize = RootCanvas->GetCachedGeometry().GetLocalSize();
-	if (LocalSize.X <= 0.f || LocalSize.Y <= 0.f)
-	{
-		return false;
-	}
-	OutSize = LocalSize;
-	return true;
-}
-
-void UEditScreenWidget::PositionRoadFilterPanelInitially()
-{
-	if (!RoadFilterPanelSlot || !RoadFilterPanel)
-	{
-		return;
-	}
-
-	FVector2D CanvasSize;
-	const FVector2D PanelSize = RoadFilterPanel->GetCachedGeometry().GetLocalSize();
-	if (!GetReliableCanvasSize(CanvasSize) || PanelSize.X <= 0.f)
-	{
-		return; // no real Slate paint pass yet - NativeTick will try again next frame
-	}
-
-	constexpr float RightMargin = 10.f;
-	RoadFilterPanelSlot->SetPosition(FVector2D(
-		FMath::Max(0.f, CanvasSize.X - PanelSize.X - RightMargin),
-		EditMenuBarHeight + ExteriorToolbarBarHeight + 10.f));
-	bHasPositionedRoadFilterPanelInitially = true;
-	RefreshRoadFilterDragHandle();
-}
-
-FEventReply UEditScreenWidget::OnRoadFilterDragHandleMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
-{
-	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !RoadFilterPanel || !RoadFilterPanelSlot)
-	{
-		return UWidgetBlueprintLibrary::Unhandled();
-	}
-
-	UPanelWidget* CanvasParent = RoadFilterPanel->GetParent();
-	if (!CanvasParent)
-	{
-		return UWidgetBlueprintLibrary::Unhandled();
-	}
-
-	bIsDraggingRoadFilterPanel = true;
-	const FVector2D ScreenPosition = MouseEvent.GetScreenSpacePosition();
-	RoadFilterPanelDragStartMouse = CanvasParent->GetCachedGeometry().AbsoluteToLocal(ScreenPosition);
-	RoadFilterPanelDragStartPosition = RoadFilterPanelSlot->GetPosition();
-
-	// Bound to RoadFilterPanel (not the handle) so mouse capture keeps receiving move/up events even
-	// once the cursor moves off the handle's own small bounds mid-drag - same reasoning as
-	// OnAudioDragHandleMouseButtonDown's own CaptureMouse call.
-	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
-	return UWidgetBlueprintLibrary::CaptureMouse(Reply, RoadFilterPanel);
-}
-
-FEventReply UEditScreenWidget::OnRoadFilterPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
-{
-	if (!bIsDraggingRoadFilterPanel || !RoadFilterPanel || !RoadFilterPanelSlot)
-	{
-		return UWidgetBlueprintLibrary::Unhandled();
-	}
-
-	UPanelWidget* CanvasParent = RoadFilterPanel->GetParent();
-	if (!CanvasParent)
-	{
-		return UWidgetBlueprintLibrary::Unhandled();
-	}
-
-	const FGeometry& ParentGeometry = CanvasParent->GetCachedGeometry();
-	const FVector2D CurrentMousePosition = ParentGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
-	const FVector2D NewPosition = RoadFilterPanelDragStartPosition + (CurrentMousePosition - RoadFilterPanelDragStartMouse);
-
-	const FVector2D ViewportSize = ParentGeometry.GetLocalSize();
-	const FVector2D PanelSize = RoadFilterPanel->GetCachedGeometry().GetLocalSize();
-	const float ClampedX = FMath::Clamp(NewPosition.X, 0.f, FMath::Max(0.f, ViewportSize.X - PanelSize.X));
-	const float ClampedY = FMath::Clamp(NewPosition.Y, AudioPanelDragMinY, FMath::Max(AudioPanelDragMinY, ViewportSize.Y - PanelSize.Y));
-	RoadFilterPanelSlot->SetPosition(FVector2D(ClampedX, ClampedY));
-
-	RefreshRoadFilterDragHandle();
-
-	return UWidgetBlueprintLibrary::Handled();
-}
-
-FEventReply UEditScreenWidget::OnRoadFilterPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
-{
-	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
-	{
-		return UWidgetBlueprintLibrary::Unhandled();
-	}
-
-	bIsDraggingRoadFilterPanel = false;
-	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
-	return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
-}
-
 void UEditScreenWidget::OnRoadHideAllCheckChanged(bool bIsChecked)
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
@@ -1332,7 +1149,7 @@ void UEditScreenWidget::RefreshAudioList()
 			continue;
 		}
 		Row->SetFileName(FileName, PC->IsAudioFilePlaying(FileName));
-		Row->SetWidth(EditAudioPanelWidth);
+		Row->SetWidth(AudioContentWidth);
 		Row->OnPlayClicked.AddUniqueDynamic(this, &UEditScreenWidget::HandleAudioRowPlayClicked);
 
 		if (UScrollBoxSlot* RowSlot = Cast<UScrollBoxSlot>(AudioFileListBox->AddChild(Row)))
@@ -1340,186 +1157,6 @@ void UEditScreenWidget::RefreshAudioList()
 			RowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
 		}
 	}
-}
-
-void UEditScreenWidget::RefreshAudioDragHandle()
-{
-	if (!AudioDragHandleSlot || !AudioPanelSlot)
-	{
-		return;
-	}
-
-	FVector2D HandleSize(AudioDragHandleSize, AudioDragHandleSize);
-	if (AudioTitleText)
-	{
-		const FVector2D TextSize = AudioTitleText->GetCachedGeometry().GetLocalSize();
-		HandleSize = FVector2D(FMath::Max(TextSize.X, AudioDragHandleSize), FMath::Max(TextSize.Y, AudioDragHandleSize));
-	}
-	AudioDragHandleSlot->SetSize(HandleSize);
-
-	const FVector2D PanelPos = AudioPanelSlot->GetPosition();
-	AudioDragHandleSlot->SetPosition(FVector2D(PanelPos.X + AudioPanelPadding, PanelPos.Y + AudioPanelPadding));
-}
-
-FEventReply UEditScreenWidget::OnAudioDragHandleMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
-{
-	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !AudioPanel || !AudioPanelSlot)
-	{
-		return UWidgetBlueprintLibrary::Unhandled();
-	}
-
-	USizeBox* Wrapper = Cast<USizeBox>(AudioPanel->GetParent());
-	UPanelWidget* CanvasParent = Wrapper ? Wrapper->GetParent() : nullptr;
-	if (!CanvasParent)
-	{
-		return UWidgetBlueprintLibrary::Unhandled();
-	}
-
-	bIsDraggingAudioPanel = true;
-	const FVector2D ScreenPosition = MouseEvent.GetScreenSpacePosition();
-	AudioPanelDragStartMouse = CanvasParent->GetCachedGeometry().AbsoluteToLocal(ScreenPosition);
-	AudioPanelDragStartPosition = AudioPanelSlot->GetPosition();
-
-	// Bound to AudioPanel (not the handle) so mouse capture keeps receiving move/up events even once
-	// the cursor moves off the handle's own small bounds mid-drag - same reasoning as
-	// UInteriorScreenWidget::HandlePanelMouseButtonDown's own CaptureMouse call.
-	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
-	return UWidgetBlueprintLibrary::CaptureMouse(Reply, AudioPanel);
-}
-
-FEventReply UEditScreenWidget::OnAudioPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
-{
-	if (!bIsDraggingAudioPanel || !AudioPanel || !AudioPanelSlot)
-	{
-		return UWidgetBlueprintLibrary::Unhandled();
-	}
-
-	USizeBox* Wrapper = Cast<USizeBox>(AudioPanel->GetParent());
-	UPanelWidget* CanvasParent = Wrapper ? Wrapper->GetParent() : nullptr;
-	if (!CanvasParent)
-	{
-		return UWidgetBlueprintLibrary::Unhandled();
-	}
-
-	const FGeometry& ParentGeometry = CanvasParent->GetCachedGeometry();
-	const FVector2D CurrentMousePosition = ParentGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
-	const FVector2D NewPosition = AudioPanelDragStartPosition + (CurrentMousePosition - AudioPanelDragStartMouse);
-
-	const FVector2D ViewportSize = ParentGeometry.GetLocalSize();
-	const FVector2D PanelSize = AudioPanel->GetCachedGeometry().GetLocalSize();
-	const float ClampedX = FMath::Clamp(NewPosition.X, 0.f, FMath::Max(0.f, ViewportSize.X - PanelSize.X));
-	const float ClampedY = FMath::Clamp(NewPosition.Y, AudioPanelDragMinY, FMath::Max(AudioPanelDragMinY, ViewportSize.Y - PanelSize.Y));
-	AudioPanelSlot->SetPosition(FVector2D(ClampedX, ClampedY));
-
-	RefreshAudioDragHandle();
-	RefreshAudioBottomResizeHandle();
-
-	return UWidgetBlueprintLibrary::Handled();
-}
-
-FEventReply UEditScreenWidget::OnAudioPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
-{
-	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
-	{
-		return UWidgetBlueprintLibrary::Unhandled();
-	}
-
-	bIsDraggingAudioPanel = false;
-	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
-	return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
-}
-
-void UEditScreenWidget::RefreshAudioBottomResizeHandle()
-{
-	if (!AudioPanel || !AudioPanelSlot || !AudioBottomResizeHandleSlot)
-	{
-		return;
-	}
-
-	if (USizeBox* Wrapper = Cast<USizeBox>(AudioPanel->GetParent()))
-	{
-		if (AudioPanelHeight > 0.f)
-		{
-			Wrapper->SetHeightOverride(AudioPanelHeight);
-		}
-		else
-		{
-			Wrapper->ClearHeightOverride();
-		}
-	}
-
-	const FVector2D PanelSize = AudioPanel->GetCachedGeometry().GetLocalSize();
-	// Prefers the explicit override over PanelSize.Y - same staleness reasoning as
-	// UInteriorScreenWidget's own HandleHeight computation in RefreshDockLayout (GetCachedGeometry
-	// won't reflect a SetHeightOverride just set above until the next real paint).
-	const float CurrentHeight = AudioPanelHeight > 0.f ? AudioPanelHeight : FMath::Max(PanelSize.Y, AudioPanelMinHeight);
-	const FVector2D PanelPos = AudioPanelSlot->GetPosition();
-
-	AudioBottomResizeHandleSlot->SetAutoSize(false);
-	AudioBottomResizeHandleSlot->SetSize(FVector2D(FMath::Max(PanelSize.X, 40.f), 8.f));
-	AudioBottomResizeHandleSlot->SetPosition(FVector2D(PanelPos.X, PanelPos.Y + CurrentHeight - 4.f));
-}
-
-FEventReply UEditScreenWidget::OnAudioBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
-{
-	if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || !AudioBottomResizeHandle || !AudioPanel)
-	{
-		return UWidgetBlueprintLibrary::Unhandled();
-	}
-
-	bIsResizingAudioPanelHeight = true;
-	AudioPanelResizeStartMouseY = MouseEvent.GetScreenSpacePosition().Y;
-	AudioPanelResizeStartHeight = AudioPanel->GetCachedGeometry().GetLocalSize().Y;
-	FEventReply Reply = UWidgetBlueprintLibrary::Handled();
-	return UWidgetBlueprintLibrary::CaptureMouse(Reply, AudioBottomResizeHandle);
-}
-
-FEventReply UEditScreenWidget::OnAudioBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
-{
-	if (!bIsResizingAudioPanelHeight)
-	{
-		return UWidgetBlueprintLibrary::Unhandled();
-	}
-
-	if (!MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
-	{
-		bIsResizingAudioPanelHeight = false;
-		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
-		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
-	}
-
-	// Clamped so the panel's bottom edge can never be dragged past the bottom of the screen - same
-	// two-hop parent lookup as OnAudioPanelMouseMove's own ViewportSize.
-	float MaxHeight = TNumericLimits<float>::Max();
-	if (AudioPanelSlot)
-	{
-		if (USizeBox* Wrapper = Cast<USizeBox>(AudioPanel->GetParent()))
-		{
-			if (UPanelWidget* CanvasParent = Wrapper->GetParent())
-			{
-				const float ViewportHeight = CanvasParent->GetCachedGeometry().GetLocalSize().Y;
-				MaxHeight = FMath::Max(AudioPanelMinHeight, ViewportHeight - AudioPanelSlot->GetPosition().Y);
-			}
-		}
-	}
-
-	const float DeltaY = MouseEvent.GetScreenSpacePosition().Y - AudioPanelResizeStartMouseY;
-	AudioPanelHeight = FMath::Clamp(AudioPanelResizeStartHeight + DeltaY, AudioPanelMinHeight, MaxHeight);
-	RefreshAudioBottomResizeHandle();
-
-	return UWidgetBlueprintLibrary::Handled();
-}
-
-FEventReply UEditScreenWidget::OnAudioBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent)
-{
-	if (bIsResizingAudioPanelHeight && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
-	{
-		bIsResizingAudioPanelHeight = false;
-		FEventReply Reply = UWidgetBlueprintLibrary::Handled();
-		return UWidgetBlueprintLibrary::ReleaseMouseCapture(Reply);
-	}
-
-	return UWidgetBlueprintLibrary::Unhandled();
 }
 
 void UEditScreenWidget::OnAudioStopAllClicked()
@@ -1592,4 +1229,213 @@ void UEditScreenWidget::HandleAudioRowPlayClicked(FString FileName)
 		PC->PlayAudioFile(FileName);
 		RefreshAudioList();
 	}
+}
+
+void UEditScreenWidget::HandleActionFailed(FString Reason, EActionFailureSeverity Severity)
+{
+	LastActionFailedMessage = Reason;
+	LastActionFailedSeverity = Severity;
+}
+
+// ---------------------------------------------------------------------------
+// Docking
+// ---------------------------------------------------------------------------
+
+bool UEditScreenWidget::GetReliableCanvasSize(FVector2D& OutSize) const
+{
+	UCanvasPanel* RootCanvas = WidgetTree ? Cast<UCanvasPanel>(WidgetTree->RootWidget) : nullptr;
+	if (!RootCanvas)
+	{
+		return false;
+	}
+	const FVector2D LocalSize = RootCanvas->GetCachedGeometry().GetLocalSize();
+	if (LocalSize.X <= 0.f || LocalSize.Y <= 0.f)
+	{
+		return false;
+	}
+	OutSize = LocalSize;
+	return true;
+}
+
+FVector2D UEditScreenWidget::GetCanvasSize() const
+{
+	FVector2D ReliableSize;
+	if (GetReliableCanvasSize(ReliableSize))
+	{
+		return ReliableSize;
+	}
+	if (LastKnownCanvasSize.X > 0.f && LastKnownCanvasSize.Y > 0.f)
+	{
+		return LastKnownCanvasSize;
+	}
+	return UWidgetLayoutLibrary::GetViewportSize(this);
+}
+
+void UEditScreenWidget::InitializeDockLayout()
+{
+	if (!DockHost || bDockLayoutInitialized)
+	{
+		return;
+	}
+	bDockLayoutInitialized = true;
+
+	DockHost->OnPanelClosedNative.BindUObject(this, &UEditScreenWidget::HandleDockPanelClosed);
+	DockHost->OnLayoutChangedNative.BindUObject(this, &UEditScreenWidget::HandleDockLayoutChanged);
+
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetPointerOverUICallback(this, [this](const FVector2D& ScreenPosition)
+		{
+			return DockHost && DockHost->IsScreenPositionOverDock(ScreenPosition);
+		});
+	}
+
+	ExteriorDock::LoadLayout(*DockHost->GetLayout(), GetCanvasSize());
+	DockHost->NotifyLayoutChanged();
+	RefreshWindowMenuChecks();
+	RefreshAudioList();
+}
+
+bool UEditScreenWidget::IsDockPanelShown(FName Panel) const
+{
+	return DockHost && DockHost->IsPanelShown(Panel);
+}
+
+void UEditScreenWidget::SetDockPanelHidden(FName Panel, bool bHidden)
+{
+	if (!DockHost)
+	{
+		return;
+	}
+	if (bHidden)
+	{
+		DockHost->GetLayout()->HidePanel(Panel);
+	}
+	else
+	{
+		// Comes back where it was (or at its default edge if it was never placed).
+		DockHost->GetLayout()->ShowPanel(Panel, ExteriorDock::DefaultSideFor(Panel));
+	}
+	DockHost->NotifyLayoutChanged();
+	RefreshWindowMenuChecks();
+}
+
+void UEditScreenWidget::HandleDockPanelClosed(FName Panel)
+{
+	RefreshWindowMenuChecks();
+}
+
+void UEditScreenWidget::HandleDockLayoutChanged()
+{
+	RefreshWindowMenuChecks();
+}
+
+void UEditScreenWidget::RefreshWindowMenuChecks()
+{
+	auto Sync = [this](UCheckBox* Checkbox, FName Panel)
+	{
+		if (Checkbox)
+		{
+			Checkbox->SetIsChecked(IsDockPanelShown(Panel));
+		}
+	};
+	Sync(WindowAudioCheckbox, ExteriorDock::Audio);
+	Sync(WindowRoadsCheckbox, ExteriorDock::Map);
+	Sync(WindowDebugCheckbox, ExteriorDock::Debug);
+}
+
+void UEditScreenWidget::ResetDockLayout()
+{
+	if (!DockHost)
+	{
+		return;
+	}
+	ExteriorDock::BuildDefaultLayout(*DockHost->GetLayout());
+	DockHost->NotifyLayoutChanged();
+	RefreshWindowMenuChecks();
+	SaveDockLayoutToDisk();
+}
+
+void UEditScreenWidget::SaveDockLayoutToDisk() const
+{
+	// Extents are stored as fractions of the canvas size, so saving against a guessed size (a widget that
+	// never got on screen, e.g. in a test) would write a layout that restores far too big or small.
+	FVector2D Size;
+	if (DockHost && (GetReliableCanvasSize(Size) || (LastKnownCanvasSize.X > 0.f && LastKnownCanvasSize.Y > 0.f)))
+	{
+		if (!GetReliableCanvasSize(Size))
+		{
+			Size = LastKnownCanvasSize;
+		}
+		ExteriorDock::SaveToFile(*DockHost->GetLayout(), ExteriorDock::UserLayoutPath(), Size);
+	}
+}
+
+void UEditScreenWidget::SyncAudioPanelWidth()
+{
+	if (!DockHost)
+	{
+		return;
+	}
+	const float PanelWidth = DockHost->GetPanelWidth(ExteriorDock::Audio);
+	if (PanelWidth <= 0.f)
+	{
+		return; // hidden, or not laid out yet
+	}
+	// Minus the panel's 14px padding on each side and room for the scroll bar.
+	const float Width = FMath::Max(80.f, PanelWidth - 48.f);
+	if (FMath::IsNearlyEqual(Width, AudioContentWidth, 0.5f))
+	{
+		return;
+	}
+	AudioContentWidth = Width;
+
+	if (AudioStopAllButton)
+	{
+		if (USizeBox* SizeBox = Cast<USizeBox>(AudioStopAllButton->GetContent()))
+		{
+			SizeBox->SetWidthOverride(Width);
+		}
+	}
+	if (AudioFileListBox)
+	{
+		if (USizeBox* SizeBox = Cast<USizeBox>(AudioFileListBox->GetParent()))
+		{
+			SizeBox->SetWidthOverride(Width);
+		}
+	}
+	if (AudioVolumeSlider)
+	{
+		if (USizeBox* SizeBox = Cast<USizeBox>(AudioVolumeSlider->GetParent()))
+		{
+			SizeBox->SetWidthOverride(FMath::Max(60.f, Width - 60.f));
+		}
+	}
+	// Rows are rebuilt from scratch with the new width baked in - cheap for a list this small.
+	RefreshAudioList();
+}
+
+void UEditScreenWidget::OnWindowAudioCheckChanged(bool bIsChecked)
+{
+	SetDockPanelHidden(ExteriorDock::Audio, !bIsChecked);
+	if (bIsChecked)
+	{
+		RefreshAudioList();
+	}
+}
+
+void UEditScreenWidget::OnWindowRoadsCheckChanged(bool bIsChecked)
+{
+	SetDockPanelHidden(ExteriorDock::Map, !bIsChecked);
+}
+
+void UEditScreenWidget::OnWindowDebugCheckChanged(bool bIsChecked)
+{
+	SetDockPanelHidden(ExteriorDock::Debug, !bIsChecked);
+}
+
+void UEditScreenWidget::OnWindowResetLayoutClicked()
+{
+	CloseMenuDropdowns();
+	ResetDockLayout();
 }

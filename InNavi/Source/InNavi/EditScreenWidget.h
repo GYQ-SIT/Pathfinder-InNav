@@ -4,12 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "InteriorTypes.h"
 #include "EditScreenWidget.generated.h"
 
 class UBorder;
 class UButton;
-class UCanvasPanelSlot;
 class UCheckBox;
+class UDockHostWidget;
 class UEditableTextBox;
 class UScrollBox;
 class USlider;
@@ -24,15 +25,14 @@ class UTextBlock;
 // the selected building's interior and hands off to UInteriorScreenWidget, and is hidden until a
 // building is actually selected.
 //
-// Also has its own top menu bar (File: New/Load; Window: Audio panel visibility) and Audio panel,
-// mirroring UInteriorScreenWidget's own - but this screen has no dockable-panel system at all, so
-// the Audio panel here is just a single freely-draggable Border (see AudioDragHandle - same
-// drag-by-a-small-corner-handle-only idea as UInteriorScreenWidget's dock panels, just without any
-// resize/dock/snap/column chrome, since there's only ever the one panel here) and Window only ever
-// has the one Audio entry, not a panel-per-checkbox list. Enter Interior/Back live in this menu
-// bar's own right side (Enter Interior, then Back) instead of the old standalone bottom-right
-// button stack - do NOT confuse this Back (menu-bar chrome, returns to the start screen) with
-// UInteriorScreenWidget's own Back (returns to THIS screen instead) - they're different buttons
+// Also has its own top menu bar (File: New/Load; Window: one entry per dockable panel plus Reset
+// Layout) and three dockable panels - Audio, Map and Debug - laid out by the same dock system as the
+// interior editor (DockLayoutModel / DockHostWidget / DockHostUMG): tab groups, splits, edge areas,
+// drag-to-dock, floating windows, and a saved layout (ExteriorDockLayout.h). This class only builds
+// each panel's content, registers it with DockHost, and reacts to layout changes. Enter Interior/Back
+// live in this menu bar's own right side (Enter Interior, then Back) instead of the old standalone
+// bottom-right button stack - do NOT confuse this Back (menu-bar chrome, returns to the start screen)
+// with UInteriorScreenWidget's own Back (returns to THIS screen instead) - they're different buttons
 // with different targets despite matching chrome/position.
 UCLASS()
 class INNAVI_API UEditScreenWidget : public UUserWidget
@@ -42,11 +42,15 @@ class INNAVI_API UEditScreenWidget : public UUserWidget
 public:
 	UEditScreenWidget(const FObjectInitializer& ObjectInitializer);
 
+	// The dock system hosting the Audio/Map/Debug panels (null until the widget tree is built).
+	UDockHostWidget* GetDockHost() const { return DockHost; }
+
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+	virtual FReply NativeOnMouseWheel(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 
 private:
 	UFUNCTION()
@@ -97,6 +101,11 @@ private:
 	UFUNCTION()
 	void HandleBuildingSelected(FString BuildingId);
 
+	// Bound to ANavPlayerController::OnActionFailed - remembers the last failure so the Debug panel can
+	// show it (File > New/Load and "Set Default" failures used to be completely silent on this screen).
+	UFUNCTION()
+	void HandleActionFailed(FString Reason, EActionFailureSeverity Severity);
+
 	void GoToStartScreen();
 
 	UFUNCTION()
@@ -108,7 +117,7 @@ private:
 	UFUNCTION()
 	void HandleCancel();
 
-	// --- Top menu bar: File (New/Load) + Window (Audio panel visibility) ---
+	// --- Top menu bar: File (New/Load) + Window (panel visibility, Reset Layout) ---
 	// Mirrors UInteriorScreenWidget's own menu bar layout/behavior exactly (own dropdown per menu
 	// button, MenuClickCatcher for click-elsewhere-closes-it) - see that class's own header comments
 	// for the full reasoning, not repeated here.
@@ -162,26 +171,31 @@ private:
 	UFUNCTION()
 	void HandleFileLoadCancel();
 
-	// Window > Audio - the only entry (this screen has no dockable-panel system to list panels
-	// for). Toggles AudioPanel's own visibility.
+	// Window > Audio / Map / Debug - show or hide that panel in the dock (it comes back where it was).
+	// Map is the panel behind OnWindowRoadsCheckChanged/RoadFilterPanel: labeled "Map" (not "Roads")
+	// since it also filters buildings, not just roads/POIs - the variable/function names underneath
+	// keep their original "Road..." names (cosmetic rename only, not worth the churn).
 	UFUNCTION()
 	void OnWindowAudioCheckChanged(bool bIsChecked);
 
-	// Window > Map - toggles RoadFilterPanel's own visibility. Labeled "Map" (not "Roads") since the
-	// panel now also filters buildings, not just roads/POIs - the variable/function names underneath
-	// keep their original "Road..." names (cosmetic rename only, not worth the churn of renaming every
-	// symbol that reads them).
 	UFUNCTION()
 	void OnWindowRoadsCheckChanged(bool bIsChecked);
+
+	UFUNCTION()
+	void OnWindowDebugCheckChanged(bool bIsChecked);
+
+	// Window > Reset Layout - back to the team default arrangement.
+	UFUNCTION()
+	void OnWindowResetLayoutClicked();
 
 	// Master switch, above the 6 category rows - forwards to PC->SetAllRoadsVisible and visually syncs
 	// the 6 category checkboxes to match (same pattern as OnAudioMuteAllCheckChanged).
 	UFUNCTION()
 	void OnRoadHideAllCheckChanged(bool bIsChecked);
 
-	// --- Map filter panel (Window > Map) --- one handler per ERoadCategory, since
-	// UCheckBox::OnCheckStateChanged only carries the new bool, not which row it came from. Each
-	// forwards to PC->SetRoadCategoryVisible with its own hardcoded category.
+	// --- Map panel --- one handler per ERoadCategory, since UCheckBox::OnCheckStateChanged only
+	// carries the new bool, not which row it came from. Each forwards to PC->SetRoadCategoryVisible
+	// with its own hardcoded category.
 	UFUNCTION()
 	void OnRoadPrimaryCheckChanged(bool bIsChecked);
 	UFUNCTION()
@@ -196,87 +210,50 @@ private:
 	void OnRoadOtherCheckChanged(bool bIsChecked);
 
 	// Region filter, below the 6 category checkboxes - forwards to PC->SetRoadsAndPOIsWithinCampusOnly.
-	// Starts unchecked (shows everything, matching today's behavior with no region filter at all).
+	// Starts checked (see NativeConstruct, which applies it once a PC/Generator exists).
 	UFUNCTION()
 	void OnRoadCampusOnlyCheckChanged(bool bIsChecked);
 
 	// Building-visibility filter (Map panel's "Buildings" section) - one handler per bucket, same
-	// reasoning as the 6 road-category handlers above. Both start checked (everything shown, matching
-	// today's behavior before this filter existed).
+	// reasoning as the 6 road-category handlers above.
 	UFUNCTION()
 	void OnBuildingCampusCheckChanged(bool bIsChecked);
 	UFUNCTION()
 	void OnBuildingNonCampusCheckChanged(bool bIsChecked);
 
-	// RoadFilterPanel's own small corner drag handle - same idea as AudioDragHandle (reuses its
-	// AudioDragHandleSize/AudioPanelPadding/AudioPanelDragMinY constants, generic enough for either
-	// panel), just move-only - this panel's content never resizes, so there's no bottom-resize handle
-	// to go with it.
-	void RefreshRoadFilterDragHandle();
+	// --- Docking ---
+	// Called once from NativeConstruct: loads the user's saved layout (else the team default) and hooks the
+	// dock's change notifications.
+	void InitializeDockLayout();
+	bool IsDockPanelShown(FName Panel) const;
+	void SetDockPanelHidden(FName Panel, bool bHidden);
+	void HandleDockPanelClosed(FName Panel);
+	void HandleDockLayoutChanged();
+	// Ticks the Window menu's checkboxes to match which panels are actually shown (a tab's X, a re-dock,
+	// Reset Layout... can all change that behind the menu's back). SetIsChecked doesn't fire
+	// OnCheckStateChanged, so this is safe to call from the handlers themselves.
+	void RefreshWindowMenuChecks();
+	void ResetDockLayout();
+	// Persists the arrangement to Saved/ExteriorDockLayout.json - a per-machine UI preference.
+	void SaveDockLayoutToDisk() const;
+	// The Audio panel's controls size themselves from the width of the dock group showing it.
+	void SyncAudioPanelWidth();
 
 	// The actual rendered size of the root canvas - NOT UWidgetLayoutLibrary::GetViewportSize, which
 	// returns the platform's raw pixel resolution and only matches this Slate-local coordinate space
 	// at DPI scale 1 (see UInteriorScreenWidget::GetReliableCanvasSize's own comment for the same
 	// reasoning). Returns false (leaving OutSize untouched) if RebuildWidget hasn't had a real Slate
-	// paint pass yet - see PositionRoadFilterPanelInitially's own retry.
+	// paint pass yet.
 	bool GetReliableCanvasSize(FVector2D& OutSize) const;
-
-	// Places RoadFilterPanel a fixed margin in from the canvas' own actual right edge (screen-size/
-	// resolution independent, unlike a hardcoded X) - called every tick from NativeTick until it
-	// succeeds once (both the canvas' and the panel's own CachedGeometry need a real paint pass
-	// first, so this can't just run once at construction), then never again (the user's own drag
-	// takes over from there - see bHasPositionedRoadFilterPanelInitially).
-	void PositionRoadFilterPanelInitially();
-	UFUNCTION()
-	FEventReply OnRoadFilterDragHandleMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
-	UFUNCTION()
-	FEventReply OnRoadFilterPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
-	UFUNCTION()
-	FEventReply OnRoadFilterPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+	FVector2D GetCanvasSize() const;
 
 	// --- Audio panel (Window > Audio) ---
 	// Same Play/Stop All/mute-click-sound/file-list layout as UInteriorScreenWidget's own Audio
 	// panel (reuses the same UAudioFileRowWidget class for rows, and the same PC-level
 	// GetAvailableAudioFiles/PlayAudioFile/StopAllAudio/IsButtonClickSoundEnabled functions - none of
-	// that is tied to the interior editor specifically), a single freely-draggable Border (see
-	// AudioDragHandle) with no resize/dock/snap/column chrome, since this screen only ever has the
-	// one panel to plug into a dock system for. Starts hidden, same as the interior editor's own
+	// that is tied to the interior editor specifically). Starts hidden, same as the interior editor's own
 	// Audio panel.
 	void RefreshAudioList();
-
-	// Sizes AudioDragHandleSlot off AudioTitleText's own rendered size (same reasoning as
-	// UInteriorScreenWidget::GetDockDragHandleSize - GetCachedGeometry is the text's real painted
-	// size, not a pre-paint estimate) and positions it at AudioPanel's current top-left corner, inset
-	// by AudioPanelPadding to match where the title text itself starts. Called once right after
-	// construction, again every tick for AudioDragHandleSettleFrameCount ticks after that (the text
-	// isn't necessarily painted yet on the very first call - same class of staleness
-	// UInteriorScreenWidget hits, see its own LayoutGeometrySettleFramesRemaining), and again on every
-	// drag move (the panel's own position changed, not its size, but the handle must track it too).
-	void RefreshAudioDragHandle();
-
-	UFUNCTION()
-	FEventReply OnAudioDragHandleMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
-
-	UFUNCTION()
-	FEventReply OnAudioPanelMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
-
-	UFUNCTION()
-	FEventReply OnAudioPanelMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
-
-	// Positions AudioBottomResizeHandleSlot at AudioPanel's current bottom edge (AudioPanelHeight if
-	// the user has dragged it at least once, else the panel's own natural painted height) and spans
-	// its current width. Called from the same trigger points as RefreshAudioDragHandle, plus every
-	// bottom-drag mouse move.
-	void RefreshAudioBottomResizeHandle();
-
-	UFUNCTION()
-	FEventReply OnAudioBottomResizeMouseButtonDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
-
-	UFUNCTION()
-	FEventReply OnAudioBottomResizeMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
-
-	UFUNCTION()
-	FEventReply OnAudioBottomResizeMouseButtonUp(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
 
 	UFUNCTION()
 	void OnAudioStopAllClicked();
@@ -341,20 +318,36 @@ private:
 	UBorder* WindowMenuDropdown = nullptr;
 
 	UPROPERTY()
+	UCheckBox* WindowAudioCheckbox = nullptr;
+
+	UPROPERTY()
 	UCheckBox* WindowRoadsCheckbox = nullptr;
 
-	// Freely-draggable panel (see RoadFilterDragHandle), Visible by default (unlike AudioPanel) - just
-	// 6 checkboxes, one per ERoadCategory, each toggling PC->SetRoadCategoryVisible.
+	UPROPERTY()
+	UCheckBox* WindowDebugCheckbox = nullptr;
+
+	// The dock system's host: lays out the three panels below. Stretches over the whole canvas; only its
+	// chrome takes mouse input, so clicks on the empty area still reach the 3D scene.
+	UPROPERTY()
+	UDockHostWidget* DockHost = nullptr;
+
+	bool bDockLayoutInitialized = false;
+
+	// The canvas size the layout was last known to be arranged for - kept so the layout can still be saved
+	// while the widget is being torn down (its geometry is no longer reliable by then).
+	FVector2D LastKnownCanvasSize = FVector2D::ZeroVector;
+
+	// Content roots of the three dock panels (the UBorders registered with DockHost).
+	UPROPERTY()
+	UBorder* AudioPanel = nullptr;
+
+	// Map panel - 6 road-category checkboxes + region filter + 2 building filters (see
+	// OnRoadHideAllCheckChanged and friends).
 	UPROPERTY()
 	UBorder* RoadFilterPanel = nullptr;
 
 	UPROPERTY()
-	UCanvasPanelSlot* RoadFilterPanelSlot = nullptr;
-
-	// RoadFilterPanel's own title UTextBlock - RefreshRoadFilterDragHandle sizes the drag handle off
-	// its rendered size, same reasoning as AudioTitleText/RefreshAudioDragHandle.
-	UPROPERTY()
-	UTextBlock* RoadFilterTitleText = nullptr;
+	UBorder* DebugPanel = nullptr;
 
 	// Master "Hide All" checkbox, above the 6 category rows.
 	UPROPERTY()
@@ -386,103 +379,15 @@ private:
 	UPROPERTY()
 	UCheckBox* BuildingNonCampusCheckbox = nullptr;
 
-	UPROPERTY()
-	UBorder* RoadFilterDragHandle = nullptr;
-
-	UPROPERTY()
-	UCanvasPanelSlot* RoadFilterDragHandleSlot = nullptr;
-
-	bool bIsDraggingRoadFilterPanel = false;
-	FVector2D RoadFilterPanelDragStartMouse = FVector2D::ZeroVector;
-	FVector2D RoadFilterPanelDragStartPosition = FVector2D::ZeroVector;
-
-	// See RefreshAudioDragHandle's own comment on why more than one retry is needed - a separate
-	// counter from AudioDragHandleSettleFramesRemaining since the two panels' refreshes are
-	// independent (sharing one counter would make one panel's visibility change reset the other's
-	// in-progress retry).
-	int32 RoadFilterDragHandleSettleFramesRemaining = 0;
-
-	// See PositionRoadFilterPanelInitially - true once that one-time repositioning has actually run,
-	// so NativeTick stops retrying (and doesn't fight the user's own drag afterward).
-	bool bHasPositionedRoadFilterPanelInitially = false;
-
 	// Full-screen, fully transparent, Collapsed by default - see
 	// UInteriorScreenWidget::OnMenuClickCatcherMouseButtonDown's own comment for why this is how
 	// "click elsewhere closes the dropdown" works in UMG.
 	UPROPERTY()
 	UBorder* MenuClickCatcher = nullptr;
 
-	UPROPERTY()
-	UCheckBox* WindowAudioCheckbox = nullptr;
-
 	// Set by OnFileLoadClicked, read back by HandleFileLoadSave/Discard once the user picks a
 	// choice - same role as UInteriorScreenWidget's own PendingLoadFilePath.
 	FString PendingLoadFilePath;
-
-	UPROPERTY()
-	UBorder* AudioPanel = nullptr;
-
-	// AudioPanel's own CanvasPanelSlot - promoted to a member (RebuildWidget's other slots stay local)
-	// purely so the drag handlers can read/set its position without threading it through every call.
-	UPROPERTY()
-	UCanvasPanelSlot* AudioPanelSlot = nullptr;
-
-	// AudioPanel's title UTextBlock - see RefreshAudioDragHandle's own comment.
-	UPROPERTY()
-	UTextBlock* AudioTitleText = nullptr;
-
-	// The small move-drag handle box in AudioPanel's top-left corner - same idea as
-	// UInteriorScreenWidget's own DockDragHandles (only this specific box starts a drag; clicking
-	// anywhere else on the panel, like its checkboxes or file list, does not), just for the one panel
-	// this screen has instead of a per-panel array.
-	UPROPERTY()
-	UBorder* AudioDragHandle = nullptr;
-
-	UPROPERTY()
-	UCanvasPanelSlot* AudioDragHandleSlot = nullptr;
-
-	bool bIsDraggingAudioPanel = false;
-	FVector2D AudioPanelDragStartMouse = FVector2D::ZeroVector;
-	FVector2D AudioPanelDragStartPosition = FVector2D::ZeroVector;
-
-	// See RefreshAudioDragHandle's own comment on why more than one retry is needed.
-	int32 AudioDragHandleSettleFramesRemaining = 0;
-	static constexpr int32 AudioDragHandleSettleFrameCount = 6;
-
-	// Matches UInteriorScreenWidget::DockDragHandleSize - the floor each axis of the handle is
-	// clamped to, so a not-yet-painted or empty title never shrinks it to something unclickable.
-	static constexpr float AudioDragHandleSize = 12.f;
-
-	// Matches AudioPanel's own SetPadding(FMargin(10.f)) in RebuildWidget - the handle is inset by
-	// this same amount so it sits right where the title text itself starts, not some separate margin.
-	static constexpr float AudioPanelPadding = 10.f;
-
-	// Matches RebuildWidget's own local EditMenuBarHeight (kept as a separate class constant rather
-	// than shared - see RebuildWidget's own comment on why EditMenuBarHeight is a local, not a class
-	// member) - the drag clamp's own top bound, so the panel can't be dragged up under the menu bar.
-	static constexpr float AudioPanelDragMinY = 32.f;
-
-	// The small resize handle bar at AudioPanel's bottom edge - only this class' one panel needs it,
-	// so unlike UInteriorScreenWidget's per-panel DockBottomResizeHandles array this is just a single
-	// widget. Dragging it sets AudioPanelHeight to an explicit value via AudioPanelWrapper's own
-	// SetHeightOverride (see its construction comment in RebuildWidget for why AudioPanel needs a
-	// wrapping SizeBox at all).
-	UPROPERTY()
-	UBorder* AudioBottomResizeHandle = nullptr;
-
-	UPROPERTY()
-	UCanvasPanelSlot* AudioBottomResizeHandleSlot = nullptr;
-
-	// 0 = never manually resized, keep sizing to natural content height - same "0 means auto" idiom as
-	// UInteriorScreenWidget::DockPanelHeights.
-	float AudioPanelHeight = 0.f;
-	bool bIsResizingAudioPanelHeight = false;
-	float AudioPanelResizeStartMouseY = 0.f;
-	float AudioPanelResizeStartHeight = 0.f;
-
-	// Floor for AudioPanelHeight - matches UInteriorScreenWidget::DockPanelMinHeight's role, just a
-	// smaller value since this one panel's natural content is itself much shorter than a dock panel's.
-	static constexpr float AudioPanelMinHeight = 60.f;
 
 	UPROPERTY()
 	UButton* AudioStopAllButton = nullptr;
@@ -504,6 +409,24 @@ private:
 
 	UPROPERTY()
 	UScrollBox* AudioFileListBox = nullptr;
+
+	// Width the Audio panel's controls (Stop All, file rows, volume slider) are currently sized to - follows
+	// the dock group's real width, see SyncAudioPanelWidth.
+	float AudioContentWidth = 220.f;
+
+	// Debug panel: live info text plus a "Last Error" line coloured by severity.
+	UPROPERTY()
+	UTextBlock* DebugInfoText = nullptr;
+
+	UPROPERTY()
+	UTextBlock* DebugLastErrorText = nullptr;
+
+	float DebugSmoothedDeltaTime = 0.f;
+
+	// Last message/severity broadcast by ANavPlayerController::OnActionFailed (see HandleActionFailed);
+	// empty until the first failure.
+	FString LastActionFailedMessage;
+	EActionFailureSeverity LastActionFailedSeverity = EActionFailureSeverity::Warning;
 
 	// 15pt, matching the rest of the app's UI text (see UInteriorScreenWidget::StandardFontSize).
 	static constexpr int32 StandardFontSize = 15;

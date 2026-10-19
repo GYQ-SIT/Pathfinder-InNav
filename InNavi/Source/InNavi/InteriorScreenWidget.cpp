@@ -1575,6 +1575,14 @@ void UInteriorScreenWidget::InitializeDockLayout()
 	DockHost->OnPanelClosedNative.BindUObject(this, &UInteriorScreenWidget::HandleDockPanelClosed);
 	DockHost->OnLayoutChangedNative.BindUObject(this, &UInteriorScreenWidget::HandleDockLayoutChanged);
 
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetPointerOverUICallback(this, [this](const FVector2D& ScreenPosition)
+		{
+			return DockHost && DockHost->IsScreenPositionOverDock(ScreenPosition);
+		});
+	}
+
 	InteriorDock::LoadLayout(*DockHost->GetLayout(), GetCanvasSize());
 	DockHost->NotifyLayoutChanged();
 	RefreshWindowMenuChecks();
@@ -1663,6 +1671,7 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnPreviewModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandlePreviewModeChanged);
 		PC->OnEdit3DModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleEdit3DModeChanged);
 		PC->OnSnapEnabledChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSnapEnabledChanged);
+		PC->ClearPointerOverUICallback(this);
 
 		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
 		{

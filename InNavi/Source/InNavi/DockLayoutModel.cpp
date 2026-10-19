@@ -1213,6 +1213,40 @@ bool FDockLayout::HidePanel(FName Panel)
 		return false;
 	}
 	RecordHint(Panel);
+
+	// A panel that was the last one left in its spot has no neighbour to come back next to. If an
+	// already-hidden panel was recorded as next to this one, link back to it (mirrored), so showing the
+	// two in either order puts them back together instead of the first one claiming the spot alone.
+	if (FDockHint* Hint = HiddenHints.Find(Panel))
+	{
+		if (Hint->NeighborPanel.IsNone() && Hint->Kind == FDockHint::EKind::Docked)
+		{
+			for (const TPair<FName, FDockHint>& Other : HiddenHints)
+			{
+				if (Other.Key == Panel || Other.Value.NeighborPanel != Panel || Other.Value.Kind != FDockHint::EKind::Docked)
+				{
+					continue;
+				}
+				EDockDropZone Mirrored = EDockDropZone::None;
+				switch (Other.Value.Zone)
+				{
+				case EDockDropZone::Center: Mirrored = EDockDropZone::Center; break;
+				case EDockDropZone::Left: Mirrored = EDockDropZone::Right; break;
+				case EDockDropZone::Right: Mirrored = EDockDropZone::Left; break;
+				case EDockDropZone::Top: Mirrored = EDockDropZone::Bottom; break;
+				case EDockDropZone::Bottom: Mirrored = EDockDropZone::Top; break;
+				default: break;
+				}
+				if (Mirrored != EDockDropZone::None)
+				{
+					Hint->NeighborPanel = Other.Key;
+					Hint->Zone = Mirrored;
+					break;
+				}
+			}
+		}
+	}
+
 	RemovePanelTab(Panel);
 	Normalize();
 	return true;

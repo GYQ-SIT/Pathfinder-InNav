@@ -177,6 +177,12 @@ void ANavPlayerController::OnClick()
 		return;
 	}
 
+	// Ignore clicks that land on a dock panel (see SetPointerOverUICallback).
+	if (IsPointerOverUI())
+	{
+		return;
+	}
+
 	// The 2D floor-plan widget normally handles navigation-point clicks. Keep
 	// the original 3D deprojection as a fallback because GameAndUI input can
 	// route the same mouse click to the PlayerController without delivering it
@@ -2722,9 +2728,29 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 	}
 }
 
+void ANavPlayerController::SetPointerOverUICallback(const UObject* ScreenOwner, TFunction<bool(const FVector2D&)> Callback)
+{
+	PointerOverUIOwner = ScreenOwner;
+	PointerOverUICallback = MoveTemp(Callback);
+}
+
+void ANavPlayerController::ClearPointerOverUICallback(const UObject* ScreenOwner)
+{
+	if (PointerOverUIOwner.Get() == ScreenOwner)
+	{
+		PointerOverUIOwner = nullptr;
+		PointerOverUICallback = nullptr;
+	}
+}
+
+bool ANavPlayerController::IsPointerOverUI() const
+{
+	return PointerOverUIOwner.IsValid() && PointerOverUICallback && PointerOverUICallback(FSlateApplication::Get().GetCursorPos());
+}
+
 void ANavPlayerController::OnLeftMouseDown3DEdit()
 {
-	if (!bIsIn3DPreviewMode || !bIsIn3DEditMode || !bSelectMode || !InteriorGen)
+	if (!bIsIn3DPreviewMode || !bIsIn3DEditMode || !bSelectMode || !InteriorGen || IsPointerOverUI())
 	{
 		return;
 	}

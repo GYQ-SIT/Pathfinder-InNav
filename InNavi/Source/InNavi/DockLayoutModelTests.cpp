@@ -597,6 +597,25 @@ bool FDockHideShowTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("size"), L.GetFloating()[0].Size.Equals(FVector2D(300.0, 400.0), 0.01));
 	}
 
+	// Two tabs hidden one after the other come back together in either order.
+	for (int32 Order = 0; Order < 2; ++Order)
+	{
+		FDockLayout T;
+		T.DockPanelToEdge(P(TEXT("X")), EDockSide::Bottom);
+		T.DockPanel(P(TEXT("Y")), P(TEXT("X")), EDockDropZone::Center);
+		T.HidePanel(P(TEXT("Y")));
+		T.HidePanel(P(TEXT("X")));
+		const TCHAR* First = Order == 0 ? TEXT("X") : TEXT("Y");
+		const TCHAR* Second = Order == 0 ? TEXT("Y") : TEXT("X");
+		T.ShowPanel(P(First), EDockSide::Right);
+		T.ShowPanel(P(Second), EDockSide::Right);
+		FDockLocation LX, LY;
+		T.FindPanel(P(TEXT("X")), LX);
+		T.FindPanel(P(TEXT("Y")), LY);
+		TestTrue(*FString::Printf(TEXT("order %d: X and Y share a group"), Order), LX.Group != nullptr && LX.Group == LY.Group);
+		CheckValid(*this, T, TEXT("hide/show tabs"));
+	}
+
 	TestTrue(TEXT("a never-seen panel docks to the fallback edge"), L.ShowPanel(P(TEXT("Z")), EDockSide::Bottom));
 	TestEqual(TEXT("bottom"), DescribeArea(L, EDockSide::Bottom), FString(TEXT("[Z]")));
 	CheckValid(*this, L, TEXT("hide/show"));

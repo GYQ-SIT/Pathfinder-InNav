@@ -121,6 +121,14 @@ public:
 	void SelectNavigationPoint(FVector2D FootprintPosition, int32 Floor);
 	UNavigationPanelWidget* GetNavigationPanel() const { return NavigationPanel; }
 
+	// A screen with dockable panels tells the controller where its chrome is, so a mouse press over a panel
+	// is not also treated as a click on whatever 3D scene lies behind it (selecting a building, placing a
+	// room...). Slate handling the press is not enough: the left-click action reaches this controller anyway.
+	// ScreenOwner identifies the screen, so a screen being torn down never clears the one that replaced it.
+	void SetPointerOverUICallback(const UObject* ScreenOwner, TFunction<bool(const FVector2D&)> Callback);
+	void ClearPointerOverUICallback(const UObject* ScreenOwner);
+	bool IsPointerOverUI() const;
+
 	// Bind this once to catch every failed action (see FOnActionFailed above) instead of hunting
 	// through the Output Log.
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")
@@ -1007,6 +1015,9 @@ private:
 
 	UPROPERTY()
 	UNavigationPanelWidget* NavigationPanel = nullptr;
+
+	TWeakObjectPtr<const UObject> PointerOverUIOwner;
+	TFunction<bool(const FVector2D&)> PointerOverUICallback;
 
 	void SelectBuildingUnderCursor();
 

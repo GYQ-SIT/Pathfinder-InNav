@@ -292,6 +292,19 @@ public:
 		ContentHolder->SetContent(SNullWidget::NullWidget);
 	}
 
+	// A press nobody inside the group handled (empty panel space, a label...) stops here instead of bubbling
+	// on to the game viewport, where it would act on whatever 3D scene lies behind the panel (selecting a
+	// building, placing a room...). Controls inside the panel handle their own presses first.
+	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+	{
+		return FReply::Handled();
+	}
+
+	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+	{
+		return FReply::Handled();
+	}
+
 private:
 	TSharedPtr<SDockTabBar> TabBar;
 	TSharedPtr<SBorder> ContentHolder;
