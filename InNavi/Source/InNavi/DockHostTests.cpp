@@ -157,9 +157,12 @@ bool FDockHostDragTest::RunTest(const FString& Parameters)
 	// --- right edge area: dragging left grows it ---
 	const float RightStart = L->GetAreaExtent(EDockSide::Right);
 	Host->BeginAreaEdgeDrag(EDockSide::Right, MakeMouse(1920.f - RightStart, 500.f));
+	TestTrue(TEXT("the dragged edge bar reports it is being dragged"), Host->IsDraggingBar(nullptr, 0, true, EDockSide::Right));
+	TestFalse(TEXT("the other edge bars do not"), Host->IsDraggingBar(nullptr, 0, true, EDockSide::Left));
 	Host->OnMouseMove(RootGeometry, MakeMouse(1920.f - RightStart - 80.f, 500.f));
 	TestNearlyEqual(TEXT("right area grew"), L->GetAreaExtent(EDockSide::Right), RightStart + 80.f, 0.01f);
 	Host->OnMouseButtonUp(RootGeometry, MakeMouse(0.f, 500.f, false));
+	TestFalse(TEXT("after the release no bar is highlighted as dragged"), Host->IsDraggingBar(nullptr, 0, true, EDockSide::Right));
 
 	FString Err;
 	TestTrue(TEXT("layout valid after dragging"), L->Validate(Err));

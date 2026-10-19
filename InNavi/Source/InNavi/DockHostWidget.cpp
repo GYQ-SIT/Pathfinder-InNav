@@ -341,7 +341,9 @@ public:
 
 	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
 	{
-		const FLinearColor Color = (bHovered || bDragging) ? SplitterHoverColor : (bAreaEdge ? FLinearColor::Transparent : SplitterIdleColor);
+		const TSharedPtr<SDockHost> Pinned = Host.Pin();
+		const bool bDraggingNow = Pinned.IsValid() && Pinned->IsDraggingBar(SplitNode, DividerIndex, bAreaEdge, Side);
+		const FLinearColor Color = (bHovered || bDraggingNow) ? SplitterHoverColor : (bAreaEdge ? FLinearColor::Transparent : SplitterIdleColor);
 		FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(), &WhiteBrush, ESlateDrawEffect::None, Color);
 		return LayerId + 1;
 	}
@@ -357,15 +359,11 @@ public:
 		{
 			return FReply::Unhandled();
 		}
-		bDragging = true;
-		Invalidate(EInvalidateWidgetReason::Paint);
 		return bAreaEdge ? Pinned->BeginAreaEdgeDrag(Side, MouseEvent) : Pinned->BeginSplitterDrag(SplitNode, DividerIndex, MouseEvent);
 	}
 
 	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
 	{
-		bDragging = false;
-		Invalidate(EInvalidateWidgetReason::Paint);
 		return FReply::Unhandled(); // the host owns the capture and finishes the drag
 	}
 
@@ -394,7 +392,6 @@ private:
 	bool bAreaEdge = false;
 	bool bVerticalBar = true;
 	bool bHovered = false;
-	bool bDragging = false;
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -819,6 +816,30 @@ void SDockHost::OnArrangeChildren(const FGeometry& AllottedGeometry, FArrangedCh
 	}
 }
 
+bool SDockHost::IsDraggingBar(const FDockNode* Split, int32 DividerIndex, bool bAreaEdge, EDockSide Side) const
+{
+	if (bAreaEdge)
+	{
+		return Drag.Kind == FDragState::EKind::AreaEdge && Drag.Side == Side;
+	}
+	return Drag.Kind == FDragState::EKind::Splitter && Drag.Split == Split && Drag.DividerIndex == DividerIndex;
+}
+
+void SDockHost::InvalidateBars()
+{
+	for (const TPair<TPair<const FDockNode*, int32>, TSharedPtr<SDockSplitterBar>>& Pair : SplitterBars)
+	{
+		Pair.Value->Invalidate(EInvalidateWidgetReason::Paint);
+	}
+	for (const TSharedPtr<SDockSplitterBar>& Bar : AreaEdgeBars)
+	{
+		if (Bar.IsValid())
+		{
+			Bar->Invalidate(EInvalidateWidgetReason::Paint);
+		}
+	}
+}
+
 int32 SDockHost::FindFloatingIndex(const FDockNode* WindowRoot) const
 {
 	const TArray<FDockFloatingWindow>& Windows = Layout->GetFloating();
@@ -934,6 +955,7 @@ FReply SDockHost::BeginSplitterDrag(const FDockNode* Split, int32 DividerIndex, 
 			Drag.AvailablePx = S.AvailablePx;
 			Drag.bVerticalBar = Split->Orientation == EDockOrientation::Horizontal;
 			Drag.StartLocal = FVector2D(GetCachedGeometry().AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()));
+			InvalidateBars();
 			return FReply::Handled().CaptureMouse(SharedThis(this));
 		}
 	}
@@ -952,6 +974,7 @@ FReply SDockHost::BeginAreaEdgeDrag(EDockSide Side, const FPointerEvent& MouseEv
 	Drag.StartExtent = Layout->GetAreaExtent(Side);
 	Drag.bVerticalBar = Side == EDockSide::Left || Side == EDockSide::Right;
 	Drag.StartLocal = FVector2D(GetCachedGeometry().AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()));
+	InvalidateBars();
 	return FReply::Handled().CaptureMouse(SharedThis(this));
 }
 
@@ -1278,6 +1301,7 @@ FReply SDockHost::OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEve
 		return FReply::Handled().ReleaseMouseCapture();
 	}
 	Drag = FDragState();
+	InvalidateBars();
 	OnLayoutChanged.ExecuteIfBound();
 	return FReply::Handled().ReleaseMouseCapture();
 }
@@ -1319,6 +1343,7 @@ void SDockHost::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
 	if (Drag.Kind != FDragState::EKind::None)
 	{
 		Drag = FDragState();
+		InvalidateBars();
 		OnLayoutChanged.ExecuteIfBound();
 	}
 }

@@ -70,6 +70,10 @@ public:
 	// Pressing a floating window's drag strip (Edges == 0, moves the window) or its outer ring (Edges != 0,
 	// resizes it). WindowRoot identifies the window.
 	FReply BeginFloatDrag(const FDockNode* WindowRoot, uint8 Edges, const FPointerEvent& MouseEvent);
+	// True while this splitter bar / area-edge bar is the one being dragged (the bars use it to stay
+	// highlighted for exactly as long as the drag lasts - they never see the mouse release themselves, since
+	// the host holds the mouse capture).
+	bool IsDraggingBar(const FDockNode* Split, int32 DividerIndex, bool bAreaEdge, EDockSide Side) const;
 	bool IsDraggingFloatingWindow() const { return Drag.Kind == FDragState::EKind::Float; }
 	// True while the window being moved is carrying a lone panel over something it would dock into.
 	bool HasFloatingDropTarget() const { return Drag.Kind == FDragState::EKind::Float && Drag.Target.IsValid(); }
@@ -163,6 +167,8 @@ private:
 	void UpdatePanelDragTarget(const FVector2D& ViewportSize);
 	void FinishPanelDrag();
 	void FinishFloatDrag(const FGeometry& Geometry);
+	// Repaints every splitter bar (after a bar drag started or ended).
+	void InvalidateBars();
 	int32 FindFloatingIndex(const FDockNode* WindowRoot) const;
 	// Recomputes Computed from the model right now (after an edit made between two arrange passes).
 	void RecomputeNow(const FGeometry& Geometry) const;
