@@ -1417,18 +1417,20 @@ void FDockLayout::ComputeLayout(const FVector2D& Viewport, const FDockMetrics& M
 		const float Y = FMath::Clamp((float)Window.Position.Y, UsableTop, FMath::Max(UsableTop, UsableBottom - M.FloatingMinVisible));
 		const FBox2D Rect = MakeBox(X, Y, X + SizeX, Y + SizeY);
 		Out.FloatingRects.Add(Rect);
+		const float Grip = FMath::Min(M.FloatingGripHeight, SizeY);
+		Out.FloatingGripRects.Add(MakeBox(X, Y, X + SizeX, Y + Grip));
 		if (Window.Root.IsValid())
 		{
-			LayoutNode(*Window.Root, Rect, M, EDockSide::Left, i, Out);
+			LayoutNode(*Window.Root, MakeBox(X, Y + Grip, X + SizeX, Y + SizeY), M, EDockSide::Left, i, Out);
 		}
 	}
 }
 
-FDockDropTarget FDockLayout::HitTestDropTarget(const FVector2D& Point, FName DraggedPanel, const FVector2D& Viewport, const FDockMetrics& M, const FDockComputedLayout& C) const
+FDockDropTarget FDockLayout::HitTestDropTarget(const FVector2D& Point, FName DraggedPanel, const FVector2D& Viewport, const FDockMetrics& M, const FDockComputedLayout& C, const FVector2D& FloatSize) const
 {
 	FDockDropTarget Result;
 
-	auto EvaluateGroup = [&](const FDockComputedGroup& G) -> FDockDropTarget
+	auto EvaluateGroup = [&](const FDockComputedGroup& G, bool bForceCenter = false) -> FDockDropTarget
 	{
 		FDockDropTarget T;
 		const FDockNode& Node = *G.Node;
@@ -1438,7 +1440,7 @@ FDockDropTarget FDockLayout::HitTestDropTarget(const FVector2D& Point, FName Dra
 		}
 
 		EDockDropZone Zone = EDockDropZone::Center;
-		if (!BoxContains(G.TabBarRect, Point))
+		if (!bForceCenter && !BoxContains(G.TabBarRect, Point))
 		{
 			const FVector2D Size = G.Rect.GetSize();
 			if (Size.X > 0.0 && Size.Y > 0.0)
@@ -1513,12 +1515,34 @@ FDockDropTarget FDockLayout::HitTestDropTarget(const FVector2D& Point, FName Dra
 		{
 			continue;
 		}
+		// The dragged panel's own window vanishes when it is dropped (the panel is moving out of it), so it
+		// must not hide whatever lies beneath it.
+		if (Floating.IsValidIndex(i) && Floating[i].Root.IsValid() && Floating[i].Root->IsTabGroup()
+			&& Floating[i].Root->Tabs.Num() == 1 && Floating[i].Root->Tabs[0] == DraggedPanel)
+		{
+			continue;
+		}
+		const bool bOnGrip = C.FloatingGripRects.IsValidIndex(i) && BoxContains(C.FloatingGripRects[i], Point);
+		const FDockComputedGroup* First = nullptr;
 		for (const FDockComputedGroup& G : C.Groups)
 		{
-			if (G.FloatingIndex == i && BoxContains(G.Rect, Point))
+			if (G.FloatingIndex != i)
+			{
+				continue;
+			}
+			if (BoxContains(G.Rect, Point))
 			{
 				return EvaluateGroup(G);
 			}
+			if (!First)
+			{
+				First = &G;
+			}
+		}
+		// The drag strip acts like the window's tab bar: dropping on it adds a tab to the window's first group.
+		if (bOnGrip && First)
+		{
+			return EvaluateGroup(*First, true);
 		}
 		return Result;
 	}
@@ -1557,6 +1581,23 @@ FDockDropTarget FDockLayout::HitTestDropTarget(const FVector2D& Point, FName Dra
 	}
 	if (BestSide == INDEX_NONE)
 	{
+		// Not over any docked chrome (floating windows and area groups were handled above, and an area's
+		// own rect - even over a splitter - is not canvas): this is empty canvas, so the drop floats.
+		for (int32 s = 0; s < DockSideCount; ++s)
+		{
+			if (C.bAreaVisible[s] && BoxContains(C.AreaRects[s], Point))
+			{
+				return Result;
+			}
+		}
+		const float SizeX = FMath::Clamp((float)FloatSize.X, (float)M.FloatingMinSize.X, W);
+		const float SizeY = FMath::Clamp((float)FloatSize.Y, (float)M.FloatingMinSize.Y, FMath::Max((float)M.FloatingMinSize.Y, UsableBottom - UsableTop));
+		const float X = FMath::Clamp((float)Point.X - SizeX * 0.5f, 0.f, FMath::Max(0.f, W - SizeX));
+		const float Y = FMath::Clamp((float)Point.Y - M.FloatingGripHeight * 0.5f, UsableTop, FMath::Max(UsableTop, UsableBottom - SizeY));
+		Result.Kind = FDockDropTarget::EKind::Float;
+		Result.FloatPosition = FVector2D(X, Y);
+		Result.FloatSize = FVector2D(SizeX, SizeY);
+		Result.PreviewRect = MakeBox(X, Y, X + SizeX, Y + SizeY);
 		return Result;
 	}
 

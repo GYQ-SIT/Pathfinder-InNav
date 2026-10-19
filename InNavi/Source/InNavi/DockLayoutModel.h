@@ -120,6 +120,9 @@ struct INNAVI_API FDockMetrics
 	float MaxEdgeFraction = 0.6f; // an edge area may use at most this share of the usable width/height
 	float EdgeGuideSize = 36.f;   // distance from the screen edge that counts as "dock to this edge"
 	float FloatingMinVisible = 40.f;
+	float FloatingGripHeight = 14.f; // the draggable strip along the top of every floating window
+	FVector2D FloatingMinSize = FVector2D(160.0, 120.0); // smallest size a user can resize a floating window to
+	FVector2D FloatingDefaultSize = FVector2D(320.0, 360.0); // size of a window created by dropping on empty canvas
 };
 
 struct INNAVI_API FDockComputedGroup
@@ -149,7 +152,8 @@ struct INNAVI_API FDockComputedLayout
 {
 	FBox2D AreaRects[DockSideCount];
 	bool bAreaVisible[DockSideCount] = { false, false, false, false };
-	TArray<FBox2D> FloatingRects; // parallel to the layout's floating list
+	TArray<FBox2D> FloatingRects;     // whole window (grip + content), parallel to the layout's floating list
+	TArray<FBox2D> FloatingGripRects; // the drag strip at the top of each floating window
 	TArray<FDockComputedGroup> Groups;
 	TArray<FDockComputedSplitter> Splitters;
 
@@ -162,7 +166,8 @@ struct INNAVI_API FDockDropTarget
 	{
 		None,
 		Group, // drop relative to an existing tab group
-		Edge   // drop onto an outer screen edge (new/extended edge area)
+		Edge,  // drop onto an outer screen edge (new/extended edge area)
+		Float  // drop on empty canvas: becomes a floating window at FloatPosition / FloatSize
 	};
 
 	EKind Kind = EKind::None;
@@ -171,6 +176,8 @@ struct INNAVI_API FDockDropTarget
 	EDockDropZone Zone = EDockDropZone::None;
 	EDockSide Side = EDockSide::Left;
 	FBox2D PreviewRect; // what the host should highlight
+	FVector2D FloatPosition = FVector2D::ZeroVector; // Float only
+	FVector2D FloatSize = FVector2D::ZeroVector;     // Float only
 
 	bool IsValid() const { return Kind != EKind::None; }
 };
@@ -233,8 +240,9 @@ public:
 	// --- Layout and hit testing (pure functions of the model + viewport) ---
 	void ComputeLayout(const FVector2D& Viewport, const FDockMetrics& Metrics, FDockComputedLayout& Out) const;
 
-	// What a drag of DraggedPanel would do if released at Point. A panel never targets itself.
-	FDockDropTarget HitTestDropTarget(const FVector2D& Point, FName DraggedPanel, const FVector2D& Viewport, const FDockMetrics& Metrics, const FDockComputedLayout& Computed) const;
+	// What a drag of DraggedPanel would do if released at Point. A panel never targets itself. Over empty
+	// canvas the target is Float: a window of FloatSize with its drag strip centred under the cursor.
+	FDockDropTarget HitTestDropTarget(const FVector2D& Point, FName DraggedPanel, const FVector2D& Viewport, const FDockMetrics& Metrics, const FDockComputedLayout& Computed, const FVector2D& FloatSize = FVector2D(320.0, 360.0)) const;
 
 	// --- Persistence ---
 	// Viewport sizes are only used to store extents / floating rects as fractions so a layout saved on

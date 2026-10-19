@@ -522,7 +522,13 @@ bool FDockHitTestTest::RunTest(const FString& Parameters)
 	T = Hit(1000, 1075, TEXT("A"));
 	TestTrue(TEXT("bottom screen edge"), T.Kind == FDockDropTarget::EKind::Edge && T.Side == EDockSide::Bottom);
 	T = Hit(1000, 500, TEXT("A"));
-	TestFalse(TEXT("the middle of the canvas is no target"), T.IsValid());
+	TestTrue(TEXT("the middle of the canvas floats the panel"), T.Kind == FDockDropTarget::EKind::Float);
+	TestTrue(TEXT("floating preview is centred under the cursor"), FMath::IsNearlyEqual((float)T.PreviewRect.GetCenter().X, 1000.f, 0.5f));
+	TestTrue(TEXT("floating preview stays on screen"), T.PreviewRect.Min.X >= 0.0 && T.PreviewRect.Max.X <= HD.X && T.PreviewRect.Min.Y >= 30.0 && T.PreviewRect.Max.Y <= HD.Y);
+	T = Hit(1000, 1075 - 40, TEXT("A"));
+	TestTrue(TEXT("just above the bottom guide still floats, clamped on screen"), T.Kind == FDockDropTarget::EKind::Float && T.PreviewRect.Max.Y <= HD.Y + 0.01);
+	T = Hit(150, 500, TEXT("B"));
+	TestFalse(TEXT("over a docked group is never a float drop"), T.Kind == FDockDropTarget::EKind::Float);
 	T = Hit(5, 20, TEXT("A"));
 	TestFalse(TEXT("above the menu bar is no target"), T.IsValid());
 
@@ -924,6 +930,91 @@ bool FDockFuzzInvariantsTest::RunTest(const FString& Parameters)
 			}
 		}
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDockFloatingWindowTest, "InNavi.Dock.FloatingWindow", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FDockFloatingWindowTest::RunTest(const FString& Parameters)
+{
+	FDockLayout L;
+	FDockMetrics M;
+	M.TopMargin = 30.f;
+	FDockComputedLayout C;
+
+	// A floating window has a drag strip on top; its tab group sits below the strip.
+	L.FloatPanel(P(TEXT("F")), FVector2D(100.0, 150.0), FVector2D(300.0, 400.0));
+	L.ComputeLayout(HD, M, C);
+	if (!TestEqual(TEXT("one window"), C.FloatingRects.Num(), 1) || !TestEqual(TEXT("one grip"), C.FloatingGripRects.Num(), 1))
+	{
+		return false;
+	}
+	TestTrue(TEXT("window rect"), C.FloatingRects[0].Min.Equals(FVector2D(100.0, 150.0), 0.01) && C.FloatingRects[0].Max.Equals(FVector2D(400.0, 550.0), 0.01));
+	TestTrue(TEXT("grip is the top strip"), C.FloatingGripRects[0].Min.Equals(FVector2D(100.0, 150.0), 0.01) && C.FloatingGripRects[0].Max.Equals(FVector2D(400.0, 150.0 + M.FloatingGripHeight), 0.01));
+	if (TestEqual(TEXT("one group"), C.Groups.Num(), 1))
+	{
+		TestNearlyEqual(TEXT("group starts below the strip"), (float)C.Groups[0].Rect.Min.Y, 150.f + M.FloatingGripHeight, 0.01f);
+		TestNearlyEqual(TEXT("group reaches the bottom of the window"), (float)C.Groups[0].Rect.Max.Y, 550.f, 0.01f);
+	}
+
+	// Over empty canvas a drop floats; the new window's strip is under the cursor and it stays on screen.
+	L.DockPanelToEdge(P(TEXT("A")), EDockSide::Left);
+	L.ComputeLayout(HD, M, C);
+	FDockDropTarget T = L.HitTestDropTarget(FVector2D(1000.0, 500.0), P(TEXT("A")), HD, M, C, FVector2D(300.0, 400.0));
+	TestTrue(TEXT("empty canvas floats"), T.Kind == FDockDropTarget::EKind::Float);
+	TestTrue(TEXT("requested size"), T.FloatSize.Equals(FVector2D(300.0, 400.0), 0.01));
+	TestNearlyEqual(TEXT("strip centred under the cursor (x)"), (float)(T.FloatPosition.X + T.FloatSize.X * 0.5), 1000.f, 0.01f);
+	TestTrue(TEXT("cursor is inside the strip"), T.FloatPosition.Y <= 500.0 && T.FloatPosition.Y + M.FloatingGripHeight >= 500.0);
+
+	T = L.HitTestDropTarget(FVector2D(1900.0, 1000.0), P(TEXT("A")), HD, M, C, FVector2D(300.0, 400.0));
+	if (T.Kind == FDockDropTarget::EKind::Float)
+	{
+		TestTrue(TEXT("near a corner the window is pulled back on screen"), T.PreviewRect.Max.X <= HD.X + 0.01 && T.PreviewRect.Max.Y <= HD.Y + 0.01 && T.PreviewRect.Min.X >= -0.01);
+	}
+	T = L.HitTestDropTarget(FVector2D(150.0, 160.0), P(TEXT("A")), HD, M, C, FVector2D(300.0, 400.0));
+	TestTrue(TEXT("over a floating window's drag strip the drop adds a tab to it"), T.Kind == FDockDropTarget::EKind::Group && T.Zone == EDockDropZone::Center && T.TargetPanel == P(TEXT("F")));
+	T = L.HitTestDropTarget(FVector2D(100.0, 600.0), P(TEXT("F")), HD, M, C);
+	TestFalse(TEXT("over a docked area's own rect (not a group) nothing floats"), T.Kind == FDockDropTarget::EKind::Float);
+
+	// A tiny request is raised to the minimum window size.
+	T = L.HitTestDropTarget(FVector2D(1000.0, 500.0), P(TEXT("A")), HD, M, C, FVector2D(10.0, 10.0));
+	TestTrue(TEXT("minimum window size"), T.Kind == FDockDropTarget::EKind::Float && T.FloatSize.Equals(M.FloatingMinSize, 0.01));
+
+	// A lone panel's own window doesn't hide what is under it; another window's strip drops as a tab.
+	{
+		FDockLayout L2;
+		L2.DockPanelToEdge(P(TEXT("X")), EDockSide::Left);
+		L2.FloatPanel(P(TEXT("W1")), FVector2D(300.0, 200.0), FVector2D(300.0, 300.0));
+		L2.FloatPanel(P(TEXT("W2")), FVector2D(450.0, 250.0), FVector2D(300.0, 300.0)); // on top of W1
+		FDockComputedLayout C2;
+		L2.ComputeLayout(HD, M, C2);
+		// Over W2's strip: a Center drop onto W2.
+		FDockDropTarget T2 = L2.HitTestDropTarget(FVector2D(600.0, 255.0), P(TEXT("X")), HD, M, C2);
+		TestTrue(TEXT("another window's strip adds a tab"), T2.Kind == FDockDropTarget::EKind::Group && T2.Zone == EDockDropZone::Center && T2.TargetPanel == P(TEXT("W2")));
+		// Dragging W2 itself over W1 (W2's own window is transparent to the drop): targets W1 beneath.
+		T2 = L2.HitTestDropTarget(FVector2D(350.0, 400.0), P(TEXT("W2")), HD, M, C2);
+		TestTrue(TEXT("W1 is targeted"), T2.Kind == FDockDropTarget::EKind::Group && T2.TargetPanel == P(TEXT("W1")));
+		T2 = L2.HitTestDropTarget(FVector2D(500.0, 300.0), P(TEXT("W2")), HD, M, C2);
+		TestTrue(TEXT("through its own window onto W1's body"), T2.Kind == FDockDropTarget::EKind::Group && T2.TargetPanel == P(TEXT("W1")));
+		T2 = L2.HitTestDropTarget(FVector2D(700.0, 520.0), P(TEXT("W2")), HD, M, C2);
+		TestTrue(TEXT("over only its own window it floats instead"), T2.Kind == FDockDropTarget::EKind::Float);
+	}
+
+	// Applying the target: A leaves the left edge and the area disappears.
+	T = L.HitTestDropTarget(FVector2D(1000.0, 500.0), P(TEXT("A")), HD, M, C, FVector2D(300.0, 400.0));
+	TestTrue(TEXT("float A"), L.FloatPanel(P(TEXT("A")), T.FloatPosition, T.FloatSize));
+	TestFalse(TEXT("left area is gone"), L.GetAreaRoot(EDockSide::Left).IsValid());
+	TestEqual(TEXT("two windows"), L.GetFloating().Num(), 2);
+	TestTrue(TEXT("the new window is on top"), L.GetFloating().Last().Root->Tabs.Contains(P(TEXT("A"))));
+
+	// Move / resize / raise.
+	TestTrue(TEXT("move"), L.MoveFloating(0, FVector2D(10.0, 20.0)));
+	TestTrue(TEXT("resize"), L.ResizeFloating(0, FVector2D(333.0, 222.0)));
+	TestTrue(TEXT("window 0 moved and resized"), L.GetFloating()[0].Position.Equals(FVector2D(10.0, 20.0), 0.01) && L.GetFloating()[0].Size.Equals(FVector2D(333.0, 222.0), 0.01));
+	const int32 NewIndex = L.BringFloatingToFront(0);
+	TestEqual(TEXT("raised to the top"), NewIndex, 1);
+	TestTrue(TEXT("and it is the F window"), L.GetFloating()[1].Root->Tabs.Contains(P(TEXT("F"))));
+
+	CheckValid(*this, L, TEXT("floating"));
 	return true;
 }
 

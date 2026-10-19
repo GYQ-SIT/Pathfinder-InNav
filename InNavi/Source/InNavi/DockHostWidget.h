@@ -10,6 +10,16 @@ DECLARE_DELEGATE_OneParam(FOnDockPanelEvent, FName);
 
 class SDockGroupFrame;
 class SDockSplitterBar;
+class SDockFloatFrame;
+
+// Which sides of a floating window a resize drag moves (a bit mask); 0 means the whole window is moved.
+namespace DockFloatEdge
+{
+	constexpr uint8 Left = 1;
+	constexpr uint8 Right = 2;
+	constexpr uint8 Top = 4;
+	constexpr uint8 Bottom = 8;
+}
 
 // Renders an FDockLayout and turns user input into model operations.
 //
@@ -57,6 +67,12 @@ public:
 	// can be dropped on a group, a group side, a screen edge, or another slot of its own tab strip.
 	FReply BeginTabDrag(FName Panel, const FPointerEvent& MouseEvent);
 	bool IsDraggingPanel() const { return Drag.Kind == FDragState::EKind::Panel && Drag.bActive; }
+	// Pressing a floating window's drag strip (Edges == 0, moves the window) or its outer ring (Edges != 0,
+	// resizes it). WindowRoot identifies the window.
+	FReply BeginFloatDrag(const FDockNode* WindowRoot, uint8 Edges, const FPointerEvent& MouseEvent);
+	bool IsDraggingFloatingWindow() const { return Drag.Kind == FDragState::EKind::Float; }
+	// True while the window being moved is carrying a lone panel over something it would dock into.
+	bool HasFloatingDropTarget() const { return Drag.Kind == FDragState::EKind::Float && Drag.Target.IsValid(); }
 
 	// True when ScreenPosition lies over Panel's group and Panel is that group's active tab (i.e. it is
 	// actually on screen right now).
@@ -74,6 +90,8 @@ public:
 	virtual FChildren* GetChildren() override { return &Children; }
 	virtual FVector2D ComputeDesiredSize(float) const override { return FVector2D::ZeroVector; }
 	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
+	// Raises a floating window to the front when anything inside it is pressed (never consumes the press).
+	virtual FReply OnPreviewMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
@@ -93,7 +111,8 @@ private:
 		{
 			Group,
 			Splitter,
-			AreaEdge
+			AreaEdge,
+			FloatFrame
 		};
 
 		EKind Kind = EKind::Group;
@@ -110,7 +129,8 @@ private:
 			None,
 			Splitter,
 			AreaEdge,
-			Panel
+			Panel,
+			Float
 		};
 
 		EKind Kind = EKind::None;
@@ -121,6 +141,12 @@ private:
 		FDockDropTarget Target;
 		int32 ReorderSlot = INDEX_NONE; // >= 0: reorder within the dragged panel's own tab strip
 		FBox2D ReorderPreview;
+		FVector2D FloatSize = FVector2D::ZeroVector; // size a window created by this drag gets
+
+		// Float drags (moving / resizing an existing floating window).
+		const FDockNode* FloatRoot = nullptr;
+		FBox2D FloatStartRect;
+		uint8 FloatEdges = 0;
 
 		const FDockNode* Split = nullptr;
 		int32 DividerIndex = 0;
@@ -136,6 +162,10 @@ private:
 	void RefreshFrames();
 	void UpdatePanelDragTarget(const FVector2D& ViewportSize);
 	void FinishPanelDrag();
+	void FinishFloatDrag(const FGeometry& Geometry);
+	int32 FindFloatingIndex(const FDockNode* WindowRoot) const;
+	// Recomputes Computed from the model right now (after an edit made between two arrange passes).
+	void RecomputeNow(const FGeometry& Geometry) const;
 
 	TSharedPtr<FDockLayout> Layout;
 	FDockMetrics Metrics;
@@ -148,6 +178,7 @@ private:
 	TMap<const FDockNode*, TSharedPtr<SDockGroupFrame>> GroupFrames;
 	TMap<TPair<const FDockNode*, int32>, TSharedPtr<SDockSplitterBar>> SplitterBars;
 	TSharedPtr<SDockSplitterBar> AreaEdgeBars[DockSideCount];
+	TMap<const FDockNode*, TSharedPtr<SDockFloatFrame>> FloatFrames;
 
 	mutable FDockComputedLayout Computed;
 	FDragState Drag;

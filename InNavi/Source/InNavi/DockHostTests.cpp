@@ -279,11 +279,17 @@ bool FDockHostTabDragTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("and holds C"), L->GetAreaRoot(EDockSide::Left).IsValid() && L->GetAreaRoot(EDockSide::Left)->Tabs.Contains(HP(TEXT("C"))));
 	}
 
-	// 6. Dropping where nothing is a target changes nothing.
+	// 6. Dropping on empty canvas floats the panel, with its drag strip under the cursor.
 	{
-		const FString Before = Describe(EDockSide::Left) + Describe(EDockSide::Right) + Describe(EDockSide::Top);
 		Drag(TEXT("B"), FVector2f(960.f, 500.f));
-		TestEqual(TEXT("nothing changed"), Describe(EDockSide::Left) + Describe(EDockSide::Right) + Describe(EDockSide::Top), Before);
+		FDockLocation LocB;
+		TestTrue(TEXT("B is now floating"), L->FindPanel(HP(TEXT("B")), LocB) && LocB.Kind == FDockLocation::EKind::Floating);
+		const FDockComputedLayout& Computed = Host->GetComputedLayout();
+		if (LocB.Kind == FDockLocation::EKind::Floating && Computed.FloatingGripRects.IsValidIndex(LocB.FloatingIndex))
+		{
+			const FBox2D& Grip = Computed.FloatingGripRects[LocB.FloatingIndex];
+			TestTrue(TEXT("the cursor is over the new window's drag strip"), Grip.Min.X <= 960.0 && Grip.Max.X >= 960.0 && Grip.Min.Y <= 500.0 && Grip.Max.Y >= 500.0);
+		}
 	}
 
 	// 7. Right-click cancels a drag in progress.
@@ -312,6 +318,213 @@ bool FDockHostTabDragTest::RunTest(const FString& Parameters)
 
 	FString Err;
 	TestTrue(TEXT("layout valid after every drop"), L->Validate(Err));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDockHostFloatingTest, "InNavi.Dock.Host.Floating", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FDockHostFloatingTest::RunTest(const FString& Parameters)
+{
+	const TSharedRef<FDockLayout> L = MakeShared<FDockLayout>();
+	L->DockPanelToEdge(HP(TEXT("A")), EDockSide::Left);
+	L->DockPanelToEdge(HP(TEXT("B")), EDockSide::Right);
+	L->FloatPanel(HP(TEXT("C")), FVector2D(700.0, 300.0), FVector2D(400.0, 300.0));
+	L->FloatPanel(HP(TEXT("D")), FVector2D(900.0, 500.0), FVector2D(300.0, 300.0));
+	const TSharedRef<SDockHost> Host = MakeHost(L, { HP(TEXT("A")), HP(TEXT("B")), HP(TEXT("C")), HP(TEXT("D")) });
+
+	auto Arrange = [&]()
+	{
+		FArrangedChildren Arranged(EVisibility::Visible);
+		Host->ArrangeChildren(RootGeometry, Arranged);
+		return Arranged.Num();
+	};
+	auto RectOf = [&](const TCHAR* Panel) -> FBox2D
+	{
+		FDockLocation Loc;
+		L->FindPanel(HP(Panel), Loc);
+		return Loc.Kind == FDockLocation::EKind::Floating ? Host->GetComputedLayout().FloatingRects[Loc.FloatingIndex] : FBox2D(ForceInit);
+	};
+	auto RootOf = [&](const TCHAR* Panel) -> const FDockNode*
+	{
+		for (const FDockFloatingWindow& W : L->GetFloating())
+		{
+			if (W.Root->Tabs.Contains(HP(Panel)))
+			{
+				return W.Root.Get();
+			}
+		}
+		return nullptr;
+	};
+
+	// Two groups + two edge handles + a frame and a group for each of the two windows.
+	TestEqual(TEXT("arranged children"), Arrange(), 8);
+
+	// --- move by the drag strip ---
+	TestTrue(TEXT("begin move"), Host->BeginFloatDrag(RootOf(TEXT("C")), 0, MakeMouse(800.f, 307.f)).IsEventHandled());
+	TestTrue(TEXT("dragging a window"), Host->IsDraggingFloatingWindow());
+	Host->OnMouseMove(RootGeometry, MakeMouse(900.f, 357.f));
+	Arrange();
+	TestTrue(TEXT("window follows the cursor"), RectOf(TEXT("C")).Min.Equals(FVector2D(800.0, 350.0), 0.01));
+	Host->OnMouseMove(RootGeometry, MakeMouse(-5000.f, -5000.f));
+	Arrange();
+	TestTrue(TEXT("window can't be dragged off the top of the screen"), RectOf(TEXT("C")).Min.Y >= 0.0);
+	TestTrue(TEXT("but a strip of it stays reachable"), RectOf(TEXT("C")).Max.X >= 40.0);
+	Host->OnMouseMove(RootGeometry, MakeMouse(900.f, 357.f));
+	Host->OnMouseButtonUp(RootGeometry, MakeMouse(900.f, 357.f, false));
+	TestFalse(TEXT("released"), Host->IsDraggingFloatingWindow());
+	Arrange();
+	TestTrue(TEXT("model holds the final position"), L->GetFloating()[0].Position.Equals(FVector2D(800.0, 350.0), 0.01));
+
+	// --- resize from the bottom-right corner ---
+	{
+		const FBox2D Start = RectOf(TEXT("C"));
+		Host->BeginFloatDrag(RootOf(TEXT("C")), DockFloatEdge::Right | DockFloatEdge::Bottom, MakeMouse((float)Start.Max.X, (float)Start.Max.Y));
+		Host->OnMouseMove(RootGeometry, MakeMouse((float)Start.Max.X + 100.f, (float)Start.Max.Y + 50.f));
+		Arrange();
+		const FBox2D Now = RectOf(TEXT("C"));
+		TestTrue(TEXT("grew right and down, top-left fixed"), Now.Min.Equals(Start.Min, 0.01) && Now.GetSize().Equals(Start.GetSize() + FVector2D(100.0, 50.0), 0.01));
+		Host->OnMouseMove(RootGeometry, MakeMouse(-9999.f, -9999.f));
+		Arrange();
+		TestTrue(TEXT("stops at the minimum size"), RectOf(TEXT("C")).GetSize().Equals(FDockMetrics().FloatingMinSize, 0.01));
+		Host->OnMouseButtonUp(RootGeometry, MakeMouse(0.f, 0.f, false));
+	}
+
+	// --- resize from the left edge keeps the right edge in place ---
+	{
+		Arrange();
+		const FBox2D Start = RectOf(TEXT("C"));
+		Host->BeginFloatDrag(RootOf(TEXT("C")), DockFloatEdge::Left, MakeMouse((float)Start.Min.X, (float)Start.Min.Y + 40.f));
+		Host->OnMouseMove(RootGeometry, MakeMouse((float)Start.Min.X - 60.f, (float)Start.Min.Y + 40.f));
+		Arrange();
+		const FBox2D Now = RectOf(TEXT("C"));
+		TestNearlyEqual(TEXT("right edge stays"), (float)Now.Max.X, (float)Start.Max.X, 0.01f);
+		TestNearlyEqual(TEXT("left edge moved with the cursor"), (float)Now.Min.X, (float)Start.Min.X - 60.f, 0.01f);
+		Host->OnMouseButtonUp(RootGeometry, MakeMouse(0.f, 0.f, false));
+	}
+
+	// --- pressing inside a lower window raises it; pressing the top one or empty canvas changes nothing ---
+	{
+		Arrange();
+		TestTrue(TEXT("D is on top at first"), L->GetFloating().Last().Root->Tabs.Contains(HP(TEXT("D"))));
+		const FBox2D C = RectOf(TEXT("C"));
+		const FVector2f InC((float)C.Min.X + 20.f, (float)C.Min.Y + 5.f);
+		const FBox2D D = RectOf(TEXT("D"));
+		const bool bOverlap = InC.X >= D.Min.X && InC.X <= D.Max.X && InC.Y >= D.Min.Y && InC.Y <= D.Max.Y;
+		if (!bOverlap)
+		{
+			TestFalse(TEXT("press on empty canvas isn't consumed"), Host->OnPreviewMouseButtonDown(RootGeometry, MakeMouse(10.f, 900.f)).IsEventHandled());
+			TestTrue(TEXT("still D on top"), L->GetFloating().Last().Root->Tabs.Contains(HP(TEXT("D"))));
+			TestFalse(TEXT("the preview press never consumes the click"), Host->OnPreviewMouseButtonDown(RootGeometry, MakeMouse(InC.X, InC.Y)).IsEventHandled());
+			TestTrue(TEXT("C is raised to the top"), L->GetFloating().Last().Root->Tabs.Contains(HP(TEXT("C"))));
+			Host->OnPreviewMouseButtonDown(RootGeometry, MakeMouse(InC.X, InC.Y));
+			TestEqual(TEXT("windows count unchanged"), L->GetFloating().Num(), 2);
+		}
+	}
+
+	FString Err;
+	TestTrue(TEXT("layout valid"), L->Validate(Err));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDockHostRedockFloatTest, "InNavi.Dock.Host.RedockFloat", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FDockHostRedockFloatTest::RunTest(const FString& Parameters)
+{
+	// The reported case: Map over Toolbar in the left column; float the Toolbar, then drag it back in.
+	const TSharedRef<FDockLayout> L = MakeShared<FDockLayout>();
+	L->DockPanelToEdge(HP(TEXT("Map")), EDockSide::Left);
+	L->DockPanel(HP(TEXT("Toolbar")), HP(TEXT("Map")), EDockDropZone::Bottom);
+	L->DockPanelToEdge(HP(TEXT("Props")), EDockSide::Right);
+	const TSharedRef<SDockHost> Host = MakeHost(L, { HP(TEXT("Map")), HP(TEXT("Toolbar")), HP(TEXT("Props")) });
+	auto Arrange = [&]() { FArrangedChildren A(EVisibility::Visible); Host->ArrangeChildren(RootGeometry, A); };
+	auto TabPos = [&](const TCHAR* Panel)
+	{
+		FDockLocation Loc;
+		L->FindPanel(HP(Panel), Loc);
+		const FDockComputedGroup* G = Host->GetComputedLayout().FindGroup(Loc.Group);
+		const FBox2D& B = G->TabRects[Loc.TabIndex];
+		return FVector2f((float)((B.Min.X + B.Max.X) * 0.5), (float)((B.Min.Y + B.Max.Y) * 0.5));
+	};
+	auto ContentCenter = [&](const TCHAR* Panel)
+	{
+		FDockLocation Loc;
+		L->FindPanel(HP(Panel), Loc);
+		const FDockComputedGroup* G = Host->GetComputedLayout().FindGroup(Loc.Group);
+		return FVector2f((float)((G->ContentRect.Min.X + G->ContentRect.Max.X) * 0.5), (float)((G->ContentRect.Min.Y + G->ContentRect.Max.Y) * 0.5));
+	};
+
+	Arrange();
+	// 1. Float the Toolbar by dropping it on empty canvas.
+	FVector2f Start = TabPos(TEXT("Toolbar"));
+	Host->BeginTabDrag(HP(TEXT("Toolbar")), MakeMouse(Start.X, Start.Y));
+	Host->OnMouseMove(RootGeometry, MakeMouse(960.f, 500.f));
+	Host->OnMouseButtonUp(RootGeometry, MakeMouse(960.f, 500.f, false));
+	Arrange();
+	FDockLocation Loc;
+	TestTrue(TEXT("Toolbar floats"), L->FindPanel(HP(TEXT("Toolbar")), Loc) && Loc.Kind == FDockLocation::EKind::Floating);
+
+	// 2. Drag it again: over the Map group it must target Map and dock on release.
+	Start = TabPos(TEXT("Toolbar"));
+	Host->BeginTabDrag(HP(TEXT("Toolbar")), MakeMouse(Start.X, Start.Y));
+	const FVector2f OverMap = ContentCenter(TEXT("Map"));
+	Host->OnMouseMove(RootGeometry, MakeMouse(Start.X + 20.f, Start.Y + 20.f));
+	Host->OnMouseMove(RootGeometry, MakeMouse(OverMap.X, OverMap.Y));
+	TestTrue(TEXT("carrying the floating panel"), Host->IsDraggingPanel());
+	Host->OnMouseButtonUp(RootGeometry, MakeMouse(OverMap.X, OverMap.Y, false));
+	Arrange();
+	FDockLocation LocT, LocM;
+	L->FindPanel(HP(TEXT("Toolbar")), LocT);
+	L->FindPanel(HP(TEXT("Map")), LocM);
+	TestTrue(TEXT("Toolbar docked into Map's group"), LocT.Kind == FDockLocation::EKind::Area && LocT.Group == LocM.Group);
+	TestEqual(TEXT("no floating windows left"), L->GetFloating().Num(), 0);
+
+	// 3. Float again and dock to the right screen edge.
+	Start = TabPos(TEXT("Toolbar"));
+	Host->BeginTabDrag(HP(TEXT("Toolbar")), MakeMouse(Start.X, Start.Y));
+	Host->OnMouseMove(RootGeometry, MakeMouse(960.f, 500.f));
+	Host->OnMouseButtonUp(RootGeometry, MakeMouse(960.f, 500.f, false));
+	Arrange();
+	Start = TabPos(TEXT("Toolbar"));
+	Host->BeginTabDrag(HP(TEXT("Toolbar")), MakeMouse(Start.X, Start.Y));
+	Host->OnMouseMove(RootGeometry, MakeMouse(1915.f, 500.f));
+	Host->OnMouseButtonUp(RootGeometry, MakeMouse(1915.f, 500.f, false));
+	Arrange();
+	L->FindPanel(HP(TEXT("Toolbar")), LocT);
+	TestTrue(TEXT("Toolbar docked on the right edge"), LocT.Kind == FDockLocation::EKind::Area && LocT.Side == EDockSide::Right);
+
+	// 4. Float it again, then move the window by its drag strip onto Map: it docks (strip drags act like tab drags).
+	Start = TabPos(TEXT("Toolbar"));
+	Host->BeginTabDrag(HP(TEXT("Toolbar")), MakeMouse(Start.X, Start.Y));
+	Host->OnMouseMove(RootGeometry, MakeMouse(960.f, 500.f));
+	Host->OnMouseButtonUp(RootGeometry, MakeMouse(960.f, 500.f, false));
+	Arrange();
+	L->FindPanel(HP(TEXT("Toolbar")), LocT);
+	TestTrue(TEXT("floats again"), LocT.Kind == FDockLocation::EKind::Floating);
+	const FDockNode* Root = L->GetFloating()[LocT.FloatingIndex].Root.Get();
+	const FBox2D Strip = Host->GetComputedLayout().FloatingGripRects[LocT.FloatingIndex];
+	const FVector2f Grab((float)(Strip.Min.X + 30.0), (float)(Strip.Min.Y + 4.0));
+	Host->BeginFloatDrag(Root, 0, MakeMouse(Grab.X, Grab.Y));
+	const FVector2f MapPoint = ContentCenter(TEXT("Map"));
+	Host->OnMouseMove(RootGeometry, MakeMouse(MapPoint.X, MapPoint.Y));
+	TestTrue(TEXT("the moved window shows a drop target over Map"), Host->HasFloatingDropTarget());
+	Host->OnMouseButtonUp(RootGeometry, MakeMouse(MapPoint.X, MapPoint.Y, false));
+	Arrange();
+	L->FindPanel(HP(TEXT("Toolbar")), LocT);
+	L->FindPanel(HP(TEXT("Map")), LocM);
+	TestTrue(TEXT("window moved onto Map docked its panel there"), LocT.Kind == FDockLocation::EKind::Area && LocT.Group == LocM.Group);
+
+	// 5. A moved window over empty canvas just moves: no target, nothing docks.
+	Start = TabPos(TEXT("Toolbar"));
+	Host->BeginTabDrag(HP(TEXT("Toolbar")), MakeMouse(Start.X, Start.Y));
+	Host->OnMouseMove(RootGeometry, MakeMouse(960.f, 500.f));
+	Host->OnMouseButtonUp(RootGeometry, MakeMouse(960.f, 500.f, false));
+	Arrange();
+	L->FindPanel(HP(TEXT("Toolbar")), LocT);
+	const FBox2D Strip2 = Host->GetComputedLayout().FloatingGripRects[LocT.FloatingIndex];
+	Host->BeginFloatDrag(L->GetFloating()[LocT.FloatingIndex].Root.Get(), 0, MakeMouse((float)Strip2.Min.X + 30.f, (float)Strip2.Min.Y + 4.f));
+	Host->OnMouseMove(RootGeometry, MakeMouse(1100.f, 700.f));
+	TestFalse(TEXT("no drop target over empty canvas"), Host->HasFloatingDropTarget());
+	Host->OnMouseButtonUp(RootGeometry, MakeMouse(1100.f, 700.f, false));
+	L->FindPanel(HP(TEXT("Toolbar")), LocT);
+	TestTrue(TEXT("still floating, just moved"), LocT.Kind == FDockLocation::EKind::Floating);
 	return true;
 }
 

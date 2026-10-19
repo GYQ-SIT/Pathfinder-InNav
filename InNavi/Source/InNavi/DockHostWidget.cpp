@@ -31,6 +31,36 @@ namespace
 	const FLinearColor SplitterHoverColor(0.25f, 0.55f, 1.f, 0.7f);
 
 	constexpr float CloseButtonWidth = 18.f;
+	// A floating window's frame widget reaches this far outside the window; that ring is the resize handle.
+	constexpr float FloatFrameBorder = 5.f;
+	constexpr float FloatCornerSize = 14.f;
+
+	const FLinearColor FloatShadowColor(0.f, 0.f, 0.f, 0.30f);
+	const FLinearColor FloatGripColor(0.17f, 0.17f, 0.20f, 1.f);
+	const FLinearColor FloatGripDotColor(0.5f, 0.5f, 0.55f, 1.f);
+
+	EMouseCursor::Type CursorForFloatEdges(uint8 Edges)
+	{
+		const bool bL = (Edges & DockFloatEdge::Left) != 0, bR = (Edges & DockFloatEdge::Right) != 0;
+		const bool bT = (Edges & DockFloatEdge::Top) != 0, bB = (Edges & DockFloatEdge::Bottom) != 0;
+		if ((bL && bT) || (bR && bB))
+		{
+			return EMouseCursor::ResizeSouthEast;
+		}
+		if ((bR && bT) || (bL && bB))
+		{
+			return EMouseCursor::ResizeSouthWest;
+		}
+		if (bL || bR)
+		{
+			return EMouseCursor::ResizeLeftRight;
+		}
+		if (bT || bB)
+		{
+			return EMouseCursor::ResizeUpDown;
+		}
+		return EMouseCursor::CardinalCross;
+	}
 
 	void GatherNode(const FDockNode* Node, TArray<const FDockNode*>& Groups, TArray<TPair<const FDockNode*, int32>>& Dividers)
 	{
@@ -355,6 +385,135 @@ private:
 };
 
 // ---------------------------------------------------------------------------------------------
+// Chrome of one floating window: the drag strip along its top and a thin ring around it that resizes.
+// It is laid out FloatFrameBorder larger than the window on every side and sits behind the window's
+// groups, so only the strip and the ring (not the content) ever hit it.
+// ---------------------------------------------------------------------------------------------
+class SDockFloatFrame : public SLeafWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SDockFloatFrame) {}
+		SLATE_ARGUMENT(TWeakPtr<SDockHost>, Host)
+		SLATE_ARGUMENT(const FDockNode*, WindowRoot)
+		SLATE_ARGUMENT(FDockMetrics, Metrics)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs)
+	{
+		Host = InArgs._Host;
+		WindowRoot = InArgs._WindowRoot;
+		Metrics = InArgs._Metrics;
+	}
+
+	virtual FVector2D ComputeDesiredSize(float) const override { return FVector2D(100.0, 100.0); }
+
+	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
+	{
+		const FVector2f Size = AllottedGeometry.GetLocalSize();
+		const float B = FloatFrameBorder;
+		const FLinearColor Ring = HoverEdges != 0 ? FLinearColor(AccentColor.R, AccentColor.G, AccentColor.B, 0.55f) : FloatShadowColor;
+		FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(), &WhiteBrush, ESlateDrawEffect::None, Ring);
+
+		const FVector2f BodySize(FMath::Max(0.f, Size.X - 2.f * B), FMath::Max(0.f, Size.Y - 2.f * B));
+		FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 1,
+			AllottedGeometry.ToPaintGeometry(BodySize, FSlateLayoutTransform(FVector2f(B, B))), &WhiteBrush, ESlateDrawEffect::None, FrameColor);
+
+		const float Grip = FMath::Min((float)Metrics.FloatingGripHeight, BodySize.Y);
+		FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 2,
+			AllottedGeometry.ToPaintGeometry(FVector2f(BodySize.X, Grip), FSlateLayoutTransform(FVector2f(B, B))), &WhiteBrush, ESlateDrawEffect::None,
+			bHoverGrip ? TabHoverColor : FloatGripColor);
+		for (int32 i = -1; i <= 1; ++i)
+		{
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 3,
+				AllottedGeometry.ToPaintGeometry(FVector2f(3.f, 3.f), FSlateLayoutTransform(FVector2f(Size.X * 0.5f + (float)i * 9.f - 1.5f, B + Grip * 0.5f - 1.5f))),
+				&WhiteBrush, ESlateDrawEffect::None, FloatGripDotColor);
+		}
+		return LayerId + 4;
+	}
+
+	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+	{
+		if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
+		{
+			return FReply::Unhandled();
+		}
+		const FVector2f Local = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
+		const uint8 Edges = EdgesAt(Local, MyGeometry.GetLocalSize());
+		if (Edges == 0 && !IsOnGrip(Local))
+		{
+			return FReply::Unhandled();
+		}
+		const TSharedPtr<SDockHost> Pinned = Host.Pin();
+		return Pinned.IsValid() ? Pinned->BeginFloatDrag(WindowRoot, Edges, MouseEvent) : FReply::Unhandled();
+	}
+
+	virtual FReply OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+	{
+		const FVector2f Local = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
+		const uint8 Edges = EdgesAt(Local, MyGeometry.GetLocalSize());
+		const bool bGrip = Edges == 0 && IsOnGrip(Local);
+		if (Edges != HoverEdges || bGrip != bHoverGrip)
+		{
+			HoverEdges = Edges;
+			bHoverGrip = bGrip;
+			Invalidate(EInvalidateWidgetReason::Paint);
+		}
+		return FReply::Unhandled();
+	}
+
+	virtual void OnMouseLeave(const FPointerEvent& MouseEvent) override
+	{
+		if (HoverEdges != 0 || bHoverGrip)
+		{
+			HoverEdges = 0;
+			bHoverGrip = false;
+			Invalidate(EInvalidateWidgetReason::Paint);
+		}
+	}
+
+	virtual FCursorReply OnCursorQuery(const FGeometry& MyGeometry, const FPointerEvent& CursorEvent) const override
+	{
+		const FVector2f Local = MyGeometry.AbsoluteToLocal(CursorEvent.GetScreenSpacePosition());
+		const uint8 Edges = EdgesAt(Local, MyGeometry.GetLocalSize());
+		if (Edges != 0 || IsOnGrip(Local))
+		{
+			return FCursorReply::Cursor(CursorForFloatEdges(Edges));
+		}
+		return FCursorReply::Unhandled();
+	}
+
+private:
+	static uint8 EdgesAt(const FVector2f& P, const FVector2f& S)
+	{
+		const float B = FloatFrameBorder;
+		const float C = FloatCornerSize;
+		uint8 E = 0;
+		if (P.X < B) { E |= DockFloatEdge::Left; } else if (P.X > S.X - B) { E |= DockFloatEdge::Right; }
+		if (P.Y < B) { E |= DockFloatEdge::Top; } else if (P.Y > S.Y - B) { E |= DockFloatEdge::Bottom; }
+		if (E & (DockFloatEdge::Top | DockFloatEdge::Bottom))
+		{
+			if (P.X < C) { E |= DockFloatEdge::Left; } else if (P.X > S.X - C) { E |= DockFloatEdge::Right; }
+		}
+		if (E & (DockFloatEdge::Left | DockFloatEdge::Right))
+		{
+			if (P.Y < C) { E |= DockFloatEdge::Top; } else if (P.Y > S.Y - C) { E |= DockFloatEdge::Bottom; }
+		}
+		return E;
+	}
+
+	bool IsOnGrip(const FVector2f& P) const
+	{
+		return P.Y >= FloatFrameBorder && P.Y < FloatFrameBorder + Metrics.FloatingGripHeight;
+	}
+
+	TWeakPtr<SDockHost> Host;
+	const FDockNode* WindowRoot = nullptr;
+	FDockMetrics Metrics;
+	uint8 HoverEdges = 0;
+	bool bHoverGrip = false;
+};
+
+// ---------------------------------------------------------------------------------------------
 // SDockHost
 // ---------------------------------------------------------------------------------------------
 SDockHost::SDockHost()
@@ -519,13 +678,33 @@ void SDockHost::RebuildChildren()
 			Entries.Add(Entry);
 		}
 	}
+	TMap<const FDockNode*, TSharedPtr<SDockFloatFrame>> NewFloatFrames;
 	for (int32 i = 0; i < Layout->GetFloating().Num(); ++i)
 	{
+		const FDockNode* WindowRoot = Layout->GetFloating()[i].Root.Get();
+		TSharedPtr<SDockFloatFrame> FloatFrame;
+		if (const TSharedPtr<SDockFloatFrame>* Found = FloatFrames.Find(WindowRoot))
+		{
+			FloatFrame = *Found;
+		}
+		else
+		{
+			FloatFrame = SNew(SDockFloatFrame).Host(WeakSelf).WindowRoot(WindowRoot).Metrics(Metrics);
+		}
+		NewFloatFrames.Add(WindowRoot, FloatFrame);
+		Children.Add(FloatFrame.ToSharedRef());
+		FChildEntry FrameEntry;
+		FrameEntry.Kind = FChildEntry::EKind::FloatFrame;
+		FrameEntry.Widget = FloatFrame;
+		FrameEntry.Node = WindowRoot;
+		Entries.Add(FrameEntry);
+
 		AddContainer(Containers[DockSideCount + i]);
 	}
 
 	GroupFrames = NewFrames;
 	SplitterBars = NewBars;
+	FloatFrames = NewFloatFrames;
 	RefreshFrames();
 }
 
@@ -613,8 +792,37 @@ void SDockHost::OnArrangeChildren(const FGeometry& AllottedGeometry, FArrangedCh
 			Place(Entry.Widget, Bar);
 			break;
 		}
+		case FChildEntry::EKind::FloatFrame:
+		{
+			const int32 Index = FindFloatingIndex(Entry.Node);
+			if (Computed.FloatingRects.IsValidIndex(Index))
+			{
+				const FBox2D& Window = Computed.FloatingRects[Index];
+				Place(Entry.Widget, FBox2D(Window.Min - FVector2D(FloatFrameBorder, FloatFrameBorder), Window.Max + FVector2D(FloatFrameBorder, FloatFrameBorder)));
+			}
+			break;
+		}
 		}
 	}
+}
+
+int32 SDockHost::FindFloatingIndex(const FDockNode* WindowRoot) const
+{
+	const TArray<FDockFloatingWindow>& Windows = Layout->GetFloating();
+	for (int32 i = 0; i < Windows.Num(); ++i)
+	{
+		if (Windows[i].Root.Get() == WindowRoot)
+		{
+			return i;
+		}
+	}
+	return INDEX_NONE;
+}
+
+void SDockHost::RecomputeNow(const FGeometry& Geometry) const
+{
+	const FVector2f Size = Geometry.GetLocalSize();
+	Layout->ComputeLayout(FVector2D(Size.X, Size.Y), Metrics, Computed);
 }
 
 bool SDockHost::IsScreenPositionOverPanel(FName Panel, const FVector2D& ScreenPosition) const
@@ -641,6 +849,13 @@ bool SDockHost::IsScreenPositionOverDock(const FVector2D& ScreenPosition) const
 	{
 		return Local.X >= Box.Min.X && Local.X <= Box.Max.X && Local.Y >= Box.Min.Y && Local.Y <= Box.Max.Y;
 	};
+	for (const FBox2D& Window : Computed.FloatingRects)
+	{
+		if (Contains(Window))
+		{
+			return true;
+		}
+	}
 	for (const FDockComputedGroup& Group : Computed.Groups)
 	{
 		if (Contains(Group.Rect))
@@ -738,7 +953,86 @@ FReply SDockHost::BeginTabDrag(FName Panel, const FPointerEvent& MouseEvent)
 	Drag.DraggedPanel = Panel;
 	Drag.StartLocal = FVector2D(GetCachedGeometry().AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()));
 	Drag.CurrentLocal = Drag.StartLocal;
+
+	// A panel dropped on empty canvas floats at about the size of the group it came from.
+	Drag.FloatSize = Metrics.FloatingDefaultSize;
+	FDockLocation Location;
+	if (Layout->FindPanel(Panel, Location))
+	{
+		FVector2D Own = FVector2D::ZeroVector;
+		if (Location.Kind == FDockLocation::EKind::Floating && Computed.FloatingRects.IsValidIndex(Location.FloatingIndex))
+		{
+			Own = Computed.FloatingRects[Location.FloatingIndex].GetSize();
+		}
+		else if (const FDockComputedGroup* Group = Computed.FindGroup(Location.Group))
+		{
+			Own = Group->Rect.GetSize() + FVector2D(0.0, Metrics.FloatingGripHeight);
+		}
+		if (Own.X > 0.0 && Own.Y > 0.0)
+		{
+			Drag.FloatSize = FVector2D(
+				FMath::Clamp(Own.X, FMath::Max(240.0, Metrics.FloatingMinSize.X), 480.0),
+				FMath::Clamp(Own.Y, FMath::Max(200.0, Metrics.FloatingMinSize.Y), 560.0));
+		}
+	}
 	return FReply::Handled().CaptureMouse(SharedThis(this));
+}
+
+FReply SDockHost::BeginFloatDrag(const FDockNode* WindowRoot, uint8 Edges, const FPointerEvent& MouseEvent)
+{
+	const int32 Index = FindFloatingIndex(WindowRoot);
+	if (Index == INDEX_NONE || !Computed.FloatingRects.IsValidIndex(Index))
+	{
+		return FReply::Unhandled();
+	}
+	Drag = FDragState();
+	Drag.Kind = FDragState::EKind::Float;
+	Drag.FloatRoot = WindowRoot;
+	Drag.FloatEdges = Edges;
+	Drag.FloatStartRect = Computed.FloatingRects[Index];
+	// Moving a window that holds a single panel works like dragging that panel's tab: it can be dropped on
+	// a group, a group side or a screen edge. (Windows with several tabs or splits just move.)
+	if (Edges == 0 && WindowRoot->IsTabGroup() && WindowRoot->Tabs.Num() == 1)
+	{
+		Drag.DraggedPanel = WindowRoot->Tabs[0];
+		Drag.FloatSize = Drag.FloatStartRect.GetSize();
+	}
+	Drag.StartLocal = FVector2D(GetCachedGeometry().AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()));
+	return FReply::Handled().CaptureMouse(SharedThis(this));
+}
+
+void SDockHost::FinishFloatDrag(const FGeometry& Geometry)
+{
+	const int32 Index = FindFloatingIndex(Drag.FloatRoot);
+	const FDockDropTarget Target = Drag.Target;
+	const FName CarriedPanel = Drag.DraggedPanel;
+	const bool bMoved = Drag.FloatEdges == 0;
+	Drag = FDragState();
+
+	if (bMoved && Target.IsValid() && !CarriedPanel.IsNone())
+	{
+		const bool bDocked = Target.Kind == FDockDropTarget::EKind::Group
+			? Layout->DockPanel(CarriedPanel, Target.TargetPanel, Target.Zone)
+			: Layout->DockPanelToEdge(CarriedPanel, Target.Side);
+		if (bDocked)
+		{
+			NotifyLayoutChanged();
+			OnLayoutChanged.ExecuteIfBound();
+			return;
+		}
+	}
+
+	// Mouse moves can arrive several per frame, so do not trust what the last arrange pass saw.
+	RecomputeNow(Geometry);
+	if (Index != INDEX_NONE && Computed.FloatingRects.IsValidIndex(Index))
+	{
+		// The model may have run past what is allowed on screen while dragging; keep what was drawn.
+		const FBox2D Shown = Computed.FloatingRects[Index];
+		Layout->MoveFloating(Index, Shown.Min);
+		Layout->ResizeFloating(Index, Shown.GetSize());
+	}
+	Invalidate(EInvalidateWidgetReason::Layout | EInvalidateWidgetReason::Paint);
+	OnLayoutChanged.ExecuteIfBound();
 }
 
 void SDockHost::UpdatePanelDragTarget(const FVector2D& ViewportSize)
@@ -767,7 +1061,7 @@ void SDockHost::UpdatePanelDragTarget(const FVector2D& ViewportSize)
 		}
 	}
 
-	Drag.Target = Layout->HitTestDropTarget(Drag.CurrentLocal, Drag.DraggedPanel, ViewportSize, Metrics, Computed);
+	Drag.Target = Layout->HitTestDropTarget(Drag.CurrentLocal, Drag.DraggedPanel, ViewportSize, Metrics, Computed, Drag.FloatSize);
 }
 
 void SDockHost::FinishPanelDrag()
@@ -797,12 +1091,43 @@ void SDockHost::FinishPanelDrag()
 	{
 		bChanged = Layout->DockPanelToEdge(Panel, Target.Side);
 	}
+	else if (Target.Kind == FDockDropTarget::EKind::Float)
+	{
+		bChanged = Layout->FloatPanel(Panel, Target.FloatPosition, Target.FloatSize);
+	}
 
 	if (bChanged)
 	{
 		NotifyLayoutChanged();
 		OnLayoutChanged.ExecuteIfBound();
 	}
+}
+
+FReply SDockHost::OnPreviewMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
+{
+	if (Drag.Kind != FDragState::EKind::None)
+	{
+		return FReply::Unhandled();
+	}
+	const FVector2D Local = FVector2D(MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()));
+	const int32 Count = Computed.FloatingRects.Num();
+	for (int32 i = Count - 1; i >= 0; --i)
+	{
+		const FBox2D Outer(Computed.FloatingRects[i].Min - FVector2D(FloatFrameBorder, FloatFrameBorder), Computed.FloatingRects[i].Max + FVector2D(FloatFrameBorder, FloatFrameBorder));
+		if (Local.X < Outer.Min.X || Local.X > Outer.Max.X || Local.Y < Outer.Min.Y || Local.Y > Outer.Max.Y)
+		{
+			continue;
+		}
+		if (i != Count - 1)
+		{
+			Layout->BringFloatingToFront(i);
+			NotifyLayoutChanged();
+			RecomputeNow(MyGeometry);
+			OnLayoutChanged.ExecuteIfBound();
+		}
+		break;
+	}
+	return FReply::Unhandled();
 }
 
 FReply SDockHost::OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
@@ -845,6 +1170,61 @@ FReply SDockHost::OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& 
 		return FReply::Handled();
 	}
 
+	if (Drag.Kind == FDragState::EKind::Float)
+	{
+		const int32 Index = FindFloatingIndex(Drag.FloatRoot);
+		if (Index == INDEX_NONE)
+		{
+			return FReply::Handled();
+		}
+		const FBox2D& Start = Drag.FloatStartRect;
+		FVector2D Position = Start.Min;
+		FVector2D Size = Start.GetSize();
+		const uint8 E = Drag.FloatEdges;
+		if (E == 0)
+		{
+			Position = Start.Min + Delta;
+		}
+		else
+		{
+			if (E & DockFloatEdge::Right)
+			{
+				Size.X = FMath::Max(Metrics.FloatingMinSize.X, Start.GetSize().X + Delta.X);
+			}
+			if (E & DockFloatEdge::Left)
+			{
+				Size.X = FMath::Max(Metrics.FloatingMinSize.X, Start.GetSize().X - Delta.X);
+				Position.X = Start.Max.X - Size.X;
+			}
+			if (E & DockFloatEdge::Bottom)
+			{
+				Size.Y = FMath::Max(Metrics.FloatingMinSize.Y, Start.GetSize().Y + Delta.Y);
+			}
+			if (E & DockFloatEdge::Top)
+			{
+				Size.Y = FMath::Max(Metrics.FloatingMinSize.Y, Start.GetSize().Y - Delta.Y);
+				Position.Y = Start.Max.Y - Size.Y;
+			}
+		}
+		Layout->MoveFloating(Index, Position);
+		if (E != 0)
+		{
+			Layout->ResizeFloating(Index, Size);
+		}
+		else if (!Drag.DraggedPanel.IsNone())
+		{
+			const FVector2f ViewSize = MyGeometry.GetLocalSize();
+			Drag.CurrentLocal = Local;
+			Drag.Target = Layout->HitTestDropTarget(Local, Drag.DraggedPanel, FVector2D(ViewSize.X, ViewSize.Y), Metrics, Computed, Drag.FloatSize);
+			if (Drag.Target.Kind == FDockDropTarget::EKind::Float)
+			{
+				Drag.Target = FDockDropTarget(); // already floating: moving the window is the whole effect
+			}
+		}
+		Invalidate(EInvalidateWidgetReason::Layout | EInvalidateWidgetReason::Paint);
+		return FReply::Handled();
+	}
+
 	if (Drag.Kind == FDragState::EKind::Splitter)
 	{
 		FDockNode* Split = const_cast<FDockNode*>(Drag.Split);
@@ -879,6 +1259,11 @@ FReply SDockHost::OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEve
 		FinishPanelDrag();
 		return FReply::Handled().ReleaseMouseCapture();
 	}
+	if (Drag.Kind == FDragState::EKind::Float)
+	{
+		FinishFloatDrag(MyGeometry);
+		return FReply::Handled().ReleaseMouseCapture();
+	}
 	Drag = FDragState();
 	OnLayoutChanged.ExecuteIfBound();
 	return FReply::Handled().ReleaseMouseCapture();
@@ -893,6 +1278,10 @@ FCursorReply SDockHost::OnCursorQuery(const FGeometry& MyGeometry, const FPointe
 			return FCursorReply::Unhandled();
 		}
 		return FCursorReply::Cursor((Drag.Target.IsValid() || Drag.ReorderSlot != INDEX_NONE) ? EMouseCursor::GrabHandClosed : EMouseCursor::SlashedCircle);
+	}
+	if (Drag.Kind == FDragState::EKind::Float)
+	{
+		return FCursorReply::Cursor(Drag.Target.IsValid() ? EMouseCursor::GrabHandClosed : CursorForFloatEdges(Drag.FloatEdges));
 	}
 	if (Drag.Kind != FDragState::EKind::None)
 	{
@@ -909,6 +1298,11 @@ void SDockHost::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
 		Invalidate(EInvalidateWidgetReason::Paint);
 		return;
 	}
+	if (Drag.Kind == FDragState::EKind::Float)
+	{
+		FinishFloatDrag(GetCachedGeometry());
+		return;
+	}
 	if (Drag.Kind != FDragState::EKind::None)
 	{
 		Drag = FDragState();
@@ -918,8 +1312,21 @@ void SDockHost::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
 
 int32 SDockHost::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
 {
-	const int32 MaxLayer = SPanel::OnPaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
-	if (!IsDraggingPanel())
+	// SPanel paints every child starting at the same layer, so where two children overlap the deeper elements of
+	// the lower one (text, icons) would show through the opaque background of the upper one. Floating windows
+	// overlap, so give each child its own band of layers, bottom to top.
+	FArrangedChildren Arranged(EVisibility::Visible);
+	ArrangeChildren(AllottedGeometry, Arranged);
+	const FPaintArgs NewArgs = Args.WithNewParent(this);
+	const bool bChildrenEnabled = ShouldBeEnabled(bParentEnabled);
+	int32 MaxLayer = LayerId;
+	for (int32 i = 0; i < Arranged.Num(); ++i)
+	{
+		const FArrangedWidget& Child = Arranged[i];
+		const int32 ChildMax = Child.Widget->Paint(NewArgs, Child.Geometry, MyCullingRect, OutDrawElements, MaxLayer + 1, InWidgetStyle, bChildrenEnabled);
+		MaxLayer = FMath::Max(MaxLayer, ChildMax);
+	}
+	if (!IsDraggingPanel() && !HasFloatingDropTarget())
 	{
 		return MaxLayer;
 	}

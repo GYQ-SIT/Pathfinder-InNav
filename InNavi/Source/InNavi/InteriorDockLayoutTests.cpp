@@ -12,6 +12,9 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
 
+// File-scope `using namespace` would leak into other files in a unity build, so keep it inside a namespace.
+namespace InteriorDockTests
+{
 using namespace InteriorDock;
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInteriorDockDefaultLayoutTest, "InNavi.Dock.Interior.DefaultLayout", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -186,5 +189,7 @@ bool FInteriorScreenDockSmokeTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("reset hides Navigation again"), Dock->IsPanelShown(Navigation));
 	return true;
 }
+
+} // namespace InteriorDockTests
 
 #endif // WITH_DEV_AUTOMATION_TESTS
