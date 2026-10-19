@@ -58,6 +58,10 @@ public:
 	FReply BeginTabDrag(FName Panel, const FPointerEvent& MouseEvent);
 	bool IsDraggingPanel() const { return Drag.Kind == FDragState::EKind::Panel && Drag.bActive; }
 
+	// True when ScreenPosition lies over Panel's group and Panel is that group's active tab (i.e. it is
+	// actually on screen right now).
+	bool IsScreenPositionOverPanel(FName Panel, const FVector2D& ScreenPosition) const;
+
 	// --- SWidget ---
 	virtual void OnArrangeChildren(const FGeometry& AllottedGeometry, FArrangedChildren& ArrangedChildren) const override;
 	virtual FChildren* GetChildren() override { return &Children; }

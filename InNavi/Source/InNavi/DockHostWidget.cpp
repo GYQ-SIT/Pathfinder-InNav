@@ -617,6 +617,23 @@ void SDockHost::OnArrangeChildren(const FGeometry& AllottedGeometry, FArrangedCh
 	}
 }
 
+bool SDockHost::IsScreenPositionOverPanel(FName Panel, const FVector2D& ScreenPosition) const
+{
+	FDockLocation Location;
+	if (!Layout->FindPanel(Panel, Location) || !Location.Group
+		|| !Location.Group->Tabs.IsValidIndex(Location.Group->ActiveTab) || Location.Group->Tabs[Location.Group->ActiveTab] != Panel)
+	{
+		return false;
+	}
+	const FDockComputedGroup* Group = Computed.FindGroup(Location.Group);
+	if (!Group)
+	{
+		return false;
+	}
+	const FVector2D Local = FVector2D(GetCachedGeometry().AbsoluteToLocal(ScreenPosition));
+	return Local.X >= Group->Rect.Min.X && Local.X <= Group->Rect.Max.X && Local.Y >= Group->Rect.Min.Y && Local.Y <= Group->Rect.Max.Y;
+}
+
 void SDockHost::HandleTabActivated(FName Panel)
 {
 	if (Layout->SetActiveTab(Panel))
