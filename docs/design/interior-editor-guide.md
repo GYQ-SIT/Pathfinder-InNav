@@ -83,10 +83,11 @@ Pinned across the very top of the interior editor screen.
   OS file picker for an existing `buildings.json` or `.db`. Both check for unsaved
   changes first and prompt to save/discard/cancel, exactly like leaving to the
   exterior does.
-- **Window** — a checklist of the seven dockable panels (Toolbar/Floor/Properties/
-  Layers/Navigation/Audio/Map, see below). Unchecking one hides it; re-checking shows
-  it again. Audio and Navigation start unchecked/hidden; the other five (Map included)
-  start visible.
+- **Window** — a checklist of the eight dockable panels (Toolbar/Floor/Properties/
+  Layers/Navigation/Audio/Map/Debug, see below). Unchecking one hides it; re-checking
+  puts it back where it was. Navigation, Audio and Debug start hidden; the other five
+  start visible. **Reset Layout** puts every panel back in the team default
+  arrangement.
 - **Back**, on the right — same as described above.
 
 ## Building switcher bar
@@ -104,20 +105,34 @@ a **View**/**Edit** toggle, only appear while in 3D preview (View/Edit is covere
 
 ## Dockable panels
 
-Seven panels — **Toolbar**, **Floor**, **Properties**, **Layers**, **Navigation**,
-**Audio**, **Map** — can each be:
+Eight panels — **Toolbar**, **Floor**, **Properties**, **Layers**, **Navigation**,
+**Audio**, **Map**, **Debug** — sit in a Visual Studio / Unreal-style docking layout. The
+middle of the screen (the floor plan or the 3D view) is never part of the layout; panels
+dock around it, on the left, right, top or bottom edge, and sit on top of the canvas.
 
-- **Moved**: drag by the panel's own background (not one of its buttons).
-- **Resized**: drag either its left or right edge.
-- **Docked together**: drop one near another's edge and they snap into a shared column,
-  filling the screen height end to end; drag the thin splitter bar between two docked
-  panels to adjust how much height each gets.
-- **Hidden/shown**: via the Window menu (above), or Properties auto-hides its own
-  content but stays visible as an empty placeholder when nothing's selected.
+- **Tabs**: every panel has a tab. Several panels in one group show as tabs; click a tab
+  to switch. The **×** on a tab hides that panel (the Window menu check box clears too).
+- **Re-dock by dragging a tab**: press a tab and drag. A blue preview shows where it will
+  land when you let go:
+  - onto the **middle** of another group (or its tab strip) → joins that group as a tab;
+  - onto the **left / right / top / bottom** part of a group → splits that group, putting
+    the panel beside or above/below it;
+  - onto a **screen edge** → docks against that edge (a new column or row if one is
+    already there);
+  - along **its own tab strip** → reorders the tabs.
+  Right-click while dragging cancels; letting go anywhere with no highlight does nothing.
+- **Resize**: drag the thin bar between two panels, or the inner edge of a side/top/bottom
+  area, to change how much room each gets.
+- **Hide / show**: the tab's **×**, or the Window menu. Showing a panel again puts it back
+  where it was.
+- **Reset**: Window → **Reset Layout**.
 
-Panel positions/sizes/docking are saved automatically (one global layout, not per
-project) whenever you save the project or leave the interior editor, and restored the
-next time you open it.
+Panel contents scroll when they are taller than their panel. The arrangement (which panels
+are tabs of which, how the space is split, which are hidden) is saved automatically — one
+global layout per machine, not per project — whenever you save the project or leave the
+interior editor, and restored the next time you open it. Layouts saved by older versions
+of the editor are not compatible; the first run after updating uses the team default.
+Floating panels (dragging a tab out onto empty space) are not available yet.
 
 ### Toolbar panel
 

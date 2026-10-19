@@ -1249,7 +1249,7 @@ private:
 
 	// See SetCurrentViewAsDefaultExterior's own comment - loaded once in BeginPlay, saved by that
 	// function. Tries Saved/ExteriorEditorLayout.json first (same Saved-dir/per-machine convention as
-	// UInteriorScreenWidget's own InteriorEditorLayout.json), then falls back to the team's shipped
+	// the interior editor's own InteriorDockLayout.json), then falls back to the team's shipped
 	// Data/DefaultLayouts/DefaultExteriorLayout.json if no per-user save exists yet.
 	void LoadExteriorCameraDefaultFromDisk();
 	void SaveExteriorCameraDefaultToDisk() const;
