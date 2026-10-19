@@ -1,4 +1,6 @@
 #include "InteriorScreenWidget.h"
+#include "DockHostUMG.h"
+#include "InteriorDockLayout.h"
 
 #include "AudioFileRowWidget.h"
 #include "ConfirmDialogWidget.h"
@@ -226,155 +228,33 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			ApplyStandardFont(TextBlock);
 		};
 
-		// Each of the 3 dockable panels (Toolbar/Floor/Properties) is a UBorder wrapped in a
-		// USizeBox, added DIRECTLY to Canvas (no shared bar/VerticalBox) - the SizeBox is what
-		// actually gets the CanvasPanelSlot, so it alone controls the panel's rendered width/height
-		// (width always via WidthOverride; height via HeightOverride while docked in a column, or
-		// left auto/natural via ClearHeightOverride while floating - see RefreshDockLayout). A
-		// drag-to-resize handle (width only) sits glued to each panel's own right edge, same
-		// SetCursor/CaptureMouse pattern as before, just per-panel instead of per-bar. All layout
-		// math (position/size/handle placement) happens later in RefreshDockLayout - this just
-		// constructs the widgets and gives them a starting Canvas slot; InitializeDefaultDockLayout
-		// (called once from NativeConstruct) positions everything for the first time.
-		auto ConstructDockPanel = [this, Canvas](EDockPanelId Id, const TCHAR* BorderName, const FLinearColor& BrushColor, float BorderPadding) -> UBorder*
+		// Panel contents live in a UDockHostWidget (the dock system), not directly on this canvas. Each
+		// panel is built as a content-root UBorder with the usual padding; nothing is added to the canvas -
+		// the root is registered with DockHost and placed there. DockPanelBorders[] keeps hold of each
+		// root so the rest of this class can still reach its content.
+		DockHost = WidgetTree->ConstructWidget<UDockHostWidget>(UDockHostWidget::StaticClass(), TEXT("DockHost"));
+		{
+			FDockMetrics DockMetrics;
+			DockMetrics.TopMargin = SidebarTopMargin;
+			DockMetrics.BottomMargin = SidebarBottomMargin;
+			DockHost->SetMetrics(DockMetrics);
+		}
+		UCanvasPanelSlot* DockHostSlot = Canvas->AddChildToCanvas(DockHost);
+		DockHostSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
+		DockHostSlot->SetOffsets(FMargin(0.f));
+		DockHostSlot->SetZOrder(2);
+
+		auto ConstructDockPanel = [this](EDockPanelId Id, const TCHAR* BorderName, const FLinearColor& BrushColor, float BorderPadding) -> UBorder*
 		{
 			const int32 Index = (int32)Id;
-			DockPanelBorderPadding[Index] = BorderPadding;
-
 			UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(BorderName));
-			Border->SetBrushColor(BrushColor);
+			// The dock frame already paints the panel background.
+			Border->SetBrushColor(FLinearColor::Transparent);
 			Border->SetPadding(FMargin(BorderPadding));
-			// A SizeBox's height/width override only constrains LAYOUT size, not paint size - content
-			// taller than a squeezed-down panel (e.g. Properties' fields when a splitter drag or the
-			// screen's own edge leaves it little room) would otherwise paint straight past the panel's
-			// own border, potentially off the visible screen entirely. Clip it to its own bounds instead.
-			Border->SetClipping(EWidgetClipping::ClipToBoundsAlways);
-			// BindDynamic is a macro that stringifies its function-pointer argument at compile time
-			// (to look up the UFUNCTION by name for reflection-based invocation) - it can't take a
-			// ternary/runtime-selected pointer, only a literal &Class::Method token. So this lambda
-			// only constructs the widgets; each panel's actual event bindings are 3 tiny literal
-			// BindDynamic calls right after its ConstructDockPanel call site below.
 			DockPanelBorders[Index] = Border;
-
-			USizeBox* Wrapper = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(BorderName) + TEXT("SizeBox")));
-			Wrapper->SetWidthOverride(DockPanelWidths[Index]);
-			Wrapper->SetContent(Border);
-
-			UCanvasPanelSlot* PanelCanvasSlot = Canvas->AddChildToCanvas(Wrapper);
-			PanelCanvasSlot->SetAnchors(FAnchors(0.f, 0.f));
-			PanelCanvasSlot->SetAlignment(FVector2D(0.f, 0.f));
-			PanelCanvasSlot->SetAutoSize(true);
-			PanelCanvasSlot->SetZOrder(2);
-			DockPanelCanvasSlots[Index] = PanelCanvasSlot;
-
-			UBorder* Handle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(BorderName) + TEXT("ResizeHandle")));
-			Handle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
-			Handle->SetCursor(EMouseCursor::ResizeLeftRight);
-			// Same reasoning as Border above - bound with literal calls at each call site instead.
-			DockResizeHandles[Index] = Handle;
-
-			UCanvasPanelSlot* HandleSlot = Canvas->AddChildToCanvas(Handle);
-			HandleSlot->SetAnchors(FAnchors(0.f, 0.f));
-			HandleSlot->SetAlignment(FVector2D(0.f, 0.f));
-			HandleSlot->SetZOrder(3);
-			DockResizeHandleSlots[Index] = HandleSlot;
-
-			// A second handle on the panel's LEFT edge too - free-floating panels can end up
-			// anywhere on screen, and a panel sitting near the right edge of the viewport can have
-			// its own right edge crowded right up against it (or past it), making the right handle
-			// awkward or impossible to grab. Dragging this one keeps the panel's RIGHT edge fixed
-			// and grows/shrinks it from the left instead (see HandleLeftResizeMouseMove).
-			UBorder* LeftHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(BorderName) + TEXT("LeftResizeHandle")));
-			LeftHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
-			LeftHandle->SetCursor(EMouseCursor::ResizeLeftRight);
-			DockLeftResizeHandles[Index] = LeftHandle;
-
-			UCanvasPanelSlot* LeftHandleSlot = Canvas->AddChildToCanvas(LeftHandle);
-			LeftHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
-			LeftHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
-			LeftHandleSlot->SetZOrder(3);
-			DockLeftResizeHandleSlots[Index] = LeftHandleSlot;
-
-			// The move-drag handle - see DockDragHandleSize's own comment. Same muted tone as the resize
-			// handles (not brighter) so it reads as part of the same UI language instead of looking like
-			// a stray highlighted square sitting on top of the title.
-			UBorder* DragHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(BorderName) + TEXT("DragHandle")));
-			DragHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
-			DragHandle->SetCursor(EMouseCursor::CardinalCross);
-			DockDragHandles[Index] = DragHandle;
-
-			UCanvasPanelSlot* DragHandleSlot = Canvas->AddChildToCanvas(DragHandle);
-			DragHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
-			DragHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
-			DragHandleSlot->SetAutoSize(false);
-			DragHandleSlot->SetSize(FVector2D(DockDragHandleSize, DockDragHandleSize));
-			DragHandleSlot->SetZOrder(3);
-			DockDragHandleSlots[Index] = DragHandleSlot;
-
-			// BOTTOM-edge height handle - see DockBottomResizeHandles' own comment (RefreshDockLayout
-			// only ever shows this while floating). Same style/thickness as the right/left width
-			// handles, just horizontal instead.
-			UBorder* BottomHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(BorderName) + TEXT("BottomResizeHandle")));
-			BottomHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
-			BottomHandle->SetCursor(EMouseCursor::ResizeUpDown);
-			DockBottomResizeHandles[Index] = BottomHandle;
-
-			UCanvasPanelSlot* BottomHandleSlot = Canvas->AddChildToCanvas(BottomHandle);
-			BottomHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
-			BottomHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
-			BottomHandleSlot->SetZOrder(3);
-			DockBottomResizeHandleSlots[Index] = BottomHandleSlot;
-
+			DockHost->RegisterPanel(FName(GetDockPanelName(Id)), FText::FromString(GetDockPanelName(Id)), Border);
 			return Border;
 		};
-
-		// 4 splitter handles - the most that can ever be needed at once (all 5 panels docked together
-		// in one column has 4 internal boundaries). RefreshSplitterLayout shows/hides and repositions
-		// these to match whichever columns actually exist right now.
-		for (int32 SplitterIndex = 0; SplitterIndex < MaxDockSplitters; ++SplitterIndex)
-		{
-			UBorder* Splitter = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(*FString::Printf(TEXT("DockSplitter%d"), SplitterIndex)));
-			Splitter->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
-			Splitter->SetCursor(EMouseCursor::ResizeUpDown);
-			Splitter->SetVisibility(ESlateVisibility::Collapsed);
-			if (SplitterIndex == 0)
-			{
-				Splitter->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter0MouseButtonDown);
-				Splitter->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter0MouseMove);
-				Splitter->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter0MouseButtonUp);
-			}
-			else if (SplitterIndex == 1)
-			{
-				Splitter->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter1MouseButtonDown);
-				Splitter->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter1MouseMove);
-				Splitter->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter1MouseButtonUp);
-			}
-			else if (SplitterIndex == 2)
-			{
-				Splitter->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter2MouseButtonDown);
-				Splitter->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter2MouseMove);
-				Splitter->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter2MouseButtonUp);
-			}
-			else if (SplitterIndex == 3)
-			{
-				Splitter->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter3MouseButtonDown);
-				Splitter->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter3MouseMove);
-				Splitter->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter3MouseButtonUp);
-			}
-			else
-			{
-				Splitter->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter4MouseButtonDown);
-				Splitter->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter4MouseMove);
-				Splitter->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnSplitter4MouseButtonUp);
-			}
-			SplitterHandles[SplitterIndex] = Splitter;
-
-			UCanvasPanelSlot* SplitterSlot = Canvas->AddChildToCanvas(Splitter);
-			SplitterSlot->SetAnchors(FAnchors(0.f, 0.f));
-			SplitterSlot->SetAlignment(FVector2D(0.f, 0.f));
-			SplitterSlot->SetZOrder(4);
-			SplitterCanvasSlots[SplitterIndex] = SplitterSlot;
-		}
 
 		// Panels flush against each other in a column should read as one continuous surface, not
 		// separate boxes with visible seams - so all 4 share this exact background color.
@@ -387,18 +267,6 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// down) so it stays put regardless of how this panel gets dragged/resized/hidden.
 		ToolbarPanel = ConstructDockPanel(EDockPanelId::Toolbar, TEXT("Pnl_Toolbar"), DockPanelColor, 10.f);
 		// Bound to the drag handle, not ToolbarPanel itself - see DockDragHandleSize's own comment.
-		DockDragHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarPanelMouseButtonDown);
-		ToolbarPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarPanelMouseMove);
-		ToolbarPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarPanelMouseButtonUp);
-		DockResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarResizeMouseButtonDown);
-		DockResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarResizeMouseMove);
-		DockResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarResizeMouseButtonUp);
-		DockLeftResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarLeftResizeMouseButtonDown);
-		DockLeftResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarLeftResizeMouseMove);
-		DockLeftResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarLeftResizeMouseButtonUp);
-		DockBottomResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarBottomResizeMouseButtonDown);
-		DockBottomResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarBottomResizeMouseMove);
-		DockBottomResizeHandles[(int32)EDockPanelId::Toolbar]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnToolbarBottomResizeMouseButtonUp);
 
 		UVerticalBox* LeftSidebar = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LeftSidebar"));
 		ToolbarPanel->SetContent(LeftSidebar);
@@ -559,18 +427,6 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// -- Floor panel --
 		FloorPanel = ConstructDockPanel(EDockPanelId::Floor, TEXT("Pnl_Floor"), DockPanelColor, 14.f);
 		// Bound to the drag handle, not FloorPanel itself - see DockDragHandleSize's own comment.
-		DockDragHandles[(int32)EDockPanelId::Floor]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorPanelMouseButtonDown);
-		FloorPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorPanelMouseMove);
-		FloorPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorPanelMouseButtonUp);
-		DockResizeHandles[(int32)EDockPanelId::Floor]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorResizeMouseButtonDown);
-		DockResizeHandles[(int32)EDockPanelId::Floor]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorResizeMouseMove);
-		DockResizeHandles[(int32)EDockPanelId::Floor]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorResizeMouseButtonUp);
-		DockLeftResizeHandles[(int32)EDockPanelId::Floor]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorLeftResizeMouseButtonDown);
-		DockLeftResizeHandles[(int32)EDockPanelId::Floor]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorLeftResizeMouseMove);
-		DockLeftResizeHandles[(int32)EDockPanelId::Floor]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorLeftResizeMouseButtonUp);
-		DockBottomResizeHandles[(int32)EDockPanelId::Floor]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorBottomResizeMouseButtonDown);
-		DockBottomResizeHandles[(int32)EDockPanelId::Floor]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorBottomResizeMouseMove);
-		DockBottomResizeHandles[(int32)EDockPanelId::Floor]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnFloorBottomResizeMouseButtonUp);
 
 		UVerticalBox* FloorStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("FloorStack"));
 		FloorPanel->SetContent(FloorStack);
@@ -849,6 +705,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		WindowDebugCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowDebug"), TEXT("Debug"));
 		WindowDebugCheckbox->SetIsChecked(false);
 		WindowDebugCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowDebugCheckChanged);
+		UButton* WindowResetLayoutButton = AddDropdownButtonRow(WindowDropdownStack, TEXT("Btn_WindowResetLayout"), TEXT("Reset Layout"));
+		WindowResetLayoutButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowResetLayoutClicked);
 		// Full-screen, fully transparent, Collapsed by default - see the comment on
 		// OnMenuClickCatcherMouseButtonDown for why this is how "click elsewhere closes the dropdown"
 		// works. Z=5 sits above every dock panel/handle/splitter (2-4) but below the menu bar and
@@ -1125,18 +983,6 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// time - see HandleSelectedDoorChanged/HandleSelectedRoomChanged/HandleSelectedConnectorChanged.
 		PropertiesPanel = ConstructDockPanel(EDockPanelId::Properties, TEXT("Pnl_Properties"), DockPanelColor, 14.f);
 		// Bound to the drag handle, not PropertiesPanel itself - see DockDragHandleSize's own comment.
-		DockDragHandles[(int32)EDockPanelId::Properties]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesPanelMouseButtonDown);
-		PropertiesPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesPanelMouseMove);
-		PropertiesPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesPanelMouseButtonUp);
-		DockResizeHandles[(int32)EDockPanelId::Properties]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesResizeMouseButtonDown);
-		DockResizeHandles[(int32)EDockPanelId::Properties]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesResizeMouseMove);
-		DockResizeHandles[(int32)EDockPanelId::Properties]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesResizeMouseButtonUp);
-		DockLeftResizeHandles[(int32)EDockPanelId::Properties]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesLeftResizeMouseButtonDown);
-		DockLeftResizeHandles[(int32)EDockPanelId::Properties]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesLeftResizeMouseMove);
-		DockLeftResizeHandles[(int32)EDockPanelId::Properties]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesLeftResizeMouseButtonUp);
-		DockBottomResizeHandles[(int32)EDockPanelId::Properties]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesBottomResizeMouseButtonDown);
-		DockBottomResizeHandles[(int32)EDockPanelId::Properties]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesBottomResizeMouseMove);
-		DockBottomResizeHandles[(int32)EDockPanelId::Properties]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnPropertiesBottomResizeMouseButtonUp);
 
 		UVerticalBox* PropertiesStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("PropertiesStack"));
 		PropertiesPanel->SetContent(PropertiesStack);
@@ -1321,18 +1167,6 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// RefreshLayersList rather than laid out here (same reasoning as FloorListBox's rows).
 		LayersPanel = ConstructDockPanel(EDockPanelId::Layers, TEXT("Pnl_Layers"), DockPanelColor, 14.f);
 		// Bound to the drag handle, not LayersPanel itself - see DockDragHandleSize's own comment.
-		DockDragHandles[(int32)EDockPanelId::Layers]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersPanelMouseButtonDown);
-		LayersPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersPanelMouseMove);
-		LayersPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersPanelMouseButtonUp);
-		DockResizeHandles[(int32)EDockPanelId::Layers]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersResizeMouseButtonDown);
-		DockResizeHandles[(int32)EDockPanelId::Layers]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersResizeMouseMove);
-		DockResizeHandles[(int32)EDockPanelId::Layers]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersResizeMouseButtonUp);
-		DockLeftResizeHandles[(int32)EDockPanelId::Layers]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersLeftResizeMouseButtonDown);
-		DockLeftResizeHandles[(int32)EDockPanelId::Layers]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersLeftResizeMouseMove);
-		DockLeftResizeHandles[(int32)EDockPanelId::Layers]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersLeftResizeMouseButtonUp);
-		DockBottomResizeHandles[(int32)EDockPanelId::Layers]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersBottomResizeMouseButtonDown);
-		DockBottomResizeHandles[(int32)EDockPanelId::Layers]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersBottomResizeMouseMove);
-		DockBottomResizeHandles[(int32)EDockPanelId::Layers]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnLayersBottomResizeMouseButtonUp);
 
 		UVerticalBox* LayersStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LayersStack"));
 		LayersPanel->SetContent(LayersStack);
@@ -1371,20 +1205,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// original bespoke draggable-overlay look; RefreshNavigationPanelDisplay fills in the dynamic
 		// bits (button colors/labels/enablement, status/route text) once NativeConstruct hooks it up.
 		NavigationPanel = ConstructDockPanel(EDockPanelId::Navigation, TEXT("Pnl_Navigation"), DockPanelColor, 14.f);
-		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
 		// Bound to the drag handle, not NavigationPanel itself - see DockDragHandleSize's own comment.
-		DockDragHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationPanelMouseButtonDown);
-		NavigationPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationPanelMouseMove);
-		NavigationPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationPanelMouseButtonUp);
-		DockResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationResizeMouseButtonDown);
-		DockResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationResizeMouseMove);
-		DockResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationResizeMouseButtonUp);
-		DockLeftResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationLeftResizeMouseButtonDown);
-		DockLeftResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationLeftResizeMouseMove);
-		DockLeftResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationLeftResizeMouseButtonUp);
-		DockBottomResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationBottomResizeMouseButtonDown);
-		DockBottomResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationBottomResizeMouseMove);
-		DockBottomResizeHandles[(int32)EDockPanelId::Navigation]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnNavigationBottomResizeMouseButtonUp);
 
 		UVerticalBox* NavStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("NavStack"));
 		NavigationPanel->SetContent(NavStack);
@@ -1487,20 +1308,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// InitializeDockRuntimeArrays) - shown via the Window menu, same mechanism as hiding any other
 		// panel, just inverted for its starting state.
 		AudioPanel = ConstructDockPanel(EDockPanelId::Audio, TEXT("Pnl_Audio"), DockPanelColor, 14.f);
-		AudioPanel->SetVisibility(ESlateVisibility::Collapsed);
 		// Bound to the drag handle, not AudioPanel itself - see DockDragHandleSize's own comment.
-		DockDragHandles[(int32)EDockPanelId::Audio]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioPanelMouseButtonDown);
-		AudioPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioPanelMouseMove);
-		AudioPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioPanelMouseButtonUp);
-		DockResizeHandles[(int32)EDockPanelId::Audio]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioResizeMouseButtonDown);
-		DockResizeHandles[(int32)EDockPanelId::Audio]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioResizeMouseMove);
-		DockResizeHandles[(int32)EDockPanelId::Audio]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioResizeMouseButtonUp);
-		DockLeftResizeHandles[(int32)EDockPanelId::Audio]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioLeftResizeMouseButtonDown);
-		DockLeftResizeHandles[(int32)EDockPanelId::Audio]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioLeftResizeMouseMove);
-		DockLeftResizeHandles[(int32)EDockPanelId::Audio]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioLeftResizeMouseButtonUp);
-		DockBottomResizeHandles[(int32)EDockPanelId::Audio]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioBottomResizeMouseButtonDown);
-		DockBottomResizeHandles[(int32)EDockPanelId::Audio]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioBottomResizeMouseMove);
-		DockBottomResizeHandles[(int32)EDockPanelId::Audio]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnAudioBottomResizeMouseButtonUp);
 
 		UVerticalBox* AudioStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("AudioStack"));
 		AudioPanel->SetContent(AudioStack);
@@ -1604,18 +1412,6 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// concept). Same PC functions as there (SetRoadCategoryVisible/SetAllRoadsVisible/
 		// SetRoadsAndPOIsWithinCampusOnly). Starts VISIBLE (unlike Audio/Navigation above).
 		MapPanel = ConstructDockPanel(EDockPanelId::Map, TEXT("Pnl_Map"), DockPanelColor, 14.f);
-		DockDragHandles[(int32)EDockPanelId::Map]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapPanelMouseButtonDown);
-		MapPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapPanelMouseMove);
-		MapPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapPanelMouseButtonUp);
-		DockResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapResizeMouseButtonDown);
-		DockResizeHandles[(int32)EDockPanelId::Map]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapResizeMouseMove);
-		DockResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapResizeMouseButtonUp);
-		DockLeftResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapLeftResizeMouseButtonDown);
-		DockLeftResizeHandles[(int32)EDockPanelId::Map]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapLeftResizeMouseMove);
-		DockLeftResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapLeftResizeMouseButtonUp);
-		DockBottomResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapBottomResizeMouseButtonDown);
-		DockBottomResizeHandles[(int32)EDockPanelId::Map]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapBottomResizeMouseMove);
-		DockBottomResizeHandles[(int32)EDockPanelId::Map]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnMapBottomResizeMouseButtonUp);
 
 		UVerticalBox* MapStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("MapStack"));
 		MapPanel->SetContent(MapStack);
@@ -1649,22 +1445,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		// -- Debug panel --
 		DebugPanel = ConstructDockPanel(EDockPanelId::Debug, TEXT("Pnl_Debug"), DockPanelColor, 14.f);
-		DockDragHandles[(int32)EDockPanelId::Debug]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugPanelMouseButtonDown);
-		DebugPanel->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugPanelMouseMove);
-		DebugPanel->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugPanelMouseButtonUp);
 
-		DockResizeHandles[(int32)EDockPanelId::Debug]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugResizeMouseButtonDown);
-		DockResizeHandles[(int32)EDockPanelId::Debug]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugResizeMouseMove);
-		DockResizeHandles[(int32)EDockPanelId::Debug]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugResizeMouseButtonUp);
 
-		DockLeftResizeHandles[(int32)EDockPanelId::Debug]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugLeftResizeMouseButtonDown);
-		DockLeftResizeHandles[(int32)EDockPanelId::Debug]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugLeftResizeMouseMove);
-		DockLeftResizeHandles[(int32)EDockPanelId::Debug]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugLeftResizeMouseButtonUp);
 
-		DockBottomResizeHandles[(int32)EDockPanelId::Debug]->OnMouseButtonDownEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugBottomResizeMouseButtonDown);
-		DockBottomResizeHandles[(int32)EDockPanelId::Debug]->OnMouseMoveEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugBottomResizeMouseMove);
-		DockBottomResizeHandles[(int32)EDockPanelId::Debug]->OnMouseButtonUpEvent.BindDynamic(this, &UInteriorScreenWidget::OnDebugBottomResizeMouseButtonUp);
-		DebugPanel->SetVisibility(ESlateVisibility::Collapsed);
 
 		UVerticalBox* DebugStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DebugStack"));
 		DebugPanel->SetContent(DebugStack);
@@ -1689,6 +1472,20 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		ApplyStandardFont(DebugLastErrorText);
 		ApplyStandardTextWrap(DebugLastErrorText);
 		DebugStack->AddChildToVerticalBox(DebugLastErrorText);
+
+		// The dock frames' tabs already show each panel's name, so the static title text at the top of a
+		// panel's content would just repeat it. Properties keeps its own - that one changes with the
+		// selection (see RefreshPropertiesPanelVisibility).
+		for (int32 Index = 0; Index < NumDockPanels; ++Index)
+		{
+			if (UTextBlock* Title = DockPanelTitleTexts[Index])
+			{
+				if ((EDockPanelId)Index != EDockPanelId::Properties)
+				{
+					Title->SetVisibility(ESlateVisibility::Collapsed);
+				}
+			}
+		}
 	}
 
 	return Super::RebuildWidget();
@@ -1773,7 +1570,10 @@ void UInteriorScreenWidget::NativeConstruct()
 		// changes, from any trigger (this panel's own buttons, or a floor-plan click).
 		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
 		{
-			Nav->SetPanelBorderForHitTest(NavigationPanel);
+			Nav->SetPointerOverPanelCallback([this](const FVector2D& ScreenPosition)
+			{
+				return DockHost && DockHost->IsScreenPositionOverPanel(FName(GetDockPanelName(EDockPanelId::Navigation)), ScreenPosition);
+			});
 			Nav->OnStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavigationStateChanged);
 		}
 
@@ -1812,9 +1612,92 @@ void UInteriorScreenWidget::NativeConstruct()
 	// Syncs Properties' placeholder title/visibility against PC's actual current selection state
 	// (normally nothing yet, but defensive either way) before panels get positioned below.
 	RefreshPropertiesPanelVisibility();
-	// Places every dock panel for the first time (Toolbar floating top-left, Floor+Properties
-	// pre-docked top-right) - guarded internally so a later NativeConstruct call (if any) is a no-op.
-	InitializeDefaultDockLayout();
+	// Arranges every dock panel for the first time: the user's saved layout, else the team default.
+	InitializeDockLayout();
+}
+
+void UInteriorScreenWidget::InitializeDockLayout()
+{
+	if (!DockHost || bDockLayoutInitialized)
+	{
+		return;
+	}
+	bDockLayoutInitialized = true;
+
+	DockHost->OnPanelClosedNative.BindUObject(this, &UInteriorScreenWidget::HandleDockPanelClosed);
+	DockHost->OnLayoutChangedNative.BindUObject(this, &UInteriorScreenWidget::HandleDockLayoutChanged);
+
+	InteriorDock::LoadLayout(*DockHost->GetLayout(), GetCanvasSize());
+	DockHost->NotifyLayoutChanged();
+	RefreshWindowMenuChecks();
+}
+
+bool UInteriorScreenWidget::IsDockPanelShown(EDockPanelId Id) const
+{
+	return DockHost && DockHost->IsPanelShown(FName(GetDockPanelName(Id)));
+}
+
+void UInteriorScreenWidget::HandleDockPanelClosed(FName Panel)
+{
+	RefreshWindowMenuChecks();
+}
+
+void UInteriorScreenWidget::HandleDockLayoutChanged()
+{
+	RefreshWindowMenuChecks();
+}
+
+void UInteriorScreenWidget::RefreshWindowMenuChecks()
+{
+	auto Sync = [this](UCheckBox* Checkbox, EDockPanelId Id)
+	{
+		if (Checkbox)
+		{
+			Checkbox->SetIsChecked(IsDockPanelShown(Id));
+		}
+	};
+	Sync(WindowToolbarCheckbox, EDockPanelId::Toolbar);
+	Sync(WindowFloorCheckbox, EDockPanelId::Floor);
+	Sync(WindowPropertiesCheckbox, EDockPanelId::Properties);
+	Sync(WindowLayersCheckbox, EDockPanelId::Layers);
+	Sync(WindowNavigationCheckbox, EDockPanelId::Navigation);
+	Sync(WindowAudioCheckbox, EDockPanelId::Audio);
+	Sync(WindowMapCheckbox, EDockPanelId::Map);
+	Sync(WindowDebugCheckbox, EDockPanelId::Debug);
+}
+
+void UInteriorScreenWidget::ResetDockLayout()
+{
+	if (!DockHost)
+	{
+		return;
+	}
+	InteriorDock::BuildDefaultLayout(*DockHost->GetLayout());
+	DockHost->NotifyLayoutChanged();
+	RefreshWindowMenuChecks();
+	SaveDockLayoutToDisk();
+}
+
+void UInteriorScreenWidget::SyncDockPanelWidths()
+{
+	if (!DockHost)
+	{
+		return;
+	}
+	bool bAnyChanged = false;
+	for (int32 Index = 0; Index < NumDockPanels; ++Index)
+	{
+		const float Width = DockHost->GetPanelWidth(FName(GetDockPanelName((EDockPanelId)Index)));
+		if (Width > 0.f && !FMath::IsNearlyEqual(Width, DockPanelWidths[Index], 0.5f))
+		{
+			DockPanelWidths[Index] = Width;
+			bAnyChanged = true;
+		}
+	}
+	if (bAnyChanged)
+	{
+		RefreshDockPanelContentWidths();
+	}
 }
 
 void UInteriorScreenWidget::NativeDestruct()
@@ -1836,8 +1719,14 @@ void UInteriorScreenWidget::NativeDestruct()
 		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
 		{
 			Nav->OnStateChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleNavigationStateChanged);
-			Nav->SetPanelBorderForHitTest(nullptr);
+			Nav->SetPointerOverPanelCallback(nullptr);
 		}
+	}
+
+	if (DockHost)
+	{
+		DockHost->OnPanelClosedNative.Unbind();
+		DockHost->OnLayoutChangedNative.Unbind();
 	}
 
 	Super::NativeDestruct();
@@ -2005,38 +1894,13 @@ void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 			}
 		}
 	}
-	// Keeps retrying every tick, not just once - RootCanvas's cached geometry (what
-	// ApplyLayoutSaveData actually needs, see GetReliableCanvasSize's own comment) turned out to
-	// still not be valid a tick or two after construction in practice, not just on the literal first
-	// call, so a single one-shot retry (the previous approach) wasn't reliably enough. Cheap to poll -
-	// ApplyLayoutSaveData returns immediately without doing any work once RootCanvas isn't ready.
-	if (PendingSavedLayoutToReapply.IsValid() && ApplyLayoutSaveData(PendingSavedLayoutToReapply))
-	{
-		PendingSavedLayoutToReapply.Reset();
-	}
-
-	if (PropertiesFractionRecalcFramesRemaining > 0)
-	{
-		--PropertiesFractionRecalcFramesRemaining;
-		RecomputeColumnFractionsFromNaturalSizes(DockPanelColumnIndex[(int32)EDockPanelId::Properties]);
-		RefreshDockLayout();
-	}
-
-	if (LayoutGeometrySettleFramesRemaining > 0)
-	{
-		--LayoutGeometrySettleFramesRemaining;
-		RefreshDockLayout();
-	}
+	// Panel content sizes itself from its panel's width, which the user can change at any time.
+	SyncDockPanelWidths();
 }
 
 FReply UInteriorScreenWidget::NativeOnMouseWheel(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
-	const bool bOverAnyPanel =
-		(ToolbarPanel && ToolbarPanel->IsHovered()) ||
-		(FloorPanel && FloorPanel->IsHovered()) ||
-		(PropertiesPanel && PropertiesPanel->IsHovered()) ||
-		(LayersPanel && LayersPanel->IsHovered()) ||
-		(NavigationPanel && NavigationPanel->IsHovered());
+	const bool bOverAnyPanel = DockHost && DockHost->IsScreenPositionOverDock(InMouseEvent.GetScreenSpacePosition());
 
 	if (bOverAnyPanel)
 	{
@@ -2965,13 +2829,10 @@ bool UInteriorScreenWidget::ApplyLayoutSaveData(const TSharedPtr<FJsonObject>& R
 
 void UInteriorScreenWidget::SaveDockLayoutToDisk() const
 {
-	const TSharedPtr<FJsonObject> Root = BuildLayoutSaveData();
-
-	FString OutputString;
-	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
-	FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
-
-	FFileHelper::SaveStringToFile(OutputString, *(FPaths::ProjectSavedDir() / TEXT("InteriorEditorLayout.json")));
+	if (DockHost)
+	{
+		InteriorDock::SaveToFile(*DockHost->GetLayout(), InteriorDock::UserLayoutPath(), GetCanvasSize());
+	}
 }
 
 bool UInteriorScreenWidget::TryLoadDockLayoutFromFile(const FString& FilePath)
@@ -4006,35 +3867,15 @@ void UInteriorScreenWidget::HandleSelectedConnectorChanged(FString GroupId)
 
 void UInteriorScreenWidget::RefreshPropertiesPanelVisibility()
 {
-	if (!PropertiesPanel)
-	{
-		return;
-	}
-
-	// Properties is a permanent panel now, same as Floor/Toolbar/Layers - it never collapses away
-	// entirely just because nothing's selected; with nothing selected it just shows an empty
-	// "Properties" placeholder instead of disappearing, matching a real editor's Details/Properties
-	// panel (see AutoDockPropertiesBelowFloor, called once at construction instead of waiting for a
-	// first selection to dock it under Floor). The Window menu's own checkbox can still hide it -
-	// that user choice takes priority over this panel's usual always-visible behavior.
-	const bool bUserHidden = bDockPanelUserHidden.IsValidIndex((int32)EDockPanelId::Properties)
-		&& bDockPanelUserHidden[(int32)EDockPanelId::Properties];
-	PropertiesPanel->SetVisibility(bUserHidden ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
-
+	// Properties is a permanent panel: with nothing selected it just shows an empty "Properties"
+	// placeholder instead of disappearing, like a real editor's Details panel. Showing or hiding it is the
+	// dock system's business (Window menu / tab close button), not selection state's.
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
 	const bool bAnySelected = PC && (!PC->GetSelectedRoomId().IsEmpty() || !PC->GetSelectedDoorId().IsEmpty() || !PC->GetSelectedConnectorGroupId().IsEmpty());
 	if (!bAnySelected && PropertiesTitleText)
 	{
 		PropertiesTitleText->SetText(FText::FromString(TEXT("Properties")));
 	}
-
-	// Its natural content height changes meaningfully with every selection change (Door/Room/
-	// Connector fields are different heights, and the empty placeholder above is shorter than any of
-	// them) - queue a re-split of its column once geometry actually reflects the new content. See
-	// PropertiesFractionRecalcFramesRemaining's own comment for why more than one tick is needed.
-	PropertiesFractionRecalcFramesRemaining = PropertiesFractionRecalcFrameCount;
-
-	RefreshSplitterLayout();
 }
 
 void UInteriorScreenWidget::OnApplyConnectorClicked()
@@ -5404,34 +5245,28 @@ void UInteriorScreenWidget::OnRoadCampusOnlyCheckChanged(bool bIsChecked)
 
 void UInteriorScreenWidget::SetDockPanelUserHidden(EDockPanelId Id, bool bHidden)
 {
-	const int32 Index = (int32)Id;
-	if (!bDockPanelUserHidden.IsValidIndex(Index))
+	if (!DockHost)
 	{
 		return;
 	}
-	bDockPanelUserHidden[Index] = bHidden;
-
-	if (Id == EDockPanelId::Properties)
+	const FName Panel(GetDockPanelName(Id));
+	if (bHidden)
 	{
-		// Properties' own visibility already has other logic fighting over it (shown/hidden by
-		// selection state) - RefreshPropertiesPanelVisibility is the single source of truth for it,
-		// and now reads this same flag to override that.
-		RefreshPropertiesPanelVisibility();
+		DockHost->GetLayout()->HidePanel(Panel);
 	}
-	else if (UBorder* Border = DockPanelBorders[Index])
+	else
 	{
-		Border->SetVisibility(bHidden ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+		// Comes back where it was (or at its default edge if it was never placed).
+		DockHost->GetLayout()->ShowPanel(Panel, InteriorDock::DefaultSideFor(Panel));
 	}
+	DockHost->NotifyLayoutChanged();
+	RefreshWindowMenuChecks();
+}
 
-	RefreshDockLayout();
-
-	// A panel that was Collapsed (Audio starts this way - see bDockPanelUserHidden's own init) never
-	// got a real Slate paint pass while hidden, so its title text's GetCachedGeometry is still stale
-	// the FIRST time it's revealed - same underlying cause as LayoutGeometrySettleFramesRemaining's own
-	// comment, just triggered by a visibility change instead of construction. Queue the same retry so
-	// the drag handle picks up the text's real size once it's actually been painted, instead of only
-	// self-correcting on whatever LATER interaction happens to trigger another RefreshDockLayout.
-	LayoutGeometrySettleFramesRemaining = LayoutGeometrySettleFrameCount;
+void UInteriorScreenWidget::OnWindowResetLayoutClicked()
+{
+	CloseMenuDropdowns();
+	ResetDockLayout();
 }
 
 void UInteriorScreenWidget::OnBackClicked()

@@ -39,6 +39,9 @@ class INNAVI_API UInteriorScreenWidget : public UUserWidget
 public:
 	UInteriorScreenWidget(const FObjectInitializer& ObjectInitializer);
 
+	// The dock system hosting the eight panels (null until the widget tree is built).
+	class UDockHostWidget* GetDockHost() const { return DockHost; }
+
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
@@ -253,6 +256,11 @@ private:
 
 	UFUNCTION()
 	void OnWindowMenuClicked();
+
+	// Window > Reset Layout: puts every panel back where the team default has it.
+	UFUNCTION()
+	void OnWindowResetLayoutClicked();
+
 
 	// 2D/3D toggle, next to File/Window - calls PC->SetIn3DPreviewMode(false)/(true). The resulting
 	// UI change (hiding/showing Background+FloorPlanWidget, button highlight) happens in
@@ -620,6 +628,19 @@ private:
 	// the other 3 have nothing else fighting over their own visibility, so their Border is set
 	// directly), and refreshes the dock layout so its dock-mates reflow into the freed space.
 	void SetDockPanelUserHidden(EDockPanelId Id, bool bHidden);
+
+	// --- Dock system glue (the dock itself lives in DockLayoutModel/DockHostWidget/DockHostUMG) ---
+	void InitializeDockLayout();
+	bool IsDockPanelShown(EDockPanelId Id) const;
+	void HandleDockPanelClosed(FName Panel);
+	void HandleDockLayoutChanged();
+	void RefreshWindowMenuChecks();
+	void ResetDockLayout();
+	// Content widgets size themselves from their panel's width; this feeds them the real width of the
+	// dock group currently showing each panel.
+	void SyncDockPanelWidths();
+	UPROPERTY()
+	class UDockHostWidget* DockHost = nullptr;
 
 	// Persists the dock layout (every panel's position/width, which columns exist, their member
 	// order and height split) to one global JSON file under Saved/ - a per-machine UI preference,

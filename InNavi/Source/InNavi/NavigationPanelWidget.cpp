@@ -627,6 +627,10 @@ bool UNavigationPanelWidget::IsPointerOverPanel() const
 	// interactive underneath it. Check general visibility rather than requiring the
 	// exact Visible enum value; only HitTestBorder (UInteriorScreenWidget's own Navigation
 	// dock panel Border - see SetPanelBorderForHitTest) should own pointer input.
+	if (PointerOverPanelCallback)
+	{
+		return IsVisible() && FSlateApplication::IsInitialized() && PointerOverPanelCallback(FSlateApplication::Get().GetCursorPos());
+	}
 	return IsVisible() && HitTestBorder && FSlateApplication::IsInitialized()
 		&& HitTestBorder->GetCachedGeometry().IsUnderLocation(FSlateApplication::Get().GetCursorPos());
 }

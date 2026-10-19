@@ -155,6 +155,10 @@ public:
 	// working unchanged.
 	bool IsPointerOverPanel() const;
 	void SetPanelBorderForHitTest(UBorder* Border) { HitTestBorder = Border; }
+	// Alternative to the border check: the owner says whether a screen position is over the panel's visible
+	// content. Takes precedence over HitTestBorder when set (a border's cached geometry goes stale once its
+	// tab is swapped out, so it can't be trusted for panels that live in tab groups).
+	void SetPointerOverPanelCallback(TFunction<bool(const FVector2D&)> InCallback) { PointerOverPanelCallback = MoveTemp(InCallback); }
 
 	// Broadcast whenever anything display-relevant changes (selection mode, a point
 	// accepted/rejected, a route found/cleared, a status message) - UInteriorScreenWidget
@@ -187,6 +191,8 @@ private:
 
 	UPROPERTY()
 	UBorder* HitTestBorder = nullptr;
+
+	TFunction<bool(const FVector2D&)> PointerOverPanelCallback;
 
 	UPROPERTY()
 	ABuildingGenerator* Generator = nullptr;

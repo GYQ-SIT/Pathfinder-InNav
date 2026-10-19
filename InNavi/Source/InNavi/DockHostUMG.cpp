@@ -48,6 +48,16 @@ bool UDockHostWidget::IsScreenPositionOverPanel(FName Id, const FVector2D& Scree
 	return Host.IsValid() && Host->IsScreenPositionOverPanel(Id, ScreenPosition);
 }
 
+bool UDockHostWidget::IsScreenPositionOverDock(const FVector2D& ScreenPosition) const
+{
+	return Host.IsValid() && Host->IsScreenPositionOverDock(ScreenPosition);
+}
+
+float UDockHostWidget::GetPanelWidth(FName Id) const
+{
+	return Host.IsValid() ? Host->GetPanelWidth(Id) : 0.f;
+}
+
 void UDockHostWidget::ReleaseSlateResources(bool bReleaseChildren)
 {
 	Super::ReleaseSlateResources(bReleaseChildren);

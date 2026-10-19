@@ -3,6 +3,9 @@
 #include "InteriorDockLayout.h"
 
 #include "Components/TextBlock.h"
+#include "Blueprint/UserWidget.h"
+#include "Engine/World.h"
+#include "InteriorScreenWidget.h"
 #include "DockHostUMG.h"
 #include "HAL/FileManager.h"
 #include "Layout/ArrangedChildren.h"
@@ -139,6 +142,48 @@ bool FDockUMGWrapperTest::RunTest(const FString& Parameters)
 	UTextBlock* Late = NewObject<UTextBlock>(GetTransientPackage());
 	Wrapper->RegisterPanel(FName(TEXT("Late")), FText::FromString(TEXT("Late")), Late);
 	TestFalse(TEXT("a panel with no layout position is not shown"), Wrapper->IsPanelShown(FName(TEXT("Late"))));
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInteriorScreenDockSmokeTest, "InNavi.Dock.Interior.ScreenSmoke", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FInteriorScreenDockSmokeTest::RunTest(const FString& Parameters)
+{
+	// Builds the real interior editor widget (no player controller, no building) and checks that the migrated
+	// dock system comes up with every panel in place and a sane arrangement.
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	UInteriorScreenWidget* Screen = CreateWidget<UInteriorScreenWidget>(World, UInteriorScreenWidget::StaticClass());
+	if (!TestNotNull(TEXT("screen created"), Screen))
+	{
+		return false;
+	}
+	const TSharedRef<SWidget> Slate = Screen->TakeWidget();
+	UDockHostWidget* Dock = Screen->GetDockHost();
+	if (!TestNotNull(TEXT("screen owns a dock host"), Dock))
+	{
+		return false;
+	}
+
+	FString Err;
+	const TSharedRef<FDockLayout> L = Dock->GetLayout();
+	TestTrue(*FString::Printf(TEXT("layout valid (%s)"), *Err), L->Validate(Err));
+	for (const FName Panel : AllPanels())
+	{
+		const bool bShownByDefault = Panel == Map || Panel == Toolbar || Panel == Floor || Panel == Layers || Panel == Properties;
+		TestEqual(*FString::Printf(TEXT("%s shown state"), *Panel.ToString()), Dock->IsPanelShown(Panel), bShownByDefault);
+	}
+
+	FArrangedChildren Arranged(EVisibility::Visible);
+	Slate->ArrangeChildren(FGeometry::MakeRoot(FVector2f(1920.f, 1080.f), FSlateLayoutTransform()), Arranged);
+	TestTrue(TEXT("the screen arranges children"), Arranged.Num() > 0);
+
+	// Showing a hidden panel and resetting both work on the real screen.
+	L->ShowPanel(Navigation, EDockSide::Right);
+	Dock->NotifyLayoutChanged();
+	TestTrue(TEXT("Navigation shown"), Dock->IsPanelShown(Navigation));
+	BuildDefaultLayout(*L);
+	Dock->NotifyLayoutChanged();
+	TestFalse(TEXT("reset hides Navigation again"), Dock->IsPanelShown(Navigation));
 	return true;
 }
 

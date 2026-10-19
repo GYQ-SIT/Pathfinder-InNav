@@ -30,6 +30,8 @@ public:
 	// True when ScreenPosition is over Id's visible content: false if the panel is hidden or is an inactive
 	// tab. (A widget's cached geometry outlives it being swapped out, so it can't be trusted for this.)
 	bool IsScreenPositionOverPanel(FName Id, const FVector2D& ScreenPosition) const;
+	bool IsScreenPositionOverDock(const FVector2D& ScreenPosition) const;
+	float GetPanelWidth(FName Id) const;
 
 	// Fired after a user-driven change (resize finished, tab switched or closed, panel re-docked).
 	FSimpleDelegate OnLayoutChangedNative;

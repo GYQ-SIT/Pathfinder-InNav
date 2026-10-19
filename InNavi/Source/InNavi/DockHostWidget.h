@@ -62,6 +62,13 @@ public:
 	// actually on screen right now).
 	bool IsScreenPositionOverPanel(FName Panel, const FVector2D& ScreenPosition) const;
 
+	// True when ScreenPosition is over any docked or floating group or any splitter - i.e. over dock chrome
+	// rather than the empty central canvas.
+	bool IsScreenPositionOverDock(const FVector2D& ScreenPosition) const;
+
+	// Width of the group currently holding Panel (0 if the panel isn't placed).
+	float GetPanelWidth(FName Panel) const;
+
 	// --- SWidget ---
 	virtual void OnArrangeChildren(const FGeometry& AllottedGeometry, FArrangedChildren& ArrangedChildren) const override;
 	virtual FChildren* GetChildren() override { return &Children; }
