@@ -12,6 +12,7 @@
 #include "NavigationPanelWidget.h"
 #include "NavigationRouteVisualization.h"
 #include "PolygonGeometryUtils.h"
+#include "RoomTypes.h"
 #include "EngineUtils.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
@@ -971,6 +972,36 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		for (const FVector2D& Point : Footprint)
 		{
 			WorldPoints.Add((Point + Building->BuildingOffset) * Scale);
+		}
+
+		// A room is filled with its type's colour (the walls are drawn over it), so the kinds read at a glance. A freestanding wall has none.
+		if (Room->IsClosedLoop() && N >= 3)
+		{
+			TArray<int32> FillTriangles;
+			TriangulatePolygon(Footprint, FillTriangles);
+			if (!FillTriangles.IsEmpty())
+			{
+				constexpr float RoomFillOpacity = 0.55f;
+				FLinearColor Fill = RoomTypes::Color(Room->RoomType);
+				Fill.A = RoomFillOpacity;
+				TArray<FSlateVertex> FillVertices;
+				FillVertices.Reserve(N);
+				for (const FVector2D& WorldPoint : WorldPoints)
+				{
+					FillVertices.AddZeroed();
+					FSlateVertex& Vertex = FillVertices.Last();
+					Vertex.Position = FVector2f(AllottedGeometry.LocalToAbsolute(WorldToLocal(WorldPoint)));
+					Vertex.Color = Fill.ToFColor(true);
+				}
+				TArray<SlateIndex> FillIndices;
+				FillIndices.Reserve(FillTriangles.Num());
+				for (const int32 Index : FillTriangles)
+				{
+					FillIndices.Add(static_cast<SlateIndex>(Index));
+				}
+				FSlateDrawElement::MakeCustomVerts(OutDrawElements, LayerId, FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox"))->GetRenderingResource(),
+					FillVertices, FillIndices, nullptr, 0, 0);
+			}
 		}
 
 		const bool bIsSelected = !SelectedRoomId.IsEmpty() && Room->RoomId == SelectedRoomId;

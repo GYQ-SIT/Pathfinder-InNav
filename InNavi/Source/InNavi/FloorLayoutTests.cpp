@@ -66,7 +66,7 @@ namespace FloorLayoutTests
 		return true;
 	}
 
-	FVector2D Centre(const TArray<FVector2D>& Footprint)
+	FVector2D FootprintCentre(const TArray<FVector2D>& Footprint)
 	{
 		FVector2D Sum = FVector2D::ZeroVector;
 		for (const FVector2D& P : Footprint) Sum += P;
@@ -181,7 +181,7 @@ bool FFloorLayoutShapeTest::RunTest(const FString& Parameters)
 		const FVector2D Edge = (B - A).GetSafeNormal();
 		FVector2D Out(-Edge.Y, Edge.X);
 		const FVector2D Middle = (A + B) * 0.5;
-		if (FVector2D::DotProduct(Out, Middle - Centre(Room.Footprint)) < 0) Out = -Out;
+		if (FVector2D::DotProduct(Out, Middle - FootprintCentre(Room.Footprint)) < 0) Out = -Out;
 		const FVector2D Front = Middle + Out * 10.0;
 		bool bBlocked = !Inside(Front, Outline);
 		for (int32 j = 0; j < Three.Rooms.Num(); ++j) bBlocked = bBlocked || (j != i && InsideQuad(Front, Three.Rooms[j].Footprint));
