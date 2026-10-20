@@ -133,6 +133,12 @@ int32 ABuildingGenerator::LoadBuildingsFromFile(const FString& FilePath)
 	Scale = 1.f;
 	RootObject->TryGetNumberField(TEXT("scale"), Scale);
 
+	// A file made before projects had a name carries neither field.
+	ProjectName.Reset();
+	ProjectDescription.Reset();
+	RootObject->TryGetStringField(TEXT("projectName"), ProjectName);
+	RootObject->TryGetStringField(TEXT("description"), ProjectDescription);
+
 	float GlobalFloorHeight = 300.f;
 	RootObject->TryGetNumberField(TEXT("floorHeight"), GlobalFloorHeight);
 
@@ -1026,6 +1032,14 @@ bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath) const
 	TSharedRef<FJsonObject> RootObject = MakeShared<FJsonObject>();
 	RootObject->SetNumberField(TEXT("scale"), Scale);
 	RootObject->SetNumberField(TEXT("floorHeight"), 300.f);
+	if (!ProjectName.IsEmpty())
+	{
+		RootObject->SetStringField(TEXT("projectName"), ProjectName);
+	}
+	if (!ProjectDescription.IsEmpty())
+	{
+		RootObject->SetStringField(TEXT("description"), ProjectDescription);
+	}
 
 	TArray<TSharedPtr<FJsonValue>> BuildingsArray;
 	for (const auto& Pair : BuildingsById)
@@ -1095,6 +1109,23 @@ TSharedPtr<FJsonObject> ABuildingGenerator::GetInteriorDataForBuilding(const FSt
 void ABuildingGenerator::SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData)
 {
 	InteriorDataById.Add(BuildingId, InteriorData);
+}
+
+bool ABuildingGenerator::IsEmptyProjectFile(const FString& FilePath)
+{
+	FString JsonString;
+	TSharedPtr<FJsonObject> RootObject;
+	if (!FFileHelper::LoadFileToString(JsonString, *FilePath))
+	{
+		return false;
+	}
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(JsonString);
+	if (!FJsonSerializer::Deserialize(Reader, RootObject) || !RootObject.IsValid())
+	{
+		return false;
+	}
+	const TArray<TSharedPtr<FJsonValue>>* BuildingsArray = nullptr;
+	return RootObject->TryGetArrayField(TEXT("buildings"), BuildingsArray) && BuildingsArray && BuildingsArray->IsEmpty();
 }
 
 void ABuildingGenerator::ClearAllBuildings()

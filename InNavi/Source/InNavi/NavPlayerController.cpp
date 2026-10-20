@@ -1830,7 +1830,7 @@ FString ANavPlayerController::BrowseForBuildingDataFile()
 	// Start in the project's Data folder (where the sample .db ships) instead of wherever the OS
 	// dialog last was - ProjectDir() is a relative path in a packaged build, which the native dialog
 	// can't resolve, so it has to be made absolute first.
-	const FString DefaultDataDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("Data"));
+	const FString DefaultDataDir = GetProjectsDirectory();
 
 	TArray<FString> OutFiles;
 	const bool bPicked = DesktopPlatform->OpenFileDialog(
@@ -1891,13 +1891,14 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 
 	const int32 Count = Generator->LoadBuildingsFromFile(FilePath);
 	UE_LOG(LogTemp, Warning, TEXT("LoadBuildingDataFromPath: loaded %d buildings from %s"), Count, *FilePath);
-	if (Count == 0)
+	if (Count == 0 && !ABuildingGenerator::IsEmptyProjectFile(FilePath))
 	{
 		OnActionFailed.Broadcast(TEXT("No buildings were loaded from that file - check that it matches the expected JSON format."), EActionFailureSeverity::Critical);
 	}
 	else
 	{
-		// This file is now what Ctrl+S saves back to.
+		// This file is now what Ctrl+S saves back to. (A project that was just created has no buildings yet and is
+		// still a good file.)
 		CurrentProjectFilePath = FilePath;
 		bHasUnsavedChanges = false;
 		FocusCameraOnAllBuildings();
@@ -1982,6 +1983,7 @@ void ANavPlayerController::StartNewProject()
 		Generator->ClearAllBuildings();
 		Generator->ClearAllRoadsAndPOIs();
 		Generator->ClearAllContextBuildings();
+		Generator->SetProjectInfo(FString(), FString());
 	}
 
 	CurrentProjectFilePath.Empty();
@@ -3130,6 +3132,75 @@ void ANavPlayerController::SaveExteriorCameraDefaultToDisk() const
 	FJsonSerializer::Serialize(Root, Writer);
 
 	FFileHelper::SaveStringToFile(OutputString, *(FPaths::ProjectSavedDir() / TEXT("ExteriorEditorLayout.json")));
+}
+
+FString ANavPlayerController::GetProjectsDirectory() const
+{
+	if (!ProjectsDirectoryOverride.IsEmpty())
+	{
+		return ProjectsDirectoryOverride;
+	}
+	// ProjectDir() is a relative path in a packaged build, which the native dialogs cannot resolve.
+	return FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("Data"));
+}
+
+FString ANavPlayerController::GetProjectFilePathForName(const FString& Name) const
+{
+	FString FileName = FPaths::MakeValidFileName(Name.TrimStartAndEnd(), TEXT('_'));
+	FileName.TrimStartAndEndInline();
+	// Names that are only dots or underscores (what is left of "???" or "..") would make a file nobody can see.
+	FString Letters = FileName;
+	Letters.ReplaceInline(TEXT("_"), TEXT(""));
+	Letters.ReplaceInline(TEXT("."), TEXT(""));
+	Letters.TrimStartAndEndInline();
+	if (Letters.IsEmpty())
+	{
+		return FString();
+	}
+	constexpr int32 MaxFileNameLength = 80;
+	if (FileName.Len() > MaxFileNameLength)
+	{
+		FileName.LeftInline(MaxFileNameLength);
+		FileName.TrimEndInline();
+	}
+	return GetProjectsDirectory() / (FileName + TEXT(".json"));
+}
+
+bool ANavPlayerController::CreateNewProject(const FString& Name, const FString& Description, FString& OutError)
+{
+	OutError.Reset();
+	const FString TrimmedName = Name.TrimStartAndEnd();
+	if (TrimmedName.IsEmpty())
+	{
+		OutError = TEXT("Enter a project name.");
+		return false;
+	}
+	const FString FilePath = GetProjectFilePathForName(TrimmedName);
+	if (FilePath.IsEmpty())
+	{
+		OutError = TEXT("The name needs at least one letter or number.");
+		return false;
+	}
+	if (IFileManager::Get().FileExists(*FilePath))
+	{
+		OutError = FString::Printf(TEXT("A project named \"%s\" already exists. Choose another name."), *FPaths::GetBaseFilename(FilePath));
+		return false;
+	}
+	if (!Generator)
+	{
+		OutError = TEXT("The level has no building generator, so a project cannot be created.");
+		return false;
+	}
+
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(FilePath), true);
+	StartNewProject();
+	Generator->SetProjectInfo(TrimmedName, Description.TrimStartAndEnd());
+	if (!SaveCurrentProjectAs(FilePath))
+	{
+		OutError = TEXT("The project file could not be written - check that the Data folder can be written to.");
+		return false;
+	}
+	return true;
 }
 
 void ANavPlayerController::RestoreExteriorCameraView()

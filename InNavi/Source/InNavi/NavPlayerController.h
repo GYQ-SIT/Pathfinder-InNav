@@ -295,6 +295,23 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void StartNewProject();
 
+	// The folder project files live in (InNavi/Data, as an absolute path) - where New project writes its file and where
+	// the Open dialog starts.
+	FString GetProjectsDirectory() const;
+
+	// The file CreateNewProject would write for this name: the name with the characters Windows does not allow in a file
+	// name replaced, plus ".json". Empty if nothing usable is left of the name.
+	FString GetProjectFilePathForName(const FString& Name) const;
+
+	// What the New project dialog's Create button does: starts a blank project, gives it the name and description, writes
+	// it as a blank file in the projects folder, and makes that file the one Ctrl+S saves to. Returns false and says why in
+	// OutError (shown in the dialog) if the name is empty or unusable, a project with that name already exists (nothing is
+	// ever overwritten), or the file could not be written.
+	bool CreateNewProject(const FString& Name, const FString& Description, FString& OutError);
+
+	// Tests only: use another folder instead of InNavi/Data.
+	void SetProjectsDirectoryOverrideForTests(const FString& Directory) { ProjectsDirectoryOverride = Directory; }
+
 	// Puts the camera back where it was before LoadInteriorForBuilding snapped it to a top-down
 	// view, and shows whatever building's floor/roof section that hid (see PositionCameraForFloor
 	// below) - the interior screen's Back button should call this before switching back to the edit
@@ -1117,6 +1134,8 @@ private:
 	// See GetCurrentProjectFilePath/SaveCurrentProject above.
 	UPROPERTY()
 	FString CurrentProjectFilePath;
+
+	FString ProjectsDirectoryOverride;
 
 	// See HasUnsavedChanges above.
 	bool bHasUnsavedChanges = false;

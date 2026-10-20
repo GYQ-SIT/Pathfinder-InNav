@@ -6,10 +6,14 @@
 
 ## Getting to the interior editor
 
-1. Launch the project, pick **New** (blank), **Open** (load an existing
+1. Launch the project, pick **New project** (blank), **Open project** (load an existing
    `buildings.json` or a SQLite `.db` map export - the file picker shows both, and
    which loader runs is picked automatically from the extension), or **Quit**, from
    the start screen.
+   **New project** asks for a **Project name** (required) and an optional **Description** first. Create writes a blank
+   `<project name>.json` into the `InNavi/Data` folder (characters Windows does not allow in a file name are replaced;
+   an existing project is never overwritten - you are asked for another name) and opens the editor on it, so **Ctrl+S**
+   saves straight to that file. The name and description are kept in the file (`projectName`, `description`).
 2. Click a building in the 3D exterior view to select it (plays a short selection
    sound) and **Enter Interior** appears in the exterior screen's own top menu bar
    (see below). Clicking empty space, or clicking the already-selected building again,

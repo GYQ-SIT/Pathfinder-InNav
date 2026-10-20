@@ -189,6 +189,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	bool SaveBuildingsToFile(const FString& FilePath) const;
 
+	// The project's own name and description, written to the file's top level as "projectName" and
+	// "description" and read back by LoadBuildingsFromFile. Empty for a file made before they existed.
+	const FString& GetProjectName() const { return ProjectName; }
+	const FString& GetProjectDescription() const { return ProjectDescription; }
+	void SetProjectInfo(const FString& Name, const FString& Description)
+	{
+		ProjectName = Name;
+		ProjectDescription = Description;
+	}
+
+	// True if the file is a valid project that just has no buildings yet - what "New project" writes. Loading
+	// such a file spawns nothing, so a spawned count of 0 alone cannot tell it from a broken file.
+	static bool IsEmptyProjectFile(const FString& FilePath);
+
 	// The raw "interior" JSON sub-object associated with a building id, as loaded from (or to be
 	// written into) the combined project file - not interpreted here, that's InteriorGenerator's
 	// schema. Returns nullptr if this building has no interior data yet.
@@ -264,6 +278,8 @@ private:
 	uint64 BuildingResultsRevision = 0;
 	mutable uint64 CachedBuildingResultsRevision = MAX_uint64;
 	mutable TMap<FString, FString> CachedBuildingOptions;
+	FString ProjectName;
+	FString ProjectDescription;
 
 	// The lat/lon centroid LoadBuildingsFromDatabase projects around, stashed so
 	// LoadRoadsAndPOIsFromDatabase can project roads/POIs into that exact same local-meters space

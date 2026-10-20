@@ -2,6 +2,7 @@
 
 #include "EditScreenWidget.h"
 #include "NavPlayerController.h"
+#include "NewProjectDialogWidget.h"
 #include "TimerManager.h"
 #include "Engine/Texture2D.h"
 #include "RenderUtils.h"
@@ -529,8 +530,33 @@ void UStartScreenWidget::OnNewClicked()
 		return;
 	}
 
-	PC->StartNewProject();
-	GoToEditScreen();
+	// Ask for a project name first; the project file is created when the dialog is confirmed.
+	UNewProjectDialogWidget* Dialog = CreateWidget<UNewProjectDialogWidget>(PC, UNewProjectDialogWidget::StaticClass());
+	if (!Dialog)
+	{
+		return;
+	}
+	TWeakObjectPtr<UStartScreenWidget> WeakThis(this);
+	TWeakObjectPtr<ANavPlayerController> WeakPC(PC);
+	Dialog->OnCreate = [WeakThis, WeakPC](const FString& Name, const FString& Description) -> FString
+	{
+		ANavPlayerController* Controller = WeakPC.Get();
+		if (!Controller)
+		{
+			return TEXT("There is no player to create the project for.");
+		}
+		FString Error;
+		if (!Controller->CreateNewProject(Name, Description, Error))
+		{
+			return Error;
+		}
+		if (UStartScreenWidget* Screen = WeakThis.Get())
+		{
+			Screen->GoToEditScreen();
+		}
+		return FString();
+	};
+	Dialog->AddToViewport(100);
 }
 
 void UStartScreenWidget::OnOpenClicked()
@@ -570,7 +596,8 @@ void UStartScreenWidget::BrowseAndLoadBuildingData()
 
 	// LoadBuildingDataFromPathOrDatabase already broadcasts OnActionFailed itself if the file doesn't parse.
 	const int32 Count = PC->LoadBuildingDataFromPathOrDatabase(FilePath);
-	if (Count > 0)
+	// A project that was just created has no buildings yet; it still counts as opened when it became the current file.
+	if (Count > 0 || PC->GetCurrentProjectFilePath() == FilePath)
 	{
 		GoToEditScreen();
 	}
