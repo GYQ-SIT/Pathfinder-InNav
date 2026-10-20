@@ -563,6 +563,10 @@ public:
 	bool SetSelectedRoomType(const FString& NewType);
 	FString GetSelectedRoomType() const;
 
+	// Fills the active floor with rooms along its outer wall and a core beside each door (see AInteriorGenerator::GenerateFloor), as one undo
+	// step. A fresh random seed each time, so doing it again after an undo gives a different layout. False, with OutMessage saying why.
+	bool GenerateFloorForActiveFloor(FString& OutMessage);
+
 	// Whether the currently-selected room/wall is an actual closed room (true) or an open
 	// standalone wall (false) - see AInteriorGenerator::IsRoomClosedLoop. What the room properties
 	// panel should check to show "Wall property" instead of "Room property" for a selected wall.

@@ -139,8 +139,9 @@ left out as inert placeholder blocks.
 Pinned across the very top of the interior editor screen.
 
 - **Save** — same as `Ctrl+S`, left of File.
-- **File** — **New** clears everything and starts a blank project; **Load** opens the
-  OS file picker for an existing `buildings.json` or `.db`. Both check for unsaved
+- **File** — **New** clears everything and starts a blank project; **Generate floor** fills the
+  current floor (see below); **Load** opens the
+  OS file picker for an existing `buildings.json` or `.db`. New and Load check for unsaved
   changes first and prompt to save/discard/cancel, exactly like leaving to the
   exterior does.
 - **Window** — a checklist of the eight dockable panels (Toolbar/Floor/Properties/
@@ -279,6 +280,23 @@ green mark on the outline and a link door a blue one; in Select mode click one (
 **Main door** or **Link door**, its floor and where it leads (for a link door the building, and when it was opened from that building).
 Backspace or Delete removes it. Doors are saved in the building's `interior.entrances` (an optional list, so older files load as
 before) and covered by undo. Route-finding does not use them yet.
+
+
+### Generate floor (File > Generate floor)
+
+Fills the **floor you are on** with a believable layout in one click, so there is something to test with: a **core** (two lifts and a
+stair) against the outer wall, **a toilet** next to it (one per core, three on a floor at most), and a **ring of rooms** along the outer wall. What is left in the middle is
+the corridor (it is not drawn).
+
+- Open the building's **main / link doors on that floor first**. One core is made beside each door (one at the end of the longest wall
+  if there are none). If a core would not fit this close to another one, that one serves the door.
+- The floor must be **empty** (no rooms or walls), otherwise it is refused and the Debug panel says so.
+- If the building already has lifts or stairs they are used as they are and extended to this floor; no new core is made.
+- Rooms get random sizes of a believable range, have a door onto the corridor, are named "Type floor-number" and tagged `generated`.
+  Rooms of one kind sit together, a few are left out and corners are sometimes open. A floor never gets more than 24 rooms (a big
+  building gets bigger rooms instead), because route-finding slows down with many walls.
+- Rooms are rectangles for now; L-shaped or notched rooms and the open areas are a later step. Every room goes through the same
+  checks as one drawn by hand. The whole floor is **one undo step**. Click it again after undoing to get a different layout.
 
 ### Layers panel
 

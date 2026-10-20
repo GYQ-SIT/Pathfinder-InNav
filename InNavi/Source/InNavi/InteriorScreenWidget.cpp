@@ -593,7 +593,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 			ApplyStandardFont(Text);
 			USizeBox* RowSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-			RowSizeBox->SetWidthOverride(90.f);
+			RowSizeBox->SetWidthOverride(130.f);
 			RowSizeBox->SetMinDesiredHeight(24.f);
 			if (USizeBoxSlot* RowTextSlot = Cast<USizeBoxSlot>(RowSizeBox->SetContent(Text)))
 			{
@@ -631,6 +631,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		FileNewButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileNewClicked);
 		UButton* FileLoadButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileLoad"), TEXT("Load"));
 		FileLoadButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileLoadClicked);
+		UButton* FileGenerateFloorButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileGenerateFloor"), TEXT("Generate floor"));
+		FileGenerateFloorButton->SetToolTip(MakeToolTipWidget(TEXT("Fill this floor with rooms along its outer wall and a core beside each door")));
+		FileGenerateFloorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileGenerateFloorClicked);
 
 		WindowMenuDropdown = ConstructDropdown(TEXT("Pnl_WindowDropdown"), MenuBarLeftMargin + SaveButtonWidth + MenuButtonWidth);
 		UVerticalBox* WindowDropdownStack = Cast<UVerticalBox>(WindowMenuDropdown->GetContent());
@@ -3394,7 +3397,7 @@ UWidget* UInteriorScreenWidget::HandleGenerateRoomTypeItem(FString Item)
 	ItemText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	ApplyStandardFont(ItemText);
 	Row->AddChildToHorizontalBox(ItemText)->SetVerticalAlignment(VAlign_Center);
-	return Row;
+	return RetainComboItem(Row);
 }
 
 void UInteriorScreenWidget::SetKindTag(const FString& Label, const FLinearColor& OutlineColor)
@@ -3409,13 +3412,24 @@ void UInteriorScreenWidget::SetKindTag(const FString& Label, const FLinearColor&
 	}
 }
 
+UWidget* UInteriorScreenWidget::RetainComboItem(UWidget* Item)
+{
+	constexpr int32 MaxRetained = 400;
+	RetainedComboItems.Add(Item);
+	if (RetainedComboItems.Num() > MaxRetained)
+	{
+		RetainedComboItems.RemoveAt(0, RetainedComboItems.Num() - MaxRetained);
+	}
+	return Item;
+}
+
 UWidget* UInteriorScreenWidget::HandleGenerateComboBoxItem(FString Item)
 {
 	UTextBlock* ItemText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 	ItemText->SetText(FText::FromString(Item));
 	ItemText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 	ApplyStandardFont(ItemText);
-	return ItemText;
+	return RetainComboItem(ItemText);
 }
 
 void UInteriorScreenWidget::OnDrawRoomModeClicked()
@@ -3805,6 +3819,16 @@ void UInteriorScreenWidget::HandleFileNewDiscard()
 void UInteriorScreenWidget::HandleFileNewCancel()
 {
 	// Nothing to do - the dialog already removed itself.
+}
+
+void UInteriorScreenWidget::OnFileGenerateFloorClicked()
+{
+	CloseMenuDropdowns();
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		FString Message;
+		PC->GenerateFloorForActiveFloor(Message);
+	}
 }
 
 void UInteriorScreenWidget::OnFileLoadClicked()

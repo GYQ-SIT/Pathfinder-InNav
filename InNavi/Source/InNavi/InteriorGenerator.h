@@ -25,6 +25,19 @@ struct FInteriorRoomList
 	TArray<AInteriorRoom*> Rooms;
 };
 
+// What AInteriorGenerator::GenerateFloor did, or why it did nothing.
+struct FFloorGenerationResult
+{
+	int32 RoomsCreated = 0;
+	int32 DoorsCreated = 0;
+	// Lifts and stairs placed new, and ones the building already had that now reach this floor.
+	int32 ConnectorsPlaced = 0;
+	int32 ConnectorsReused = 0;
+	// Rooms the layout proposed that the editor's own checks turned down.
+	int32 RoomsSkipped = 0;
+	FString Error;
+};
+
 // Per-floor settings that outlive the JSON parse - needed so AddFloor knows what defaults to
 // inherit for a brand new floor.
 struct FInteriorFloorInfo
@@ -235,6 +248,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	TArray<FString> GetRoomTags(const FString& RoomId) const;
 
+	// Fills the active floor, which must have no rooms or walls yet, with rooms along its outer wall and a core (two lifts, a stair and a
+	// toilet either side) beside each door in the outer wall on that floor (see FloorLayout.h). If the building already has lifts and stairs
+	// they are used as they are, and reach this floor. The same Seed gives the same result. All of it is one undo step. Returns false, with
+	// OutResult.Error, when nothing was generated.
+	bool GenerateFloor(int32 Seed, FFloorGenerationResult& OutResult);
+
 	// A room's type (see RoomTypes.h); a value that is not on the list is stored as Other. False if the room is missing or is a wall.
 	bool SetRoomType(const FString& RoomId, const FString& NewType);
 	FString GetRoomType(const FString& RoomId) const;
@@ -369,8 +388,8 @@ private:
 	// check - needed by RotateConnectorGroup/ScaleConnectorGroup, which re-validate a connector's OWN
 	// existing floor instances against everything else; without it, a connector would always overlap
 	// itself and could never be rotated or scaled in place. Left empty (default) for a brand new
-	// placement, which has no group of its own yet to exclude.
-	bool CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVector2D Position, int32 Level, float RotationDegrees, float SizeScale, const FString& IgnoreGroupId = FString()) const;
+	// placement, which has no group of its own yet to exclude. bLogFailures false is for a caller that only asks (no log line for a "no").
+	bool CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVector2D Position, int32 Level, float RotationDegrees, float SizeScale, const FString& IgnoreGroupId = FString(), bool bLogFailures = true) const;
 
 	// The reverse of CanPlaceConnectorOnFloor's wall-thickness check: would this room/wall
 	// footprint's own walls end up inside a wall's solid thickness of an existing connector
@@ -433,4 +452,7 @@ private:
 	int32 HistoryIndex = -1;
 
 	bool bIsRestoringHistory = false;
+
+	// While true, edits do not record undo snapshots (a bulk operation records one itself when it is done).
+	bool bBulkEditing = false;
 };

@@ -3,6 +3,7 @@
 
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
+#include "FloorLayout.h"
 #include "NavigationSearchUtils.h"
 #include "RoomTypes.h"
 #include "InteriorConnectorMarker.h"
@@ -1083,19 +1084,19 @@ bool AInteriorGenerator::DoesFootprintBlockConnector(const TArray<FVector2D>& Fo
 	return false;
 }
 
-bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVector2D Position, int32 Level, float RotationDegrees, float SizeScale, const FString& IgnoreGroupId) const
+bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVector2D Position, int32 Level, float RotationDegrees, float SizeScale, const FString& IgnoreGroupId, bool bLogFailures) const
 {
 	const FInteriorFloorInfo* FloorInfo = FloorInfoByLevel.Find(Level);
 	if (!FloorInfo)
 	{
-		UE_LOG(LogTemp, Error, TEXT("Connector placement: floor %d doesn't exist"), Level);
+		if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: floor %d doesn't exist"), Level);
 		return false;
 	}
 
 	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
 	if (!Building)
 	{
-		UE_LOG(LogTemp, Error, TEXT("Connector placement: building '%s' no longer exists"), *LoadedBuildingId);
+		if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: building '%s' no longer exists"), *LoadedBuildingId);
 		return false;
 	}
 
@@ -1121,7 +1122,7 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVe
 
 	if (!IsFootprintFullyInsidePolygon(Corners, Building->GetFootprint()))
 	{
-		UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint doesn't fit inside the building's outline on floor %d"), Level);
+		if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint doesn't fit inside the building's outline on floor %d"), Level);
 		return false;
 	}
 
@@ -1152,7 +1153,7 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVe
 				{
 					if (InteriorGen_DistanceSegmentToSegment2D(Corners[c], Corners[(c + 1) % 4], EdgeA, EdgeB) < HalfWallThickness)
 					{
-						UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint overlaps a wall on floor %d"), Level);
+						if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint overlaps a wall on floor %d"), Level);
 						return false;
 					}
 				}
@@ -1186,7 +1187,7 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVe
 
 		if (DoFootprintsOverlap(Corners, true, OtherCorners, true, OverlapToleranceWorldUnits / Scale))
 		{
-			UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint overlaps another connector ('%s') on floor %d"), *Node.ConnectorGroupId, Level);
+			if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint overlaps another connector ('%s') on floor %d"), *Node.ConnectorGroupId, Level);
 			return false;
 		}
 	}
@@ -1217,7 +1218,7 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVe
 		// not divided by Scale again.
 		if (DoFootprintsOverlap(WorldCorners, true, OtherWorldFootprint, true, OverlapToleranceWorldUnits))
 		{
-			UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint overlaps building '%s'"), *OtherBuilding->BuildingId);
+			if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint overlaps building '%s'"), *OtherBuilding->BuildingId);
 			return false;
 		}
 	}
@@ -2350,6 +2351,184 @@ bool AInteriorGenerator::RemoveEntrance(const FString& Id)
 	return true;
 }
 
+bool AInteriorGenerator::GenerateFloor(int32 Seed, FFloorGenerationResult& OutResult)
+{
+	OutResult = FFloorGenerationResult();
+
+	APolyBuilding* Building = (!LoadedBuildingId.IsEmpty() && Generator) ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+	if (!Building)
+	{
+		OutResult.Error = TEXT("No building interior is currently loaded.");
+		return false;
+	}
+	if (!FloorInfoByLevel.Contains(ActiveFloor))
+	{
+		OutResult.Error = TEXT("The active floor doesn't exist.");
+		return false;
+	}
+	const FInteriorRoomList* Existing = RoomsByFloor.Find(ActiveFloor);
+	if (Existing && !Existing->Rooms.IsEmpty())
+	{
+		OutResult.Error = TEXT("This floor already has rooms or walls. Delete them first to generate it.");
+		return false;
+	}
+	const float Scale = Generator->GetScale();
+	if (Scale <= KINDA_SMALL_NUMBER)
+	{
+		OutResult.Error = TEXT("The project's scale is not valid.");
+		return false;
+	}
+
+	// What the layout needs to know: the outline, this floor's doors in the outer wall, and the lifts and stairs that stand already.
+	FFloorLayoutParams Params;
+	Params.Seed = Seed;
+	Params.UnitsPerMetre = 100.0 / Scale;
+	Params.Outline = Building->GetFootprint();
+	for (const FInteriorEntrance& Entrance : AllEntrances)
+	{
+		if (Entrance.Level == ActiveFloor && Params.Outline.IsValidIndex(Entrance.EdgeIndex))
+		{
+			FFloorDoor Door;
+			Door.EdgeIndex = Entrance.EdgeIndex;
+			Door.MiddleAlong = (Entrance.Offset + Entrance.Width * 0.5) / Scale;
+			Door.Width = Entrance.Width / Scale;
+			Params.Doors.Add(Door);
+		}
+	}
+	TSet<FString> ExistingGroups;
+	for (const FInteriorNavNode& Node : NavNodes)
+	{
+		TArray<FVector2D> Corners;
+		GetConnectorFootprintCorners(Node.Type, Node.RotationDegrees, Node.SizeScale, Corners);
+		if (Corners.Num() == 4)
+		{
+			for (FVector2D& Corner : Corners)
+			{
+				Corner = Node.Position + Corner / Scale;
+			}
+			Params.ConnectorFootprints.Add(Corners);
+			Params.ConnectorCentres.Add(Node.Position);
+			if (!Node.ConnectorGroupId.IsEmpty())
+			{
+				ExistingGroups.Add(Node.ConnectorGroupId);
+			}
+		}
+	}
+	Params.bMakeCore = ExistingGroups.IsEmpty();
+
+	FFloorLayout Layout;
+	if (!FloorLayout::Generate(Params, Layout, OutResult.Error))
+	{
+		return false;
+	}
+
+	const int32 Level = ActiveFloor;
+	int32 HighestLevel = 0;
+	for (const TPair<int32, FInteriorFloorInfo>& Pair : FloorInfoByLevel)
+	{
+		HighestLevel = FMath::Max(HighestLevel, Pair.Key);
+	}
+
+	bBulkEditing = true;
+	// A new core: its lifts reach every floor and its stair the floors either side, as far as nothing blocks them on those floors.
+	for (const FFloorConnector& Connector : Layout.Connectors)
+	{
+		TArray<int32> Floors;
+		const bool bStair = Connector.Type != EInteriorNavNodeType::Elevator;
+		for (int32 Floor = bStair ? FMath::Max(1, Level - 1) : 1; Floor <= (bStair ? FMath::Min(HighestLevel, Level + 1) : HighestLevel); ++Floor)
+		{
+			Floors.Add(Floor);
+		}
+		// Asked quietly first, so a floor where something is in the way is a "just this floor", not a line in the error log.
+		for (int32 Floor : Floors)
+		{
+			if (!CanPlaceConnectorOnFloor(Connector.Type, Connector.Position, Floor, Connector.RotationDegrees, 1.f, FString(), false))
+			{
+				Floors = { Level };
+				break;
+			}
+		}
+		const FString GroupId = PlaceConnectorNode(Connector.Type, Connector.Position, Floors);
+		if (!GroupId.IsEmpty())
+		{
+			if (!FMath::IsNearlyZero(Connector.RotationDegrees))
+			{
+				RotateConnectorGroup(GroupId, Connector.RotationDegrees);
+			}
+			++OutResult.ConnectorsPlaced;
+		}
+	}
+
+	// Lifts and stairs the building already had are used as they are, and made to reach this floor.
+	for (const FString& GroupId : ExistingGroups)
+	{
+		TArray<int32> Floors;
+		for (const FInteriorNavNode& Node : NavNodes)
+		{
+			if (Node.ConnectorGroupId == GroupId)
+			{
+				Floors = Node.ConnectsFloors;
+				break;
+			}
+		}
+		if (!Floors.Contains(Level))
+		{
+			const FInteriorNavNode* Sample = NavNodes.FindByPredicate([&GroupId](const FInteriorNavNode& Node) { return Node.ConnectorGroupId == GroupId; });
+			if (!Sample || !CanPlaceConnectorOnFloor(Sample->Type, Sample->Position, Level, Sample->RotationDegrees, Sample->SizeScale, GroupId, false))
+			{
+				continue;
+			}
+			Floors.Add(Level);
+			Floors.Sort();
+			if (SetConnectorFloors(GroupId, Floors))
+			{
+				++OutResult.ConnectorsReused;
+			}
+		}
+		else
+		{
+			++OutResult.ConnectorsReused;
+		}
+	}
+
+	int32 RoomNumber = 0;
+	for (const FFloorRoom& Proposed : Layout.Rooms)
+	{
+		// What the creation function would refuse is skipped quietly, so a failed room is not an error in the log.
+		if (!IsFootprintFullyInsidePolygon(Proposed.Footprint, Building->GetFootprint()) || DoesFootprintBlockConnector(Proposed.Footprint, true, Level))
+		{
+			++OutResult.RoomsSkipped;
+			continue;
+		}
+		FString CreateError;
+		const FString Name = FString::Printf(TEXT("%s %d-%02d"), *Proposed.Type, Level, ++RoomNumber);
+		AInteriorRoom* Room = CreateRoomFromFootprintWithTags(Proposed.Footprint, FString(), Name, true, false, false, CreateError, { TEXT("generated") }, Proposed.Type);
+		if (!Room)
+		{
+			++OutResult.RoomsSkipped;
+			continue;
+		}
+		++OutResult.RoomsCreated;
+
+		// The door onto the corridor, in the middle of the side that faces it.
+		constexpr float DoorWidth = 90.f;
+		const int32 Count = Proposed.Footprint.Num();
+		const float EdgeLength = static_cast<float>(FVector2D::Distance(Proposed.Footprint[Proposed.DoorEdgeIndex], Proposed.Footprint[(Proposed.DoorEdgeIndex + 1) % Count])) * Scale;
+		if (EdgeLength >= DoorWidth + 20.f)
+		{
+			const float Offset = FMath::Clamp(EdgeLength * Proposed.DoorFraction - DoorWidth * 0.5f, 0.f, EdgeLength - DoorWidth);
+			if (!AddDoorToRoom(Room->RoomId, Proposed.DoorEdgeIndex, Offset).IsEmpty())
+			{
+				++OutResult.DoorsCreated;
+			}
+		}
+	}
+
+	bBulkEditing = false;
+	RecordHistorySnapshot();
+	return true;
+}
+
 bool AInteriorGenerator::SetRoomType(const FString& RoomId, const FString& NewType)
 {
 	AInteriorRoom* Room = GetRoomById(RoomId);
@@ -2733,7 +2912,7 @@ void AInteriorGenerator::RecordHistorySnapshot()
 {
 	// All committed interior edits pass here. Invalidation is cheap and rebuilding stays lazy.
 	++RoomSearchRevision;
-	if (bIsRestoringHistory || LoadedBuildingId.IsEmpty())
+	if (bIsRestoringHistory || bBulkEditing || LoadedBuildingId.IsEmpty())
 	{
 		return;
 	}

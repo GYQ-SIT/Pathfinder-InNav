@@ -1201,6 +1201,31 @@ bool ANavPlayerController::SetSelectedRoomType(const FString& NewType)
 	return true;
 }
 
+bool ANavPlayerController::GenerateFloorForActiveFloor(FString& OutMessage)
+{
+	OutMessage.Empty();
+	if (!InteriorGen)
+	{
+		OutMessage = TEXT("No interior is open.");
+		OnActionFailed.Broadcast(OutMessage, EActionFailureSeverity::Warning);
+		return false;
+	}
+
+	FFloorGenerationResult Result;
+	if (!InteriorGen->GenerateFloor(FMath::Rand(), Result))
+	{
+		OutMessage = Result.Error;
+		OnActionFailed.Broadcast(OutMessage, EActionFailureSeverity::Warning);
+		return false;
+	}
+
+	OutMessage = FString::Printf(TEXT("Generated %d rooms and %d lifts/stairs"), Result.RoomsCreated, Result.ConnectorsPlaced + Result.ConnectorsReused);
+	UE_LOG(LogTemp, Warning, TEXT("GenerateFloor: %s, %d doors, %d rooms did not fit"), *OutMessage, Result.DoorsCreated, Result.RoomsSkipped);
+	bHasUnsavedChanges = true;
+	OnInteriorContentChanged.Broadcast();
+	return true;
+}
+
 FString ANavPlayerController::GetSelectedRoomType() const
 {
 	return InteriorGen ? InteriorGen->GetRoomType(SelectedRoomId) : FString();

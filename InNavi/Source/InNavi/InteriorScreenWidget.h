@@ -235,6 +235,12 @@ private:
 	UFUNCTION()
 	UWidget* HandleGenerateRoomTypeItem(FString Item);
 
+	// What the drop-downs hand to Slate is a UMG widget made on the spot; nothing else owns it, so without this it can be collected while the
+	// drop-down still draws it (a crash on the next paint). Only the newest are kept: older ones are long off screen.
+	UPROPERTY()
+	TArray<TObjectPtr<UWidget>> RetainedComboItems;
+	UWidget* RetainComboItem(UWidget* Item);
+
 	void RefreshBuildingSwitcher();
 
 	UFUNCTION()
@@ -359,6 +365,10 @@ private:
 
 	UFUNCTION()
 	void OnFileLoadClicked();
+
+	// File > Generate floor: fills the floor being edited with rooms along its outer wall and a core beside each door (one undo step).
+	UFUNCTION()
+	void OnFileGenerateFloorClicked();
 
 	UFUNCTION()
 	void HandleFileNewSave();
