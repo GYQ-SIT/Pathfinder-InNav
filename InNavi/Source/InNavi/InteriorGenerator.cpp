@@ -90,10 +90,18 @@ static bool InteriorGen_SegmentsIntersect(const FVector2D& A, const FVector2D& B
 		return (P1.X - O.X) * (P2.Y - O.Y) - (P1.Y - O.Y) * (P2.X - O.X);
 	};
 
-	const float d1 = Cross(C, D, A);
-	const float d2 = Cross(C, D, B);
-	const float d3 = Cross(A, B, C);
-	const float d4 = Cross(A, B, D);
+	// A point within a millimetre of the other segment's line counts as on it. Without this two rooms side by side in a turned row,
+	// whose edges lie on one line with a gap between them, can read as crossing when float noise tips one cross product's sign.
+	auto Settle = [](float Value, float LineLength)
+	{
+		return FMath::Abs(Value) < 1e-3f * LineLength ? 0.f : Value;
+	};
+	const float LengthAB = FVector2D::Distance(A, B);
+	const float LengthCD = FVector2D::Distance(C, D);
+	const float d1 = Settle(Cross(C, D, A), LengthCD);
+	const float d2 = Settle(Cross(C, D, B), LengthCD);
+	const float d3 = Settle(Cross(A, B, C), LengthAB);
+	const float d4 = Settle(Cross(A, B, D), LengthAB);
 
 	return ((d1 > 0.f) != (d2 > 0.f)) && ((d3 > 0.f) != (d4 > 0.f));
 }
