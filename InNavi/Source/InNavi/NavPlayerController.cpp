@@ -1497,6 +1497,12 @@ bool ANavPlayerController::SelectEntranceNear(const FVector2D& FootprintPoint, f
 	return true;
 }
 
+FString ANavPlayerController::GetBuildingDisplayName(const FString& BuildingId) const
+{
+	const APolyBuilding* Building = Generator ? Generator->FindBuildingById(BuildingId) : nullptr;
+	return Building && !Building->BuildingName.IsEmpty() ? Building->BuildingName : BuildingId;
+}
+
 const FInteriorEntrance* ANavPlayerController::FindEntrance(const FString& Id) const
 {
 	return InteriorGen ? InteriorGen->FindEntranceById(Id) : nullptr;

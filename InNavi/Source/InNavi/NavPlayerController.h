@@ -644,6 +644,8 @@ public:
 	void SelectEntrance(const FString& EntranceId);
 	const FString& GetSelectedEntranceId() const { return SelectedEntranceId; }
 	const FInteriorEntrance* FindEntrance(const FString& Id) const;
+	// A building's name as the user has set it (its id if it has none) - what to show instead of an id.
+	FString GetBuildingDisplayName(const FString& BuildingId) const;
 
 	// Removes every floor's node for the currently-selected connector (see
 	// AInteriorGenerator::DeleteConnectorGroup) and clears the selection. Bound as part of

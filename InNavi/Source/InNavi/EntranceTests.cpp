@@ -201,7 +201,13 @@ bool FEntrancePropertiesTest::RunTest(const FString& Parameters)
 	const FString Link = Fixture.Interior->AddEntranceAtPoint(EntranceTests::EastWall, 15.f, Error);
 	Controller->SelectEntrance(Link);
 	TestEqual(TEXT("a link door says so"), Title->GetText().ToString(), FString(TEXT("Link door")));
-	TestTrue(TEXT("and which building it leads to, and on which floor"), Text->GetText().ToString().Contains(TEXT("E3")) && Text->GetText().ToString().Contains(TEXT("Floor 3")));
+	TestTrue(TEXT("and which building it leads to, and on which floor"), Text->GetText().ToString().Contains(Controller->GetBuildingDisplayName(TEXT("E3"))) && Text->GetText().ToString().Contains(TEXT("Floor 3")));
+
+	// The building is shown by its name, so renaming it shows there; the id is only a fallback.
+	Fixture.Generator->FindBuildingById(TEXT("E3"))->BuildingName = TEXT("Auditorium North");
+	Controller->SelectEntrance(FString());
+	Controller->SelectEntrance(Link);
+	TestTrue(TEXT("a renamed building shows its new name"), Text->GetText().ToString().Contains(TEXT("Auditorium North")) && !Text->GetText().ToString().Contains(TEXT("E3")));
 
 	// Delete removes the selected door, like any other selection.
 	TestTrue(TEXT("Delete removes the selected door"), Controller->DeleteSelection());

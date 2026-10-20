@@ -2194,7 +2194,7 @@ void UInteriorScreenWidget::HandleSelectedEntranceChanged(FString EntranceId)
 	{
 		DoorRoomText->SetText(FText::FromString(bMain
 			? FString::Printf(TEXT("Floor %d. The way out: leads outside the building."), Entrance->Level)
-			: FString::Printf(TEXT("Floor %d. Connects to building %s%s."), Entrance->Level, *Entrance->ConnectsTo,
+			: FString::Printf(TEXT("Floor %d. Connects to building %s%s."), Entrance->Level, *PC->GetBuildingDisplayName(Entrance->ConnectsTo),
 				Entrance->bMirrored ? TEXT(" (opened from that building)") : TEXT(""))));
 	}
 	RefreshPropertiesPanelVisibility();
