@@ -288,17 +288,6 @@ TSharedRef<SWidget> UStartScreenWidget::RebuildWidget()
 		TopBarLineSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
 		TopBarLineSlot->SetOffsets(FMargin(0.f, TopBarHeight, 0.f, 1.f));
 
-		UTextBlock* Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_Title"));
-		Title->SetText(FText::FromString(TEXT("In Nav")));
-		FSlateFontInfo TitleFont = Title->GetFont();
-		TitleFont.Size = 32;
-		Title->SetFont(TitleFont);
-		UCanvasPanelSlot* TitleSlot = Canvas->AddChildToCanvas(Title);
-		TitleSlot->SetAnchors(FAnchors(0.f, 0.f));
-		TitleSlot->SetAlignment(FVector2D(0.f, 0.5f));
-		TitleSlot->SetPosition(FVector2D(22.f * DesignToUi, TopBarHeight * 0.5f));
-		TitleSlot->SetAutoSize(true);
-
 		auto MakeText = [this](const FString& Name, const TCHAR* Value, float Size, const FLinearColor& Color, bool bBold, int32 Spacing = 0) -> UTextBlock*
 		{
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(Name));
@@ -314,6 +303,21 @@ TSharedRef<SWidget> UStartScreenWidget::RebuildWidget()
 			Text->SetFont(Font);
 			return Text;
 		};
+
+		// The brand in the top bar: "InNav" with the product name in small capitals under it.
+		UHorizontalBox* Brand = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("Brand"));
+		UCanvasPanelSlot* BrandSlot = Canvas->AddChildToCanvas(Brand);
+		BrandSlot->SetAnchors(FAnchors(0.f, 0.f));
+		BrandSlot->SetAlignment(FVector2D(0.f, 0.5f));
+		BrandSlot->SetPosition(FVector2D(22.f * DesignToUi, TopBarHeight * 0.5f));
+		BrandSlot->SetAutoSize(true);
+
+		UVerticalBox* BrandText = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Brand_Text"));
+		BrandText->AddChildToVerticalBox(MakeText(TEXT("Txt_BrandName"), TEXT("InNav"), 19.f * DesignToUi, Srgb(241, 246, 255), true));
+		BrandText->AddChildToVerticalBox(MakeText(TEXT("Txt_BrandCaption"), TEXT("INDOOR NAVIGATION EDITOR"), 9.f * DesignToUi, Srgb(171, 189, 212), true, 80))
+			->SetPadding(FMargin(0.f, 1.f * DesignToUi, 0.f, 0.f));
+		UHorizontalBoxSlot* BrandTextSlot = Brand->AddChildToHorizontalBox(BrandText);
+		BrandTextSlot->SetVerticalAlignment(VAlign_Center);
 
 		// Everything on the left, top to bottom: the heading block, then the two launch cards, then a plain Quit.
 		// Starts at the same height as the design's heading and is placed from the top-left, so the block follows the
