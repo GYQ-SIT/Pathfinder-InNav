@@ -57,6 +57,8 @@ public:
 	// whole building.
 	// Level must be between 1 and GetFloorCount(); pass 0 to show everything (exterior view).
 	void SetVisibleInteriorLevel(int32 Level);
+	// 0 = nothing hidden (the normal, whole-building exterior look).
+	int32 GetVisibleInteriorLevel() const { return VisibleInteriorLevel; }
 
 	// Data
 	UPROPERTY()

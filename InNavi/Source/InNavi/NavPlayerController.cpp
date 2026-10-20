@@ -2032,6 +2032,33 @@ void ANavPlayerController::FocusCameraOnBuilding(APolyBuilding* Building)
 	PositionCameraForFloor(Building, Level);
 }
 
+void ANavPlayerController::FocusCameraOnBuildingFromExterior(APolyBuilding* Building)
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!Building || !ControlledPawn)
+	{
+		return;
+	}
+
+	FVector2D Center;
+	float Span;
+	GetBuildingFootprintBounds(Building, Center, Span);
+	if (Span <= 0.f && Center.IsZero())
+	{
+		return;
+	}
+
+	// Aim at the middle of the building and back off along the view direction far enough to see all of it.
+	// The current heading (yaw) is kept so the view does not spin; only the pitch is set.
+	const float BuildingHeight = Building->GetFloorCount() * Building->GetFloorHeight();
+	const FVector Target(Center.X, Center.Y, BuildingHeight * 0.5f);
+	const FRotator Rotation(-35.f, GetControlRotation().Yaw, 0.f);
+	const float Distance = FMath::Max(Span, BuildingHeight) * 1.8f + 500.f;
+
+	ControlledPawn->SetActorLocationAndRotation(Target - Rotation.Vector() * Distance, Rotation);
+	SetControlRotation(Rotation);
+}
+
 void ANavPlayerController::GetBuildingFootprintBounds(APolyBuilding* Building, FVector2D& OutCenter, float& OutSpan) const
 {
 	OutCenter = FVector2D::ZeroVector;
@@ -2900,7 +2927,7 @@ bool ANavPlayerController::SelectBuildingById(const FString& BuildingId)
 	SelectedBuilding = Building;
 	Building->SetHighlighted(true);
 	OnBuildingSelected.Broadcast(BuildingId);
-	FocusCameraOnBuilding(Building);
+	FocusCameraOnBuildingFromExterior(Building);
 	return true;
 }
 

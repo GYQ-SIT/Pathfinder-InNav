@@ -8,6 +8,7 @@
 #include "PolyBuilding.h"
 #include "NavPlayerController.h"
 #include "InteriorScreenWidget.h"
+#include "GameFramework/DefaultPawn.h"
 #include "Components/ScrollBox.h"
 #include "LayerRowWidget.h"
 #include "EditScreenWidget.h"
@@ -445,6 +446,33 @@ bool FNavigationLayersSearchTest::RunTest(const FString& Parameters)
 	Search->SetText(FText());
 	Search->OnTextChanged.Broadcast(Search->GetText());
 	TestEqual(TEXT("clearing the search restores the plain list"), CountResultRows(), RowsWithoutSearch);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationSelectFromListTest, "InNavi.Navigation.Search.SelectFromList",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationSelectFromListTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	APawn* Pawn = Fixture.World->SpawnActor<ADefaultPawn>();
+	Controller->Possess(Pawn);
+	if (!TestTrue(TEXT("the controller has a pawn to move"), Controller->GetPawn() == Pawn)) return false;
+
+	APolyBuilding* First = Fixture.Generator->FindBuildingById(TEXT("E1"));
+	APolyBuilding* Second = Fixture.Generator->FindBuildingById(TEXT("E2"));
+	if (!TestNotNull(TEXT("two buildings"), First) || !TestNotNull(TEXT("two buildings"), Second)) return false;
+
+	Pawn->SetActorLocation(FVector(-123456.f, 0.f, 50.f));
+	TestTrue(TEXT("picking E1 from the list works"), Controller->SelectBuildingById(TEXT("E1")));
+	TestTrue(TEXT("the camera moved"), !FMath::IsNearlyEqual(Pawn->GetActorLocation().X, -123456.f, 1.f));
+	TestTrue(TEXT("and looks down at the building"), Controller->GetControlRotation().Pitch < -1.f);
+	TestEqual(TEXT("the building is not cut open"), First->GetVisibleInteriorLevel(), 0);
+
+	TestTrue(TEXT("picking E2 next works"), Controller->SelectBuildingById(TEXT("E2")));
+	TestEqual(TEXT("the second building is not cut open"), Second->GetVisibleInteriorLevel(), 0);
+	TestEqual(TEXT("and the first one still is not"), First->GetVisibleInteriorLevel(), 0);
+	TestEqual(TEXT("the pick is selected"), Controller->GetSelectedBuildingId(), FString(TEXT("E2")));
 	return true;
 }
 

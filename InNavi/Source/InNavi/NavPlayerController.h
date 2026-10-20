@@ -1245,6 +1245,12 @@ private:
 	// is called) so that can be restored later. The actual positioning is PositionCameraForFloor.
 	void FocusCameraOnBuilding(APolyBuilding* Building);
 
+	// Moves the exterior camera so the whole building is in view, from an angle above and in front of it, for
+	// picking a building from the filter results list. Unlike FocusCameraOnBuilding (the top-down framing used
+	// when a building's interior is entered) it never hides any floors, never touches the saved exterior view
+	// and never marks the building as cut open - the building stays complete.
+	void FocusCameraOnBuildingFromExterior(APolyBuilding* Building);
+
 	// Moves the camera to a tilted top-down view centered on Building's footprint, at a height just
 	// above Level's own ceiling (so it stays close to whichever floor is being edited, regardless of
 	// how many floors are above it), and hides that ceiling (see APolyBuilding::
