@@ -70,40 +70,52 @@ TSharedRef<SWidget> UBuildingInfoPanelWidget::RebuildWidget()
 		IdText->SetAutoWrapText(true);
 		Content->AddChildToVerticalBox(IdText)->SetPadding(FMargin(0.f, 4.f * DesignToUi, 0.f, 0.f));
 
-		// ---- Numbers: floors, rooms, lifts & stairs ----
+		// ---- Numbers: floors and rooms side by side, lifts & stairs on a row of its own ----
 		UBorder* Stats = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("BuildingStats"));
 		Stats->SetBrush(Rounded(Rgb(20, 34, 54), Rgb(44, 62, 88), 8.f));
 		Stats->SetBrushColor(FLinearColor::White);
-		UHorizontalBox* Cells = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BuildingStatCells"));
-		Stats->SetContent(Cells);
-		auto AddCell = [this, Cells](const TCHAR* Name, const TCHAR* Label, UTextBlock*& OutValue, bool bFirst)
+		UVerticalBox* Grid = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("BuildingStatGrid"));
+		Stats->SetContent(Grid);
+		UHorizontalBox* TopRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BuildingStatTopRow"));
+		Grid->AddChildToVerticalBox(TopRow);
+
+		auto MakeDivider = [this](const TCHAR* Name, bool bVertical) -> USizeBox*
 		{
-			if (!bFirst)
+			UBorder* Line = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(Name)));
+			Line->SetBrushColor(StartStyle::Rgb(44, 62, 88));
+			USizeBox* LineSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
+			if (bVertical)
 			{
-				UBorder* Divider = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(Name) + TEXT("Divider")));
-				Divider->SetBrushColor(StartStyle::Rgb(44, 62, 88));
-				USizeBox* DividerSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("DividerSize")));
-				DividerSize->SetWidthOverride(1.f);
-				DividerSize->SetContent(Divider);
-				UHorizontalBoxSlot* DividerSlot = Cells->AddChildToHorizontalBox(DividerSize);
-				DividerSlot->SetVerticalAlignment(VAlign_Fill);
+				LineSize->SetWidthOverride(1.f);
 			}
+			else
+			{
+				LineSize->SetHeightOverride(1.f);
+			}
+			LineSize->SetContent(Line);
+			return LineSize;
+		};
+		auto AddCell = [this](UHorizontalBox* Row, const TCHAR* Name, const TCHAR* Label, UTextBlock*& OutValue)
+		{
 			UVerticalBox* Cell = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), FName(FString(Name) + TEXT("Cell")));
-			UTextBlock* LabelText = StartStyle::Text(WidgetTree, FString(Name) + TEXT("Label"), Label, 11.f, StartStyle::Rgb(150, 170, 196));
-			LabelText->SetAutoWrapText(true);
-			Cell->AddChildToVerticalBox(LabelText);
+			Cell->AddChildToVerticalBox(StartStyle::Text(WidgetTree, FString(Name) + TEXT("Label"), Label, 11.f, StartStyle::Rgb(150, 170, 196)));
 			OutValue = StartStyle::Text(WidgetTree, FString(Name) + TEXT("Value"), TEXT("0"), 22.f, StartStyle::Rgb(241, 246, 255), true);
 			Cell->AddChildToVerticalBox(OutValue)->SetPadding(FMargin(0.f, 4.f * StartStyle::DesignToUi, 0.f, 0.f));
 			UBorder* CellPad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(Name) + TEXT("Pad")));
 			CellPad->SetBrushColor(FLinearColor::Transparent);
 			CellPad->SetPadding(FMargin(12.f * StartStyle::DesignToUi, 11.f * StartStyle::DesignToUi));
 			CellPad->SetContent(Cell);
-			UHorizontalBoxSlot* CellSlot = Cells->AddChildToHorizontalBox(CellPad);
+			UHorizontalBoxSlot* CellSlot = Row->AddChildToHorizontalBox(CellPad);
 			CellSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			CellSlot->SetVerticalAlignment(VAlign_Fill);
 		};
-		AddCell(TEXT("Floors"), TEXT("Floors"), FloorsValue, true);
-		AddCell(TEXT("Rooms"), TEXT("Rooms"), RoomsValue, false);
-		AddCell(TEXT("Links"), TEXT("Lifts & stairs"), LinksValue, false);
+		AddCell(TopRow, TEXT("Floors"), TEXT("Floors"), FloorsValue);
+		TopRow->AddChildToHorizontalBox(MakeDivider(TEXT("RoomsDivider"), true))->SetVerticalAlignment(VAlign_Fill);
+		AddCell(TopRow, TEXT("Rooms"), TEXT("Rooms"), RoomsValue);
+		Grid->AddChildToVerticalBox(MakeDivider(TEXT("LinksDivider"), false));
+		UHorizontalBox* BottomRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BuildingStatBottomRow"));
+		Grid->AddChildToVerticalBox(BottomRow);
+		AddCell(BottomRow, TEXT("Links"), TEXT("Lifts & stairs"), LinksValue);
 		Content->AddChildToVerticalBox(Stats)->SetPadding(FMargin(0.f, 18.f * DesignToUi, 0.f, 0.f));
 
 		// ---- Status: Empty (no rooms yet) or Has rooms ----
