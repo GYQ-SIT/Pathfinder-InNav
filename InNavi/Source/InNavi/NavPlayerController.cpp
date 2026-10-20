@@ -194,11 +194,19 @@ void ANavPlayerController::OnClick()
 	// to the custom floor-plan widget.
 	if (IsSelectingNavigationPoint())
 	{
-		// 3D preview mode is view-only - InteriorFloorPlanWidget is Collapsed (and so already
-		// un-clickable) while it's active, but this fallback path bypasses that widget entirely, so
-		// it needs its own explicit guard.
+		// In 3D preview the floor-plan widget is Collapsed, so there is nothing to hit-test there: the click is
+		// turned into a point on the active floor instead, by casting the mouse ray onto that floor's plane (a
+		// hit on a wall or a floor edge would shift the point sideways on an oblique camera). The panel then
+		// treats it exactly like a click on the 2D plan - the same rules decide whether the point is valid.
 		if (bIsIn3DPreviewMode)
 		{
+			const int32 ActiveFloor = InteriorGen ? InteriorGen->GetActiveFloor() : 0;
+			FVector2D FootprintPoint;
+			const FHitResult NoHit;
+			if (ActiveFloor >= 1 && Get3DFloorFootprintPoint(NoHit, FootprintPoint))
+			{
+				SelectNavigationPoint(FootprintPoint, ActiveFloor);
+			}
 			return;
 		}
 
