@@ -312,12 +312,28 @@ void ANavPlayerController::OnClick()
 	}
 }
 
+bool ANavPlayerController::IsPointerOverInteriorFloorPlan() const
+{
+	const FVector2D Cursor = FSlateApplication::Get().GetCursorPos();
+	for (TObjectIterator<UInteriorFloorPlanWidget> It; It; ++It)
+	{
+		// A plan that is no longer on screen has let go of its Slate widget, even if the object has not been collected yet.
+		const UInteriorFloorPlanWidget* FloorPlan = *It;
+		if (FloorPlan && FloorPlan->GetWorld() == GetWorld() && FloorPlan->GetCachedWidget().IsValid() && FloorPlan->IsVisible()
+			&& FloorPlan->GetCachedGeometry().IsUnderLocation(Cursor))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 void ANavPlayerController::SelectBuildingUnderCursor()
 {
 	// The yellow "selected building" highlight only makes sense when browsing the exterior building
 	// cluster - not while previewing one specific building's interior in 3D, where the same click
 	// would otherwise land on that building's own (now visible, collidable) exterior wall.
-	if (bIsIn3DPreviewMode)
+	if (bIsIn3DPreviewMode || IsPointerOverInteriorFloorPlan())
 	{
 		return;
 	}

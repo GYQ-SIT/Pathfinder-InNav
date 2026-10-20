@@ -1086,6 +1086,10 @@ private:
 
 	void SelectBuildingUnderCursor();
 
+	// Whether the mouse is over the 2D floor plan on screen. A click there is the plan's business (or a menu's or toolbar's on top of it):
+	// it must never fall through to the 3D scene behind it and select an exterior building.
+	bool IsPointerOverInteriorFloorPlan() const;
+
 	// Build mode (Plan A): click to trace out a new building's footprint on the ground.
 	// FinishBuilding/CancelBuilding are declared public above (Blueprint-callable).
 	void AddFootprintPointUnderCursor();
