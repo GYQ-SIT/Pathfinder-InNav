@@ -5,6 +5,7 @@
 
 #include "AudioFileRowWidget.h"
 #include "AudioPanelWidget.h"
+#include "StartScreenStyle.h"
 #include "MapPanelWidget.h"
 #include "DebugPanelWidget.h"
 #include "ConfirmDialogWidget.h"
@@ -20,6 +21,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/CheckBox.h"
@@ -89,6 +91,17 @@ void UInteriorScreenWidget::ApplyStandardFont(UEditableTextBox* TextBox)
 	Style.ForegroundColor = FSlateColor(StandardTextBoxTextColor);
 	Style.FocusedForegroundColor = FSlateColor(StandardTextBoxTextColor);
 	TextBox->SetWidgetStyle(Style);
+}
+
+namespace
+{
+	// A tool row's look: plain, or blue when its tool is the active one.
+	FButtonStyle Button_Style_Tool(bool bActive)
+	{
+		using namespace StartStyle;
+		return bActive ? Button(Rgb(14, 66, 148), Rgb(20, 80, 172), Rgb(10, 54, 124), Rgb(30, 118, 235), 8.f)
+			: Button(Rgb(24, 38, 60), Rgb(33, 54, 84), Rgb(18, 30, 50), Rgb(46, 66, 94), 8.f);
+	}
 }
 
 UWidget* UInteriorScreenWidget::MakeToolTipWidget(const TCHAR* TooltipLabel)
@@ -219,166 +232,121 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// separate boxes with visible seams - so all 4 share this exact background color.
 		const FLinearColor DockPanelColor(0.03f, 0.03f, 0.03f, 0.88f);
 
-		// -- Toolbar panel: the mode toolbar grouped into Default/Draw/Navigate sections (matching the
-		// hand-drawn layout) - one VerticalBox so everything auto-stacks instead of each piece needing
-		// its own guessed Y position. The building switcher used to live at the top of this panel; it's
-		// now its own fixed bar below the menu bar instead (see BuildingSwitcherBarBackground further
-		// down) so it stays put regardless of how this panel gets dragged/resized/hidden.
-		ToolbarPanel = ConstructDockPanel(EDockPanelId::Toolbar, TEXT("Pnl_Toolbar"), DockPanelColor, 10.f);
+		// -- Toolbar panel: one row per tool, in the style of the design team's "2D floor tools" - the tool's icon, its name and
+		// its keyboard shortcut - in four groups. The row of the tool that is active is highlighted in blue (see
+		// RefreshModeButtonHighlights). What each tool does, and every shortcut, is unchanged. One VerticalBox so everything
+		// auto-stacks. (The building switcher is its own fixed bar below the menu bar, see BuildingSwitcherBarBackground.)
+		ToolbarPanel = ConstructDockPanel(EDockPanelId::Toolbar, TEXT("Pnl_Toolbar"), DockPanelColor, 14.f);
 
 		UVerticalBox* LeftSidebar = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LeftSidebar"));
 		ToolbarPanel->SetContent(LeftSidebar);
 
-		auto AddToolGroupLabel = [this, LeftSidebar](const TCHAR* Name, const TCHAR* Label) -> UTextBlock*
+		// Heading. (Not registered as the panel's title text: the dock tab already names the panel, and those titles are hidden.)
+		LeftSidebar->AddChildToVerticalBox(StartStyle::Text(WidgetTree, TEXT("Txt_ToolbarKicker"), TEXT("FLOOR EDITOR"), 10.f, StartStyle::Rgb(116, 181, 255), true, 160));
+		LeftSidebar->AddChildToVerticalBox(StartStyle::Text(WidgetTree, TEXT("Txt_ToolbarTitle"), TEXT("2D floor tools"), 18.f, StartStyle::Rgb(241, 246, 255), true))
+			->SetPadding(FMargin(0.f, 6.f * StartStyle::DesignToUi, 0.f, 0.f));
+
+		auto AddToolGroupLabel = [this, LeftSidebar](const TCHAR* Name, const TCHAR* Label)
 		{
-			UTextBlock* GroupLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(Name));
-			GroupLabel->SetText(FText::FromString(FString(Label)));
-			GroupLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.75f, 0.75f, 1.f)));
-			ApplyStandardFont(GroupLabel);
-			UVerticalBoxSlot* GroupLabelSlot = LeftSidebar->AddChildToVerticalBox(GroupLabel);
-			GroupLabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
-			return GroupLabel;
+			UTextBlock* GroupLabel = StartStyle::Text(WidgetTree, Name, Label, 10.f, StartStyle::Rgb(150, 170, 196), true, 120);
+			LeftSidebar->AddChildToVerticalBox(GroupLabel)->SetPadding(FMargin(0.f, 16.f * StartStyle::DesignToUi, 0.f, 8.f * StartStyle::DesignToUi));
 		};
 
-		// Icon-only now instead of a text label - sidesteps the font-size/overflow fight entirely
-		// (an icon has no line-wrap or width-overflow failure mode), at the cost of needing a
-		// tooltip so the mode is still discoverable. IconAssetName is one of Padre's existing
-		// toolbar icons under /Game/ImageAssets (Icon_AddDoor, Icon_DrawRoom, ...), previously
-		// unreferenced in C++ (same asset pack already reused for the floor-plan connector markers
-		// in InteriorFloorPlanWidget).
-		constexpr float ModeButtonSize = 36.f;
-
-		auto AddModeButton = [this, LeftSidebar](const TCHAR* Name, const TCHAR* IconAssetName, const TCHAR* TooltipLabel) -> UButton*
+		// A tool row: icon, name, shortcut. The tooltip keeps describing the actual interaction (click count, confirm key,
+		// defaults) - see docs/design/interior-editor-guide.md. IconAssetName is one of Padre's toolbar icons under
+		// /Game/ImageAssets, forced to one size because the source PNGs were not authored at a consistent resolution.
+		auto AddToolRow = [this, LeftSidebar](const TCHAR* Name, const TCHAR* IconAssetName, const TCHAR* Label, const TCHAR* Key, const TCHAR* TooltipLabel) -> UButton*
 		{
+			using namespace StartStyle;
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+			Button->SetStyle(Button_Style_Tool(false));
+			Button->SetBackgroundColor(FLinearColor::White);
 			Button->SetToolTip(MakeToolTipWidget(TooltipLabel));
 			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+
+			UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), FName(FString(Name) + TEXT("Row")));
+			UBorder* Pad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(Name) + TEXT("Pad")));
+			Pad->SetBrushColor(FLinearColor::Transparent);
+			Pad->SetPadding(FMargin(12.f * DesignToUi, 9.f * DesignToUi, 10.f * DesignToUi, 9.f * DesignToUi));
+			Pad->SetContent(Row);
+			if (UButtonSlot* ContentSlot = Cast<UButtonSlot>(Button->SetContent(Pad)))
+			{
+				// A button centres and shrinks its content by default; these rows have to fill it so the right-hand part (the
+				// shortcut, the chevron, the +/-) lines up in one column.
+				ContentSlot->SetHorizontalAlignment(HAlign_Fill);
+				ContentSlot->SetVerticalAlignment(VAlign_Fill);
+			}
 
 			UImage* Icon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), FName(FString(Name) + TEXT("Icon")));
 			const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), IconAssetName, IconAssetName);
 			if (UTexture2D* IconTexture = LoadObject<UTexture2D>(nullptr, *IconPath))
 			{
-				// Not bMatchSize - these source PNGs weren't authored at a consistent resolution, so
-				// matching native size would make icons different sizes (and some bigger than the
-				// button itself). DesiredSizeOverride forces every icon to render at the same size
-				// regardless of its source image's actual resolution.
 				Icon->SetBrushFromTexture(IconTexture, false);
 				Icon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
 			}
+			USizeBox* IconSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("IconSize")));
+			IconSize->SetWidthOverride(24.f);
+			IconSize->SetHeightOverride(24.f);
+			IconSize->SetContent(Icon);
+			Row->AddChildToHorizontalBox(IconSize)->SetVerticalAlignment(VAlign_Center);
 
-			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
-			SizeBox->SetWidthOverride(ModeButtonSize);
-			SizeBox->SetHeightOverride(ModeButtonSize);
-			if (USizeBoxSlot* IconSlot = Cast<USizeBoxSlot>(SizeBox->SetContent(Icon)))
-			{
-				IconSlot->SetHorizontalAlignment(HAlign_Center);
-				IconSlot->SetVerticalAlignment(VAlign_Center);
-			}
-			Button->SetContent(SizeBox);
+			UTextBlock* Caption = Text(WidgetTree, FString(Name) + TEXT("Label"), Label, 13.f, Rgb(241, 246, 255), true);
+			Caption->SetAutoWrapText(true);
+			UHorizontalBoxSlot* CaptionSlot = Row->AddChildToHorizontalBox(Caption);
+			CaptionSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			CaptionSlot->SetVerticalAlignment(VAlign_Center);
+			CaptionSlot->SetPadding(FMargin(12.f * DesignToUi, 0.f, 8.f * DesignToUi, 0.f));
 
-			UVerticalBoxSlot* ButtonSlot = LeftSidebar->AddChildToVerticalBox(Button);
-			ButtonSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+			// The shortcut, in a small rounded key.
+			UBorder* Key_Badge = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(Name) + TEXT("Key")));
+			Key_Badge->SetBrush(Rounded(Rgb(14, 24, 38), Rgb(60, 78, 104), 5.f));
+			Key_Badge->SetBrushColor(FLinearColor::White);
+			Key_Badge->SetPadding(FMargin(7.f * DesignToUi, 3.f * DesignToUi));
+			Key_Badge->SetContent(Text(WidgetTree, FString(Name) + TEXT("KeyText"), Key, 11.f, Rgb(170, 190, 214), true));
+			UHorizontalBoxSlot* KeySlot = Row->AddChildToHorizontalBox(Key_Badge);
+			KeySlot->SetVerticalAlignment(VAlign_Center);
+
+			LeftSidebar->AddChildToVerticalBox(Button)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f * DesignToUi));
 			return Button;
 		};
 
-		// Same 10 tools as before, just regrouped to match the hand-drawn layout's
-		// Default/Draw/Navigate sections - no new tools added. Tooltips describe the actual
-		// interaction (click count, confirm key, defaults), not just the mode's name - matches
-		// docs/design/interior-editor-guide.md.
-		// Toolbar has no separate panel-level title (see DockPanelTitleTexts' own comment) - its first
-		// group label doubles as the text the drag handle sizes itself off.
-		DockPanelTitleTexts[(int32)EDockPanelId::Toolbar] = AddToolGroupLabel(TEXT("Txt_GroupDefault"), TEXT("Default"));
-		SelectModeButton = AddModeButton(TEXT("Select_Mode_Button"), TEXT("Icon_Select"), TEXT("Select Mode [Q] (click a room, door, or connector to select it; drag to move it; Backspace to delete)"));
+		AddToolGroupLabel(TEXT("Txt_GroupSelect"), TEXT("SELECT"));
+		SelectModeButton = AddToolRow(TEXT("Select_Mode_Button"), TEXT("Icon_Select"), TEXT("Select"), TEXT("Q"), TEXT("Select Mode [Q] (click a room, door, or connector to select it; drag to move it; Backspace to delete)"));
 		SelectModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSelectModeClicked);
 
-		AddToolGroupLabel(TEXT("Txt_GroupDraw"), TEXT("Draw"));
-		DrawRoomModeButton = AddModeButton(TEXT("Draw_Mode_Button"), TEXT("Icon_DrawRoom"), TEXT("Draw Room Mode [P] (click at least 3 points to outline a room, then press Enter to finish; Esc cancels)"));
+		AddToolGroupLabel(TEXT("Txt_GroupDraw"), TEXT("DRAW & PLACE"));
+		DrawRoomModeButton = AddToolRow(TEXT("Draw_Mode_Button"), TEXT("Icon_DrawRoom"), TEXT("Draw room"), TEXT("P"), TEXT("Draw Room Mode [P] (click at least 3 points to outline a room, then press Enter to finish; Esc cancels)"));
 		DrawRoomModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnDrawRoomModeClicked);
-		DrawWallModeButton = AddModeButton(TEXT("Draw_Wall_Button"), TEXT("Icon_DrawWall"), TEXT("Draw Wall Mode [L] (click points to draw a standalone wall, then press Enter to finish; Esc cancels)"));
+		DrawWallModeButton = AddToolRow(TEXT("Draw_Wall_Button"), TEXT("Icon_DrawWall"), TEXT("Draw wall"), TEXT("L"), TEXT("Draw Wall Mode [L] (click points to draw a standalone wall, then press Enter to finish; Esc cancels)"));
 		DrawWallModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnDrawWallModeClicked);
-		AddRectModeButton = AddModeButton(TEXT("Add_Rect_Button"), TEXT("Icon_AddRectangle"), TEXT("Add Rectangle [1] (click a point to place a rectangular room centered there)"));
+		AddRectModeButton = AddToolRow(TEXT("Add_Rect_Button"), TEXT("Icon_AddRectangle"), TEXT("Rectangle room"), TEXT("1"), TEXT("Add Rectangle [1] (click a point to place a rectangular room centered there)"));
 		AddRectModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddRectangleClicked);
-		AddTriangleModeButton = AddModeButton(TEXT("Add_Triangle_Button"), TEXT("Icon_AddTriangle"), TEXT("Add Triangle [2] (click a point to place a triangular room centered there)"));
+		AddTriangleModeButton = AddToolRow(TEXT("Add_Triangle_Button"), TEXT("Icon_AddTriangle"), TEXT("Triangle room"), TEXT("2"), TEXT("Add Triangle [2] (click a point to place a triangular room centered there)"));
 		AddTriangleModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddTriangleClicked);
-		AddCircleModeButton = AddModeButton(TEXT("Add_Circle_Button"), TEXT("Icon_AddCircle"), TEXT("Add Circle [3] (click a point to place a circular room centered there)"));
+		AddCircleModeButton = AddToolRow(TEXT("Add_Circle_Button"), TEXT("Icon_AddCircle"), TEXT("Circle room"), TEXT("3"), TEXT("Add Circle [3] (click a point to place a circular room centered there)"));
 		AddCircleModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddCircleClicked);
 
-		AddToolGroupLabel(TEXT("Txt_GroupNavigate"), TEXT("Navigate"));
-		AddDoorModeButton = AddModeButton(TEXT("Add_Door_Button"), TEXT("Icon_AddDoor"), TEXT("Add Door Mode [K] (click a wall edge to cut a fixed-size door into it)"));
+		AddToolGroupLabel(TEXT("Txt_GroupNavigate"), TEXT("DOORS & LINKS"));
+		AddDoorModeButton = AddToolRow(TEXT("Add_Door_Button"), TEXT("Icon_AddDoor"), TEXT("Place door"), TEXT("K"), TEXT("Add Door Mode [K] (click a wall edge to cut a fixed-size door into it)"));
 		AddDoorModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddDoorModeClicked);
-		AddStairsModeButton = AddModeButton(TEXT("Add_Stairs_Button"), TEXT("Icon_AddStairs"), TEXT("Add Stairs Mode [5] (click a point to place stairs, connecting the floor above and below by default)"));
+		AddStairsModeButton = AddToolRow(TEXT("Add_Stairs_Button"), TEXT("Icon_AddStairs"), TEXT("Stairs"), TEXT("5"), TEXT("Add Stairs Mode [5] (click a point to place stairs, connecting the floor above and below by default)"));
 		AddStairsModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddStairsModeClicked);
-		AddElevatorModeButton = AddModeButton(TEXT("Add_Elevator_Button"), TEXT("Icon_AddElevator"), TEXT("Add Elevator Mode [4] (click a point to place an elevator, connecting every floor by default)"));
+		AddElevatorModeButton = AddToolRow(TEXT("Add_Elevator_Button"), TEXT("Icon_AddElevator"), TEXT("Elevator"), TEXT("4"), TEXT("Add Elevator Mode [4] (click a point to place an elevator, connecting every floor by default)"));
 		AddElevatorModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddElevatorModeClicked);
-		AddEscalatorModeButton = AddModeButton(TEXT("Add_Escalator_Button"), TEXT("Icon_AddEscalator"), TEXT("Add Escalator Mode [6] (click a point to place an escalator, connecting the floor above and below by default)"));
+		AddEscalatorModeButton = AddToolRow(TEXT("Add_Escalator_Button"), TEXT("Icon_AddEscalator"), TEXT("Escalator"), TEXT("6"), TEXT("Add Escalator Mode [6] (click a point to place an escalator, connecting the floor above and below by default)"));
 		AddEscalatorModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddEscalatorModeClicked);
 
-		AddToolGroupLabel(TEXT("Txt_GroupGizmos"), TEXT("Gizmos"));
-		// Grow/Shrink and Rotate CW/CCW each have their own dedicated icon now (UX-provided
-		// Icon_IncreaseSize/Icon_DecreaseSize/Icon_RotateCW/Icon_RotateCCW) - previously Grow/Shrink
-		// reused one Icon_GizmoMove asset at two different sizes, and Rotate CW/CCW reused one
-		// Icon_GizmoRotate asset with CCW rotated 180 degrees, since a 180-degree rotation of a
-		// hand-drawn arrow icon isn't a true mirror image of it. Grow/Shrink and Rotate CW/CCW mirror
-		// PC's existing =/- and 9/0 keys exactly (see OnGrowRoomClicked etc.) rather than introducing
-		// any new interaction - small square buttons, two per row, per the hand-drawn layout.
-		constexpr float GizmoButtonSize = 26.f;
-		constexpr float GizmoIconSizeLarge = 18.f;
-		auto AddGizmoIconButton = [this, GizmoButtonSize](UHorizontalBox* Row, const TCHAR* Name, const TCHAR* IconAssetName, float IconSize, float IconRotationDegrees, const TCHAR* TooltipLabel) -> UButton*
-		{
-			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-			Button->SetToolTip(MakeToolTipWidget(TooltipLabel));
-			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
-
-			UImage* Icon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), FName(FString(Name) + TEXT("Icon")));
-			const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), IconAssetName, IconAssetName);
-			if (UTexture2D* IconTexture = LoadObject<UTexture2D>(nullptr, *IconPath))
-			{
-				Icon->SetBrushFromTexture(IconTexture, false);
-				Icon->SetDesiredSizeOverride(FVector2D(IconSize, IconSize));
-			}
-			if (!FMath::IsNearlyZero(IconRotationDegrees))
-			{
-				Icon->SetRenderTransformAngle(IconRotationDegrees);
-			}
-
-			USizeBox* GizmoSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
-			GizmoSizeBox->SetWidthOverride(GizmoButtonSize);
-			GizmoSizeBox->SetHeightOverride(GizmoButtonSize);
-			if (USizeBoxSlot* GizmoIconSlot = Cast<USizeBoxSlot>(GizmoSizeBox->SetContent(Icon)))
-			{
-				GizmoIconSlot->SetHorizontalAlignment(HAlign_Center);
-				GizmoIconSlot->SetVerticalAlignment(VAlign_Center);
-			}
-			Button->SetContent(GizmoSizeBox);
-
-			UHorizontalBoxSlot* GizmoRowSlot = Row->AddChildToHorizontalBox(Button);
-			GizmoRowSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
-			return Button;
-		};
-
-		UHorizontalBox* GizmoScaleRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("GizmoScaleRow"));
-		UVerticalBoxSlot* GizmoScaleRowSlot = LeftSidebar->AddChildToVerticalBox(GizmoScaleRow);
-		GizmoScaleRowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-		// The row only takes up as much width as its 2 small buttons, not the panel's full width - by
-		// default a VerticalBoxSlot stretches/left-aligns it, leaving it hugging the left edge. Center
-		// it instead, matching the hand-drawn layout.
-		GizmoScaleRowSlot->SetHorizontalAlignment(HAlign_Center);
-		GrowRoomButton = AddGizmoIconButton(GizmoScaleRow, TEXT("Btn_GrowRoom"), TEXT("Icon_IncreaseSize"), GizmoIconSizeLarge, 0.f, TEXT("Grow (increase the selected room's size)"));
+		// Grow/Shrink and Rotate mirror the room keys = - 9 0 exactly (see OnGrowRoomClicked etc.). Rotate keeps turning while the
+		// button is held.
+		AddToolGroupLabel(TEXT("Txt_GroupGizmos"), TEXT("TRANSFORM"));
+		GrowRoomButton = AddToolRow(TEXT("Btn_GrowRoom"), TEXT("Icon_IncreaseSize"), TEXT("Grow"), TEXT("="), TEXT("Grow (increase the selected room's size)"));
 		GrowRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnGrowRoomClicked);
-		ShrinkRoomButton = AddGizmoIconButton(GizmoScaleRow, TEXT("Btn_ShrinkRoom"), TEXT("Icon_DecreaseSize"), GizmoIconSizeLarge, 0.f, TEXT("Shrink (decrease the selected room's size)"));
+		ShrinkRoomButton = AddToolRow(TEXT("Btn_ShrinkRoom"), TEXT("Icon_DecreaseSize"), TEXT("Shrink"), TEXT("-"), TEXT("Shrink (decrease the selected room's size)"));
 		ShrinkRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnShrinkRoomClicked);
-
-		UHorizontalBox* GizmoRotateRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("GizmoRotateRow"));
-		if (UVerticalBoxSlot* GizmoRotateRowSlot = LeftSidebar->AddChildToVerticalBox(GizmoRotateRow))
-		{
-			GizmoRotateRowSlot->SetHorizontalAlignment(HAlign_Center);
-		}
-		RotateCCWButton = AddGizmoIconButton(GizmoRotateRow, TEXT("Btn_RotateCCW"), TEXT("Icon_RotateCCW"), GizmoIconSizeLarge, 0.f, TEXT("Rotate Left (hold to keep rotating the selected room counter-clockwise)"));
+		RotateCCWButton = AddToolRow(TEXT("Btn_RotateCCW"), TEXT("Icon_RotateCCW"), TEXT("Rotate left"), TEXT("9"), TEXT("Rotate Left (hold to keep rotating the selected room counter-clockwise)"));
 		RotateCCWButton->OnPressed.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCCWPressed);
 		RotateCCWButton->OnReleased.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCCWReleased);
-		RotateCWButton = AddGizmoIconButton(GizmoRotateRow, TEXT("Btn_RotateCW"), TEXT("Icon_RotateCW"), GizmoIconSizeLarge, 0.f, TEXT("Rotate Right (hold to keep rotating the selected room clockwise)"));
+		RotateCWButton = AddToolRow(TEXT("Btn_RotateCW"), TEXT("Icon_RotateCW"), TEXT("Rotate right"), TEXT("0"), TEXT("Rotate Right (hold to keep rotating the selected room clockwise)"));
 		RotateCWButton->OnPressed.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCWPressed);
 		RotateCWButton->OnReleased.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCWReleased);
 
@@ -2047,13 +2015,12 @@ void UInteriorScreenWidget::RefreshModeButtonHighlights()
 		return;
 	}
 
-	const FLinearColor ActiveColor(0.2f, 0.75f, 0.3f, 1.f);
-	const FLinearColor InactiveColor(0.6f, 0.6f, 0.6f, 1.f);
-	auto SetHighlight = [&ActiveColor, &InactiveColor](UButton* Button, bool bActive)
+	// The active tool's row is blue; the others are the plain row.
+	auto SetHighlight = [](UButton* Button, bool bActive)
 	{
 		if (Button)
 		{
-			Button->SetBackgroundColor(bActive ? ActiveColor : InactiveColor);
+			Button->SetStyle(Button_Style_Tool(bActive));
 		}
 	};
 

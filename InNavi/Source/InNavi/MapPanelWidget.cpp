@@ -7,6 +7,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/CheckBox.h"
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
@@ -44,7 +45,13 @@ UVerticalBox* UMapPanelWidget::AddCollapsibleSection(UVerticalBox* Stack, const 
 	Pad->SetBrushColor(FLinearColor::Transparent);
 	Pad->SetPadding(FMargin(12.f * DesignToUi, 9.f * DesignToUi));
 	Pad->SetContent(Row);
-	OutHeader->SetContent(Pad);
+	if (UButtonSlot* ContentSlot = Cast<UButtonSlot>(OutHeader->SetContent(Pad)))
+		{
+			// A button centres and shrinks its content by default; these rows have to fill it so the right-hand part (the
+			// shortcut, the chevron, the +/-) lines up in one column.
+			ContentSlot->SetHorizontalAlignment(HAlign_Fill);
+			ContentSlot->SetVerticalAlignment(VAlign_Fill);
+		}
 	UHorizontalBoxSlot* TitleSlot = Row->AddChildToHorizontalBox(Text(WidgetTree, Base + TEXT("Title"), Title, 12.f, Rgb(214, 226, 242), true, 20));
 	TitleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 	OutSign = Text(WidgetTree, Base + TEXT("Sign"), TEXT("+"), 14.f, Rgb(150, 172, 202), true);

@@ -6,6 +6,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/HorizontalBox.h"
@@ -31,7 +32,13 @@ TSharedRef<SWidget> UMapBuildingRowWidget::RebuildWidget()
 		Pad->SetBrushColor(FLinearColor::Transparent);
 		Pad->SetPadding(FMargin(12.f * DesignToUi, 10.f * DesignToUi, 12.f * DesignToUi, 10.f * DesignToUi));
 		Pad->SetContent(Content);
-		RowButton->SetContent(Pad);
+		if (UButtonSlot* ContentSlot = Cast<UButtonSlot>(RowButton->SetContent(Pad)))
+			{
+				// A button centres and shrinks its content by default; these rows have to fill it so the right-hand part (the
+				// shortcut, the chevron, the +/-) lines up in one column.
+				ContentSlot->SetHorizontalAlignment(HAlign_Fill);
+				ContentSlot->SetVerticalAlignment(VAlign_Fill);
+			}
 
 		// The building mark: an outlined block with two vertical lines.
 		USizeBox* MarkSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RowMarkSize"));

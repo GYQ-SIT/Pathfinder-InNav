@@ -210,20 +210,22 @@ of the editor are not compatible; the first run after updating uses the team def
 
 ### Toolbar panel
 
-Grouped into four sections:
+Headed **FLOOR EDITOR / 2D floor tools**, in the style of the design team's page: one row per tool with its icon,
+its name and its keyboard shortcut in a small key on the right (hover a row for the full description). The row of the
+tool that is active is highlighted in blue. Four groups:
 
-- **Default** — select tool (also `Q`): click a room (anywhere in its body, not just
+- **SELECT** - the select tool (`Q`): click a room (anywhere in its body, not just
   the outline), a door marker, or a connector marker to select it; drag to move it;
   `Backspace` to delete.
-- **Draw** — draw a custom room (`P`, click points then `Enter`, `Esc` cancels), draw a
+- **DRAW & PLACE** - draw a custom room (`P`, click points then `Enter`, `Esc` cancels), draw a
   standalone wall (`L`, same mechanic), or place a prefab rectangle/triangle/circle
   room (`1`/`2`/`3`) centered on the next click.
-- **Navigate** — add-door mode (`K`, click a wall edge to cut a fixed-size door into
-  it), or place a stairs/elevator/escalator connector (`4`/`5`/`6`) at the next click;
+- **DOORS & LINKS** - add-door mode (`K`, click a wall edge to cut a fixed-size door into
+  it), or place a stairs/elevator/escalator connector (`5`/`4`/`6`) at the next click;
   an elevator defaults to every floor in the building, stairs/escalator default to the
   floor above and below.
-- **Gizmos** — grow/shrink the selected room (same as `=`/`-`), and hold to rotate it
-  counter-clockwise/clockwise around its own center (same as holding `9`/`0`).
+- **TRANSFORM** - grow/shrink the selected room (`=`/`-`), and hold to rotate it
+  counter-clockwise/clockwise around its own center (hold `9`/`0`).
 
 Clicking inside the building's outline but on top of a wall, outside the outline, or
 overlapping another room will fail, with the reason logged to the Output Log.
