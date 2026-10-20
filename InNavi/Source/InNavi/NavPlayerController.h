@@ -493,6 +493,16 @@ public:
 	int32 GetBuildingFilterMaximumFloors() const;
 	bool AreCampusBuildingsVisible() const;
 	const TMap<FString, FString>& GetFilteredBuildingOptions() const;
+
+	// One building of the exterior list (the Map panel's list), for the buildings that pass the current filters.
+	struct FBuildingListItem
+	{
+		FString Id;
+		FString Name;
+		int32 Floors = 0;
+	};
+	// Those buildings, by name.
+	TArray<FBuildingListItem> GetFilteredBuildingList() const;
 	uint64 GetBuildingResultsRevision() const;
 	int32 GetEditableBuildingCount() const;
 	bool SelectBuildingById(const FString& BuildingId);

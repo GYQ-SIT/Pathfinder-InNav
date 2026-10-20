@@ -2,6 +2,7 @@
 
 #include "AudioPanelWidget.h"
 #include "DebugPanelWidget.h"
+#include "MapPanelWidget.h"
 #include "EditScreenWidget.h"
 #include "InteriorScreenWidget.h"
 #include "UiTestFixture.h"
@@ -150,10 +151,42 @@ bool FUiMapPanelTest::RunTest(const FString& Parameters)
 	TestNull(TEXT("interior: no building search"), Interior->FindScreenWidget(TEXT("Txt_BuildingSearch")));
 	TestNull(TEXT("interior: no campus building switch"), Interior->FindScreenWidget(TEXT("Chk_BuildingCampus")));
 	TestNotNull(TEXT("exterior: building search"), Exterior->FindScreenWidget(TEXT("Txt_BuildingSearch")));
-	TestNotNull(TEXT("exterior: building results"), Exterior->FindScreenWidget(TEXT("Cbx_FilteredBuildings")));
 	TestNotNull(TEXT("exterior: campus building switch"), Exterior->FindScreenWidget(TEXT("Chk_BuildingCampus")));
 	TestNotNull(TEXT("exterior: non-campus building switch"), Exterior->FindScreenWidget(TEXT("Chk_BuildingNonCampus")));
 	TestNotNull(TEXT("exterior: reset button"), Exterior->FindScreenWidget(TEXT("Btn_ResetBuildingFilters")));
+
+	// The site overview: a list of buildings, and the filters and roads in sections that start closed.
+	UMapPanelWidget* Map = Exterior->GetMapPanelForTests();
+	if (TestNotNull(TEXT("exterior: the map panel"), Map))
+	{
+		Map->Refresh();
+		TestTrue(TEXT("the building list is filled"), Map->GetBuildingRowCountForTests() > 0);
+		TestFalse(TEXT("the filters section starts closed"), Map->IsFiltersSectionOpenForTests());
+		if (UButton* FiltersHeader = Cast<UButton>(Exterior->FindScreenWidget(TEXT("FiltersHeader"))))
+		{
+			FiltersHeader->OnClicked.Broadcast();
+			TestTrue(TEXT("its header opens it"), Map->IsFiltersSectionOpenForTests());
+			FiltersHeader->OnClicked.Broadcast();
+			TestFalse(TEXT("and closes it again"), Map->IsFiltersSectionOpenForTests());
+		}
+		else
+		{
+			AddError(TEXT("the filters header is missing"));
+		}
+		// A floor-count chip narrows the list; Any brings it back.
+		const int32 All = Map->GetBuildingRowCountForTests();
+		if (UButton* OneFloor = Cast<UButton>(Exterior->FindScreenWidget(TEXT("Btn_FloorsOne"))))
+		{
+			OneFloor->OnClicked.Broadcast();
+			TestEqual(TEXT("1 floor leaves only one-floor buildings (the example has none)"), Map->GetBuildingRowCountForTests(), 0);
+			Cast<UButton>(Exterior->FindScreenWidget(TEXT("Btn_FloorsAny")))->OnClicked.Broadcast();
+			TestEqual(TEXT("Any brings them all back"), Map->GetBuildingRowCountForTests(), All);
+		}
+		else
+		{
+			AddError(TEXT("the floor chips are missing"));
+		}
+	}
 	return true;
 }
 

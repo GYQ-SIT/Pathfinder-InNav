@@ -2,31 +2,34 @@
 
 #include "CoreMinimal.h"
 #include "DockPanelContent.h"
-#include "Types/SlateEnums.h"
 #include "MapPanelWidget.generated.h"
 
 class UButton;
 class UCheckBox;
-class UComboBoxString;
 class UEditableTextBox;
+class UMapBuildingRowWidget;
+class UScrollBox;
+class USizeBox;
 class UTextBlock;
+class UVerticalBox;
 
 // The Map dock panel, shared by the interior editor and the exterior screen.
 //
-// Both screens show the Roads section: Hide All, one check box per road category and "Campus Only". The exterior
-// screen also turns on the Buildings section (SetShowBuildingFilters): the campus / non-campus switches and the
-// building search with its floor-count filter and result list. The interior editor has no outside buildings to
-// filter, so it keeps the Roads section only.
+// Both screens show the road filters: Hide All, one check box per road category and "Campus Only". The exterior screen
+// turns on the site overview (SetShowBuildingFilters), in the style of the design team's page: "Choose a building" with a
+// search box and the list of buildings (the selected one highlighted), then two collapsible sections, Filters (floor count,
+// campus / non-campus, reset) and Roads, and a note. The interior editor has no outside buildings, so it keeps the road
+// check boxes only.
 UCLASS()
 class INNAVI_API UMapPanelWidget : public UDockPanelContentWidget
 {
 	GENERATED_BODY()
 
 public:
-	// Adds the Buildings section. Has to be called before the panel is first shown, because the content is built then.
+	// Turns on the site overview. Has to be called before the panel is first shown, because the content is built then.
 	void SetShowBuildingFilters(bool bShow) { bShowBuildingFilters = bShow; }
 
-	// The width the building controls are sized to (the dock group's width minus the panel padding).
+	// The width the controls are sized to (the dock group's width minus the panel padding).
 	void SetContentWidth(float Width);
 
 	// Brings the building controls in line with the filters the controller currently holds.
@@ -37,11 +40,19 @@ public:
 	// is available.
 	void ApplyDefaultsToController();
 
-	// Rebuilds the result list and the count line from the controller's current building results.
+	// Rebuilds the building list and the count line from the controller's current building results.
 	void RefreshBuildingFilterDisplay();
 
-	// Same, but only when the controller's results changed since the last time - cheap enough to call every tick.
+	// Same, but only when the results or the selected building changed since the last time - cheap enough to call every tick.
 	void RefreshBuildingFilterDisplayIfChanged();
+
+	// Tests.
+	int32 GetBuildingRowCountForTests() const { return BuildingRows.Num(); }
+	const TArray<UMapBuildingRowWidget*>& GetBuildingRowsForTests() const { return BuildingRows; }
+	FText GetBuildingCountTextForTests() const;
+	void SetBuildingSearchForTests(const FString& Text);
+	bool IsFiltersSectionOpenForTests() const { return bFiltersOpen; }
+	void SetSectionOpenForTests(bool bFilters, bool bOpen);
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -73,18 +84,31 @@ private:
 	UFUNCTION()
 	void HandleBuildingSearchChanged(const FText& Text);
 	UFUNCTION()
-	void HandleBuildingFloorFilterChanged(FString Item, ESelectInfo::Type Type);
-	UFUNCTION()
-	void HandleFilteredBuildingChanged(FString Item, ESelectInfo::Type Type);
-	UFUNCTION()
 	void OnResetBuildingFiltersClicked();
 	UFUNCTION()
-	UWidget* GenerateBuildingFilterItem(FString Item);
+	void OnFloorAnyClicked();
+	UFUNCTION()
+	void OnFloorOneClicked();
+	UFUNCTION()
+	void OnFloorMidClicked();
+	UFUNCTION()
+	void OnFloorTallClicked();
+	UFUNCTION()
+	void OnFiltersHeaderClicked();
+	UFUNCTION()
+	void OnRoadsHeaderClicked();
 
+	void SelectFloorOption(int32 Minimum, int32 Maximum);
+	void RefreshFloorChips();
 	void ApplyBuildingFilters();
-	void AddSectionHeader(class UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label);
+	void SetSectionOpen(bool bFilters, bool bOpen);
+	void HandleBuildingRowClicked(const FString& BuildingId);
+
+	// A header button that opens and closes the section under it; Body is the box the section's controls go into.
+	UVerticalBox* AddCollapsibleSection(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Title, UButton*& OutHeader, UTextBlock*& OutSign, USizeBox*& OutHeaderBox);
+	void AddRoadRows(UVerticalBox* Stack);
 	// A control inside a SizeBox whose width follows the panel.
-	class USizeBox* WrapInPanelWidth(UWidget* Control);
+	USizeBox* WrapInPanelWidth(UWidget* Control);
 
 	UPROPERTY()
 	UCheckBox* RoadHideAllCheckbox = nullptr;
@@ -110,18 +134,37 @@ private:
 	UPROPERTY()
 	UEditableTextBox* BuildingSearchBox = nullptr;
 	UPROPERTY()
-	UComboBoxString* BuildingFloorFilter = nullptr;
+	UScrollBox* BuildingList = nullptr;
 	UPROPERTY()
-	UComboBoxString* FilteredBuildingComboBox = nullptr;
+	TArray<UMapBuildingRowWidget*> BuildingRows;
 	UPROPERTY()
 	UTextBlock* BuildingFilterResultsText = nullptr;
 	UPROPERTY()
 	UButton* ResetBuildingFiltersButton = nullptr;
+	// The four floor-count choices (any, 1, 2-5, 6+), as a row of buttons.
+	UPROPERTY()
+	TArray<UButton*> FloorChips;
+	UPROPERTY()
+	UButton* FiltersHeader = nullptr;
+	UPROPERTY()
+	UTextBlock* FiltersSign = nullptr;
+	UPROPERTY()
+	UVerticalBox* FiltersBody = nullptr;
+	UPROPERTY()
+	UButton* RoadsHeader = nullptr;
+	UPROPERTY()
+	UTextBlock* RoadsSign = nullptr;
+	UPROPERTY()
+	UVerticalBox* RoadsBody = nullptr;
 
-	TMap<FString, FString> CachedBuildingOptions;
 	bool bShowBuildingFilters = false;
 	// True while the controls are being set from the controller, so their change events do not write back.
 	bool bUpdatingBuildingFilters = false;
+	bool bFiltersOpen = false;
+	bool bRoadsOpen = false;
+	int32 FloorMinimum = 0;
+	int32 FloorMaximum = 0;
 	uint64 DisplayedBuildingResultsRevision = MAX_uint64;
+	FString DisplayedSelectedBuildingId;
 	float ContentWidth = 220.f;
 };

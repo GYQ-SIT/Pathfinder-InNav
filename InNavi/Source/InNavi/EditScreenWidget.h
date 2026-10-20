@@ -54,6 +54,7 @@ public:
 	UWidget* FindScreenWidget(FName Name) const;
 	UAudioPanelWidget* GetAudioPanelForTests() const { return AudioPanelWidget; }
 	UDebugPanelWidget* GetDebugPanelForTests() const { return DebugPanelWidget; }
+	UMapPanelWidget* GetMapPanelForTests() const { return MapPanelWidget; }
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;

@@ -82,32 +82,31 @@ Hidden or shown via Window > Map. Only appears once a database (`.db`) has been 
 (roads/POIs/context buildings only come from that loading path - a plain
 `buildings.json` project has nothing for this panel to filter).
 
-**Roads** section:
+**Exterior screen: site overview.** The panel is laid out like the design team's "Site overview" page:
 
-- **Hide All** — hides every road at once, and visually unchecks the six category
+- **Choose a building** - a search box (building name or id) and the list of buildings that pass the filters, one row each
+  with its name and floor count, and a count ("29 / 29 editable buildings"). Clicking a row selects that building and
+  frames it with the camera; the selected building's row is highlighted in blue (also when it was picked in the 3D scene).
+  Buildings that do not match are hidden and cannot be clicked. The list scrolls inside the panel when it is long.
+- **FILTERS** (collapsed; click the header) - **Floors**: Any, 1 floor, 2-5 or 6+. **Show**: **Campus** shows/hides the
+  real, university-tagged (or adjacency-linked, see below) campus buildings - the ones you can enter and edit - and
+  **Non-Campus** shows/hides every other building loaded from the database as flat gray placeholder blocks (context only,
+  not editable; unchecked by default). **Reset Building Filters** shows everything again. The filters are kept when you
+  enter a building and come back to the exterior.
+- **ROADS** (collapsed) - the road filters below.
+- A note that buildings outside the campus are context only.
+
+**Road filters** (the whole panel in the interior editor, which has no outside buildings):
+
+- **Hide All** - hides every road at once, and visually unchecks the six category
   boxes below to match. Unchecking it again shows everything (categories reset to
   checked).
 - **Primary** / **Secondary** / **Residential/Tertiary** / **Cycleway** /
-  **Footway/Path** / **Other** — one checkbox per road category (bucketed from OSM's
+  **Footway/Path** / **Other** - one checkbox per road category (bucketed from OSM's
   own finer `highway=` tags); toggling one shows/hides just that category's roads.
-- **Campus Only** — a region/distance filter (not a category): hides every road *and*
+- **Campus Only** - a region/distance filter (not a category): hides every road *and*
   POI farther than a padded radius from the loaded campus buildings' own extent.
   Checked by default.
-
-**Buildings** section (exterior screen's Map panel only - the interior editor's own
-copy of this panel is Roads-only, see below):
-
-- **Campus** — shows/hides the real, university-tagged (or adjacency-linked, see
-  below) campus buildings - the ones you can actually enter and edit the interior of.
-- **Non-Campus** — shows/hides every other building loaded from the database, as
-  flat gray placeholder blocks (visual context for the surrounding area only - not
-  interior-editable, not clickable to enter). Unchecked by default.
-
-**Building filters** (below the Buildings checkboxes): a search box (campus building name
-or id), a floor-count filter (any, 1 floor, 2-5, 6+), a results list and a count. Buildings
-that do not match are hidden and cannot be clicked; choosing a result selects that building.
-**Reset Building Filters** shows everything again. The filters are kept when you enter a
-building and come back to the exterior.
 
 **Why some non-`university`-tagged buildings are still enterable:** loading a
 database doesn't just take the buildings tagged `university` - it also pulls in any

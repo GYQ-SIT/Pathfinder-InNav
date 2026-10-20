@@ -1,6 +1,8 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "NavigationSearchUtils.h"
+#include "MapBuildingRowWidget.h"
+#include "MapPanelWidget.h"
 #include "UiTestFixture.h"
 #include "NavigationPanelWidget.h"
 #include "BuildingGenerator.h"
@@ -184,21 +186,21 @@ bool FNavigationSearchControlsTest::RunTest(const FString& Parameters)
 	UEditScreenWidget* Editor = NewObject<UEditScreenWidget>();
 	Editor->Initialize(); Editor->TakeWidget(); Editor->SetOwningPlayer(Controller);
 	UEditableTextBox* BuildingSearch = Cast<UEditableTextBox>(Editor->FindScreenWidget(TEXT("Txt_BuildingSearch")));
-	UComboBoxString* BuildingResults = Cast<UComboBoxString>(Editor->FindScreenWidget(TEXT("Cbx_FilteredBuildings")));
+	UMapPanelWidget* MapPanel = Editor->GetMapPanelForTests();
 	UButton* Reset = Cast<UButton>(Editor->FindScreenWidget(TEXT("Btn_ResetBuildingFilters")));
-	if (!TestNotNull(TEXT("Building search exists"), BuildingSearch) || !TestNotNull(TEXT("Building results exist"), BuildingResults)
+	if (!TestNotNull(TEXT("Building search exists"), BuildingSearch) || !TestNotNull(TEXT("Map panel exists"), MapPanel)
 		|| !TestNotNull(TEXT("Reset filters exists"), Reset)) return false;
 	TypeText(BuildingSearch, TEXT("E1"));
-	TestTrue(TEXT("Building search populates results"), BuildingResults->GetOptionCount() > 0);
-	for (const auto& Pair : Controller->GetFilteredBuildingOptions())
+	TestTrue(TEXT("Building search populates the list"), MapPanel->GetBuildingRowCountForTests() > 0);
+	for (UMapBuildingRowWidget* Row : MapPanel->GetBuildingRowsForTests())
 	{
-		if (Pair.Value == TEXT("E1")) BuildingResults->OnSelectionChanged.Broadcast(Pair.Key, ESelectInfo::OnMouseClick);
+		if (Row->GetBuildingId() == TEXT("E1")) { Row->ClickForTests(); break; }
 	}
-	TestEqual(TEXT("Result selection selects its stable building ID"), Controller->GetSelectedBuildingId(), FString(TEXT("E1")));
+	TestEqual(TEXT("Clicking a row selects its stable building ID"), Controller->GetSelectedBuildingId(), FString(TEXT("E1")));
 	TypeText(BuildingSearch, TEXT("missing-building-756"));
-	TestTrue(TEXT("No results disables choices and clears hidden selection"), !BuildingResults->GetIsEnabled() && Controller->GetSelectedBuildingId().IsEmpty());
+	TestTrue(TEXT("No results empties the list and clears hidden selection"), MapPanel->GetBuildingRowCountForTests() == 0 && Controller->GetSelectedBuildingId().IsEmpty());
 	Reset->OnClicked.Broadcast();
-	TestEqual(TEXT("Reset restores all editable buildings"), BuildingResults->GetOptionCount(), Controller->GetEditableBuildingCount());
+	TestEqual(TEXT("Reset restores all editable buildings"), MapPanel->GetBuildingRowCountForTests(), Controller->GetEditableBuildingCount());
 	TypeText(BuildingSearch, TEXT("E2"));
 	Controller->RestoreExteriorCameraView();
 	TestTrue(TEXT("Returning to exterior retains filters and excluded-building visibility"),

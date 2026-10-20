@@ -2916,6 +2916,27 @@ bool ANavPlayerController::AreCampusBuildingsVisible() const { return !Generator
 int32 ANavPlayerController::GetEditableBuildingCount() const { return Generator ? Generator->GetBuildingCount() : 0; }
 uint64 ANavPlayerController::GetBuildingResultsRevision() const { return Generator ? Generator->GetBuildingResultsRevision() : 0; }
 
+TArray<ANavPlayerController::FBuildingListItem> ANavPlayerController::GetFilteredBuildingList() const
+{
+	TArray<FBuildingListItem> Items;
+	if (Generator)
+	{
+		for (const APolyBuilding* Building : Generator->GetFilteredBuildings())
+		{
+			if (IsValid(Building))
+			{
+				Items.Add({ Building->BuildingId, Building->BuildingName, Building->GetFloorCount() });
+			}
+		}
+	}
+	Items.Sort([](const FBuildingListItem& A, const FBuildingListItem& B)
+	{
+		const int32 ByName = A.Name.Compare(B.Name, ESearchCase::IgnoreCase);
+		return ByName != 0 ? ByName < 0 : A.Id < B.Id;
+	});
+	return Items;
+}
+
 const TMap<FString, FString>& ANavPlayerController::GetFilteredBuildingOptions() const
 {
 	static const TMap<FString, FString> Empty;
