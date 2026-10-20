@@ -29,14 +29,19 @@ public:
 	// Turns on the site overview. Has to be called before the panel is first shown, because the content is built then.
 	void SetShowBuildingFilters(bool bShow) { bShowBuildingFilters = bShow; }
 
+	// Whether the roads start shown (the exterior screen) or hidden (the interior editor, where they are not wanted). Sets how
+	// the check boxes start and what ApplyDefaultsToController makes the controller do. Has to be called before the panel is
+	// first shown.
+	void SetRoadsVisibleByDefault(bool bVisible) { bRoadsVisibleByDefault = bVisible; }
+
 	// The width the controls are sized to (the dock group's width minus the panel padding).
 	void SetContentWidth(float Width);
 
 	// Brings the building controls in line with the filters the controller currently holds.
 	void Refresh();
 
-	// Puts the controller in the state the check boxes start in: roads and POIs limited to the campus, buildings
-	// outside the campus hidden. The check boxes alone do not do that, because they are created before a controller
+	// Puts the controller in the state the check boxes start in: roads shown or hidden (see SetRoadsVisibleByDefault), roads
+	// and POIs limited to the campus, buildings outside the campus hidden. The check boxes alone do not do that, because they are created before a controller
 	// is available.
 	void ApplyDefaultsToController();
 
@@ -50,6 +55,7 @@ public:
 	int32 GetBuildingRowCountForTests() const { return BuildingRows.Num(); }
 	const TArray<UMapBuildingRowWidget*>& GetBuildingRowsForTests() const { return BuildingRows; }
 	FText GetBuildingCountTextForTests() const;
+	bool AreRoadsCheckedForTests() const;
 	void SetBuildingSearchForTests(const FString& Text);
 	bool IsFiltersSectionOpenForTests() const { return bFiltersOpen; }
 	void SetSectionOpenForTests(bool bFilters, bool bOpen);
@@ -158,6 +164,7 @@ private:
 	UVerticalBox* RoadsBody = nullptr;
 
 	bool bShowBuildingFilters = false;
+	bool bRoadsVisibleByDefault = true;
 	// True while the controls are being set from the controller, so their change events do not write back.
 	bool bUpdatingBuildingFilters = false;
 	bool bFiltersOpen = false;

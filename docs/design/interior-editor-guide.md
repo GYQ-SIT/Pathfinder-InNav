@@ -290,9 +290,12 @@ audio still playing.
 
 ### Map panel
 
-Same Roads section as the exterior screen's own Map panel (Hide All, the six road
-categories, Campus Only) - see its description under **Exterior edit screen** above.
-No Buildings section here - campus/non-campus building visibility isn't something you'd
+Hidden by default here (Window > Map shows it; it comes back above the Toolbar). The roads are
+hidden by default too while you edit a building: opening the interior editor turns them off, and the
+panel's check boxes start that way (Hide All checked). Going back to the exterior screen turns them
+on again - there they start shown. Same road filters as the exterior screen's own Map panel (Hide All,
+the six road categories, Campus Only) - see its description under **Exterior edit screen** above. No
+site overview or building filters here - campus/non-campus building visibility isn't something you'd
 toggle from inside a building's own interior.
 
 ## 3D preview mode

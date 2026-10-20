@@ -50,7 +50,7 @@ namespace InteriorDock
 	{
 		bool IsHiddenByDefault(FName Panel)
 		{
-			return Panel == Navigation || Panel == Audio || Panel == Debug;
+			return Panel == Navigation || Panel == Audio || Panel == Debug || Panel == Map;
 		}
 
 		void SetRatios(const TSharedPtr<FDockNode>& Root, const TArray<float>& Ratios)
@@ -70,6 +70,9 @@ namespace InteriorDock
 		L.DockPanel(Toolbar, Map, EDockDropZone::Bottom);
 		SetRatios(L.GetAreaRoot(EDockSide::Left), { 0.29f, 0.71f });
 		L.SetAreaExtent(EDockSide::Left, 250.f);
+		// Hidden by default (roads are not wanted while editing a building), but it keeps its place above the Toolbar for when the
+		// Window menu shows it.
+		L.HidePanel(Map);
 
 		L.DockPanelToEdge(Floor, EDockSide::Right);
 		L.DockPanel(Layers, Floor, EDockDropZone::Bottom);

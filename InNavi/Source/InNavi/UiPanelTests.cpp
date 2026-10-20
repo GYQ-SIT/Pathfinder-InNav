@@ -127,7 +127,7 @@ bool FUiMapPanelTest::RunTest(const FString& Parameters)
 	UEditScreenWidget* Exterior = NewObject<UEditScreenWidget>();
 	Exterior->Initialize(); Exterior->TakeWidget(); Exterior->SetOwningPlayer(Controller);
 
-	auto CheckRoadSection = [this](const TCHAR* Screen, auto* Widget)
+	auto CheckRoadSection = [this](const TCHAR* Screen, auto* Widget, bool bShownByDefault)
 	{
 		UCheckBox* HideAll = Cast<UCheckBox>(Widget->FindScreenWidget(TEXT("Chk_RoadHideAll")));
 		UCheckBox* Primary = Cast<UCheckBox>(Widget->FindScreenWidget(TEXT("Chk_RoadPrimary")));
@@ -137,7 +137,9 @@ bool FUiMapPanelTest::RunTest(const FString& Parameters)
 		{
 			return;
 		}
-		TestTrue(*FString::Printf(TEXT("%s: Primary starts shown"), Screen), Primary->IsChecked());
+		// The exterior screen starts with the roads shown; the interior editor with them hidden (Hide All checked).
+		TestEqual(*FString::Printf(TEXT("%s: Primary starts %s"), Screen, bShownByDefault ? TEXT("shown") : TEXT("hidden")), Primary->IsChecked(), bShownByDefault);
+		TestEqual(*FString::Printf(TEXT("%s: Hide All starts %s"), Screen, bShownByDefault ? TEXT("unchecked") : TEXT("checked")), HideAll->IsChecked(), !bShownByDefault);
 		TestTrue(*FString::Printf(TEXT("%s: Campus Only starts on"), Screen), CampusOnly->IsChecked());
 		// The master switch drags the category check boxes along with it, both ways.
 		HideAll->SetIsChecked(true);
@@ -147,8 +149,8 @@ bool FUiMapPanelTest::RunTest(const FString& Parameters)
 		HideAll->OnCheckStateChanged.Broadcast(false);
 		TestTrue(*FString::Printf(TEXT("%s: unticking Hide All brings them back"), Screen), Primary->IsChecked());
 	};
-	CheckRoadSection(TEXT("interior"), Interior);
-	CheckRoadSection(TEXT("exterior"), Exterior);
+	CheckRoadSection(TEXT("interior"), Interior, false);
+	CheckRoadSection(TEXT("exterior"), Exterior, true);
 
 	// Only the exterior screen has outside buildings to filter.
 	TestNull(TEXT("interior: no building search"), Interior->FindScreenWidget(TEXT("Txt_BuildingSearch")));

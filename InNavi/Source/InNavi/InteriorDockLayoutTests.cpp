@@ -25,22 +25,26 @@ bool FInteriorDockDefaultLayoutTest::RunTest(const FString& Parameters)
 	FString Err;
 	TestTrue(*FString::Printf(TEXT("default layout is valid (%s)"), *Err), L.Validate(Err));
 
-	for (const FName Panel : { Map, Toolbar, Floor, Layers, Properties })
+	for (const FName Panel : { Toolbar, Floor, Layers, Properties })
 	{
 		TestTrue(*FString::Printf(TEXT("%s is visible by default"), *Panel.ToString()), L.ContainsPanel(Panel));
 	}
-	for (const FName Panel : { Navigation, InteriorDock::Audio, Debug })
+	for (const FName Panel : { Navigation, InteriorDock::Audio, Debug, Map })
 	{
 		TestTrue(*FString::Printf(TEXT("%s is hidden by default"), *Panel.ToString()), L.IsHidden(Panel));
 	}
 
+	// Map is hidden, so the left area holds the Toolbar alone; showing Map puts it back above the Toolbar.
+	const TSharedPtr<FDockNode> LeftBefore = L.GetAreaRoot(EDockSide::Left);
+	TestTrue(TEXT("left: the Toolbar alone while Map is hidden"), LeftBefore.IsValid() && !LeftBefore->IsSplit() && LeftBefore->Tabs.Contains(Toolbar));
+	TestTrue(TEXT("show Map"), L.ShowPanel(Map, DefaultSideFor(Map)));
 	const TSharedPtr<FDockNode> Left = L.GetAreaRoot(EDockSide::Left);
-	TestTrue(TEXT("left: Map over Toolbar"), Left.IsValid() && Left->IsSplit() && Left->Orientation == EDockOrientation::Vertical && Left->Children.Num() == 2);
+	TestTrue(TEXT("left: Map over Toolbar once shown"), Left.IsValid() && Left->IsSplit() && Left->Orientation == EDockOrientation::Vertical && Left->Children.Num() == 2);
 	if (Left.IsValid() && Left->IsSplit() && Left->Children.Num() == 2)
 	{
 		TestTrue(TEXT("Map first"), Left->Children[0]->Tabs.Contains(Map));
-		TestNearlyEqual(TEXT("Map share"), Left->Ratios[0], 0.29f, 1e-3f);
 	}
+	L.HidePanel(Map);
 	const TSharedPtr<FDockNode> Right = L.GetAreaRoot(EDockSide::Right);
 	TestTrue(TEXT("right: three stacked groups"), Right.IsValid() && Right->IsSplit() && Right->Children.Num() == 3);
 	TestFalse(TEXT("no top area"), L.GetAreaRoot(EDockSide::Top).IsValid());
@@ -128,8 +132,8 @@ bool FDockUMGWrapperTest::RunTest(const FString& Parameters)
 
 	FArrangedChildren Arranged(EVisibility::Visible);
 	Slate->ArrangeChildren(FGeometry::MakeRoot(FVector2f(1920.f, 1080.f), FSlateLayoutTransform()), Arranged);
-	// left: 2 groups + splitter, right: 3 groups + 2 splitters, plus the two edge handles
-	TestEqual(TEXT("default layout arranges 5 groups, 3 splitters and 2 edge handles"), Arranged.Num(), 10);
+	// left: 1 group (Map is hidden), right: 3 groups + 2 splitters, plus the two edge handles
+	TestEqual(TEXT("default layout arranges 4 groups, 2 splitters and 2 edge handles"), Arranged.Num(), 8);
 
 	TestTrue(TEXT("Floor is shown"), Wrapper->IsPanelShown(Floor));
 	TestFalse(TEXT("Audio is not"), Wrapper->IsPanelShown(InteriorDock::Audio));
@@ -139,7 +143,7 @@ bool FDockUMGWrapperTest::RunTest(const FString& Parameters)
 	Wrapper->NotifyLayoutChanged();
 	Arranged.Empty();
 	Slate->ArrangeChildren(FGeometry::MakeRoot(FVector2f(1920.f, 1080.f), FSlateLayoutTransform()), Arranged);
-	TestEqual(TEXT("showing Audio adds the bottom group and its edge handle"), Arranged.Num(), 12);
+	TestEqual(TEXT("showing Audio adds the bottom group and its edge handle"), Arranged.Num(), 10);
 
 	// A late registration also works.
 	UTextBlock* Late = NewObject<UTextBlock>(GetTransientPackage());
@@ -177,7 +181,7 @@ bool FInteriorScreenDockSmokeTest::RunTest(const FString& Parameters)
 	TestTrue(*FString::Printf(TEXT("layout valid (%s)"), *Err), L->Validate(Err));
 	for (const FName Panel : AllPanels())
 	{
-		const bool bShownByDefault = Panel == Map || Panel == Toolbar || Panel == Floor || Panel == Layers || Panel == Properties;
+		const bool bShownByDefault = Panel == Toolbar || Panel == Floor || Panel == Layers || Panel == Properties;
 		TestEqual(*FString::Printf(TEXT("%s shown state"), *Panel.ToString()), Dock->IsPanelShown(Panel), bShownByDefault);
 	}
 

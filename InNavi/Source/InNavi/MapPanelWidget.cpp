@@ -67,19 +67,20 @@ UVerticalBox* UMapPanelWidget::AddCollapsibleSection(UVerticalBox* Stack, const 
 
 void UMapPanelWidget::AddRoadRows(UVerticalBox* Stack)
 {
-	RoadHideAllCheckbox = AddCheckRow(Stack, TEXT("Chk_RoadHideAll"), TEXT("Hide All"), false, MapRowBottomPadding);
+	// With the roads hidden by default, Hide All starts checked and the categories unchecked (as Hide All leaves them).
+	RoadHideAllCheckbox = AddCheckRow(Stack, TEXT("Chk_RoadHideAll"), TEXT("Hide All"), !bRoadsVisibleByDefault, MapRowBottomPadding);
 	RoadHideAllCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UMapPanelWidget::OnRoadHideAllCheckChanged);
-	RoadPrimaryCheckbox = AddCheckRow(Stack, TEXT("Chk_RoadPrimary"), TEXT("Primary"), true, MapRowBottomPadding);
+	RoadPrimaryCheckbox = AddCheckRow(Stack, TEXT("Chk_RoadPrimary"), TEXT("Primary"), bRoadsVisibleByDefault, MapRowBottomPadding);
 	RoadPrimaryCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UMapPanelWidget::OnRoadPrimaryCheckChanged);
-	RoadSecondaryCheckbox = AddCheckRow(Stack, TEXT("Chk_RoadSecondary"), TEXT("Secondary"), true, MapRowBottomPadding);
+	RoadSecondaryCheckbox = AddCheckRow(Stack, TEXT("Chk_RoadSecondary"), TEXT("Secondary"), bRoadsVisibleByDefault, MapRowBottomPadding);
 	RoadSecondaryCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UMapPanelWidget::OnRoadSecondaryCheckChanged);
-	RoadResidentialCheckbox = AddCheckRow(Stack, TEXT("Chk_RoadResidential"), TEXT("Residential/Tertiary"), true, MapRowBottomPadding);
+	RoadResidentialCheckbox = AddCheckRow(Stack, TEXT("Chk_RoadResidential"), TEXT("Residential/Tertiary"), bRoadsVisibleByDefault, MapRowBottomPadding);
 	RoadResidentialCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UMapPanelWidget::OnRoadResidentialCheckChanged);
-	RoadCyclewayCheckbox = AddCheckRow(Stack, TEXT("Chk_RoadCycleway"), TEXT("Cycleway"), true, MapRowBottomPadding);
+	RoadCyclewayCheckbox = AddCheckRow(Stack, TEXT("Chk_RoadCycleway"), TEXT("Cycleway"), bRoadsVisibleByDefault, MapRowBottomPadding);
 	RoadCyclewayCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UMapPanelWidget::OnRoadCyclewayCheckChanged);
-	RoadFootwayCheckbox = AddCheckRow(Stack, TEXT("Chk_RoadFootway"), TEXT("Footway/Path"), true, MapRowBottomPadding);
+	RoadFootwayCheckbox = AddCheckRow(Stack, TEXT("Chk_RoadFootway"), TEXT("Footway/Path"), bRoadsVisibleByDefault, MapRowBottomPadding);
 	RoadFootwayCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UMapPanelWidget::OnRoadFootwayCheckChanged);
-	RoadOtherCheckbox = AddCheckRow(Stack, TEXT("Chk_RoadOther"), TEXT("Other"), true, MapRowBottomPadding);
+	RoadOtherCheckbox = AddCheckRow(Stack, TEXT("Chk_RoadOther"), TEXT("Other"), bRoadsVisibleByDefault, MapRowBottomPadding);
 	RoadOtherCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UMapPanelWidget::OnRoadOtherCheckChanged);
 	// The region limit only ever affects roads and POIs, so it is one more row of the road filters. It starts checked;
 	// ApplyDefaultsToController makes the controller agree.
@@ -273,6 +274,7 @@ void UMapPanelWidget::ApplyDefaultsToController()
 	if (ANavPlayerController* PC = GetController())
 	{
 		// By the time the screen is constructed any roads and POIs to filter have already been loaded.
+		PC->SetAllRoadsVisible(bRoadsVisibleByDefault);
 		PC->SetRoadsAndPOIsWithinCampusOnly(true);
 		if (bShowBuildingFilters)
 		{
@@ -478,6 +480,11 @@ void UMapPanelWidget::RefreshBuildingFilterDisplayIfChanged()
 	{
 		RefreshBuildingFilterDisplay();
 	}
+}
+
+bool UMapPanelWidget::AreRoadsCheckedForTests() const
+{
+	return RoadPrimaryCheckbox && RoadPrimaryCheckbox->IsChecked();
 }
 
 FText UMapPanelWidget::GetBuildingCountTextForTests() const

@@ -635,7 +635,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		WindowAudioCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowAudioCheckChanged);
 		WindowMapCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowMap"), TEXT("Map"));
 		// Starts checked, matching UEditScreenWidget's own "Map" panel default.
-		WindowMapCheckbox->SetIsChecked(true);
+		WindowMapCheckbox->SetIsChecked(false); // the Map panel starts hidden (RefreshWindowMenuChecks follows the real state)
 		WindowMapCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowMapCheckChanged);
 		WindowDebugCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowDebug"), TEXT("Debug"));
 		WindowDebugCheckbox->SetIsChecked(false);
@@ -1246,6 +1246,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// to filter. Starts shown.
 		MapPanelWidget = CreateWidget<UMapPanelWidget>(this, UMapPanelWidget::StaticClass());
 		MapPanelWidget->SetOwnerScreen(this);
+		// The interior editor does not want roads in the way; the exterior screen turns them back on.
+		MapPanelWidget->SetRoadsVisibleByDefault(false);
 		DockHost->RegisterPanel(FName(GetDockPanelName(EDockPanelId::Map)), FText::FromString(GetDockPanelName(EDockPanelId::Map)), MapPanelWidget);
 
 		// -- Debug panel: the shared one (DebugPanelWidget.h). The screen supplies the lines that are its own.
@@ -1371,6 +1373,11 @@ void UInteriorScreenWidget::NativeConstruct()
 	if (DebugPanelWidget)
 	{
 		DebugPanelWidget->BindToController();
+	}
+	if (MapPanelWidget)
+	{
+		// Roads off while editing a building; the check boxes in the (hidden) Map panel agree.
+		MapPanelWidget->ApplyDefaultsToController();
 	}
 	RefreshModeButtonHighlights();
 	// Syncs Properties' placeholder title/visibility against PC's actual current selection state
