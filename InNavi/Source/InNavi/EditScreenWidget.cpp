@@ -13,6 +13,7 @@
 #include "StartScreenWidget.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
+#include "StartScreenStyle.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
@@ -51,8 +52,8 @@ namespace
 	const FLinearColor EditTextBoxBackgroundColor(0.149f, 0.149f, 0.169f, 1.f);
 	const FLinearColor EditTextBoxTextColor(1.f, 1.f, 1.f, 1.f);
 	constexpr float EditMenuBarHeight = 40.f;
-	constexpr float EditMenuButtonWidth = 50.f;
-	constexpr float EditCameraMenuButtonWidth = 72.f;
+	constexpr float EditMenuButtonWidth = 72.f;
+	constexpr float EditCameraMenuButtonWidth = 84.f;
 	constexpr float EditMenuBarLeftMargin = 10.f;
 
 }
@@ -101,7 +102,7 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		// use for. Enter Interior and Back used to live in a standalone bottom-right button stack;
 		// they now live in this bar instead, Enter Interior immediately left of Back.
 		UBorder* MenuBarBackground = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_MenuBar"));
-		MenuBarBackground->SetBrushColor(EditMenuBarColor);
+		MenuBarBackground->SetBrushColor(StartStyle::Rgb(16, 32, 50));
 		MenuBarBackground->SetPadding(FMargin(EditMenuBarLeftMargin, 0.f, 0.f, 0.f));
 		UCanvasPanelSlot* MenuBarSlot = Canvas->AddChildToCanvas(MenuBarBackground);
 		MenuBarSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
@@ -115,7 +116,8 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		auto AddMenuButton = [this, MenuBarRow](const TCHAR* Name, const TCHAR* Label) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.f)); // transparent
+			Button->SetStyle(StartStyle::MenuButton());
+			Button->SetBackgroundColor(FLinearColor::White);
 			Button->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::PlayButtonClickSound);
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 			Text->SetText(FText::FromString(FString(Label)));
@@ -138,7 +140,8 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		// Save icon button, left of File - see UInteriorScreenWidget::OnSaveClicked's own comment
 		// (mirrors it exactly, just without that class's MakeToolTipWidget helper).
 		SaveButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Save"));
-		SaveButton->SetBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
+		SaveButton->SetStyle(StartStyle::MenuButton());
+		SaveButton->SetBackgroundColor(FLinearColor::White);
 		SaveButton->SetToolTipText(FText::FromString(TEXT("Save [Ctrl+S]")));
 		SaveButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnSaveClicked);
 		SaveButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::PlayButtonClickSound);
@@ -175,7 +178,8 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		auto AddBarButton = [this, MenuBarRow](const TCHAR* Name, const TCHAR* Label, float Width) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+			Button->SetStyle(StartStyle::SecondaryButton());
+			Button->SetBackgroundColor(FLinearColor::White);
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
 			Text->SetText(FText::FromString(FString(Label)));
 			Text->SetJustification(ETextJustify::Center);
@@ -214,8 +218,9 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		{
 			UVerticalBox* Stack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), FName(FString(Name) + TEXT("Stack")));
 			UBorder* Dropdown = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(Name));
-			Dropdown->SetBrushColor(EditMenuBarColor);
-			Dropdown->SetPadding(FMargin(4.f));
+			Dropdown->SetBrush(StartStyle::MenuPanel());
+			Dropdown->SetBrushColor(FLinearColor::White);
+			Dropdown->SetPadding(FMargin(6.f));
 			Dropdown->SetContent(Stack);
 			Dropdown->SetVisibility(ESlateVisibility::Collapsed);
 			UCanvasPanelSlot* DropdownSlot = Canvas->AddChildToCanvas(Dropdown);
@@ -230,7 +235,8 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		auto AddDropdownButtonRow = [this](UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+			Button->SetStyle(StartStyle::MenuRowButton());
+			Button->SetBackgroundColor(FLinearColor::White);
 			Button->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::PlayButtonClickSound);
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 			Text->SetText(FText::FromString(FString(Label)));
@@ -240,10 +246,13 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			USizeBox* RowSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 			RowSizeBox->SetWidthOverride(120.f);
 			RowSizeBox->SetMinDesiredHeight(24.f);
-			RowSizeBox->SetContent(Text);
+			if (USizeBoxSlot* RowTextSlot = Cast<USizeBoxSlot>(RowSizeBox->SetContent(Text)))
+			{
+				RowTextSlot->SetPadding(FMargin(10.f, 4.f));
+			}
 			Button->SetContent(RowSizeBox);
 			UVerticalBoxSlot* RowSlot = Stack->AddChildToVerticalBox(Button);
-			RowSlot->SetPadding(FMargin(2.f));
+			RowSlot->SetPadding(FMargin(2.f, 3.f));
 			return Button;
 		};
 
@@ -252,6 +261,7 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
 			UCheckBox* CheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), FName(Name));
 			CheckBox->SetIsChecked(true);
+			StartStyle::DarkCheckBox(CheckBox);
 			UHorizontalBoxSlot* CheckSlot = Row->AddChildToHorizontalBox(CheckBox);
 			CheckSlot->SetVerticalAlignment(VAlign_Center);
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
@@ -327,6 +337,7 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		CameraSpeedTextBox->SetToolTipText(FText::FromString(TEXT("Camera Speed (type a value, then press Enter or click away)")));
 		CameraSpeedTextBox->OnTextCommitted.AddUniqueDynamic(this, &UEditScreenWidget::OnCameraSpeedTextCommitted);
 		ApplyStandardFont(CameraSpeedTextBox);
+		CameraSpeedTextBox->SetWidgetStyle(StartStyle::Field(13.f));
 		USizeBox* CameraSpeedSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 		CameraSpeedSizeBox->SetWidthOverride(120.f);
 		CameraSpeedSizeBox->SetContent(CameraSpeedTextBox);

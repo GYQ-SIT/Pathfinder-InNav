@@ -1,6 +1,7 @@
 #include "AudioPanelWidget.h"
 
 #include "AudioFileRowWidget.h"
+#include "StartScreenStyle.h"
 #include "NavPlayerController.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -35,7 +36,8 @@ TSharedRef<SWidget> UAudioPanelWidget::RebuildWidget()
 		Root->SetContent(Stack);
 
 		StopAllButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_AudioStopAll"));
-		StopAllButton->SetBackgroundColor(FLinearColor(0.75f, 0.2f, 0.2f, 1.f));
+		StopAllButton->SetStyle(StartStyle::Button(StartStyle::Rgb(150, 40, 48), StartStyle::Rgb(180, 52, 62), StartStyle::Rgb(120, 32, 40), StartStyle::Rgb(180, 52, 62)));
+		StopAllButton->SetBackgroundColor(FLinearColor::White);
 		StopAllButton->OnClicked.AddUniqueDynamic(this, &UAudioPanelWidget::OnStopAllClicked);
 		StopAllButton->OnClicked.AddUniqueDynamic(this, &UAudioPanelWidget::PlayButtonClickSound);
 		UTextBlock* StopAllText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_AudioStopAll"));
@@ -75,6 +77,7 @@ TSharedRef<SWidget> UAudioPanelWidget::RebuildWidget()
 		VolumeSlider->SetMinValue(0.f);
 		VolumeSlider->SetMaxValue(1.f);
 		VolumeSlider->SetValue(1.f);
+		StartStyle::DarkSlider(VolumeSlider);
 		VolumeSlider->OnValueChanged.AddUniqueDynamic(this, &UAudioPanelWidget::OnVolumeChanged);
 		USizeBox* VolumeSliderSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 		VolumeSliderSize->SetWidthOverride(FMath::Max(60.f, ContentWidth - 60.f));

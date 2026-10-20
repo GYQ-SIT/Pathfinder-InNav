@@ -1,5 +1,6 @@
 #include "DockHostWidget.h"
 
+#include "StartScreenStyle.h"
 #include "Brushes/SlateColorBrush.h"
 #include "Fonts/FontMeasure.h"
 #include "Framework/Application/SlateApplication.h"
@@ -18,17 +19,19 @@ namespace
 {
 	const FSlateColorBrush WhiteBrush(FLinearColor::White);
 
-	const FLinearColor FrameColor(0.04f, 0.04f, 0.05f, 0.97f);
-	const FLinearColor ContentColor(0.11f, 0.11f, 0.12f, 0.97f);
-	const FLinearColor TabBarColor(0.07f, 0.07f, 0.08f, 1.f);
-	const FLinearColor TabInactiveColor(0.12f, 0.12f, 0.13f, 1.f);
-	const FLinearColor TabHoverColor(0.18f, 0.18f, 0.20f, 1.f);
-	const FLinearColor TabActiveColor(0.21f, 0.21f, 0.24f, 1.f);
-	const FLinearColor AccentColor(0.25f, 0.55f, 1.f, 1.f);
-	const FLinearColor TextColor(0.88f, 0.88f, 0.9f, 1.f);
-	const FLinearColor CloseIdleColor(0.55f, 0.55f, 0.58f, 1.f);
-	const FLinearColor SplitterIdleColor(0.03f, 0.03f, 0.035f, 0.9f);
-	const FLinearColor SplitterHoverColor(0.25f, 0.55f, 1.f, 0.7f);
+	// The page's dark blues (see StartScreenStyle.h).
+	using StartStyle::Rgb;
+	const FLinearColor FrameColor = Rgb(10, 20, 34, 247);
+	const FLinearColor ContentColor = Rgb(17, 31, 50, 247);
+	const FLinearColor TabBarColor = Rgb(12, 24, 40);
+	const FLinearColor TabInactiveColor = Rgb(20, 34, 54);
+	const FLinearColor TabHoverColor = Rgb(31, 51, 80);
+	const FLinearColor TabActiveColor = Rgb(27, 56, 100);
+	const FLinearColor AccentColor = Rgb(66, 150, 255);
+	const FLinearColor TextColor = Rgb(226, 238, 252);
+	const FLinearColor CloseIdleColor = Rgb(130, 150, 178);
+	const FLinearColor SplitterIdleColor = Rgb(12, 22, 36, 230);
+	const FLinearColor SplitterHoverColor = Rgb(66, 150, 255, 180);
 
 	constexpr float CloseButtonWidth = 18.f;
 	// A floating window's frame widget reaches this far outside the window; that ring is the resize handle.
@@ -36,8 +39,8 @@ namespace
 	constexpr float FloatCornerSize = 14.f;
 
 	const FLinearColor FloatShadowColor(0.f, 0.f, 0.f, 0.30f);
-	const FLinearColor FloatGripColor(0.17f, 0.17f, 0.20f, 1.f);
-	const FLinearColor FloatGripDotColor(0.5f, 0.5f, 0.55f, 1.f);
+	const FLinearColor FloatGripColor = Rgb(31, 51, 80);
+	const FLinearColor FloatGripDotColor = Rgb(130, 150, 178);
 
 	EMouseCursor::Type CursorForFloatEdges(uint8 Edges)
 	{
@@ -1413,7 +1416,7 @@ int32 SDockHost::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeomet
 	const FVector2f ChipSize(TextSize.X + 16.f, TextSize.Y + 8.f);
 	const FVector2f ChipPos((float)Drag.CurrentLocal.X + 14.f, (float)Drag.CurrentLocal.Y + 14.f);
 	FSlateDrawElement::MakeBox(OutDrawElements, Layer + 2, AllottedGeometry.ToPaintGeometry(ChipSize, FSlateLayoutTransform(ChipPos)), &WhiteBrush,
-		ESlateDrawEffect::None, FLinearColor(0.1f, 0.1f, 0.12f, 0.92f));
+		ESlateDrawEffect::None, Rgb(17, 31, 50, 235));
 	FSlateDrawElement::MakeText(OutDrawElements, Layer + 3,
 		AllottedGeometry.ToPaintGeometry(TextSize, FSlateLayoutTransform(FVector2f(ChipPos.X + 8.f, ChipPos.Y + 4.f))),
 		Title, Font, ESlateDrawEffect::None, TextColor);

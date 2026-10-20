@@ -2,7 +2,9 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/WidgetTree.h"
+#include "Components/CheckBox.h"
 #include "Components/ComboBoxString.h"
+#include "Components/Slider.h"
 #include "Components/TextBlock.h"
 #include "Styling/SlateBrush.h"
 #include "Styling/SlateTypes.h"
@@ -81,6 +83,13 @@ namespace StartStyle
 		return Button(Rgb(27, 41, 63), Rgb(38, 56, 84), Rgb(22, 34, 54), Rgb(61, 78, 104));
 	}
 
+	// A button filled with one status colour (green / red) that keeps the outlined shape of the others; hover and press shade it.
+	inline FButtonStyle StatusButton(const FLinearColor& Fill)
+	{
+		auto Shade = [](const FLinearColor& Color, float Factor) { return FLinearColor(FMath::Min(Color.R * Factor, 1.f), FMath::Min(Color.G * Factor, 1.f), FMath::Min(Color.B * Factor, 1.f), Color.A); };
+		return Button(Fill, Shade(Fill, 1.2f), Shade(Fill, 0.8f), Shade(Fill, 1.3f));
+	}
+
 	// Gives a drop-down the page's dark look: a dark button that keeps the engine's arrow (in a light colour), and a dark list
 	// whose rows light up blue. Its items are made by the owner (their text is white), so the list must not be white.
 	inline void DarkCombo(UComboBoxString* Combo)
@@ -107,6 +116,48 @@ namespace StartStyle
 		Row.TextColor = FSlateColor(Rgb(226, 238, 252));
 		Row.SelectedTextColor = FSlateColor(FLinearColor::White);
 		Combo->SetItemStyle(Row);
+	}
+
+	// A check box in the page's colours: the engine's own box and check mark, tinted - light grey when empty, blue when checked.
+	inline void DarkCheckBox(UCheckBox* Box)
+	{
+		FCheckBoxStyle Style = Box->GetWidgetStyle();
+		auto Tint = [](FSlateBrush& Brush, const FLinearColor& Color) { Brush.TintColor = FSlateColor(Color); };
+		Tint(Style.UncheckedImage, Rgb(150, 170, 196));
+		Tint(Style.UncheckedHoveredImage, Rgb(214, 228, 246));
+		Tint(Style.UncheckedPressedImage, Rgb(120, 140, 166));
+		Tint(Style.CheckedImage, Rgb(66, 150, 255));
+		Tint(Style.CheckedHoveredImage, Rgb(120, 182, 255));
+		Tint(Style.CheckedPressedImage, Rgb(46, 120, 225));
+		Tint(Style.UndeterminedImage, Rgb(150, 170, 196));
+		Tint(Style.UndeterminedHoveredImage, Rgb(214, 228, 246));
+		Tint(Style.UndeterminedPressedImage, Rgb(120, 140, 166));
+		Box->SetWidgetStyle(Style);
+	}
+
+	// A slider's bar and handle in the page's colours.
+	inline void DarkSlider(USlider* Slider)
+	{
+		Slider->SetSliderBarColor(Rgb(54, 70, 92));
+		Slider->SetSliderHandleColor(Rgb(66, 150, 255));
+	}
+
+	// A text button in a menu bar (File, Window, ...): no box until the mouse is over it.
+	inline FButtonStyle MenuButton()
+	{
+		return Button(FLinearColor::Transparent, Rgb(31, 51, 80), Rgb(22, 36, 58), FLinearColor::Transparent, 6.f);
+	}
+
+	// A button row inside a menu's panel: a box of its own, so it reads as a button.
+	inline FButtonStyle MenuRowButton()
+	{
+		return Button(Rgb(24, 38, 60), Rgb(33, 54, 84), Rgb(18, 30, 50), Rgb(46, 66, 94), 6.f);
+	}
+
+	// The panel a menu opens.
+	inline FSlateBrush MenuPanel()
+	{
+		return Rounded(Rgb(17, 31, 50), Rgb(54, 70, 92), 8.f);
 	}
 
 	inline FEditableTextBoxStyle Field(float PixelSize)

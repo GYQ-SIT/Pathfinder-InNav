@@ -448,12 +448,12 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// it (both button widths are fixed, so their X positions are known up front - simpler than
 		// querying a HorizontalBox child's live position) rather than nested inside the same layout
 		// flow, so opening one never resizes the bar itself.
-		constexpr float MenuButtonWidth = 50.f;
-		constexpr float CameraMenuButtonWidth = 72.f;
+		constexpr float MenuButtonWidth = 72.f;
+		constexpr float CameraMenuButtonWidth = 84.f;
 		constexpr float MenuBarLeftMargin = 10.f;
 
 		UBorder* MenuBarBackground = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_MenuBar"));
-		MenuBarBackground->SetBrushColor(DockPanelColor);
+		MenuBarBackground->SetBrushColor(StartStyle::Rgb(16, 32, 50));
 		// Left margin so "File" doesn't sit flush against the screen's own left edge - File/Window's
 		// own MenuButtonSizeBox already matches MenuBarHeight exactly, so the taller bar (see
 		// MenuBarHeight's own comment) gives their text vertical breathing room on its own.
@@ -470,7 +470,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		auto AddMenuButton = [this, MenuBarRow, MenuButtonWidth](const TCHAR* Name, const TCHAR* Label) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.f)); // transparent - just the bar's own background shows through
+			Button->SetStyle(StartStyle::MenuButton());
+			Button->SetBackgroundColor(FLinearColor::White);
 			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 			Text->SetText(FText::FromString(FString(Label)));
@@ -494,7 +495,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// takes no dropdown of its own (unlike File/Window) and just fires PC->SaveCurrentProject()
 		// on click. Square, matching the bar's own height.
 		SaveButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Save"));
-		SaveButton->SetBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
+		SaveButton->SetStyle(StartStyle::MenuButton());
+		SaveButton->SetBackgroundColor(FLinearColor::White);
 		SaveButton->SetToolTip(MakeToolTipWidget(TEXT("Save [Ctrl+S]")));
 		SaveButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSaveClicked);
 		SaveButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
@@ -540,7 +542,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// A plain text label, not the arrow-glyph icon this used to be - tried the icon-only look, but
 		// after actually using it a text label reads faster/clearer than the arrow, so back to this.
 		BackButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Back"));
-		BackButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+		BackButton->SetStyle(StartStyle::SecondaryButton());
+		BackButton->SetBackgroundColor(FLinearColor::White);
 		UTextBlock* BackText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_BackLabel"));
 		BackText->SetText(FText::FromString(TEXT("Back")));
 		BackText->SetJustification(ETextJustify::Center);
@@ -569,8 +572,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		{
 			UVerticalBox* Stack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), FName(FString(Name) + TEXT("Stack")));
 			UBorder* Dropdown = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(Name));
-			Dropdown->SetBrushColor(DockPanelColor);
-			Dropdown->SetPadding(FMargin(4.f));
+			Dropdown->SetBrush(StartStyle::MenuPanel());
+			Dropdown->SetBrushColor(FLinearColor::White);
+			Dropdown->SetPadding(FMargin(6.f));
 			Dropdown->SetContent(Stack);
 			Dropdown->SetVisibility(ESlateVisibility::Collapsed);
 			UCanvasPanelSlot* DropdownSlot = Canvas->AddChildToCanvas(Dropdown);
@@ -587,7 +591,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		auto AddDropdownButtonRow = [this](UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+			Button->SetStyle(StartStyle::MenuRowButton());
+			Button->SetBackgroundColor(FLinearColor::White);
 			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 			Text->SetText(FText::FromString(FString(Label)));
@@ -597,10 +602,13 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			USizeBox* RowSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 			RowSizeBox->SetWidthOverride(90.f);
 			RowSizeBox->SetMinDesiredHeight(24.f);
-			RowSizeBox->SetContent(Text);
+			if (USizeBoxSlot* RowTextSlot = Cast<USizeBoxSlot>(RowSizeBox->SetContent(Text)))
+			{
+				RowTextSlot->SetPadding(FMargin(10.f, 4.f));
+			}
 			Button->SetContent(RowSizeBox);
 			UVerticalBoxSlot* RowSlot = Stack->AddChildToVerticalBox(Button);
-			RowSlot->SetPadding(FMargin(2.f));
+			RowSlot->SetPadding(FMargin(2.f, 3.f));
 			return Button;
 		};
 
@@ -609,6 +617,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
 			UCheckBox* CheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), FName(Name));
 			CheckBox->SetIsChecked(true);
+			StartStyle::DarkCheckBox(CheckBox);
 			UHorizontalBoxSlot* CheckSlot = Row->AddChildToHorizontalBox(CheckBox);
 			CheckSlot->SetVerticalAlignment(VAlign_Center);
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
@@ -672,6 +681,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		CameraSpeedTextBox->SetToolTipText(FText::FromString(TEXT("Camera Speed (type a value, then press Enter or click away)")));
 		CameraSpeedTextBox->OnTextCommitted.AddUniqueDynamic(this, &UInteriorScreenWidget::OnCameraSpeedTextCommitted);
 		ApplyStandardFont(CameraSpeedTextBox);
+		CameraSpeedTextBox->SetWidgetStyle(StartStyle::Field(13.f));
 		USizeBox* CameraSpeedSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 		CameraSpeedSizeBox->SetWidthOverride(90.f);
 		CameraSpeedSizeBox->SetContent(CameraSpeedTextBox);
@@ -866,7 +876,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		auto AddHorizontalSeparator = [this, Canvas, SeparatorLineHeight](float PositionY)
 		{
 			UBorder* Separator = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(*FString::Printf(TEXT("Chrome_Separator_%d"), FMath::RoundToInt(PositionY))));
-			Separator->SetBrushColor(FLinearColor(1.f, 1.f, 1.f, 0.5f));
+			Separator->SetBrushColor(StartStyle::Rgb(41, 64, 87));
 			UCanvasPanelSlot* SeparatorSlot = Canvas->AddChildToCanvas(Separator);
 			SeparatorSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
 			SeparatorSlot->SetAlignment(FVector2D(0.f, 0.f));
@@ -1079,6 +1089,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			UHorizontalBox* FloorEntry = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), FName(*FString::Printf(TEXT("FloorEntry%02d"), FloorNumber)));
 
 			UCheckBox* CheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), FName(*FString::Printf(TEXT("Chk_Floor%d"), FloorNumber)));
+			StartStyle::DarkCheckBox(CheckBox);
 			UHorizontalBoxSlot* CheckBoxSlot = FloorEntry->AddChildToHorizontalBox(CheckBox);
 			CheckBoxSlot->SetVerticalAlignment(VAlign_Center);
 
@@ -1179,6 +1190,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 			UComboBoxString* ComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), FName(Name));
 			ComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
+			StartStyle::DarkCombo(ComboBox);
 			USizeBox* ComboSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
 			ComboSizeBox->SetWidthOverride(StandardButtonWidth);
 			ComboSizeBox->SetContent(ComboBox);
@@ -1201,6 +1213,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// Search the destination list across every floor of the loaded building.
 		DestinationSearchBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_DestinationSearch"));
 		ApplyStandardFont(DestinationSearchBox);
+		DestinationSearchBox->SetWidgetStyle(StartStyle::Field(13.f));
 		DestinationSearchBox->SetHintText(FText::FromString(TEXT("Search destinations by name, ID or tag")));
 		DestinationSearchBox->OnTextChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleDestinationSearchChanged);
 		USizeBox* DestinationSearchSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
@@ -1216,7 +1229,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		auto AddNavButton = [this, NavStack, ApplyStandardTextWrap](const TCHAR* Name, const TCHAR* Label, UTextBlock*& OutLabel) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+			Button->SetStyle(StartStyle::SecondaryButton());
+			Button->SetBackgroundColor(FLinearColor::White);
 			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
 			Text->SetText(FText::FromString(FString(Label)));
@@ -2258,7 +2272,7 @@ void UInteriorScreenWidget::OnDeleteSelectionClicked()
 void UInteriorScreenWidget::RefreshRoomBoundsFields()
 {
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
-	FVector2D Position, Size;
+	FVector2D Position = FVector2D::ZeroVector, Size = FVector2D::ZeroVector;
 	const bool bHave = PC && PC->GetSelectedRoomBounds(Position, Size);
 	auto Show = [bHave](UEditableTextBox* Box, double Value)
 	{
@@ -2854,9 +2868,14 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 	}
 
 	const ENavigationSelectionMode Mode = Nav->GetSelectionMode();
-	static const FLinearColor InactiveButtonColor(0.6f, 0.6f, 0.6f, 1.f);
-	static const FLinearColor ActiveStartColor(0.08f, 0.55f, 0.22f, 1.f);
-	static const FLinearColor ActiveDestinationColor(0.72f, 0.12f, 0.12f, 1.f);
+	static const FLinearColor InactiveButtonColor = StartStyle::Rgb(27, 41, 63);
+	static const FLinearColor ActiveStartColor = StartStyle::Rgb(26, 138, 84);
+	static const FLinearColor ActiveDestinationColor = StartStyle::Rgb(180, 52, 62);
+	// The buttons keep their outlined shape and take the state's colour as their fill.
+	auto PaintNavButton = [](UButton* Button, const FLinearColor& Color)
+	{
+		Button->SetStyle(Color == InactiveButtonColor ? StartStyle::SecondaryButton() : StartStyle::StatusButton(Color));
+	};
 	static const FLinearColor DropdownUnsetColor(0.f, 0.f, 0.f, 0.f);
 
 	// Whichever of the button / dropdown-frame actually set the point gets the color; the other one
@@ -2867,7 +2886,7 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 	const bool bStartSetViaClick = Nav->HasStart() && !bStartSetViaDropdown;
 	if (NavSetStartButton)
 	{
-		NavSetStartButton->SetBackgroundColor(bStartActivelyPicking || bStartSetViaClick ? ActiveStartColor : InactiveButtonColor);
+		PaintNavButton(NavSetStartButton, bStartActivelyPicking || bStartSetViaClick ? ActiveStartColor : InactiveButtonColor);
 	}
 	if (NavSetStartButtonLabel)
 	{
@@ -2898,7 +2917,7 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 	const bool bDestSetViaClick = Nav->HasDestination() && !bDestSetViaDropdown;
 	if (NavSetDestinationButton)
 	{
-		NavSetDestinationButton->SetBackgroundColor(bDestActivelyPicking || bDestSetViaClick ? ActiveDestinationColor : InactiveButtonColor);
+		PaintNavButton(NavSetDestinationButton, bDestActivelyPicking || bDestSetViaClick ? ActiveDestinationColor : InactiveButtonColor);
 	}
 	if (NavSetDestinationButtonLabel)
 	{
@@ -2934,7 +2953,7 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 		{
 			FindRouteColor = ActiveDestinationColor;
 		}
-		NavFindRouteButton->SetBackgroundColor(FindRouteColor);
+		PaintNavButton(NavFindRouteButton, FindRouteColor);
 	}
 	if (NavClearRouteButton)
 	{

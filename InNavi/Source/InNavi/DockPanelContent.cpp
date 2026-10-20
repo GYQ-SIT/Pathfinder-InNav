@@ -1,6 +1,7 @@
 #include "DockPanelContent.h"
 
 #include "NavPlayerController.h"
+#include "StartScreenStyle.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/CheckBox.h"
 #include "Components/EditableTextBox.h"
@@ -56,6 +57,7 @@ UCheckBox* UDockPanelContentWidget::AddCheckRow(UVerticalBox* Stack, const TCHAR
 	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
 	UCheckBox* CheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), FName(Name));
 	CheckBox->SetIsChecked(bChecked);
+	StartStyle::DarkCheckBox(CheckBox);
 	UHorizontalBoxSlot* CheckSlot = Row->AddChildToHorizontalBox(CheckBox);
 	CheckSlot->SetVerticalAlignment(VAlign_Center);
 	UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());

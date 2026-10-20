@@ -122,3 +122,13 @@ does not mention at its default spot.
 - Rebuilds fail with "Unable to build while Live Coding is active" while the editor is open.
 - A Debug-style panel that reads the controller must tolerate running before the screen has a
   controller (the base class `GetController()` falls back to the owning screen's player).
+
+## Control styling
+
+Every control takes its look from `StartScreenStyle.h` (namespace `StartStyle`), never from the
+engine default grey. Use `PrimaryButton` / `SecondaryButton` / `StatusButton(colour)` for
+buttons, `MenuButton` (menu-bar text buttons) and `MenuRowButton` (boxed rows inside a menu's
+dropdown), `MenuPanel` for the dropdown itself, `Field` for text boxes, `DarkCombo`,
+`DarkCheckBox` and `DarkSlider`. After `SetStyle`, call `SetBackgroundColor(White)` so the
+button's own tint does not darken the style. The dock chrome (tabs, panel body, splitters,
+floating frames) takes its colours from the constants at the top of `DockHostWidget.cpp`.

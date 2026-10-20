@@ -1,6 +1,7 @@
 #include "ConfirmDialogWidget.h"
 
 #include "NavPlayerController.h"
+#include "StartScreenStyle.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
@@ -27,7 +28,6 @@ TSharedRef<SWidget> UConfirmDialogWidget::RebuildWidget()
 		// was left at UMG's 24pt default with plain white/black boxes, which is why button labels like
 		// "Discard changes and leave" overflowed their own button at that size.
 		constexpr int32 DialogFontSize = 15;
-		const FLinearColor PanelColor(0.03f, 0.03f, 0.03f, 0.95f);
 
 		// Dims whatever's behind instead of blacking it out entirely - still blocks clicks through to
 		// it (same modal purpose as before), but reads as a dialog over the app rather than a jarring
@@ -41,7 +41,8 @@ TSharedRef<SWidget> UConfirmDialogWidget::RebuildWidget()
 		// The dialog card itself - one dark panel holding the message and button row together, instead
 		// of a separate white message box floating above an unrelated button row.
 		UBorder* Card = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Card"));
-		Card->SetBrushColor(PanelColor);
+		Card->SetBrush(StartStyle::Rounded(StartStyle::Rgb(17, 31, 50), StartStyle::Rgb(54, 70, 92), 12.f));
+		Card->SetBrushColor(FLinearColor::White);
 		Card->SetPadding(FMargin(20.f));
 		UCanvasPanelSlot* CardSlot = Canvas->AddChildToCanvas(Card);
 		CardSlot->SetAnchors(FAnchors(0.5f, 0.5f));
@@ -58,7 +59,7 @@ TSharedRef<SWidget> UConfirmDialogWidget::RebuildWidget()
 
 		UTextBlock* MessageText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_Message"));
 		MessageText->SetText(FText::FromString(TEXT("You have unsaved changes. Do you want to save them?")));
-		MessageText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		MessageText->SetColorAndOpacity(FSlateColor(StartStyle::Rgb(226, 238, 252)));
 		MessageText->SetJustification(ETextJustify::Center);
 		MessageText->SetAutoWrapText(true);
 		{
@@ -80,10 +81,11 @@ TSharedRef<SWidget> UConfirmDialogWidget::RebuildWidget()
 		// needed once the font shrank from UMG's 24pt default) - a shared per-button color instead of
 		// the button's own uniform gray, so Discard (a destructive/leave-without-saving action) reads
 		// differently from Save/Cancel at a glance.
-		auto AddButton = [this, ButtonRow, DialogFontSize](const TCHAR* Name, const TCHAR* Label, float Width, const FLinearColor& Color) -> UButton*
+		auto AddButton = [this, ButtonRow, DialogFontSize](const TCHAR* Name, const TCHAR* Label, float Width, const FButtonStyle& Style) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(Color);
+			Button->SetStyle(Style);
+			Button->SetBackgroundColor(FLinearColor::White);
 
 			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
 			Text->SetText(FText::FromString(FString(Label)));
@@ -110,12 +112,13 @@ TSharedRef<SWidget> UConfirmDialogWidget::RebuildWidget()
 			return Button;
 		};
 
-		const FLinearColor NeutralColor(0.35f, 0.35f, 0.35f, 1.f);
-		const FLinearColor DestructiveColor(0.55f, 0.2f, 0.2f, 1.f);
+		const FButtonStyle PrimaryStyle = StartStyle::PrimaryButton();
+		const FButtonStyle NeutralStyle = StartStyle::SecondaryButton();
+		const FButtonStyle DestructiveStyle = StartStyle::StatusButton(StartStyle::Rgb(150, 40, 48));
 
-		SaveAndLeaveButton = AddButton(TEXT("Btn_SaveAndLeave"), TEXT("Save and Exit"), 140.f, NeutralColor);
-		DiscardAndLeaveButton = AddButton(TEXT("Btn_DiscardAndLeave"), TEXT("Discard and Leave"), 150.f, DestructiveColor);
-		CancelButton = AddButton(TEXT("Btn_Cancel"), TEXT("Cancel"), 90.f, NeutralColor);
+		SaveAndLeaveButton = AddButton(TEXT("Btn_SaveAndLeave"), TEXT("Save and Exit"), 140.f, PrimaryStyle);
+		DiscardAndLeaveButton = AddButton(TEXT("Btn_DiscardAndLeave"), TEXT("Discard and Leave"), 150.f, DestructiveStyle);
+		CancelButton = AddButton(TEXT("Btn_Cancel"), TEXT("Cancel"), 90.f, NeutralStyle);
 		// Last button in the row - no trailing gap needed.
 		if (UHorizontalBoxSlot* CancelSlot = Cast<UHorizontalBoxSlot>(CancelButton->Slot))
 		{
