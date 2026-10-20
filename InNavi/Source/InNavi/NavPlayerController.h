@@ -827,6 +827,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	int32 GetLoadedBuildingFloorCount() const;
 
+	// How tall one floor of the loaded building is, in world units (cm); 300 if nothing is loaded.
+	float GetLoadedBuildingFloorHeight() const;
+
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	FString PeekNextRoomId() const;
 

@@ -232,8 +232,10 @@ overlapping another room will fail, with the reason logged to the Output Log.
 
 ### Floor panel
 
-Lists every floor in the building; click one to switch to it (same as `[`/`]` to cycle
-up/down). **+ Add floor** / **- Remove floor** buttons do the same as `F`/`X`.
+The heading shows **Floors** and how many there are, with **+ Add** on the right. Each floor is a row - "Level N"
+and, on the right, how high that level is above the ground floor (for example 0 m, 3 m, 6 m, from the building's
+own floor height); the active floor's row is blue. Click a row to switch to that floor (same as `[`/`]` to cycle
+up/down). **+ Add** and **Delete floor** do the same as `F`/`X`; Delete floor turns red under the mouse.
 
 ### Properties panel
 
@@ -252,13 +254,14 @@ selecting a room, door, or connector fills it in:
 
 ### Layers panel
 
-An Outliner-style view of everything on the current floor, with a search box at the
-top to filter by name. Typing in the search box also adds a **Search results** group at the
+An Outliner-style view of everything on the current floor (the heading says which: "LEVEL 3"), with a search box
+at the top to filter by name. Typing in the search box also adds a **Search results** group at the
 top: every room of the building, on **any floor**, whose name, id or tags match (every word
 you type must match, ignoring case). Click a result to switch to its floor and select the
 room. Five categories — **Boundary**, **Rooms**, **Walls**, **Path
-Nodes**, **I/O Nodes** — each expandable (arrow) to list its individual items. The eye
-icon on a category or an individual item toggles its visibility on the floor plan;
+Nodes**, **I/O Nodes** — each expandable (arrow) to list its individual items, and showing on its right how many of that kind
+this floor has. The dot on a category or an individual item (blue when shown, grey ring when hidden) toggles its
+visibility on the floor plan;
 toggling a category affects everything in it at once.
 
 ### Navigation panel

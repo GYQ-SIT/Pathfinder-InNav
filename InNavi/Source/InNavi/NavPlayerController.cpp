@@ -3811,6 +3811,18 @@ FString ANavPlayerController::GetLoadedBuildingId() const
 	return InteriorGen ? InteriorGen->GetLoadedBuildingId() : FString();
 }
 
+float ANavPlayerController::GetLoadedBuildingFloorHeight() const
+{
+	if (Generator && InteriorGen)
+	{
+		if (const APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()))
+		{
+			return Building->GetFloorHeight();
+		}
+	}
+	return 300.f;
+}
+
 int32 ANavPlayerController::GetLoadedBuildingFloorCount() const
 {
 	if (!InteriorGen || !Generator)

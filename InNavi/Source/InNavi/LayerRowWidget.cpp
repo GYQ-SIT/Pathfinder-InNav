@@ -1,7 +1,9 @@
 #include "LayerRowWidget.h"
 
 #include "NavPlayerController.h"
+#include "StartScreenStyle.h"
 #include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
@@ -22,7 +24,12 @@ TSharedRef<SWidget> ULayerRowWidget::RebuildWidget()
 		WidgetTree->RootWidget = RowSizeBox;
 
 		Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HBox_LayerRow"));
-		RowSizeBox->SetContent(Row);
+		HoverBackground = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Hover_LayerRow"));
+		HoverBackground->SetBrush(StartStyle::Rounded(FLinearColor::Transparent, FLinearColor::Transparent, 6.f, 0.f));
+		HoverBackground->SetBrushColor(FLinearColor::White);
+		HoverBackground->SetPadding(FMargin(2.f, 3.f, 6.f, 3.f));
+		HoverBackground->SetContent(Row);
+		RowSizeBox->SetContent(HoverBackground);
 
 		// Reserves the indent width whether or not this particular row shows an expand arrow, so
 		// every row's label lines up at the same X regardless of depth.
@@ -35,8 +42,13 @@ TSharedRef<SWidget> ULayerRowWidget::RebuildWidget()
 		ExpandButton->OnClicked.AddUniqueDynamic(this, &ULayerRowWidget::HandleExpandClicked);
 		ExpandButton->OnClicked.AddUniqueDynamic(this, &ULayerRowWidget::PlayButtonClickSound);
 		ExpandButtonText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_LayerRowExpand"));
-		ExpandButtonText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		ExpandButtonText->SetColorAndOpacity(FSlateColor(StartStyle::Rgb(150, 172, 202)));
 		ExpandButtonText->SetJustification(ETextJustify::Center);
+		{
+			FSlateFontInfo ArrowFont = ExpandButtonText->GetFont();
+			ArrowFont.Size = 10;
+			ExpandButtonText->SetFont(ArrowFont);
+		}
 		USizeBox* ExpandGlyphSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 		ExpandGlyphSizeBox->SetWidthOverride(20.f);
 		ExpandGlyphSizeBox->SetHeightOverride(20.f);
@@ -57,7 +69,7 @@ TSharedRef<SWidget> ULayerRowWidget::RebuildWidget()
 			// Matches UInteriorScreenWidget::StandardFontSize - keep the two in sync by hand if that
 			// one changes.
 			FSlateFontInfo LabelFont = Label->GetFont();
-			LabelFont.Size = 15;
+			LabelFont.Size = 13;
 			Label->SetFont(LabelFont);
 		}
 		UHorizontalBoxSlot* LabelSlot = Row->AddChildToHorizontalBox(Label);
@@ -65,6 +77,12 @@ TSharedRef<SWidget> ULayerRowWidget::RebuildWidget()
 		LabelSlot->SetHorizontalAlignment(HAlign_Fill);
 		LabelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		LabelSlot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
+
+		// How many items a category holds (categories only).
+		CountText = StartStyle::Text(WidgetTree, TEXT("Txt_LayerRowCount"), TEXT(""), 12.f, StartStyle::Rgb(140, 160, 186), true);
+		UHorizontalBoxSlot* CountSlot = Row->AddChildToHorizontalBox(CountText);
+		CountSlot->SetVerticalAlignment(VAlign_Center);
+		CountSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
 
 		VisibilityButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_LayerRowVisibility"));
 		VisibilityButton->SetBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
@@ -90,8 +108,9 @@ TSharedRef<SWidget> ULayerRowWidget::RebuildWidget()
 	return Super::RebuildWidget();
 }
 
-void ULayerRowWidget::Setup(const FString& InRowKey, const FString& InLabel, float IndentPx, bool bInShowExpandArrow, bool bInIsExpanded, bool bInIsVisible)
+void ULayerRowWidget::Setup(const FString& InRowKey, const FString& InLabel, float IndentPx, bool bInShowExpandArrow, bool bInIsExpanded, bool bInIsVisible, int32 InCount)
 {
+	Count = InCount;
 	RowKey = InRowKey;
 	LabelText = InLabel;
 	Indent = IndentPx;
@@ -117,6 +136,24 @@ FReply ULayerRowWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, con
 		return FReply::Handled();
 	}
 	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+}
+
+void ULayerRowWidget::NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	Super::NativeOnMouseEnter(InGeometry, InMouseEvent);
+	if (HoverBackground)
+	{
+		HoverBackground->SetBrush(StartStyle::Rounded(StartStyle::Rgb(31, 51, 80), FLinearColor::Transparent, 6.f, 0.f));
+	}
+}
+
+void ULayerRowWidget::NativeOnMouseLeave(const FPointerEvent& InMouseEvent)
+{
+	Super::NativeOnMouseLeave(InMouseEvent);
+	if (HoverBackground)
+	{
+		HoverBackground->SetBrush(StartStyle::Rounded(FLinearColor::Transparent, FLinearColor::Transparent, 6.f, 0.f));
+	}
 }
 
 void ULayerRowWidget::SetWidth(float NewWidth)
@@ -147,8 +184,17 @@ void ULayerRowWidget::ApplyVisuals()
 	if (Label)
 	{
 		Label->SetText(FText::FromString(LabelText));
-		// A clickable result reads as a link.
-		Label->SetColorAndOpacity(FSlateColor(bSearchResult ? FLinearColor(0.62f, 0.8f, 1.f) : FLinearColor::White));
+		// A clickable result reads as a link; category rows are bold, the items under them regular and a little softer.
+		const bool bCategory = Indent <= 0.f && !bSearchResult;
+		Label->SetColorAndOpacity(FSlateColor(bSearchResult ? StartStyle::Rgb(158, 204, 255) : (bCategory ? StartStyle::Rgb(241, 246, 255) : StartStyle::Rgb(200, 214, 232))));
+		FSlateFontInfo LabelFont = Label->GetFont();
+		LabelFont.TypefaceFontName = bCategory ? FName(TEXT("Bold")) : FName(TEXT("Regular"));
+		Label->SetFont(LabelFont);
+	}
+	if (CountText)
+	{
+		CountText->SetText(FText::AsNumber(FMath::Max(Count, 0)));
+		CountText->SetVisibility(Count >= 0 ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	}
 	if (VisibilityButton)
 	{
@@ -157,6 +203,8 @@ void ULayerRowWidget::ApplyVisuals()
 	if (VisibilityButtonText)
 	{
 		VisibilityButtonText->SetText(FText::FromString(bIsVisible ? TEXT("\x25CF") : TEXT("\x25CB"))); // ● / ○
+		// Blue while shown, dim while hidden.
+		VisibilityButtonText->SetColorAndOpacity(FSlateColor(bIsVisible ? StartStyle::Rgb(96, 170, 255) : StartStyle::Rgb(112, 130, 154)));
 	}
 	if (RowSizeBox)
 	{

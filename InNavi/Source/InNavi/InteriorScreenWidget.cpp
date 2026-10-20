@@ -356,51 +356,50 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UVerticalBox* FloorStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("FloorStack"));
 		FloorPanel->SetContent(FloorStack);
 
-		UTextBlock* FloorTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_FloorTitle"));
-		FloorTitle->SetText(FText::FromString(TEXT("Floor")));
-		FloorTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(FloorTitle);
-		UVerticalBoxSlot* FloorTitleSlot = FloorStack->AddChildToVerticalBox(FloorTitle);
-		FloorTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-		DockPanelTitleTexts[(int32)EDockPanelId::Floor] = FloorTitle;
+		// Heading: a floor mark, "Floors" with how many there are, and + Add on the right.
+		UHorizontalBox* FloorHeader = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("FloorHeader"));
+		FloorHeader->AddChildToHorizontalBox(StartStyle::Text(WidgetTree, TEXT("Txt_FloorMark"), TEXT("\u25A4"), 16.f, StartStyle::Rgb(176, 198, 228)))->SetVerticalAlignment(VAlign_Center);
+		UHorizontalBoxSlot* FloorTitleSlot = FloorHeader->AddChildToHorizontalBox(StartStyle::Text(WidgetTree, TEXT("Txt_FloorTitle"), TEXT("Floors"), 16.f, StartStyle::Rgb(241, 246, 255), true));
+		FloorTitleSlot->SetVerticalAlignment(VAlign_Center);
+		FloorTitleSlot->SetPadding(FMargin(8.f * StartStyle::DesignToUi, 0.f, 6.f * StartStyle::DesignToUi, 0.f));
+		FloorCountText = StartStyle::Text(WidgetTree, TEXT("Txt_FloorCount"), TEXT("0"), 13.f, StartStyle::Rgb(150, 172, 202), true);
+		UHorizontalBoxSlot* FloorCountSlot = FloorHeader->AddChildToHorizontalBox(FloorCountText);
+		FloorCountSlot->SetVerticalAlignment(VAlign_Center);
+		FloorCountSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+
+		AddFloorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_AddFloor"));
+		AddFloorButton->SetStyle(StartStyle::SecondaryButton());
+		AddFloorButton->SetBackgroundColor(FLinearColor::White);
+		UTextBlock* AddFloorText = StartStyle::Text(WidgetTree, TEXT("Btn_AddFloorLabel"), TEXT("+  Add"), 12.f, FLinearColor::White, true);
+		UBorder* AddFloorPad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Btn_AddFloorPad"));
+		AddFloorPad->SetBrushColor(FLinearColor::Transparent);
+		AddFloorPad->SetPadding(FMargin(12.f * StartStyle::DesignToUi, 7.f * StartStyle::DesignToUi));
+		AddFloorPad->SetContent(AddFloorText);
+		AddFloorButton->SetContent(AddFloorPad);
+		FloorHeader->AddChildToHorizontalBox(AddFloorButton)->SetVerticalAlignment(VAlign_Center);
+		FloorStack->AddChildToVerticalBox(FloorHeader)->SetPadding(FMargin(0.f, 0.f, 0.f, 12.f * StartStyle::DesignToUi));
 
 		FloorListBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("FloorListBox"));
 		// 3 rows tall (row height + 4px padding each, see RefreshFloorList) caps the list without
 		// hiding the scrollbar UScrollBox already shows once content overflows that.
 		USizeBox* FloorListSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("FloorListSizeBox"));
-		FloorListSizeBox->SetHeightOverride((StandardButtonHeight + 4.f) * 3.f);
+		FloorListSizeBox->SetHeightOverride((StandardButtonHeight + 10.f) * 3.f);
 		FloorListSizeBox->SetWidthOverride(StandardButtonWidth);
 		FloorListSizeBox->SetContent(FloorListBox);
 		UVerticalBoxSlot* FloorListSlot = FloorStack->AddChildToVerticalBox(FloorListSizeBox);
-		FloorListSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+		FloorListSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f * StartStyle::DesignToUi));
 
-		AddFloorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_AddFloor"));
-		AddFloorButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-		UTextBlock* AddFloorText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_AddFloorLabel"));
-		AddFloorText->SetText(FText::FromString(TEXT("+ Add floor")));
-		AddFloorText->SetJustification(ETextJustify::Center);
-		AddFloorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardTextWrap(AddFloorText);
-		USizeBox* AddFloorSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Btn_AddFloorSize"));
-		AddFloorSizeBox->SetWidthOverride(StandardButtonWidth);
-		AddFloorSizeBox->SetMinDesiredHeight(StandardButtonHeight);
-		AddFloorSizeBox->SetContent(AddFloorText);
-		AddFloorButton->SetContent(AddFloorSizeBox);
-		UVerticalBoxSlot* AddFloorSlot = FloorStack->AddChildToVerticalBox(AddFloorButton);
-		AddFloorSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-
+		// Delete floor: a quiet button that turns red when the mouse is over it.
 		RemoveFloorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_RemoveFloor"));
-		RemoveFloorButton->SetBackgroundColor(FLinearColor(0.6f, 0.2f, 0.2f, 1.f));
-		UTextBlock* RemoveFloorText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_RemoveFloorLabel"));
-		RemoveFloorText->SetText(FText::FromString(TEXT("Delete floor")));
+		RemoveFloorButton->SetStyle(StartStyle::Button(StartStyle::Rgb(27, 41, 63), StartStyle::Rgb(96, 34, 42), StartStyle::Rgb(72, 24, 32), StartStyle::Rgb(61, 78, 104)));
+		RemoveFloorButton->SetBackgroundColor(FLinearColor::White);
+		UTextBlock* RemoveFloorText = StartStyle::Text(WidgetTree, TEXT("Btn_RemoveFloorLabel"), TEXT("Delete floor"), 12.f, FLinearColor::White, true);
 		RemoveFloorText->SetJustification(ETextJustify::Center);
-		RemoveFloorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardTextWrap(RemoveFloorText);
-		USizeBox* RemoveFloorSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Btn_RemoveFloorSize"));
-		RemoveFloorSizeBox->SetWidthOverride(StandardButtonWidth);
-		RemoveFloorSizeBox->SetMinDesiredHeight(StandardButtonHeight);
-		RemoveFloorSizeBox->SetContent(RemoveFloorText);
-		RemoveFloorButton->SetContent(RemoveFloorSizeBox);
+		UBorder* RemoveFloorPad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Btn_RemoveFloorPad"));
+		RemoveFloorPad->SetBrushColor(FLinearColor::Transparent);
+		RemoveFloorPad->SetPadding(FMargin(10.f * StartStyle::DesignToUi, 9.f * StartStyle::DesignToUi));
+		RemoveFloorPad->SetContent(RemoveFloorText);
+		RemoveFloorButton->SetContent(RemoveFloorPad);
 		FloorStack->AddChildToVerticalBox(RemoveFloorButton);
 
 		// PropertiesPanel/FloorPanel's own SetPadding(14.f) eats 14px on each side - this is what's
@@ -1089,23 +1088,26 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UVerticalBox* LayersStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LayersStack"));
 		LayersPanel->SetContent(LayersStack);
 
-		UTextBlock* LayersTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_LayersTitle"));
-		LayersTitle->SetText(FText::FromString(TEXT("Layers")));
-		LayersTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(LayersTitle);
-		UVerticalBoxSlot* LayersTitleSlot = LayersStack->AddChildToVerticalBox(LayersTitle);
-		LayersTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-		DockPanelTitleTexts[(int32)EDockPanelId::Layers] = LayersTitle;
+		// Heading: "Layers / Scene" on the left, "LEVEL n" (the floor being listed) on the right.
+		UHorizontalBox* LayersHeader = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("LayersHeader"));
+		LayersHeader->AddChildToHorizontalBox(StartStyle::Text(WidgetTree, TEXT("Txt_LayersMark"), TEXT("\u25C7"), 14.f, StartStyle::Rgb(176, 198, 228)))->SetVerticalAlignment(VAlign_Center);
+		UHorizontalBoxSlot* LayersTitleSlot = LayersHeader->AddChildToHorizontalBox(StartStyle::Text(WidgetTree, TEXT("Txt_LayersTitle"), TEXT("Layers / Scene"), 16.f, StartStyle::Rgb(241, 246, 255), true));
+		LayersTitleSlot->SetVerticalAlignment(VAlign_Center);
+		LayersTitleSlot->SetPadding(FMargin(8.f * StartStyle::DesignToUi, 0.f, 8.f * StartStyle::DesignToUi, 0.f));
+		LayersTitleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		LayersLevelText = StartStyle::Text(WidgetTree, TEXT("Txt_LayersLevel"), TEXT(""), 10.f, StartStyle::Rgb(150, 172, 202), true, 100);
+		LayersHeader->AddChildToHorizontalBox(LayersLevelText)->SetVerticalAlignment(VAlign_Center);
+		LayersStack->AddChildToVerticalBox(LayersHeader)->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f * StartStyle::DesignToUi));
 
 		LayersSearchBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_LayersSearch"));
 		LayersSearchBox->SetHintText(FText::FromString(TEXT("Search")));
-		ApplyStandardFont(LayersSearchBox);
+		LayersSearchBox->SetWidgetStyle(StartStyle::Field(12.f));
 		LayersSearchBox->OnTextChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleLayersSearchTextChanged);
 		USizeBox* LayersSearchSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Txt_LayersSearchSize"));
 		LayersSearchSizeBox->SetWidthOverride(StandardButtonWidth);
 		LayersSearchSizeBox->SetContent(LayersSearchBox);
 		UVerticalBoxSlot* LayersSearchSlot = LayersStack->AddChildToVerticalBox(LayersSearchSizeBox);
-		LayersSearchSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+		LayersSearchSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f * StartStyle::DesignToUi));
 
 		LayersListBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("LayersListBox"));
 		// 8 rows tall by default - scrollable beyond that via UScrollBox's own scrollbar, same
@@ -2294,6 +2296,11 @@ void UInteriorScreenWidget::RefreshFloorList()
 
 	const int32 FloorCount = PC->GetLoadedBuildingFloorCount();
 	const int32 ActiveFloor = PC->GetActiveFloor();
+	const float FloorHeightCm = PC->GetLoadedBuildingFloorHeight();
+	if (FloorCountText)
+	{
+		FloorCountText->SetText(FText::AsNumber(FloorCount));
+	}
 	// Lowest floor first (Level 1 at the top) - reversed from the original mockup per explicit
 	// request.
 	for (int32 FloorNumber = 1; FloorNumber <= FloorCount; ++FloorNumber)
@@ -2303,13 +2310,13 @@ void UInteriorScreenWidget::RefreshFloorList()
 		{
 			continue;
 		}
-		Entry->SetFloorNumber(FloorNumber, FloorNumber == ActiveFloor);
+		Entry->SetFloorNumber(FloorNumber, FloorNumber == ActiveFloor, (FloorNumber - 1) * FloorHeightCm / 100.f);
 		Entry->SetWidth(ComputePanelButtonWidth(EDockPanelId::Floor));
 		Entry->OnEntryClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleFloorEntryClicked);
 
 		if (UScrollBoxSlot* EntrySlot = Cast<UScrollBoxSlot>(FloorListBox->AddChild(Entry)))
 		{
-			EntrySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+			EntrySlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 		}
 	}
 }
@@ -2330,14 +2337,14 @@ void UInteriorScreenWidget::RefreshLayersList()
 
 	// Category headers are never filtered out by search (only their children are) - if they were,
 	// searching for an item would also hide the very row you'd expand to find more like it.
-	auto AddRow = [this, PC, RowWidth](const FString& RowKey, const FString& Label, float IndentPx, bool bShowExpandArrow, bool bIsExpanded, bool bIsVisible, bool bSearchResult = false)
+	auto AddRow = [this, PC, RowWidth](const FString& RowKey, const FString& Label, float IndentPx, bool bShowExpandArrow, bool bIsExpanded, bool bIsVisible, bool bSearchResult = false, int32 Count = -1)
 	{
 		ULayerRowWidget* Row = CreateWidget<ULayerRowWidget>(PC, ULayerRowWidget::StaticClass());
 		if (!Row)
 		{
 			return;
 		}
-		Row->Setup(RowKey, Label, IndentPx, bShowExpandArrow, bIsExpanded, bIsVisible);
+		Row->Setup(RowKey, Label, IndentPx, bShowExpandArrow, bIsExpanded, bIsVisible, Count);
 		Row->SetWidth(RowWidth);
 		Row->OnExpandClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleLayerRowExpandClicked);
 		Row->OnVisibilityClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleLayerRowVisibilityClicked);
@@ -2350,6 +2357,24 @@ void UInteriorScreenWidget::RefreshLayersList()
 	};
 
 	const int32 ActiveFloor = PC->GetActiveFloor();
+	if (LayersLevelText)
+	{
+		LayersLevelText->SetText(FText::FromString(FString::Printf(TEXT("LEVEL %d"), ActiveFloor)));
+	}
+
+	// How many of each kind the active floor has, shown on the category rows.
+	int32 RoomCount = 0, WallCount = 0, PathNodeCount = 0, IONodeCount = 0;
+	for (const FString& RoomId : PC->GetRoomIdsOnFloor(ActiveFloor))
+	{
+		(PC->IsRoomClosedLoop(RoomId) ? RoomCount : WallCount)++;
+	}
+	for (const FInteriorNavNode& Node : PC->GetNavNodes())
+	{
+		if (Node.Level == ActiveFloor)
+		{
+			(Node.Type == EInteriorNavNodeType::PathNode ? PathNodeCount : IONodeCount)++;
+		}
+	}
 
 	// -- Search results -- while something is typed in the search box, every room of the building (all
 	// floors, not just the active one) whose name, id or tags match is listed first. Clicking one switches to
@@ -2415,7 +2440,7 @@ void UInteriorScreenWidget::RefreshLayersList()
 	// both closed rooms and open standalone walls, sharing the same id/class).
 	{
 		const bool bExpanded = ExpandedLayerCategories.Contains(TEXT("category:Rooms"));
-		AddRow(TEXT("category:Rooms"), TEXT("Rooms"), 0.f, true, bExpanded, PC->AreRoomsVisible());
+		AddRow(TEXT("category:Rooms"), TEXT("Rooms"), 0.f, true, bExpanded, PC->AreRoomsVisible(), false, RoomCount);
 		if (bExpanded)
 		{
 			for (const FString& RoomId : PC->GetRoomIdsOnFloor(ActiveFloor))
@@ -2437,7 +2462,7 @@ void UInteriorScreenWidget::RefreshLayersList()
 
 	{
 		const bool bExpanded = ExpandedLayerCategories.Contains(TEXT("category:Walls"));
-		AddRow(TEXT("category:Walls"), TEXT("Walls"), 0.f, true, bExpanded, PC->AreWallsVisible());
+		AddRow(TEXT("category:Walls"), TEXT("Walls"), 0.f, true, bExpanded, PC->AreWallsVisible(), false, WallCount);
 		if (bExpanded)
 		{
 			for (const FString& RoomId : PC->GetRoomIdsOnFloor(ActiveFloor))
@@ -2461,7 +2486,7 @@ void UInteriorScreenWidget::RefreshLayersList()
 	// split by type (see InteriorFloorPlanWidget::NativePaint, which draws them the same way).
 	{
 		const bool bExpanded = ExpandedLayerCategories.Contains(TEXT("category:PathNodes"));
-		AddRow(TEXT("category:PathNodes"), TEXT("Path Nodes"), 0.f, true, bExpanded, PC->ArePathNodesVisible());
+		AddRow(TEXT("category:PathNodes"), TEXT("Path Nodes"), 0.f, true, bExpanded, PC->ArePathNodesVisible(), false, PathNodeCount);
 		if (bExpanded)
 		{
 			for (const FInteriorNavNode& Node : PC->GetNavNodes())
@@ -2482,7 +2507,7 @@ void UInteriorScreenWidget::RefreshLayersList()
 
 	{
 		const bool bExpanded = ExpandedLayerCategories.Contains(TEXT("category:IONodes"));
-		AddRow(TEXT("category:IONodes"), TEXT("I/O Nodes"), 0.f, true, bExpanded, PC->AreIONodesVisible());
+		AddRow(TEXT("category:IONodes"), TEXT("I/O Nodes"), 0.f, true, bExpanded, PC->AreIONodesVisible(), false, IONodeCount);
 		if (bExpanded)
 		{
 			for (const FInteriorNavNode& Node : PC->GetNavNodes())

@@ -2,7 +2,12 @@
 
 #include "NavPlayerController.h"
 #include "Blueprint/WidgetTree.h"
+#include "StartScreenStyle.h"
+#include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/ButtonSlot.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 
@@ -11,33 +16,53 @@ UFloorListEntryWidget::UFloorListEntryWidget(const FObjectInitializer& ObjectIni
 {
 }
 
+namespace
+{
+	// A floor row's look: plain, or blue for the active floor (the same blue as the Map panel's selected building).
+	FButtonStyle FloorRowStyle(bool bActive)
+	{
+		using namespace StartStyle;
+		return bActive ? Button(Rgb(14, 66, 148), Rgb(20, 80, 172), Rgb(10, 54, 124), Rgb(30, 118, 235), 8.f)
+			: Button(Rgb(24, 38, 60), Rgb(33, 54, 84), Rgb(18, 30, 50), Rgb(46, 66, 94), 8.f);
+	}
+}
+
 TSharedRef<SWidget> UFloorListEntryWidget::RebuildWidget()
 {
 	if (WidgetTree && !WidgetTree->RootWidget)
 	{
+		using namespace StartStyle;
 		Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_FloorEntry"));
-		Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+		Button->SetBackgroundColor(FLinearColor::White);
 		Button->OnClicked.AddUniqueDynamic(this, &UFloorListEntryWidget::HandleClicked);
 		Button->OnClicked.AddUniqueDynamic(this, &UFloorListEntryWidget::PlayButtonClickSound);
 
-		Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_FloorEntryLabel"));
-		Label->SetJustification(ETextJustify::Center);
-		Label->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		Label->SetAutoWrapText(true);
-		{
-			// Matches UInteriorScreenWidget::StandardFontSize - keep the two in sync by hand if that
-			// one changes, same reasoning as the width default below.
-			FSlateFontInfo LabelFont = Label->GetFont();
-			LabelFont.Size = 15;
-			Label->SetFont(LabelFont);
-		}
-
-		// Width starts at whatever SetWidth was last called with (or the 200 default if never
-		// called - matches every other button's old fixed size).
+		// Width starts at whatever SetWidth was last called with (or the 150 default if never called).
 		SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("SizeBox_FloorEntry"));
 		SizeBox->SetMinDesiredHeight(32.f);
-		SizeBox->SetContent(Label);
-		Button->SetContent(SizeBox);
+		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("HBox_FloorEntry"));
+		UBorder* Pad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pad_FloorEntry"));
+		Pad->SetBrushColor(FLinearColor::Transparent);
+		Pad->SetPadding(FMargin(12.f * DesignToUi, 8.f * DesignToUi, 12.f * DesignToUi, 8.f * DesignToUi));
+		Pad->SetContent(Row);
+		SizeBox->SetContent(Pad);
+		if (UButtonSlot* ContentSlot = Cast<UButtonSlot>(Button->SetContent(SizeBox)))
+		{
+			ContentSlot->SetHorizontalAlignment(HAlign_Fill);
+			ContentSlot->SetVerticalAlignment(VAlign_Fill);
+		}
+
+		// A small floor mark, the name, and how high the floor is on the right.
+		UHorizontalBoxSlot* MarkSlot = Row->AddChildToHorizontalBox(Text(WidgetTree, TEXT("Txt_FloorEntryMark"), TEXT("\u25A4"), 15.f, Rgb(176, 198, 228)));
+		MarkSlot->SetVerticalAlignment(VAlign_Center);
+		Label = Text(WidgetTree, TEXT("Txt_FloorEntryLabel"), TEXT(""), 13.f, FLinearColor::White, true);
+		Label->SetAutoWrapText(true);
+		UHorizontalBoxSlot* LabelSlot = Row->AddChildToHorizontalBox(Label);
+		LabelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		LabelSlot->SetVerticalAlignment(VAlign_Center);
+		LabelSlot->SetPadding(FMargin(10.f * DesignToUi, 0.f, 8.f * DesignToUi, 0.f));
+		ElevationLabel = Text(WidgetTree, TEXT("Txt_FloorEntryElevation"), TEXT(""), 12.f, Rgb(176, 198, 228), true);
+		Row->AddChildToHorizontalBox(ElevationLabel)->SetVerticalAlignment(VAlign_Center);
 
 		WidgetTree->RootWidget = Button;
 	}
@@ -46,10 +71,11 @@ TSharedRef<SWidget> UFloorListEntryWidget::RebuildWidget()
 	return Super::RebuildWidget();
 }
 
-void UFloorListEntryWidget::SetFloorNumber(int32 InFloorNumber, bool bInIsActive)
+void UFloorListEntryWidget::SetFloorNumber(int32 InFloorNumber, bool bInIsActive, float InElevationMeters)
 {
 	FloorNumber = InFloorNumber;
 	bIsActive = bInIsActive;
+	ElevationMeters = InElevationMeters;
 	ApplyVisuals();
 }
 
@@ -68,10 +94,15 @@ void UFloorListEntryWidget::ApplyVisuals()
 	{
 		Label->SetText(FText::FromString(FString::Printf(TEXT("Level %d"), FloorNumber)));
 	}
+	if (ElevationLabel)
+	{
+		// "3 m", or "3.5 m" when the floor height is not a whole number of metres.
+		const bool bWhole = FMath::IsNearlyEqual(ElevationMeters, FMath::RoundToFloat(ElevationMeters), 0.05f);
+		ElevationLabel->SetText(FText::FromString(bWhole ? FString::Printf(TEXT("%d m"), FMath::RoundToInt(ElevationMeters)) : FString::Printf(TEXT("%.1f m"), ElevationMeters)));
+	}
 	if (Button)
 	{
-		// Light purple when active, matching the hand-drawn mockup's highlight on the current floor.
-		Button->SetBackgroundColor(bIsActive ? FLinearColor(0.75f, 0.68f, 0.95f, 1.f) : FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+		Button->SetStyle(FloorRowStyle(bIsActive));
 	}
 	if (SizeBox)
 	{

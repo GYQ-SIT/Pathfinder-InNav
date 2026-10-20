@@ -635,6 +635,10 @@ private:
 	UPROPERTY()
 	UScrollBox* FloorListBox = nullptr;
 
+	// The number of floors, in the Floor panel's heading.
+	UPROPERTY()
+	UTextBlock* FloorCountText = nullptr;
+
 	UPROPERTY()
 	UButton* AddFloorButton = nullptr;
 
@@ -710,6 +714,10 @@ private:
 	// Layers panel - see the comment above HandleLayerRowExpandClicked.
 	UPROPERTY()
 	UBorder* LayersPanel = nullptr;
+
+	// "LEVEL n", in the Layers panel's heading: the floor whose layers are listed.
+	UPROPERTY()
+	UTextBlock* LayersLevelText = nullptr;
 
 	UPROPERTY()
 	UEditableTextBox* LayersSearchBox = nullptr;

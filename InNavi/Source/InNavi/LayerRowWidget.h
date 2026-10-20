@@ -6,6 +6,7 @@
 #include "Blueprint/UserWidget.h"
 #include "LayerRowWidget.generated.h"
 
+class UBorder;
 class UButton;
 class UHorizontalBox;
 class USizeBox;
@@ -31,7 +32,8 @@ class INNAVI_API ULayerRowWidget : public UUserWidget
 public:
 	ULayerRowWidget(const FObjectInitializer& ObjectInitializer);
 
-	void Setup(const FString& InRowKey, const FString& InLabel, float IndentPx, bool bInShowExpandArrow, bool bInIsExpanded, bool bInIsVisible);
+	// Count (when not negative) is shown at the right of the row, before the visibility dot - how many items a category holds.
+	void Setup(const FString& InRowKey, const FString& InLabel, float IndentPx, bool bInShowExpandArrow, bool bInIsExpanded, bool bInIsVisible, int32 InCount = -1);
 
 	// Lets UInteriorScreenWidget::RefreshDockPanelContentWidths keep this row's width in sync with
 	// the Layers panel as it's dragged - same "not realized yet" caveat as Setup, so this is also
@@ -57,6 +59,8 @@ public:
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual void NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual void NativeOnMouseLeave(const FPointerEvent& InMouseEvent) override;
 
 private:
 	UFUNCTION()
@@ -94,6 +98,13 @@ private:
 	UTextBlock* Label = nullptr;
 
 	UPROPERTY()
+	UTextBlock* CountText = nullptr;
+
+	// The row's background: transparent, lit while the mouse is over the row.
+	UPROPERTY()
+	UBorder* HoverBackground = nullptr;
+
+	UPROPERTY()
 	UButton* VisibilityButton = nullptr;
 
 	UPROPERTY()
@@ -106,5 +117,6 @@ private:
 	bool bIsExpanded = false;
 	bool bIsVisible = true;
 	bool bSearchResult = false;
+	int32 Count = -1;
 	float Width = 200.f;
 };
