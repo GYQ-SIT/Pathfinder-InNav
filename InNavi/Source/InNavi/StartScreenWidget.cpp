@@ -2,7 +2,9 @@
 
 #include "EditScreenWidget.h"
 #include "NavPlayerController.h"
+#include "BrandTopBarWidget.h"
 #include "NewProjectDialogWidget.h"
+#include "ProjectLibraryWidget.h"
 #include "TimerManager.h"
 #include "Engine/Texture2D.h"
 #include "RenderUtils.h"
@@ -274,20 +276,11 @@ TSharedRef<SWidget> UStartScreenWidget::RebuildWidget()
 			SplashSlot->SetOffsets(FMargin(0.f));
 		}
 
-		// The top bar from the design: a dark strip across the screen with a thin divider line along its lower edge.
-		const float TopBarHeight = 64.f * DesignToUi;
-		UBorder* TopBar = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("TopBar"));
-		TopBar->SetBrushColor(Srgb(16, 32, 50));
-		TopBar->SetVisibility(ESlateVisibility::HitTestInvisible);
+		// The top bar (shared with the project library).
+		UBrandTopBarWidget* TopBar = CreateWidget<UBrandTopBarWidget>(this, UBrandTopBarWidget::StaticClass());
 		UCanvasPanelSlot* TopBarSlot = Canvas->AddChildToCanvas(TopBar);
 		TopBarSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
-		TopBarSlot->SetOffsets(FMargin(0.f, 0.f, 0.f, TopBarHeight));
-		UBorder* TopBarLine = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("TopBarLine"));
-		TopBarLine->SetBrushColor(Srgb(41, 64, 87));
-		TopBarLine->SetVisibility(ESlateVisibility::HitTestInvisible);
-		UCanvasPanelSlot* TopBarLineSlot = Canvas->AddChildToCanvas(TopBarLine);
-		TopBarLineSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
-		TopBarLineSlot->SetOffsets(FMargin(0.f, TopBarHeight, 0.f, 1.f));
+		TopBarSlot->SetOffsets(FMargin(0.f, 0.f, 0.f, UBrandTopBarWidget::DesignHeight()));
 
 		auto MakeText = [this](const FString& Name, const TCHAR* Value, float Size, const FLinearColor& Color, bool bBold, int32 Spacing = 0) -> UTextBlock*
 		{
@@ -304,21 +297,6 @@ TSharedRef<SWidget> UStartScreenWidget::RebuildWidget()
 			Text->SetFont(Font);
 			return Text;
 		};
-
-		// The brand in the top bar: "InNav" with the product name in small capitals under it.
-		UHorizontalBox* Brand = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("Brand"));
-		UCanvasPanelSlot* BrandSlot = Canvas->AddChildToCanvas(Brand);
-		BrandSlot->SetAnchors(FAnchors(0.f, 0.f));
-		BrandSlot->SetAlignment(FVector2D(0.f, 0.5f));
-		BrandSlot->SetPosition(FVector2D(22.f * DesignToUi, TopBarHeight * 0.5f));
-		BrandSlot->SetAutoSize(true);
-
-		UVerticalBox* BrandText = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Brand_Text"));
-		BrandText->AddChildToVerticalBox(MakeText(TEXT("Txt_BrandName"), TEXT("InNav"), 19.f * DesignToUi, Srgb(241, 246, 255), true));
-		BrandText->AddChildToVerticalBox(MakeText(TEXT("Txt_BrandCaption"), TEXT("INDOOR NAVIGATION EDITOR"), 9.f * DesignToUi, Srgb(171, 189, 212), true, 80))
-			->SetPadding(FMargin(0.f, 1.f * DesignToUi, 0.f, 0.f));
-		UHorizontalBoxSlot* BrandTextSlot = Brand->AddChildToHorizontalBox(BrandText);
-		BrandTextSlot->SetVerticalAlignment(VAlign_Center);
 
 		// Everything on the left, top to bottom: the heading block, then the two launch cards, then a plain Quit.
 		// Starts at the same height as the design's heading and is placed from the top-left, so the block follows the
@@ -500,12 +478,8 @@ void UStartScreenWidget::NativeConstruct()
 	}
 	if (OpenButton)
 	{
-		// PlayButtonClickSound bound BEFORE OnOpenClicked (opposite of every other button in the app) -
-		// a multicast delegate fires its bound functions in bind order, and OnOpenClicked's
-		// BrowseForBuildingDataFile() opens a blocking native file picker, so with the usual order the
-		// click sound wouldn't play until the dialog closed and the user had already picked a file.
-		OpenButton->OnClicked.AddUniqueDynamic(this, &UStartScreenWidget::PlayButtonClickSound);
 		OpenButton->OnClicked.AddUniqueDynamic(this, &UStartScreenWidget::OnOpenClicked);
+		OpenButton->OnClicked.AddUniqueDynamic(this, &UStartScreenWidget::PlayButtonClickSound);
 	}
 	if (QuitButton)
 	{
@@ -524,82 +498,29 @@ void UStartScreenWidget::PlayButtonClickSound()
 
 void UStartScreenWidget::OnNewClicked()
 {
-	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
-	if (!PC)
-	{
-		return;
-	}
-
 	// Ask for a project name first; the project file is created when the dialog is confirmed.
-	UNewProjectDialogWidget* Dialog = CreateWidget<UNewProjectDialogWidget>(PC, UNewProjectDialogWidget::StaticClass());
-	if (!Dialog)
-	{
-		return;
-	}
 	TWeakObjectPtr<UStartScreenWidget> WeakThis(this);
-	TWeakObjectPtr<ANavPlayerController> WeakPC(PC);
-	Dialog->OnCreate = [WeakThis, WeakPC](const FString& Name, const FString& Description) -> FString
+	UNewProjectDialogWidget::OpenNewProject(GetOwningPlayer<ANavPlayerController>(), [WeakThis]()
 	{
-		ANavPlayerController* Controller = WeakPC.Get();
-		if (!Controller)
-		{
-			return TEXT("There is no player to create the project for.");
-		}
-		FString Error;
-		if (!Controller->CreateNewProject(Name, Description, Error))
-		{
-			return Error;
-		}
 		if (UStartScreenWidget* Screen = WeakThis.Get())
 		{
 			Screen->GoToEditScreen();
 		}
-		return FString();
-	};
-	Dialog->AddToViewport(100);
+	});
 }
 
 void UStartScreenWidget::OnOpenClicked()
 {
-	// PlayButtonClickSound (bound alongside this handler) decodes the click sound asynchronously and
-	// only actually starts playing once the game thread processes that decode's completion callback -
-	// see ANavPlayerController::PlayButtonClickSound. That can't happen while this function is
-	// blocked inside BrowseForBuildingDataFile's native OS dialog below, on the very same call stack,
-	// with no tick in between - the sound would only become audible once the dialog had already
-	// closed. Deferring the actual browse-and-load by a short delay instead gives that callback time
-	// to run first, so the click is audible right away.
-	if (UWorld* World = GetWorld())
-	{
-		FTimerHandle Unused;
-		World->GetTimerManager().SetTimer(Unused, FTimerDelegate::CreateUObject(this, &UStartScreenWidget::BrowseAndLoadBuildingData), 0.15f, false);
-	}
-	else
-	{
-		BrowseAndLoadBuildingData();
-	}
-}
-
-void UStartScreenWidget::BrowseAndLoadBuildingData()
-{
-	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	// The library lists the Data folder itself; there is no file dialog any more.
+	APlayerController* PC = GetOwningPlayer();
 	if (!PC)
 	{
 		return;
 	}
-
-	const FString FilePath = PC->BrowseForBuildingDataFile();
-	if (FilePath.IsEmpty())
+	if (UProjectLibraryWidget* Library = CreateWidget<UProjectLibraryWidget>(PC, UProjectLibraryWidget::StaticClass()))
 	{
-		// User cancelled the OS dialog - stay on this screen, nothing to report.
-		return;
-	}
-
-	// LoadBuildingDataFromPathOrDatabase already broadcasts OnActionFailed itself if the file doesn't parse.
-	const int32 Count = PC->LoadBuildingDataFromPathOrDatabase(FilePath);
-	// A project that was just created has no buildings yet; it still counts as opened when it became the current file.
-	if (Count > 0 || PC->GetCurrentProjectFilePath() == FilePath)
-	{
-		GoToEditScreen();
+		Library->AddToViewport();
+		RemoveFromParent();
 	}
 }
 

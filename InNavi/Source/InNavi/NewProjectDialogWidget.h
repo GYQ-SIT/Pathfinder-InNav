@@ -4,6 +4,8 @@
 #include "Blueprint/UserWidget.h"
 #include "NewProjectDialogWidget.generated.h"
 
+class ANavPlayerController;
+class APlayerController;
 class UButton;
 class UEditableTextBox;
 class UMultiLineEditableTextBox;
@@ -22,6 +24,17 @@ class INNAVI_API UNewProjectDialogWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	// Opens the New project dialog over the current screen. When it is confirmed the project has been created (see
+	// ANavPlayerController::CreateNewProject) and OnCreated runs - the caller moves on to the editor.
+	static UNewProjectDialogWidget* OpenNewProject(ANavPlayerController* Controller, TFunction<void()> OnCreated);
+
+	// Opens it as "Rename project" for a project called CurrentName. OnRename gets the typed name and returns an empty
+	// string when it worked or the reason it did not (shown under the name).
+	static UNewProjectDialogWidget* OpenRename(APlayerController* Controller, const FString& CurrentName, TFunction<FString(const FString& NewName)> OnRename);
+
+	// Makes this a rename dialog: only the name, filled in with CurrentName. Has to be called before the dialog is shown.
+	void ConfigureRename(const FString& CurrentName);
+
 	TFunction<FString(const FString& Name, const FString& Description)> OnCreate;
 	TFunction<void()> OnCancelled;
 
@@ -68,4 +81,7 @@ private:
 
 	// The name box takes keyboard focus on the first tick, once the dialog is on screen.
 	bool bFocusedName = false;
+
+	bool bRenameMode = false;
+	FString InitialName;
 };

@@ -11,6 +11,7 @@
 #include "GameFramework/FloatingPawnMovement.h"
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
+#include "ProjectLibrary.h"
 #include "InteriorRoom.h"
 #include "InteriorConnectorMarker.h"
 #include "EngineUtils.h"
@@ -3146,24 +3147,7 @@ FString ANavPlayerController::GetProjectsDirectory() const
 
 FString ANavPlayerController::GetProjectFilePathForName(const FString& Name) const
 {
-	FString FileName = FPaths::MakeValidFileName(Name.TrimStartAndEnd(), TEXT('_'));
-	FileName.TrimStartAndEndInline();
-	// Names that are only dots or underscores (what is left of "???" or "..") would make a file nobody can see.
-	FString Letters = FileName;
-	Letters.ReplaceInline(TEXT("_"), TEXT(""));
-	Letters.ReplaceInline(TEXT("."), TEXT(""));
-	Letters.TrimStartAndEndInline();
-	if (Letters.IsEmpty())
-	{
-		return FString();
-	}
-	constexpr int32 MaxFileNameLength = 80;
-	if (FileName.Len() > MaxFileNameLength)
-	{
-		FileName.LeftInline(MaxFileNameLength);
-		FileName.TrimEndInline();
-	}
-	return GetProjectsDirectory() / (FileName + TEXT(".json"));
+	return ProjectLibrary::FilePathForName(GetProjectsDirectory(), Name);
 }
 
 bool ANavPlayerController::CreateNewProject(const FString& Name, const FString& Description, FString& OutError)

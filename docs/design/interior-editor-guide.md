@@ -6,9 +6,7 @@
 
 ## Getting to the interior editor
 
-1. Launch the project, pick **New project** (blank), **Open project** (load an existing
-   `buildings.json` or a SQLite `.db` map export - the file picker shows both, and
-   which loader runs is picked automatically from the extension), or **Quit**, from
+1. Launch the project, pick **New project** (blank), **Open project** (the project library, below), or **Quit**, from
    the start screen.
    **New project** asks for a **Project name** (required) and an optional **Description** first. Create writes a blank
    `<project name>.json` into the `InNavi/Data` folder (characters Windows does not allow in a file name are replaced;
@@ -23,6 +21,23 @@
    to zoom. A separate **3D preview** is available too — see its own section below.
 4. **Back**, at the right end of the top menu bar, returns to the exterior view (will
    prompt to save if you have unsaved changes).
+
+### Project library (Open project)
+
+**Open project** shows every project in the `InNavi/Data` folder as a card, newest first - `.json` projects and `.db` map
+databases; other JSON files in the folder (layouts, settings) are left out. There is no file dialog. The search box filters by
+project or file name, **+ New project** starts a new one, and **Back** returns to the start screen.
+
+Each card shows the number of buildings (and an **Empty** tag when there are none yet), the project's name, its file name, its
+description and when the file was last written, with:
+
+- **Open project** - loads it and opens the editor. A project with no buildings yet opens like any other.
+- **Duplicate** - copies a `.json` project to "<name> copy" (then "copy 2", ...) with that name inside; the original is untouched.
+- **Rename** - changes the project's name and its file name together; a name another project already has is refused.
+
+The sample files that ship with the project (`buildings.json`, `map_extended.db`) cannot be renamed, because tests and defaults
+refer to them by name; a database cannot be duplicated. A database card's building count is the number of campus buildings
+(tagged `university`) in it.
 
 ## Exterior edit screen
 

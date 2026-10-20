@@ -122,8 +122,8 @@ TSharedRef<SWidget> UNewProjectDialogWidget::RebuildWidget()
 
 		// Header: title and one line of help.
 		UVerticalBox* Header = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Header"));
-		Header->AddChildToVerticalBox(MakeText(TEXT("Txt_DialogTitle"), TEXT("Create a new project"), 23.f, DialogRgb(241, 246, 255), true));
-		UTextBlock* Help = MakeText(TEXT("Txt_DialogHelp"), TEXT("Name your project. A blank project file is created in the Data folder."), 13.f, DialogRgb(176, 192, 210), false);
+		Header->AddChildToVerticalBox(MakeText(TEXT("Txt_DialogTitle"), bRenameMode ? TEXT("Rename project") : TEXT("Create a new project"), 23.f, DialogRgb(241, 246, 255), true));
+		UTextBlock* Help = MakeText(TEXT("Txt_DialogHelp"), bRenameMode ? TEXT("Choose a new name. The project file is renamed to match.") : TEXT("Name your project. A blank project file is created in the Data folder."), 13.f, DialogRgb(176, 192, 210), false);
 		Help->SetAutoWrapText(true);
 		Header->AddChildToVerticalBox(Help)->SetPadding(FMargin(0.f, 6.f * DialogUiScale, 0.f, 0.f));
 		UBorder* HeaderPad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("HeaderPad"));
@@ -147,6 +147,10 @@ TSharedRef<SWidget> UNewProjectDialogWidget::RebuildWidget()
 		NameBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_ProjectName"));
 		NameBox->SetWidgetStyle(DialogFieldStyle(13.f));
 		NameBox->SetHintText(FText::FromString(TEXT("e.g. Campus Navigation")));
+		if (bRenameMode)
+		{
+			NameBox->SetText(FText::FromString(InitialName));
+		}
 		NameBox->OnTextChanged.AddUniqueDynamic(this, &UNewProjectDialogWidget::HandleNameChanged);
 		NameBox->OnTextCommitted.AddUniqueDynamic(this, &UNewProjectDialogWidget::HandleNameCommitted);
 		Body->AddChildToVerticalBox(NameBox)->SetPadding(FMargin(0.f, 6.f * DialogUiScale, 0.f, 0.f));
@@ -156,15 +160,18 @@ TSharedRef<SWidget> UNewProjectDialogWidget::RebuildWidget()
 		ErrorText->SetVisibility(ESlateVisibility::Collapsed);
 		Body->AddChildToVerticalBox(ErrorText)->SetPadding(FMargin(0.f, 6.f * DialogUiScale, 0.f, 0.f));
 
-		Body->AddChildToVerticalBox(MakeText(TEXT("Txt_DescriptionLabel"), TEXT("Description"), 11.f, LabelColor, true, 30))
-			->SetPadding(FMargin(0.f, 16.f * DialogUiScale, 0.f, 0.f));
-		DescriptionBox = WidgetTree->ConstructWidget<UMultiLineEditableTextBox>(UMultiLineEditableTextBox::StaticClass(), TEXT("Txt_ProjectDescription"));
-		DescriptionBox->WidgetStyle = DialogFieldStyle(13.f);
-		DescriptionBox->SetHintText(FText::FromString(TEXT("Purpose or short description")));
-		USizeBox* DescriptionSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("DescriptionSize"));
-		DescriptionSize->SetHeightOverride(76.f * DialogUiScale);
-		DescriptionSize->SetContent(DescriptionBox);
-		Body->AddChildToVerticalBox(DescriptionSize)->SetPadding(FMargin(0.f, 6.f * DialogUiScale, 0.f, 0.f));
+		if (!bRenameMode)
+		{
+			Body->AddChildToVerticalBox(MakeText(TEXT("Txt_DescriptionLabel"), TEXT("Description"), 11.f, LabelColor, true, 30))
+				->SetPadding(FMargin(0.f, 16.f * DialogUiScale, 0.f, 0.f));
+			DescriptionBox = WidgetTree->ConstructWidget<UMultiLineEditableTextBox>(UMultiLineEditableTextBox::StaticClass(), TEXT("Txt_ProjectDescription"));
+			DescriptionBox->WidgetStyle = DialogFieldStyle(13.f);
+			DescriptionBox->SetHintText(FText::FromString(TEXT("Purpose or short description")));
+			USizeBox* DescriptionSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("DescriptionSize"));
+			DescriptionSize->SetHeightOverride(76.f * DialogUiScale);
+			DescriptionSize->SetContent(DescriptionBox);
+			Body->AddChildToVerticalBox(DescriptionSize)->SetPadding(FMargin(0.f, 6.f * DialogUiScale, 0.f, 0.f));
+		}
 
 		UBorder* BodyPad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("BodyPad"));
 		BodyPad->SetBrushColor(FLinearColor::Transparent);
@@ -194,7 +201,7 @@ TSharedRef<SWidget> UNewProjectDialogWidget::RebuildWidget()
 		};
 		CancelButton = AddFooterButton(TEXT("Btn_CancelProject"), TEXT("Cancel"),
 			DialogButtonStyle(FLinearColor::Transparent, DialogRgb(36, 50, 74), DialogRgb(30, 43, 66), DialogRgb(74, 90, 113)), 74.f, true);
-		CreateButton = AddFooterButton(TEXT("Btn_CreateProject"), TEXT("Create project"),
+		CreateButton = AddFooterButton(TEXT("Btn_CreateProject"), bRenameMode ? TEXT("Rename") : TEXT("Create project"),
 			DialogButtonStyle(DialogAmber, DialogRgb(238, 138, 24), DialogRgb(190, 102, 4), DialogAmber), 110.f, false);
 
 		UBorder* FooterPad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("FooterPad"));
@@ -204,6 +211,66 @@ TSharedRef<SWidget> UNewProjectDialogWidget::RebuildWidget()
 		Column->AddChildToVerticalBox(FooterPad);
 	}
 	return Super::RebuildWidget();
+}
+
+void UNewProjectDialogWidget::ConfigureRename(const FString& CurrentName)
+{
+	bRenameMode = true;
+	InitialName = CurrentName;
+}
+
+UNewProjectDialogWidget* UNewProjectDialogWidget::OpenNewProject(ANavPlayerController* Controller, TFunction<void()> OnCreated)
+{
+	if (!Controller)
+	{
+		return nullptr;
+	}
+	UNewProjectDialogWidget* Dialog = CreateWidget<UNewProjectDialogWidget>(Controller, UNewProjectDialogWidget::StaticClass());
+	if (!Dialog)
+	{
+		return nullptr;
+	}
+	TWeakObjectPtr<ANavPlayerController> WeakController(Controller);
+	Dialog->OnCreate = [WeakController, OnCreated](const FString& Name, const FString& Description) -> FString
+	{
+		ANavPlayerController* Player = WeakController.Get();
+		if (!Player)
+		{
+			return TEXT("There is no player to create the project for.");
+		}
+		FString Error;
+		if (!Player->CreateNewProject(Name, Description, Error))
+		{
+			return Error;
+		}
+		if (OnCreated)
+		{
+			OnCreated();
+		}
+		return FString();
+	};
+	Dialog->AddToViewport(100);
+	return Dialog;
+}
+
+UNewProjectDialogWidget* UNewProjectDialogWidget::OpenRename(APlayerController* Controller, const FString& CurrentName, TFunction<FString(const FString& NewName)> OnRename)
+{
+	if (!Controller)
+	{
+		return nullptr;
+	}
+	UNewProjectDialogWidget* Dialog = CreateWidget<UNewProjectDialogWidget>(Controller, UNewProjectDialogWidget::StaticClass());
+	if (!Dialog)
+	{
+		return nullptr;
+	}
+	Dialog->ConfigureRename(CurrentName);
+	Dialog->OnCreate = [OnRename](const FString& Name, const FString&) -> FString
+	{
+		return OnRename ? OnRename(Name) : FString();
+	};
+	Dialog->AddToViewport(100);
+	return Dialog;
 }
 
 void UNewProjectDialogWidget::NativeConstruct()
