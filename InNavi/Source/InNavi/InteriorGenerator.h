@@ -111,7 +111,8 @@ public:
 	AInteriorRoom* CreateRoomFromFootprint(const TArray<FVector2D>& Footprint,const FString& RoomId,const FString& RoomName,bool bIsPublic,bool bRequiresKey,bool bAllowOverlap, FString& OutError);
 	// Clipboard creation includes tags in the same undo snapshot as the new room.
 	AInteriorRoom* CreateRoomFromFootprintWithTags(const TArray<FVector2D>& Footprint, const FString& RoomId,
-		const FString& RoomName, bool bIsPublic, bool bRequiresKey, bool bAllowOverlap, FString& OutError, const TArray<FString>& InTags);
+		const FString& RoomName, bool bIsPublic, bool bRequiresKey, bool bAllowOverlap, FString& OutError, const TArray<FString>& InTags,
+		const FString& InRoomType = FString());
 
 	// Builds a standalone open wall/partition line on the active floor - same id/floor rules as
 	// CreateRoomFromFootprint, but the points aren't closed into a loop (at least 2 points, not 3)
@@ -232,6 +233,10 @@ public:
 	bool SetRoomTags(const FString& RoomId, const TArray<FString>& InTags);
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	TArray<FString> GetRoomTags(const FString& RoomId) const;
+
+	// A room's type (see RoomTypes.h); a value that is not on the list is stored as Other. False if the room is missing or is a wall.
+	bool SetRoomType(const FString& RoomId, const FString& NewType);
+	FString GetRoomType(const FString& RoomId) const;
 
 	// Reads a room's current human-readable name - for a room properties panel to populate its
 	// field. A plain getter with no side effects, so this is BlueprintPure (no exec pins needed).

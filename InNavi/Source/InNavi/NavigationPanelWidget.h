@@ -148,6 +148,7 @@ public:
 		FString RoomId;
 		FString RoomName;
 		TArray<FString> Tags;
+		FString RoomType;
 		int32 Floor = 1;
 		FVector2D Centroid = FVector2D::ZeroVector;
 		// Built with the centroid when the room index changes; queries reuse these strings.

@@ -131,6 +131,11 @@ private:
 	UFUNCTION()
 	void HandleProjectSaved();
 
+	// Bound to ANavPlayerController::OnBeforeProjectSave: applies what was typed or picked in the Properties panel but not
+	// applied yet (room name, type and tags; a connector's floors), so a save never leaves it behind.
+	UFUNCTION()
+	void HandleBeforeProjectSave();
+
 	// Bound to ANavPlayerController::OnActiveFloorChanged - see the comment on that delegate. Covers
 	// the [/]/F/X keyboard shortcuts (and anything else that changes the active floor or its content)
 	// on top of this screen's own Floor panel button handlers, which already call these directly.
@@ -221,6 +226,10 @@ private:
 	// dark theme, so both are bound to build their own white-text item widget instead.
 	UFUNCTION()
 	UWidget* HandleGenerateComboBoxItem(FString Item);
+
+	// The same for the room-type drop-down, with the type's colour as a small square before its name.
+	UFUNCTION()
+	UWidget* HandleGenerateRoomTypeItem(FString Item);
 
 	void RefreshBuildingSwitcher();
 
@@ -496,6 +505,12 @@ private:
 	// Saves these tags (a comma-separated list) on the selected room - part of Save changes.
 	void ApplyRoomTags(const FString& TagsText);
 
+	// Shows the selected room's type in the type drop-down.
+	void RefreshRoomTypeDisplay();
+
+	// The kind tag at the top of Properties: its text, and the colour of its outline.
+	void SetKindTag(const FString& Label, const FLinearColor& OutlineColor);
+
 	// Fills the read-only position / size fields from the selected room's bounding box.
 	void RefreshRoomBoundsFields();
 
@@ -716,6 +731,9 @@ private:
 	UPROPERTY() USizeBox* RoomTagsFieldsSizeBox = nullptr;
 	UPROPERTY()
 	UEditableTextBox* RoomTagsTextBox = nullptr;
+	// The room's type, picked from RoomTypes::All(); saved with Save changes.
+	UPROPERTY()
+	UComboBoxString* RoomTypeComboBox = nullptr;
 
 	UPROPERTY()
 	UButton* ApplyRoomButton = nullptr;

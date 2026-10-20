@@ -1169,6 +1169,29 @@ TArray<FString> ANavPlayerController::GetSelectedRoomTags() const
 	return InteriorGen ? InteriorGen->GetRoomTags(SelectedRoomId) : TArray<FString>();
 }
 
+bool ANavPlayerController::SetSelectedRoomType(const FString& NewType)
+{
+	if (!InteriorGen || !InteriorGen->IsRoomClosedLoop(SelectedRoomId)) return false;
+	const FString Before = InteriorGen->GetRoomType(SelectedRoomId);
+	if (!InteriorGen->SetRoomType(SelectedRoomId, NewType)) return false;
+	if (Before != InteriorGen->GetRoomType(SelectedRoomId))
+	{
+		bHasUnsavedChanges = true;
+		OnInteriorContentChanged.Broadcast();
+	}
+	return true;
+}
+
+FString ANavPlayerController::GetSelectedRoomType() const
+{
+	return InteriorGen ? InteriorGen->GetRoomType(SelectedRoomId) : FString();
+}
+
+FString ANavPlayerController::GetRoomType(const FString& RoomId) const
+{
+	return InteriorGen ? InteriorGen->GetRoomType(RoomId) : FString();
+}
+
 bool ANavPlayerController::IsSelectedRoomClosedLoop() const
 {
 	if (SelectedRoomId.IsEmpty() || !InteriorGen)
@@ -3315,6 +3338,7 @@ void ANavPlayerController::RestoreExteriorCameraView()
 
 bool ANavPlayerController::SaveCurrentProject()
 {
+	OnBeforeProjectSave.Broadcast();
 	if (!Generator)
 	{
 		UE_LOG(LogTemp, Error, TEXT("SaveCurrentProject: no BuildingGenerator found in the level"));
@@ -3395,6 +3419,7 @@ FString ANavPlayerController::BrowseForSaveLocation()
 
 bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
 {
+	OnBeforeProjectSave.Broadcast();
 	if (!Generator)
 	{
 		UE_LOG(LogTemp, Error, TEXT("SaveCurrentProjectAs: no BuildingGenerator found in the level"));
@@ -3518,6 +3543,7 @@ void ANavPlayerController::CopyInteriorKeyHandler()
 	CopiedRoomFootprint = Room->GetFootprint();
 	CopiedRoomName = Room->RoomName;
 	CopiedRoomTags = Room->RoomTags;
+	CopiedRoomType = Room->RoomType;
 	bCopiedRoomIsPublic = Room->bIsPublic;
 	bCopiedRoomRequiresKey = Room->bRequiresKey;
 	bHasCopiedRoom = true;
@@ -3678,7 +3704,8 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 		bCopiedRoomRequiresKey,
 		/*bAllowOverlap=*/false,
 		CreateError,
-		CopiedRoomTags
+		CopiedRoomTags,
+		CopiedRoomType
 	);
 
 	if (NewRoom)

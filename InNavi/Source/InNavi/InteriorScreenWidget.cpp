@@ -2,6 +2,7 @@
 #include "DockHostUMG.h"
 #include "InteriorDockLayout.h"
 #include "NavigationSearchUtils.h"
+#include "RoomTypes.h"
 
 #include "AudioFileRowWidget.h"
 #include "AudioPanelWidget.h"
@@ -909,12 +910,15 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		};
 
 		// Heading: a mark and "Properties" on the left, the tag on the right.
-		UHorizontalBox* PropertiesHeader = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("PropertiesHeader"));
-		PropertiesHeader->AddChildToHorizontalBox(Text(WidgetTree, TEXT("Txt_PropertiesMark"), TEXT("\u2261"), 17.f, Rgb(176, 198, 228)))->SetVerticalAlignment(VAlign_Center);
-		UHorizontalBoxSlot* PropertiesHeaderTitleSlot = PropertiesHeader->AddChildToHorizontalBox(Text(WidgetTree, TEXT("Txt_PropertiesHeader"), TEXT("Properties"), 16.f, Rgb(241, 246, 255), true));
+		// A wrap box: a long tag (a room type such as "MEETING ROOM") drops under the title when the panel is narrow, instead of drawing over it.
+		UWrapBox* PropertiesHeader = WidgetTree->ConstructWidget<UWrapBox>(UWrapBox::StaticClass(), TEXT("PropertiesHeader"));
+		PropertiesHeader->SetInnerSlotPadding(FVector2D(8.f * DesignToUi, 6.f * DesignToUi));
+		UHorizontalBox* PropertiesHeaderTitle = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("PropertiesHeaderTitle"));
+		PropertiesHeaderTitle->AddChildToHorizontalBox(Text(WidgetTree, TEXT("Txt_PropertiesMark"), TEXT("\u2261"), 17.f, Rgb(176, 198, 228)))->SetVerticalAlignment(VAlign_Center);
+		UHorizontalBoxSlot* PropertiesHeaderTitleSlot = PropertiesHeaderTitle->AddChildToHorizontalBox(Text(WidgetTree, TEXT("Txt_PropertiesHeader"), TEXT("Properties"), 16.f, Rgb(241, 246, 255), true));
 		PropertiesHeaderTitleSlot->SetVerticalAlignment(VAlign_Center);
-		PropertiesHeaderTitleSlot->SetPadding(FMargin(8.f * DesignToUi, 0.f, 8.f * DesignToUi, 0.f));
-		PropertiesHeaderTitleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		PropertiesHeaderTitleSlot->SetPadding(FMargin(8.f * DesignToUi, 0.f, 0.f, 0.f));
+		PropertiesHeader->AddChildToWrapBox(PropertiesHeaderTitle)->SetVerticalAlignment(VAlign_Center);
 		PropertiesKindTag = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("PropertiesKindTag"));
 		PropertiesKindTag->SetBrush(Rounded(Rgb(14, 24, 38), Rgb(60, 78, 104), 5.f));
 		PropertiesKindTag->SetBrushColor(FLinearColor::White);
@@ -922,7 +926,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		PropertiesKindTag->SetVisibility(ESlateVisibility::Collapsed);
 		PropertiesKindText = Text(WidgetTree, TEXT("Txt_PropertiesKind"), TEXT(""), 10.f, Rgb(170, 190, 214), true, 100);
 		PropertiesKindTag->SetContent(PropertiesKindText);
-		PropertiesHeader->AddChildToHorizontalBox(PropertiesKindTag)->SetVerticalAlignment(VAlign_Center);
+		PropertiesHeader->AddChildToWrapBox(PropertiesKindTag)->SetVerticalAlignment(VAlign_Center);
 		PropertiesStack->AddChildToVerticalBox(InWidthBox(PropertiesHeader))->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f * DesignToUi));
 
 		// Section heading ("Room properties", ...), which is also what the dock treats as this panel's title.
@@ -1042,6 +1046,16 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		RoomTagsFieldsSizeBox->SetWidthOverride(StandardButtonWidth);
 		RoomTagsFieldsSizeBox->SetContent(RoomTagsFields);
 		RoomFieldsBox->AddChildToVerticalBox(RoomTagsFieldsSizeBox);
+		AddFieldLabel(RoomTagsFields, TEXT("Txt_RoomTypeLabel"), TEXT("ROOM TYPE"));
+		RoomTypeComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cmb_RoomType"));
+		RoomTypeComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateRoomTypeItem);
+		DarkCombo(RoomTypeComboBox);
+		for (const FString& TypeName : RoomTypes::All())
+		{
+			RoomTypeComboBox->AddOption(TypeName);
+		}
+		RoomTypeComboBox->SetSelectedOption(RoomTypes::Default());
+		RoomTagsFields->AddChildToVerticalBox(RoomTypeComboBox);
 		AddFieldLabel(RoomTagsFields, TEXT("Txt_RoomTagsLabel"), TEXT("SEARCH TAGS (COMMA SEPARATED)"));
 		RoomTagsTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_RoomTags"));
 		StyleField(RoomTagsTextBox, false);
@@ -1356,6 +1370,7 @@ void UInteriorScreenWidget::NativeConstruct()
 		// through this widget at all - this is what lets the dock layout still get saved when the
 		// user saves that way instead of through Back's own confirm dialog.
 		PC->OnProjectSaved.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
+		PC->OnBeforeProjectSave.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleBeforeProjectSave);
 		// Same reasoning - the [/]/F/X floor keyboard shortcuts change the active floor without ever
 		// going through this screen's own Floor panel handlers.
 		PC->OnActiveFloorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
@@ -1534,6 +1549,7 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnSelectedConnectorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedConnectorChanged);
 		PC->OnEditModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleEditModeChanged);
 		PC->OnProjectSaved.RemoveDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
+		PC->OnBeforeProjectSave.RemoveDynamic(this, &UInteriorScreenWidget::HandleBeforeProjectSave);
 		PC->OnActiveFloorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
 		PC->OnInteriorContentChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleInteriorContentChanged);
 		PC->OnPreviewModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandlePreviewModeChanged);
@@ -1818,6 +1834,46 @@ void UInteriorScreenWidget::HandleEditModeChanged()
 	RefreshModeButtonHighlights();
 }
 
+void UInteriorScreenWidget::HandleBeforeProjectSave()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC)
+	{
+		return;
+	}
+
+	// Only what differs from the model is applied, so a save with nothing pending adds no undo steps.
+	if (RoomFieldsBox && RoomFieldsBox->GetVisibility() == ESlateVisibility::Visible && !PC->GetSelectedRoomId().IsEmpty())
+	{
+		const bool bNameChanged = RoomNameTextBox && RoomNameTextBox->GetText().ToString() != PC->GetSelectedRoomName();
+		const bool bTagsChanged = RoomTagsTextBox && NavigationSearch::ParseTags(RoomTagsTextBox->GetText().ToString()) != PC->GetSelectedRoomTags();
+		const bool bTypeChanged = PC->IsSelectedRoomClosedLoop() && RoomTypeComboBox && !RoomTypeComboBox->GetSelectedOption().IsEmpty()
+			&& RoomTypeComboBox->GetSelectedOption() != PC->GetSelectedRoomType();
+		if (bNameChanged || bTagsChanged || bTypeChanged)
+		{
+			OnApplyRoomClicked();
+		}
+	}
+	if (ConnectorFieldsBox && ConnectorFieldsBox->GetVisibility() == ESlateVisibility::Visible)
+	{
+		TArray<int32> Checked;
+		for (int32 Index = 0; Index < FloorCheckboxes.Num(); ++Index)
+		{
+			const UCheckBox* CheckBox = FloorCheckboxes[Index];
+			if (CheckBox && CheckBox->GetVisibility() != ESlateVisibility::Collapsed && CheckBox->IsChecked())
+			{
+				Checked.Add(Index + 1);
+			}
+		}
+		TArray<int32> Current = PC->GetSelectedConnectorFloors();
+		Current.Sort();
+		if (!Checked.IsEmpty() && Checked != Current)
+		{
+			OnApplyConnectorClicked();
+		}
+	}
+}
+
 void UInteriorScreenWidget::HandleProjectSaved()
 {
 	SaveDockLayoutToDisk();
@@ -1837,6 +1893,7 @@ void UInteriorScreenWidget::HandleInteriorContentChanged()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		if (RoomTagsTextBox) RoomTagsTextBox->SetText(FText::FromString(FString::Join(PC->GetSelectedRoomTags(), TEXT(", "))));
+		RefreshRoomTypeDisplay();
 	}
 }
 
@@ -2126,7 +2183,7 @@ void UInteriorScreenWidget::HandleSelectedDoorChanged(FString RoomId, FString Do
 	}
 	if (PropertiesKindText)
 	{
-		PropertiesKindText->SetText(FText::FromString(TEXT("DOOR")));
+		SetKindTag(TEXT("DOOR"), StartStyle::Rgb(60, 78, 104));
 	}
 	if (PropertiesKindTag)
 	{
@@ -2202,7 +2259,14 @@ void UInteriorScreenWidget::HandleSelectedRoomChanged(FString RoomId)
 	}
 	if (PropertiesKindText)
 	{
-		PropertiesKindText->SetText(FText::FromString(PC->IsSelectedRoomClosedLoop() ? TEXT("ROOM") : TEXT("WALL")));
+		if (PC->IsSelectedRoomClosedLoop())
+		{
+			SetKindTag(PC->GetSelectedRoomType().ToUpper(), RoomTypes::Color(PC->GetSelectedRoomType()));
+		}
+		else
+		{
+			SetKindTag(TEXT("WALL"), StartStyle::Rgb(60, 78, 104));
+		}
 	}
 	if (PropertiesKindTag)
 	{
@@ -2223,6 +2287,7 @@ void UInteriorScreenWidget::HandleSelectedRoomChanged(FString RoomId)
 	}
 	if (RoomTagsFields) RoomTagsFields->SetVisibility(PC->IsSelectedRoomClosedLoop() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	if (RoomTagsTextBox) RoomTagsTextBox->SetText(FText::FromString(FString::Join(PC->GetSelectedRoomTags(), TEXT(", "))));
+	RefreshRoomTypeDisplay();
 
 	RefreshRoomBoundsFields();
 	RefreshPropertiesPanelVisibility();
@@ -2234,8 +2299,13 @@ void UInteriorScreenWidget::OnApplyRoomClicked()
 	// room, which would put the old tags back in the tags box before they were saved.
 	const FString NewName = RoomNameTextBox ? RoomNameTextBox->GetText().ToString() : FString();
 	const FString NewTags = RoomTagsTextBox ? RoomTagsTextBox->GetText().ToString() : FString();
+	const FString NewType = RoomTypeComboBox ? RoomTypeComboBox->GetSelectedOption() : FString();
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
+		if (RoomTypeComboBox)
+		{
+			PC->SetSelectedRoomType(NewType);
+		}
 		if (RoomNameTextBox)
 		{
 			PC->SetSelectedRoomName(NewName);
@@ -2248,6 +2318,23 @@ void UInteriorScreenWidget::OnApplyRoomClicked()
 		{
 			const FString Name = PC->GetSelectedRoomName();
 			RoomSubtitleText->SetText(FText::FromString(Name.IsEmpty() ? PC->GetSelectedRoomId() : Name));
+		}
+		if (PropertiesKindText && PC->IsSelectedRoomClosedLoop())
+		{
+			SetKindTag(PC->GetSelectedRoomType().ToUpper(), RoomTypes::Color(PC->GetSelectedRoomType()));
+		}
+	}
+}
+
+void UInteriorScreenWidget::RefreshRoomTypeDisplay()
+{
+	const ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (PC && RoomTypeComboBox && PC->IsSelectedRoomClosedLoop())
+	{
+		const FString Type = PC->GetSelectedRoomType();
+		if (RoomTypeComboBox->GetSelectedOption() != Type)
+		{
+			RoomTypeComboBox->SetSelectedOption(Type);
 		}
 	}
 }
@@ -2328,7 +2415,7 @@ void UInteriorScreenWidget::HandleSelectedConnectorChanged(FString GroupId)
 	}
 	if (PropertiesKindText)
 	{
-		PropertiesKindText->SetText(FText::FromString(TEXT("CONNECTOR")));
+		SetKindTag(TEXT("CONNECTOR"), StartStyle::Rgb(60, 78, 104));
 	}
 	if (PropertiesKindTag)
 	{
@@ -2527,12 +2614,18 @@ void UInteriorScreenWidget::RefreshLayersList()
 				}
 				const FString RoomName = PC->GetRoomName(RoomId);
 				const TArray<FString> Tags = PC->GetRoomTags(RoomId);
-				const FString Searchable = RoomName + TEXT(" ") + RoomId + TEXT(" ") + FString::Join(Tags, TEXT(" "));
+				const FString RoomType = PC->GetRoomType(RoomId);
+				const bool bTyped = RoomType != RoomTypes::Default();
+				const FString Searchable = RoomName + TEXT(" ") + RoomId + TEXT(" ") + FString::Join(Tags, TEXT(" ")) + (bTyped ? TEXT(" ") + RoomType : FString());
 				if (!NavigationSearch::MatchesWords(Words, Searchable))
 				{
 					continue;
 				}
 				FString Label = FString::Printf(TEXT("%s [%s] - Floor %d"), RoomName.IsEmpty() ? *RoomId : *RoomName, *RoomId, Floor);
+				if (bTyped)
+				{
+					Label += TEXT(" - ") + RoomType;
+				}
 				if (!Tags.IsEmpty())
 				{
 					Label += TEXT(" - ") + FString::Join(Tags, TEXT(", "));
@@ -3225,6 +3318,39 @@ void UInteriorScreenWidget::OnEditBuildingNameClicked()
 	BuildingSwitcherComboBox->SetVisibility(ESlateVisibility::Visible);
 	EditBuildingNameButtonText->SetText(FText::FromString(TEXT("\x270E"))); // pencil
 	RefreshBuildingSwitcher();
+}
+
+UWidget* UInteriorScreenWidget::HandleGenerateRoomTypeItem(FString Item)
+{
+	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+	USizeBox* SquareSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+	SquareSize->SetWidthOverride(10.f * StartStyle::DesignToUi);
+	SquareSize->SetHeightOverride(10.f * StartStyle::DesignToUi);
+	UBorder* Square = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	Square->SetBrush(StartStyle::Rounded(RoomTypes::Color(Item), FLinearColor::Transparent, 3.f, 0.f));
+	Square->SetBrushColor(FLinearColor::White);
+	SquareSize->SetContent(Square);
+	UHorizontalBoxSlot* SquareSlot = Row->AddChildToHorizontalBox(SquareSize);
+	SquareSlot->SetVerticalAlignment(VAlign_Center);
+	SquareSlot->SetPadding(FMargin(0.f, 0.f, 8.f * StartStyle::DesignToUi, 0.f));
+	UTextBlock* ItemText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+	ItemText->SetText(FText::FromString(Item));
+	ItemText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	ApplyStandardFont(ItemText);
+	Row->AddChildToHorizontalBox(ItemText)->SetVerticalAlignment(VAlign_Center);
+	return Row;
+}
+
+void UInteriorScreenWidget::SetKindTag(const FString& Label, const FLinearColor& OutlineColor)
+{
+	if (PropertiesKindText)
+	{
+		PropertiesKindText->SetText(FText::FromString(Label));
+	}
+	if (PropertiesKindTag)
+	{
+		PropertiesKindTag->SetBrush(StartStyle::Rounded(StartStyle::Rgb(14, 24, 38), OutlineColor, 5.f));
+	}
 }
 
 UWidget* UInteriorScreenWidget::HandleGenerateComboBoxItem(FString Item)

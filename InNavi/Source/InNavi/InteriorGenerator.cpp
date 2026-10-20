@@ -4,6 +4,7 @@
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
 #include "NavigationSearchUtils.h"
+#include "RoomTypes.h"
 #include "InteriorConnectorMarker.h"
 #include "BuildingGenerator.h"
 #include "PolyBuilding.h"
@@ -480,6 +481,9 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 						}
 						Room->RoomTags = NavigationSearch::NormalizeTags(LoadedTags);
 					}
+					FString LoadedType;
+					RoomObject->TryGetStringField(TEXT("roomType"), LoadedType);
+					Room->RoomType = RoomTypes::Normalize(LoadedType);
 					Room->FloorLevel = Level;
 					Room->bIsPublic = bIsPublic;
 					Room->bRequiresKey = bRequiresKey;
@@ -795,7 +799,8 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2
 }
 
 AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprintWithTags(const TArray<FVector2D>& Footprint, const FString& RoomId,
-	const FString& RoomName, bool bIsPublic, bool bRequiresKey, bool bAllowOverlap, FString& OutError, const TArray<FString>& InTags)
+	const FString& RoomName, bool bIsPublic, bool bRequiresKey, bool bAllowOverlap, FString& OutError, const TArray<FString>& InTags,
+	const FString& InRoomType)
 {
 	OutError.Empty();
 
@@ -890,6 +895,7 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprintWithTags(const TArray<
 		Room->RoomId = ResolvedId;
 		Room->RoomName = RoomName.IsEmpty() ? ResolvedId : RoomName;
 		Room->RoomTags = NavigationSearch::NormalizeTags(InTags);
+		Room->RoomType = RoomTypes::Normalize(InRoomType);
 		Room->FloorLevel = ActiveFloor;
 		Room->bIsPublic = bIsPublic;
 		Room->bRequiresKey = bRequiresKey;
@@ -2066,6 +2072,25 @@ TArray<FString> AInteriorGenerator::GetRoomTags(const FString& RoomId) const
 	return Room ? Room->RoomTags : TArray<FString>();
 }
 
+bool AInteriorGenerator::SetRoomType(const FString& RoomId, const FString& NewType)
+{
+	AInteriorRoom* Room = GetRoomById(RoomId);
+	if (!Room || !Room->IsClosedLoop()) return false;
+	const FString Normalized = RoomTypes::Normalize(NewType);
+	if (Room->RoomType != Normalized)
+	{
+		Room->RoomType = Normalized;
+		RecordHistorySnapshot();
+	}
+	return true;
+}
+
+FString AInteriorGenerator::GetRoomType(const FString& RoomId) const
+{
+	const AInteriorRoom* Room = GetRoomById(RoomId);
+	return Room ? Room->RoomType : RoomTypes::Default();
+}
+
 FString AInteriorGenerator::GetRoomName(const FString& RoomId) const
 {
 	for (const auto& Pair : RoomsByFloor)
@@ -2132,6 +2157,10 @@ TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 				TArray<TSharedPtr<FJsonValue>> SerializedTags;
 				for (const FString& Tag : Room->RoomTags) SerializedTags.Add(MakeShared<FJsonValueString>(Tag));
 				RoomObject->SetArrayField(TEXT("tags"), SerializedTags);
+				if (Room->RoomType != RoomTypes::Default())
+				{
+					RoomObject->SetStringField(TEXT("roomType"), Room->RoomType);
+				}
 				RoomObject->SetStringField(TEXT("access"), Room->bIsPublic ? TEXT("public") : TEXT("private"));
 				RoomObject->SetBoolField(TEXT("requireKey"), Room->bRequiresKey);
 				RoomObject->SetBoolField(TEXT("closed"), Room->IsClosedLoop());

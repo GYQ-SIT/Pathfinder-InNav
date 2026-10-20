@@ -70,6 +70,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Room")
 	TArray<FString> RoomTags;
 
+	// What kind of room this is - one value from RoomTypes::All(), unlike the free-form tags.
+	UPROPERTY()
+	FString RoomType = TEXT("Other");
+
 	UPROPERTY()
 	int32 FloorLevel = 1;
 

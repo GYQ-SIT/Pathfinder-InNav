@@ -245,10 +245,14 @@ the section heading reads "Nothing selected"; selecting a room, door, or connect
 labels over dark fields, and every kind ends with a red **Delete ...** button (the same as `Backspace`) and **Save changes**.
 
 - **Room / wall**: **ROOM NAME**, then **X POSITION**, **Y POSITION**, **WIDTH** and **HEIGHT** - the room's bounding box,
-  read-only, following the room as you drag or resize it - and (rooms only) **SEARCH TAGS**, a comma-separated list of tags
-  (for example `laboratory, teaching`). **Save changes** saves the name and the tags together. Tags are saved with the
-  project, work with Undo/Redo, and make the room findable in the Layers and Navigation
-  searches. Blank and repeated tags (ignoring case) are dropped.
+  read-only, following the room as you drag or resize it - and (rooms only) **ROOM TYPE** and **SEARCH TAGS**.
+  The type is one value picked from a fixed list (Classroom, Lecture hall, Lab, Office, Study area, Meeting room,
+  Canteen, Toilet, Lift lobby, Corridor, Storage, Other; the list lives in `RoomTypes.h`) and is shown in the tag at the
+  top of the panel; a room with no type is **Other**. Tags are a free comma-separated list (for example
+  `laboratory, teaching`) for details the type cannot say. **Save changes** saves the name, the type and the tags
+  together. Both are saved with the project (`roomType` is left out of the file when it is Other, so older files load
+  unchanged), work with Undo/Redo, are copied with a copied room, and make the room findable in the Layers and
+  Navigation searches (the word "other" is not searchable). Blank and repeated tags (ignoring case) are dropped.
 - **Door**: which room it belongs to (read-only), and **CONNECTS TO**, a dropdown to pick what it
   connects to on the other side (another room, by name, or "corridor").
 - **Connector**: its type (read-only), and **FLOORS IT REACHES**, a checklist of floors -

@@ -86,6 +86,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnActionFailed, FString, Reason, E
 // (e.g. InteriorScreenWidget's own panel layout) can still piggyback on the same save action
 // instead of needing its own separate save trigger the user has to remember.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnProjectSaved);
+// Broadcast at the start of every save (the Save button, Ctrl+S, Save and leave ...), before anything is written, so a panel holding
+// edits that were typed but not applied yet (the Properties fields) can apply them and have them end up in the file.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnBeforeProjectSave);
 // Broadcast whenever a room is created, deleted, or renamed (PlacePrefabRoomAt/FinishRoom on
 // success, DeleteRoom on success, SetSelectedRoomName on success) - anything that could make a
 // room-name list (the Layers panel, the Navigation panel's Start/Destination room dropdowns) go
@@ -139,6 +142,10 @@ public:
 	// See FOnProjectSaved above.
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")
 	FOnProjectSaved OnProjectSaved;
+
+	// See FOnBeforeProjectSave above.
+	UPROPERTY(BlueprintAssignable, Category = "Feedback")
+	FOnBeforeProjectSave OnBeforeProjectSave;
 
 	// See FOnInteriorContentChanged above.
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")
@@ -549,6 +556,9 @@ public:
 	bool GetSelectedRoomBounds(FVector2D& OutPosition, FVector2D& OutSize) const;
 	bool SetSelectedRoomTags(const TArray<FString>& InTags);
 	TArray<FString> GetSelectedRoomTags() const;
+	// The selected room's type (see RoomTypes.h). Setting marks the project changed when the type actually differs.
+	bool SetSelectedRoomType(const FString& NewType);
+	FString GetSelectedRoomType() const;
 
 	// Whether the currently-selected room/wall is an actual closed room (true) or an open
 	// standalone wall (false) - see AInteriorGenerator::IsRoomClosedLoop. What the room properties
@@ -852,6 +862,7 @@ public:
 	FString GetRoomName(const FString& RoomId) const;
 	// The tags of any room on the loaded building (empty if the room does not exist or has none).
 	TArray<FString> GetRoomTags(const FString& RoomId) const;
+	FString GetRoomType(const FString& RoomId) const;
 
 	// Any room/wall's current closed-loop state by id (unlike IsSelectedRoomClosedLoop, which only
 	// reads whichever one is currently selected) - what a Layers panel calls to sort each id from
@@ -1189,6 +1200,7 @@ private:
 	TArray<FString> CopiedRoomTags;
 	bool bHasCopiedRoom = false;
 	bool bCopiedRoomIsPublic = true;
+	FString CopiedRoomType;
 	bool bCopiedRoomRequiresKey = false;
 	// Whole-building copy/paste
 	bool bHasCopiedBuilding = false;

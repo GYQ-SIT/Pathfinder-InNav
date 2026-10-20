@@ -4,6 +4,7 @@
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
 #include "NavigationSearchUtils.h"
+#include "RoomTypes.h"
 #include "PolyBuilding.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -368,11 +369,17 @@ void UNavigationPanelWidget::RefreshRoomSearchIndex() const
 			FNavigationRoomOption Option;
 			Option.RoomId = Room->RoomId;
 			Option.Tags = Room->RoomTags;
+			Option.RoomType = Room->RoomType;
 			Option.RoomName = Room->RoomName.IsEmpty() ? Room->RoomId : Room->RoomName;
 			Option.Floor = Floor;
 			Option.Centroid = ComputePolygonCentroid(Room->GetFootprint());
 			Option.DisplayLabel = FString::Printf(TEXT("%s [%s] (Floor %d)"), *Option.RoomName, *Option.RoomId, Floor);
 			Option.SearchableText = Option.DisplayLabel + TEXT(" ") + FString::Join(Option.Tags, TEXT(" "));
+			// Other says nothing, and would make a search for the word "other" match every untyped room.
+			if (Option.RoomType != RoomTypes::Default())
+			{
+				Option.SearchableText += TEXT(" ") + Option.RoomType;
+			}
 			SortedDestinationIndices.Add(CachedRooms.Num());
 			CachedRooms.Add(MoveTemp(Option));
 		}

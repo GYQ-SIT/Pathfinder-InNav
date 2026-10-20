@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "NavigationSearchUtils.h"
+#include "RoomTypes.h"
 #include "MapBuildingRowWidget.h"
 #include "MapPanelWidget.h"
 #include "UiTestFixture.h"
@@ -24,6 +25,7 @@
 #include "Engine/World.h"
 #include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "UObject/UnrealType.h"
 #include "UObject/Script.h"
@@ -90,6 +92,64 @@ bool FNavigationRoomTagsTest::RunTest(const FString& Parameters)
 		TestNull(TEXT("One undo removes the newly created room"), Fixture.Interior->GetRoomById(TEXT("Tags-Copy-Test")));
 		TestTrue(TEXT("Redo tagged creation succeeds"), Fixture.Interior->Redo());
 		TestTrue(TEXT("Redo restores copied tags"), Fixture.Interior->GetRoomTags(TEXT("Tags-Copy-Test")).Contains(TEXT("copied-tag")));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationRoomTypeTest, "InNavi.Navigation.Search.RoomType",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationRoomTypeTest::RunTest(const FString& Parameters)
+{
+	TestEqual(TEXT("A type is matched ignoring case"), RoomTypes::Normalize(TEXT(" lECTURE hall ")), FString(TEXT("Lecture hall")));
+	TestEqual(TEXT("An unknown type becomes Other"), RoomTypes::Normalize(TEXT("Dungeon")), RoomTypes::Default());
+	TestEqual(TEXT("An empty type becomes Other"), RoomTypes::Normalize(FString()), RoomTypes::Default());
+	TestTrue(TEXT("Other is on the list"), RoomTypes::All().Contains(RoomTypes::Default()));
+	TArray<FLinearColor> SeenColors;
+	for (const FString& Type : RoomTypes::All())
+	{
+		const FLinearColor Color = RoomTypes::Color(Type);
+		TestFalse(*FString::Printf(TEXT("%s has a colour of its own"), *Type), SeenColors.Contains(Color));
+		SeenColors.Add(Color);
+	}
+
+	FNavigationSearchFixture Fixture;
+	const auto Options = Fixture.Nav->GetSelectableRooms();
+	if (!TestFalse(TEXT("Fixture has rooms"), Options.IsEmpty())) return false;
+	const FString Id = Options[0].RoomId;
+	TestEqual(TEXT("A room loaded without a type is Other"), Fixture.Interior->GetRoomType(Id), RoomTypes::Default());
+	TestTrue(TEXT("An untyped room is not found by searching for Other"), !Fixture.Nav->SearchDestinations(TEXT("other")).ContainsByPredicate(
+		[&Id](const auto& Option) { return Option.RoomId == Id; }));
+	TestTrue(TEXT("A type can be set"), Fixture.Interior->SetRoomType(Id, TEXT("lab")));
+	TestEqual(TEXT("It is stored in the list's spelling"), Fixture.Interior->GetRoomType(Id), FString(TEXT("Lab")));
+	TestTrue(TEXT("The type finds the destination"), Fixture.Nav->SearchDestinations(TEXT("LAB")).ContainsByPredicate(
+		[&Id](const auto& Option) { return Option.RoomId == Id; }));
+	TestTrue(TEXT("An unknown room cannot be typed"), !Fixture.Interior->SetRoomType(TEXT("missing-room"), TEXT("Lab")));
+	TestTrue(TEXT("The change can be undone"), Fixture.Interior->Undo());
+	TestEqual(TEXT("Undo restores Other"), Fixture.Interior->GetRoomType(Id), RoomTypes::Default());
+	TestTrue(TEXT("The change can be redone"), Fixture.Interior->Redo());
+	TestEqual(TEXT("Redo restores the type"), Fixture.Interior->GetRoomType(Id), FString(TEXT("Lab")));
+
+	Fixture.Interior->SyncInteriorToBuildingGenerator();
+	const FString SavePath = FPaths::ProjectSavedDir() / TEXT("RoomType-") + FGuid::NewGuid().ToString() + TEXT(".json");
+	TestTrue(TEXT("The project saves"), Fixture.Generator->SaveBuildingsToFile(SavePath));
+	FString Saved;
+	FFileHelper::LoadFileToString(Saved, *SavePath);
+	TestTrue(TEXT("The file holds the type"), Saved.Contains(TEXT("\"roomType\"")));
+	Fixture.Interior->ClearLoadedInterior();
+	Fixture.Generator->ClearAllBuildings();
+	TestTrue(TEXT("The project reloads"), Fixture.Generator->LoadBuildingsFromFile(SavePath) > 0);
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("E2"));
+	TestEqual(TEXT("The type survives a reload"), Fixture.Interior->GetRoomType(Id), FString(TEXT("Lab")));
+	IFileManager::Get().Delete(*SavePath);
+
+	const TArray<FVector2D> CopyFootprint = Fixture.Interior->GetRoomById(Id)->GetFootprint();
+	Fixture.Interior->SetActiveFloor(Options[0].Floor);
+	FString CreationError;
+	AInteriorRoom* Copy = Fixture.Interior->CreateRoomFromFootprintWithTags(CopyFootprint, TEXT("Type-Copy-Test"),
+		TEXT("Type copy"), true, false, true, CreationError, {}, TEXT("Toilet"));
+	if (TestNotNull(TEXT("A typed room can be created in one operation"), Copy))
+	{
+		TestEqual(TEXT("The new room has the type"), Copy->RoomType, FString(TEXT("Toilet")));
 	}
 	return true;
 }
@@ -166,6 +226,28 @@ bool FNavigationSearchControlsTest::RunTest(const FString& Parameters)
 	ApplyTags->OnClicked.Broadcast();
 	TestEqual(TEXT("Actual Apply Tags updates room metadata"), Fixture.Interior->GetRoomTags(Room.RoomId).Num(), 2);
 	TestTrue(TEXT("Tags mark the project dirty"), Controller->HasUnsavedChanges());
+	UComboBoxString* TypeBox = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cmb_RoomType")));
+	if (TestNotNull(TEXT("Room type drop-down exists"), TypeBox))
+	{
+		TestEqual(TEXT("A room with no type shows Other"), TypeBox->GetSelectedOption(), FString(TEXT("Other")));
+		TypeBox->SetSelectedOption(TEXT("Lab"));
+		ApplyTags->OnClicked.Broadcast();
+		TestEqual(TEXT("Save changes saves the room type"), Fixture.Interior->GetRoomType(Room.RoomId), FString(TEXT("Lab")));
+		TestEqual(TEXT("The drop-down keeps showing the saved type"), TypeBox->GetSelectedOption(), FString(TEXT("Lab")));
+
+		// A save applies what is still pending in the fields, so the file never misses it.
+		FScriptDelegate BeforeSave;
+		BeforeSave.BindUFunction(Screen, TEXT("HandleBeforeProjectSave"));
+		Controller->OnBeforeProjectSave.AddUnique(BeforeSave);
+		TypeBox->SetSelectedOption(TEXT("Office"));
+		TestEqual(TEXT("Picking a type alone does not change the room"), Fixture.Interior->GetRoomType(Room.RoomId), FString(TEXT("Lab")));
+		Controller->OnBeforeProjectSave.Broadcast();
+		TestEqual(TEXT("A save applies the pending type"), Fixture.Interior->GetRoomType(Room.RoomId), FString(TEXT("Office")));
+		const int32 TagCountBefore = Fixture.Interior->GetRoomTags(Room.RoomId).Num();
+		Controller->OnBeforeProjectSave.Broadcast();
+		TestEqual(TEXT("A save with nothing pending changes nothing"), Fixture.Interior->GetRoomTags(Room.RoomId).Num(), TagCountBefore);
+		Controller->OnBeforeProjectSave.Remove(BeforeSave);
+	}
 	Starts->SetSelectedOption(Room.GetDisplayLabel());
 	Starts->OnSelectionChanged.Broadcast(Room.GetDisplayLabel(), ESelectInfo::OnMouseClick);
 	const int32 StartOptionCount = Starts->GetOptionCount();
