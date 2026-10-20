@@ -544,6 +544,9 @@ public:
 	// populate its field when a room gets selected. Empty if nothing is selected.
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	FString GetSelectedRoomName() const;
+
+	// The selected room's (or wall's) bounding box in footprint units: its top-left corner and its size. False if none is selected.
+	bool GetSelectedRoomBounds(FVector2D& OutPosition, FVector2D& OutSize) const;
 	bool SetSelectedRoomTags(const TArray<FString>& InTags);
 	TArray<FString> GetSelectedRoomTags() const;
 

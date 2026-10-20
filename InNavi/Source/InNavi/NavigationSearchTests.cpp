@@ -145,7 +145,7 @@ bool FNavigationSearchControlsTest::RunTest(const FString& Parameters)
 	Selection.BindUFunction(Screen, TEXT("HandleSelectedRoomChanged"));
 	Controller->OnSelectedRoomChanged.AddUnique(Selection);
 	UEditableTextBox* TagsBox = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_RoomTags")));
-	UButton* ApplyTags = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_ApplyRoomTags")));
+	UButton* ApplyTags = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_ApplyRoom"))); // Save changes: the name and the tags
 	UEditableTextBox* Search = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_DestinationSearch")));
 	UComboBoxString* Destinations = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_NavDestinationRoom")));
 	UComboBoxString* Starts = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_NavStartRoom")));

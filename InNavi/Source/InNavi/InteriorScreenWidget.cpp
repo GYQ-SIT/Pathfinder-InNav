@@ -882,151 +882,191 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		UVerticalBox* PropertiesStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("PropertiesStack"));
 		PropertiesPanel->SetContent(PropertiesStack);
+		{
+		// What follows is in the style of the design team's Properties panel: a heading with a tag saying what is selected, a
+		// section heading, small-capital field labels over dark fields, and Delete / Save changes at the bottom. Every piece sits
+		// in a SizeBox that follows the panel's width (PropertiesWidthBoxes, see RefreshDockPanelContentWidths).
+		using namespace StartStyle;
+		auto InWidthBox = [this](UWidget* Content) -> USizeBox*
+		{
+			USizeBox* Box = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+			Box->SetWidthOverride(StandardButtonWidth);
+			Box->SetContent(Content);
+			PropertiesWidthBoxes.Add(Box);
+			return Box;
+		};
+		auto AddFieldLabel = [this](UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label)
+		{
+			Stack->AddChildToVerticalBox(StartStyle::Text(WidgetTree, Name, Label, 10.f, StartStyle::Rgb(165, 182, 204), true, 30))
+				->SetPadding(FMargin(0.f, 12.f * StartStyle::DesignToUi, 0.f, 6.f * StartStyle::DesignToUi));
+		};
+		auto StyleField = [](UEditableTextBox* Box, bool bReadOnly)
+		{
+			Box->SetWidgetStyle(StartStyle::Field(12.f));
+			Box->SetIsReadOnly(bReadOnly);
+		};
 
-		PropertiesTitleText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_PropertiesTitle"));
-		PropertiesTitleText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(PropertiesTitleText);
-		UVerticalBoxSlot* PropertiesTitleSlot = PropertiesStack->AddChildToVerticalBox(WrapLabelToPanelWidth(PropertiesTitleText, TEXT("Txt_PropertiesTitleSize")));
-		PropertiesTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+		// Heading: a mark and "Properties" on the left, the tag on the right.
+		UHorizontalBox* PropertiesHeader = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("PropertiesHeader"));
+		PropertiesHeader->AddChildToHorizontalBox(Text(WidgetTree, TEXT("Txt_PropertiesMark"), TEXT("\u2261"), 17.f, Rgb(176, 198, 228)))->SetVerticalAlignment(VAlign_Center);
+		UHorizontalBoxSlot* PropertiesHeaderTitleSlot = PropertiesHeader->AddChildToHorizontalBox(Text(WidgetTree, TEXT("Txt_PropertiesHeader"), TEXT("Properties"), 16.f, Rgb(241, 246, 255), true));
+		PropertiesHeaderTitleSlot->SetVerticalAlignment(VAlign_Center);
+		PropertiesHeaderTitleSlot->SetPadding(FMargin(8.f * DesignToUi, 0.f, 8.f * DesignToUi, 0.f));
+		PropertiesHeaderTitleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		PropertiesKindTag = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("PropertiesKindTag"));
+		PropertiesKindTag->SetBrush(Rounded(Rgb(14, 24, 38), Rgb(60, 78, 104), 5.f));
+		PropertiesKindTag->SetBrushColor(FLinearColor::White);
+		PropertiesKindTag->SetPadding(FMargin(7.f * DesignToUi, 3.f * DesignToUi));
+		PropertiesKindTag->SetVisibility(ESlateVisibility::Collapsed);
+		PropertiesKindText = Text(WidgetTree, TEXT("Txt_PropertiesKind"), TEXT(""), 10.f, Rgb(170, 190, 214), true, 100);
+		PropertiesKindTag->SetContent(PropertiesKindText);
+		PropertiesHeader->AddChildToHorizontalBox(PropertiesKindTag)->SetVerticalAlignment(VAlign_Center);
+		PropertiesStack->AddChildToVerticalBox(InWidthBox(PropertiesHeader))->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f * DesignToUi));
+
+		// Section heading ("Room properties", ...), which is also what the dock treats as this panel's title.
+		PropertiesTitleText = Text(WidgetTree, TEXT("Txt_PropertiesTitle"), TEXT(""), 15.f, Rgb(241, 246, 255), true);
+		PropertiesTitleText->SetAutoWrapText(true);
+		PropertiesStack->AddChildToVerticalBox(WrapLabelToPanelWidth(PropertiesTitleText, TEXT("Txt_PropertiesTitleSize")));
 		DockPanelTitleTexts[(int32)EDockPanelId::Properties] = PropertiesTitleText;
+
+		// A Delete button (red under the mouse) and a Save changes button, side by side.
+		auto AddButtonsRow = [this, &InWidthBox](UVerticalBox* Box, const TCHAR* DeleteName, const TCHAR* DeleteLabelText, UTextBlock** OutDeleteLabel,
+			const TCHAR* SaveName, const TCHAR* SaveLabelText, UButton*& OutSaveButton)
+		{
+			using namespace StartStyle;
+			UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), FName(FString(SaveName) + TEXT("Row")));
+
+			UButton* Delete = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(DeleteName));
+			Delete->SetStyle(Button(Rgb(86, 32, 40), Rgb(124, 42, 52), Rgb(66, 24, 32), Rgb(150, 56, 66)));
+			Delete->SetBackgroundColor(FLinearColor::White);
+			UTextBlock* DeleteText = Text(WidgetTree, FString(DeleteName) + TEXT("Label"), DeleteLabelText, 12.f, FLinearColor::White, true);
+			DeleteText->SetJustification(ETextJustify::Center);
+			DeleteText->SetAutoWrapText(true);
+			UBorder* DeletePad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(DeleteName) + TEXT("Pad")));
+			DeletePad->SetBrushColor(FLinearColor::Transparent);
+			DeletePad->SetPadding(FMargin(8.f * DesignToUi, 10.f * DesignToUi));
+			DeletePad->SetContent(DeleteText);
+			Delete->SetContent(DeletePad);
+			Delete->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnDeleteSelectionClicked);
+			Delete->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+			if (OutDeleteLabel)
+			{
+				*OutDeleteLabel = DeleteText;
+			}
+			UHorizontalBoxSlot* DeleteSlot = Row->AddChildToHorizontalBox(Delete);
+			DeleteSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			DeleteSlot->SetPadding(FMargin(0.f, 0.f, 4.f * DesignToUi, 0.f));
+
+			OutSaveButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(SaveName));
+			OutSaveButton->SetStyle(SecondaryButton());
+			OutSaveButton->SetBackgroundColor(FLinearColor::White);
+			UTextBlock* SaveText = Text(WidgetTree, FString(SaveName) + TEXT("Label"), SaveLabelText, 12.f, FLinearColor::White, true);
+			SaveText->SetJustification(ETextJustify::Center);
+			SaveText->SetAutoWrapText(true);
+			UBorder* SavePad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(SaveName) + TEXT("Pad")));
+			SavePad->SetBrushColor(FLinearColor::Transparent);
+			SavePad->SetPadding(FMargin(8.f * DesignToUi, 10.f * DesignToUi));
+			SavePad->SetContent(SaveText);
+			OutSaveButton->SetContent(SavePad);
+			UHorizontalBoxSlot* SaveSlot = Row->AddChildToHorizontalBox(OutSaveButton);
+			SaveSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			SaveSlot->SetPadding(FMargin(4.f * DesignToUi, 0.f, 0.f, 0.f));
+			Box->AddChildToVerticalBox(InWidthBox(Row))->SetPadding(FMargin(0.f, 18.f * DesignToUi, 0.f, 0.f));
+		};
 
 		// -- Door fields --
 		DoorFieldsBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DoorFieldsBox"));
 		DoorFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
 		PropertiesStack->AddChildToVerticalBox(DoorFieldsBox);
 
-		DoorRoomText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_DoorRoom"));
-		DoorRoomText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(DoorRoomText);
-		UVerticalBoxSlot* DoorRoomSlot = DoorFieldsBox->AddChildToVerticalBox(WrapLabelToPanelWidth(DoorRoomText, TEXT("Txt_DoorRoomSize")));
-		DoorRoomSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+		DoorRoomText = Text(WidgetTree, TEXT("Txt_DoorRoom"), TEXT(""), 12.f, Rgb(170, 190, 214));
+		DoorFieldsBox->AddChildToVerticalBox(WrapLabelToPanelWidth(DoorRoomText, TEXT("Txt_DoorRoomSize")))->SetPadding(FMargin(0.f, 4.f * DesignToUi, 0.f, 0.f));
 
-		UHorizontalBox* ConnectsToRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ConnectsToRow"));
-		// Neither this row nor RoomNameRow below had any width constraint before - at a narrow panel
-		// width, the dropdown/text box's own natural size could push past the panel's edge instead of
-		// shrinking with it. Wrapped in a SizeBox (tracked in RefreshDockPanelContentWidths the same
-		// as everything else) with the combo box itself set to Fill so it's what actually shrinks,
-		// not the "Connect to" label.
+		// "Connects to": the label above a drop-down that fills the width.
+		UVerticalBox* ConnectsToColumn = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ConnectsToColumn"));
 		ConnectsToRowSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		ConnectsToRowSizeBox->SetContent(ConnectsToRow);
+		ConnectsToRowSizeBox->SetContent(ConnectsToColumn);
 		DoorFieldsBox->AddChildToVerticalBox(ConnectsToRowSizeBox);
-
-		UTextBlock* ConnectsToLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_ConnectsToLabel"));
-		ConnectsToLabel->SetText(FText::FromString(TEXT("Connect to")));
-		ConnectsToLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(ConnectsToLabel);
-		UHorizontalBoxSlot* ConnectsToLabelSlot = ConnectsToRow->AddChildToHorizontalBox(ConnectsToLabel);
-		ConnectsToLabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-		ConnectsToLabelSlot->SetVerticalAlignment(VAlign_Center);
-
+		AddFieldLabel(ConnectsToColumn, TEXT("Txt_ConnectsToLabel"), TEXT("CONNECTS TO"));
 		ConnectsToComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cmb_ConnectsTo"));
 		ConnectsToComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
-		UHorizontalBoxSlot* ConnectsToComboSlot = ConnectsToRow->AddChildToHorizontalBox(ConnectsToComboBox);
-		ConnectsToComboSlot->SetHorizontalAlignment(HAlign_Fill);
-		ConnectsToComboSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-
-		ApplyDoorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_ApplyDoor"));
-		ApplyDoorButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-		UTextBlock* ApplyDoorText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_ApplyDoorLabel"));
-		ApplyDoorText->SetText(FText::FromString(TEXT("Apply")));
-		ApplyDoorText->SetJustification(ETextJustify::Center);
-		ApplyDoorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardTextWrap(ApplyDoorText);
-		USizeBox* ApplyDoorSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Btn_ApplyDoorSize"));
-		ApplyDoorSizeBox->SetWidthOverride(StandardButtonWidth);
-		ApplyDoorSizeBox->SetMinDesiredHeight(StandardButtonHeight);
-		ApplyDoorSizeBox->SetContent(ApplyDoorText);
-		ApplyDoorButton->SetContent(ApplyDoorSizeBox);
-		UVerticalBoxSlot* ApplyDoorSlot = DoorFieldsBox->AddChildToVerticalBox(ApplyDoorButton);
-		ApplyDoorSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
+		{
+			// The same dark look as the text fields.
+			FComboBoxStyle ComboStyle = ConnectsToComboBox->GetWidgetStyle();
+			ComboStyle.ComboButtonStyle.ButtonStyle = Button(Rgb(15, 26, 42), Rgb(24, 40, 62), Rgb(12, 21, 34), Rgb(54, 70, 92), 5.f);
+			ConnectsToComboBox->SetWidgetStyle(ComboStyle);
+		}
+		ConnectsToColumn->AddChildToVerticalBox(ConnectsToComboBox);
+		AddButtonsRow(DoorFieldsBox, TEXT("Btn_DeleteDoor"), TEXT("Delete door"), nullptr, TEXT("Btn_ApplyDoor"), TEXT("Save changes"), ApplyDoorButton);
+		// Wired as the button is built, so it works however the widget came to exist.
+		ApplyDoorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyDoorClicked);
 
 		// -- Room/Wall fields --
 		RoomFieldsBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RoomFieldsBox"));
 		RoomFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
 		PropertiesStack->AddChildToVerticalBox(RoomFieldsBox);
 
-		UHorizontalBox* RoomNameRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RoomNameRow"));
-		// See ConnectsToRow's comment above - same missing-width-constraint issue.
+		RoomSubtitleText = Text(WidgetTree, TEXT("Txt_RoomSubtitle"), TEXT(""), 12.f, Rgb(170, 190, 214));
+		RoomSubtitleText->SetAutoWrapText(true);
+		RoomFieldsBox->AddChildToVerticalBox(WrapLabelToPanelWidth(RoomSubtitleText, TEXT("Txt_RoomSubtitleSize")))->SetPadding(FMargin(0.f, 4.f * DesignToUi, 0.f, 0.f));
+
+		UVerticalBox* RoomNameColumn = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RoomNameRow"));
 		RoomNameRowSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		RoomNameRowSizeBox->SetContent(RoomNameRow);
+		RoomNameRowSizeBox->SetContent(RoomNameColumn);
 		RoomFieldsBox->AddChildToVerticalBox(RoomNameRowSizeBox);
-
-		UTextBlock* RoomNameLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_RoomNameLabel"));
-		RoomNameLabel->SetText(FText::FromString(TEXT("Name :")));
-		RoomNameLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(RoomNameLabel);
-		UHorizontalBoxSlot* RoomNameLabelSlot = RoomNameRow->AddChildToHorizontalBox(RoomNameLabel);
-		RoomNameLabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-		RoomNameLabelSlot->SetVerticalAlignment(VAlign_Center);
-
+		AddFieldLabel(RoomNameColumn, TEXT("Txt_RoomNameLabel"), TEXT("ROOM NAME"));
 		RoomNameTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_RoomName"));
-		ApplyStandardFont(RoomNameTextBox);
-		// Fill (matches ConnectsToComboBox) so this still tracks the panel width like everything
-		// else, instead of sitting at a fixed size - readability at a narrow width is handled by
-		// raising SidebarMinWidth instead (see its own comment) so there's just always enough room,
-		// rather than exempting this one element from the "everything is linked" rule.
-		UHorizontalBoxSlot* RoomNameBoxSlot = RoomNameRow->AddChildToHorizontalBox(RoomNameTextBox);
-		RoomNameBoxSlot->SetVerticalAlignment(VAlign_Center);
-		RoomNameBoxSlot->SetHorizontalAlignment(HAlign_Fill);
-		RoomNameBoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		StyleField(RoomNameTextBox, false);
+		RoomNameColumn->AddChildToVerticalBox(RoomNameTextBox);
 
-		ApplyRoomButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_ApplyRoom"));
-		ApplyRoomButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-		UTextBlock* ApplyRoomText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_ApplyRoomLabel"));
-		ApplyRoomText->SetText(FText::FromString(TEXT("Apply")));
-		ApplyRoomText->SetJustification(ETextJustify::Center);
-		ApplyRoomText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardTextWrap(ApplyRoomText);
-		USizeBox* ApplyRoomSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Btn_ApplyRoomSize"));
-		ApplyRoomSizeBox->SetWidthOverride(StandardButtonWidth);
-		ApplyRoomSizeBox->SetMinDesiredHeight(StandardButtonHeight);
-		ApplyRoomSizeBox->SetContent(ApplyRoomText);
-		ApplyRoomButton->SetContent(ApplyRoomSizeBox);
-		UVerticalBoxSlot* ApplyRoomSlot = RoomFieldsBox->AddChildToVerticalBox(ApplyRoomButton);
-		ApplyRoomSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
+		// Where the room is and how big: its bounding box, read-only (it follows the room as it is dragged or resized).
+		auto AddBoundsCell = [this, &AddFieldLabel, &StyleField](UHorizontalBox* Row, const TCHAR* Name, const TCHAR* Label, UEditableTextBox*& OutBox, bool bFirstInRow)
+		{
+			UVerticalBox* Cell = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), FName(FString(Name) + TEXT("Cell")));
+			AddFieldLabel(Cell, *(FString(Name) + TEXT("Label")), Label);
+			OutBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), FName(Name));
+			StyleField(OutBox, true);
+			Cell->AddChildToVerticalBox(OutBox);
+			UHorizontalBoxSlot* CellSlot = Row->AddChildToHorizontalBox(Cell);
+			CellSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			CellSlot->SetPadding(FMargin(bFirstInRow ? 0.f : 6.f * StartStyle::DesignToUi, 0.f, bFirstInRow ? 6.f * StartStyle::DesignToUi : 0.f, 0.f));
+		};
+		UHorizontalBox* PositionRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RoomPositionRow"));
+		AddBoundsCell(PositionRow, TEXT("Txt_RoomX"), TEXT("X POSITION"), RoomXBox, true);
+		AddBoundsCell(PositionRow, TEXT("Txt_RoomY"), TEXT("Y POSITION"), RoomYBox, false);
+		RoomNameColumn->AddChildToVerticalBox(PositionRow);
+		UHorizontalBox* SizeRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RoomSizeRow"));
+		AddBoundsCell(SizeRow, TEXT("Txt_RoomWidth"), TEXT("WIDTH"), RoomWidthBox, true);
+		AddBoundsCell(SizeRow, TEXT("Txt_RoomHeight"), TEXT("HEIGHT"), RoomHeightBox, false);
+		RoomNameColumn->AddChildToVerticalBox(SizeRow);
 
 		RoomTagsFields = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RoomTagsFields"));
 		RoomTagsFieldsSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 		RoomTagsFieldsSizeBox->SetWidthOverride(StandardButtonWidth);
 		RoomTagsFieldsSizeBox->SetContent(RoomTagsFields);
 		RoomFieldsBox->AddChildToVerticalBox(RoomTagsFieldsSizeBox);
-		UTextBlock* TagsLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_RoomTagsLabel"));
-		TagsLabel->SetText(FText::FromString(TEXT("Search tags (comma separated)")));
-		ApplyStandardTextWrap(TagsLabel);
-		RoomTagsFields->AddChildToVerticalBox(TagsLabel)->SetPadding(FMargin(0.f, 8.f, 0.f, 4.f));
+		AddFieldLabel(RoomTagsFields, TEXT("Txt_RoomTagsLabel"), TEXT("SEARCH TAGS (COMMA SEPARATED)"));
 		RoomTagsTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_RoomTags"));
-		ApplyStandardFont(RoomTagsTextBox);
+		StyleField(RoomTagsTextBox, false);
 		RoomTagsTextBox->SetHintText(FText::FromString(TEXT("e.g. laboratory, teaching")));
 		RoomTagsFields->AddChildToVerticalBox(RoomTagsTextBox);
-		ApplyRoomTagsButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_ApplyRoomTags"));
-		UTextBlock* ApplyTagsLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_ApplyRoomTags"));
-		ApplyTagsLabel->SetText(FText::FromString(TEXT("Apply Tags")));
-		ApplyTagsLabel->SetJustification(ETextJustify::Center);
-		ApplyStandardTextWrap(ApplyTagsLabel);
-		ApplyRoomTagsButton->SetContent(ApplyTagsLabel);
-		ApplyRoomTagsButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyRoomTagsClicked);
-		RoomTagsFields->AddChildToVerticalBox(ApplyRoomTagsButton)->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
+
+		// One button saves the name and the tags together.
+		AddButtonsRow(RoomFieldsBox, TEXT("Btn_DeleteRoom"), TEXT("Delete room"), &RoomDeleteLabel, TEXT("Btn_ApplyRoom"), TEXT("Save changes"), ApplyRoomButton);
+		ApplyRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyRoomClicked);
 
 		// -- Connector (elevator/stairs/escalator) fields --
 		ConnectorFieldsBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ConnectorFieldsBox"));
 		ConnectorFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
 		PropertiesStack->AddChildToVerticalBox(ConnectorFieldsBox);
 
-		ConnectorTypeText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_ConnectorType"));
-		ConnectorTypeText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(ConnectorTypeText);
-		UVerticalBoxSlot* ConnectorTypeSlot = ConnectorFieldsBox->AddChildToVerticalBox(WrapLabelToPanelWidth(ConnectorTypeText, TEXT("Txt_ConnectorTypeSize")));
-		ConnectorTypeSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+		ConnectorTypeText = Text(WidgetTree, TEXT("Txt_ConnectorType"), TEXT(""), 12.f, Rgb(170, 190, 214));
+		ConnectorFieldsBox->AddChildToVerticalBox(WrapLabelToPanelWidth(ConnectorTypeText, TEXT("Txt_ConnectorTypeSize")))->SetPadding(FMargin(0.f, 4.f * DesignToUi, 0.f, 0.f));
 
-		UTextBlock* FloorsLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_FloorsLabel"));
-		FloorsLabel->SetText(FText::FromString(TEXT("Floors :")));
-		FloorsLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(FloorsLabel);
-		UVerticalBoxSlot* FloorsLabelSlot = ConnectorFieldsBox->AddChildToVerticalBox(FloorsLabel);
-		FloorsLabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+		AddFieldLabel(ConnectorFieldsBox, TEXT("Txt_FloorsLabel"), TEXT("FLOORS IT REACHES"));
 
 		UWrapBox* FloorsWrap = WidgetTree->ConstructWidget<UWrapBox>(UWrapBox::StaticClass(), TEXT("FloorsWrap"));
-		FloorsWrap->SetInnerSlotPadding(FVector2D(4.f, 2.f));
+		FloorsWrap->SetInnerSlotPadding(FVector2D(8.f, 4.f));
 		// Hard-capped to PropertiesPanel's content width (panel width minus its own 14px-a-side
 		// padding) so the floor checkboxes wrap onto more lines instead of pushing the panel wider
 		// than Floor above it - a WrapBox with nothing constraining its width just grows to fit
@@ -1034,8 +1074,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		FloorsWrapSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("FloorsWrapSizeBox"));
 		FloorsWrapSizeBox->SetWidthOverride(SidebarContentWidth);
 		FloorsWrapSizeBox->SetContent(FloorsWrap);
-		UVerticalBoxSlot* FloorsWrapSlot = ConnectorFieldsBox->AddChildToVerticalBox(FloorsWrapSizeBox);
-		FloorsWrapSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+		ConnectorFieldsBox->AddChildToVerticalBox(FloorsWrapSizeBox)->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
 
 		FloorCheckboxes.Reserve(20);
 		for (int32 FloorNumber = 1; FloorNumber <= 20; ++FloorNumber)
@@ -1046,10 +1085,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			UHorizontalBoxSlot* CheckBoxSlot = FloorEntry->AddChildToHorizontalBox(CheckBox);
 			CheckBoxSlot->SetVerticalAlignment(VAlign_Center);
 
-			UTextBlock* FloorLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(*FString::Printf(TEXT("Txt_Floor%dLabel"), FloorNumber)));
-			FloorLabel->SetText(FText::AsNumber(FloorNumber));
-			FloorLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-			ApplyStandardFont(FloorLabel);
+			UTextBlock* FloorLabel = Text(WidgetTree, *FString::Printf(TEXT("Txt_Floor%dLabel"), FloorNumber), *FString::FromInt(FloorNumber), 12.f, Rgb(214, 226, 242));
 			UHorizontalBoxSlot* FloorLabelSlot = FloorEntry->AddChildToHorizontalBox(FloorLabel);
 			FloorLabelSlot->SetPadding(FMargin(2.f, 0.f, 0.f, 0.f));
 			FloorLabelSlot->SetVerticalAlignment(VAlign_Center);
@@ -1058,26 +1094,15 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			FloorCheckboxes.Add(CheckBox);
 		}
 
-		ApplyConnectorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_ApplyConnector"));
-		ApplyConnectorButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-		UTextBlock* ApplyConnectorText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_ApplyConnectorLabel"));
-		ApplyConnectorText->SetText(FText::FromString(TEXT("Apply")));
-		ApplyConnectorText->SetJustification(ETextJustify::Center);
-		ApplyConnectorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardTextWrap(ApplyConnectorText);
-		USizeBox* ApplyConnectorSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Btn_ApplyConnectorSize"));
-		ApplyConnectorSizeBox->SetWidthOverride(StandardButtonWidth);
-		ApplyConnectorSizeBox->SetMinDesiredHeight(StandardButtonHeight);
-		ApplyConnectorSizeBox->SetContent(ApplyConnectorText);
-		ApplyConnectorButton->SetContent(ApplyConnectorSizeBox);
-		UVerticalBoxSlot* ApplyConnectorSlot = ConnectorFieldsBox->AddChildToVerticalBox(ApplyConnectorButton);
-		ApplyConnectorSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
+		AddButtonsRow(ConnectorFieldsBox, TEXT("Btn_DeleteConnector"), TEXT("Delete connector"), nullptr, TEXT("Btn_ApplyConnector"), TEXT("Save changes"), ApplyConnectorButton);
+		ApplyConnectorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyConnectorClicked);
+		}
 
 		// Permanent panel, like Floor/Toolbar/Layers - always shown; RefreshPropertiesPanelVisibility
 		// keeps its title as this neutral placeholder while nothing's selected instead of collapsing
 		// the whole panel away.
 		PropertiesPanel->SetVisibility(ESlateVisibility::Visible);
-		PropertiesTitleText->SetText(FText::FromString(TEXT("Properties")));
+		PropertiesTitleText->SetText(FText::FromString(TEXT("Nothing selected")));
 
 		// -- Layers panel: a Hierarchy/Outliner-style tree over what the 2D floor plan actually
 		// draws (Boundary/Walls/Path Nodes/I/O Nodes) - see the comment above
@@ -1533,6 +1558,10 @@ void UInteriorScreenWidget::NativeDestruct()
 
 void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
+	if (RoomFieldsBox && RoomFieldsBox->GetVisibility() == ESlateVisibility::Visible)
+	{
+		RefreshRoomBoundsFields();
+	}
 	Super::NativeTick(MyGeometry, InDeltaTime);
 	// Panel content sizes itself from its panel's width, which the user can change at any time.
 	SyncDockPanelWidths();
@@ -1924,6 +1953,13 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 		}
 	};
 	ResizeLabelWrap(PropertiesTitleText, PropertiesButtonWidth);
+	for (USizeBox* WidthBox : PropertiesWidthBoxes)
+	{
+		if (WidthBox)
+		{
+			WidthBox->SetWidthOverride(PropertiesButtonWidth);
+		}
+	}
 	ResizeLabelWrap(DoorRoomText, PropertiesButtonWidth);
 	ResizeLabelWrap(ConnectorTypeText, PropertiesButtonWidth);
 
@@ -2076,7 +2112,15 @@ void UInteriorScreenWidget::HandleSelectedDoorChanged(FString RoomId, FString Do
 	}
 	if (PropertiesTitleText)
 	{
-		PropertiesTitleText->SetText(FText::FromString(TEXT("Door property")));
+		PropertiesTitleText->SetText(FText::FromString(TEXT("Door properties")));
+	}
+	if (PropertiesKindText)
+	{
+		PropertiesKindText->SetText(FText::FromString(TEXT("DOOR")));
+	}
+	if (PropertiesKindTag)
+	{
+		PropertiesKindTag->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	}
 
 	if (DoorRoomText)
@@ -2144,7 +2188,24 @@ void UInteriorScreenWidget::HandleSelectedRoomChanged(FString RoomId)
 	}
 	if (PropertiesTitleText)
 	{
-		PropertiesTitleText->SetText(FText::FromString(PC->IsSelectedRoomClosedLoop() ? TEXT("Room property") : TEXT("Wall property")));
+		PropertiesTitleText->SetText(FText::FromString(PC->IsSelectedRoomClosedLoop() ? TEXT("Room properties") : TEXT("Wall properties")));
+	}
+	if (PropertiesKindText)
+	{
+		PropertiesKindText->SetText(FText::FromString(PC->IsSelectedRoomClosedLoop() ? TEXT("ROOM") : TEXT("WALL")));
+	}
+	if (PropertiesKindTag)
+	{
+		PropertiesKindTag->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	}
+	if (RoomDeleteLabel)
+	{
+		RoomDeleteLabel->SetText(FText::FromString(PC->IsSelectedRoomClosedLoop() ? TEXT("Delete room") : TEXT("Delete wall")));
+	}
+	if (RoomSubtitleText)
+	{
+		const FString Name = PC->GetSelectedRoomName();
+		RoomSubtitleText->SetText(FText::FromString(Name.IsEmpty() ? PC->GetSelectedRoomId() : Name));
 	}
 	if (RoomNameTextBox)
 	{
@@ -2153,29 +2214,73 @@ void UInteriorScreenWidget::HandleSelectedRoomChanged(FString RoomId)
 	if (RoomTagsFields) RoomTagsFields->SetVisibility(PC->IsSelectedRoomClosedLoop() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	if (RoomTagsTextBox) RoomTagsTextBox->SetText(FText::FromString(FString::Join(PC->GetSelectedRoomTags(), TEXT(", "))));
 
+	RefreshRoomBoundsFields();
 	RefreshPropertiesPanelVisibility();
 }
 
 void UInteriorScreenWidget::OnApplyRoomClicked()
 {
+	// Save changes: the name and the tags in one go. Both boxes are read first - changing the name refreshes the panel from the
+	// room, which would put the old tags back in the tags box before they were saved.
+	const FString NewName = RoomNameTextBox ? RoomNameTextBox->GetText().ToString() : FString();
+	const FString NewTags = RoomTagsTextBox ? RoomTagsTextBox->GetText().ToString() : FString();
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		if (RoomNameTextBox)
 		{
-			PC->SetSelectedRoomName(RoomNameTextBox->GetText().ToString());
+			PC->SetSelectedRoomName(NewName);
+		}
+	}
+	ApplyRoomTags(NewTags);
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (RoomSubtitleText)
+		{
+			const FString Name = PC->GetSelectedRoomName();
+			RoomSubtitleText->SetText(FText::FromString(Name.IsEmpty() ? PC->GetSelectedRoomId() : Name));
 		}
 	}
 }
 
-void UInteriorScreenWidget::OnApplyRoomTagsClicked()
+void UInteriorScreenWidget::ApplyRoomTags(const FString& TagsText)
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		if (RoomTagsTextBox && PC->SetSelectedRoomTags(NavigationSearch::ParseTags(RoomTagsTextBox->GetText().ToString())))
+		if (PC->SetSelectedRoomTags(NavigationSearch::ParseTags(TagsText)) && RoomTagsTextBox)
 		{
 			RoomTagsTextBox->SetText(FText::FromString(FString::Join(PC->GetSelectedRoomTags(), TEXT(", "))));
 		}
 	}
+}
+
+void UInteriorScreenWidget::OnDeleteSelectionClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->DeleteSelection();
+	}
+}
+
+void UInteriorScreenWidget::RefreshRoomBoundsFields()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	FVector2D Position, Size;
+	const bool bHave = PC && PC->GetSelectedRoomBounds(Position, Size);
+	auto Show = [bHave](UEditableTextBox* Box, double Value)
+	{
+		if (Box)
+		{
+			const FString Text = bHave ? FString::FromInt(FMath::RoundToInt(Value)) : FString();
+			if (Box->GetText().ToString() != Text)
+			{
+				Box->SetText(FText::FromString(Text));
+			}
+		}
+	};
+	Show(RoomXBox, Position.X);
+	Show(RoomYBox, Position.Y);
+	Show(RoomWidthBox, Size.X);
+	Show(RoomHeightBox, Size.Y);
 }
 
 void UInteriorScreenWidget::HandleSelectedConnectorChanged(FString GroupId)
@@ -2209,7 +2314,15 @@ void UInteriorScreenWidget::HandleSelectedConnectorChanged(FString GroupId)
 	}
 	if (PropertiesTitleText)
 	{
-		PropertiesTitleText->SetText(FText::FromString(TEXT("Connector property")));
+		PropertiesTitleText->SetText(FText::FromString(TEXT("Connector properties")));
+	}
+	if (PropertiesKindText)
+	{
+		PropertiesKindText->SetText(FText::FromString(TEXT("CONNECTOR")));
+	}
+	if (PropertiesKindTag)
+	{
+		PropertiesKindTag->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	}
 
 	if (ConnectorTypeText)
@@ -2222,7 +2335,7 @@ void UInteriorScreenWidget::HandleSelectedConnectorChanged(FString GroupId)
 		case EInteriorNavNodeType::Escalator: TypeName = TEXT("Escalator"); break;
 		default:                              TypeName = TEXT("-");        break;
 		}
-		ConnectorTypeText->SetText(FText::FromString(FString::Printf(TEXT("Type: %s"), *TypeName)));
+		ConnectorTypeText->SetText(FText::FromString(TypeName));
 	}
 
 	const TArray<int32> CurrentFloors = PC->GetSelectedConnectorFloors();
@@ -2259,7 +2372,11 @@ void UInteriorScreenWidget::RefreshPropertiesPanelVisibility()
 	const bool bAnySelected = PC && (!PC->GetSelectedRoomId().IsEmpty() || !PC->GetSelectedDoorId().IsEmpty() || !PC->GetSelectedConnectorGroupId().IsEmpty());
 	if (!bAnySelected && PropertiesTitleText)
 	{
-		PropertiesTitleText->SetText(FText::FromString(TEXT("Properties")));
+		PropertiesTitleText->SetText(FText::FromString(TEXT("Nothing selected")));
+	}
+	if (!bAnySelected && PropertiesKindTag)
+	{
+		PropertiesKindTag->SetVisibility(ESlateVisibility::Collapsed);
 	}
 }
 

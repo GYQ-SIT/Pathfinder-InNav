@@ -1120,6 +1120,24 @@ FString ANavPlayerController::GetSelectedRoomName() const
 	return InteriorGen->GetRoomName(SelectedRoomId);
 }
 
+bool ANavPlayerController::GetSelectedRoomBounds(FVector2D& OutPosition, FVector2D& OutSize) const
+{
+	const AInteriorRoom* Room = (!SelectedRoomId.IsEmpty() && InteriorGen) ? InteriorGen->GetRoomById(SelectedRoomId) : nullptr;
+	if (!Room || Room->GetFootprint().IsEmpty())
+	{
+		return false;
+	}
+	FVector2D Min(DBL_MAX, DBL_MAX), Max(-DBL_MAX, -DBL_MAX);
+	for (const FVector2D& Point : Room->GetFootprint())
+	{
+		Min = FVector2D(FMath::Min(Min.X, Point.X), FMath::Min(Min.Y, Point.Y));
+		Max = FVector2D(FMath::Max(Max.X, Point.X), FMath::Max(Max.Y, Point.Y));
+	}
+	OutPosition = Min;
+	OutSize = Max - Min;
+	return true;
+}
+
 bool ANavPlayerController::SetSelectedRoomTags(const TArray<FString>& InTags)
 {
 	if (!InteriorGen || !InteriorGen->IsRoomClosedLoop(SelectedRoomId)) return false;

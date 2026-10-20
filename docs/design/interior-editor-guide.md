@@ -239,17 +239,19 @@ up/down). **+ Add** and **Delete floor** do the same as `F`/`X`; Delete floor tu
 
 ### Properties panel
 
-Always visible. Shows an empty "Properties" placeholder when nothing's selected;
-selecting a room, door, or connector fills it in:
+Headed **Properties**, with a small tag saying what is selected (ROOM, WALL, DOOR or CONNECTOR). With nothing selected
+the section heading reads "Nothing selected"; selecting a room, door, or connector fills it in. Fields have small-capital
+labels over dark fields, and every kind ends with a red **Delete ...** button (the same as `Backspace`) and **Save changes**.
 
-- **Room**: a field to rename it, and **Search tags** - a comma-separated list of tags
-  (for example `laboratory, teaching`) with an **Apply Tags** button. Tags are saved with the
+- **Room / wall**: **ROOM NAME**, then **X POSITION**, **Y POSITION**, **WIDTH** and **HEIGHT** - the room's bounding box,
+  read-only, following the room as you drag or resize it - and (rooms only) **SEARCH TAGS**, a comma-separated list of tags
+  (for example `laboratory, teaching`). **Save changes** saves the name and the tags together. Tags are saved with the
   project, work with Undo/Redo, and make the room findable in the Layers and Navigation
   searches. Blank and repeated tags (ignoring case) are dropped.
-- **Door**: which room it belongs to (read-only), and a dropdown to pick what it
+- **Door**: which room it belongs to (read-only), and **CONNECTS TO**, a dropdown to pick what it
   connects to on the other side (another room, by name, or "corridor").
-- **Connector**: its type (read-only), and a checklist of floors it should reach —
-  check/uncheck floors and hit Apply. Only shows checkboxes for floors that actually
+- **Connector**: its type (read-only), and **FLOORS IT REACHES**, a checklist of floors -
+  check/uncheck floors and hit **Save changes**. Only shows checkboxes for floors that actually
   exist on the loaded building.
 
 ### Layers panel

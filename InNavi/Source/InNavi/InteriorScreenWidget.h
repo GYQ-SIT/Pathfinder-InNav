@@ -489,8 +489,15 @@ private:
 	void HandleNavDestinationRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
 	UFUNCTION()
 	void HandleDestinationSearchChanged(const FText& Text);
+	// Deletes whatever is selected (room, wall, door or connector) - what Backspace does.
 	UFUNCTION()
-	void OnApplyRoomTagsClicked();
+	void OnDeleteSelectionClicked();
+
+	// Saves these tags (a comma-separated list) on the selected room - part of Save changes.
+	void ApplyRoomTags(const FString& TagsText);
+
+	// Fills the read-only position / size fields from the selected room's bounding box.
+	void RefreshRoomBoundsFields();
 
 	void RefreshNavRoomDropdowns();
 	void RefreshDestinationRoomDropdown();
@@ -652,6 +659,30 @@ private:
 	UPROPERTY()
 	UTextBlock* PropertiesTitleText = nullptr;
 
+	// What the selection is, in the panel's heading (ROOM, WALL, DOOR, CONNECTOR); hidden with nothing selected.
+	UPROPERTY()
+	UBorder* PropertiesKindTag = nullptr;
+	UPROPERTY()
+	UTextBlock* PropertiesKindText = nullptr;
+	// The selected room's name, under the section heading.
+	UPROPERTY()
+	UTextBlock* RoomSubtitleText = nullptr;
+	// The label of the room section's Delete button ("Delete room" or "Delete wall").
+	UPROPERTY()
+	UTextBlock* RoomDeleteLabel = nullptr;
+	// Read-only: the selected room's bounding box.
+	UPROPERTY()
+	UEditableTextBox* RoomXBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* RoomYBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* RoomWidthBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* RoomHeightBox = nullptr;
+	// Every box the Properties panel puts in a SizeBox so its width follows the panel (see RefreshDockPanelContentWidths).
+	UPROPERTY()
+	TArray<USizeBox*> PropertiesWidthBoxes;
+
 	UPROPERTY()
 	UVerticalBox* DoorFieldsBox = nullptr;
 
@@ -685,8 +716,6 @@ private:
 	UPROPERTY() USizeBox* RoomTagsFieldsSizeBox = nullptr;
 	UPROPERTY()
 	UEditableTextBox* RoomTagsTextBox = nullptr;
-	UPROPERTY()
-	UButton* ApplyRoomTagsButton = nullptr;
 
 	UPROPERTY()
 	UButton* ApplyRoomButton = nullptr;
