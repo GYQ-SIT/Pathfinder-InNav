@@ -13,8 +13,8 @@
    an existing project is never overwritten - you are asked for another name) and opens the editor on it, so **Ctrl+S**
    saves straight to that file. The name and description are kept in the file (`projectName`, `description`).
 2. Click a building in the 3D exterior view to select it (plays a short selection
-   sound) and **Enter Interior** appears in the exterior screen's own top menu bar
-   (see below). Clicking empty space, or clicking the already-selected building again,
+   sound) - its details appear in the exterior screen's **Building** panel, with **Open 2D floor
+   editor** (see below). Clicking empty space, or clicking the already-selected building again,
    deselects it.
 3. You're now in the 2D floor-plan editor — a flat top-down view of the building's
    currently active floor, not a 3D camera trick. Right-click-drag to pan, mouse wheel
@@ -55,9 +55,9 @@ menu bar, same look as the interior editor's:
   speed (Enter or clicking away commits it), **+** / **-** to nudge it, and **Set Default**
   (see below). The menu stays open after +/- and closes after Reset/Set Default.
 - **Save** — same as `Ctrl+S`, left of File.
-- **Enter Interior**, then **Back** on the far right — Enter Interior only appears once
-  a building is selected; Back here returns to the start screen (not to be confused
-  with the interior editor's own Back, which returns to *this* screen instead).
+- **Back** on the far right — returns to the start screen (not to be confused
+  with the interior editor's own Back, which returns to *this* screen instead). The way into a
+  building is the **Building** panel's buttons, below.
 
 Camera: WASD + mouse-look to free-fly, scroll to zoom; the **Camera** menu's **-**/**+**
 and speed box adjust move speed. **Reset** snaps the camera back to a framed view of every
@@ -65,8 +65,9 @@ loaded building; **Set Default** stores the camera's *current* position/angle as
 instead (persisted to disk, so it survives closing and reopening the project) — for
 tuning what "Reset" snaps back to once you've found an angle you like.
 
-This screen's three panels — **Map** (shown by default, docked on the right), **Audio** and
-**Debug** (hidden by default, tabs of one group along the bottom) — use the same docking
+This screen's four panels — **Map** (shown by default, docked on the left), **Building**
+(shown by default, docked on the right), **Audio** and **Debug** (hidden by default, tabs of
+one group along the bottom) — use the same docking
 system as the interior editor (see **Dockable panels** below: tabs, splits, screen edges,
 floating windows, Reset Layout). Its arrangement is saved separately, in
 `Saved/ExteriorDockLayout.json`, when you save or leave the screen. The **Debug** panel
@@ -75,6 +76,21 @@ shows the selected building, camera speed, unsaved-changes flag, FPS and frame t
 data may have been lost) - File > New/Load failures used to be silent on this screen.
 
 > Audio, Map and Debug are the same widgets on this screen and in the interior editor; how panels are built and added is in [UI Panels Guide](ui-panels-guide.md).
+
+### Building panel (the selected building)
+
+Hidden or shown via Window > Building. With nothing selected it asks for a selection. For the
+selected building (picked in the Map panel's list or by clicking it in the scene) it shows:
+
+- its **outline** (the footprint, drawn as a line drawing that fits the panel), its name and
+  **Building ID**;
+- **Floors**, **Rooms** (all floors) and **Lifts & stairs** (elevators, stairs and escalators; a
+  link that reaches several floors counts once). Rooms and links come from the interior data
+  saved in the project, so edits made in the interior editor show here once they are saved;
+- **STATUS**: an amber **Empty** tag while the building has no rooms, a green **Has rooms** tag
+  once it does;
+- **Open 2D floor editor** - opens the building in the interior editor's 2D floor plan - and
+  **Open 3D building view** - opens it straight in the interior editor's 3D preview.
 
 ### Map panel (roads, POIs, buildings)
 

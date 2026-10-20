@@ -19,11 +19,14 @@ bool FExteriorDockDefaultLayoutTest::RunTest(const FString& Parameters)
 	FString Err;
 	TestTrue(*FString::Printf(TEXT("default layout is valid (%s)"), *Err), L.Validate(Err));
 
-	TestTrue(TEXT("Map is visible on the right"), L.ContainsPanel(ExteriorDock::Map));
+	TestTrue(TEXT("Map is visible"), L.ContainsPanel(ExteriorDock::Map));
+	TestTrue(TEXT("Building is visible"), L.ContainsPanel(ExteriorDock::Building));
 	TestTrue(TEXT("Audio is hidden by default"), L.IsHidden(ExteriorDock::Audio));
 	TestTrue(TEXT("Debug is hidden by default"), L.IsHidden(ExteriorDock::Debug));
 	FDockLocation Loc;
-	TestTrue(TEXT("Map is in the right area"), L.FindPanel(ExteriorDock::Map, Loc) && Loc.Kind == FDockLocation::EKind::Area && Loc.Side == EDockSide::Right);
+	TestTrue(TEXT("Map is in the left area"), L.FindPanel(ExteriorDock::Map, Loc) && Loc.Kind == FDockLocation::EKind::Area && Loc.Side == EDockSide::Left);
+	FDockLocation BuildingLoc;
+	TestTrue(TEXT("Building is in the right area"), L.FindPanel(ExteriorDock::Building, BuildingLoc) && BuildingLoc.Kind == FDockLocation::EKind::Area && BuildingLoc.Side == EDockSide::Right);
 
 	// Showing the hidden panels brings them back along the bottom, as tabs of one group.
 	L.ShowPanel(ExteriorDock::Audio, ExteriorDock::DefaultSideFor(ExteriorDock::Audio));
@@ -63,6 +66,7 @@ bool FExteriorDockPersistenceTest::RunTest(const FString& Parameters)
 	FDockLayout FromPartial;
 	TestTrue(TEXT("loads partial"), ExteriorDock::LoadFromFile(FromPartial, Path, Viewport));
 	TestTrue(TEXT("Map was missing and is shown at its default side"), FromPartial.ContainsPanel(ExteriorDock::Map));
+	TestTrue(TEXT("so was Building"), FromPartial.ContainsPanel(ExteriorDock::Building));
 	TestFalse(TEXT("Debug was missing but is hidden by default"), FromPartial.ContainsPanel(ExteriorDock::Debug));
 
 	// The interior and exterior layouts live in different files.
@@ -101,6 +105,7 @@ bool FExteriorScreenDockSmokeTest::RunTest(const FString& Parameters)
 	FString Err;
 	TestTrue(*FString::Printf(TEXT("layout valid (%s)"), *Err), L->Validate(Err));
 	TestTrue(TEXT("Map is shown"), Dock->IsPanelShown(ExteriorDock::Map));
+	TestTrue(TEXT("Building is shown"), Dock->IsPanelShown(ExteriorDock::Building));
 	TestFalse(TEXT("Audio is hidden"), Dock->IsPanelShown(ExteriorDock::Audio));
 	TestFalse(TEXT("Debug is hidden"), Dock->IsPanelShown(ExteriorDock::Debug));
 

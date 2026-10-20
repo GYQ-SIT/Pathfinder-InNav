@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "BuildingSummary.h"
 #include "GameFramework/PlayerController.h"
 #include "InteriorTypes.h"
 #include "RoadSegmentActor.h"
@@ -503,6 +504,9 @@ public:
 	};
 	// Those buildings, by name.
 	TArray<FBuildingListItem> GetFilteredBuildingList() const;
+
+	// What the Building panel shows about the selected building. False when nothing is selected.
+	bool GetSelectedBuildingSummary(FBuildingSummary& OutSummary) const;
 	uint64 GetBuildingResultsRevision() const;
 	int32 GetEditableBuildingCount() const;
 	bool SelectBuildingById(const FString& BuildingId);

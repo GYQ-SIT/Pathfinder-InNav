@@ -1,6 +1,9 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "AudioPanelWidget.h"
+#include "BuildingInfoPanelWidget.h"
+#include "FootprintPreviewWidget.h"
+#include "PolyBuilding.h"
 #include "DebugPanelWidget.h"
 #include "MapPanelWidget.h"
 #include "EditScreenWidget.h"
@@ -187,6 +190,77 @@ bool FUiMapPanelTest::RunTest(const FString& Parameters)
 			AddError(TEXT("the floor chips are missing"));
 		}
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiBuildingPanelTest, "InNavi.UI.Panels.Building", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FUiBuildingPanelTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	UEditScreenWidget* Exterior = NewObject<UEditScreenWidget>();
+	Exterior->Initialize(); Exterior->TakeWidget(); Exterior->SetOwningPlayer(Controller);
+	UBuildingInfoPanelWidget* Panel = Exterior->GetBuildingInfoPanelForTests();
+	if (!TestNotNull(TEXT("the exterior screen has the Building panel"), Panel))
+	{
+		return false;
+	}
+
+	Panel->Refresh();
+	TestFalse(TEXT("with nothing selected it asks for a selection"), Panel->IsShowingBuildingForTests());
+
+	// E2 has rooms and lifts / stairs; E1 has neither rooms nor a vertical link in the example project.
+	TestTrue(TEXT("E2 can be selected"), Controller->SelectBuildingById(TEXT("E2")));
+	Panel->Refresh();
+	TestTrue(TEXT("a selected building is shown"), Panel->IsShowingBuildingForTests());
+	TestEqual(TEXT("with its name"), Panel->GetNameTextForTests(), Fixture.Generator->FindBuildingById(TEXT("E2"))->BuildingName);
+	TestEqual(TEXT("its id"), Panel->GetIdTextForTests(), FString(TEXT("Building ID: E2")));
+	TestEqual(TEXT("its floors"), Panel->GetFloorsTextForTests(), FString::FromInt(Fixture.Generator->FindBuildingById(TEXT("E2"))->GetFloorCount()));
+	TestTrue(TEXT("its rooms"), FCString::Atoi(*Panel->GetRoomsTextForTests()) > 0);
+	TestTrue(TEXT("its lifts and stairs"), FCString::Atoi(*Panel->GetLinksTextForTests()) > 0);
+	TestTrue(TEXT("and its outline"), Panel->GetOutlinePointCountForTests() >= 3);
+	TestTrue(TEXT("a building with rooms is not marked empty"), Panel->GetStatusTextForTests().Contains(TEXT("Has rooms")));
+
+	TestTrue(TEXT("E1 can be selected"), Controller->SelectBuildingById(TEXT("E1")));
+	Panel->RefreshIfChanged();
+	TestEqual(TEXT("the panel follows the selection"), Panel->GetIdTextForTests(), FString(TEXT("Building ID: E1")));
+	TestEqual(TEXT("a building without rooms has none"), Panel->GetRoomsTextForTests(), FString(TEXT("0")));
+	TestEqual(TEXT("and is marked empty"), Panel->GetStatusTextForTests(), FString(TEXT("Empty")));
+
+	// The two buttons hand over to whoever set them (the screen opens the interior editor).
+	int32 Opened2D = 0, Opened3D = 0;
+	Panel->OnOpen2D = [&Opened2D]() { ++Opened2D; };
+	Panel->OnOpen3D = [&Opened3D]() { ++Opened3D; };
+	if (TestNotNull(TEXT("the 2D button"), Panel->GetOpen2DButtonForTests()) && TestNotNull(TEXT("the 3D button"), Panel->GetOpen3DButtonForTests()))
+	{
+		Panel->GetOpen2DButtonForTests()->OnClicked.Broadcast();
+		Panel->GetOpen3DButtonForTests()->OnClicked.Broadcast();
+		TestEqual(TEXT("Open 2D floor editor"), Opened2D, 1);
+		TestEqual(TEXT("Open 3D building view"), Opened3D, 1);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiFootprintOutlineTest, "InNavi.UI.FootprintOutline", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FUiFootprintOutlineTest::RunTest(const FString& Parameters)
+{
+	TArray<FVector2f> Line;
+	// A 200 x 100 rectangle in a 100 x 100 space: scaled to fit the width, centred vertically, inside the margin.
+	const TArray<FVector2D> Rectangle = { FVector2D(1000, 500), FVector2D(1200, 500), FVector2D(1200, 600), FVector2D(1000, 600) };
+	TestTrue(TEXT("an outline is made"), SFootprintPreview::FitOutline(Rectangle, FVector2D(100, 100), Line));
+	TestEqual(TEXT("the four corners and the closing point"), Line.Num(), 5);
+	if (Line.Num() == 5)
+	{
+		TestEqual(TEXT("the outline is closed"), Line[0], Line[4]);
+		for (const FVector2f& Point : Line)
+		{
+			TestTrue(TEXT("every point is inside the space"), Point.X >= 0.f && Point.X <= 100.f && Point.Y >= 0.f && Point.Y <= 100.f);
+		}
+		TestTrue(TEXT("proportions are kept (twice as wide as tall)"), FMath::IsNearlyEqual((Line[1].X - Line[0].X), 2.f * (Line[2].Y - Line[1].Y), 0.01f));
+	}
+	TestFalse(TEXT("two points are not an outline"), SFootprintPreview::FitOutline({ FVector2D(0, 0), FVector2D(1, 1) }, FVector2D(100, 100), Line));
+	TestFalse(TEXT("no space, no outline"), SFootprintPreview::FitOutline(Rectangle, FVector2D(0, 0), Line));
+	TestFalse(TEXT("a single repeated point has no extent"), SFootprintPreview::FitOutline({ FVector2D(5, 5), FVector2D(5, 5), FVector2D(5, 5) }, FVector2D(100, 100), Line));
 	return true;
 }
 

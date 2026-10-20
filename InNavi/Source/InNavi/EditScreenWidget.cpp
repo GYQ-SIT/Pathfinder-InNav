@@ -3,6 +3,7 @@
 #include "AudioFileRowWidget.h"
 #include "AudioPanelWidget.h"
 #include "DebugPanelWidget.h"
+#include "BuildingInfoPanelWidget.h"
 #include "MapPanelWidget.h"
 #include "ConfirmDialogWidget.h"
 #include "DockHostUMG.h"
@@ -197,19 +198,12 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			return Button;
 		};
 
-		// Eats all remaining row width so Enter Interior/Back land flush against the bar's right edge.
+		// Eats all remaining row width so Back lands flush against the bar's right edge.
 		USpacer* MenuBarSpacer = WidgetTree->ConstructWidget<USpacer>(USpacer::StaticClass());
 		if (UHorizontalBoxSlot* SpacerSlot = Cast<UHorizontalBoxSlot>(MenuBarRow->AddChildToHorizontalBox(MenuBarSpacer)))
 		{
 			SpacerSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		}
-
-		EnterInteriorButton = AddBarButton(TEXT("Btn_EnterInterior"), TEXT("Enter Interior"), 120.f);
-		EnterInteriorButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnEnterInteriorClicked);
-		EnterInteriorButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::PlayButtonClickSound);
-		// Hidden until a building is actually selected (see HandleBuildingSelected) - matches
-		// WBP_EditScreen's original behavior.
-		EnterInteriorButton->SetVisibility(ESlateVisibility::Collapsed);
 
 		BackButton = AddBarButton(TEXT("Btn_Back"), TEXT("Back"), 60.f);
 		BackButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnBackClicked);
@@ -305,6 +299,10 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		WindowRoadsCheckbox->SetIsChecked(true);
 		WindowRoadsCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowRoadsCheckChanged);
 
+		WindowBuildingCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowBuilding"), TEXT("Building"));
+		WindowBuildingCheckbox->SetIsChecked(true);
+		WindowBuildingCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowBuildingCheckChanged);
+
 		// Starts unchecked - the Debug panel starts hidden, like the interior editor's own. All three boxes
 		// are re-synced to the real dock state by RefreshWindowMenuChecks once the layout is loaded.
 		WindowDebugCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowDebug"), TEXT("Debug"));
@@ -392,6 +390,13 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		MapPanelWidget->SetShowBuildingFilters(true);
 		DockHost->RegisterPanel(ExteriorDock::Map, FText::FromName(ExteriorDock::Map), MapPanelWidget);
 
+		// --- Building panel (Window > Building): the selected building and the two ways into it. Starts shown.
+		BuildingInfoPanelWidget = CreateWidget<UBuildingInfoPanelWidget>(this, UBuildingInfoPanelWidget::StaticClass());
+		BuildingInfoPanelWidget->SetOwnerScreen(this);
+		BuildingInfoPanelWidget->OnOpen2D = [this]() { OpenInteriorEditor(false); };
+		BuildingInfoPanelWidget->OnOpen3D = [this]() { OpenInteriorEditor(true); };
+		DockHost->RegisterPanel(ExteriorDock::Building, FText::FromName(ExteriorDock::Building), BuildingInfoPanelWidget);
+
 		// --- Debug panel (Window > Debug): the shared one (DebugPanelWidget.h). The screen supplies the lines that
 		// are its own. Starts hidden.
 		DebugPanelWidget = CreateWidget<UDebugPanelWidget>(this, UDebugPanelWidget::StaticClass());
@@ -441,6 +446,10 @@ void UEditScreenWidget::NativeConstruct()
 	if (AudioPanelWidget)
 	{
 		AudioPanelWidget->Refresh();
+	}
+	if (BuildingInfoPanelWidget)
+	{
+		BuildingInfoPanelWidget->Refresh();
 	}
 	RefreshCameraSpeedDisplay();
 	// Arranges every dock panel for the first time: the user's saved layout, else the team default.
@@ -493,6 +502,11 @@ void UEditScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 	// The Audio and Map panels' controls size themselves from their panel's width, which the user can change at any time.
 	SyncAudioPanelWidth();
 	SyncMapPanelWidth();
+	SyncBuildingPanelWidth();
+	if (BuildingInfoPanelWidget)
+	{
+		BuildingInfoPanelWidget->RefreshIfChanged();
+	}
 }
 
 FReply UEditScreenWidget::NativeOnMouseWheel(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
@@ -515,13 +529,13 @@ void UEditScreenWidget::HandleBuildingSelected(FString BuildingId)
 	// An empty BuildingId means the selection was cleared (see ANavPlayerController::
 	// SelectBuildingUnderCursor - clicking empty space, or re-clicking the already-selected building,
 	// now deselects instead of only ever adding/switching a selection).
-	if (EnterInteriorButton)
+	if (BuildingInfoPanelWidget)
 	{
-		EnterInteriorButton->SetVisibility(BuildingId.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+		BuildingInfoPanelWidget->Refresh();
 	}
 }
 
-void UEditScreenWidget::OnEnterInteriorClicked()
+void UEditScreenWidget::OpenInteriorEditor(bool b3DView)
 {
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
 	if (!PC)
@@ -535,6 +549,11 @@ void UEditScreenWidget::OnEnterInteriorClicked()
 	{
 		InteriorScreen->AddToViewport();
 		RemoveFromParent();
+		if (b3DView)
+		{
+			// The interior screen follows this through its own preview-mode notification.
+			PC->SetIn3DPreviewMode(true);
+		}
 	}
 }
 
@@ -996,6 +1015,7 @@ void UEditScreenWidget::RefreshWindowMenuChecks()
 	};
 	Sync(WindowAudioCheckbox, ExteriorDock::Audio);
 	Sync(WindowRoadsCheckbox, ExteriorDock::Map);
+	Sync(WindowBuildingCheckbox, ExteriorDock::Building);
 	Sync(WindowDebugCheckbox, ExteriorDock::Debug);
 }
 
@@ -1069,6 +1089,26 @@ void UEditScreenWidget::OnWindowAudioCheckChanged(bool bIsChecked)
 void UEditScreenWidget::OnWindowRoadsCheckChanged(bool bIsChecked)
 {
 	SetDockPanelHidden(ExteriorDock::Map, !bIsChecked);
+}
+
+void UEditScreenWidget::SyncBuildingPanelWidth()
+{
+	if (!DockHost || !BuildingInfoPanelWidget)
+	{
+		return;
+	}
+	const float PanelWidth = DockHost->GetPanelWidth(ExteriorDock::Building);
+	if (PanelWidth <= 0.f)
+	{
+		return; // hidden, or not laid out yet
+	}
+	// Minus the panel's 14px padding on each side and room for the scroll bar.
+	BuildingInfoPanelWidget->SetContentWidth(FMath::Max(100.f, PanelWidth - 48.f));
+}
+
+void UEditScreenWidget::OnWindowBuildingCheckChanged(bool bIsChecked)
+{
+	SetDockPanelHidden(ExteriorDock::Building, !bIsChecked);
 }
 
 void UEditScreenWidget::OnWindowDebugCheckChanged(bool bIsChecked)

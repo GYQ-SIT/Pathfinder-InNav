@@ -1111,6 +1111,65 @@ void ABuildingGenerator::SetInteriorDataForBuilding(const FString& BuildingId, T
 	InteriorDataById.Add(BuildingId, InteriorData);
 }
 
+bool ABuildingGenerator::GetBuildingSummary(const FString& BuildingId, FBuildingSummary& OutSummary) const
+{
+	const APolyBuilding* Building = FindBuildingById(BuildingId);
+	if (!IsValid(Building))
+	{
+		return false;
+	}
+	OutSummary = FBuildingSummary();
+	OutSummary.Id = Building->BuildingId;
+	OutSummary.Name = Building->BuildingName;
+	OutSummary.Floors = Building->GetFloorCount();
+	OutSummary.Footprint = Building->GetFootprint();
+
+	if (const TSharedPtr<FJsonObject> Interior = GetInteriorDataForBuilding(BuildingId))
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
+		if (Interior->TryGetArrayField(TEXT("floors"), Floors) && Floors)
+		{
+			TSet<FString> Links;
+			for (const TSharedPtr<FJsonValue>& FloorValue : *Floors)
+			{
+				const TSharedPtr<FJsonObject> Floor = FloorValue.IsValid() ? FloorValue->AsObject() : nullptr;
+				if (!Floor.IsValid())
+				{
+					continue;
+				}
+				const TArray<TSharedPtr<FJsonValue>>* Rooms = nullptr;
+				if (Floor->TryGetArrayField(TEXT("rooms"), Rooms) && Rooms)
+				{
+					OutSummary.Rooms += Rooms->Num();
+				}
+				const TArray<TSharedPtr<FJsonValue>>* Nodes = nullptr;
+				if (Floor->TryGetArrayField(TEXT("navNodes"), Nodes) && Nodes)
+				{
+					for (const TSharedPtr<FJsonValue>& NodeValue : *Nodes)
+					{
+						const TSharedPtr<FJsonObject> Node = NodeValue.IsValid() ? NodeValue->AsObject() : nullptr;
+						FString Type;
+						if (!Node.IsValid() || !Node->TryGetStringField(TEXT("type"), Type)
+							|| !(Type == TEXT("elevator") || Type == TEXT("stairs") || Type == TEXT("escalator")))
+						{
+							continue;
+						}
+						// One link has a node on every floor it reaches, all sharing a group id.
+						FString Key;
+						if (!Node->TryGetStringField(TEXT("connectorGroupId"), Key) || Key.IsEmpty())
+						{
+							Node->TryGetStringField(TEXT("id"), Key);
+						}
+						Links.Add(Key);
+					}
+				}
+			}
+			OutSummary.VerticalLinks = Links.Num();
+		}
+	}
+	return true;
+}
+
 bool ABuildingGenerator::IsEmptyProjectFile(const FString& FilePath)
 {
 	FString JsonString;

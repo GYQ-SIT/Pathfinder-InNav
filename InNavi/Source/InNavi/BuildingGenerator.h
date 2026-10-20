@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "BuildingSummary.h"
 #include "GameFramework/Actor.h"
 #include "RoadSegmentActor.h"
 #include "BuildingGenerator.generated.h"
@@ -207,6 +208,9 @@ public:
 	// written into) the combined project file - not interpreted here, that's InteriorGenerator's
 	// schema. Returns nullptr if this building has no interior data yet.
 	TSharedPtr<FJsonObject> GetInteriorDataForBuilding(const FString& BuildingId) const;
+
+	// False if there is no such building.
+	bool GetBuildingSummary(const FString& BuildingId, FBuildingSummary& OutSummary) const;
 
 	// Stashes the interior data for a building id, overwriting whatever was there before (e.g.
 	// InteriorGenerator syncing its current in-memory state before a project save).

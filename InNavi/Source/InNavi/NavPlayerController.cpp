@@ -2916,6 +2916,12 @@ bool ANavPlayerController::AreCampusBuildingsVisible() const { return !Generator
 int32 ANavPlayerController::GetEditableBuildingCount() const { return Generator ? Generator->GetBuildingCount() : 0; }
 uint64 ANavPlayerController::GetBuildingResultsRevision() const { return Generator ? Generator->GetBuildingResultsRevision() : 0; }
 
+bool ANavPlayerController::GetSelectedBuildingSummary(FBuildingSummary& OutSummary) const
+{
+	const FString Id = GetSelectedBuildingId();
+	return Generator && !Id.IsEmpty() && Generator->GetBuildingSummary(Id, OutSummary);
+}
+
 TArray<ANavPlayerController::FBuildingListItem> ANavPlayerController::GetFilteredBuildingList() const
 {
 	TArray<FBuildingListItem> Items;

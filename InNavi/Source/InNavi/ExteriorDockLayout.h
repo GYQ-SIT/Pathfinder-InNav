@@ -10,6 +10,7 @@ namespace ExteriorDock
 {
 	INNAVI_API extern const FName Audio;
 	INNAVI_API extern const FName Map;
+	INNAVI_API extern const FName Building;
 	INNAVI_API extern const FName Debug;
 
 	INNAVI_API const TArray<FName>& AllPanels();
@@ -18,8 +19,8 @@ namespace ExteriorDock
 	// Where a panel is docked the first time it is shown if there is no saved position for it.
 	INNAVI_API EDockSide DefaultSideFor(FName Panel);
 
-	// Map on the right edge; Audio and Debug (tabs of one group along the bottom) start hidden and remember
-	// that spot for when the Window menu shows them.
+	// Map on the left edge and Building (the selected building) on the right, like the design page; Audio and Debug
+	// (tabs of one group along the bottom) start hidden and remember that spot for when the Window menu shows them.
 	INNAVI_API void BuildDefaultLayout(FDockLayout& Layout);
 
 	// Panels the file did not mention are placed the way the default layout would have: visible ones are

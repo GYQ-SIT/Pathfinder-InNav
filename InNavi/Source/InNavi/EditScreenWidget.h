@@ -12,6 +12,7 @@ class UButton;
 class UAudioPanelWidget;
 class UDebugPanelWidget;
 class UMapPanelWidget;
+class UBuildingInfoPanelWidget;
 class UCheckBox;
 class UDockHostWidget;
 class UComboBoxString;
@@ -55,6 +56,7 @@ public:
 	UAudioPanelWidget* GetAudioPanelForTests() const { return AudioPanelWidget; }
 	UDebugPanelWidget* GetDebugPanelForTests() const { return DebugPanelWidget; }
 	UMapPanelWidget* GetMapPanelForTests() const { return MapPanelWidget; }
+	UBuildingInfoPanelWidget* GetBuildingInfoPanelForTests() const { return BuildingInfoPanelWidget; }
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -67,8 +69,8 @@ private:
 	UFUNCTION()
 	void OnBackClicked();
 
-	UFUNCTION()
-	void OnEnterInteriorClicked();
+	// Opens the selected building in the interior editor: the 2D floor editor, or (b3DView) straight into its 3D view.
+	void OpenInteriorEditor(bool b3DView);
 
 	// Calls PC->Increase/DecreaseCameraSpeedExterior() - the exterior free-fly camera's default speed
 	// auto-scales to the loaded campus's span (see FocusCameraOnAllBuildings), but these let the user
@@ -193,6 +195,9 @@ private:
 	void OnWindowRoadsCheckChanged(bool bIsChecked);
 
 	UFUNCTION()
+	void OnWindowBuildingCheckChanged(bool bIsChecked);
+
+	UFUNCTION()
 	void OnWindowDebugCheckChanged(bool bIsChecked);
 
 	// Window > Reset Layout - back to the team default arrangement.
@@ -218,6 +223,8 @@ private:
 	void SyncAudioPanelWidth();
 	// Same for the Map panel's building controls.
 	void SyncMapPanelWidth();
+	// And the Building panel.
+	void SyncBuildingPanelWidth();
 
 	// The actual rendered size of the root canvas - NOT UWidgetLayoutLibrary::GetViewportSize, which
 	// returns the platform's raw pixel resolution and only matches this Slate-local coordinate space
@@ -229,9 +236,6 @@ private:
 
 	UPROPERTY()
 	UButton* BackButton = nullptr;
-
-	UPROPERTY()
-	UButton* EnterInteriorButton = nullptr;
 
 	UPROPERTY()
 	UButton* ResetCameraViewButton = nullptr;
@@ -276,6 +280,9 @@ private:
 	UCheckBox* WindowRoadsCheckbox = nullptr;
 
 	UPROPERTY()
+	UCheckBox* WindowBuildingCheckbox = nullptr;
+
+	UPROPERTY()
 	UCheckBox* WindowDebugCheckbox = nullptr;
 
 	// The dock system's host: lays out the three panels below. Stretches over the whole canvas; only its
@@ -297,6 +304,10 @@ private:
 	// building filters. Starts shown.
 	UPROPERTY()
 	UMapPanelWidget* MapPanelWidget = nullptr;
+
+	// The Building dock panel (BuildingInfoPanelWidget.h): the selected building and the ways into it. Starts shown.
+	UPROPERTY()
+	UBuildingInfoPanelWidget* BuildingInfoPanelWidget = nullptr;
 
 	// The Debug dock panel (shared with the interior editor, see DebugPanelWidget.h). Starts hidden.
 	UPROPERTY()
