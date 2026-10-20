@@ -152,6 +152,44 @@ bool FProjectLibraryEditTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectLibraryDeleteTest, "InNavi.Project.Library.Delete", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FProjectLibraryDeleteTest::RunTest(const FString& Parameters)
+{
+	using namespace ProjectLibraryTests;
+	const FString Folder = MakeFolder();
+	IFileManager::Get().MakeDirectory(*Folder, true);
+	const FDateTime Now = FDateTime(2026, 10, 20, 12, 0, 0);
+	Write(Folder / TEXT("a.json"), TEXT("{\"projectName\":\"Alpha\",\"buildings\":[{}]}"), Now);
+	Write(Folder / TEXT("buildings.json"), TEXT("{\"buildings\":[{}]}"), Now);
+
+	auto Load = [&Folder](const TCHAR* FileName) { return *ProjectLibraryTests::Find(ProjectLibrary::Scan(Folder), FileName); };
+	FString DeletedPath, Error;
+
+	TestTrue(TEXT("a project can be deleted"), ProjectLibrary::SoftDelete(Load(TEXT("a.json")), Folder, DeletedPath, Error));
+	TestFalse(TEXT("its file leaves the library folder"), IFileManager::Get().FileExists(*(Folder / TEXT("a.json"))));
+	TestTrue(TEXT("and is kept in the Deleted folder"), IFileManager::Get().FileExists(*(Folder / TEXT("Deleted") / TEXT("a.json"))));
+	TestEqual(TEXT("the library no longer lists it (and does not list the Deleted folder's files)"), ProjectLibrary::Scan(Folder).Num(), 1);
+
+	// A project with the same file name deleted later does not replace the first one.
+	Write(Folder / TEXT("a.json"), TEXT("{\"projectName\":\"Alpha again\",\"buildings\":[]}"), Now);
+	TestTrue(TEXT("a second project with that file name can be deleted too"), ProjectLibrary::SoftDelete(Load(TEXT("a.json")), Folder, DeletedPath, Error));
+	TArray<FString> Kept;
+	IFileManager::Get().FindFiles(Kept, *(Folder / TEXT("Deleted") / TEXT("*.json")), true, false);
+	TestEqual(TEXT("both are kept"), Kept.Num(), 2);
+
+	TestFalse(TEXT("the shipped sample cannot be deleted"), ProjectLibrary::SoftDelete(Load(TEXT("buildings.json")), Folder, DeletedPath, Error));
+	TestTrue(TEXT("with the reason"), Error.Contains(TEXT("sample")));
+	TestTrue(TEXT("and it is still there"), IFileManager::Get().FileExists(*(Folder / TEXT("buildings.json"))));
+
+	FProjectLibraryEntry Gone;
+	Gone.FilePath = Folder / TEXT("not here.json");
+	Gone.FileName = TEXT("not here.json");
+	TestFalse(TEXT("a file that is already gone is reported"), ProjectLibrary::SoftDelete(Gone, Folder, DeletedPath, Error));
+
+	IFileManager::Get().DeleteDirectory(*Folder, false, true);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectLibraryWidgetTest, "InNavi.UI.ProjectLibrary", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FProjectLibraryWidgetTest::RunTest(const FString& Parameters)
 {
@@ -200,6 +238,8 @@ bool FProjectLibraryWidgetTest::RunTest(const FString& Parameters)
 		TestFalse(TEXT("the sample cannot be renamed"), SampleCard->GetRenameButtonForTests()->GetIsEnabled());
 		TestTrue(TEXT("but can be duplicated"), SampleCard->GetDuplicateButtonForTests()->GetIsEnabled());
 		TestTrue(TEXT("an ordinary project can be renamed"), AlphaCard->GetRenameButtonForTests()->GetIsEnabled());
+		TestFalse(TEXT("the sample cannot be deleted"), SampleCard->GetDeleteButtonForTests()->GetIsEnabled());
+		TestTrue(TEXT("an ordinary project can be deleted"), AlphaCard->GetDeleteButtonForTests()->GetIsEnabled());
 	}
 
 	// Search narrows the cards by name or file name, without losing the total.

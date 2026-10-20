@@ -89,8 +89,9 @@ TSharedRef<SWidget> UProjectLibraryWidget::RebuildWidget()
 			Slot->SetPadding(FMargin(LeftPadding * StartStyle::DesignToUi, 0.f, 0.f, 0.f));
 			return Button;
 		};
-		BackButton = AddHeaderButton(TEXT("Btn_LibraryBack"), TEXT("Back"), SecondaryButton(), 82.f, 0.f);
-		NewButton = AddHeaderButton(TEXT("Btn_LibraryNew"), TEXT("+  New project"), PrimaryButton(), 126.f, 8.f);
+		// New project first, Back at the far right.
+		NewButton = AddHeaderButton(TEXT("Btn_LibraryNew"), TEXT("+  New project"), PrimaryButton(), 126.f, 0.f);
+		BackButton = AddHeaderButton(TEXT("Btn_LibraryBack"), TEXT("Back"), SecondaryButton(), 82.f, 8.f);
 		Column->AddChildToVerticalBox(Header);
 
 		// Failures from opening a file (the controller reports them; nothing else on this screen would show them).
@@ -220,6 +221,7 @@ void UProjectLibraryWidget::RebuildCards()
 		Card->OnOpen = [this](const FProjectLibraryEntry& Clicked) { OpenProject(Clicked); };
 		Card->OnDuplicate = [this](const FProjectLibraryEntry& Clicked) { DuplicateProject(Clicked); };
 		Card->OnRename = [this](const FProjectLibraryEntry& Clicked) { RenameProject(Clicked); };
+		Card->OnDelete = [this](const FProjectLibraryEntry& Clicked) { DeleteProject(Clicked); };
 		Cards.Add(Card);
 		Grid->AddChildToWrapBox(Card);
 	}
@@ -354,6 +356,35 @@ void UProjectLibraryWidget::RenameProject(const FProjectLibraryEntry& Entry)
 		}
 		return FString();
 	});
+}
+
+void UProjectLibraryWidget::DeleteProject(const FProjectLibraryEntry& Entry)
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC)
+	{
+		return;
+	}
+	ShowMessage(FString());
+	TWeakObjectPtr<UProjectLibraryWidget> WeakThis(this);
+	const FString Directory = PC->GetProjectsDirectory();
+	UNewProjectDialogWidget::OpenConfirm(PC, TEXT("Delete project?"),
+		FString::Printf(TEXT("\"%s\" (%s) is taken out of the library. The file is moved to the Deleted folder inside Data, so you can still put it back by hand."),
+			*Entry.DisplayName, *Entry.FileName),
+		TEXT("Delete"),
+		[WeakThis, Entry, Directory]() -> FString
+		{
+			FString DeletedPath, Error;
+			if (!ProjectLibrary::SoftDelete(Entry, Directory, DeletedPath, Error))
+			{
+				return Error;
+			}
+			if (UProjectLibraryWidget* Library = WeakThis.Get())
+			{
+				Library->Refresh();
+			}
+			return FString();
+		});
 }
 
 void UProjectLibraryWidget::HandleNewClicked()

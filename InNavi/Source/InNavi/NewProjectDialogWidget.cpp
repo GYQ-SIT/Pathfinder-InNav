@@ -97,6 +97,11 @@ TSharedRef<SWidget> UNewProjectDialogWidget::RebuildWidget()
 			return Text;
 		};
 
+		const FString DialogTitle = bConfirmMode ? ConfirmTitle : (bRenameMode ? FString(TEXT("Rename project")) : FString(TEXT("Create a new project")));
+		const FString DialogHelp = bConfirmMode ? ConfirmMessage
+			: (bRenameMode ? FString(TEXT("Choose a new name. The project file is renamed to match.")) : FString(TEXT("Name your project. A blank project file is created in the Data folder.")));
+		const FString ConfirmButtonLabel = bConfirmMode ? ConfirmLabel : (bRenameMode ? FString(TEXT("Rename")) : FString(TEXT("Create project")));
+
 		UOverlay* Root = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("DialogRoot"));
 		WidgetTree->RootWidget = Root;
 
@@ -122,8 +127,8 @@ TSharedRef<SWidget> UNewProjectDialogWidget::RebuildWidget()
 
 		// Header: title and one line of help.
 		UVerticalBox* Header = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Header"));
-		Header->AddChildToVerticalBox(MakeText(TEXT("Txt_DialogTitle"), bRenameMode ? TEXT("Rename project") : TEXT("Create a new project"), 23.f, DialogRgb(241, 246, 255), true));
-		UTextBlock* Help = MakeText(TEXT("Txt_DialogHelp"), bRenameMode ? TEXT("Choose a new name. The project file is renamed to match.") : TEXT("Name your project. A blank project file is created in the Data folder."), 13.f, DialogRgb(176, 192, 210), false);
+		Header->AddChildToVerticalBox(MakeText(TEXT("Txt_DialogTitle"), *DialogTitle, 23.f, DialogRgb(241, 246, 255), true));
+		UTextBlock* Help = MakeText(TEXT("Txt_DialogHelp"), *DialogHelp, 13.f, DialogRgb(176, 192, 210), false);
 		Help->SetAutoWrapText(true);
 		Header->AddChildToVerticalBox(Help)->SetPadding(FMargin(0.f, 6.f * DialogUiScale, 0.f, 0.f));
 		UBorder* HeaderPad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("HeaderPad"));
@@ -142,25 +147,28 @@ TSharedRef<SWidget> UNewProjectDialogWidget::RebuildWidget()
 		// Body: the two fields.
 		UVerticalBox* Body = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Body"));
 		const FLinearColor LabelColor = DialogRgb(165, 182, 204);
-		Body->AddChildToVerticalBox(MakeText(TEXT("Txt_NameLabel"), TEXT("Project name *"), 11.f, LabelColor, true, 30));
-
-		NameBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_ProjectName"));
-		NameBox->SetWidgetStyle(DialogFieldStyle(13.f));
-		NameBox->SetHintText(FText::FromString(TEXT("e.g. Campus Navigation")));
-		if (bRenameMode)
+		if (!bConfirmMode)
 		{
-			NameBox->SetText(FText::FromString(InitialName));
+			Body->AddChildToVerticalBox(MakeText(TEXT("Txt_NameLabel"), TEXT("Project name *"), 11.f, LabelColor, true, 30));
+
+			NameBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_ProjectName"));
+			NameBox->SetWidgetStyle(DialogFieldStyle(13.f));
+			NameBox->SetHintText(FText::FromString(TEXT("e.g. Campus Navigation")));
+			if (bRenameMode)
+			{
+				NameBox->SetText(FText::FromString(InitialName));
+			}
+			NameBox->OnTextChanged.AddUniqueDynamic(this, &UNewProjectDialogWidget::HandleNameChanged);
+			NameBox->OnTextCommitted.AddUniqueDynamic(this, &UNewProjectDialogWidget::HandleNameCommitted);
+			Body->AddChildToVerticalBox(NameBox)->SetPadding(FMargin(0.f, 6.f * DialogUiScale, 0.f, 0.f));
 		}
-		NameBox->OnTextChanged.AddUniqueDynamic(this, &UNewProjectDialogWidget::HandleNameChanged);
-		NameBox->OnTextCommitted.AddUniqueDynamic(this, &UNewProjectDialogWidget::HandleNameCommitted);
-		Body->AddChildToVerticalBox(NameBox)->SetPadding(FMargin(0.f, 6.f * DialogUiScale, 0.f, 0.f));
 
 		ErrorText = MakeText(TEXT("Txt_NameError"), TEXT(""), 12.f, DialogRgb(255, 140, 130), false);
 		ErrorText->SetAutoWrapText(true);
 		ErrorText->SetVisibility(ESlateVisibility::Collapsed);
 		Body->AddChildToVerticalBox(ErrorText)->SetPadding(FMargin(0.f, 6.f * DialogUiScale, 0.f, 0.f));
 
-		if (!bRenameMode)
+		if (!bRenameMode && !bConfirmMode)
 		{
 			Body->AddChildToVerticalBox(MakeText(TEXT("Txt_DescriptionLabel"), TEXT("Description"), 11.f, LabelColor, true, 30))
 				->SetPadding(FMargin(0.f, 16.f * DialogUiScale, 0.f, 0.f));
@@ -201,8 +209,11 @@ TSharedRef<SWidget> UNewProjectDialogWidget::RebuildWidget()
 		};
 		CancelButton = AddFooterButton(TEXT("Btn_CancelProject"), TEXT("Cancel"),
 			DialogButtonStyle(FLinearColor::Transparent, DialogRgb(36, 50, 74), DialogRgb(30, 43, 66), DialogRgb(74, 90, 113)), 74.f, true);
-		CreateButton = AddFooterButton(TEXT("Btn_CreateProject"), bRenameMode ? TEXT("Rename") : TEXT("Create project"),
-			DialogButtonStyle(DialogAmber, DialogRgb(238, 138, 24), DialogRgb(190, 102, 4), DialogAmber), 110.f, false);
+		// Amber to create or rename; red when the question is about throwing something away.
+		const FButtonStyle ConfirmStyle = bConfirmMode
+			? DialogButtonStyle(DialogRgb(200, 52, 60), DialogRgb(224, 72, 80), DialogRgb(168, 40, 48), DialogRgb(200, 52, 60))
+			: DialogButtonStyle(DialogAmber, DialogRgb(238, 138, 24), DialogRgb(190, 102, 4), DialogAmber);
+		CreateButton = AddFooterButton(TEXT("Btn_CreateProject"), *ConfirmButtonLabel, ConfirmStyle, 110.f, false);
 
 		UBorder* FooterPad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("FooterPad"));
 		FooterPad->SetBrushColor(FLinearColor::Transparent);
@@ -211,6 +222,34 @@ TSharedRef<SWidget> UNewProjectDialogWidget::RebuildWidget()
 		Column->AddChildToVerticalBox(FooterPad);
 	}
 	return Super::RebuildWidget();
+}
+
+void UNewProjectDialogWidget::ConfigureConfirm(const FString& Title, const FString& Message, const FString& Label)
+{
+	bConfirmMode = true;
+	ConfirmTitle = Title;
+	ConfirmMessage = Message;
+	ConfirmLabel = Label;
+}
+
+UNewProjectDialogWidget* UNewProjectDialogWidget::OpenConfirm(APlayerController* Controller, const FString& Title, const FString& Message, const FString& ConfirmLabelText, TFunction<FString()> OnConfirm)
+{
+	if (!Controller)
+	{
+		return nullptr;
+	}
+	UNewProjectDialogWidget* Dialog = CreateWidget<UNewProjectDialogWidget>(Controller, UNewProjectDialogWidget::StaticClass());
+	if (!Dialog)
+	{
+		return nullptr;
+	}
+	Dialog->ConfigureConfirm(Title, Message, ConfirmLabelText);
+	Dialog->OnCreate = [OnConfirm](const FString&, const FString&) -> FString
+	{
+		return OnConfirm ? OnConfirm() : FString();
+	};
+	Dialog->AddToViewport(100);
+	return Dialog;
 }
 
 void UNewProjectDialogWidget::ConfigureRename(const FString& CurrentName)
@@ -291,11 +330,20 @@ void UNewProjectDialogWidget::NativeConstruct()
 void UNewProjectDialogWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
-	if (!bFocusedName && NameBox)
+	if (!bFocusedName)
 	{
-		// Typing can start straight away.
-		NameBox->SetKeyboardFocus();
-		bFocusedName = true;
+		if (NameBox)
+		{
+			// Typing can start straight away.
+			NameBox->SetKeyboardFocus();
+			bFocusedName = true;
+		}
+		else if (bConfirmMode && CancelButton)
+		{
+			// Enter must never throw something away: it presses Cancel.
+			CancelButton->SetKeyboardFocus();
+			bFocusedName = true;
+		}
 	}
 }
 
@@ -355,12 +403,13 @@ void UNewProjectDialogWidget::ShowError(const FString& Message)
 
 void UNewProjectDialogWidget::Submit()
 {
-	if (!OnCreate || !NameBox)
+	if (!OnCreate)
 	{
 		return;
 	}
+	const FString Name = NameBox ? NameBox->GetText().ToString() : FString();
 	const FString Description = DescriptionBox ? DescriptionBox->GetText().ToString() : FString();
-	const FString Error = OnCreate(NameBox->GetText().ToString(), Description);
+	const FString Error = OnCreate(Name, Description);
 	if (Error.IsEmpty())
 	{
 		RemoveFromParent();
@@ -368,7 +417,10 @@ void UNewProjectDialogWidget::Submit()
 	else
 	{
 		ShowError(Error);
-		NameBox->SetKeyboardFocus();
+		if (NameBox)
+		{
+			NameBox->SetKeyboardFocus();
+		}
 	}
 }
 

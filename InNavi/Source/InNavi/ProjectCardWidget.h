@@ -23,10 +23,12 @@ public:
 	TFunction<void(const FProjectLibraryEntry&)> OnOpen;
 	TFunction<void(const FProjectLibraryEntry&)> OnDuplicate;
 	TFunction<void(const FProjectLibraryEntry&)> OnRename;
+	TFunction<void(const FProjectLibraryEntry&)> OnDelete;
 
 	UButton* GetOpenButtonForTests() const { return OpenButton; }
 	UButton* GetDuplicateButtonForTests() const { return DuplicateButton; }
 	UButton* GetRenameButtonForTests() const { return RenameButton; }
+	UButton* GetDeleteButtonForTests() const { return DeleteButton; }
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -40,6 +42,8 @@ private:
 	UFUNCTION()
 	void HandleRenameClicked();
 	UFUNCTION()
+	void HandleDeleteClicked();
+	UFUNCTION()
 	void PlayButtonClickSound();
 
 	FProjectLibraryEntry Entry;
@@ -50,4 +54,6 @@ private:
 	UButton* DuplicateButton = nullptr;
 	UPROPERTY()
 	UButton* RenameButton = nullptr;
+	UPROPERTY()
+	UButton* DeleteButton = nullptr;
 };

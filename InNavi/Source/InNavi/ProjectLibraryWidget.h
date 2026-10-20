@@ -29,6 +29,8 @@ public:
 	void OpenProject(const FProjectLibraryEntry& Entry);
 	void DuplicateProject(const FProjectLibraryEntry& Entry);
 	void RenameProject(const FProjectLibraryEntry& Entry);
+	// Asks first, then moves the file into the Data/Deleted folder (see ProjectLibrary::SoftDelete).
+	void DeleteProject(const FProjectLibraryEntry& Entry);
 	void GoBack();
 
 	// Tests.

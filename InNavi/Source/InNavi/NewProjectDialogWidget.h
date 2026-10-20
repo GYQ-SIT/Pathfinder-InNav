@@ -32,6 +32,14 @@ public:
 	// string when it worked or the reason it did not (shown under the name).
 	static UNewProjectDialogWidget* OpenRename(APlayerController* Controller, const FString& CurrentName, TFunction<FString(const FString& NewName)> OnRename);
 
+	// Opens a plain question with a confirm button in the danger colour (Delete). OnConfirm returns an empty string when it
+	// worked or the reason it did not, which is shown in the dialog.
+	static UNewProjectDialogWidget* OpenConfirm(APlayerController* Controller, const FString& Title, const FString& Message, const FString& ConfirmLabel, TFunction<FString()> OnConfirm);
+
+	// Makes this a plain confirmation: no fields, the message under the title, a red confirm button. Has to be called before
+	// the dialog is shown.
+	void ConfigureConfirm(const FString& Title, const FString& Message, const FString& ConfirmLabel);
+
 	// Makes this a rename dialog: only the name, filled in with CurrentName. Has to be called before the dialog is shown.
 	void ConfigureRename(const FString& CurrentName);
 
@@ -84,4 +92,9 @@ private:
 
 	bool bRenameMode = false;
 	FString InitialName;
+
+	bool bConfirmMode = false;
+	FString ConfirmTitle;
+	FString ConfirmMessage;
+	FString ConfirmLabel;
 };

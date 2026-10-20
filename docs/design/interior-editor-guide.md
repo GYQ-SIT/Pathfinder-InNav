@@ -34,9 +34,12 @@ description and when the file was last written, with:
 - **Open project** - loads it and opens the editor. A project with no buildings yet opens like any other.
 - **Duplicate** - copies a `.json` project to "<name> copy" (then "copy 2", ...) with that name inside; the original is untouched.
 - **Rename** - changes the project's name and its file name together; a name another project already has is refused.
+- **Delete** (the trash can) - asks first, then moves the file into `Data/Deleted/` (a name already there gets a time stamp), so
+  nothing is destroyed: put the file back into `Data` by hand to restore it. The keyboard focus starts on Cancel, so Enter never
+  deletes.
 
-The sample files that ship with the project (`buildings.json`, `map_extended.db`) cannot be renamed, because tests and defaults
-refer to them by name; a database cannot be duplicated. A database card's building count is the number of campus buildings
+The sample files that ship with the project (`buildings.json`, `map_extended.db`) cannot be renamed or deleted, because tests and
+defaults refer to them by name; a database cannot be duplicated. A database card's building count is the number of campus buildings
 (tagged `university`) in it.
 
 ## Exterior edit screen

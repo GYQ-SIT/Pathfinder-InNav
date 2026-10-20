@@ -229,3 +229,36 @@ bool ProjectLibrary::Rename(const FProjectLibraryEntry& Entry, const FString& Ne
 	OutNewPath = NewPath;
 	return true;
 }
+
+bool ProjectLibrary::SoftDelete(const FProjectLibraryEntry& Entry, const FString& Directory, FString& OutDeletedPath, FString& OutError)
+{
+	OutDeletedPath.Reset();
+	OutError.Reset();
+	if (Entry.bIsSample)
+	{
+		OutError = TEXT("The sample files that come with the project cannot be deleted.");
+		return false;
+	}
+	if (!IFileManager::Get().FileExists(*Entry.FilePath))
+	{
+		OutError = TEXT("The project file is already gone.");
+		return false;
+	}
+	const FString DeletedFolder = Directory / TEXT("Deleted");
+	IFileManager::Get().MakeDirectory(*DeletedFolder, true);
+
+	FString Target = DeletedFolder / Entry.FileName;
+	for (int32 Attempt = 0; IFileManager::Get().FileExists(*Target) && Attempt < 1000; ++Attempt)
+	{
+		const FString Stamp = FDateTime::Now().ToString(TEXT("%Y%m%d-%H%M%S"));
+		const FString Suffix = Attempt == 0 ? Stamp : FString::Printf(TEXT("%s-%d"), *Stamp, Attempt + 1);
+		Target = DeletedFolder / FString::Printf(TEXT("%s (deleted %s).%s"), *FPaths::GetBaseFilename(Entry.FileName), *Suffix, *FPaths::GetExtension(Entry.FileName));
+	}
+	if (!IFileManager::Get().Move(*Target, *Entry.FilePath))
+	{
+		OutError = TEXT("The project file could not be moved - it may be open in another program.");
+		return false;
+	}
+	OutDeletedPath = Target;
+	return true;
+}

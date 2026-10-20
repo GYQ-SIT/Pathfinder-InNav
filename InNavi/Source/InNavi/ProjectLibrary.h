@@ -32,6 +32,10 @@ namespace ProjectLibrary
 	// overwrites. A database cannot be duplicated here.
 	INNAVI_API bool Duplicate(const FProjectLibraryEntry& Entry, const FString& Directory, FString& OutNewPath, FString& OutError);
 
+	// Takes a project out of the library without destroying it: the file is moved into a "Deleted" folder inside Directory (a
+	// name already there gets a time stamp), so it can be put back by hand. Refuses the shipped sample files.
+	INNAVI_API bool SoftDelete(const FProjectLibraryEntry& Entry, const FString& Directory, FString& OutDeletedPath, FString& OutError);
+
 	// Gives a .json project a new name and moves its file to match. Refuses an empty or unusable name, a name some other
 	// project already has, and the shipped sample files and databases.
 	INNAVI_API bool Rename(const FProjectLibraryEntry& Entry, const FString& NewName, const FString& Directory, FString& OutNewPath, FString& OutError);

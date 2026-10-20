@@ -175,6 +175,47 @@ TSharedRef<SWidget> UProjectCardWidget::RebuildWidget()
 		OpenButton = AddButton(TEXT("Btn_OpenProject"), TEXT("Open project →"), PrimaryButton(), true, 120.f, 0.f);
 		DuplicateButton = AddButton(TEXT("Btn_DuplicateProject"), TEXT("Duplicate"), SecondaryButton(), false, 74.f, 8.f);
 		RenameButton = AddButton(TEXT("Btn_RenameProject"), TEXT("Rename"), SecondaryButton(), false, 66.f, 8.f);
+
+		// Delete: a square button with a trash can drawn from bars, red when hovered.
+		DeleteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_DeleteProject"));
+		DeleteButton->SetStyle(Button(Rgb(27, 41, 63), Rgb(96, 34, 42), Rgb(72, 24, 32), Rgb(61, 78, 104)));
+		DeleteButton->SetBackgroundColor(FLinearColor::White);
+		USizeBox* TrashSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("TrashSize"));
+		TrashSize->SetWidthOverride(18.f * DesignToUi);
+		TrashSize->SetHeightOverride(20.f * DesignToUi);
+		UCanvasPanel* Trash = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("Trash"));
+		const FLinearColor TrashColor = Rgb(203, 218, 236);
+		auto AddTrashPart = [this, Trash](const TCHAR* PartName, float X, float Y, float Width, float Height, const FSlateBrush* Brush, const FLinearColor& Color)
+		{
+			UBorder* Part = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(PartName));
+			if (Brush)
+			{
+				Part->SetBrush(*Brush);
+				Part->SetBrushColor(FLinearColor::White);
+			}
+			else
+			{
+				Part->SetBrushColor(Color);
+			}
+			UCanvasPanelSlot* PartSlot = Trash->AddChildToCanvas(Part);
+			PartSlot->SetPosition(FVector2D(X, Y) * DesignToUi);
+			PartSlot->SetSize(FVector2D(Width, Height) * DesignToUi);
+		};
+		const FSlateBrush CanBrush = Rounded(FLinearColor::Transparent, TrashColor, 2.f, 2.f);
+		AddTrashPart(TEXT("TrashHandle"), 6.f, 0.f, 6.f, 3.f, nullptr, TrashColor);
+		AddTrashPart(TEXT("TrashLid"), 0.f, 3.f, 18.f, 2.f, nullptr, TrashColor);
+		AddTrashPart(TEXT("TrashCan"), 2.f, 6.f, 14.f, 14.f, &CanBrush, TrashColor);
+		AddTrashPart(TEXT("TrashLineLeft"), 6.f, 9.f, 2.f, 8.f, nullptr, TrashColor);
+		AddTrashPart(TEXT("TrashLineRight"), 10.f, 9.f, 2.f, 8.f, nullptr, TrashColor);
+		TrashSize->SetContent(Trash);
+		DeleteButton->SetContent(TrashSize);
+		USizeBox* DeleteBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Btn_DeleteProjectSize"));
+		DeleteBox->SetWidthOverride(39.f * DesignToUi);
+		DeleteBox->SetHeightOverride(39.f * DesignToUi);
+		DeleteBox->SetContent(DeleteButton);
+		UHorizontalBoxSlot* DeleteSlot = Buttons->AddChildToHorizontalBox(DeleteBox);
+		DeleteSlot->SetPadding(FMargin(8.f * DesignToUi, 0.f, 0.f, 0.f));
+		DeleteButton->SetToolTipText(FText::FromString(TEXT("Delete")));
 		Body->AddChildToVerticalBox(Buttons);
 
 		// What cannot be done to this file is greyed out, with the reason as its tooltip.
@@ -182,6 +223,11 @@ TSharedRef<SWidget> UProjectCardWidget::RebuildWidget()
 		{
 			DuplicateButton->SetIsEnabled(false);
 			DuplicateButton->SetToolTipText(FText::FromString(TEXT("A map database cannot be duplicated.")));
+		}
+		if (Entry.bIsSample)
+		{
+			DeleteButton->SetIsEnabled(false);
+			DeleteButton->SetToolTipText(FText::FromString(TEXT("The sample files that come with the project cannot be deleted.")));
 		}
 		if (Entry.bIsDatabase || Entry.bIsSample)
 		{
@@ -195,7 +241,7 @@ TSharedRef<SWidget> UProjectCardWidget::RebuildWidget()
 void UProjectCardWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
-	for (UButton* Button : { OpenButton, DuplicateButton, RenameButton })
+	for (UButton* Button : { OpenButton, DuplicateButton, RenameButton, DeleteButton })
 	{
 		if (Button)
 		{
@@ -213,6 +259,10 @@ void UProjectCardWidget::NativeConstruct()
 	if (RenameButton)
 	{
 		RenameButton->OnClicked.AddUniqueDynamic(this, &UProjectCardWidget::HandleRenameClicked);
+	}
+	if (DeleteButton)
+	{
+		DeleteButton->OnClicked.AddUniqueDynamic(this, &UProjectCardWidget::HandleDeleteClicked);
 	}
 }
 
@@ -245,5 +295,13 @@ void UProjectCardWidget::HandleRenameClicked()
 	if (OnRename)
 	{
 		OnRename(Entry);
+	}
+}
+
+void UProjectCardWidget::HandleDeleteClicked()
+{
+	if (OnDelete)
+	{
+		OnDelete(Entry);
 	}
 }
