@@ -7,6 +7,7 @@
 #include "StartScreenWidget.generated.h"
 
 class UButton;
+class UTexture2D;
 
 // Pure-C++ replacement for WBP_StartScreen (built the same way as ws/jh's NavigationPanelWidget -
 // RebuildWidget() constructs the layout in code instead of the UMG Designer, so the whole screen
@@ -57,4 +58,11 @@ private:
 
 	UPROPERTY()
 	UButton* QuitButton = nullptr;
+
+	// The background is drawn in code like the design team's page: a colour gradient with a soft glow, and a faint
+	// grid. They are made once here and kept alive by these pointers.
+	UPROPERTY()
+	UTexture2D* BackgroundGradientTexture = nullptr;
+	UPROPERTY()
+	UTexture2D* BackgroundGridTexture = nullptr;
 };
