@@ -10,6 +10,7 @@
 class UBorder;
 class UButton;
 class UAudioPanelWidget;
+class UDebugPanelWidget;
 class UCheckBox;
 class UDockHostWidget;
 class UComboBoxString;
@@ -50,6 +51,8 @@ public:
 	// Finds a widget of this screen by name; GetWidgetFromName cannot see the dock panels' contents (they are
 	// registered with DockHost, not parented in the widget tree). For tests and tooling.
 	UWidget* FindScreenWidget(FName Name) const;
+	UAudioPanelWidget* GetAudioPanelForTests() const { return AudioPanelWidget; }
+	UDebugPanelWidget* GetDebugPanelForTests() const { return DebugPanelWidget; }
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -106,11 +109,6 @@ private:
 	// there's actually a building selected to enter.
 	UFUNCTION()
 	void HandleBuildingSelected(FString BuildingId);
-
-	// Bound to ANavPlayerController::OnActionFailed - remembers the last failure so the Debug panel can
-	// show it (File > New/Load and "Set Default" failures used to be completely silent on this screen).
-	UFUNCTION()
-	void HandleActionFailed(FString Reason, EActionFailureSeverity Severity);
 
 	void GoToStartScreen();
 
@@ -341,8 +339,9 @@ private:
 	UPROPERTY()
 	UBorder* RoadFilterPanel = nullptr;
 
+	// The Debug dock panel (shared with the interior editor, see DebugPanelWidget.h). Starts hidden.
 	UPROPERTY()
-	UBorder* DebugPanel = nullptr;
+	UDebugPanelWidget* DebugPanelWidget = nullptr;
 
 	// Master "Hide All" checkbox, above the 6 category rows.
 	UPROPERTY()
@@ -391,20 +390,6 @@ private:
 	// Set by OnFileLoadClicked, read back by HandleFileLoadSave/Discard once the user picks a
 	// choice - same role as UInteriorScreenWidget's own PendingLoadFilePath.
 	FString PendingLoadFilePath;
-
-	// Debug panel: live info text plus a "Last Error" line coloured by severity.
-	UPROPERTY()
-	UTextBlock* DebugInfoText = nullptr;
-
-	UPROPERTY()
-	UTextBlock* DebugLastErrorText = nullptr;
-
-	float DebugSmoothedDeltaTime = 0.f;
-
-	// Last message/severity broadcast by ANavPlayerController::OnActionFailed (see HandleActionFailed);
-	// empty until the first failure.
-	FString LastActionFailedMessage;
-	EActionFailureSeverity LastActionFailedSeverity = EActionFailureSeverity::Warning;
 
 	// 15pt, matching the rest of the app's UI text (see UInteriorScreenWidget::StandardFontSize).
 	static constexpr int32 StandardFontSize = 15;

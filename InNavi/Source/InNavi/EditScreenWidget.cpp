@@ -2,6 +2,7 @@
 
 #include "AudioFileRowWidget.h"
 #include "AudioPanelWidget.h"
+#include "DebugPanelWidget.h"
 #include "ConfirmDialogWidget.h"
 #include "DockHostUMG.h"
 #include "ExteriorDockLayout.h"
@@ -474,27 +475,28 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		ResetFiltersSize->SetContent(ResetBuildingFiltersButton);
 		RoadFilterStack->AddChildToVerticalBox(ResetFiltersSize)->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
 
-		// --- Debug panel (Window > Debug): live info plus the last failed action. Starts hidden.
-		DebugPanel = ConstructDockPanel(ExteriorDock::Debug, TEXT("Pnl_Debug"));
-		UVerticalBox* DebugStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DebugStack"));
-		DebugPanel->SetContent(DebugStack);
-
-		DebugInfoText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_DebugInfo"));
-		DebugInfoText->SetText(FText::FromString(TEXT("Debug information")));
-		DebugInfoText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(DebugInfoText);
-		DebugInfoText->SetAutoWrapText(true);
-		DebugStack->AddChildToVerticalBox(DebugInfoText);
-
-		// Separate from DebugInfoText so it can carry its own colour (yellow/red once an action has failed)
-		// independently of the rest of the panel.
-		DebugLastErrorText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_DebugLastError"));
-		DebugLastErrorText->SetText(FText::FromString(TEXT("Last Error: None")));
-		DebugLastErrorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(DebugLastErrorText);
-		DebugLastErrorText->SetAutoWrapText(true);
-		UVerticalBoxSlot* DebugErrorSlot = DebugStack->AddChildToVerticalBox(DebugLastErrorText);
-		DebugErrorSlot->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
+		// --- Debug panel (Window > Debug): the shared one (DebugPanelWidget.h). The screen supplies the lines that
+		// are its own. Starts hidden.
+		DebugPanelWidget = CreateWidget<UDebugPanelWidget>(this, UDebugPanelWidget::StaticClass());
+		DebugPanelWidget->SetOwnerScreen(this);
+		DebugPanelWidget->SetInfoProvider([this]() -> FString
+		{
+			FString SelectedBuilding = TEXT("None");
+			FString CameraSpeed = TEXT("-");
+			FString UnsavedChanges = TEXT("No");
+			if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+			{
+				const FString BuildingId = PC->GetSelectedBuildingId();
+				if (!BuildingId.IsEmpty())
+				{
+					SelectedBuilding = BuildingId;
+				}
+				CameraSpeed = FString::FromInt(FMath::RoundToInt(PC->GetCameraMoveSpeed()));
+				UnsavedChanges = PC->HasUnsavedChanges() ? TEXT("Yes") : TEXT("No");
+			}
+			return FString::Printf(TEXT("Selected Building: %s\nCamera Speed: %s\nUnsaved Changes: %s"), *SelectedBuilding, *CameraSpeed, *UnsavedChanges);
+		});
+		DockHost->RegisterPanel(ExteriorDock::Debug, FText::FromName(ExteriorDock::Debug), DebugPanelWidget);
 	}
 
 	return Super::RebuildWidget();
@@ -507,7 +509,10 @@ void UEditScreenWidget::NativeConstruct()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->OnBuildingSelected.AddUniqueDynamic(this, &UEditScreenWidget::HandleBuildingSelected);
-		PC->OnActionFailed.AddUniqueDynamic(this, &UEditScreenWidget::HandleActionFailed);
+		if (DebugPanelWidget)
+		{
+			DebugPanelWidget->BindToController();
+		}
 		bUpdatingBuildingFilters = true;
 		if (BuildingSearchBox) BuildingSearchBox->SetText(FText::FromString(PC->GetBuildingFilterText()));
 		if (BuildingCampusCheckbox) BuildingCampusCheckbox->SetIsChecked(PC->AreCampusBuildingsVisible());
@@ -552,7 +557,6 @@ void UEditScreenWidget::NativeDestruct()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->OnBuildingSelected.RemoveDynamic(this, &UEditScreenWidget::HandleBuildingSelected);
-		PC->OnActionFailed.RemoveDynamic(this, &UEditScreenWidget::HandleActionFailed);
 		PC->ClearPointerOverUICallback(this);
 	}
 
@@ -582,48 +586,6 @@ void UEditScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 	if (GetReliableCanvasSize(ReliableSize))
 	{
 		LastKnownCanvasSize = ReliableSize;
-	}
-
-	if (DebugInfoText)
-	{
-		// Smooth frame time / FPS
-		DebugSmoothedDeltaTime = DebugSmoothedDeltaTime <= 0.f ? InDeltaTime : FMath::Lerp(DebugSmoothedDeltaTime, InDeltaTime, 0.1f);
-		const float FPS = DebugSmoothedDeltaTime > 0.f ? 1.f / DebugSmoothedDeltaTime : 0.f;
-
-		FString SelectedBuilding = TEXT("None");
-		FString CameraSpeed = TEXT("-");
-		FString UnsavedChanges = TEXT("No");
-		if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-		{
-			const FString BuildingId = PC->GetSelectedBuildingId();
-			if (!BuildingId.IsEmpty())
-			{
-				SelectedBuilding = BuildingId;
-			}
-			CameraSpeed = FString::FromInt(FMath::RoundToInt(PC->GetCameraMoveSpeed()));
-			UnsavedChanges = PC->HasUnsavedChanges() ? TEXT("Yes") : TEXT("No");
-		}
-
-		DebugInfoText->SetText(FText::FromString(FString::Printf(
-			TEXT("Selected Building: %s\nCamera Speed: %s\nUnsaved Changes: %s\nFPS: %.1f\nFrame Time: %.2f ms"),
-			*SelectedBuilding, *CameraSpeed, *UnsavedChanges, FPS, DebugSmoothedDeltaTime * 1000.f)));
-
-		if (DebugLastErrorText)
-		{
-			if (LastActionFailedMessage.IsEmpty())
-			{
-				DebugLastErrorText->SetText(FText::FromString(TEXT("Last Error: None")));
-				DebugLastErrorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-			}
-			else
-			{
-				DebugLastErrorText->SetText(FText::FromString(TEXT("Last Error: ") + LastActionFailedMessage));
-				// Yellow: the action was rejected but nothing was lost. Red: existing data may have been
-				// cleared, or a save may have silently failed - see EActionFailureSeverity.
-				DebugLastErrorText->SetColorAndOpacity(FSlateColor(
-					LastActionFailedSeverity == EActionFailureSeverity::Critical ? FLinearColor::Red : FLinearColor::Yellow));
-			}
-		}
 	}
 
 	// The Audio and Map panels' controls size themselves from their panel's width, which the user can change at any time.
@@ -1144,12 +1106,6 @@ void UEditScreenWidget::OnBuildingNonCampusCheckChanged(bool bIsChecked)
 	{
 		PC->SetNonCampusBuildingsVisible(bIsChecked);
 	}
-}
-
-void UEditScreenWidget::HandleActionFailed(FString Reason, EActionFailureSeverity Severity)
-{
-	LastActionFailedMessage = Reason;
-	LastActionFailedSeverity = Severity;
 }
 
 // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@
 
 #include "AudioFileRowWidget.h"
 #include "AudioPanelWidget.h"
+#include "DebugPanelWidget.h"
 #include "ConfirmDialogWidget.h"
 #include "EditScreenWidget.h"
 #include "FloorListEntryWidget.h"
@@ -1308,35 +1309,11 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		RoadCampusOnlyCheckbox->SetIsChecked(true);
 		RoadCampusOnlyCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadCampusOnlyCheckChanged); RoadCampusOnlyCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadCampusOnlyCheckChanged);
 
-		// -- Debug panel --
-		DebugPanel = ConstructDockPanel(EDockPanelId::Debug, TEXT("Pnl_Debug"), DockPanelColor, 14.f);
-
-
-
-
-		UVerticalBox* DebugStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("DebugStack"));
-		DebugPanel->SetContent(DebugStack);
-
-		UTextBlock* DebugTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_DebugTitle"));
-		DebugTitle->SetText(FText::FromString(TEXT("Debug")));
-		DebugTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(DebugTitle);
-		DebugStack->AddChildToVerticalBox(DebugTitle);
-		DockPanelTitleTexts[(int32)EDockPanelId::Debug] = DebugTitle;
-		DebugInfoText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_DebugInfo"));
-		DebugInfoText->SetText(FText::FromString(TEXT("Debug information")));
-		DebugInfoText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(DebugInfoText);
-		ApplyStandardTextWrap(DebugInfoText);
-		DebugStack->AddChildToVerticalBox(DebugInfoText);
-		// Separate from DebugInfoText so it can carry its own colour (red once an action has failed)
-		// independently of the rest of the panel, which stays a single white block.
-		DebugLastErrorText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_DebugLastError"));
-		DebugLastErrorText->SetText(FText::FromString(TEXT("Last Error: None")));
-		DebugLastErrorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(DebugLastErrorText);
-		ApplyStandardTextWrap(DebugLastErrorText);
-		DebugStack->AddChildToVerticalBox(DebugLastErrorText);
+		// -- Debug panel: the shared one (DebugPanelWidget.h). The screen supplies the lines that are its own.
+		DebugPanelWidget = CreateWidget<UDebugPanelWidget>(this, UDebugPanelWidget::StaticClass());
+		DebugPanelWidget->SetOwnerScreen(this);
+		DebugPanelWidget->SetInfoProvider([this]() { return BuildDebugInfo(); });
+		DockHost->RegisterPanel(FName(GetDockPanelName(EDockPanelId::Debug)), FText::FromString(GetDockPanelName(EDockPanelId::Debug)), DebugPanelWidget);
 
 		// The dock frames' tabs already show each panel's name, so the static title text at the top of a
 		// panel's content would just repeat it. Properties keeps its own - that one changes with the
@@ -1410,7 +1387,6 @@ void UInteriorScreenWidget::NativeConstruct()
 		// through this widget at all - this is what lets the dock layout still get saved when the
 		// user saves that way instead of through Back's own confirm dialog.
 		PC->OnProjectSaved.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
-		PC->OnActionFailed.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleActionFailed);
 		// Same reasoning - the [/]/F/X floor keyboard shortcuts change the active floor without ever
 		// going through this screen's own Floor panel handlers.
 		PC->OnActiveFloorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
@@ -1452,6 +1428,10 @@ void UInteriorScreenWidget::NativeConstruct()
 	if (AudioPanelWidget)
 	{
 		AudioPanelWidget->Refresh();
+	}
+	if (DebugPanelWidget)
+	{
+		DebugPanelWidget->BindToController();
 	}
 	RefreshModeButtonHighlights();
 	// Syncs Properties' placeholder title/visibility against PC's actual current selection state
@@ -1580,7 +1560,6 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnSelectedConnectorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedConnectorChanged);
 		PC->OnEditModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleEditModeChanged);
 		PC->OnProjectSaved.RemoveDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
-		PC->OnActionFailed.RemoveDynamic(this, &UInteriorScreenWidget::HandleActionFailed);
 		PC->OnActiveFloorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
 		PC->OnInteriorContentChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleInteriorContentChanged);
 		PC->OnPreviewModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandlePreviewModeChanged);
@@ -1607,167 +1586,125 @@ void UInteriorScreenWidget::NativeDestruct()
 void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
-	if (DebugInfoText)
-	{
-		// Smooth frame time / FPS
-		if (DebugSmoothedDeltaTime <= 0.f)
-		{
-			DebugSmoothedDeltaTime = InDeltaTime;
-		}
-		else
-		{
-			DebugSmoothedDeltaTime = FMath::Lerp(
-				DebugSmoothedDeltaTime,
-				InDeltaTime,
-				0.1f
-			);
-		}
-
-		const float FPS = DebugSmoothedDeltaTime > 0.f
-			? 1.f / DebugSmoothedDeltaTime
-			: 0.f;
-
-		FString ActiveBuildingId = TEXT("None");
-		int32 ActiveFloor = 0;
-		int32 TotalFloors = 0;
-
-		FString ToolMode = TEXT("None");
-		FString ViewType = TEXT("2D");
-
-		FString SelectedRoom = TEXT("None");
-		FString SelectedDoor = TEXT("None");
-		FString SelectedConnector = TEXT("None");
-
-		FString UnsavedChanges = TEXT("No");
-
-		if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-		{
-			// Building
-			const FString BuildingId = PC->GetSelectedBuildingId();
-			if (!BuildingId.IsEmpty())
-			{
-				ActiveBuildingId = BuildingId;
-			}
-
-			// Floor
-			ActiveFloor = PC->GetActiveFloor();
-			TotalFloors = PC->GetLoadedBuildingFloorCount();
-
-			// Tool mode
-			if (PC->IsInDrawRoomMode())
-			{
-				ToolMode = TEXT("Draw Room");
-			}
-			else if (PC->IsInDrawWallMode())
-			{
-				ToolMode = TEXT("Draw Wall");
-			}
-			else if (PC->IsInAddDoorMode())
-			{
-				ToolMode = TEXT("Add Door");
-			}
-			else if (PC->GetActivePrefabShape() != 0)
-			{
-				ToolMode = FString::Printf(
-					TEXT("Prefab (%d)"),
-					PC->GetActivePrefabShape()
-				);
-			}
-			else if (PC->GetActiveConnectorType() != 0)
-			{
-				ToolMode = FString::Printf(
-					TEXT("Connector (%d)"),
-					PC->GetActiveConnectorType()
-				);
-			}
-			else if (PC->IsInSelectMode())
-			{
-				ToolMode = TEXT("Select");
-			}
-
-			// View
-			if (PC->IsIn3DPreviewMode())
-			{
-				ViewType = PC->IsIn3DEditMode()
-					? TEXT("3D Edit")
-					: TEXT("3D View");
-			}
-
-			// Selection
-			const FString RoomId = PC->GetSelectedRoomId();
-			const FString DoorId = PC->GetSelectedDoorId();
-			const FString ConnectorId = PC->GetSelectedConnectorGroupId();
-
-			if (!RoomId.IsEmpty())
-			{
-				SelectedRoom = RoomId;
-			}
-
-			if (!DoorId.IsEmpty())
-			{
-				SelectedDoor = DoorId;
-			}
-
-			if (!ConnectorId.IsEmpty())
-			{
-				SelectedConnector = ConnectorId;
-			}
-
-			// Unsaved state
-			UnsavedChanges = PC->HasUnsavedChanges()
-				? TEXT("Yes")
-				: TEXT("No");
-		}
-
-		const FString DebugText = FString::Printf(
-			TEXT(
-				"Building: %s\n"
-				"Floor: %d / %d\n"
-				"Tool Mode: %s\n"
-				"View: %s\n"
-				"Selected Room: %s\n"
-				"Selected Door: %s\n"
-				"Selected Connector: %s\n"
-				"Unsaved Changes: %s\n"
-				"FPS: %.1f\n"
-				"Frame Time: %.2f ms"
-			),
-			*ActiveBuildingId,
-			ActiveFloor,
-			TotalFloors,
-			*ToolMode,
-			*ViewType,
-			*SelectedRoom,
-			*SelectedDoor,
-			*SelectedConnector,
-			*UnsavedChanges,
-			FPS,
-			DebugSmoothedDeltaTime * 1000.f
-		);
-
-		DebugInfoText->SetText(FText::FromString(DebugText));
-
-		if (DebugLastErrorText)
-		{
-			if (LastActionFailedMessage.IsEmpty())
-			{
-				DebugLastErrorText->SetText(FText::FromString(TEXT("Last Error: None")));
-				DebugLastErrorText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-			}
-			else
-			{
-				DebugLastErrorText->SetText(FText::FromString(TEXT("Last Error: ") + LastActionFailedMessage));
-				// Yellow: the action was rejected but nothing was lost. Red: existing data may have
-				// been cleared, or a save may have silently failed - see EActionFailureSeverity.
-				DebugLastErrorText->SetColorAndOpacity(FSlateColor(
-					LastActionFailedSeverity == EActionFailureSeverity::Critical
-						? FLinearColor::Red
-						: FLinearColor::Yellow));
-			}
-		}
-	}
 	// Panel content sizes itself from its panel's width, which the user can change at any time.
 	SyncDockPanelWidths();
+}
+
+FString UInteriorScreenWidget::BuildDebugInfo() const
+{
+	FString ActiveBuildingId = TEXT("None");
+	int32 ActiveFloor = 0;
+	int32 TotalFloors = 0;
+
+	FString ToolMode = TEXT("None");
+	FString ViewType = TEXT("2D");
+
+	FString SelectedRoom = TEXT("None");
+	FString SelectedDoor = TEXT("None");
+	FString SelectedConnector = TEXT("None");
+
+	FString UnsavedChanges = TEXT("No");
+
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		// Building
+		const FString BuildingId = PC->GetSelectedBuildingId();
+		if (!BuildingId.IsEmpty())
+		{
+			ActiveBuildingId = BuildingId;
+		}
+
+		// Floor
+		ActiveFloor = PC->GetActiveFloor();
+		TotalFloors = PC->GetLoadedBuildingFloorCount();
+
+		// Tool mode
+		if (PC->IsInDrawRoomMode())
+		{
+			ToolMode = TEXT("Draw Room");
+		}
+		else if (PC->IsInDrawWallMode())
+		{
+			ToolMode = TEXT("Draw Wall");
+		}
+		else if (PC->IsInAddDoorMode())
+		{
+			ToolMode = TEXT("Add Door");
+		}
+		else if (PC->GetActivePrefabShape() != 0)
+		{
+			ToolMode = FString::Printf(
+				TEXT("Prefab (%d)"),
+				PC->GetActivePrefabShape()
+			);
+		}
+		else if (PC->GetActiveConnectorType() != 0)
+		{
+			ToolMode = FString::Printf(
+				TEXT("Connector (%d)"),
+				PC->GetActiveConnectorType()
+			);
+		}
+		else if (PC->IsInSelectMode())
+		{
+			ToolMode = TEXT("Select");
+		}
+
+		// View
+		if (PC->IsIn3DPreviewMode())
+		{
+			ViewType = PC->IsIn3DEditMode()
+				? TEXT("3D Edit")
+				: TEXT("3D View");
+		}
+
+		// Selection
+		const FString RoomId = PC->GetSelectedRoomId();
+		const FString DoorId = PC->GetSelectedDoorId();
+		const FString ConnectorId = PC->GetSelectedConnectorGroupId();
+
+		if (!RoomId.IsEmpty())
+		{
+			SelectedRoom = RoomId;
+		}
+
+		if (!DoorId.IsEmpty())
+		{
+			SelectedDoor = DoorId;
+		}
+
+		if (!ConnectorId.IsEmpty())
+		{
+			SelectedConnector = ConnectorId;
+		}
+
+		// Unsaved state
+		UnsavedChanges = PC->HasUnsavedChanges()
+			? TEXT("Yes")
+			: TEXT("No");
+	}
+
+	return FString::Printf(
+		TEXT(
+			"Building: %s\n"
+			"Floor: %d / %d\n"
+			"Tool Mode: %s\n"
+			"View: %s\n"
+			"Selected Room: %s\n"
+			"Selected Door: %s\n"
+			"Selected Connector: %s\n"
+			"Unsaved Changes: %s"
+		),
+		*ActiveBuildingId,
+		ActiveFloor,
+		TotalFloors,
+		*ToolMode,
+		*ViewType,
+		*SelectedRoom,
+		*SelectedDoor,
+		*SelectedConnector,
+		*UnsavedChanges
+	);
 }
 
 FReply UInteriorScreenWidget::NativeOnMouseWheel(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
@@ -1860,12 +1797,6 @@ void UInteriorScreenWidget::HandleEditModeChanged()
 void UInteriorScreenWidget::HandleProjectSaved()
 {
 	SaveDockLayoutToDisk();
-}
-
-void UInteriorScreenWidget::HandleActionFailed(FString Reason, EActionFailureSeverity Severity)
-{
-	LastActionFailedMessage = Reason;
-	LastActionFailedSeverity = Severity;
 }
 
 void UInteriorScreenWidget::HandleActiveFloorChanged()
