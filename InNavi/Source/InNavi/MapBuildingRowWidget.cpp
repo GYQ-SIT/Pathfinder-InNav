@@ -22,7 +22,7 @@ TSharedRef<SWidget> UMapBuildingRowWidget::RebuildWidget()
 		using namespace StartStyle;
 		RowButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("RowButton"));
 		RowButton->SetStyle(bSelected
-			? Button(Rgb(14, 66, 148), Rgb(20, 80, 172), Rgb(10, 54, 124), Rgb(30, 118, 235), 8.f)
+			? ActiveButton()
 			: Button(Rgb(23, 38, 60), Rgb(31, 51, 80), Rgb(18, 31, 50), Rgb(44, 62, 88), 8.f));
 		RowButton->SetBackgroundColor(FLinearColor::White);
 		WidgetTree->RootWidget = RowButton;

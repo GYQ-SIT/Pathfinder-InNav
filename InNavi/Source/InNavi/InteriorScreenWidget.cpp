@@ -96,11 +96,11 @@ void UInteriorScreenWidget::ApplyStandardFont(UEditableTextBox* TextBox)
 
 namespace
 {
-	// A 2D / 3D segment: blue when it is the active mode, otherwise just text on the frame.
+	// A 2D / 3D segment: amber when it is the active mode, otherwise just text on the frame.
 	FButtonStyle Button_Style_Segment(bool bActive)
 	{
 		using namespace StartStyle;
-		return bActive ? Button(Rgb(21, 110, 255), Rgb(46, 132, 255), Rgb(10, 88, 214), Rgb(21, 110, 255), 6.f)
+		return bActive ? ActiveButton(6.f)
 			: Button(FLinearColor::Transparent, Rgb(31, 51, 80), Rgb(22, 36, 58), FLinearColor::Transparent, 6.f);
 	}
 
@@ -112,11 +112,11 @@ namespace
 			: Button(Rgb(196, 112, 8), Rgb(220, 130, 14), Rgb(160, 90, 4), Rgb(196, 112, 8), 6.f);
 	}
 
-	// A tool row's look: plain, or blue when its tool is the active one.
+	// A tool row's look: plain, or amber when its tool is the active one.
 	FButtonStyle Button_Style_Tool(bool bActive)
 	{
 		using namespace StartStyle;
-		return bActive ? Button(Rgb(14, 66, 148), Rgb(20, 80, 172), Rgb(10, 54, 124), Rgb(30, 118, 235), 8.f)
+		return bActive ? ActiveButton()
 			: Button(Rgb(24, 38, 60), Rgb(33, 54, 84), Rgb(18, 30, 50), Rgb(46, 66, 94), 8.f);
 	}
 }

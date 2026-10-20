@@ -18,11 +18,11 @@ UFloorListEntryWidget::UFloorListEntryWidget(const FObjectInitializer& ObjectIni
 
 namespace
 {
-	// A floor row's look: plain, or blue for the active floor (the same blue as the Map panel's selected building).
+	// A floor row's look: plain, or amber for the active floor (the same amber as the Map panel's selected building).
 	FButtonStyle FloorRowStyle(bool bActive)
 	{
 		using namespace StartStyle;
-		return bActive ? Button(Rgb(14, 66, 148), Rgb(20, 80, 172), Rgb(10, 54, 124), Rgb(30, 118, 235), 8.f)
+		return bActive ? ActiveButton()
 			: Button(Rgb(24, 38, 60), Rgb(33, 54, 84), Rgb(18, 30, 50), Rgb(46, 66, 94), 8.f);
 	}
 }

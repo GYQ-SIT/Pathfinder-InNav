@@ -79,6 +79,12 @@ namespace StartStyle
 		return Style;
 	}
 
+	// A selected / active button or row: the page's amber - a dark gold fill with an orange outline.
+	inline FButtonStyle ActiveButton(float Radius = 8.f)
+	{
+		return Button(Rgb(92, 62, 18), Rgb(112, 76, 22), Rgb(72, 48, 14), Rgb(230, 150, 30), Radius);
+	}
+
 	// The two button looks of the page: the blue primary one and the outlined secondary one.
 	inline FButtonStyle PrimaryButton()
 	{
