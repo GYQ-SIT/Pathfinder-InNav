@@ -255,6 +255,9 @@ private:
 	void SaveDockLayoutToDisk() const;
 	// The Audio panel's controls size themselves from the width of the dock group showing it.
 	void SyncAudioPanelWidth();
+	// The Map panel's building-filter controls size themselves from the width of the dock group showing it.
+	void SyncMapPanelWidth();
+	float MapContentWidth = 220.f;
 
 	// The actual rendered size of the root canvas - NOT UWidgetLayoutLibrary::GetViewportSize, which
 	// returns the platform's raw pixel resolution and only matches this Slate-local coordinate space

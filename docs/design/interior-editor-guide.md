@@ -79,6 +79,12 @@ copy of this panel is Roads-only, see below):
   flat gray placeholder blocks (visual context for the surrounding area only - not
   interior-editable, not clickable to enter). Unchecked by default.
 
+**Building filters** (below the Buildings checkboxes): a search box (campus building name
+or id), a floor-count filter (any, 1 floor, 2-5, 6+), a results list and a count. Buildings
+that do not match are hidden and cannot be clicked; choosing a result selects that building.
+**Reset Building Filters** shows everything again. The filters are kept when you enter a
+building and come back to the exterior.
+
 **Why some non-`university`-tagged buildings are still enterable:** loading a
 database doesn't just take the buildings tagged `university` - it also pulls in any
 building whose footprint physically touches (or nearly touches, within a small
@@ -193,7 +199,10 @@ up/down). **+ Add floor** / **- Remove floor** buttons do the same as `F`/`X`.
 Always visible. Shows an empty "Properties" placeholder when nothing's selected;
 selecting a room, door, or connector fills it in:
 
-- **Room**: a field to rename it.
+- **Room**: a field to rename it, and **Search tags** - a comma-separated list of tags
+  (for example `laboratory, teaching`) with an **Apply Tags** button. Tags are saved with the
+  project, work with Undo/Redo, and make the room findable in the Layers and Navigation
+  searches. Blank and repeated tags (ignoring case) are dropped.
 - **Door**: which room it belongs to (read-only), and a dropdown to pick what it
   connects to on the other side (another room, by name, or "corridor").
 - **Connector**: its type (read-only), and a checklist of floors it should reach —
@@ -203,7 +212,10 @@ selecting a room, door, or connector fills it in:
 ### Layers panel
 
 An Outliner-style view of everything on the current floor, with a search box at the
-top to filter by name. Five categories — **Boundary**, **Rooms**, **Walls**, **Path
+top to filter by name. Typing in the search box also adds a **Search results** group at the
+top: every room of the building, on **any floor**, whose name, id or tags match (every word
+you type must match, ignoring case). Click a result to switch to its floor and select the
+room. Five categories — **Boundary**, **Rooms**, **Walls**, **Path
 Nodes**, **I/O Nodes** — each expandable (arrow) to list its individual items. The eye
 icon on a category or an individual item toggles its visibility on the floor plan;
 toggling a category affects everything in it at once.
@@ -214,9 +226,13 @@ Pick Start/Destination Room from the dropdowns (populated from the current floor
 rooms, refreshed live as rooms are added/renamed/deleted) and it marks the room's
 centroid on the floor plan, or click **Set Start**/**Set Destination** and then click a
 point directly on the floor plan instead - either way the button turns green once set.
+A **search box above Destination Room** filters the destination list across every floor of
+the building by room name, id or tag (every word must match, ignoring case), with a line
+saying how many destinations match; typing never changes the Start you already picked.
 **Find Route** enables once both are set on the same building and computes/draws the
 route (including cross-floor connector instructions where relevant); **Clear Route**
-resets both endpoints.
+resets both endpoints. **Hide Route** / **Show Route** hides or restores the route lines,
+direction arrows, markers and written instructions without clearing the route.
 
 ### Audio panel
 

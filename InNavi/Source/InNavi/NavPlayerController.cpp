@@ -1132,6 +1132,11 @@ bool ANavPlayerController::SetSelectedRoomTags(const TArray<FString>& InTags)
 	return true;
 }
 
+TArray<FString> ANavPlayerController::GetRoomTags(const FString& RoomId) const
+{
+	return InteriorGen ? InteriorGen->GetRoomTags(RoomId) : TArray<FString>();
+}
+
 TArray<FString> ANavPlayerController::GetSelectedRoomTags() const
 {
 	return InteriorGen ? InteriorGen->GetRoomTags(SelectedRoomId) : TArray<FString>();

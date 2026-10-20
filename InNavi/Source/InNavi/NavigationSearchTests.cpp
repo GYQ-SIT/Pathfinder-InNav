@@ -8,6 +8,8 @@
 #include "PolyBuilding.h"
 #include "NavPlayerController.h"
 #include "InteriorScreenWidget.h"
+#include "Components/ScrollBox.h"
+#include "LayerRowWidget.h"
 #include "EditScreenWidget.h"
 #include "Components/Button.h"
 #include "Components/ComboBoxString.h"
@@ -370,6 +372,79 @@ bool FNavigationRoomSearchIndexTest::RunTest(const FString& Parameters)
 	Fixture.Interior->LoadInteriorForBuilding(TEXT("E2"));
 	TestFalse(TEXT("Loading another building populates index"), Fixture.Nav->GetSelectableRooms().IsEmpty());
 	TestTrue(TEXT("No entries leak across buildings"), Fixture.Nav->SearchDestinations(TEXT("Index-Upstairs")).IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationLayersSearchTest, "InNavi.Navigation.Search.LayersResults",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationLayersSearchTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>();
+	Screen->Initialize(); Screen->TakeWidget(); Screen->SetOwningPlayer(Controller);
+	UEditableTextBox* Search = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_LayersSearch")));
+	UScrollBox* List = Cast<UScrollBox>(Screen->FindScreenWidget(TEXT("LayersListBox")));
+	if (!TestNotNull(TEXT("Layers search exists"), Search) || !TestNotNull(TEXT("Layers list exists"), List)) return false;
+
+	// A room on a floor other than the active one, tagged so it can be found by tag.
+	const auto Options = Fixture.Nav->GetSelectableRooms();
+	const auto* Target = Options.FindByPredicate([](const auto& Option) { return Option.Floor != 1; });
+	if (!Target) Target = &Options[0];
+	const FString RoomId = Target->RoomId;
+	const int32 RoomFloor = Target->Floor;
+	TestTrue(TEXT("tag the room"), Fixture.Interior->SetRoomTags(RoomId, { TEXT("zz-unique-tag") }));
+	Controller->SetActiveFloor(1);
+
+	auto CountResultRows = [&]()
+	{
+		int32 Count = 0;
+		for (int32 i = 0; i < List->GetChildrenCount(); ++i)
+		{
+			if (Cast<ULayerRowWidget>(List->GetChildAt(i))) ++Count;
+		}
+		return Count;
+	};
+	// The list is only built on a refresh; do one with an empty search to get the plain-list baseline.
+	Search->SetText(FText());
+	Search->OnTextChanged.Broadcast(Search->GetText());
+	const int32 RowsWithoutSearch = CountResultRows();
+	Search->SetText(FText::FromString(TEXT("ZZ-UNIQUE")));
+	Search->OnTextChanged.Broadcast(Search->GetText());
+	TestTrue(TEXT("a tag search adds a results header and the matching room"), CountResultRows() >= 2);
+
+	// Find the result row and click it the way the row widget does.
+	ULayerRowWidget* ResultRow = nullptr;
+	for (int32 i = 0; i < List->GetChildrenCount(); ++i)
+	{
+		if (ULayerRowWidget* Row = Cast<ULayerRowWidget>(List->GetChildAt(i)))
+		{
+			if (Row->GetRowKeyForTests().StartsWith(TEXT("result:"))) { ResultRow = Row; }
+		}
+	}
+	if (!TestNotNull(TEXT("a result row exists"), ResultRow)) return false;
+	TestEqual(TEXT("result key names floor and room"), ResultRow->GetRowKeyForTests(), FString::Printf(TEXT("result:%d:%s"), RoomFloor, *RoomId));
+	ResultRow->OnLabelClicked.Broadcast(ResultRow->GetRowKeyForTests());
+	TestEqual(TEXT("clicking the result switches to the room's floor"), Controller->GetActiveFloor(), RoomFloor);
+	TestEqual(TEXT("and selects the room"), Controller->GetSelectedRoomId(), RoomId);
+
+	// A search that matches nothing lists no rooms.
+	Search->SetText(FText::FromString(TEXT("no-such-room-93751")));
+	Search->OnTextChanged.Broadcast(Search->GetText());
+	bool bAnyResultRow = false;
+	for (int32 i = 0; i < List->GetChildrenCount(); ++i)
+	{
+		if (ULayerRowWidget* Row = Cast<ULayerRowWidget>(List->GetChildAt(i)))
+		{
+			bAnyResultRow |= Row->GetRowKeyForTests().StartsWith(TEXT("result:"));
+		}
+	}
+	TestFalse(TEXT("no match, no result rows"), bAnyResultRow);
+
+	// Clearing the search removes the results again.
+	Search->SetText(FText());
+	Search->OnTextChanged.Broadcast(Search->GetText());
+	TestEqual(TEXT("clearing the search restores the plain list"), CountResultRows(), RowsWithoutSearch);
 	return true;
 }
 

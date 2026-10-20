@@ -2544,7 +2544,7 @@ void UInteriorScreenWidget::RefreshLayersList()
 
 	// Category headers are never filtered out by search (only their children are) - if they were,
 	// searching for an item would also hide the very row you'd expand to find more like it.
-	auto AddRow = [this, PC, RowWidth](const FString& RowKey, const FString& Label, float IndentPx, bool bShowExpandArrow, bool bIsExpanded, bool bIsVisible)
+	auto AddRow = [this, PC, RowWidth](const FString& RowKey, const FString& Label, float IndentPx, bool bShowExpandArrow, bool bIsExpanded, bool bIsVisible, bool bSearchResult = false)
 	{
 		ULayerRowWidget* Row = CreateWidget<ULayerRowWidget>(PC, ULayerRowWidget::StaticClass());
 		if (!Row)
@@ -2555,6 +2555,8 @@ void UInteriorScreenWidget::RefreshLayersList()
 		Row->SetWidth(RowWidth);
 		Row->OnExpandClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleLayerRowExpandClicked);
 		Row->OnVisibilityClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleLayerRowVisibilityClicked);
+		Row->OnLabelClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleLayerRowLabelClicked);
+		Row->SetSearchResult(bSearchResult);
 		if (UScrollBoxSlot* RowSlot = Cast<UScrollBoxSlot>(LayersListBox->AddChild(Row)))
 		{
 			RowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
@@ -2562,6 +2564,50 @@ void UInteriorScreenWidget::RefreshLayersList()
 	};
 
 	const int32 ActiveFloor = PC->GetActiveFloor();
+
+	// -- Search results -- while something is typed in the search box, every room of the building (all
+	// floors, not just the active one) whose name, id or tags match is listed first. Clicking one switches to
+	// its floor and selects the room.
+	if (!SearchFilter.IsEmpty())
+	{
+		TArray<FString> Words;
+		SearchFilter.ParseIntoArrayWS(Words);
+		struct FResult
+		{
+			int32 Floor;
+			FString RoomId;
+			FString Label;
+		};
+		TArray<FResult> Results;
+		for (int32 Floor = 1; Floor <= PC->GetLoadedBuildingFloorCount(); ++Floor)
+		{
+			for (const FString& RoomId : PC->GetRoomIdsOnFloor(Floor))
+			{
+				if (!PC->IsRoomClosedLoop(RoomId))
+				{
+					continue;
+				}
+				const FString RoomName = PC->GetRoomName(RoomId);
+				const TArray<FString> Tags = PC->GetRoomTags(RoomId);
+				const FString Searchable = RoomName + TEXT(" ") + RoomId + TEXT(" ") + FString::Join(Tags, TEXT(" "));
+				if (!NavigationSearch::MatchesWords(Words, Searchable))
+				{
+					continue;
+				}
+				FString Label = FString::Printf(TEXT("%s [%s] - Floor %d"), RoomName.IsEmpty() ? *RoomId : *RoomName, *RoomId, Floor);
+				if (!Tags.IsEmpty())
+				{
+					Label += TEXT(" - ") + FString::Join(Tags, TEXT(", "));
+				}
+				Results.Add({ Floor, RoomId, Label });
+			}
+		}
+		AddRow(TEXT("category:SearchResults"), FString::Printf(TEXT("Search results (%d)"), Results.Num()), 0.f, false, false, true, true);
+		for (const FResult& Result : Results)
+		{
+			AddRow(FString::Printf(TEXT("result:%d:%s"), Result.Floor, *Result.RoomId), Result.Label, ItemIndent, false, false, true, true);
+		}
+	}
 
 	// -- Boundary -- exactly one item, the loaded building itself.
 	{
@@ -2737,6 +2783,30 @@ void UInteriorScreenWidget::HandleLayerRowVisibilityClicked(FString RowKey)
 	}
 
 	RefreshLayersList();
+}
+
+void UInteriorScreenWidget::HandleLayerRowLabelClicked(FString RowKey)
+{
+	// "result:<floor>:<room id>"
+	FString Rest;
+	if (!RowKey.Split(TEXT("result:"), nullptr, &Rest) || Rest.IsEmpty())
+	{
+		return;
+	}
+	FString FloorText, RoomId;
+	if (!Rest.Split(TEXT(":"), &FloorText, &RoomId) || RoomId.IsEmpty())
+	{
+		return;
+	}
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		const int32 Floor = FCString::Atoi(*FloorText);
+		if (Floor > 0 && Floor != PC->GetActiveFloor())
+		{
+			PC->SetActiveFloor(Floor);
+		}
+		PC->SelectRoom(RoomId);
+	}
 }
 
 void UInteriorScreenWidget::HandleLayersSearchTextChanged(const FText& NewText)

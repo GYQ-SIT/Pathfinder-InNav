@@ -38,14 +38,25 @@ public:
 	// safe to call before RebuildWidget has run.
 	void SetWidth(float NewWidth);
 
+	// Turns this row into a search result: its label can be clicked (OnLabelClicked) and the visibility dot,
+	// which means nothing for a result, is hidden.
+	void SetSearchResult(bool bInSearchResult);
+
+	const FString& GetRowKeyForTests() const { return RowKey; }
+
 	UPROPERTY(BlueprintAssignable, Category = "LayerRow")
 	FOnLayerRowKeyClicked OnExpandClicked;
 
 	UPROPERTY(BlueprintAssignable, Category = "LayerRow")
 	FOnLayerRowKeyClicked OnVisibilityClicked;
 
+	// Only fires for search-result rows (see SetSearchResult).
+	UPROPERTY(BlueprintAssignable, Category = "LayerRow")
+	FOnLayerRowKeyClicked OnLabelClicked;
+
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
+	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 
 private:
 	UFUNCTION()
@@ -94,5 +105,6 @@ private:
 	bool bShowExpandArrow = false;
 	bool bIsExpanded = false;
 	bool bIsVisible = true;
+	bool bSearchResult = false;
 	float Width = 200.f;
 };

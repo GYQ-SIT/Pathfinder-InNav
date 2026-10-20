@@ -101,6 +101,24 @@ void ULayerRowWidget::Setup(const FString& InRowKey, const FString& InLabel, flo
 	ApplyVisuals();
 }
 
+void ULayerRowWidget::SetSearchResult(bool bInSearchResult)
+{
+	bSearchResult = bInSearchResult;
+	ApplyVisuals();
+}
+
+FReply ULayerRowWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	// The row's own buttons handle their clicks first; this only sees clicks on the label itself.
+	if (bSearchResult && InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+	{
+		PlayButtonClickSound();
+		OnLabelClicked.Broadcast(RowKey);
+		return FReply::Handled();
+	}
+	return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+}
+
 void ULayerRowWidget::SetWidth(float NewWidth)
 {
 	Width = NewWidth;
@@ -129,6 +147,12 @@ void ULayerRowWidget::ApplyVisuals()
 	if (Label)
 	{
 		Label->SetText(FText::FromString(LabelText));
+		// A clickable result reads as a link.
+		Label->SetColorAndOpacity(FSlateColor(bSearchResult ? FLinearColor(0.62f, 0.8f, 1.f) : FLinearColor::White));
+	}
+	if (VisibilityButton)
+	{
+		VisibilityButton->SetVisibility(bSearchResult ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 	}
 	if (VisibilityButtonText)
 	{

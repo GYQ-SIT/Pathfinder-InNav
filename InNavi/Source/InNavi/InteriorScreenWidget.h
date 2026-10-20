@@ -446,6 +446,10 @@ private:
 	UFUNCTION()
 	void HandleLayerRowExpandClicked(FString RowKey);
 
+	// A search-result row was clicked: switches to the room's floor and selects it ("result:<floor>:<room id>").
+	UFUNCTION()
+	void HandleLayerRowLabelClicked(FString RowKey);
+
 	UFUNCTION()
 	void HandleLayerRowVisibilityClicked(FString RowKey);
 

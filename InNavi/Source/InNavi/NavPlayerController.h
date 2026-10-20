@@ -813,6 +813,8 @@ public:
 	// room with that id exists.
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	FString GetRoomName(const FString& RoomId) const;
+	// The tags of any room on the loaded building (empty if the room does not exist or has none).
+	TArray<FString> GetRoomTags(const FString& RoomId) const;
 
 	// Any room/wall's current closed-loop state by id (unlike IsSelectedRoomClosedLoop, which only
 	// reads whichever one is currently selected) - what a Layers panel calls to sort each id from

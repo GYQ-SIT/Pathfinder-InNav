@@ -726,8 +726,9 @@ void UEditScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 		}
 	}
 
-	// The Audio panel's controls size themselves from its panel's width, which the user can change at any time.
+	// The Audio and Map panels' controls size themselves from their panel's width, which the user can change at any time.
 	SyncAudioPanelWidth();
+	SyncMapPanelWidth();
 }
 
 FReply UEditScreenWidget::NativeOnMouseWheel(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
@@ -1536,6 +1537,36 @@ void UEditScreenWidget::SyncAudioPanelWidth()
 	}
 	// Rows are rebuilt from scratch with the new width baked in - cheap for a list this small.
 	RefreshAudioList();
+}
+
+void UEditScreenWidget::SyncMapPanelWidth()
+{
+	if (!DockHost)
+	{
+		return;
+	}
+	const float PanelWidth = DockHost->GetPanelWidth(ExteriorDock::Map);
+	if (PanelWidth <= 0.f)
+	{
+		return; // hidden, or not laid out yet
+	}
+	// Minus the panel's 14px padding on each side and room for the scroll bar.
+	const float Width = FMath::Max(100.f, PanelWidth - 48.f);
+	if (FMath::IsNearlyEqual(Width, MapContentWidth, 0.5f))
+	{
+		return;
+	}
+	MapContentWidth = Width;
+	for (UWidget* Control : { (UWidget*)BuildingSearchBox, (UWidget*)BuildingFloorFilter, (UWidget*)FilteredBuildingComboBox, (UWidget*)BuildingFilterResultsText })
+	{
+		if (Control)
+		{
+			if (USizeBox* SizeBox = Cast<USizeBox>(Control->GetParent()))
+			{
+				SizeBox->SetWidthOverride(Width);
+			}
+		}
+	}
 }
 
 void UEditScreenWidget::OnWindowAudioCheckChanged(bool bIsChecked)
