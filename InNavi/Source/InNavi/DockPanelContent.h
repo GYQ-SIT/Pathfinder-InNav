@@ -6,6 +6,7 @@
 
 class ANavPlayerController;
 class UCheckBox;
+class UEditableTextBox;
 class UTextBlock;
 class UVerticalBox;
 
@@ -34,6 +35,8 @@ protected:
 
 	// The app's standard 15pt text, same as UInteriorScreenWidget::StandardFontSize.
 	static void ApplyStandardFont(UTextBlock* TextBlock);
+	// Same size, with the app's dark box and white text (the engine defaults read as the same grey as the panel).
+	static void ApplyStandardFont(UEditableTextBox* TextBox);
 
 	// A check box with a label, as a row at the end of Stack. Returns the check box.
 	UCheckBox* AddCheckRow(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label, bool bChecked, float BottomPadding = 6.f);

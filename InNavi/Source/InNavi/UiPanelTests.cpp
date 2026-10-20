@@ -112,4 +112,49 @@ bool FUiDebugPanelTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiMapPanelTest, "InNavi.UI.Panels.Map", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FUiMapPanelTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+
+	UInteriorScreenWidget* Interior = NewObject<UInteriorScreenWidget>();
+	Interior->Initialize(); Interior->TakeWidget(); Interior->SetOwningPlayer(Controller);
+	UEditScreenWidget* Exterior = NewObject<UEditScreenWidget>();
+	Exterior->Initialize(); Exterior->TakeWidget(); Exterior->SetOwningPlayer(Controller);
+
+	auto CheckRoadSection = [this](const TCHAR* Screen, auto* Widget)
+	{
+		UCheckBox* HideAll = Cast<UCheckBox>(Widget->FindScreenWidget(TEXT("Chk_RoadHideAll")));
+		UCheckBox* Primary = Cast<UCheckBox>(Widget->FindScreenWidget(TEXT("Chk_RoadPrimary")));
+		UCheckBox* CampusOnly = Cast<UCheckBox>(Widget->FindScreenWidget(TEXT("Chk_RoadCampusOnly")));
+		if (!TestNotNull(*FString::Printf(TEXT("%s: Hide All exists"), Screen), HideAll) || !TestNotNull(*FString::Printf(TEXT("%s: Primary exists"), Screen), Primary)
+			|| !TestNotNull(*FString::Printf(TEXT("%s: Campus Only exists"), Screen), CampusOnly))
+		{
+			return;
+		}
+		TestTrue(*FString::Printf(TEXT("%s: Primary starts shown"), Screen), Primary->IsChecked());
+		TestTrue(*FString::Printf(TEXT("%s: Campus Only starts on"), Screen), CampusOnly->IsChecked());
+		// The master switch drags the category check boxes along with it, both ways.
+		HideAll->SetIsChecked(true);
+		HideAll->OnCheckStateChanged.Broadcast(true);
+		TestFalse(*FString::Printf(TEXT("%s: Hide All unchecks the categories"), Screen), Primary->IsChecked());
+		HideAll->SetIsChecked(false);
+		HideAll->OnCheckStateChanged.Broadcast(false);
+		TestTrue(*FString::Printf(TEXT("%s: unticking Hide All brings them back"), Screen), Primary->IsChecked());
+	};
+	CheckRoadSection(TEXT("interior"), Interior);
+	CheckRoadSection(TEXT("exterior"), Exterior);
+
+	// Only the exterior screen has outside buildings to filter.
+	TestNull(TEXT("interior: no building search"), Interior->FindScreenWidget(TEXT("Txt_BuildingSearch")));
+	TestNull(TEXT("interior: no campus building switch"), Interior->FindScreenWidget(TEXT("Chk_BuildingCampus")));
+	TestNotNull(TEXT("exterior: building search"), Exterior->FindScreenWidget(TEXT("Txt_BuildingSearch")));
+	TestNotNull(TEXT("exterior: building results"), Exterior->FindScreenWidget(TEXT("Cbx_FilteredBuildings")));
+	TestNotNull(TEXT("exterior: campus building switch"), Exterior->FindScreenWidget(TEXT("Chk_BuildingCampus")));
+	TestNotNull(TEXT("exterior: non-campus building switch"), Exterior->FindScreenWidget(TEXT("Chk_BuildingNonCampus")));
+	TestNotNull(TEXT("exterior: reset button"), Exterior->FindScreenWidget(TEXT("Btn_ResetBuildingFilters")));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

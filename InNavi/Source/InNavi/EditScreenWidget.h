@@ -11,6 +11,7 @@ class UBorder;
 class UButton;
 class UAudioPanelWidget;
 class UDebugPanelWidget;
+class UMapPanelWidget;
 class UCheckBox;
 class UDockHostWidget;
 class UComboBoxString;
@@ -197,46 +198,6 @@ private:
 	UFUNCTION()
 	void OnWindowResetLayoutClicked();
 
-	// Master switch, above the 6 category rows - forwards to PC->SetAllRoadsVisible and visually syncs
-	// the 6 category checkboxes to match (same pattern as OnAudioMuteAllCheckChanged).
-	UFUNCTION()
-	void OnRoadHideAllCheckChanged(bool bIsChecked);
-
-	// --- Map panel --- one handler per ERoadCategory, since UCheckBox::OnCheckStateChanged only
-	// carries the new bool, not which row it came from. Each forwards to PC->SetRoadCategoryVisible
-	// with its own hardcoded category.
-	UFUNCTION()
-	void OnRoadPrimaryCheckChanged(bool bIsChecked);
-	UFUNCTION()
-	void OnRoadSecondaryCheckChanged(bool bIsChecked);
-	UFUNCTION()
-	void OnRoadResidentialCheckChanged(bool bIsChecked);
-	UFUNCTION()
-	void OnRoadCyclewayCheckChanged(bool bIsChecked);
-	UFUNCTION()
-	void OnRoadFootwayCheckChanged(bool bIsChecked);
-	UFUNCTION()
-	void OnRoadOtherCheckChanged(bool bIsChecked);
-
-	// Region filter, below the 6 category checkboxes - forwards to PC->SetRoadsAndPOIsWithinCampusOnly.
-	// Starts checked (see NativeConstruct, which applies it once a PC/Generator exists).
-	UFUNCTION()
-	void OnRoadCampusOnlyCheckChanged(bool bIsChecked);
-
-	// Building-visibility filter (Map panel's "Buildings" section) - one handler per bucket, same
-	// reasoning as the 6 road-category handlers above.
-	UFUNCTION()
-	void OnBuildingCampusCheckChanged(bool bIsChecked);
-	UFUNCTION() void HandleBuildingSearchChanged(const FText& Text);
-	UFUNCTION() void HandleBuildingFloorFilterChanged(FString Item, ESelectInfo::Type Type);
-	UFUNCTION() void HandleFilteredBuildingChanged(FString Item, ESelectInfo::Type Type);
-	UFUNCTION() void OnResetBuildingFiltersClicked();
-	UFUNCTION() UWidget* GenerateBuildingFilterItem(FString Item);
-	void ApplyBuildingFilters();
-	void RefreshBuildingFilterDisplay();
-	UFUNCTION()
-	void OnBuildingNonCampusCheckChanged(bool bIsChecked);
-
 	// --- Docking ---
 	// Called once from NativeConstruct: loads the user's saved layout (else the team default) and hooks the
 	// dock's change notifications.
@@ -254,9 +215,8 @@ private:
 	void SaveDockLayoutToDisk() const;
 	// The Audio panel's controls size themselves from the width of the dock group showing it.
 	void SyncAudioPanelWidth();
-	// The Map panel's building-filter controls size themselves from the width of the dock group showing it.
+	// Same for the Map panel's building controls.
 	void SyncMapPanelWidth();
-	float MapContentWidth = 220.f;
 
 	// The actual rendered size of the root canvas - NOT UWidgetLayoutLibrary::GetViewportSize, which
 	// returns the platform's raw pixel resolution and only matches this Slate-local coordinate space
@@ -332,54 +292,14 @@ private:
 	UPROPERTY()
 	UAudioPanelWidget* AudioPanelWidget = nullptr;
 
-	// Content roots of the other dock panels (the UBorders registered with DockHost).
-
-	// Map panel - 6 road-category checkboxes + region filter + 2 building filters (see
-	// OnRoadHideAllCheckChanged and friends).
+	// The Map dock panel (shared with the interior editor, see MapPanelWidget.h): road filters plus, here, the
+	// building filters. Starts shown.
 	UPROPERTY()
-	UBorder* RoadFilterPanel = nullptr;
+	UMapPanelWidget* MapPanelWidget = nullptr;
 
 	// The Debug dock panel (shared with the interior editor, see DebugPanelWidget.h). Starts hidden.
 	UPROPERTY()
 	UDebugPanelWidget* DebugPanelWidget = nullptr;
-
-	// Master "Hide All" checkbox, above the 6 category rows.
-	UPROPERTY()
-	UCheckBox* RoadHideAllCheckbox = nullptr;
-
-	// The 6 category checkboxes themselves - stored (not just local RebuildWidget variables) so
-	// OnRoadHideAllCheckChanged can visually sync them later.
-	UPROPERTY()
-	UCheckBox* RoadPrimaryCheckbox = nullptr;
-	UPROPERTY()
-	UCheckBox* RoadSecondaryCheckbox = nullptr;
-	UPROPERTY()
-	UCheckBox* RoadResidentialCheckbox = nullptr;
-	UPROPERTY()
-	UCheckBox* RoadCyclewayCheckbox = nullptr;
-	UPROPERTY()
-	UCheckBox* RoadFootwayCheckbox = nullptr;
-	UPROPERTY()
-	UCheckBox* RoadOtherCheckbox = nullptr;
-
-	// Region/distance filter's own checkbox - the 7th row in the Roads section (see
-	// OnRoadCampusOnlyCheckChanged).
-	UPROPERTY()
-	UCheckBox* RoadCampusOnlyCheckbox = nullptr;
-
-	// Building-visibility filter's own checkboxes ("Buildings" section).
-	UPROPERTY()
-	UCheckBox* BuildingCampusCheckbox = nullptr;
-	UPROPERTY() UEditableTextBox* BuildingSearchBox = nullptr;
-	UPROPERTY() UComboBoxString* BuildingFloorFilter = nullptr;
-	UPROPERTY() UComboBoxString* FilteredBuildingComboBox = nullptr;
-	UPROPERTY() UTextBlock* BuildingFilterResultsText = nullptr;
-	UPROPERTY() UButton* ResetBuildingFiltersButton = nullptr;
-	TMap<FString, FString> CachedBuildingOptions;
-	bool bUpdatingBuildingFilters = false;
-	uint64 DisplayedBuildingResultsRevision = MAX_uint64;
-	UPROPERTY()
-	UCheckBox* BuildingNonCampusCheckbox = nullptr;
 
 	// Full-screen, fully transparent, Collapsed by default - see
 	// UInteriorScreenWidget::OnMenuClickCatcherMouseButtonDown's own comment for why this is how

@@ -3,6 +3,7 @@
 #include "AudioFileRowWidget.h"
 #include "AudioPanelWidget.h"
 #include "DebugPanelWidget.h"
+#include "MapPanelWidget.h"
 #include "ConfirmDialogWidget.h"
 #include "DockHostUMG.h"
 #include "ExteriorDockLayout.h"
@@ -52,8 +53,6 @@ namespace
 	constexpr float EditMenuButtonWidth = 50.f;
 	constexpr float EditCameraMenuButtonWidth = 72.f;
 	constexpr float EditMenuBarLeftMargin = 10.f;
-	constexpr float EditAudioPanelWidth = 220.f;
-	constexpr float EditAudioFileListHeight = 150.f;
 
 }
 
@@ -302,7 +301,7 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		WindowAudioCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowAudioCheckChanged);
 
 		WindowRoadsCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowRoads"), TEXT("Map"));
-		// Unlike WindowAudioCheckbox, starts checked - RoadFilterPanel starts Visible.
+		// Unlike WindowAudioCheckbox, starts checked - the Map panel starts shown.
 		WindowRoadsCheckbox->SetIsChecked(true);
 		WindowRoadsCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowRoadsCheckChanged);
 
@@ -386,94 +385,12 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		AudioPanelWidget->SetOwnerScreen(this);
 		DockHost->RegisterPanel(ExteriorDock::Audio, FText::FromName(ExteriorDock::Audio), AudioPanelWidget);
 
-		// --- Map panel (Window > Map): road category/region filters and the building filters.
-		RoadFilterPanel = ConstructDockPanel(ExteriorDock::Map, TEXT("Pnl_RoadFilter"));
-
-		UVerticalBox* RoadFilterStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RoadFilterStack"));
-		RoadFilterPanel->SetContent(RoadFilterStack);
-
-		AddSectionHeaderRow(RoadFilterStack, TEXT("Txt_RoadFilterRoads"), TEXT("Roads"));
-		RoadHideAllCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadHideAll"), TEXT("Hide All"));
-		RoadHideAllCheckbox->SetIsChecked(false);
-		RoadHideAllCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadHideAllCheckChanged);
-		RoadPrimaryCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadPrimary"), TEXT("Primary"));
-		RoadPrimaryCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadPrimaryCheckChanged);
-		RoadSecondaryCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadSecondary"), TEXT("Secondary"));
-		RoadSecondaryCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadSecondaryCheckChanged);
-		RoadResidentialCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadResidential"), TEXT("Residential/Tertiary"));
-		RoadResidentialCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadResidentialCheckChanged);
-		RoadCyclewayCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadCycleway"), TEXT("Cycleway"));
-		RoadCyclewayCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadCyclewayCheckChanged);
-		RoadFootwayCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadFootway"), TEXT("Footway/Path"));
-		RoadFootwayCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadFootwayCheckChanged);
-		RoadOtherCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadOther"), TEXT("Other"));
-		RoadOtherCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadOtherCheckChanged);
-		// Region/distance filter, folded into the Roads section (not its own "Region" header) - it only
-		// ever affects roads/POIs, so it reads as a 7th road-filter row, not a separate concept.
-		RoadCampusOnlyCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_RoadCampusOnly"), TEXT("Campus Only"));
-		// Starts checked - OnRoadCampusOnlyCheckChanged isn't bound yet at this point in RebuildWidget,
-		// so this alone doesn't apply the filter - see the PC->SetRoadsAndPOIsWithinCampusOnly(true)
-		// call in NativeConstruct that actually turns it on once a PC/Generator exists.
-		RoadCampusOnlyCheckbox->SetIsChecked(true);
-		RoadCampusOnlyCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnRoadCampusOnlyCheckChanged);
-
-		AddSectionHeaderRow(RoadFilterStack, TEXT("Txt_RoadFilterBuildings"), TEXT("Buildings"));
-		BuildingCampusCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_BuildingCampus"), TEXT("Campus"));
-		BuildingCampusCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnBuildingCampusCheckChanged);
-		BuildingNonCampusCheckbox = AddDropdownCheckRow(RoadFilterStack, TEXT("Chk_BuildingNonCampus"), TEXT("Non-Campus"));
-		// Starts unchecked (unlike BuildingCampusCheckbox) - non-campus buildings are hidden by
-		// default. OnBuildingNonCampusCheckChanged isn't bound yet at this point in RebuildWidget, so
-		// this alone doesn't hide anything - see the PC->SetNonCampusBuildingsVisible(false) call in
-		// NativeConstruct that actually applies it once a PC/Generator exists.
-		BuildingNonCampusCheckbox->SetIsChecked(false);
-		BuildingNonCampusCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnBuildingNonCampusCheckChanged);
-
-		BuildingSearchBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_BuildingSearch"));
-		ApplyStandardFont(BuildingSearchBox);
-		BuildingSearchBox->SetHintText(FText::FromString(TEXT("Campus building name or ID")));
-		BuildingSearchBox->OnTextChanged.AddUniqueDynamic(this, &UEditScreenWidget::HandleBuildingSearchChanged);
-		USizeBox* SearchSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		SearchSize->SetWidthOverride(EditAudioPanelWidth);
-		SearchSize->SetContent(BuildingSearchBox);
-		RoadFilterStack->AddChildToVerticalBox(SearchSize)->SetPadding(FMargin(0.f, 6.f, 0.f, 4.f));
-		BuildingFloorFilter = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_BuildingFloorFilter"));
-		for (const TCHAR* Item : { TEXT("Any floor count"), TEXT("1 floor"), TEXT("2-5 floors"), TEXT("6+ floors") }) BuildingFloorFilter->AddOption(Item);
-		BuildingFloorFilter->SetSelectedOption(TEXT("Any floor count"));
-		BuildingFloorFilter->OnGenerateWidgetEvent.BindDynamic(this, &UEditScreenWidget::GenerateBuildingFilterItem);
-		BuildingFloorFilter->OnSelectionChanged.AddUniqueDynamic(this, &UEditScreenWidget::HandleBuildingFloorFilterChanged);
-		USizeBox* FloorFilterSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		FloorFilterSize->SetWidthOverride(EditAudioPanelWidth);
-		FloorFilterSize->SetContent(BuildingFloorFilter);
-		RoadFilterStack->AddChildToVerticalBox(FloorFilterSize)->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
-		FilteredBuildingComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_FilteredBuildings"));
-		FilteredBuildingComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UEditScreenWidget::GenerateBuildingFilterItem);
-		FilteredBuildingComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UEditScreenWidget::HandleFilteredBuildingChanged);
-		FilteredBuildingComboBox->SetIsEnabled(false);
-		USizeBox* BuildingResultsSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		BuildingResultsSize->SetWidthOverride(EditAudioPanelWidth);
-		BuildingResultsSize->SetContent(FilteredBuildingComboBox);
-		RoadFilterStack->AddChildToVerticalBox(BuildingResultsSize);
-		BuildingFilterResultsText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_BuildingFilterResults"));
-		ApplyStandardFont(BuildingFilterResultsText);
-		BuildingFilterResultsText->SetAutoWrapText(true);
-		USizeBox* CountSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		CountSize->SetWidthOverride(EditAudioPanelWidth);
-		CountSize->SetContent(BuildingFilterResultsText);
-		RoadFilterStack->AddChildToVerticalBox(CountSize);
-		// Same recipe as the other buttons in the panels: a wrapping label, and a width that follows the panel
-		// (see SyncMapPanelWidth) so the text wraps inside the button instead of running out of it.
-		ResetBuildingFiltersButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_ResetBuildingFilters"));
-		UTextBlock* ResetLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-		ResetLabel->SetText(FText::FromString(TEXT("Reset Building Filters")));
-		ResetLabel->SetJustification(ETextJustify::Center);
-		ResetLabel->SetAutoWrapText(true);
-		ApplyStandardFont(ResetLabel);
-		ResetBuildingFiltersButton->SetContent(ResetLabel);
-		ResetBuildingFiltersButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnResetBuildingFiltersClicked);
-		USizeBox* ResetFiltersSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		ResetFiltersSize->SetWidthOverride(EditAudioPanelWidth);
-		ResetFiltersSize->SetContent(ResetBuildingFiltersButton);
-		RoadFilterStack->AddChildToVerticalBox(ResetFiltersSize)->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
+		// --- Map panel (Window > Map): the shared one (MapPanelWidget.h) - road filters plus, on this screen, the
+		// building filters. Starts shown.
+		MapPanelWidget = CreateWidget<UMapPanelWidget>(this, UMapPanelWidget::StaticClass());
+		MapPanelWidget->SetOwnerScreen(this);
+		MapPanelWidget->SetShowBuildingFilters(true);
+		DockHost->RegisterPanel(ExteriorDock::Map, FText::FromName(ExteriorDock::Map), MapPanelWidget);
 
 		// --- Debug panel (Window > Debug): the shared one (DebugPanelWidget.h). The screen supplies the lines that
 		// are its own. Starts hidden.
@@ -513,26 +430,12 @@ void UEditScreenWidget::NativeConstruct()
 		{
 			DebugPanelWidget->BindToController();
 		}
-		bUpdatingBuildingFilters = true;
-		if (BuildingSearchBox) BuildingSearchBox->SetText(FText::FromString(PC->GetBuildingFilterText()));
-		if (BuildingCampusCheckbox) BuildingCampusCheckbox->SetIsChecked(PC->AreCampusBuildingsVisible());
-		if (BuildingFloorFilter)
+		if (MapPanelWidget)
 		{
-			const int32 Min = PC->GetBuildingFilterMinimumFloors();
-			const int32 Max = PC->GetBuildingFilterMaximumFloors();
-			BuildingFloorFilter->SetSelectedOption(Min == 1 && Max == 1 ? TEXT("1 floor")
-				: Min == 2 && Max == 5 ? TEXT("2-5 floors") : Min == 6 && Max == 0 ? TEXT("6+ floors") : TEXT("Any floor count"));
+			MapPanelWidget->Refresh();
+			// The check boxes start in the state the filters should be in; make the controller agree.
+			MapPanelWidget->ApplyDefaultsToController();
 		}
-		bUpdatingBuildingFilters = false;
-		ApplyBuildingFilters();
-
-		// RoadCampusOnlyCheckbox defaults to checked (set in RebuildWidget), but that alone doesn't hide
-		// anything - actually apply it now that a PC/Generator exists (by the time this screen is
-		// constructed, LoadBuildingDataFromPath has already loaded any roads/POIs to filter).
-		PC->SetRoadsAndPOIsWithinCampusOnly(true);
-		// Same reasoning for BuildingNonCampusCheckbox, which defaults to UNCHECKED - actually hide the
-		// context buildings now that a PC/Generator exists.
-		PC->SetNonCampusBuildingsVisible(false);
 	}
 
 	if (AudioPanelWidget)
@@ -576,10 +479,9 @@ void UEditScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 	Super::NativeTick(MyGeometry, InDeltaTime);
 	// Changes only bump a counter. Batch loads therefore cause one UI rebuild on the next frame,
 	// while an idle frame does no building scan, label formatting, sorting, or option comparison.
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
-		PC && DisplayedBuildingResultsRevision != PC->GetBuildingResultsRevision())
+	if (MapPanelWidget)
 	{
-		RefreshBuildingFilterDisplay();
+		MapPanelWidget->RefreshBuildingFilterDisplayIfChanged();
 	}
 
 	FVector2D ReliableSize;
@@ -606,7 +508,10 @@ FReply UEditScreenWidget::NativeOnMouseWheel(const FGeometry& InGeometry, const 
 
 void UEditScreenWidget::HandleBuildingSelected(FString BuildingId)
 {
-	RefreshBuildingFilterDisplay();
+	if (MapPanelWidget)
+	{
+		MapPanelWidget->RefreshBuildingFilterDisplay();
+	}
 	// An empty BuildingId means the selection was cleared (see ANavPlayerController::
 	// SelectBuildingUnderCursor - clicking empty space, or re-clicking the already-selected building,
 	// now deselects instead of only ever adding/switching a selection).
@@ -941,173 +846,6 @@ void UEditScreenWidget::HandleFileLoadCancel()
 	// Nothing to do - the dialog already removed itself.
 }
 
-void UEditScreenWidget::OnRoadHideAllCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetAllRoadsVisible(!bIsChecked);
-	}
-	// Visually sync the 6 category checkboxes to match (checked = shown) - SetIsChecked doesn't re-fire
-	// OnCheckStateChanged, same pattern as OnAudioMuteAllCheckChanged.
-	const bool bCategoriesChecked = !bIsChecked;
-	if (RoadPrimaryCheckbox) RoadPrimaryCheckbox->SetIsChecked(bCategoriesChecked);
-	if (RoadSecondaryCheckbox) RoadSecondaryCheckbox->SetIsChecked(bCategoriesChecked);
-	if (RoadResidentialCheckbox) RoadResidentialCheckbox->SetIsChecked(bCategoriesChecked);
-	if (RoadCyclewayCheckbox) RoadCyclewayCheckbox->SetIsChecked(bCategoriesChecked);
-	if (RoadFootwayCheckbox) RoadFootwayCheckbox->SetIsChecked(bCategoriesChecked);
-	if (RoadOtherCheckbox) RoadOtherCheckbox->SetIsChecked(bCategoriesChecked);
-}
-
-void UEditScreenWidget::OnRoadPrimaryCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetRoadCategoryVisible(ERoadCategory::Primary, bIsChecked);
-	}
-}
-
-void UEditScreenWidget::OnRoadSecondaryCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetRoadCategoryVisible(ERoadCategory::Secondary, bIsChecked);
-	}
-}
-
-void UEditScreenWidget::OnRoadResidentialCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetRoadCategoryVisible(ERoadCategory::Residential, bIsChecked);
-	}
-}
-
-void UEditScreenWidget::OnRoadCyclewayCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetRoadCategoryVisible(ERoadCategory::Cycleway, bIsChecked);
-	}
-}
-
-void UEditScreenWidget::OnRoadFootwayCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetRoadCategoryVisible(ERoadCategory::Footway, bIsChecked);
-	}
-}
-
-void UEditScreenWidget::OnRoadOtherCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetRoadCategoryVisible(ERoadCategory::Other, bIsChecked);
-	}
-}
-
-void UEditScreenWidget::OnRoadCampusOnlyCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetRoadsAndPOIsWithinCampusOnly(bIsChecked);
-	}
-}
-
-void UEditScreenWidget::OnBuildingCampusCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetCampusBuildingsVisible(bIsChecked);
-		RefreshBuildingFilterDisplay();
-	}
-}
-
-void UEditScreenWidget::HandleBuildingSearchChanged(const FText& Text) { if (!bUpdatingBuildingFilters) ApplyBuildingFilters(); }
-void UEditScreenWidget::HandleBuildingFloorFilterChanged(FString Item, ESelectInfo::Type Type)
-{
-	if (!bUpdatingBuildingFilters && Type != ESelectInfo::Direct) ApplyBuildingFilters();
-}
-
-void UEditScreenWidget::ApplyBuildingFilters()
-{
-	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
-	if (!PC || !BuildingSearchBox || !BuildingFloorFilter) return;
-	const FString Floor = BuildingFloorFilter->GetSelectedOption();
-	const int32 Min = Floor == TEXT("1 floor") ? 1 : Floor == TEXT("2-5 floors") ? 2 : Floor == TEXT("6+ floors") ? 6 : 0;
-	const int32 Max = Floor == TEXT("1 floor") ? 1 : Floor == TEXT("2-5 floors") ? 5 : 0;
-	PC->SetBuildingFilter(BuildingSearchBox->GetText().ToString(), Min, Max);
-	RefreshBuildingFilterDisplay();
-}
-
-void UEditScreenWidget::RefreshBuildingFilterDisplay()
-{
-	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
-	if (!PC || !FilteredBuildingComboBox) return;
-	if (DisplayedBuildingResultsRevision != PC->GetBuildingResultsRevision())
-	{
-		const TMap<FString, FString>& Options = PC->GetFilteredBuildingOptions();
-		if (!Options.OrderIndependentCompareEqual(CachedBuildingOptions))
-		{
-			CachedBuildingOptions = Options;
-			FilteredBuildingComboBox->ClearOptions();
-			TArray<FString> Labels;
-			Options.GetKeys(Labels);
-			Labels.Sort();
-			for (const FString& Label : Labels) FilteredBuildingComboBox->AddOption(Label);
-		}
-		FilteredBuildingComboBox->SetIsEnabled(!Options.IsEmpty());
-		if (BuildingFilterResultsText)
-		{
-			BuildingFilterResultsText->SetText(FText::FromString(Options.IsEmpty() ? TEXT("No matching editable buildings.")
-				: FString::Printf(TEXT("%d / %d editable buildings. Select one above."), Options.Num(), PC->GetEditableBuildingCount())));
-		}
-		DisplayedBuildingResultsRevision = PC->GetBuildingResultsRevision();
-	}
-	FString SelectedLabel;
-	const FString SelectedId = PC->GetSelectedBuildingId();
-	for (const auto& Pair : CachedBuildingOptions) if (Pair.Value == SelectedId) { SelectedLabel = Pair.Key; break; }
-	if (SelectedLabel.IsEmpty()) FilteredBuildingComboBox->ClearSelection();
-	else if (FilteredBuildingComboBox->GetSelectedOption() != SelectedLabel) FilteredBuildingComboBox->SetSelectedOption(SelectedLabel);
-}
-
-void UEditScreenWidget::HandleFilteredBuildingChanged(FString Item, ESelectInfo::Type Type)
-{
-	if (Type == ESelectInfo::Direct || Item.IsEmpty()) return;
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		if (const FString* Id = CachedBuildingOptions.Find(Item)) PC->SelectBuildingById(*Id);
-	}
-}
-
-void UEditScreenWidget::OnResetBuildingFiltersClicked()
-{
-	bUpdatingBuildingFilters = true;
-	if (BuildingSearchBox) BuildingSearchBox->SetText(FText::GetEmpty());
-	if (BuildingFloorFilter) BuildingFloorFilter->SetSelectedOption(TEXT("Any floor count"));
-	if (BuildingCampusCheckbox) BuildingCampusCheckbox->SetIsChecked(true);
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) PC->SetCampusBuildingsVisible(true);
-	bUpdatingBuildingFilters = false;
-	ApplyBuildingFilters();
-}
-
-UWidget* UEditScreenWidget::GenerateBuildingFilterItem(FString Item)
-{
-	UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-	ApplyStandardFont(Label);
-	Label->SetText(FText::FromString(Item));
-	Label->SetAutoWrapText(true);
-	return Label;
-}
-
-void UEditScreenWidget::OnBuildingNonCampusCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetNonCampusBuildingsVisible(bIsChecked);
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Docking
 // ---------------------------------------------------------------------------
@@ -1118,7 +856,36 @@ UWidget* UEditScreenWidget::FindScreenWidget(FName Name) const
 	{
 		return Found;
 	}
-	return WidgetTree ? FindObject<UWidget>(WidgetTree, *Name.ToString()) : nullptr;
+	if (WidgetTree)
+	{
+		if (UWidget* Found = FindObject<UWidget>(WidgetTree, *Name.ToString()))
+		{
+			return Found;
+		}
+	}
+	// Shared panels keep their controls in their own widget trees.
+	if (AudioPanelWidget)
+	{
+		if (UWidget* Found = AudioPanelWidget->FindContentWidget(Name))
+		{
+			return Found;
+		}
+	}
+	if (MapPanelWidget)
+	{
+		if (UWidget* Found = MapPanelWidget->FindContentWidget(Name))
+		{
+			return Found;
+		}
+	}
+	if (DebugPanelWidget)
+	{
+		if (UWidget* Found = DebugPanelWidget->FindContentWidget(Name))
+		{
+			return Found;
+		}
+	}
+	return nullptr;
 }
 
 bool UEditScreenWidget::GetReliableCanvasSize(FVector2D& OutSize) const
@@ -1271,7 +1038,7 @@ void UEditScreenWidget::SyncAudioPanelWidth()
 
 void UEditScreenWidget::SyncMapPanelWidth()
 {
-	if (!DockHost)
+	if (!DockHost || !MapPanelWidget)
 	{
 		return;
 	}
@@ -1281,22 +1048,7 @@ void UEditScreenWidget::SyncMapPanelWidth()
 		return; // hidden, or not laid out yet
 	}
 	// Minus the panel's 14px padding on each side and room for the scroll bar.
-	const float Width = FMath::Max(100.f, PanelWidth - 48.f);
-	if (FMath::IsNearlyEqual(Width, MapContentWidth, 0.5f))
-	{
-		return;
-	}
-	MapContentWidth = Width;
-	for (UWidget* Control : { (UWidget*)BuildingSearchBox, (UWidget*)BuildingFloorFilter, (UWidget*)FilteredBuildingComboBox, (UWidget*)BuildingFilterResultsText, (UWidget*)ResetBuildingFiltersButton })
-	{
-		if (Control)
-		{
-			if (USizeBox* SizeBox = Cast<USizeBox>(Control->GetParent()))
-			{
-				SizeBox->SetWidthOverride(Width);
-			}
-		}
-	}
+	MapPanelWidget->SetContentWidth(FMath::Max(100.f, PanelWidth - 48.f));
 }
 
 void UEditScreenWidget::OnWindowAudioCheckChanged(bool bIsChecked)

@@ -3,6 +3,7 @@
 #include "NavPlayerController.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/CheckBox.h"
+#include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/TextBlock.h"
@@ -33,6 +34,21 @@ void UDockPanelContentWidget::ApplyStandardFont(UTextBlock* TextBlock)
 	FSlateFontInfo Font = TextBlock->GetFont();
 	Font.Size = 15;
 	TextBlock->SetFont(Font);
+}
+
+void UDockPanelContentWidget::ApplyStandardFont(UEditableTextBox* TextBox)
+{
+	if (!TextBox)
+	{
+		return;
+	}
+	FEditableTextBoxStyle Style = TextBox->GetWidgetStyle();
+	Style.TextStyle.Font.Size = 15;
+	// Matches UInteriorScreenWidget's StandardTextBoxBackgroundColor / StandardTextBoxTextColor.
+	Style.BackgroundColor = FSlateColor(FLinearColor(0.149f, 0.149f, 0.169f, 1.f));
+	Style.ForegroundColor = FSlateColor(FLinearColor::White);
+	Style.FocusedForegroundColor = FSlateColor(FLinearColor::White);
+	TextBox->SetWidgetStyle(Style);
 }
 
 UCheckBox* UDockPanelContentWidget::AddCheckRow(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label, bool bChecked, float BottomPadding)

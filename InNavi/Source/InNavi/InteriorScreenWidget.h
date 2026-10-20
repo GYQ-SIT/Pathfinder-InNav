@@ -20,6 +20,7 @@ class UInteriorFloorPlanWidget;
 class ULayerRowWidget;
 class UAudioFileRowWidget;
 class UAudioPanelWidget;
+class UMapPanelWidget;
 class UDebugPanelWidget;
 class UPanelWidget;
 class UScrollBox;
@@ -393,26 +394,6 @@ private:
 	void OnWindowMapCheckChanged(bool bIsChecked);
 	UFUNCTION()
 	void OnWindowDebugCheckChanged(bool bIsChecked);
-	// --- Map panel (Window > Map) --- Roads section only, ported from UEditScreenWidget's own "Map"
-	// panel - same PC functions (SetRoadCategoryVisible/SetAllRoadsVisible/
-	// SetRoadsAndPOIsWithinCampusOnly), no Buildings section (this screen has no exterior building-
-	// visibility concept).
-	UFUNCTION()
-	void OnRoadHideAllCheckChanged(bool bIsChecked);
-	UFUNCTION()
-	void OnRoadPrimaryCheckChanged(bool bIsChecked);
-	UFUNCTION()
-	void OnRoadSecondaryCheckChanged(bool bIsChecked);
-	UFUNCTION()
-	void OnRoadResidentialCheckChanged(bool bIsChecked);
-	UFUNCTION()
-	void OnRoadCyclewayCheckChanged(bool bIsChecked);
-	UFUNCTION()
-	void OnRoadFootwayCheckChanged(bool bIsChecked);
-	UFUNCTION()
-	void OnRoadOtherCheckChanged(bool bIsChecked);
-	UFUNCTION()
-	void OnRoadCampusOnlyCheckChanged(bool bIsChecked);
 
 	// Floor panel - lists every floor of the loaded building (top first, matching the mockup),
 	// highlighting the active one; clicking a row switches to it. "+Add floor"/"Delete floor" call
@@ -807,28 +788,14 @@ private:
 	UPROPERTY()
 	UAudioPanelWidget* AudioPanelWidget = nullptr;
 
-	// Map panel (road filter, Roads section only) - see EDockPanelId::Map's own comment.
+	// The Map dock panel (shared with the exterior screen, see MapPanelWidget.h): the Roads section only, since this
+	// screen has no outside buildings to filter. Starts shown.
 	UPROPERTY()
-	UBorder* MapPanel = nullptr;
+	UMapPanelWidget* MapPanelWidget = nullptr;
+
 	// The Debug dock panel (shared with the exterior screen, see DebugPanelWidget.h). Starts hidden.
 	UPROPERTY()
 	UDebugPanelWidget* DebugPanelWidget = nullptr;
-	UPROPERTY()
-	UCheckBox* RoadHideAllCheckbox = nullptr;
-	UPROPERTY()
-	UCheckBox* RoadPrimaryCheckbox = nullptr;
-	UPROPERTY()
-	UCheckBox* RoadSecondaryCheckbox = nullptr;
-	UPROPERTY()
-	UCheckBox* RoadResidentialCheckbox = nullptr;
-	UPROPERTY()
-	UCheckBox* RoadCyclewayCheckbox = nullptr;
-	UPROPERTY()
-	UCheckBox* RoadFootwayCheckbox = nullptr;
-	UPROPERTY()
-	UCheckBox* RoadOtherCheckbox = nullptr;
-	UPROPERTY()
-	UCheckBox* RoadCampusOnlyCheckbox = nullptr;
 
 	UPROPERTY()
 	UComboBoxString* BuildingSwitcherComboBox = nullptr;

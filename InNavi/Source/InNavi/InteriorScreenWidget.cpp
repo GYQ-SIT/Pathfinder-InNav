@@ -5,6 +5,7 @@
 
 #include "AudioFileRowWidget.h"
 #include "AudioPanelWidget.h"
+#include "MapPanelWidget.h"
 #include "DebugPanelWidget.h"
 #include "ConfirmDialogWidget.h"
 #include "EditScreenWidget.h"
@@ -1273,41 +1274,11 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		AudioPanelWidget->SetOwnerScreen(this);
 		DockHost->RegisterPanel(FName(GetDockPanelName(EDockPanelId::Audio)), FText::FromString(GetDockPanelName(EDockPanelId::Audio)), AudioPanelWidget);
 
-		// -- Map panel: road-filter panel ported from UEditScreenWidget's own "Map" panel, Roads
-		// section only (no Buildings section - this screen has no exterior building-visibility
-		// concept). Same PC functions as there (SetRoadCategoryVisible/SetAllRoadsVisible/
-		// SetRoadsAndPOIsWithinCampusOnly). Starts VISIBLE (unlike Audio/Navigation above).
-		MapPanel = ConstructDockPanel(EDockPanelId::Map, TEXT("Pnl_Map"), DockPanelColor, 14.f);
-
-		UVerticalBox* MapStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("MapStack"));
-		MapPanel->SetContent(MapStack);
-
-		UTextBlock* MapTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_MapTitle"));
-		MapTitle->SetText(FText::FromString(TEXT("Map")));
-		MapTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(MapTitle);
-		UVerticalBoxSlot* MapTitleSlot = MapStack->AddChildToVerticalBox(MapTitle);
-		MapTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-		DockPanelTitleTexts[(int32)EDockPanelId::Map] = MapTitle;
-
-		RoadHideAllCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadHideAll"), TEXT("Hide All"));
-		RoadHideAllCheckbox->SetIsChecked(false);
-		RoadHideAllCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadHideAllCheckChanged);
-		RoadPrimaryCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadPrimary"), TEXT("Primary"));
-		RoadPrimaryCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadPrimaryCheckChanged);
-		RoadSecondaryCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadSecondary"), TEXT("Secondary"));
-		RoadSecondaryCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadSecondaryCheckChanged);
-		RoadResidentialCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadResidential"), TEXT("Residential/Tertiary"));
-		RoadResidentialCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadResidentialCheckChanged);
-		RoadCyclewayCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadCycleway"), TEXT("Cycleway"));
-		RoadCyclewayCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadCyclewayCheckChanged);
-		RoadFootwayCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadFootway"), TEXT("Footway/Path"));
-		RoadFootwayCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadFootwayCheckChanged);
-		RoadOtherCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadOther"), TEXT("Other"));
-		RoadOtherCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadOtherCheckChanged);
-		RoadCampusOnlyCheckbox = AddDropdownCheckRow(MapStack, TEXT("Chk_RoadCampusOnly"), TEXT("Campus Only"));
-		RoadCampusOnlyCheckbox->SetIsChecked(true);
-		RoadCampusOnlyCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadCampusOnlyCheckChanged); RoadCampusOnlyCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoadCampusOnlyCheckChanged);
+		// -- Map panel: the shared one (MapPanelWidget.h), Roads section only - this screen has no outside buildings
+		// to filter. Starts shown.
+		MapPanelWidget = CreateWidget<UMapPanelWidget>(this, UMapPanelWidget::StaticClass());
+		MapPanelWidget->SetOwnerScreen(this);
+		DockHost->RegisterPanel(FName(GetDockPanelName(EDockPanelId::Map)), FText::FromString(GetDockPanelName(EDockPanelId::Map)), MapPanelWidget);
 
 		// -- Debug panel: the shared one (DebugPanelWidget.h). The screen supplies the lines that are its own.
 		DebugPanelWidget = CreateWidget<UDebugPanelWidget>(this, UDebugPanelWidget::StaticClass());
@@ -1732,7 +1703,36 @@ UWidget* UInteriorScreenWidget::FindScreenWidget(FName Name) const
 	{
 		return Found;
 	}
-	return WidgetTree ? FindObject<UWidget>(WidgetTree, *Name.ToString()) : nullptr;
+	if (WidgetTree)
+	{
+		if (UWidget* Found = FindObject<UWidget>(WidgetTree, *Name.ToString()))
+		{
+			return Found;
+		}
+	}
+	// Shared panels keep their controls in their own widget trees.
+	if (AudioPanelWidget)
+	{
+		if (UWidget* Found = AudioPanelWidget->FindContentWidget(Name))
+		{
+			return Found;
+		}
+	}
+	if (MapPanelWidget)
+	{
+		if (UWidget* Found = MapPanelWidget->FindContentWidget(Name))
+		{
+			return Found;
+		}
+	}
+	if (DebugPanelWidget)
+	{
+		if (UWidget* Found = DebugPanelWidget->FindContentWidget(Name))
+		{
+			return Found;
+		}
+	}
+	return nullptr;
 }
 
 FVector2D UInteriorScreenWidget::GetCanvasSize() const
@@ -3600,79 +3600,6 @@ void UInteriorScreenWidget::OnWindowDebugCheckChanged(bool bIsChecked)
 {
 	SetDockPanelUserHidden(EDockPanelId::Debug, !bIsChecked);
 }
-void UInteriorScreenWidget::OnRoadHideAllCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetAllRoadsVisible(!bIsChecked);
-	}
-	// Visually sync the 6 category checkboxes to match (checked = shown) - SetIsChecked doesn't
-	// re-fire OnCheckStateChanged, same pattern as OnAudioMuteAllCheckChanged.
-	const bool bCategoriesChecked = !bIsChecked;
-	if (RoadPrimaryCheckbox) RoadPrimaryCheckbox->SetIsChecked(bCategoriesChecked);
-	if (RoadSecondaryCheckbox) RoadSecondaryCheckbox->SetIsChecked(bCategoriesChecked);
-	if (RoadResidentialCheckbox) RoadResidentialCheckbox->SetIsChecked(bCategoriesChecked);
-	if (RoadCyclewayCheckbox) RoadCyclewayCheckbox->SetIsChecked(bCategoriesChecked);
-	if (RoadFootwayCheckbox) RoadFootwayCheckbox->SetIsChecked(bCategoriesChecked);
-	if (RoadOtherCheckbox) RoadOtherCheckbox->SetIsChecked(bCategoriesChecked);
-}
-
-void UInteriorScreenWidget::OnRoadPrimaryCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetRoadCategoryVisible(ERoadCategory::Primary, bIsChecked);
-	}
-}
-
-void UInteriorScreenWidget::OnRoadSecondaryCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetRoadCategoryVisible(ERoadCategory::Secondary, bIsChecked);
-	}
-}
-
-void UInteriorScreenWidget::OnRoadResidentialCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetRoadCategoryVisible(ERoadCategory::Residential, bIsChecked);
-	}
-}
-
-void UInteriorScreenWidget::OnRoadCyclewayCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetRoadCategoryVisible(ERoadCategory::Cycleway, bIsChecked);
-	}
-}
-
-void UInteriorScreenWidget::OnRoadFootwayCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetRoadCategoryVisible(ERoadCategory::Footway, bIsChecked);
-	}
-}
-
-void UInteriorScreenWidget::OnRoadOtherCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetRoadCategoryVisible(ERoadCategory::Other, bIsChecked);
-	}
-}
-
-void UInteriorScreenWidget::OnRoadCampusOnlyCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetRoadsAndPOIsWithinCampusOnly(bIsChecked);
-	}
-}
-
 void UInteriorScreenWidget::SetDockPanelUserHidden(EDockPanelId Id, bool bHidden)
 {
 	if (!DockHost)
