@@ -544,14 +544,20 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		CountSize->SetWidthOverride(EditAudioPanelWidth);
 		CountSize->SetContent(BuildingFilterResultsText);
 		RoadFilterStack->AddChildToVerticalBox(CountSize);
-		UButton* ResetFilters = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_ResetBuildingFilters"));
+		// Same recipe as the other buttons in the panels: a wrapping label, and a width that follows the panel
+		// (see SyncMapPanelWidth) so the text wraps inside the button instead of running out of it.
+		ResetBuildingFiltersButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_ResetBuildingFilters"));
 		UTextBlock* ResetLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 		ResetLabel->SetText(FText::FromString(TEXT("Reset Building Filters")));
 		ResetLabel->SetJustification(ETextJustify::Center);
+		ResetLabel->SetAutoWrapText(true);
 		ApplyStandardFont(ResetLabel);
-		ResetFilters->SetContent(ResetLabel);
-		ResetFilters->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnResetBuildingFiltersClicked);
-		RoadFilterStack->AddChildToVerticalBox(ResetFilters)->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
+		ResetBuildingFiltersButton->SetContent(ResetLabel);
+		ResetBuildingFiltersButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnResetBuildingFiltersClicked);
+		USizeBox* ResetFiltersSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		ResetFiltersSize->SetWidthOverride(EditAudioPanelWidth);
+		ResetFiltersSize->SetContent(ResetBuildingFiltersButton);
+		RoadFilterStack->AddChildToVerticalBox(ResetFiltersSize)->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
 
 		// --- Debug panel (Window > Debug): live info plus the last failed action. Starts hidden.
 		DebugPanel = ConstructDockPanel(ExteriorDock::Debug, TEXT("Pnl_Debug"));
@@ -1557,7 +1563,7 @@ void UEditScreenWidget::SyncMapPanelWidth()
 		return;
 	}
 	MapContentWidth = Width;
-	for (UWidget* Control : { (UWidget*)BuildingSearchBox, (UWidget*)BuildingFloorFilter, (UWidget*)FilteredBuildingComboBox, (UWidget*)BuildingFilterResultsText })
+	for (UWidget* Control : { (UWidget*)BuildingSearchBox, (UWidget*)BuildingFloorFilter, (UWidget*)FilteredBuildingComboBox, (UWidget*)BuildingFilterResultsText, (UWidget*)ResetBuildingFiltersButton })
 	{
 		if (Control)
 		{

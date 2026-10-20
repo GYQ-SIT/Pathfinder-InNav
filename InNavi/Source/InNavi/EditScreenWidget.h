@@ -406,6 +406,7 @@ private:
 	UPROPERTY() UComboBoxString* BuildingFloorFilter = nullptr;
 	UPROPERTY() UComboBoxString* FilteredBuildingComboBox = nullptr;
 	UPROPERTY() UTextBlock* BuildingFilterResultsText = nullptr;
+	UPROPERTY() UButton* ResetBuildingFiltersButton = nullptr;
 	TMap<FString, FString> CachedBuildingOptions;
 	bool bUpdatingBuildingFilters = false;
 	uint64 DisplayedBuildingResultsRevision = MAX_uint64;
