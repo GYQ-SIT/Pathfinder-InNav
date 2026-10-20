@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "NavigationSearchUtils.h"
+#include "UiTestFixture.h"
 #include "NavigationPanelWidget.h"
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
@@ -24,44 +25,6 @@
 #include "Misc/Paths.h"
 #include "UObject/UnrealType.h"
 #include "UObject/Script.h"
-
-namespace
-{
-	struct FNavigationSearchFixture
-	{
-		UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
-		ABuildingGenerator* Generator = World->SpawnActor<ABuildingGenerator>();
-		AInteriorGenerator* Interior = World->SpawnActor<AInteriorGenerator>();
-		UNavigationPanelWidget* Nav = NewObject<UNavigationPanelWidget>();
-		FNavigationSearchFixture()
-		{
-			GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
-			Interior->DispatchBeginPlay();
-			Generator->LoadBuildingsFromFile(FPaths::ProjectDir() / TEXT("Data/buildings.json"));
-			Interior->LoadInteriorForBuilding(TEXT("E2"));
-			Nav->SetNavigationContext(Generator, Interior);
-		}
-		~FNavigationSearchFixture()
-		{
-			World->DestroyWorld(false);
-			GEngine->DestroyWorldContext(World);
-		}
-		ANavPlayerController* MakeController()
-		{
-			ANavPlayerController* Controller = World->SpawnActor<ANavPlayerController>();
-			ULocalPlayer* Player = NewObject<ULocalPlayer>(GEngine);
-			Controller->Player = Player;
-			Player->PlayerController = Controller;
-			Controller->SetAsLocalPlayerController();
-			World->AddController(Controller);
-			Controller->SetAllUiSoundsEnabled(false);
-			FindFProperty<FObjectPropertyBase>(Controller->GetClass(), TEXT("Generator"))->SetObjectPropertyValue_InContainer(Controller, Generator);
-			FindFProperty<FObjectPropertyBase>(Controller->GetClass(), TEXT("InteriorGen"))->SetObjectPropertyValue_InContainer(Controller, Interior);
-			FindFProperty<FObjectPropertyBase>(Controller->GetClass(), TEXT("NavigationPanel"))->SetObjectPropertyValue_InContainer(Controller, Nav);
-			return Controller;
-		}
-	};
-}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationSearchTextTest, "InNavi.Navigation.Search.TextMatching",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

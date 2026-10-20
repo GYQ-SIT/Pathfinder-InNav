@@ -19,6 +19,7 @@ class UImage;
 class UInteriorFloorPlanWidget;
 class ULayerRowWidget;
 class UAudioFileRowWidget;
+class UAudioPanelWidget;
 class UPanelWidget;
 class UScrollBox;
 class USizeBox;
@@ -41,6 +42,7 @@ public:
 
 	// The dock system hosting the eight panels (null until the widget tree is built).
 	class UDockHostWidget* GetDockHost() const { return DockHost; }
+	UAudioPanelWidget* GetAudioPanelForTests() const { return AudioPanelWidget; }
 
 	// Finds a widget of this screen by name. GetWidgetFromName cannot see the dock panels' contents - they are
 	// registered with DockHost and are not parented in the widget tree - so this also looks at everything the
@@ -490,43 +492,6 @@ private:
 
 	void RefreshNavigationPanelDisplay();
 
-	// Audio panel - reads InNavi/Data/Audio/ (see ANavPlayerController::GetAvailableAudioFiles) and
-	// lists every file as its own UAudioFileRowWidget row; clicking a row plays that file
-	// (PlayAudioFile) and Stop All stops every currently-playing one at once (StopAllAudio). Rebuilt
-	// from scratch on every refresh (no per-row width tracking like Layers/Floor) since the file list
-	// is expected to be small and rarely changes mid-session.
-	void RefreshAudioList();
-
-	UFUNCTION()
-	void OnAudioStopAllClicked();
-
-	UFUNCTION()
-	void HandleAudioRowPlayClicked(FString FileName);
-
-	// AudioClickSoundCheckbox's own handler - forwards to ANavPlayerController::
-	// SetButtonClickSoundEnabled.
-	UFUNCTION()
-	void OnAudioClickSoundCheckChanged(bool bIsChecked);
-
-	// AudioSelectSoundCheckbox/AudioQuitConfirmSoundCheckbox's own handlers - same idea as
-	// OnAudioClickSoundCheckChanged, one per sound.
-	UFUNCTION()
-	void OnAudioSelectSoundCheckChanged(bool bIsChecked);
-
-	UFUNCTION()
-	void OnAudioQuitConfirmSoundCheckChanged(bool bIsChecked);
-
-	// AudioMuteAllCheckbox's own handler - checked means everything's muted (opposite sense from the
-	// three "X Sound" checkboxes above, which are checked when their sound is ENABLED) - forwards to
-	// ANavPlayerController::SetAllUiSoundsEnabled(!bIsChecked) and syncs the three individual
-	// checkboxes to match (all unchecked while muted, all checked once un-muted).
-	UFUNCTION()
-	void OnAudioMuteAllCheckChanged(bool bIsChecked);
-
-	// AudioVolumeSlider's own handler - forwards to ANavPlayerController::SetMasterVolume.
-	UFUNCTION()
-	void OnAudioVolumeChanged(float NewValue);
-
 	// Bound alongside every button's own OnClicked across this whole screen (see each button's
 	// construction site in RebuildWidget()/NativeConstruct()) so clicking anything plays the same
 	// click sound - forwards to ANavPlayerController::PlayButtonClickSound, which owns the actual
@@ -841,9 +806,10 @@ private:
 	UPROPERTY()
 	UTextBlock* NavRouteDetailsText = nullptr;
 
-	// Audio panel - see the comment above RefreshAudioList. Starts hidden (see InteriorDock::BuildDefaultLayout).
+	// The Audio dock panel (shared with the exterior screen, see AudioPanelWidget.h). Starts hidden (see
+	// InteriorDock::BuildDefaultLayout).
 	UPROPERTY()
-	UBorder* AudioPanel = nullptr;
+	UAudioPanelWidget* AudioPanelWidget = nullptr;
 
 	// Map panel (road filter, Roads section only) - see EDockPanelId::Map's own comment.
 	UPROPERTY()
@@ -877,35 +843,6 @@ private:
 	UCheckBox* RoadOtherCheckbox = nullptr;
 	UPROPERTY()
 	UCheckBox* RoadCampusOnlyCheckbox = nullptr;
-
-	UPROPERTY()
-	UButton* AudioStopAllButton = nullptr;
-
-	// Toggles ANavPlayerController::SetButtonClickSoundEnabled - see OnAudioClickSoundCheckChanged.
-	// Checked by default, matching bButtonClickSoundEnabled's own default.
-	UPROPERTY()
-	UCheckBox* AudioClickSoundCheckbox = nullptr;
-
-	// Same as AudioClickSoundCheckbox, one per remaining UI sound - see OnAudioSelectSoundCheckChanged/
-	// OnAudioQuitConfirmSoundCheckChanged.
-	UPROPERTY()
-	UCheckBox* AudioSelectSoundCheckbox = nullptr;
-
-	UPROPERTY()
-	UCheckBox* AudioQuitConfirmSoundCheckbox = nullptr;
-
-	// See OnAudioMuteAllCheckChanged - unchecked by default (nothing's muted at first).
-	UPROPERTY()
-	UCheckBox* AudioMuteAllCheckbox = nullptr;
-
-	// See OnAudioVolumeChanged - ANavPlayerController::MasterVolume as a 0-1 slider.
-	UPROPERTY()
-	USlider* AudioVolumeSlider = nullptr;
-
-	// One UAudioFileRowWidget child per file under Data/Audio/, rebuilt by RefreshAudioList. Scrollable
-	// (same reasoning as LayersListBox) since the folder could hold more files than fit the panel.
-	UPROPERTY()
-	UScrollBox* AudioFileListBox = nullptr;
 
 	UPROPERTY()
 	UComboBoxString* BuildingSwitcherComboBox = nullptr;

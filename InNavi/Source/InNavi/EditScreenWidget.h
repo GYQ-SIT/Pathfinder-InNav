@@ -9,6 +9,7 @@
 
 class UBorder;
 class UButton;
+class UAudioPanelWidget;
 class UCheckBox;
 class UDockHostWidget;
 class UComboBoxString;
@@ -267,40 +268,6 @@ private:
 	bool GetReliableCanvasSize(FVector2D& OutSize) const;
 	FVector2D GetCanvasSize() const;
 
-	// --- Audio panel (Window > Audio) ---
-	// Same Play/Stop All/mute-click-sound/file-list layout as UInteriorScreenWidget's own Audio
-	// panel (reuses the same UAudioFileRowWidget class for rows, and the same PC-level
-	// GetAvailableAudioFiles/PlayAudioFile/StopAllAudio/IsButtonClickSoundEnabled functions - none of
-	// that is tied to the interior editor specifically). Starts hidden, same as the interior editor's own
-	// Audio panel.
-	void RefreshAudioList();
-
-	UFUNCTION()
-	void OnAudioStopAllClicked();
-
-	UFUNCTION()
-	void HandleAudioRowPlayClicked(FString FileName);
-
-	UFUNCTION()
-	void OnAudioClickSoundCheckChanged(bool bIsChecked);
-
-	// Same idea as OnAudioClickSoundCheckChanged, one per remaining UI sound.
-	UFUNCTION()
-	void OnAudioSelectSoundCheckChanged(bool bIsChecked);
-
-	UFUNCTION()
-	void OnAudioQuitConfirmSoundCheckChanged(bool bIsChecked);
-
-	// Checked means everything's muted (opposite sense from the three "X Sound" checkboxes above) -
-	// forwards to ANavPlayerController::SetAllUiSoundsEnabled(!bIsChecked) and syncs the three
-	// individual checkboxes to match.
-	UFUNCTION()
-	void OnAudioMuteAllCheckChanged(bool bIsChecked);
-
-	// Forwards to ANavPlayerController::SetMasterVolume.
-	UFUNCTION()
-	void OnAudioVolumeChanged(float NewValue);
-
 	UPROPERTY()
 	UButton* BackButton = nullptr;
 
@@ -363,9 +330,11 @@ private:
 	// while the widget is being torn down (its geometry is no longer reliable by then).
 	FVector2D LastKnownCanvasSize = FVector2D::ZeroVector;
 
-	// Content roots of the three dock panels (the UBorders registered with DockHost).
+	// The Audio dock panel (shared with the interior editor, see AudioPanelWidget.h). Starts hidden.
 	UPROPERTY()
-	UBorder* AudioPanel = nullptr;
+	UAudioPanelWidget* AudioPanelWidget = nullptr;
+
+	// Content roots of the other dock panels (the UBorders registered with DockHost).
 
 	// Map panel - 6 road-category checkboxes + region filter + 2 building filters (see
 	// OnRoadHideAllCheckChanged and friends).
@@ -422,31 +391,6 @@ private:
 	// Set by OnFileLoadClicked, read back by HandleFileLoadSave/Discard once the user picks a
 	// choice - same role as UInteriorScreenWidget's own PendingLoadFilePath.
 	FString PendingLoadFilePath;
-
-	UPROPERTY()
-	UButton* AudioStopAllButton = nullptr;
-
-	UPROPERTY()
-	UCheckBox* AudioClickSoundCheckbox = nullptr;
-
-	UPROPERTY()
-	UCheckBox* AudioSelectSoundCheckbox = nullptr;
-
-	UPROPERTY()
-	UCheckBox* AudioQuitConfirmSoundCheckbox = nullptr;
-
-	UPROPERTY()
-	UCheckBox* AudioMuteAllCheckbox = nullptr;
-
-	UPROPERTY()
-	USlider* AudioVolumeSlider = nullptr;
-
-	UPROPERTY()
-	UScrollBox* AudioFileListBox = nullptr;
-
-	// Width the Audio panel's controls (Stop All, file rows, volume slider) are currently sized to - follows
-	// the dock group's real width, see SyncAudioPanelWidth.
-	float AudioContentWidth = 220.f;
 
 	// Debug panel: live info text plus a "Last Error" line coloured by severity.
 	UPROPERTY()

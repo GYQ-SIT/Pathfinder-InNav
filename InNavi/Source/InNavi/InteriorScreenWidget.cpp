@@ -4,6 +4,7 @@
 #include "NavigationSearchUtils.h"
 
 #include "AudioFileRowWidget.h"
+#include "AudioPanelWidget.h"
 #include "ConfirmDialogWidget.h"
 #include "EditScreenWidget.h"
 #include "FloorListEntryWidget.h"
@@ -1264,108 +1265,12 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		ApplyStandardTextWrap(NavRouteDetailsText);
 		NavStack->AddChildToVerticalBox(NavRouteDetailsText);
 
-		// -- Audio panel: reads InNavi/Data/Audio/ and lists every file as its own row with a Play
-		// button (see RefreshAudioList); Stop All halts everything at once
-		// (ANavPlayerController::StopAllAudio). Starts hidden (see InteriorDock::BuildDefaultLayout) -
-		// shown via the Window menu like any other hidden panel.
-		AudioPanel = ConstructDockPanel(EDockPanelId::Audio, TEXT("Pnl_Audio"), DockPanelColor, 14.f);
-
-		UVerticalBox* AudioStack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("AudioStack"));
-		AudioPanel->SetContent(AudioStack);
-
-		UTextBlock* AudioTitle = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_AudioTitle"));
-		AudioTitle->SetText(FText::FromString(TEXT("Audio")));
-		AudioTitle->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(AudioTitle);
-		UVerticalBoxSlot* AudioTitleSlot = AudioStack->AddChildToVerticalBox(AudioTitle);
-		AudioTitleSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-		DockPanelTitleTexts[(int32)EDockPanelId::Audio] = AudioTitle;
-
-		AudioStopAllButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_AudioStopAll"));
-		AudioStopAllButton->SetBackgroundColor(FLinearColor(0.75f, 0.2f, 0.2f, 1.f));
-		AudioStopAllButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioStopAllClicked);
-		AudioStopAllButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
-		UTextBlock* AudioStopAllText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_AudioStopAll"));
-		AudioStopAllText->SetText(FText::FromString(TEXT("Stop All")));
-		AudioStopAllText->SetJustification(ETextJustify::Center);
-		AudioStopAllText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardTextWrap(AudioStopAllText);
-		USizeBox* AudioStopAllSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Size_AudioStopAll"));
-		AudioStopAllSizeBox->SetWidthOverride(StandardButtonWidth);
-		AudioStopAllSizeBox->SetMinDesiredHeight(StandardButtonHeight);
-		AudioStopAllSizeBox->SetContent(AudioStopAllText);
-		AudioStopAllButton->SetContent(AudioStopAllSizeBox);
-		UVerticalBoxSlot* AudioStopAllSlot = AudioStack->AddChildToVerticalBox(AudioStopAllButton);
-		AudioStopAllSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-
-		// Lets the user mute each UI sound at once (see ANavPlayerController::SetButtonClickSoundEnabled/
-		// SetBuildingSelectSoundEnabled/SetQuitConfirmSoundEnabled) without touching the Audio files
-		// below - own rows, not UAudioFileRowWidgets, since these are settings rather than playable
-		// files.
-		auto AddAudioCheckRow = [this, AudioStack](const TCHAR* Name, const TCHAR* Label, bool bDefaultChecked) -> UCheckBox*
-		{
-			UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-			UCheckBox* CheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), FName(Name));
-			CheckBox->SetIsChecked(bDefaultChecked);
-			UHorizontalBoxSlot* CheckSlot = Row->AddChildToHorizontalBox(CheckBox);
-			CheckSlot->SetVerticalAlignment(VAlign_Center);
-			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-			Text->SetText(FText::FromString(FString(Label)));
-			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-			ApplyStandardFont(Text);
-			UHorizontalBoxSlot* TextSlot = Row->AddChildToHorizontalBox(Text);
-			TextSlot->SetPadding(FMargin(4.f, 0.f, 0.f, 0.f));
-			TextSlot->SetVerticalAlignment(VAlign_Center);
-			UVerticalBoxSlot* RowSlot = AudioStack->AddChildToVerticalBox(Row);
-			RowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-			return CheckBox;
-		};
-
-		AudioClickSoundCheckbox = AddAudioCheckRow(TEXT("Chk_AudioClickSound"), TEXT("Button Click Sound"), true);
-		AudioClickSoundCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioClickSoundCheckChanged);
-
-		AudioSelectSoundCheckbox = AddAudioCheckRow(TEXT("Chk_AudioSelectSound"), TEXT("Building Select Sound"), true);
-		AudioSelectSoundCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioSelectSoundCheckChanged);
-
-		AudioQuitConfirmSoundCheckbox = AddAudioCheckRow(TEXT("Chk_AudioQuitConfirmSound"), TEXT("Confirm Dialog Sound"), true);
-		AudioQuitConfirmSoundCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioQuitConfirmSoundCheckChanged);
-
-		// Checked = everything muted (opposite sense from the three rows above) - unchecked by default,
-		// matching nothing being muted at first.
-		AudioMuteAllCheckbox = AddAudioCheckRow(TEXT("Chk_AudioMuteAll"), TEXT("Mute All"), false);
-		AudioMuteAllCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioMuteAllCheckChanged);
-
-		// Volume slider - ANavPlayerController::MasterVolume, applied to every sound this class plays.
-		UHorizontalBox* AudioVolumeRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("AudioVolumeRow"));
-		UTextBlock* AudioVolumeLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_AudioVolume"));
-		AudioVolumeLabel->SetText(FText::FromString(TEXT("Volume")));
-		AudioVolumeLabel->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		ApplyStandardFont(AudioVolumeLabel);
-		UHorizontalBoxSlot* AudioVolumeLabelSlot = AudioVolumeRow->AddChildToHorizontalBox(AudioVolumeLabel);
-		AudioVolumeLabelSlot->SetVerticalAlignment(VAlign_Center);
-		AudioVolumeLabelSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
-
-		AudioVolumeSlider = WidgetTree->ConstructWidget<USlider>(USlider::StaticClass(), TEXT("Slider_AudioVolume"));
-		AudioVolumeSlider->SetMinValue(0.f);
-		AudioVolumeSlider->SetMaxValue(1.f);
-		AudioVolumeSlider->SetValue(1.f);
-		AudioVolumeSlider->OnValueChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioVolumeChanged);
-		USizeBox* AudioVolumeSliderSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		AudioVolumeSliderSizeBox->SetWidthOverride(StandardButtonWidth - 60.f);
-		AudioVolumeSliderSizeBox->SetContent(AudioVolumeSlider);
-		UHorizontalBoxSlot* AudioVolumeSliderSlot = AudioVolumeRow->AddChildToHorizontalBox(AudioVolumeSliderSizeBox);
-		AudioVolumeSliderSlot->SetVerticalAlignment(VAlign_Center);
-		UVerticalBoxSlot* AudioVolumeRowSlot = AudioStack->AddChildToVerticalBox(AudioVolumeRow);
-		AudioVolumeRowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-
-		// Rows themselves are built by RefreshAudioList (one UAudioFileRowWidget per file under
-		// Data/Audio/), same reasoning as FloorListBox/LayersListBox not being laid out here.
-		AudioFileListBox = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("AudioFileListBox"));
-		USizeBox* AudioFileListSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("AudioFileListSizeBox"));
-		AudioFileListSizeBox->SetHeightOverride(LayersListDefaultHeight);
-		AudioFileListSizeBox->SetWidthOverride(StandardButtonWidth);
-		AudioFileListSizeBox->SetContent(AudioFileListBox);
-		AudioStack->AddChildToVerticalBox(AudioFileListSizeBox);
+		// -- Audio panel: the shared one (AudioPanelWidget.h) - Stop All, the sound settings, volume and the file
+		// list. Starts hidden (see InteriorDock::BuildDefaultLayout); shown via the Window menu like any other
+		// hidden panel. It is registered with the dock host and not parented here.
+		AudioPanelWidget = CreateWidget<UAudioPanelWidget>(this, UAudioPanelWidget::StaticClass());
+		AudioPanelWidget->SetOwnerScreen(this);
+		DockHost->RegisterPanel(FName(GetDockPanelName(EDockPanelId::Audio)), FText::FromString(GetDockPanelName(EDockPanelId::Audio)), AudioPanelWidget);
 
 		// -- Map panel: road-filter panel ported from UEditScreenWidget's own "Map" panel, Roads
 		// section only (no Buildings section - this screen has no exterior building-visibility
@@ -1537,29 +1442,6 @@ void UInteriorScreenWidget::NativeConstruct()
 			Nav->OnStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavigationStateChanged);
 		}
 
-		// bButtonClickSoundEnabled (and the two flags below) live on the PC, not this widget, so they
-		// survive this screen being torn down and rebuilt (e.g. Back to the start screen and in again) -
-		// these checkboxes were hardcoded to SetIsChecked(true/false) at construction (RebuildWidget has
-		// no reliable PC access yet), which could show stale state even after the user had changed the
-		// real setting. Sync them to the actual state now that PC is available. Mute All has no backing
-		// flag of its own (see SetAllUiSoundsEnabled's own comment) so there's nothing to sync it to
-		// here - it always starts unchecked.
-		if (AudioClickSoundCheckbox)
-		{
-			AudioClickSoundCheckbox->SetIsChecked(PC->IsButtonClickSoundEnabled());
-		}
-		if (AudioSelectSoundCheckbox)
-		{
-			AudioSelectSoundCheckbox->SetIsChecked(PC->IsBuildingSelectSoundEnabled());
-		}
-		if (AudioQuitConfirmSoundCheckbox)
-		{
-			AudioQuitConfirmSoundCheckbox->SetIsChecked(PC->IsQuitConfirmSoundEnabled());
-		}
-		if (AudioVolumeSlider)
-		{
-			AudioVolumeSlider->SetValue(PC->GetMasterVolume());
-		}
 	}
 
 	RefreshBuildingSwitcher();
@@ -1567,7 +1449,10 @@ void UInteriorScreenWidget::NativeConstruct()
 	RefreshLayersList();
 	RefreshNavigationPanelDisplay();
 	RefreshNavRoomDropdowns();
-	RefreshAudioList();
+	if (AudioPanelWidget)
+	{
+		AudioPanelWidget->Refresh();
+	}
 	RefreshModeButtonHighlights();
 	// Syncs Properties' placeholder title/visibility against PC's actual current selection state
 	// (normally nothing yet, but defensive either way) before panels get positioned below.
@@ -2211,20 +2096,11 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 		}
 	}
 
-	// Audio: Stop All tracks the panel width the same way as everything above. The file list is
-	// simpler than Floor/Layers' own (no per-row width tracking) - RefreshAudioList just rebuilds
-	// every row from scratch with the current width baked in, which is cheap enough for a list this
-	// small (a handful of audio files, not hundreds of rooms).
-	const float AudioButtonWidth = ComputePanelButtonWidth(EDockPanelId::Audio);
-	ResizeButton(AudioStopAllButton, AudioButtonWidth);
-	if (AudioFileListBox)
+	// Audio: the shared panel sizes its own controls from the width it is given.
+	if (AudioPanelWidget)
 	{
-		if (USizeBox* SizeBox = Cast<USizeBox>(AudioFileListBox->GetParent()))
-		{
-			SizeBox->SetWidthOverride(AudioButtonWidth);
-		}
+		AudioPanelWidget->SetContentWidth(ComputePanelButtonWidth(EDockPanelId::Audio));
 	}
-	RefreshAudioList();
 }
 
 void UInteriorScreenWidget::RefreshModeButtonHighlights()
@@ -3046,107 +2922,6 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 	}
 }
 
-void UInteriorScreenWidget::RefreshAudioList()
-{
-	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
-	if (!PC || !AudioFileListBox)
-	{
-		return;
-	}
-
-	AudioFileListBox->ClearChildren();
-
-	const float RowWidth = ComputePanelButtonWidth(EDockPanelId::Audio);
-	for (const FString& FileName : PC->GetAvailableAudioFiles())
-	{
-		UAudioFileRowWidget* Row = CreateWidget<UAudioFileRowWidget>(PC, UAudioFileRowWidget::StaticClass());
-		if (!Row)
-		{
-			continue;
-		}
-		Row->SetFileName(FileName, PC->IsAudioFilePlaying(FileName));
-		Row->SetWidth(RowWidth);
-		Row->OnPlayClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleAudioRowPlayClicked);
-
-		if (UScrollBoxSlot* RowSlot = Cast<UScrollBoxSlot>(AudioFileListBox->AddChild(Row)))
-		{
-			RowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
-		}
-	}
-}
-
-void UInteriorScreenWidget::OnAudioStopAllClicked()
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->StopAllAudio();
-		RefreshAudioList();
-	}
-}
-
-void UInteriorScreenWidget::OnAudioClickSoundCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetButtonClickSoundEnabled(bIsChecked);
-	}
-}
-
-void UInteriorScreenWidget::OnAudioSelectSoundCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetBuildingSelectSoundEnabled(bIsChecked);
-	}
-}
-
-void UInteriorScreenWidget::OnAudioQuitConfirmSoundCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetQuitConfirmSoundEnabled(bIsChecked);
-	}
-}
-
-void UInteriorScreenWidget::OnAudioMuteAllCheckChanged(bool bIsChecked)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		// bIsChecked means "muted" here, opposite of the three individual "X Sound" checkboxes (which
-		// are checked when ENABLED) - so the three get the inverse, and get visually synced to match.
-		PC->SetAllUiSoundsEnabled(!bIsChecked);
-	}
-	if (AudioClickSoundCheckbox)
-	{
-		AudioClickSoundCheckbox->SetIsChecked(!bIsChecked);
-	}
-	if (AudioSelectSoundCheckbox)
-	{
-		AudioSelectSoundCheckbox->SetIsChecked(!bIsChecked);
-	}
-	if (AudioQuitConfirmSoundCheckbox)
-	{
-		AudioQuitConfirmSoundCheckbox->SetIsChecked(!bIsChecked);
-	}
-}
-
-void UInteriorScreenWidget::OnAudioVolumeChanged(float NewValue)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->SetMasterVolume(NewValue);
-	}
-}
-
-void UInteriorScreenWidget::HandleAudioRowPlayClicked(FString FileName)
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->PlayAudioFile(FileName);
-		RefreshAudioList();
-	}
-}
-
 void UInteriorScreenWidget::PlayButtonClickSound()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
@@ -3879,7 +3654,10 @@ void UInteriorScreenWidget::OnWindowAudioCheckChanged(bool bIsChecked)
 		// The file list can go stale while the panel is hidden (a file dropped into Data/Audio/, or
 		// something finishing/starting playback) - refresh right as it becomes visible instead of
 		// waiting for some other trigger.
-		RefreshAudioList();
+		if (AudioPanelWidget)
+		{
+			AudioPanelWidget->RefreshAudioList();
+		}
 	}
 }
 
