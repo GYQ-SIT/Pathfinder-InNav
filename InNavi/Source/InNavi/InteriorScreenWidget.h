@@ -993,7 +993,7 @@ private:
 	// sits flush under both, same as every panel's left/right edges already sit flush against the
 	// screen's own edges.
 	static constexpr float MenuBarHeight = 40.f;
-	static constexpr float BuildingSwitcherBarHeight = 52.f;
+	static constexpr float BuildingSwitcherBarHeight = 56.f;
 	static constexpr float SidebarTopMargin = MenuBarHeight + BuildingSwitcherBarHeight;
 	static constexpr float SidebarBottomMargin = 10.f;
 	// LayersListBox's own wrapping SizeBox is given a fixed height at construction (see RebuildWidget

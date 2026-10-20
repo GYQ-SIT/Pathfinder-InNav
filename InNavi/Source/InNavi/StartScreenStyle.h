@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/WidgetTree.h"
+#include "Components/ComboBoxString.h"
 #include "Components/TextBlock.h"
 #include "Styling/SlateBrush.h"
 #include "Styling/SlateTypes.h"
@@ -78,6 +79,34 @@ namespace StartStyle
 	inline FButtonStyle SecondaryButton()
 	{
 		return Button(Rgb(27, 41, 63), Rgb(38, 56, 84), Rgb(22, 34, 54), Rgb(61, 78, 104));
+	}
+
+	// Gives a drop-down the page's dark look: a dark button that keeps the engine's arrow (in a light colour), and a dark list
+	// whose rows light up blue. Its items are made by the owner (their text is white), so the list must not be white.
+	inline void DarkCombo(UComboBoxString* Combo)
+	{
+		FComboBoxStyle Style = Combo->GetWidgetStyle();
+		Style.ComboButtonStyle.ButtonStyle = Button(Rgb(15, 26, 42), Rgb(24, 40, 62), Rgb(12, 21, 34), Rgb(54, 70, 92), 6.f);
+		Style.ComboButtonStyle.DownArrowImage.TintColor = FSlateColor(Rgb(170, 190, 214));
+		Style.ComboButtonStyle.MenuBorderBrush = Rounded(Rgb(15, 26, 42), Rgb(54, 70, 92), 6.f);
+		Style.ComboButtonStyle.MenuBorderPadding = FMargin(4.f);
+		Combo->SetWidgetStyle(Style);
+
+		FTableRowStyle Row = Combo->GetItemStyle();
+		const FSlateBrush Dark = Rounded(Rgb(15, 26, 42), FLinearColor::Transparent, 4.f, 0.f);
+		const FSlateBrush Hover = Rounded(Rgb(31, 51, 80), FLinearColor::Transparent, 4.f, 0.f);
+		const FSlateBrush Blue = Rounded(Rgb(21, 110, 255), FLinearColor::Transparent, 4.f, 0.f);
+		Row.EvenRowBackgroundBrush = Dark;
+		Row.OddRowBackgroundBrush = Dark;
+		Row.EvenRowBackgroundHoveredBrush = Hover;
+		Row.OddRowBackgroundHoveredBrush = Hover;
+		Row.ActiveBrush = Blue;
+		Row.ActiveHoveredBrush = Blue;
+		Row.InactiveBrush = Blue;
+		Row.InactiveHoveredBrush = Blue;
+		Row.TextColor = FSlateColor(Rgb(226, 238, 252));
+		Row.SelectedTextColor = FSlateColor(FLinearColor::White);
+		Combo->SetItemStyle(Row);
 	}
 
 	inline FEditableTextBoxStyle Field(float PixelSize)

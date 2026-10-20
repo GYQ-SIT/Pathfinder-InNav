@@ -150,16 +150,17 @@ Pinned across the very top of the interior editor screen.
 
 ## Building switcher bar
 
-The bar directly under the menu bar. A dropdown lists every building in the currently
-loaded project — pick one to jump straight into its interior without going back to the
-exterior first (switching buildings while in 3D preview exits back to 2D first). The
-pencil icon next to it lets you rename the currently-loaded building in place.
+The bar directly under the menu bar, in the style of the design team's page, in one row with everything side by side.
+A small building mark and a dropdown that lists every building in the currently loaded project - pick one to jump
+straight into its interior without going back to the exterior first (switching buildings while in 3D preview exits back
+to 2D first) - and the pencil next to it, which renames the currently-loaded building in place (it becomes a check mark
+to confirm).
 
-Then, in order, on the same row: **2D**/**3D** toggles the preview mode (see below), and
-right after them a **View**/**Edit** toggle that only appears while in 3D preview (it is
-3D's sub-mode - covered in the 3D preview section below); a **Snapping** toggle icon
-button (same on/off as pressing `N` - see Snapping below), only here, not on the
-exterior screen; and **Undo**/**Redo**. The 3D camera controls are not on this bar: while
+Then, in order: **2D | 3D**, one segmented control (the active mode is blue) that toggles the preview mode (see below);
+**Undo** and **Redo** (the same as `Ctrl+Z`/`Ctrl+Y`); a **Snapping** button (same on/off as pressing `N` - see Snapping
+below), only here, not on the exterior screen; and, only while in 3D preview, a **View**/**Edit** toggle (amber for View,
+green for Edit; it is 3D's sub-mode - covered in the 3D preview section below). Drop-downs in the editor share one dark
+look. Which floor you are on is shown by the Floor panel (switch with it or with `[`/`]`). The 3D camera controls are not on this bar: while
 in 3D preview a **Camera** menu appears in the menu bar after **Window**. Its dropdown
 holds **Reset** (snaps the view back; closes the menu), the typed move-speed box (Enter
 or clicking away commits it), then **+** and **-** to nudge the speed (the menu stays open

@@ -95,6 +95,22 @@ void UInteriorScreenWidget::ApplyStandardFont(UEditableTextBox* TextBox)
 
 namespace
 {
+	// A 2D / 3D segment: blue when it is the active mode, otherwise just text on the frame.
+	FButtonStyle Button_Style_Segment(bool bActive)
+	{
+		using namespace StartStyle;
+		return bActive ? Button(Rgb(21, 110, 255), Rgb(46, 132, 255), Rgb(10, 88, 214), Rgb(21, 110, 255), 6.f)
+			: Button(FLinearColor::Transparent, Rgb(31, 51, 80), Rgb(22, 36, 58), FLinearColor::Transparent, 6.f);
+	}
+
+	// The 3D View / Edit button: amber for View, green for Edit.
+	FButtonStyle Button_Style_Edit3D(bool bEdit)
+	{
+		using namespace StartStyle;
+		return bEdit ? Button(Rgb(26, 138, 84), Rgb(36, 160, 100), Rgb(18, 110, 66), Rgb(26, 138, 84), 6.f)
+			: Button(Rgb(196, 112, 8), Rgb(220, 130, 14), Rgb(160, 90, 4), Rgb(196, 112, 8), 6.f);
+	}
+
 	// A tool row's look: plain, or blue when its tool is the active one.
 	FButtonStyle Button_Style_Tool(bool bActive)
 	{
@@ -688,51 +704,54 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// hidden. Content stays left-aligned; the rest of the bar's width is just empty background. (The 3D
 		// camera controls are not in this bar: they are the Camera menu, after Window in the menu bar.)
 		UBorder* BuildingSwitcherBarBackground = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Pnl_BuildingSwitcherBar"));
-		BuildingSwitcherBarBackground->SetBrushColor(DockPanelColor);
-		BuildingSwitcherBarBackground->SetPadding(FMargin(10.f, 8.f));
-		BuildingSwitcherBarBackground->SetHorizontalAlignment(HAlign_Left);
-		BuildingSwitcherBarBackground->SetVerticalAlignment(VAlign_Center);
+		BuildingSwitcherBarBackground->SetBrushColor(StartStyle::Rgb(17, 31, 50));
+		BuildingSwitcherBarBackground->SetPadding(FMargin(14.f, 8.f));
 		UCanvasPanelSlot* BuildingSwitcherBarSlot = Canvas->AddChildToCanvas(BuildingSwitcherBarBackground);
 		BuildingSwitcherBarSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
 		BuildingSwitcherBarSlot->SetAlignment(FVector2D(0.f, 0.f));
 		BuildingSwitcherBarSlot->SetOffsets(FMargin(0.f, MenuBarHeight, 0.f, BuildingSwitcherBarHeight));
 		BuildingSwitcherBarSlot->SetZOrder(6);
 
+		// In the style of the design team's page, one row, everything side by side: the building (a drop-down to switch, a pencil to
+		// rename), then 2D | 3D, undo, redo, snapping, and (in 3D only) View / Edit. Choosing the tools is the
+		// Toolbar panel's job, so they are not repeated here.
+		{
+		using namespace StartStyle;
+		// Adds a child to a row, vertically centred, with the given padding.
+		auto AddCentered = [](UHorizontalBox* Row, UWidget* Child, const FMargin& SlotPadding)
+		{
+			UHorizontalBoxSlot* ChildSlot = Row->AddChildToHorizontalBox(Child);
+			ChildSlot->SetVerticalAlignment(VAlign_Center);
+			ChildSlot->SetPadding(SlotPadding);
+		};
+
 		UHorizontalBox* SwitcherRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BuildingSwitcherRow"));
 		BuildingSwitcherBarBackground->SetContent(SwitcherRow);
 
+		AddCentered(SwitcherRow, Text(WidgetTree, TEXT("Txt_BuildingMark"), TEXT("\u25A5"), 15.f, Rgb(80, 150, 255)), FMargin(0.f));
+
 		BuildingSwitcherComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_BuildingSwitcher"));
 		BuildingSwitcherComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
+		DarkCombo(BuildingSwitcherComboBox);
 		USizeBox* BuildingSwitcherSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 		// A floor, not a fixed width, so a long building name (e.g. a database-loaded one) isn't
 		// clipped/cramped - it grows with the name instead of staying stuck at one width for everyone.
-		BuildingSwitcherSizeBox->SetMinDesiredWidth(140.f);
+		BuildingSwitcherSizeBox->SetMinDesiredWidth(150.f);
 		BuildingSwitcherSizeBox->SetContent(BuildingSwitcherComboBox);
-		UHorizontalBoxSlot* SwitcherComboSlot = SwitcherRow->AddChildToHorizontalBox(BuildingSwitcherSizeBox);
-		SwitcherComboSlot->SetVerticalAlignment(VAlign_Center);
-		SwitcherComboSlot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
+		AddCentered(SwitcherRow, BuildingSwitcherSizeBox, FMargin(8.f * DesignToUi, 0.f, 4.f, 0.f));
 
 		BuildingNameTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_BuildingName"));
 		BuildingNameTextBox->SetVisibility(ESlateVisibility::Collapsed);
-		ApplyStandardFont(BuildingNameTextBox);
-		UHorizontalBoxSlot* SwitcherTextSlot = SwitcherRow->AddChildToHorizontalBox(BuildingNameTextBox);
-		SwitcherTextSlot->SetVerticalAlignment(VAlign_Center);
-		SwitcherTextSlot->SetPadding(FMargin(0.f, 0.f, 4.f, 0.f));
+		BuildingNameTextBox->SetWidgetStyle(Field(13.f));
+		AddCentered(SwitcherRow, BuildingNameTextBox, FMargin(8.f * DesignToUi, 0.f, 4.f, 0.f));
 
+		// The pencil renames the building (and becomes a check mark to confirm).
 		EditBuildingNameButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_EditBuildingName"));
-		EditBuildingNameButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-		EditBuildingNameButtonText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Btn_EditBuildingNameLabel"));
-		EditBuildingNameButtonText->SetText(FText::FromString(TEXT("\x270E"))); // pencil
+		EditBuildingNameButton->SetStyle(SecondaryButton());
+		EditBuildingNameButton->SetBackgroundColor(FLinearColor::White);
+		EditBuildingNameButton->SetToolTip(MakeToolTipWidget(TEXT("Rename the building")));
+		EditBuildingNameButtonText = Text(WidgetTree, TEXT("Btn_EditBuildingNameLabel"), TEXT("\x270E"), 13.f, FLinearColor::White, true); // pencil
 		EditBuildingNameButtonText->SetJustification(ETextJustify::Center);
-		EditBuildingNameButtonText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-		// The 32x32 box below stops the button from pushing the row wider, but doesn't clip - at the
-		// default (larger) font, the glyph itself still rendered a few px wider than the box, poking
-		// out evenly on both sides. Shrinking the glyph itself is what actually keeps it inside.
-		{
-			FSlateFontInfo EditIconFont = EditBuildingNameButtonText->GetFont();
-			EditIconFont.Size = 14;
-			EditBuildingNameButtonText->SetFont(EditIconFont);
-		}
 		USizeBox* EditButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 		EditButtonSizeBox->SetWidthOverride(32.f);
 		EditButtonSizeBox->SetHeightOverride(32.f);
@@ -742,120 +761,103 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			EditButtonTextSlot->SetVerticalAlignment(VAlign_Center);
 		}
 		EditBuildingNameButton->SetContent(EditButtonSizeBox);
-		UHorizontalBoxSlot* SwitcherButtonSlot = SwitcherRow->AddChildToHorizontalBox(EditBuildingNameButton);
-		SwitcherButtonSlot->SetVerticalAlignment(VAlign_Center);
+		AddCentered(SwitcherRow, EditBuildingNameButton, FMargin(0.f));
 
-		// 2D/3D toggle + "Reset View"/move-speed +/-, same row as EditBuildingNameButton - see the
-		// comment on Switch2DButton in the header for why these live here instead of the menu bar.
-		constexpr float SwitcherButtonWidth = 48.f;
-		constexpr float SwitcherButtonHeight = 36.f;
-		auto AddSwitcherButton = [this, SwitcherButtonWidth, SwitcherButtonHeight](UHorizontalBox* TargetRow, const TCHAR* Name, const TCHAR* Label) -> UButton*
+		// 2D | 3D as one segmented control: the active one is blue. (No Stack view in this editor.)
+		UBorder* SegmentFrame = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("ModeSegmentFrame"));
+		SegmentFrame->SetBrush(Rounded(Rgb(14, 24, 38), Rgb(46, 66, 94), 8.f));
+		SegmentFrame->SetBrushColor(FLinearColor::White);
+		SegmentFrame->SetPadding(FMargin(3.f));
+		UHorizontalBox* SegmentRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ModeSegmentRow"));
+		SegmentFrame->SetContent(SegmentRow);
+		auto AddSegment = [this, SegmentRow](const TCHAR* Name, const TCHAR* Label) -> UButton*
 		{
-			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
-			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-			Text->SetText(FText::FromString(FString(Label)));
-			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-			Text->SetJustification(ETextJustify::Center);
-			ApplyStandardFont(Text);
-			USizeBox* ButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-			ButtonSizeBox->SetWidthOverride(SwitcherButtonWidth);
-			ButtonSizeBox->SetHeightOverride(SwitcherButtonHeight);
-			if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(ButtonSizeBox->SetContent(Text)))
-			{
-				TextSlot->SetHorizontalAlignment(HAlign_Center);
-				TextSlot->SetVerticalAlignment(VAlign_Center);
-			}
-			Button->SetContent(ButtonSizeBox);
-			UHorizontalBoxSlot* RowSlot = TargetRow->AddChildToHorizontalBox(Button);
-			RowSlot->SetVerticalAlignment(VAlign_Center);
-			RowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
-			return Button;
+			UButton* Segment = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+			Segment->SetStyle(Button_Style_Segment(false));
+			Segment->SetBackgroundColor(FLinearColor::White);
+			Segment->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+			UTextBlock* Caption = StartStyle::Text(WidgetTree, FString(Name) + TEXT("Label"), Label, 13.f, FLinearColor::White, true);
+			Caption->SetJustification(ETextJustify::Center);
+			UBorder* Pad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(Name) + TEXT("Pad")));
+			Pad->SetBrushColor(FLinearColor::Transparent);
+			Pad->SetPadding(FMargin(20.f * StartStyle::DesignToUi, 6.f * StartStyle::DesignToUi));
+			Pad->SetContent(Caption);
+			Segment->SetContent(Pad);
+			SegmentRow->AddChildToHorizontalBox(Segment)->SetPadding(FMargin(2.f, 0.f));
+			return Segment;
 		};
-
-		Switch2DButton = AddSwitcherButton(SwitcherRow, TEXT("Btn_Switch2D"), TEXT("2D"));
+		Switch2DButton = AddSegment(TEXT("Btn_Switch2D"), TEXT("2D"));
 		Switch2DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSwitch2DClicked);
-		Switch3DButton = AddSwitcherButton(SwitcherRow, TEXT("Btn_Switch3D"), TEXT("3D"));
+		Switch3DButton = AddSegment(TEXT("Btn_Switch3D"), TEXT("3D"));
 		Switch3DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSwitch3DClicked);
+		AddCentered(SwitcherRow, SegmentFrame, FMargin(16.f * DesignToUi, 0.f, 16.f * DesignToUi, 0.f));
 
-		// "View"/"Edit" toggle - right after 3D, since it is that mode's sub-mode - starts as "View" (yellow),
-		// matching PC's own default (see ANavPlayerController::bIsIn3DEditMode). AddSwitcherButton
-		// doesn't hand back its inner UTextBlock (every other button built with it has a fixed label),
-		// so this one reaches it back out through the widget tree instead, same "don't return every
-		// intermediate" convention used elsewhere in this function (e.g. the File/Window dropdowns).
-		Edit3DModeToggleButton = AddSwitcherButton(SwitcherRow, TEXT("Btn_Edit3DModeToggle"), TEXT("View"));
-		Edit3DModeToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnEdit3DModeToggleClicked);
-		Edit3DModeToggleButton->SetBackgroundColor(FLinearColor(0.8f, 0.7f, 0.1f, 1.f));
-		Edit3DModeToggleButton->SetVisibility(ESlateVisibility::Collapsed);
-		if (USizeBox* Edit3DModeSizeBox = Cast<USizeBox>(Edit3DModeToggleButton->GetContent()))
+		// ---- Undo, redo, snapping ----
+		// An action button: its icon and its name, like the design's edit strip.
+		auto AddEditButton = [this, SwitcherRow, &AddCentered](const TCHAR* Name, const TCHAR* IconAssetName, const TCHAR* Label, const TCHAR* TooltipLabel, UImage** OutIcon) -> UButton*
 		{
-			Edit3DModeToggleButtonText = Cast<UTextBlock>(Edit3DModeSizeBox->GetContent());
-		}
-
-		// Snap toggle - icon-only, next to 3D, always visible (snapping matters in 2D too, unlike
-		// Reset/speed/View-Edit which are 3D-preview-only). Icon itself is set by HandleSnapEnabledChanged
-		// once PC is available (RebuildWidget has no reliable PC access yet - see NativeConstruct).
-		SnapToggleButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_SnapToggle"));
-		SnapToggleButton->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-		SnapToggleButton->SetToolTip(MakeToolTipWidget(TEXT("Toggle Snapping [N]")));
-		SnapToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSnapToggleClicked);
-		SnapToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
-		SnapToggleIcon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("Img_SnapToggle"));
-		SnapToggleIcon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
-		USizeBox* SnapToggleSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		SnapToggleSizeBox->SetWidthOverride(SwitcherButtonWidth);
-		SnapToggleSizeBox->SetHeightOverride(SwitcherButtonHeight);
-		if (USizeBoxSlot* SnapToggleIconSlot = Cast<USizeBoxSlot>(SnapToggleSizeBox->SetContent(SnapToggleIcon)))
-		{
-			SnapToggleIconSlot->SetHorizontalAlignment(HAlign_Center);
-			SnapToggleIconSlot->SetVerticalAlignment(VAlign_Center);
-		}
-		SnapToggleButton->SetContent(SnapToggleSizeBox);
-		if (UHorizontalBoxSlot* SnapToggleRowSlot = Cast<UHorizontalBoxSlot>(SwitcherRow->AddChildToHorizontalBox(SnapToggleButton)))
-		{
-			SnapToggleRowSlot->SetVerticalAlignment(VAlign_Center);
-			SnapToggleRowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
-		}
-
-		// Undo/Redo - icon-only, same row as Snap, always visible in both 2D and 3D (this row isn't
-		// hidden by preview mode) - forwards to PC->UndoInteriorEdit()/RedoInteriorEdit() (also bound
-		// to Ctrl+Z/Ctrl+Y). Icons are static (unlike SnapToggleIcon, which swaps between two states).
-		auto AddSwitcherIconButton = [this, SwitcherButtonWidth, SwitcherButtonHeight](UHorizontalBox* TargetRow, const TCHAR* Name, const TCHAR* IconAssetName, const TCHAR* TooltipLabel) -> UButton*
-		{
-			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-			Button->SetToolTip(MakeToolTipWidget(TooltipLabel));
-			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
-
+			using namespace StartStyle;
+			UButton* Edit = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+			Edit->SetStyle(SecondaryButton());
+			Edit->SetBackgroundColor(FLinearColor::White);
+			Edit->SetToolTip(MakeToolTipWidget(TooltipLabel));
+			Edit->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+			UHorizontalBox* Content = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), FName(FString(Name) + TEXT("Content")));
 			UImage* Icon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), FName(FString(Name) + TEXT("Icon")));
-			const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), IconAssetName, IconAssetName);
-			if (UTexture2D* IconTexture = LoadObject<UTexture2D>(nullptr, *IconPath))
+			Icon->SetDesiredSizeOverride(FVector2D(18.f, 18.f));
+			if (IconAssetName && *IconAssetName)
 			{
-				Icon->SetBrushFromTexture(IconTexture, false);
-				Icon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
+				const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), IconAssetName, IconAssetName);
+				if (UTexture2D* IconTexture = LoadObject<UTexture2D>(nullptr, *IconPath))
+				{
+					Icon->SetBrushFromTexture(IconTexture, false);
+				}
 			}
-			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
-			SizeBox->SetWidthOverride(SwitcherButtonWidth);
-			SizeBox->SetHeightOverride(SwitcherButtonHeight);
-			if (USizeBoxSlot* IconSlot = Cast<USizeBoxSlot>(SizeBox->SetContent(Icon)))
+			USizeBox* IconSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("IconSize")));
+			IconSize->SetWidthOverride(20.f);
+			IconSize->SetHeightOverride(20.f);
+			IconSize->SetContent(Icon);
+			AddCentered(Content, IconSize, FMargin(0.f));
+			AddCentered(Content, Text(WidgetTree, FString(Name) + TEXT("Label"), Label, 12.f, FLinearColor::White, true), FMargin(8.f * DesignToUi, 0.f, 0.f, 0.f));
+			UBorder* Pad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(Name) + TEXT("Pad")));
+			Pad->SetBrushColor(FLinearColor::Transparent);
+			Pad->SetPadding(FMargin(12.f * DesignToUi, 7.f * DesignToUi));
+			Pad->SetContent(Content);
+			Edit->SetContent(Pad);
+			AddCentered(SwitcherRow, Edit, FMargin(0.f, 0.f, 8.f * DesignToUi, 0.f));
+			if (OutIcon)
 			{
-				IconSlot->SetHorizontalAlignment(HAlign_Center);
-				IconSlot->SetVerticalAlignment(VAlign_Center);
+				*OutIcon = Icon;
 			}
-			Button->SetContent(SizeBox);
-			if (UHorizontalBoxSlot* RowSlot = Cast<UHorizontalBoxSlot>(TargetRow->AddChildToHorizontalBox(Button)))
-			{
-				RowSlot->SetVerticalAlignment(VAlign_Center);
-				RowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
-			}
-			return Button;
+			return Edit;
 		};
-
-		UndoButton = AddSwitcherIconButton(SwitcherRow, TEXT("Btn_Undo"), TEXT("Icon_Undo"), TEXT("Undo [Ctrl+Z]"));
+		UndoButton = AddEditButton(TEXT("Btn_Undo"), TEXT("Icon_Undo"), TEXT("Undo"), TEXT("Undo [Ctrl+Z]"), nullptr);
 		UndoButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnUndoClicked);
-		RedoButton = AddSwitcherIconButton(SwitcherRow, TEXT("Btn_Redo"), TEXT("Icon_Redo"), TEXT("Redo [Ctrl+Y]"));
+		RedoButton = AddEditButton(TEXT("Btn_Redo"), TEXT("Icon_Redo"), TEXT("Redo"), TEXT("Redo [Ctrl+Y]"), nullptr);
 		RedoButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRedoClicked);
+		// Snapping: always visible (it matters in 2D too). Its icon swaps between on and off in HandleSnapEnabledChanged, once the
+		// controller is there to say which.
+		SnapToggleButton = AddEditButton(TEXT("Btn_SnapToggle"), TEXT(""), TEXT("Snapping"), TEXT("Toggle Snapping [N]"), &SnapToggleIcon);
+		SnapToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSnapToggleClicked);
+
+
+		// "View" / "Edit" - in 3D only, beside 2D | 3D since it is that mode's sub-mode. Starts as "View" (amber), matching PC's
+		// own default (see ANavPlayerController::bIsIn3DEditMode); HandleEdit3DModeChanged makes it green for Edit.
+		Edit3DModeToggleButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Edit3DModeToggle"));
+		Edit3DModeToggleButton->SetStyle(Button_Style_Edit3D(false));
+		Edit3DModeToggleButton->SetBackgroundColor(FLinearColor::White);
+		Edit3DModeToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+		Edit3DModeToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnEdit3DModeToggleClicked);
+		Edit3DModeToggleButtonText = Text(WidgetTree, TEXT("Btn_Edit3DModeToggleLabel"), TEXT("View"), 13.f, FLinearColor::White, true);
+		Edit3DModeToggleButtonText->SetJustification(ETextJustify::Center);
+		UBorder* Edit3DPad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Btn_Edit3DModeTogglePad"));
+		Edit3DPad->SetBrushColor(FLinearColor::Transparent);
+		Edit3DPad->SetPadding(FMargin(16.f * DesignToUi, 9.f * DesignToUi));
+		Edit3DPad->SetContent(Edit3DModeToggleButtonText);
+		Edit3DModeToggleButton->SetContent(Edit3DPad);
+		Edit3DModeToggleButton->SetVisibility(ESlateVisibility::Collapsed);
+		AddCentered(SwitcherRow, Edit3DModeToggleButton, FMargin(8.f * DesignToUi, 0.f, 0.f, 0.f));
+		}
 
 		// Thin separator lines at the seam between the menu bar and the switcher bar, and again below
 		// the switcher bar - both bars (and the panels below) share the same dark background color, so
@@ -990,12 +992,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		AddFieldLabel(ConnectsToColumn, TEXT("Txt_ConnectsToLabel"), TEXT("CONNECTS TO"));
 		ConnectsToComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cmb_ConnectsTo"));
 		ConnectsToComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
-		{
-			// The same dark look as the text fields.
-			FComboBoxStyle ComboStyle = ConnectsToComboBox->GetWidgetStyle();
-			ComboStyle.ComboButtonStyle.ButtonStyle = Button(Rgb(15, 26, 42), Rgb(24, 40, 62), Rgb(12, 21, 34), Rgb(54, 70, 92), 5.f);
-			ConnectsToComboBox->SetWidgetStyle(ComboStyle);
-		}
+		DarkCombo(ConnectsToComboBox); // the same dark look as the text fields
 		ConnectsToColumn->AddChildToVerticalBox(ConnectsToComboBox);
 		AddButtonsRow(DoorFieldsBox, TEXT("Btn_DeleteDoor"), TEXT("Delete door"), nullptr, TEXT("Btn_ApplyDoor"), TEXT("Save changes"), ApplyDoorButton);
 		// Wired as the button is built, so it works however the widget came to exist.
@@ -1838,15 +1835,13 @@ void UInteriorScreenWidget::HandlePreviewModeChanged(bool bIsActive)
 		FloorPlanWidget->SetVisibility(bIsActive ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 	}
 
-	const FLinearColor ActiveColor(0.2f, 0.75f, 0.3f, 1.f);
-	const FLinearColor InactiveColor(0.6f, 0.6f, 0.6f, 1.f);
 	if (Switch2DButton)
 	{
-		Switch2DButton->SetBackgroundColor(bIsActive ? InactiveColor : ActiveColor);
+		Switch2DButton->SetStyle(Button_Style_Segment(!bIsActive));
 	}
 	if (Switch3DButton)
 	{
-		Switch3DButton->SetBackgroundColor(bIsActive ? ActiveColor : InactiveColor);
+		Switch3DButton->SetStyle(Button_Style_Segment(bIsActive));
 	}
 	if (CameraMenuButton)
 	{
@@ -1890,9 +1885,8 @@ void UInteriorScreenWidget::HandleEdit3DModeChanged(bool bIsEditMode)
 	}
 	if (Edit3DModeToggleButton)
 	{
-		// View: yellow. Edit: green (same green used elsewhere for an "active" state, e.g.
-		// RefreshModeButtonHighlights/HandlePreviewModeChanged's own ActiveColor).
-		Edit3DModeToggleButton->SetBackgroundColor(bIsEditMode ? FLinearColor(0.2f, 0.75f, 0.3f, 1.f) : FLinearColor(0.8f, 0.7f, 0.1f, 1.f));
+		// View: amber. Edit: green.
+		Edit3DModeToggleButton->SetStyle(Button_Style_Edit3D(bIsEditMode));
 	}
 }
 
