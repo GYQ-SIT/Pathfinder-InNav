@@ -172,6 +172,10 @@ private:
 	UFUNCTION()
 	void HandleSnapEnabledChanged(bool bNewSnapEnabled);
 
+	// Bound to ANavPlayerController::OnRoomColoursChanged: the button's swatch shows the colours or greys out.
+	UFUNCTION()
+	void HandleRoomColoursChanged(bool bVisible);
+
 	void RefreshModeButtonHighlights();
 
 	// Door/Room/Connector properties all share one PropertiesPanel (see RebuildWidget) instead of
@@ -303,6 +307,10 @@ private:
 	// HandleSnapEnabledChanged, not here, since the N key can toggle it too.
 	UFUNCTION()
 	void OnSnapToggleClicked();
+
+	// Turns the room colours in the 2D plan on or off (the button after Snapping).
+	UFUNCTION()
+	void OnRoomColoursClicked();
 
 	// Calls PC->UndoInteriorEdit()/RedoInteriorEdit() - same row as Snap, always visible in both 2D
 	// and 3D (mirrors the Ctrl+Z/Ctrl+Y key bindings, doesn't replace them).
@@ -893,6 +901,12 @@ private:
 
 	UPROPERTY()
 	UImage* SnapToggleIcon = nullptr;
+
+	UPROPERTY()
+	UButton* RoomColoursButton = nullptr;
+
+	UPROPERTY()
+	UImage* RoomColoursIcon = nullptr;
 
 	// Undo/Redo - same row as Snap, always visible in both 2D and 3D (this row isn't hidden by
 	// preview mode) - see OnUndoClicked/OnRedoClicked.

@@ -611,6 +611,12 @@ void ANavPlayerController::ToggleSelectMode()
 	UE_LOG(LogTemp, Warning, TEXT("Select mode ON (floor %d): click a room/wall on the 2D canvas to select it (Backspace deletes, =/- resizes), Esc/Q to exit"), InteriorGen->GetActiveFloor());
 }
 
+void ANavPlayerController::ToggleRoomColours()
+{
+	bRoomColoursVisible = !bRoomColoursVisible;
+	OnRoomColoursChanged.Broadcast(bRoomColoursVisible);
+}
+
 void ANavPlayerController::ToggleSnapEnabled()
 {
 	bSnapEnabled = !bSnapEnabled;

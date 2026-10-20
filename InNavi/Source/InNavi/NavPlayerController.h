@@ -114,6 +114,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEdit3DModeChanged, bool, bIsEditM
 // also be toggled from the N key, not just that button (defensive symmetry with every other
 // PC-state delegate here).
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSnapEnabledChanged, bool, bIsEnabled);
+// Broadcast when the room colours in the 2D plan are switched on or off (see ToggleRoomColours).
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRoomColoursChanged, bool, bVisible);
 
 UCLASS()
 class INNAVI_API ANavPlayerController : public APlayerController
@@ -165,6 +167,10 @@ public:
 	// See FOnSnapEnabledChanged above.
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")
 	FOnSnapEnabledChanged OnSnapEnabledChanged;
+
+	// See FOnRoomColoursChanged above.
+	UPROPERTY(BlueprintAssignable, Category = "Feedback")
+	FOnRoomColoursChanged OnRoomColoursChanged;
 
 	// Whether the interior editor is currently showing the 3D preview (an oblique view of the real
 	// spawned geometry, current building/floor only) instead of the 2D floor-plan overlay. View-only
@@ -453,6 +459,13 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	bool IsSnapEnabled() const { return bSnapEnabled; }
+
+	// Whether the 2D plan fills each room with its type's colour. A view setting like the Layers panel's, on by default and not saved.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void ToggleRoomColours();
+
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool AreRoomColoursVisible() const { return bRoomColoursVisible; }
 
 	// Debug helper for tuning FocusCameraOnAllBuildings' default exterior view - fly the free-fly
 	// camera to wherever looks right, press G, and read the pawn's Location/Rotation off the Output
@@ -1216,6 +1229,8 @@ private:
 	// See ToggleSnapEnabled/IsSnapEnabled - a standing setting, not a mode, so it's declared away
 	// from the mode flags above even though it's checked by some of the same code paths.
 	bool bSnapEnabled = true;
+
+	bool bRoomColoursVisible = true;
 
 	// See SelectRoom/GetSelectedRoomId - persists across mode changes, cleared on deselect (empty
 	// id), StartNewProject, or once deleted.

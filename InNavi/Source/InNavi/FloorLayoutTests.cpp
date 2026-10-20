@@ -3,6 +3,7 @@
 #include "FloorLayout.h"
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
+#include "NavPlayerController.h"
 #include "NavigationRoutePlanner.h"
 #include "PolyBuilding.h"
 #include "RoomTypes.h"
@@ -398,6 +399,21 @@ bool FFloorGenerateCoreTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("without a second core"), Second.ConnectorsPlaced, 0);
 		TestTrue(TEXT("the lifts reach it"), Second.ConnectorsReused >= 1);
 	}
+	return true;
+}
+
+
+// The room colours in the 2D plan can be switched off; the button follows the controller.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRoomColoursToggleTest, "InNavi.Interior.RoomColours.Toggle", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FRoomColoursToggleTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	TestTrue(TEXT("the colours start on"), Controller->AreRoomColoursVisible());
+	Controller->ToggleRoomColours();
+	TestFalse(TEXT("one click turns them off"), Controller->AreRoomColoursVisible());
+	Controller->ToggleRoomColours();
+	TestTrue(TEXT("and another back on"), Controller->AreRoomColoursVisible());
 	return true;
 }
 

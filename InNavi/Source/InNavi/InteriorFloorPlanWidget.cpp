@@ -975,7 +975,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		}
 
 		// A room is filled with its type's colour (the walls are drawn over it), so the kinds read at a glance. A freestanding wall has none.
-		if (Room->IsClosedLoop() && N >= 3)
+		if (Room->IsClosedLoop() && N >= 3 && (!PlayerController || PlayerController->AreRoomColoursVisible()))
 		{
 			TArray<int32> FillTriangles;
 			TriangulatePolygon(Footprint, FillTriangles);

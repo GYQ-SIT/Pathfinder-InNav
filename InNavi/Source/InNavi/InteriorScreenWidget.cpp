@@ -845,6 +845,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// controller is there to say which.
 		SnapToggleButton = AddEditButton(TEXT("Btn_SnapToggle"), TEXT(""), TEXT("Snapping"), TEXT("Toggle Snapping [N]"), &SnapToggleIcon);
 		SnapToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSnapToggleClicked);
+		// Room colours: fills the rooms in the 2D plan with their type's colour. The swatch is coloured when on and grey when off (HandleRoomColoursChanged).
+		RoomColoursButton = AddEditButton(TEXT("Btn_RoomColours"), TEXT(""), TEXT("Colours"), TEXT("Room colours ON"), &RoomColoursIcon);
+		RoomColoursButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoomColoursClicked);
 
 
 		// "View" / "Edit" - in 3D only, beside 2D | 3D since it is that mode's sub-mode. Starts as "View" (amber), matching PC's
@@ -1393,6 +1396,8 @@ void UInteriorScreenWidget::NativeConstruct()
 		// Snapping can also be toggled by the N key, not just SnapToggleButton (defensive symmetry,
 		// matching every other PC-state delegate above).
 		PC->OnSnapEnabledChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSnapEnabledChanged);
+		PC->OnRoomColoursChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleRoomColoursChanged);
+		HandleRoomColoursChanged(PC->AreRoomColoursVisible());
 		HandleSnapEnabledChanged(PC->IsSnapEnabled());
 
 		// Navigation panel: hand ws/jh's UNavigationPanelWidget this screen's own Navigation Border to
@@ -1562,6 +1567,7 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnPreviewModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandlePreviewModeChanged);
 		PC->OnEdit3DModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleEdit3DModeChanged);
 		PC->OnSnapEnabledChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSnapEnabledChanged);
+		PC->OnRoomColoursChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleRoomColoursChanged);
 		PC->ClearPointerOverUICallback(this);
 
 		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
@@ -1984,6 +1990,20 @@ void UInteriorScreenWidget::HandleSnapEnabledChanged(bool bNewSnapEnabled)
 	if (SnapToggleButton)
 	{
 		SnapToggleButton->SetToolTip(MakeToolTipWidget(bNewSnapEnabled ? TEXT("Snapping ON [N]") : TEXT("Snapping OFF [N]")));
+	}
+}
+
+void UInteriorScreenWidget::HandleRoomColoursChanged(bool bVisible)
+{
+	if (RoomColoursIcon)
+	{
+		// A rounded swatch: a room colour when the colours show, a flat grey when they do not.
+		RoomColoursIcon->SetBrush(StartStyle::Rounded(bVisible ? RoomTypes::Color(TEXT("Classroom")) : StartStyle::Rgb(90, 100, 114), FLinearColor::Transparent, 4.f, 0.f));
+		RoomColoursIcon->SetDesiredSizeOverride(FVector2D(16.f, 16.f));
+	}
+	if (RoomColoursButton)
+	{
+		RoomColoursButton->SetToolTip(MakeToolTipWidget(bVisible ? TEXT("Room colours ON") : TEXT("Room colours OFF")));
 	}
 }
 
@@ -3630,6 +3650,14 @@ void UInteriorScreenWidget::OnSwitch3DClicked()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->SetIn3DPreviewMode(true);
+	}
+}
+
+void UInteriorScreenWidget::OnRoomColoursClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->ToggleRoomColours();
 	}
 }
 
