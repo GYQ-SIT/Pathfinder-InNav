@@ -9,6 +9,7 @@
 #include "PolyBuilding.h"
 #include "NavPlayerController.h"
 #include "NavigationPanelWidget.h"
+#include "NavigationRouteVisualization.h"
 #include "PolygonGeometryUtils.h"
 #include "EngineUtils.h"
 #include "Rendering/DrawElements.h"
@@ -1086,7 +1087,8 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 	// ---- Navigation route and endpoints on the currently viewed floor ----
 	if (PlayerController)
 	{
-		if (const UNavigationPanelWidget* NavigationPanel = PlayerController->GetNavigationPanel())
+		if (const UNavigationPanelWidget* NavigationPanel = PlayerController->GetNavigationPanel();
+			NavigationPanel && NavigationPanel->IsRouteGuidanceVisible())
 		{
 			const int32 ActiveFloor = InteriorGen->GetActiveFloor();
 			auto IsVisibleOnCurrentMap = [ActiveFloor](const FNavigationRoutePoint& Point)
@@ -1107,6 +1109,18 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 4,
 					AllottedGeometry.ToPaintGeometry(), Segment, ESlateDrawEffect::None,
 					FLinearColor(1.f, 0.55f, 0.f, 1.f), true, 6.f);
+				for (const FNavigationDirectionArrow2D& Arrow :
+					UNavigationRouteVisualization::BuildDirectionArrows2D(Segment[0], Segment[1]))
+				{
+					TArray<FVector2D> Head = { Arrow.HeadLeft, Arrow.Tip, Arrow.HeadRight };
+					// Dark outline and white centre keep arrows legible over rooms and the orange route.
+					FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 4,
+						AllottedGeometry.ToPaintGeometry(), Head, ESlateDrawEffect::None,
+						FLinearColor(0.05f, 0.05f, 0.05f, 1.f), true, 5.f);
+					FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 4,
+						AllottedGeometry.ToPaintGeometry(), Head, ESlateDrawEffect::None,
+						FLinearColor::White, true, 2.5f);
+				}
 			}
 
 			const FSlateBrush* MarkerBrush = FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox"));

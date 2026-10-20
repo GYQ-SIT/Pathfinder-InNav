@@ -2,6 +2,7 @@
 
 
 #include "BuildingGenerator.h"
+#include "NavigationSearchUtils.h"
 #include "PolyBuilding.h"
 #include "RoadSegmentActor.h"
 #include "POIMarkerActor.h"
@@ -745,12 +746,97 @@ void ABuildingGenerator::ClearAllContextBuildings()
 
 void ABuildingGenerator::SetCampusBuildingsVisible(bool bVisible)
 {
+	if (bCampusBuildingsVisible == bVisible) return;
+	bCampusBuildingsVisible = bVisible;
+	++BuildingResultsRevision;
+	ApplyBuildingFilter();
+}
+
+void ABuildingGenerator::SetBuildingFilter(const FString& Query, int32 MinimumFloors, int32 MaximumFloors)
+{
+	const FString NewText = Query.TrimStartAndEnd();
+	const int32 NewMinimum = FMath::Max(0, MinimumFloors);
+	const int32 NewMaximum = MaximumFloors > 0 ? FMath::Max(NewMinimum, MaximumFloors) : 0;
+	if (BuildingFilterText == NewText && BuildingFilterMinimumFloors == NewMinimum
+		&& BuildingFilterMaximumFloors == NewMaximum) return;
+	BuildingFilterText = NewText;
+	BuildingFilterWords.Reset();
+	BuildingFilterText.ParseIntoArrayWS(BuildingFilterWords);
+	BuildingFilterMinimumFloors = NewMinimum;
+	BuildingFilterMaximumFloors = NewMaximum;
+	++BuildingResultsRevision;
+	ApplyBuildingFilter();
+}
+
+bool ABuildingGenerator::MatchesBuildingFilter(const APolyBuilding& Building) const
+{
+	return bCampusBuildingsVisible && Building.GetFloorCount() >= BuildingFilterMinimumFloors
+		&& (BuildingFilterMaximumFloors == 0 || Building.GetFloorCount() <= BuildingFilterMaximumFloors)
+		&& NavigationSearch::MatchesWords(BuildingFilterWords, Building.BuildingName + TEXT(" ") + Building.BuildingId);
+}
+
+const TMap<FString, FString>& ABuildingGenerator::GetFilteredBuildingOptions() const
+{
+	if (CachedBuildingResultsRevision != BuildingResultsRevision)
+	{
+		CachedBuildingOptions.Reset();
+		for (const auto& Pair : BuildingsById)
+		{
+			const APolyBuilding* Building = Pair.Value;
+			if (IsValid(Building) && MatchesBuildingFilter(*Building))
+			{
+				CachedBuildingOptions.Add(FString::Printf(TEXT("%s [%s] - %d floors"), *Building->BuildingName,
+					*Building->BuildingId, Building->GetFloorCount()), Building->BuildingId);
+			}
+		}
+		CachedBuildingResultsRevision = BuildingResultsRevision;
+	}
+	return CachedBuildingOptions;
+}
+
+void ABuildingGenerator::RefreshBuildingFilterFor(APolyBuilding& Building) const
+{
+	const bool bVisible = MatchesBuildingFilter(Building);
+	Building.SetActorHiddenInGame(!bVisible);
+	Building.SetActorEnableCollision(bVisible);
+}
+
+void ABuildingGenerator::HandleBuildingFloorCountChanged(APolyBuilding*)
+{
+	++BuildingResultsRevision;
+	// Floor edits also run inside the 3D preview. The controller reapplies exterior visibility
+	// when leaving that view; only the result cache needs invalidating during the edit itself.
+}
+
+void ABuildingGenerator::HandleBuildingDestroyed(AActor* Actor)
+{
+	APolyBuilding* Building = Cast<APolyBuilding>(Actor);
+	if (Building && FindBuildingById(Building->BuildingId) == Building)
+	{
+		BuildingsById.Remove(Building->BuildingId);
+		UsedBuildingIds.Remove(Building->BuildingId);
+		InteriorDataById.Remove(Building->BuildingId);
+		++BuildingResultsRevision;
+	}
+}
+
+TArray<APolyBuilding*> ABuildingGenerator::GetFilteredBuildings() const
+{
+	TArray<APolyBuilding*> Result;
+	for (const auto& Pair : BuildingsById)
+	{
+		if (Pair.Value && MatchesBuildingFilter(*Pair.Value)) Result.Add(Pair.Value);
+	}
+	return Result;
+}
+
+void ABuildingGenerator::ApplyBuildingFilter()
+{
 	for (const TPair<FString, APolyBuilding*>& Pair : BuildingsById)
 	{
 		if (APolyBuilding* Building = Pair.Value)
 		{
-			Building->SetActorHiddenInGame(!bVisible);
-			Building->SetActorEnableCollision(bVisible);
+			RefreshBuildingFilterFor(*Building);
 		}
 	}
 }
@@ -850,6 +936,10 @@ APolyBuilding* ABuildingGenerator::SpawnBuildingFromData(const FString& Id, cons
 		NewBuilding->BuildFromFootprint(Footprint, Scale, Offset, FloorCount, FloorHeight);
 		UsedBuildingIds.Add(Id);
 		BuildingsById.Add(Id, NewBuilding);
+		NewBuilding->OnFloorCountChanged.AddUObject(this, &ABuildingGenerator::HandleBuildingFloorCountChanged);
+		NewBuilding->OnDestroyed.AddDynamic(this, &ABuildingGenerator::HandleBuildingDestroyed);
+		++BuildingResultsRevision;
+		RefreshBuildingFilterFor(*NewBuilding);
 	}
 
 	return NewBuilding;
@@ -911,7 +1001,11 @@ bool ABuildingGenerator::SetBuildingName(const FString& BuildingId, const FStrin
 		}
 	}
 
-	(*Found)->BuildingName = NewName;
+	if ((*Found)->BuildingName != NewName)
+	{
+		(*Found)->BuildingName = NewName;
+		++BuildingResultsRevision;
+	}
 	return true;
 }
 
@@ -1009,10 +1103,14 @@ void ABuildingGenerator::ClearAllBuildings()
 	{
 		if (Pair.Value)
 		{
+			// The bulk clear owns map removal; avoid changing it during iteration.
+			Pair.Value->OnDestroyed.RemoveDynamic(this, &ABuildingGenerator::HandleBuildingDestroyed);
+			Pair.Value->OnFloorCountChanged.RemoveAll(this);
 			Pair.Value->Destroy();
 		}
 	}
 	BuildingsById.Empty();
+	++BuildingResultsRevision;
 	UsedBuildingIds.Empty();
 	InteriorDataById.Empty();
 	Scale = 1.f;

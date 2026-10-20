@@ -3,6 +3,7 @@
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
+#include "NavigationSearchUtils.h"
 #include "PolyBuilding.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
@@ -211,10 +212,28 @@ void UNavigationPanelWidget::RequestClearRoute()
 	SetStatusMessage(TEXT("Route and selected points cleared."), ENavigationMessageKind::Success);
 }
 
+void UNavigationPanelWidget::SetRouteGuidanceVisible(bool bVisible)
+{
+	if (bRouteGuidanceVisible != bVisible)
+	{
+		bRouteGuidanceVisible = bVisible;
+		BroadcastStateChanged();
+	}
+}
+
+void UNavigationPanelWidget::ToggleRouteGuidance()
+{
+	if (CanToggleRouteGuidance())
+	{
+		SetRouteGuidanceVisible(!bRouteGuidanceVisible);
+	}
+}
+
 void UNavigationPanelWidget::SetNavigationContext(ABuildingGenerator* InGenerator, AInteriorGenerator* InInterior)
 {
 	Generator = InGenerator;
 	Interior = InInterior;
+	IndexedRoomSearchRevision = MAX_uint64;
 	UE_LOG(LogTemp, Warning, TEXT("[Navigation] Context set: Generator=%s Interior=%s BuildingId=%s Floor=%d"),
 		Generator ? TEXT("valid") : TEXT("NULL"),
 		Interior ? TEXT("valid") : TEXT("NULL"),
@@ -306,6 +325,7 @@ void UNavigationPanelWidget::SetEndpoint(FSelectedEndpoint& Endpoint, const FNav
 	Endpoint.RoomOptionLabel = RoomOptionLabel;
 	Endpoint.RoomId = RoomId;
 	RoutePoints.Reset();
+	bRouteGuidanceVisible = true;
 	bLastFindRouteFailed = false;
 	const FString Message = bRouteWasVisible
 		? FString::Printf(TEXT("%s changed to %s. Route cleared; press Find Route again."),
@@ -314,20 +334,27 @@ void UNavigationPanelWidget::SetEndpoint(FSelectedEndpoint& Endpoint, const FNav
 	SetStatusMessage(Message, bRouteWasVisible ? ENavigationMessageKind::Warning : ENavigationMessageKind::Success);
 }
 
-TArray<UNavigationPanelWidget::FNavigationRoomOption> UNavigationPanelWidget::GetSelectableRooms() const
+void UNavigationPanelWidget::RefreshRoomSearchIndex() const
 {
-	TArray<FNavigationRoomOption> Options;
-	if (!Generator || !Interior || Interior->GetLoadedBuildingId().IsEmpty())
+	APolyBuilding* Building = Generator && Interior
+		? Generator->FindBuildingById(Interior->GetLoadedBuildingId()) : nullptr;
+	const uint64 Revision = Interior ? Interior->GetRoomSearchRevision() : 0;
+	const int32 FloorCount = IsValid(Building) ? Building->GetFloorCount() : 0;
+	if (IndexedRoomSearchRevision == Revision && IndexedBuilding.Get() == Building && IndexedFloorCount == FloorCount)
 	{
-		return Options;
+		return;
 	}
-	APolyBuilding* Building = Generator->FindBuildingById(Interior->GetLoadedBuildingId());
-	if (!Building)
+	IndexedRoomSearchRevision = Revision;
+	IndexedBuilding = Building;
+	IndexedFloorCount = FloorCount;
+	CachedRooms.Reset();
+	SortedDestinationIndices.Reset();
+	if (!IsValid(Building))
 	{
-		return Options;
+		return;
 	}
 
-	for (int32 Floor = 1; Floor <= Building->GetFloorCount(); ++Floor)
+	for (int32 Floor = 1; Floor <= FloorCount; ++Floor)
 	{
 		for (AInteriorRoom* Room : Interior->GetRoomsOnFloor(Floor))
 		{
@@ -340,11 +367,39 @@ TArray<UNavigationPanelWidget::FNavigationRoomOption> UNavigationPanelWidget::Ge
 			}
 			FNavigationRoomOption Option;
 			Option.RoomId = Room->RoomId;
+			Option.Tags = Room->RoomTags;
 			Option.RoomName = Room->RoomName.IsEmpty() ? Room->RoomId : Room->RoomName;
 			Option.Floor = Floor;
 			Option.Centroid = ComputePolygonCentroid(Room->GetFootprint());
-			Options.Add(Option);
+			Option.DisplayLabel = FString::Printf(TEXT("%s [%s] (Floor %d)"), *Option.RoomName, *Option.RoomId, Floor);
+			Option.SearchableText = Option.DisplayLabel + TEXT(" ") + FString::Join(Option.Tags, TEXT(" "));
+			SortedDestinationIndices.Add(CachedRooms.Num());
+			CachedRooms.Add(MoveTemp(Option));
 		}
+	}
+	// Keep Start's existing floor order; destinations are sorted once, then filtered in that order.
+	SortedDestinationIndices.Sort([this](int32 A, int32 B)
+	{
+		return CachedRooms[A].DisplayLabel.Compare(CachedRooms[B].DisplayLabel, ESearchCase::IgnoreCase) < 0;
+	});
+}
+
+const TArray<UNavigationPanelWidget::FNavigationRoomOption>& UNavigationPanelWidget::GetSelectableRooms() const
+{
+	RefreshRoomSearchIndex();
+	return CachedRooms;
+}
+
+TArray<UNavigationPanelWidget::FNavigationRoomOption> UNavigationPanelWidget::SearchDestinations(const FString& Query) const
+{
+	RefreshRoomSearchIndex();
+	TArray<FString> Words;
+	Query.ParseIntoArrayWS(Words);
+	TArray<FNavigationRoomOption> Options;
+	for (int32 Index : SortedDestinationIndices)
+	{
+		const FNavigationRoomOption& Option = CachedRooms[Index];
+		if (NavigationSearch::MatchesWords(Words, Option.SearchableText)) Options.Add(Option);
 	}
 	return Options;
 }
@@ -361,7 +416,7 @@ bool UNavigationPanelWidget::SetDestinationToRoom(const FString& RoomOptionLabel
 
 bool UNavigationPanelWidget::SetEndpointToRoom(const FString& RoomOptionLabel, bool bIsStart)
 {
-	const TArray<FNavigationRoomOption> Options = GetSelectableRooms();
+	const TArray<FNavigationRoomOption>& Options = GetSelectableRooms();
 	const FNavigationRoomOption* Found = Options.FindByPredicate([&RoomOptionLabel](const FNavigationRoomOption& Option)
 	{
 		return Option.GetDisplayLabel() == RoomOptionLabel;
@@ -445,6 +500,7 @@ void UNavigationPanelWidget::ApplyRouteResult(const FNavigationRouteResult& Resu
 	}
 
 	RoutePoints = Result.Points;
+	bRouteGuidanceVisible = true;
 	bLastFindRouteFailed = false;
 	SetStatusMessage(FString::Printf(TEXT("Route found: %d points."), RoutePoints.Num()),
 		ENavigationMessageKind::Success);
@@ -496,6 +552,7 @@ bool UNavigationPanelWidget::ApplyWorldRouteResult(const FString& BuildingId,
 
 void UNavigationPanelWidget::ClearAll()
 {
+	bRouteGuidanceVisible = true;
 	SelectionMode = ENavigationSelectionMode::None;
 	Start = FSelectedEndpoint();
 	Destination = FSelectedEndpoint();

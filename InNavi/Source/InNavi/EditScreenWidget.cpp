@@ -12,6 +12,7 @@
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/CheckBox.h"
+#include "Components/ComboBoxString.h"
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
@@ -629,6 +630,47 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		BuildingNonCampusCheckbox->SetIsChecked(false);
 		BuildingNonCampusCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnBuildingNonCampusCheckChanged);
 
+		BuildingSearchBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_BuildingSearch"));
+		ApplyStandardFont(BuildingSearchBox);
+		BuildingSearchBox->SetHintText(FText::FromString(TEXT("Campus building name or ID")));
+		BuildingSearchBox->OnTextChanged.AddUniqueDynamic(this, &UEditScreenWidget::HandleBuildingSearchChanged);
+		USizeBox* SearchSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		SearchSize->SetWidthOverride(EditAudioPanelWidth);
+		SearchSize->SetContent(BuildingSearchBox);
+		RoadFilterStack->AddChildToVerticalBox(SearchSize)->SetPadding(FMargin(0.f, 6.f, 0.f, 4.f));
+		BuildingFloorFilter = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_BuildingFloorFilter"));
+		for (const TCHAR* Item : { TEXT("Any floor count"), TEXT("1 floor"), TEXT("2-5 floors"), TEXT("6+ floors") }) BuildingFloorFilter->AddOption(Item);
+		BuildingFloorFilter->SetSelectedOption(TEXT("Any floor count"));
+		BuildingFloorFilter->OnGenerateWidgetEvent.BindDynamic(this, &UEditScreenWidget::GenerateBuildingFilterItem);
+		BuildingFloorFilter->OnSelectionChanged.AddUniqueDynamic(this, &UEditScreenWidget::HandleBuildingFloorFilterChanged);
+		USizeBox* FloorFilterSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		FloorFilterSize->SetWidthOverride(EditAudioPanelWidth);
+		FloorFilterSize->SetContent(BuildingFloorFilter);
+		RoadFilterStack->AddChildToVerticalBox(FloorFilterSize)->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+		FilteredBuildingComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_FilteredBuildings"));
+		FilteredBuildingComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UEditScreenWidget::GenerateBuildingFilterItem);
+		FilteredBuildingComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UEditScreenWidget::HandleFilteredBuildingChanged);
+		FilteredBuildingComboBox->SetIsEnabled(false);
+		USizeBox* BuildingResultsSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		BuildingResultsSize->SetWidthOverride(EditAudioPanelWidth);
+		BuildingResultsSize->SetContent(FilteredBuildingComboBox);
+		RoadFilterStack->AddChildToVerticalBox(BuildingResultsSize);
+		BuildingFilterResultsText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_BuildingFilterResults"));
+		ApplyStandardFont(BuildingFilterResultsText);
+		BuildingFilterResultsText->SetAutoWrapText(true);
+		USizeBox* CountSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		CountSize->SetWidthOverride(EditAudioPanelWidth);
+		CountSize->SetContent(BuildingFilterResultsText);
+		RoadFilterStack->AddChildToVerticalBox(CountSize);
+		UButton* ResetFilters = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_ResetBuildingFilters"));
+		UTextBlock* ResetLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+		ResetLabel->SetText(FText::FromString(TEXT("Reset Building Filters")));
+		ResetLabel->SetJustification(ETextJustify::Center);
+		ApplyStandardFont(ResetLabel);
+		ResetFilters->SetContent(ResetLabel);
+		ResetFilters->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnResetBuildingFiltersClicked);
+		RoadFilterStack->AddChildToVerticalBox(ResetFilters)->SetPadding(FMargin(0.f, 4.f, 0.f, 0.f));
+
 		// The move-drag handle - only a click landing on THIS starts a drag, same reasoning as
 		// AudioDragHandle. Starts Visible, matching RoadFilterPanel's own initial visibility (unlike
 		// AudioDragHandle, which starts Collapsed to match AudioPanel starting hidden).
@@ -659,6 +701,18 @@ void UEditScreenWidget::NativeConstruct()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->OnBuildingSelected.AddUniqueDynamic(this, &UEditScreenWidget::HandleBuildingSelected);
+		bUpdatingBuildingFilters = true;
+		if (BuildingSearchBox) BuildingSearchBox->SetText(FText::FromString(PC->GetBuildingFilterText()));
+		if (BuildingCampusCheckbox) BuildingCampusCheckbox->SetIsChecked(PC->AreCampusBuildingsVisible());
+		if (BuildingFloorFilter)
+		{
+			const int32 Min = PC->GetBuildingFilterMinimumFloors();
+			const int32 Max = PC->GetBuildingFilterMaximumFloors();
+			BuildingFloorFilter->SetSelectedOption(Min == 1 && Max == 1 ? TEXT("1 floor")
+				: Min == 2 && Max == 5 ? TEXT("2-5 floors") : Min == 6 && Max == 0 ? TEXT("6+ floors") : TEXT("Any floor count"));
+		}
+		bUpdatingBuildingFilters = false;
+		ApplyBuildingFilters();
 
 		// bButtonClickSoundEnabled (and the two flags below) live on the PC, not this widget, so they
 		// survive this screen being torn down and rebuilt (e.g. Back to the start screen and in again) -
@@ -718,6 +772,13 @@ void UEditScreenWidget::NativeDestruct()
 void UEditScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	// Changes only bump a counter. Batch loads therefore cause one UI rebuild on the next frame,
+	// while an idle frame does no building scan, label formatting, sorting, or option comparison.
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+		PC && DisplayedBuildingResultsRevision != PC->GetBuildingResultsRevision())
+	{
+		RefreshBuildingFilterDisplay();
+	}
 
 	if (AudioDragHandleSettleFramesRemaining > 0)
 	{
@@ -738,6 +799,7 @@ void UEditScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 
 void UEditScreenWidget::HandleBuildingSelected(FString BuildingId)
 {
+	RefreshBuildingFilterDisplay();
 	// An empty BuildingId means the selection was cleared (see ANavPlayerController::
 	// SelectBuildingUnderCursor - clicking empty space, or re-clicking the already-selected building,
 	// now deselects instead of only ever adding/switching a selection).
@@ -1303,7 +1365,85 @@ void UEditScreenWidget::OnBuildingCampusCheckChanged(bool bIsChecked)
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->SetCampusBuildingsVisible(bIsChecked);
+		RefreshBuildingFilterDisplay();
 	}
+}
+
+void UEditScreenWidget::HandleBuildingSearchChanged(const FText& Text) { if (!bUpdatingBuildingFilters) ApplyBuildingFilters(); }
+void UEditScreenWidget::HandleBuildingFloorFilterChanged(FString Item, ESelectInfo::Type Type)
+{
+	if (!bUpdatingBuildingFilters && Type != ESelectInfo::Direct) ApplyBuildingFilters();
+}
+
+void UEditScreenWidget::ApplyBuildingFilters()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC || !BuildingSearchBox || !BuildingFloorFilter) return;
+	const FString Floor = BuildingFloorFilter->GetSelectedOption();
+	const int32 Min = Floor == TEXT("1 floor") ? 1 : Floor == TEXT("2-5 floors") ? 2 : Floor == TEXT("6+ floors") ? 6 : 0;
+	const int32 Max = Floor == TEXT("1 floor") ? 1 : Floor == TEXT("2-5 floors") ? 5 : 0;
+	PC->SetBuildingFilter(BuildingSearchBox->GetText().ToString(), Min, Max);
+	RefreshBuildingFilterDisplay();
+}
+
+void UEditScreenWidget::RefreshBuildingFilterDisplay()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC || !FilteredBuildingComboBox) return;
+	if (DisplayedBuildingResultsRevision != PC->GetBuildingResultsRevision())
+	{
+		const TMap<FString, FString>& Options = PC->GetFilteredBuildingOptions();
+		if (!Options.OrderIndependentCompareEqual(CachedBuildingOptions))
+		{
+			CachedBuildingOptions = Options;
+			FilteredBuildingComboBox->ClearOptions();
+			TArray<FString> Labels;
+			Options.GetKeys(Labels);
+			Labels.Sort();
+			for (const FString& Label : Labels) FilteredBuildingComboBox->AddOption(Label);
+		}
+		FilteredBuildingComboBox->SetIsEnabled(!Options.IsEmpty());
+		if (BuildingFilterResultsText)
+		{
+			BuildingFilterResultsText->SetText(FText::FromString(Options.IsEmpty() ? TEXT("No matching editable buildings.")
+				: FString::Printf(TEXT("%d / %d editable buildings. Select one above."), Options.Num(), PC->GetEditableBuildingCount())));
+		}
+		DisplayedBuildingResultsRevision = PC->GetBuildingResultsRevision();
+	}
+	FString SelectedLabel;
+	const FString SelectedId = PC->GetSelectedBuildingId();
+	for (const auto& Pair : CachedBuildingOptions) if (Pair.Value == SelectedId) { SelectedLabel = Pair.Key; break; }
+	if (SelectedLabel.IsEmpty()) FilteredBuildingComboBox->ClearSelection();
+	else if (FilteredBuildingComboBox->GetSelectedOption() != SelectedLabel) FilteredBuildingComboBox->SetSelectedOption(SelectedLabel);
+}
+
+void UEditScreenWidget::HandleFilteredBuildingChanged(FString Item, ESelectInfo::Type Type)
+{
+	if (Type == ESelectInfo::Direct || Item.IsEmpty()) return;
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (const FString* Id = CachedBuildingOptions.Find(Item)) PC->SelectBuildingById(*Id);
+	}
+}
+
+void UEditScreenWidget::OnResetBuildingFiltersClicked()
+{
+	bUpdatingBuildingFilters = true;
+	if (BuildingSearchBox) BuildingSearchBox->SetText(FText::GetEmpty());
+	if (BuildingFloorFilter) BuildingFloorFilter->SetSelectedOption(TEXT("Any floor count"));
+	if (BuildingCampusCheckbox) BuildingCampusCheckbox->SetIsChecked(true);
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) PC->SetCampusBuildingsVisible(true);
+	bUpdatingBuildingFilters = false;
+	ApplyBuildingFilters();
+}
+
+UWidget* UEditScreenWidget::GenerateBuildingFilterItem(FString Item)
+{
+	UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+	ApplyStandardFont(Label);
+	Label->SetText(FText::FromString(Item));
+	Label->SetAutoWrapText(true);
+	return Label;
 }
 
 void UEditScreenWidget::OnBuildingNonCampusCheckChanged(bool bIsChecked)

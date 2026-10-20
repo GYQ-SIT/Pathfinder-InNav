@@ -475,6 +475,9 @@ private:
 	void OnNavClearRouteClicked();
 
 	UFUNCTION()
+	void OnNavToggleRouteClicked();
+
+	UFUNCTION()
 	void HandleNavigationStateChanged();
 
 	void RefreshNavigationPanelDisplay();
@@ -534,8 +537,13 @@ private:
 
 	UFUNCTION()
 	void HandleNavDestinationRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+	UFUNCTION()
+	void HandleDestinationSearchChanged(const FText& Text);
+	UFUNCTION()
+	void OnApplyRoomTagsClicked();
 
 	void RefreshNavRoomDropdowns();
+	void RefreshDestinationRoomDropdown();
 
 	// --- Docking system for the Toolbar/Floor/Properties/Layers/Navigation/Audio panels ---
 	// Each of the 6 panels below is an independently draggable UBorder placed directly on the root
@@ -964,6 +972,13 @@ private:
 
 	UPROPERTY()
 	UEditableTextBox* RoomNameTextBox = nullptr;
+	UPROPERTY()
+	UVerticalBox* RoomTagsFields = nullptr;
+	UPROPERTY() USizeBox* RoomTagsFieldsSizeBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* RoomTagsTextBox = nullptr;
+	UPROPERTY()
+	UButton* ApplyRoomTagsButton = nullptr;
 
 	UPROPERTY()
 	UButton* ApplyRoomButton = nullptr;
@@ -1025,6 +1040,10 @@ private:
 
 	UPROPERTY()
 	UComboBoxString* NavDestinationRoomComboBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* DestinationSearchBox = nullptr;
+	UPROPERTY()
+	UTextBlock* DestinationSearchResultsText = nullptr;
 
 	// Same as NavStartRoomBorder, tinted red for Destination.
 	UPROPERTY()
@@ -1047,6 +1066,12 @@ private:
 
 	UPROPERTY()
 	UButton* NavClearRouteButton = nullptr;
+
+	UPROPERTY()
+	UButton* NavToggleRouteButton = nullptr;
+
+	UPROPERTY()
+	UTextBlock* NavToggleRouteButtonLabel = nullptr;
 
 	UPROPERTY()
 	UTextBlock* NavStatusText = nullptr;

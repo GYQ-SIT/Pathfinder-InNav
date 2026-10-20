@@ -461,6 +461,15 @@ public:
 	// filter panel's two building-visibility checkboxes call.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void SetCampusBuildingsVisible(bool bVisible);
+	void SetBuildingFilter(const FString& Query, int32 MinimumFloors, int32 MaximumFloors);
+	FString GetBuildingFilterText() const;
+	int32 GetBuildingFilterMinimumFloors() const;
+	int32 GetBuildingFilterMaximumFloors() const;
+	bool AreCampusBuildingsVisible() const;
+	const TMap<FString, FString>& GetFilteredBuildingOptions() const;
+	uint64 GetBuildingResultsRevision() const;
+	int32 GetEditableBuildingCount() const;
+	bool SelectBuildingById(const FString& BuildingId);
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void SetNonCampusBuildingsVisible(bool bVisible);
 
@@ -495,6 +504,8 @@ public:
 	// populate its field when a room gets selected. Empty if nothing is selected.
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	FString GetSelectedRoomName() const;
+	bool SetSelectedRoomTags(const TArray<FString>& InTags);
+	TArray<FString> GetSelectedRoomTags() const;
 
 	// Whether the currently-selected room/wall is an actual closed room (true) or an open
 	// standalone wall (false) - see AInteriorGenerator::IsRoomClosedLoop. What the room properties
@@ -1123,6 +1134,7 @@ private:
 	FString CopiedRoomId;
 	TArray<FVector2D> CopiedRoomFootprint;
 	FString CopiedRoomName;
+	TArray<FString> CopiedRoomTags;
 	bool bHasCopiedRoom = false;
 	bool bCopiedRoomIsPublic = true;
 	bool bCopiedRoomRequiresKey = false;

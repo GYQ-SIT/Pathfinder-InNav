@@ -1113,6 +1113,24 @@ FString ANavPlayerController::GetSelectedRoomName() const
 	return InteriorGen->GetRoomName(SelectedRoomId);
 }
 
+bool ANavPlayerController::SetSelectedRoomTags(const TArray<FString>& InTags)
+{
+	if (!InteriorGen || !InteriorGen->IsRoomClosedLoop(SelectedRoomId)) return false;
+	const TArray<FString> Before = InteriorGen->GetRoomTags(SelectedRoomId);
+	if (!InteriorGen->SetRoomTags(SelectedRoomId, InTags)) return false;
+	if (Before != InteriorGen->GetRoomTags(SelectedRoomId))
+	{
+		bHasUnsavedChanges = true;
+		OnInteriorContentChanged.Broadcast();
+	}
+	return true;
+}
+
+TArray<FString> ANavPlayerController::GetSelectedRoomTags() const
+{
+	return InteriorGen ? InteriorGen->GetRoomTags(SelectedRoomId) : TArray<FString>();
+}
+
 bool ANavPlayerController::IsSelectedRoomClosedLoop() const
 {
 	if (SelectedRoomId.IsEmpty() || !InteriorGen)
@@ -2146,8 +2164,9 @@ void ANavPlayerController::SetOtherBuildingsHidden(bool bNewHidden)
 	{
 		if (Building && Building->BuildingId != LoadedId)
 		{
-			Building->SetActorHiddenInGame(bNewHidden);
-			Building->SetActorEnableCollision(!bNewHidden);
+			const bool bVisible = !bNewHidden && Generator->MatchesBuildingFilter(*Building);
+			Building->SetActorHiddenInGame(!bVisible);
+			Building->SetActorEnableCollision(bVisible);
 		}
 	}
 }
@@ -2687,7 +2706,8 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 		NavigationPanel->GetRoutePoints(),
 		NavigationPanel->HasStart() ? &NavigationPanel->GetStart() : nullptr,
 		NavigationPanel->HasDestination() ? &NavigationPanel->GetDestination() : nullptr,
-		Building->BuildingOffset, Generator->GetScale(), Building->GetFloorHeight(), InteriorGen->GetActiveFloor()));
+		Building->BuildingOffset, Generator->GetScale(), Building->GetFloorHeight(), InteriorGen->GetActiveFloor(),
+		NavigationPanel->IsRouteGuidanceVisible()));
 }
 
 void ANavPlayerController::OnLeftMouseDown3DEdit()
@@ -2812,7 +2832,45 @@ void ANavPlayerController::SetCampusBuildingsVisible(bool bVisible)
 	if (Generator)
 	{
 		Generator->SetCampusBuildingsVisible(bVisible);
+		SetBuildingFilter(Generator->GetBuildingFilterText(), Generator->GetBuildingFilterMinimumFloors(), Generator->GetBuildingFilterMaximumFloors());
 	}
+}
+
+void ANavPlayerController::SetBuildingFilter(const FString& Query, int32 MinimumFloors, int32 MaximumFloors)
+{
+	if (!Generator) return;
+	Generator->SetBuildingFilter(Query, MinimumFloors, MaximumFloors);
+	if (SelectedBuilding && SelectedBuilding->IsHidden())
+	{
+		SelectedBuilding->SetHighlighted(false);
+		SelectedBuilding = nullptr;
+		OnBuildingSelected.Broadcast(FString());
+	}
+}
+
+FString ANavPlayerController::GetBuildingFilterText() const { return Generator ? Generator->GetBuildingFilterText() : FString(); }
+int32 ANavPlayerController::GetBuildingFilterMinimumFloors() const { return Generator ? Generator->GetBuildingFilterMinimumFloors() : 0; }
+int32 ANavPlayerController::GetBuildingFilterMaximumFloors() const { return Generator ? Generator->GetBuildingFilterMaximumFloors() : 0; }
+bool ANavPlayerController::AreCampusBuildingsVisible() const { return !Generator || Generator->AreCampusBuildingsVisible(); }
+int32 ANavPlayerController::GetEditableBuildingCount() const { return Generator ? Generator->GetBuildingCount() : 0; }
+uint64 ANavPlayerController::GetBuildingResultsRevision() const { return Generator ? Generator->GetBuildingResultsRevision() : 0; }
+
+const TMap<FString, FString>& ANavPlayerController::GetFilteredBuildingOptions() const
+{
+	static const TMap<FString, FString> Empty;
+	return Generator ? Generator->GetFilteredBuildingOptions() : Empty;
+}
+
+bool ANavPlayerController::SelectBuildingById(const FString& BuildingId)
+{
+	APolyBuilding* Building = Generator ? Generator->FindBuildingById(BuildingId) : nullptr;
+	if (!Building || Building->IsHidden() || bIsIn3DPreviewMode) return false;
+	if (SelectedBuilding) SelectedBuilding->SetHighlighted(false);
+	SelectedBuilding = Building;
+	Building->SetHighlighted(true);
+	OnBuildingSelected.Broadcast(BuildingId);
+	FocusCameraOnBuilding(Building);
+	return true;
 }
 
 void ANavPlayerController::SetNonCampusBuildingsVisible(bool bVisible)
@@ -3062,6 +3120,7 @@ void ANavPlayerController::RestoreExteriorCameraView()
 		}
 	}
 	InteriorBuildingHiddenById.Empty();
+	if (Generator) Generator->ApplyBuildingFilter();
 
 	// Leaving interior editing entirely - destroy whatever rooms were spawned for it (safe: the
 	// data itself lives in BuildingGenerator's InteriorDataById, not in these actors, so nothing is
@@ -3281,6 +3340,7 @@ void ANavPlayerController::CopyInteriorKeyHandler()
 	CopiedRoomId = Room->RoomId;
 	CopiedRoomFootprint = Room->GetFootprint();
 	CopiedRoomName = Room->RoomName;
+	CopiedRoomTags = Room->RoomTags;
 	bCopiedRoomIsPublic = Room->bIsPublic;
 	bCopiedRoomRequiresKey = Room->bRequiresKey;
 	bHasCopiedRoom = true;
@@ -3433,14 +3493,15 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 		break;
 	}
 	FString CreateError;
-	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(
+	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprintWithTags(
 		NewFootprint,
 		FString(),                 // Empty = generate a new unique ID
 		CopiedRoomName,
 		bCopiedRoomIsPublic,
 		bCopiedRoomRequiresKey,
 		/*bAllowOverlap=*/false,
-		CreateError
+		CreateError,
+		CopiedRoomTags
 	);
 
 	if (NewRoom)
