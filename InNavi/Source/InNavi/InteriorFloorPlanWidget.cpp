@@ -2,6 +2,7 @@
 
 
 #include "InteriorFloorPlanWidget.h"
+#include "InteriorDoorColors.h"
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
 #include "InteriorTypes.h"
@@ -930,7 +931,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			const TArray<FVector2D> Opening = { WorldToLocal((Start + Building->BuildingOffset) * Scale), WorldToLocal((End + Building->BuildingOffset) * Scale) };
 			const bool bSelected = PlayerController && PlayerController->GetSelectedEntranceId() == Entrance.Id;
 			const FLinearColor Colour = bSelected ? FLinearColor(1.f, 0.85f, 0.2f, 1.f)
-				: (Entrance.Kind == EInteriorEntranceKind::Main ? FLinearColor(0.18f, 0.8f, 0.45f, 1.f) : FLinearColor(0.26f, 0.59f, 1.f, 1.f));
+				: (Entrance.Kind == EInteriorEntranceKind::Main ? InteriorDoorColors::MainDoor() : InteriorDoorColors::LinkDoor());
 			FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, AllottedGeometry.ToPaintGeometry(), Opening, ESlateDrawEffect::None, Colour, true, bSelected ? 13.f : 9.f);
 		}
 	}
@@ -1024,7 +1025,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 				if (Opening->Type == EInteriorOpeningType::Door)
 				{
 					const bool bIsSelectedDoor = PlayerController && PlayerController->GetSelectedDoorRoomId() == Room->RoomId && PlayerController->GetSelectedDoorId() == Opening->Id;
-					const FLinearColor DoorColor = bIsSelectedDoor ? FLinearColor(1.f, 0.15f, 0.15f, 1.f) : FLinearColor(0.f, 0.85f, 1.f, 1.f); // fluorescent blue, or red when selected
+					const FLinearColor DoorColor = bIsSelectedDoor ? FLinearColor(1.f, 0.15f, 0.15f, 1.f) : InteriorDoorColors::RoomDoor(); // fluorescent blue, or red when selected
 					DrawSegment(WorldA + Dir * GapStart, WorldA + Dir * GapEnd, DoorColor, 5.f);
 				}
 

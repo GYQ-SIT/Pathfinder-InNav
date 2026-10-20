@@ -468,6 +468,12 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 						OpeningObject->TryGetNumberField(TEXT("sillHeight"), Opening.SillHeight);
 						OpeningObject->TryGetStringField(TEXT("inputId"), Opening.InputId);
 						OpeningObject->TryGetStringField(TEXT("connectsTo"), Opening.ConnectsTo);
+						// The way out of a building is a main door in its outer wall now, not a room's door: an older project's room door that
+						// led "outside" leads to the corridor instead (the main door is for the user to add).
+						if (Opening.ConnectsTo.Equals(TEXT("outside"), ESearchCase::IgnoreCase))
+						{
+							Opening.ConnectsTo = TEXT("corridor");
+						}
 
 						Openings.Add(Opening);
 					}
@@ -1903,9 +1909,10 @@ FString AInteriorGenerator::AddDoorToRoom(const FString& RoomId, int32 EdgeIndex
 			Opening.Offset = OffsetWorldUnits;
 			Opening.Width = NewDoorWidth;
 			Opening.Height = 210.f;
-			// InputId is the door's own room - always known, never user-edited. ConnectsTo is left
-			// blank on purpose - see the header comment.
+			// InputId is the door's own room - always known, never user-edited. A new door leads to the corridor (the building's
+			// walkable space outside the rooms) until it is set to another room in the door's properties.
 			Opening.InputId = RoomId;
+			Opening.ConnectsTo = TEXT("corridor");
 
 			Room->AddOpening(Opening);
 			UE_LOG(LogTemp, Warning, TEXT("Added door %s to %s edge %d"), *Opening.Id, *RoomId, EdgeIndex);

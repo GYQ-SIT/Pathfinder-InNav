@@ -2,6 +2,7 @@
 #include "DockHostUMG.h"
 #include "InteriorDockLayout.h"
 #include "NavigationSearchUtils.h"
+#include "InteriorDoorColors.h"
 #include "InteriorEntrance.h"
 #include "RoomTypes.h"
 
@@ -2185,7 +2186,7 @@ void UInteriorScreenWidget::HandleSelectedEntranceChanged(FString EntranceId)
 	{
 		PropertiesTitleText->SetText(FText::FromString(bMain ? TEXT("Main door") : TEXT("Link door")));
 	}
-	SetKindTag(bMain ? TEXT("MAIN DOOR") : TEXT("LINK DOOR"), StartStyle::Rgb(60, 78, 104));
+	SetKindTag(bMain ? TEXT("MAIN DOOR") : TEXT("LINK DOOR"), bMain ? InteriorDoorColors::MainDoor() : InteriorDoorColors::LinkDoor());
 	if (PropertiesKindTag)
 	{
 		PropertiesKindTag->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
@@ -2238,7 +2239,7 @@ void UInteriorScreenWidget::HandleSelectedDoorChanged(FString RoomId, FString Do
 	}
 	if (PropertiesKindText)
 	{
-		SetKindTag(TEXT("DOOR"), StartStyle::Rgb(60, 78, 104));
+		SetKindTag(TEXT("DOOR"), InteriorDoorColors::RoomDoor());
 	}
 	if (PropertiesKindTag)
 	{
@@ -2247,7 +2248,7 @@ void UInteriorScreenWidget::HandleSelectedDoorChanged(FString RoomId, FString Do
 
 	if (DoorRoomText)
 	{
-		DoorRoomText->SetText(FText::FromString(FString::Printf(TEXT("Current room: %s"), *PC->ResolveConnectsToDisplayName(RoomId))));
+		DoorRoomText->SetText(FText::FromString(FString::Printf(TEXT("Door belongs to: %s"), *PC->ResolveConnectsToDisplayName(RoomId))));
 	}
 
 	if (ConnectsToComboBox)

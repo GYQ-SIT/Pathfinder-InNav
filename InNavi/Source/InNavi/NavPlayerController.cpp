@@ -1305,8 +1305,11 @@ TArray<FString> ANavPlayerController::GetConnectableTargetIds() const
 
 	Result.Add(TEXT("corridor"));
 
-	// A door on Floor 1 can also connect to the outside.
-	if (InteriorGen->GetActiveFloor() == 1)
+	// A room's door leads to the corridor (the walkable space of the building that is not inside a room) or to another room. The way
+	// out of the building is a main door in the outer wall, not a room door - so "Outside" is no longer offered. A door an older project
+	// already set to outside keeps showing it, so it is not silently blanked.
+	FInteriorOpening Current;
+	if (InteriorGen->GetDoorOpening(SelectedDoorRoomId, SelectedDoorId, Current) && Current.ConnectsTo.Equals(TEXT("outside"), ESearchCase::IgnoreCase))
 	{
 		Result.Add(TEXT("Outside"));
 	}
@@ -1335,7 +1338,12 @@ FString ANavPlayerController::ResolveConnectsToDisplayName(
 		return TEXT("Outside");
 	}
 
-	if (ConnectsToId.IsEmpty() || ConnectsToId == TEXT("corridor") || !InteriorGen)
+	// A door with nothing set (older projects) leads to the corridor.
+	if (ConnectsToId.IsEmpty())
+	{
+		return TEXT("corridor");
+	}
+	if (ConnectsToId == TEXT("corridor") || !InteriorGen)
 	{
 		return ConnectsToId;
 	}
