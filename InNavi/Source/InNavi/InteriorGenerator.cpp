@@ -3,6 +3,7 @@
 
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
+#include "NavigationSearchUtils.h"
 #include "InteriorConnectorMarker.h"
 #include "BuildingGenerator.h"
 #include "PolyBuilding.h"
@@ -468,6 +469,17 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 				{
 					Room->RoomId = RoomId;
 					Room->RoomName = RoomName;
+					const TArray<TSharedPtr<FJsonValue>>* TagValues;
+					if (RoomObject->TryGetArrayField(TEXT("tags"), TagValues))
+					{
+						TArray<FString> LoadedTags;
+						for (const TSharedPtr<FJsonValue>& Tag : *TagValues)
+						{
+							FString Text;
+							if (Tag.IsValid() && Tag->TryGetString(Text)) LoadedTags.Add(Text);
+						}
+						Room->RoomTags = NavigationSearch::NormalizeTags(LoadedTags);
+					}
 					Room->FloorLevel = Level;
 					Room->bIsPublic = bIsPublic;
 					Room->bRequiresKey = bRequiresKey;
@@ -546,6 +558,7 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 
 void AInteriorGenerator::ClearLoadedInterior()
 {
+	++RoomSearchRevision;
 	for (auto& Pair : RoomsByFloor)
 	{
 		for (AInteriorRoom* Room : Pair.Value.Rooms)
@@ -778,6 +791,12 @@ FString AInteriorGenerator::PeekNextRoomId() const
 
 AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2D>& Footprint,const FString& RoomId,const FString& RoomName,bool bIsPublic,bool bRequiresKey,bool bAllowOverlap, FString& OutError)
 {
+	return CreateRoomFromFootprintWithTags(Footprint, RoomId, RoomName, bIsPublic, bRequiresKey, bAllowOverlap, OutError, {});
+}
+
+AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprintWithTags(const TArray<FVector2D>& Footprint, const FString& RoomId,
+	const FString& RoomName, bool bIsPublic, bool bRequiresKey, bool bAllowOverlap, FString& OutError, const TArray<FString>& InTags)
+{
 	OutError.Empty();
 
 	if (LoadedBuildingId.IsEmpty() || !Generator)
@@ -870,6 +889,7 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprint(const TArray<FVector2
 	{
 		Room->RoomId = ResolvedId;
 		Room->RoomName = RoomName.IsEmpty() ? ResolvedId : RoomName;
+		Room->RoomTags = NavigationSearch::NormalizeTags(InTags);
 		Room->FloorLevel = ActiveFloor;
 		Room->bIsPublic = bIsPublic;
 		Room->bRequiresKey = bRequiresKey;
@@ -1631,6 +1651,7 @@ bool AInteriorGenerator::RotateRoom(const FString& RoomId, float DeltaDegrees)
 			}
 
 			Room->ResizeFootprint(NewFootprint);
+			++RoomSearchRevision;
 			return true;
 		}
 	}
@@ -1656,6 +1677,7 @@ bool AInteriorGenerator::CommitRoomRotation(const FString& RoomId, const TArray<
 			if (DoesFootprintBlockConnector(Room->GetFootprint(), Room->IsClosedLoop(), Pair.Key))
 			{
 				Room->ResizeFootprint(FallbackFootprint);
+				++RoomSearchRevision;
 				UE_LOG(LogTemp, Warning, TEXT("CommitRoomRotation: '%s' would wall in an elevator/stairs/escalator - reverted to its position before the rotation"), *RoomId);
 				return false;
 			}
@@ -1690,6 +1712,7 @@ bool AInteriorGenerator::MoveRoom(const FString& RoomId, const TArray<FVector2D>
 			}
 
 			Room->ResizeFootprint(NewFootprint);
+			++RoomSearchRevision;
 			return true;
 		}
 	}
@@ -1722,6 +1745,7 @@ bool AInteriorGenerator::CommitRoomMove(const FString& RoomId, const TArray<FVec
 				if (DoFootprintsOverlap(Room->GetFootprint(), Room->IsClosedLoop(), Other->GetFootprint(), Other->IsClosedLoop(), OverlapToleranceWorldUnits / (Generator ? Generator->GetScale() : 1.f)))
 				{
 					Room->ResizeFootprint(FallbackFootprint);
+					++RoomSearchRevision;
 					UE_LOG(LogTemp, Warning, TEXT("CommitRoomMove: '%s' would overlap '%s' - reverted to its position before the drag"), *RoomId, *Other->RoomId);
 					return false;
 				}
@@ -1732,6 +1756,7 @@ bool AInteriorGenerator::CommitRoomMove(const FString& RoomId, const TArray<FVec
 			if (DoesFootprintBlockConnector(Room->GetFootprint(), Room->IsClosedLoop(), Pair.Key))
 			{
 				Room->ResizeFootprint(FallbackFootprint);
+				++RoomSearchRevision;
 				UE_LOG(LogTemp, Warning, TEXT("CommitRoomMove: '%s' would wall in an elevator/stairs/escalator - reverted to its position before the drag"), *RoomId);
 				return false;
 			}
@@ -2022,6 +2047,25 @@ bool AInteriorGenerator::SetRoomName(const FString& RoomId, const FString& NewNa
 	return false;
 }
 
+bool AInteriorGenerator::SetRoomTags(const FString& RoomId, const TArray<FString>& InTags)
+{
+	AInteriorRoom* Room = GetRoomById(RoomId);
+	if (!Room || !Room->IsClosedLoop()) return false;
+	const TArray<FString> Normalized = NavigationSearch::NormalizeTags(InTags);
+	if (Room->RoomTags != Normalized)
+	{
+		Room->RoomTags = Normalized;
+		RecordHistorySnapshot();
+	}
+	return true;
+}
+
+TArray<FString> AInteriorGenerator::GetRoomTags(const FString& RoomId) const
+{
+	const AInteriorRoom* Room = GetRoomById(RoomId);
+	return Room ? Room->RoomTags : TArray<FString>();
+}
+
 FString AInteriorGenerator::GetRoomName(const FString& RoomId) const
 {
 	for (const auto& Pair : RoomsByFloor)
@@ -2085,6 +2129,9 @@ TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 				TSharedRef<FJsonObject> RoomObject = MakeShared<FJsonObject>();
 				RoomObject->SetStringField(TEXT("id"), Room->RoomId);
 				RoomObject->SetStringField(TEXT("name"), Room->RoomName);
+				TArray<TSharedPtr<FJsonValue>> SerializedTags;
+				for (const FString& Tag : Room->RoomTags) SerializedTags.Add(MakeShared<FJsonValueString>(Tag));
+				RoomObject->SetArrayField(TEXT("tags"), SerializedTags);
 				RoomObject->SetStringField(TEXT("access"), Room->bIsPublic ? TEXT("public") : TEXT("private"));
 				RoomObject->SetBoolField(TEXT("requireKey"), Room->bRequiresKey);
 				RoomObject->SetBoolField(TEXT("closed"), Room->IsClosedLoop());
@@ -2367,6 +2414,8 @@ void AInteriorGenerator::SyncInteriorToBuildingGenerator()
 }
 void AInteriorGenerator::RecordHistorySnapshot()
 {
+	// All committed interior edits pass here. Invalidation is cheap and rebuilding stays lazy.
+	++RoomSearchRevision;
 	if (bIsRestoringHistory || LoadedBuildingId.IsEmpty())
 	{
 		return;

@@ -65,6 +65,8 @@ public:
 	// at rooms whose building actor is about to be destroyed.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void ClearLoadedInterior();
+	// Room search data changes with edits, loads, history restoration, and live geometry previews.
+	uint64 GetRoomSearchRevision() const { return RoomSearchRevision; }
 
 	// Shows only the given floor's rooms, hides the rest.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
@@ -107,6 +109,9 @@ public:
 	// convention) so the caller can show the real cause instead of guessing among several.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	AInteriorRoom* CreateRoomFromFootprint(const TArray<FVector2D>& Footprint,const FString& RoomId,const FString& RoomName,bool bIsPublic,bool bRequiresKey,bool bAllowOverlap, FString& OutError);
+	// Clipboard creation includes tags in the same undo snapshot as the new room.
+	AInteriorRoom* CreateRoomFromFootprintWithTags(const TArray<FVector2D>& Footprint, const FString& RoomId,
+		const FString& RoomName, bool bIsPublic, bool bRequiresKey, bool bAllowOverlap, FString& OutError, const TArray<FString>& InTags);
 
 	// Builds a standalone open wall/partition line on the active floor - same id/floor rules as
 	// CreateRoomFromFootprint, but the points aren't closed into a loop (at least 2 points, not 3)
@@ -222,6 +227,11 @@ public:
 	// see AInteriorRoom::RoomName). Returns false if no room with that id exists.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool SetRoomName(const FString& RoomId, const FString& NewName);
+
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool SetRoomTags(const FString& RoomId, const TArray<FString>& InTags);
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	TArray<FString> GetRoomTags(const FString& RoomId) const;
 
 	// Reads a room's current human-readable name - for a room properties panel to populate its
 	// field. A plain getter with no side effects, so this is BlueprintPure (no exec pins needed).
@@ -366,6 +376,7 @@ private:
 	FString LoadedBuildingId;
 
 	int32 ActiveFloor = 1;
+	uint64 RoomSearchRevision = 0;
 
 	// Rooms spawned for the currently loaded building, keyed by floor level.
 	UPROPERTY()

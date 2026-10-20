@@ -32,10 +32,12 @@ void APolyBuilding::BuildFromFootprint(const TArray<FVector2D>& Footprint, float
 	CachedFootprint = Footprint;
 	CachedScale = Scale;
 	BuildingOffset = Offset;
+	const int32 PreviousFloorCount = FloorCount;
 	FloorCount = FMath::Max(1, InFloorCount);
 	FloorHeight = InFloorHeight;
 
 	RebuildMesh();
+	if (FloorCount != PreviousFloorCount) OnFloorCountChanged.Broadcast(this);
 }
 
 void APolyBuilding::SetFloorCount(int32 NewFloorCount)
@@ -46,8 +48,10 @@ void APolyBuilding::SetFloorCount(int32 NewFloorCount)
 		return;
 	}
 
+	const int32 PreviousFloorCount = FloorCount;
 	FloorCount = FMath::Max(1, NewFloorCount);
 	RebuildMesh();
+	if (FloorCount != PreviousFloorCount) OnFloorCountChanged.Broadcast(this);
 }
 
 void APolyBuilding::RebuildMesh()

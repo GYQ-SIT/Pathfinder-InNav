@@ -106,6 +106,18 @@ public:
 	// codebase hides a whole building, e.g. NavPlayerController's other-buildings-hidden-in-3D-preview).
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void SetCampusBuildingsVisible(bool bVisible);
+	void SetBuildingFilter(const FString& Query, int32 MinimumFloors, int32 MaximumFloors);
+	void ApplyBuildingFilter();
+	bool MatchesBuildingFilter(const APolyBuilding& Building) const;
+	TArray<APolyBuilding*> GetFilteredBuildings() const;
+	FString GetBuildingFilterText() const { return BuildingFilterText; }
+	int32 GetBuildingFilterMinimumFloors() const { return BuildingFilterMinimumFloors; }
+	int32 GetBuildingFilterMaximumFloors() const { return BuildingFilterMaximumFloors; }
+	bool AreCampusBuildingsVisible() const { return bCampusBuildingsVisible; }
+	uint64 GetBuildingResultsRevision() const { return BuildingResultsRevision; }
+	int32 GetBuildingCount() const { return BuildingsById.Num(); }
+	// Lazily rebuilt once per data/filter change; idle UI frames and selection changes reuse it.
+	const TMap<FString, FString>& GetFilteredBuildingOptions() const;
 
 	// Shows/hides every spawned context-building actor at once - the filter panel's "Non-Campus"
 	// building-visibility checkbox. These are visual-only placeholders (see
@@ -216,6 +228,11 @@ public:
 	void ClearAllBuildings();
 
 private:
+	void HandleBuildingFloorCountChanged(APolyBuilding* Building);
+	UFUNCTION()
+	void HandleBuildingDestroyed(AActor* Building);
+	void RefreshBuildingFilterFor(APolyBuilding& Building) const;
+
 	float Scale = 1.f;
 	TSet<FString> UsedBuildingIds;
 
@@ -239,6 +256,14 @@ private:
 	};
 	TMap<FString, FBuildingBaseline> BuildingBaselines;
 	bool CaptureBuildingBaselineInto(const FString& BuildingId, FBuildingBaseline& Out) const;
+	FString BuildingFilterText;
+	TArray<FString> BuildingFilterWords;
+	int32 BuildingFilterMinimumFloors = 0;
+	int32 BuildingFilterMaximumFloors = 0;
+	bool bCampusBuildingsVisible = true;
+	uint64 BuildingResultsRevision = 0;
+	mutable uint64 CachedBuildingResultsRevision = MAX_uint64;
+	mutable TMap<FString, FString> CachedBuildingOptions;
 
 	// The lat/lon centroid LoadBuildingsFromDatabase projects around, stashed so
 	// LoadRoadsAndPOIsFromDatabase can project roads/POIs into that exact same local-meters space

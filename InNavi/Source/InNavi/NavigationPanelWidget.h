@@ -9,6 +9,7 @@ class ABuildingGenerator;
 class AInteriorGenerator;
 class APolyBuilding;
 class UBorder;
+class UWidget;
 
 UENUM(BlueprintType)
 enum class ENavigationSelectionMode : uint8
@@ -28,6 +29,22 @@ enum class ENavigationMessageKind : uint8
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnNavigationStateChanged);
+
+// Person A supplies absolute Unreal world coordinates in centimetres, ordered start to end.
+// Floor 0 is outside; floor changes retain connector metadata for the UI's instructions.
+USTRUCT(BlueprintType)
+struct INNAVI_API FNavigationWorldRoutePoint
+{
+	GENERATED_BODY()
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
+	FVector WorldPosition = FVector::ZeroVector;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
+	int32 Floor = 1;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
+	FString ConnectorId;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
+	EInteriorNavNodeType ConnectorType = EInteriorNavNodeType::PathNode;
+};
 
 // Navigation selection/route-planning state and logic. No UI of its own any more -
 // UInteriorScreenWidget's own Navigation dock panel is the presentation layer; this
@@ -60,6 +77,14 @@ public:
 	const FNavigationRoutePoint& GetStart() const { return Start.Point; }
 	const FNavigationRoutePoint& GetDestination() const { return Destination.Point; }
 	const TArray<FNavigationRoutePoint>& GetRoutePoints() const { return RoutePoints; }
+	// Presentation visibility is independent of the stored route and the navigation dock.
+	UFUNCTION(BlueprintPure, Category = "Navigation")
+	bool IsRouteGuidanceVisible() const { return bRouteGuidanceVisible; }
+	UFUNCTION(BlueprintCallable, Category = "Navigation")
+	void SetRouteGuidanceVisible(bool bVisible);
+	UFUNCTION(BlueprintCallable, Category = "Navigation")
+	void ToggleRouteGuidance();
+	bool CanToggleRouteGuidance() const { return HasStart() || HasDestination() || !RoutePoints.IsEmpty(); }
 	bool IsStartOutside() const { return Start.bValid && Start.Point.Floor == OutdoorFloor; }
 	bool IsDestinationOutside() const { return Destination.bValid && Destination.Point.Floor == OutdoorFloor; }
 	bool WasStartSetViaDropdown() const { return Start.bValid && Start.bSetViaDropdown; }
@@ -95,6 +120,11 @@ public:
 	// Kept as a C++ method because FNavigationRouteResult is intentionally not a reflected type.
 	void ApplyRouteResult(const FNavigationRouteResult& Result);
 
+	// Replaces the displayed route and endpoints atomically. Does not calculate a NavMesh path.
+	// A failed import leaves the currently displayed route intact and reports the reason.
+	UFUNCTION(BlueprintCallable, Category = "Navigation")
+	bool ApplyWorldRouteResult(const FString& BuildingId, const TArray<FNavigationWorldRoutePoint>& Points);
+
 	// What UInteriorScreenWidget's Navigation panel needs to display itself - kept here
 	// rather than duplicated on the display side, since some of it (CanFindRoute) needs
 	// private state (FSelectedEndpoint::BuildingId) that has no other public accessor.
@@ -117,20 +147,24 @@ public:
 	{
 		FString RoomId;
 		FString RoomName;
+		TArray<FString> Tags;
 		int32 Floor = 1;
 		FVector2D Centroid = FVector2D::ZeroVector;
+		// Built with the centroid when the room index changes; queries reuse these strings.
+		FString DisplayLabel;
+		FString SearchableText;
 
 		// Shared by both the dropdown's own population (UInteriorScreenWidget) and matching a
-		// selection back to its option (SetStartToRoom/SetDestinationToRoom) - one format, so they
-		// can never drift out of sync with each other. Always includes the floor, not just when
-		// names collide, so the format never has to change and pick a room genuinely still isn't
-		// ambiguous when two floors happen to reuse the same room name.
-		FString GetDisplayLabel() const { return FString::Printf(TEXT("%s (Floor %d)"), *RoomName, Floor); }
+		// selection back to its option (SetStartToRoom/SetDestinationToRoom). Stable room IDs and
+		// floors disambiguate names reused by copied rooms or on different floors.
+		const FString& GetDisplayLabel() const { return DisplayLabel; }
 	};
 
 	// Every closed-loop room (walls/standalone partitions are excluded - see AInteriorRoom::
 	// IsClosedLoop) across every floor of the currently loaded building. Empty if nothing's loaded.
-	TArray<FNavigationRoomOption> GetSelectableRooms() const;
+	// The cached array is refreshed by the next query after an edit; copy it if keeping a snapshot.
+	const TArray<FNavigationRoomOption>& GetSelectableRooms() const;
+	TArray<FNavigationRoomOption> SearchDestinations(const FString& Query) const;
 
 	// Sets Start/Destination directly to the named room's centroid, bypassing the click-to-pick flow
 	// (and cancelling one if it was in progress) - what the Navigation panel's room dropdowns call.
@@ -171,6 +205,13 @@ protected:
 	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 
 private:
+	void RefreshRoomSearchIndex() const;
+	mutable TArray<FNavigationRoomOption> CachedRooms;
+	mutable TArray<int32> SortedDestinationIndices;
+	mutable uint64 IndexedRoomSearchRevision = MAX_uint64;
+	mutable TWeakObjectPtr<APolyBuilding> IndexedBuilding;
+	mutable int32 IndexedFloorCount = 0;
+
 	struct FSelectedEndpoint
 	{
 		bool bValid = false;
@@ -207,4 +248,5 @@ private:
 	ENavigationMessageKind StatusKind = ENavigationMessageKind::Instruction;
 	ENavigationSelectionMode SelectionMode = ENavigationSelectionMode::None;
 	bool bLastFindRouteFailed = false;
+	bool bRouteGuidanceVisible = true;
 };

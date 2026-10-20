@@ -3,6 +3,7 @@
 
 #include "NavPlayerController.h"
 #include "NavigationPanelWidget.h"
+#include "NavigationRouteVisualization.h"
 #include "InteriorFloorPlanWidget.h"
 #include "Blueprint/UserWidget.h"
 #include "GameFramework/Pawn.h"
@@ -48,6 +49,9 @@ static bool IsPointInPolygon(const FVector2D& Point, const TArray<FVector2D>& Po
 
 ANavPlayerController::ANavPlayerController()
 {
+	// AController is hidden by default. This controller now owns visible route components.
+	SetHidden(false);
+	RouteVisualization = CreateDefaultSubobject<UNavigationRouteVisualization>(TEXT("NavigationRouteVisualization"));
 	SelectedBuilding = nullptr;
 	Generator = nullptr;
 	InteriorGen = nullptr;
@@ -1115,6 +1119,24 @@ FString ANavPlayerController::GetSelectedRoomName() const
 	return InteriorGen->GetRoomName(SelectedRoomId);
 }
 
+bool ANavPlayerController::SetSelectedRoomTags(const TArray<FString>& InTags)
+{
+	if (!InteriorGen || !InteriorGen->IsRoomClosedLoop(SelectedRoomId)) return false;
+	const TArray<FString> Before = InteriorGen->GetRoomTags(SelectedRoomId);
+	if (!InteriorGen->SetRoomTags(SelectedRoomId, InTags)) return false;
+	if (Before != InteriorGen->GetRoomTags(SelectedRoomId))
+	{
+		bHasUnsavedChanges = true;
+		OnInteriorContentChanged.Broadcast();
+	}
+	return true;
+}
+
+TArray<FString> ANavPlayerController::GetSelectedRoomTags() const
+{
+	return InteriorGen ? InteriorGen->GetRoomTags(SelectedRoomId) : TArray<FString>();
+}
+
 bool ANavPlayerController::IsSelectedRoomClosedLoop() const
 {
 	if (SelectedRoomId.IsEmpty() || !InteriorGen)
@@ -2148,8 +2170,9 @@ void ANavPlayerController::SetOtherBuildingsHidden(bool bNewHidden)
 	{
 		if (Building && Building->BuildingId != LoadedId)
 		{
-			Building->SetActorHiddenInGame(bNewHidden);
-			Building->SetActorEnableCollision(!bNewHidden);
+			const bool bVisible = !bNewHidden && Generator->MatchesBuildingFilter(*Building);
+			Building->SetActorHiddenInGame(!bVisible);
+			Building->SetActorEnableCollision(bVisible);
 		}
 	}
 }
@@ -2672,7 +2695,7 @@ void ANavPlayerController::DrawPendingRoomPointMarker3D()
 
 void ANavPlayerController::RefreshRoute3DVisualization()
 {
-	FlushPersistentDebugLines(GetWorld());
+	RouteVisualization->ClearRoute();
 
 	if (!bIsIn3DPreviewMode || !Generator || !InteriorGen || !NavigationPanel)
 	{
@@ -2685,47 +2708,12 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 		return;
 	}
 
-	const float Scale = Generator->GetScale();
-	const int32 ActiveFloor = InteriorGen->GetActiveFloor();
-	// A little above the floor slab (see AInteriorRoom::RebuildMesh's own FloorSlabZOffset and
-	// DrawPendingRoomPointMarker3D's own Z) so the route doesn't z-fight with it.
-	const float Z = (ActiveFloor - 1) * Building->GetFloorHeight() + 15.f;
-
-	auto ToWorld = [&](const FVector2D& FootprintPoint) -> FVector
-	{
-		return FVector((FootprintPoint.X + Building->BuildingOffset.X) * Scale, (FootprintPoint.Y + Building->BuildingOffset.Y) * Scale, Z);
-	};
-
-	// Mirrors InteriorFloorPlanWidget::NativePaint's own route-drawing exactly: a segment only draws
-	// if BOTH endpoints are on the active floor (a floor-crossing segment, e.g. through an elevator,
-	// simply isn't drawn on either floor - same as 2D).
-	const TArray<FNavigationRoutePoint>& Route = NavigationPanel->GetRoutePoints();
-	for (int32 i = 1; i < Route.Num(); i++)
-	{
-		if (Route[i - 1].Floor != ActiveFloor || Route[i].Floor != ActiveFloor)
-		{
-			continue;
-		}
-		// FColor(255, 140, 0) - orange, matching the 2D route line's own FLinearColor(1.f, 0.55f, 0.f, 1.f).
-		DrawDebugLine(GetWorld(), ToWorld(Route[i - 1].Position), ToWorld(Route[i].Position), FColor(255, 140, 0), true, -1.f, 0, 8.f);
-	}
-
-	auto DrawEndpoint = [&](const FNavigationRoutePoint& Point, const FColor& Color)
-	{
-		if (Point.Floor != ActiveFloor)
-		{
-			return;
-		}
-		DrawDebugSphere(GetWorld(), ToWorld(Point.Position), 30.f, 12, Color, true);
-	};
-	if (NavigationPanel->HasStart())
-	{
-		DrawEndpoint(NavigationPanel->GetStart(), FColor::Green);
-	}
-	if (NavigationPanel->HasDestination())
-	{
-		DrawEndpoint(NavigationPanel->GetDestination(), FColor::Red);
-	}
+	RouteVisualization->ShowView(UNavigationRouteVisualization::BuildView(
+		NavigationPanel->GetRoutePoints(),
+		NavigationPanel->HasStart() ? &NavigationPanel->GetStart() : nullptr,
+		NavigationPanel->HasDestination() ? &NavigationPanel->GetDestination() : nullptr,
+		Building->BuildingOffset, Generator->GetScale(), Building->GetFloorHeight(), InteriorGen->GetActiveFloor(),
+		NavigationPanel->IsRouteGuidanceVisible()));
 }
 
 void ANavPlayerController::SetPointerOverUICallback(const UObject* ScreenOwner, TFunction<bool(const FVector2D&)> Callback)
@@ -2870,7 +2858,45 @@ void ANavPlayerController::SetCampusBuildingsVisible(bool bVisible)
 	if (Generator)
 	{
 		Generator->SetCampusBuildingsVisible(bVisible);
+		SetBuildingFilter(Generator->GetBuildingFilterText(), Generator->GetBuildingFilterMinimumFloors(), Generator->GetBuildingFilterMaximumFloors());
 	}
+}
+
+void ANavPlayerController::SetBuildingFilter(const FString& Query, int32 MinimumFloors, int32 MaximumFloors)
+{
+	if (!Generator) return;
+	Generator->SetBuildingFilter(Query, MinimumFloors, MaximumFloors);
+	if (SelectedBuilding && SelectedBuilding->IsHidden())
+	{
+		SelectedBuilding->SetHighlighted(false);
+		SelectedBuilding = nullptr;
+		OnBuildingSelected.Broadcast(FString());
+	}
+}
+
+FString ANavPlayerController::GetBuildingFilterText() const { return Generator ? Generator->GetBuildingFilterText() : FString(); }
+int32 ANavPlayerController::GetBuildingFilterMinimumFloors() const { return Generator ? Generator->GetBuildingFilterMinimumFloors() : 0; }
+int32 ANavPlayerController::GetBuildingFilterMaximumFloors() const { return Generator ? Generator->GetBuildingFilterMaximumFloors() : 0; }
+bool ANavPlayerController::AreCampusBuildingsVisible() const { return !Generator || Generator->AreCampusBuildingsVisible(); }
+int32 ANavPlayerController::GetEditableBuildingCount() const { return Generator ? Generator->GetBuildingCount() : 0; }
+uint64 ANavPlayerController::GetBuildingResultsRevision() const { return Generator ? Generator->GetBuildingResultsRevision() : 0; }
+
+const TMap<FString, FString>& ANavPlayerController::GetFilteredBuildingOptions() const
+{
+	static const TMap<FString, FString> Empty;
+	return Generator ? Generator->GetFilteredBuildingOptions() : Empty;
+}
+
+bool ANavPlayerController::SelectBuildingById(const FString& BuildingId)
+{
+	APolyBuilding* Building = Generator ? Generator->FindBuildingById(BuildingId) : nullptr;
+	if (!Building || Building->IsHidden() || bIsIn3DPreviewMode) return false;
+	if (SelectedBuilding) SelectedBuilding->SetHighlighted(false);
+	SelectedBuilding = Building;
+	Building->SetHighlighted(true);
+	OnBuildingSelected.Broadcast(BuildingId);
+	FocusCameraOnBuilding(Building);
+	return true;
 }
 
 void ANavPlayerController::SetNonCampusBuildingsVisible(bool bVisible)
@@ -3120,6 +3146,7 @@ void ANavPlayerController::RestoreExteriorCameraView()
 		}
 	}
 	InteriorBuildingHiddenById.Empty();
+	if (Generator) Generator->ApplyBuildingFilter();
 
 	// Leaving interior editing entirely - destroy whatever rooms were spawned for it (safe: the
 	// data itself lives in BuildingGenerator's InteriorDataById, not in these actors, so nothing is
@@ -3350,6 +3377,7 @@ void ANavPlayerController::CopyInteriorKeyHandler()
 	CopiedRoomId = Room->RoomId;
 	CopiedRoomFootprint = Room->GetFootprint();
 	CopiedRoomName = Room->RoomName;
+	CopiedRoomTags = Room->RoomTags;
 	bCopiedRoomIsPublic = Room->bIsPublic;
 	bCopiedRoomRequiresKey = Room->bRequiresKey;
 	bHasCopiedRoom = true;
@@ -3502,14 +3530,15 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 		break;
 	}
 	FString CreateError;
-	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(
+	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprintWithTags(
 		NewFootprint,
 		FString(),                 // Empty = generate a new unique ID
 		CopiedRoomName,
 		bCopiedRoomIsPublic,
 		bCopiedRoomRequiresKey,
 		/*bAllowOverlap=*/false,
-		CreateError
+		CreateError,
+		CopiedRoomTags
 	);
 
 	if (NewRoom)

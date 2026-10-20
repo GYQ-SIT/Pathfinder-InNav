@@ -11,6 +11,7 @@ class UBorder;
 class UButton;
 class UCheckBox;
 class UDockHostWidget;
+class UComboBoxString;
 class UEditableTextBox;
 class UScrollBox;
 class USlider;
@@ -44,6 +45,10 @@ public:
 
 	// The dock system hosting the Audio/Map/Debug panels (null until the widget tree is built).
 	UDockHostWidget* GetDockHost() const { return DockHost; }
+
+	// Finds a widget of this screen by name; GetWidgetFromName cannot see the dock panels' contents (they are
+	// registered with DockHost, not parented in the widget tree). For tests and tooling.
+	UWidget* FindScreenWidget(FName Name) const;
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -223,6 +228,13 @@ private:
 	// reasoning as the 6 road-category handlers above.
 	UFUNCTION()
 	void OnBuildingCampusCheckChanged(bool bIsChecked);
+	UFUNCTION() void HandleBuildingSearchChanged(const FText& Text);
+	UFUNCTION() void HandleBuildingFloorFilterChanged(FString Item, ESelectInfo::Type Type);
+	UFUNCTION() void HandleFilteredBuildingChanged(FString Item, ESelectInfo::Type Type);
+	UFUNCTION() void OnResetBuildingFiltersClicked();
+	UFUNCTION() UWidget* GenerateBuildingFilterItem(FString Item);
+	void ApplyBuildingFilters();
+	void RefreshBuildingFilterDisplay();
 	UFUNCTION()
 	void OnBuildingNonCampusCheckChanged(bool bIsChecked);
 
@@ -387,6 +399,13 @@ private:
 	// Building-visibility filter's own checkboxes ("Buildings" section).
 	UPROPERTY()
 	UCheckBox* BuildingCampusCheckbox = nullptr;
+	UPROPERTY() UEditableTextBox* BuildingSearchBox = nullptr;
+	UPROPERTY() UComboBoxString* BuildingFloorFilter = nullptr;
+	UPROPERTY() UComboBoxString* FilteredBuildingComboBox = nullptr;
+	UPROPERTY() UTextBlock* BuildingFilterResultsText = nullptr;
+	TMap<FString, FString> CachedBuildingOptions;
+	bool bUpdatingBuildingFilters = false;
+	uint64 DisplayedBuildingResultsRevision = MAX_uint64;
 	UPROPERTY()
 	UCheckBox* BuildingNonCampusCheckbox = nullptr;
 

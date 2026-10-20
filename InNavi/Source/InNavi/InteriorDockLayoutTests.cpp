@@ -167,8 +167,13 @@ bool FInteriorScreenDockSmokeTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	FString Err;
+	// The screen loads whatever layout this machine saved; start from the team default so the checks below do
+	// not depend on it.
 	const TSharedRef<FDockLayout> L = Dock->GetLayout();
+	BuildDefaultLayout(*L);
+	Dock->NotifyLayoutChanged();
+
+	FString Err;
 	TestTrue(*FString::Printf(TEXT("layout valid (%s)"), *Err), L->Validate(Err));
 	for (const FName Panel : AllPanels())
 	{

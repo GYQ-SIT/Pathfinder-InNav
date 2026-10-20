@@ -42,6 +42,11 @@ public:
 	// The dock system hosting the eight panels (null until the widget tree is built).
 	class UDockHostWidget* GetDockHost() const { return DockHost; }
 
+	// Finds a widget of this screen by name. GetWidgetFromName cannot see the dock panels' contents - they are
+	// registered with DockHost and are not parented in the widget tree - so this also looks at everything the
+	// screen created. For tests and tooling.
+	UWidget* FindScreenWidget(FName Name) const;
+
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
@@ -474,6 +479,9 @@ private:
 	void OnNavClearRouteClicked();
 
 	UFUNCTION()
+	void OnNavToggleRouteClicked();
+
+	UFUNCTION()
 	void HandleNavigationStateChanged();
 
 	void RefreshNavigationPanelDisplay();
@@ -533,8 +541,13 @@ private:
 
 	UFUNCTION()
 	void HandleNavDestinationRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+	UFUNCTION()
+	void HandleDestinationSearchChanged(const FText& Text);
+	UFUNCTION()
+	void OnApplyRoomTagsClicked();
 
 	void RefreshNavRoomDropdowns();
+	void RefreshDestinationRoomDropdown();
 
 	// --- Docking ---
 	// The eight panels are laid out by the dock system (DockLayoutModel / DockHostWidget / DockHostUMG): tab
@@ -566,6 +579,7 @@ private:
 	void InitializeDockLayout();
 	bool IsDockPanelShown(EDockPanelId Id) const;
 	void HandleDockPanelClosed(FName Panel);
+	void CancelNavigationPickIfNavigationHidden();
 	void HandleDockLayoutChanged();
 	void RefreshWindowMenuChecks();
 	void ResetDockLayout();
@@ -716,6 +730,13 @@ private:
 
 	UPROPERTY()
 	UEditableTextBox* RoomNameTextBox = nullptr;
+	UPROPERTY()
+	UVerticalBox* RoomTagsFields = nullptr;
+	UPROPERTY() USizeBox* RoomTagsFieldsSizeBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* RoomTagsTextBox = nullptr;
+	UPROPERTY()
+	UButton* ApplyRoomTagsButton = nullptr;
 
 	UPROPERTY()
 	UButton* ApplyRoomButton = nullptr;
@@ -777,6 +798,10 @@ private:
 
 	UPROPERTY()
 	UComboBoxString* NavDestinationRoomComboBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* DestinationSearchBox = nullptr;
+	UPROPERTY()
+	UTextBlock* DestinationSearchResultsText = nullptr;
 
 	// Same as NavStartRoomBorder, tinted red for Destination.
 	UPROPERTY()
@@ -799,6 +824,12 @@ private:
 
 	UPROPERTY()
 	UButton* NavClearRouteButton = nullptr;
+
+	UPROPERTY()
+	UButton* NavToggleRouteButton = nullptr;
+
+	UPROPERTY()
+	UTextBlock* NavToggleRouteButtonLabel = nullptr;
 
 	UPROPERTY()
 	UTextBlock* NavStatusText = nullptr;
