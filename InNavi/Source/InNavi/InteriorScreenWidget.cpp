@@ -893,7 +893,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		constexpr float SeparatorLineHeight = 2.f;
 		auto AddHorizontalSeparator = [this, Canvas, SeparatorLineHeight](float PositionY)
 		{
-			UBorder* Separator = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+			UBorder* Separator = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(*FString::Printf(TEXT("Chrome_Separator_%d"), FMath::RoundToInt(PositionY))));
 			Separator->SetBrushColor(FLinearColor(1.f, 1.f, 1.f, 0.5f));
 			UCanvasPanelSlot* SeparatorSlot = Canvas->AddChildToCanvas(Separator);
 			SeparatorSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));

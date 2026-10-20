@@ -26,6 +26,8 @@ public:
 	void NotifyLayoutChanged();
 
 	bool IsPanelShown(FName Id) const { return Layout->ContainsPanel(Id); }
+	// True once the owner has registered content for Id (whether or not the panel is currently shown).
+	bool IsPanelRegistered(FName Id) const { return PanelContents.Contains(Id); }
 
 	// True when ScreenPosition is over Id's visible content: false if the panel is hidden or is an inactive
 	// tab. (A widget's cached geometry outlives it being swapped out, so it can't be trusted for this.)
