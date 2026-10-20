@@ -52,6 +52,8 @@ shows the selected building, camera speed, unsaved-changes flag, FPS and frame t
 **Last Error** line for the most recent failed action (yellow: rejected, nothing lost; red:
 data may have been lost) - File > New/Load failures used to be silent on this screen.
 
+> Audio, Map and Debug are the same widgets on this screen and in the interior editor; how panels are built and added is in [UI Panels Guide](ui-panels-guide.md).
+
 ### Map panel (roads, POIs, buildings)
 
 Hidden or shown via Window > Map. Only appears once a database (`.db`) has been loaded
