@@ -3,12 +3,15 @@
 #include "EditScreenWidget.h"
 #include "NavPlayerController.h"
 #include "TimerManager.h"
+#include "Engine/Texture2D.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/Image.h"
+#include "Components/ScaleBox.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -28,12 +31,29 @@ TSharedRef<SWidget> UStartScreenWidget::RebuildWidget()
 		WidgetTree->RootWidget = Canvas;
 
 		// Opaque background, filling the whole screen, behind everything else - without this the
-		// 3D viewport shows through.
+		// 3D viewport shows through. The same dark blue as the splash picture's empty side, so it is
+		// also what shows if the picture is missing.
 		UBorder* Background = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Background"));
-		Background->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 1.f));
+		Background->SetBrushColor(FLinearColor(0.10f, 0.17f, 0.29f, 1.f));
 		UCanvasPanelSlot* BackgroundSlot = Canvas->AddChildToCanvas(Background);
 		BackgroundSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
 		BackgroundSlot->SetOffsets(FMargin(0.f));
+
+		// The splash picture (Content/ImageAssets/Splash Screen BG.png, imported as Splash_Screen_BG). It is 16:9
+		// art with the buildings on the right and the left kept empty for the buttons. Scaled to fill the screen
+		// with its aspect ratio kept, so on a wider or taller window the edges are cropped instead of stretching it.
+		if (UTexture2D* SplashTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/ImageAssets/Splash_Screen_BG.Splash_Screen_BG")))
+		{
+			UScaleBox* SplashScale = WidgetTree->ConstructWidget<UScaleBox>(UScaleBox::StaticClass(), TEXT("Scale_SplashBackground"));
+			SplashScale->SetStretch(EStretch::ScaleToFill);
+			SplashScale->SetVisibility(ESlateVisibility::HitTestInvisible);
+			UImage* SplashImage = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("Img_SplashBackground"));
+			SplashImage->SetBrushFromTexture(SplashTexture, true);
+			SplashScale->SetContent(SplashImage);
+			UCanvasPanelSlot* SplashSlot = Canvas->AddChildToCanvas(SplashScale);
+			SplashSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
+			SplashSlot->SetOffsets(FMargin(0.f));
+		}
 
 		UTextBlock* Title = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_Title"));
 		Title->SetText(FText::FromString(TEXT("In Nav")));
