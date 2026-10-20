@@ -921,6 +921,18 @@ private:
 	UPROPERTY()
 	UButton* SaveButton = nullptr;
 
+	// The little square in front of "Save": yellow while there are unsaved changes, green once saved.
+	UPROPERTY()
+	UBorder* SaveIndicatorOuter = nullptr;
+
+	UPROPERTY()
+	UBorder* SaveIndicatorCore = nullptr;
+
+	// -1 until first painted, then 0 saved / 1 unsaved.
+	int8 SaveIndicatorState = -1;
+
+	void RefreshSaveIndicator();
+
 	UPROPERTY()
 	UButton* FileMenuButton = nullptr;
 

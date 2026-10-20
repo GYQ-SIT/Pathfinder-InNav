@@ -2,7 +2,13 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
+#include "Components/Button.h"
 #include "Components/CheckBox.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
+#include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
 #include "Components/ComboBoxString.h"
 #include "Components/Slider.h"
 #include "Components/TextBlock.h"
@@ -158,6 +164,63 @@ namespace StartStyle
 	inline FSlateBrush MenuPanel()
 	{
 		return Rounded(Rgb(17, 31, 50), Rgb(54, 70, 92), 8.f);
+	}
+
+	inline FButtonStyle SaveButtonStyle()
+	{
+		return Button(Rgb(22, 42, 62), Rgb(31, 58, 84), Rgb(16, 32, 48), Rgb(54, 84, 108), 8.f);
+	}
+
+	// The menu bar's Save button: a boxed button, a small square indicator in front of the word "Save". The indicator is
+	// yellow while the project has unsaved changes and green once it is saved (see PaintSaveIndicator).
+	inline UButton* SaveBarButton(UWidgetTree* Tree, UBorder*& OutOuter, UBorder*& OutInner, float WidthPixels)
+	{
+		UButton* Button = Tree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Save"));
+		Button->SetStyle(SaveButtonStyle());
+		Button->SetBackgroundColor(FLinearColor::White);
+
+		UHorizontalBox* Row = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("Row_Save"));
+
+		OutOuter = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Img_SaveIndicator"));
+		OutOuter->SetBrushColor(FLinearColor::White);
+		OutOuter->SetPadding(FMargin(3.f * DesignToUi));
+		USizeBox* InnerSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Size_SaveIndicator"));
+		InnerSize->SetWidthOverride(6.f * DesignToUi);
+		InnerSize->SetHeightOverride(6.f * DesignToUi);
+		OutInner = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Img_SaveIndicatorCore"));
+		OutInner->SetBrushColor(FLinearColor::White);
+		InnerSize->SetContent(OutInner);
+		OutOuter->SetContent(InnerSize);
+		UHorizontalBoxSlot* IndicatorSlot = Row->AddChildToHorizontalBox(OutOuter);
+		IndicatorSlot->SetVerticalAlignment(VAlign_Center);
+		IndicatorSlot->SetPadding(FMargin(0.f, 0.f, 8.f * DesignToUi, 0.f));
+
+		UTextBlock* Label = Text(Tree, TEXT("Txt_Save"), TEXT("Save"), 14.f, Rgb(226, 238, 252), true);
+		Row->AddChildToHorizontalBox(Label)->SetVerticalAlignment(VAlign_Center);
+
+		USizeBox* Size = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Size_Save"));
+		Size->SetMinDesiredWidth(WidthPixels);
+		Size->SetMinDesiredHeight(30.f * DesignToUi);
+		if (USizeBoxSlot* RowSlot = Cast<USizeBoxSlot>(Size->SetContent(Row)))
+		{
+			RowSlot->SetHorizontalAlignment(HAlign_Center);
+			RowSlot->SetVerticalAlignment(VAlign_Center);
+		}
+		Button->SetContent(Size);
+		return Button;
+	}
+
+	inline void PaintSaveIndicator(UBorder* Outer, UBorder* Inner, bool bUnsaved)
+	{
+		const FLinearColor Color = bUnsaved ? Rgb(245, 184, 30) : Rgb(52, 199, 120);
+		if (Outer)
+		{
+			Outer->SetBrush(Rounded(FLinearColor::Transparent, Color, 3.f, 1.5f));
+		}
+		if (Inner)
+		{
+			Inner->SetBrush(Rounded(Color, FLinearColor::Transparent, 1.5f, 0.f));
+		}
 	}
 
 	inline FEditableTextBoxStyle Field(float PixelSize)

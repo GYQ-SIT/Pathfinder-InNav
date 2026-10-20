@@ -449,6 +449,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// querying a HorizontalBox child's live position) rather than nested inside the same layout
 		// flow, so opening one never resizes the bar itself.
 		constexpr float MenuButtonWidth = 72.f;
+		// The Save button's slot in the menu bar, padding included.
+		constexpr float SaveButtonWidth = 96.f;
 		constexpr float CameraMenuButtonWidth = 84.f;
 		constexpr float MenuBarLeftMargin = 10.f;
 
@@ -494,28 +496,16 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// Save icon button, left of File - a plain icon rather than a labeled AddMenuButton, since it
 		// takes no dropdown of its own (unlike File/Window) and just fires PC->SaveCurrentProject()
 		// on click. Square, matching the bar's own height.
-		SaveButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Save"));
-		SaveButton->SetStyle(StartStyle::MenuButton());
-		SaveButton->SetBackgroundColor(FLinearColor::White);
+		SaveButton = StartStyle::SaveBarButton(WidgetTree, SaveIndicatorOuter, SaveIndicatorCore, SaveButtonWidth - 12.f);
 		SaveButton->SetToolTip(MakeToolTipWidget(TEXT("Save [Ctrl+S]")));
 		SaveButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSaveClicked);
 		SaveButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
-		UImage* SaveIcon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("Img_Save"));
-		if (UTexture2D* SaveTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/ImageAssets/Icon_Save.Icon_Save")))
+		if (UHorizontalBoxSlot* SaveBarSlot = MenuBarRow->AddChildToHorizontalBox(SaveButton))
 		{
-			SaveIcon->SetBrushFromTexture(SaveTexture, false);
-			SaveIcon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
+			SaveBarSlot->SetPadding(FMargin(6.f, 5.f));
+			SaveBarSlot->SetVerticalAlignment(VAlign_Center);
 		}
-		USizeBox* SaveSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		SaveSizeBox->SetWidthOverride(MenuBarHeight);
-		SaveSizeBox->SetHeightOverride(MenuBarHeight);
-		if (USizeBoxSlot* SaveIconSlot = Cast<USizeBoxSlot>(SaveSizeBox->SetContent(SaveIcon)))
-		{
-			SaveIconSlot->SetHorizontalAlignment(HAlign_Center);
-			SaveIconSlot->SetVerticalAlignment(VAlign_Center);
-		}
-		SaveButton->SetContent(SaveSizeBox);
-		MenuBarRow->AddChildToHorizontalBox(SaveButton);
+		RefreshSaveIndicator();
 
 		FileMenuButton = AddMenuButton(TEXT("Btn_FileMenu"), TEXT("File"));
 		FileMenuButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileMenuClicked);
@@ -632,14 +622,14 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			return CheckBox;
 		};
 
-		FileMenuDropdown = ConstructDropdown(TEXT("Pnl_FileDropdown"), MenuBarLeftMargin + MenuBarHeight);
+		FileMenuDropdown = ConstructDropdown(TEXT("Pnl_FileDropdown"), MenuBarLeftMargin + SaveButtonWidth);
 		UVerticalBox* FileDropdownStack = Cast<UVerticalBox>(FileMenuDropdown->GetContent());
 		UButton* FileNewButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileNew"), TEXT("New"));
 		FileNewButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileNewClicked);
 		UButton* FileLoadButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileLoad"), TEXT("Load"));
 		FileLoadButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileLoadClicked);
 
-		WindowMenuDropdown = ConstructDropdown(TEXT("Pnl_WindowDropdown"), MenuBarLeftMargin + MenuBarHeight + MenuButtonWidth);
+		WindowMenuDropdown = ConstructDropdown(TEXT("Pnl_WindowDropdown"), MenuBarLeftMargin + SaveButtonWidth + MenuButtonWidth);
 		UVerticalBox* WindowDropdownStack = Cast<UVerticalBox>(WindowMenuDropdown->GetContent());
 		WindowToolbarCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowToolbar"), TEXT("Toolbar"));
 		WindowToolbarCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowToolbarCheckChanged);
@@ -669,7 +659,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		// Camera dropdown: Reset, the typed move speed, +, -. Stays open after +/- so the speed can be nudged
 		// several times; Reset closes it (see OnResetView3DClicked).
-		CameraMenuDropdown = ConstructDropdown(TEXT("Pnl_CameraDropdown"), MenuBarLeftMargin + MenuBarHeight + 2.f * MenuButtonWidth);
+		CameraMenuDropdown = ConstructDropdown(TEXT("Pnl_CameraDropdown"), MenuBarLeftMargin + SaveButtonWidth + 2.f * MenuButtonWidth);
 		UVerticalBox* CameraDropdownStack = Cast<UVerticalBox>(CameraMenuDropdown->GetContent());
 		ResetView3DButton = AddDropdownButtonRow(CameraDropdownStack, TEXT("Btn_ResetView3D"), TEXT("Reset"));
 		ResetView3DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnResetView3DClicked);
@@ -1567,8 +1557,20 @@ void UInteriorScreenWidget::NativeDestruct()
 	Super::NativeDestruct();
 }
 
+void UInteriorScreenWidget::RefreshSaveIndicator()
+{
+	const ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	const int8 State = PC && PC->HasUnsavedChanges() ? 1 : 0;
+	if (State != SaveIndicatorState)
+	{
+		SaveIndicatorState = State;
+		StartStyle::PaintSaveIndicator(SaveIndicatorOuter, SaveIndicatorCore, State == 1);
+	}
+}
+
 void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
+	RefreshSaveIndicator();
 	if (RoomFieldsBox && RoomFieldsBox->GetVisibility() == ESlateVisibility::Visible)
 	{
 		RefreshRoomBoundsFields();

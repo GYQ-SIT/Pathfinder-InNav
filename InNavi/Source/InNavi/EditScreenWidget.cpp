@@ -52,6 +52,8 @@ namespace
 	const FLinearColor EditTextBoxBackgroundColor(0.149f, 0.149f, 0.169f, 1.f);
 	const FLinearColor EditTextBoxTextColor(1.f, 1.f, 1.f, 1.f);
 	constexpr float EditMenuBarHeight = 40.f;
+	// The Save button's slot in the menu bar, padding included.
+	constexpr float EditSaveButtonWidth = 96.f;
 	constexpr float EditMenuButtonWidth = 72.f;
 	constexpr float EditCameraMenuButtonWidth = 84.f;
 	constexpr float EditMenuBarLeftMargin = 10.f;
@@ -139,28 +141,16 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 
 		// Save icon button, left of File - see UInteriorScreenWidget::OnSaveClicked's own comment
 		// (mirrors it exactly, just without that class's MakeToolTipWidget helper).
-		SaveButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Save"));
-		SaveButton->SetStyle(StartStyle::MenuButton());
-		SaveButton->SetBackgroundColor(FLinearColor::White);
+		SaveButton = StartStyle::SaveBarButton(WidgetTree, SaveIndicatorOuter, SaveIndicatorCore, EditSaveButtonWidth - 12.f);
 		SaveButton->SetToolTipText(FText::FromString(TEXT("Save [Ctrl+S]")));
 		SaveButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnSaveClicked);
 		SaveButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::PlayButtonClickSound);
-		UImage* SaveIcon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("Img_Save"));
-		if (UTexture2D* SaveTexture = LoadObject<UTexture2D>(nullptr, TEXT("/Game/ImageAssets/Icon_Save.Icon_Save")))
+		if (UHorizontalBoxSlot* SaveBarSlot = MenuBarRow->AddChildToHorizontalBox(SaveButton))
 		{
-			SaveIcon->SetBrushFromTexture(SaveTexture, false);
-			SaveIcon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
+			SaveBarSlot->SetPadding(FMargin(6.f, 5.f));
+			SaveBarSlot->SetVerticalAlignment(VAlign_Center);
 		}
-		USizeBox* SaveSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		SaveSizeBox->SetWidthOverride(EditMenuBarHeight);
-		SaveSizeBox->SetHeightOverride(EditMenuBarHeight);
-		if (USizeBoxSlot* SaveIconSlot = Cast<USizeBoxSlot>(SaveSizeBox->SetContent(SaveIcon)))
-		{
-			SaveIconSlot->SetHorizontalAlignment(HAlign_Center);
-			SaveIconSlot->SetVerticalAlignment(VAlign_Center);
-		}
-		SaveButton->SetContent(SaveSizeBox);
-		MenuBarRow->AddChildToHorizontalBox(SaveButton);
+		RefreshSaveIndicator();
 
 		FileMenuButton = AddMenuButton(TEXT("Btn_FileMenu"), TEXT("File"));
 		FileMenuButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnFileMenuClicked);
@@ -288,14 +278,14 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			RowSlot->SetPadding(FMargin(0.f, 8.f, 0.f, 2.f));
 		};
 
-		FileMenuDropdown = ConstructDropdown(TEXT("Pnl_FileDropdown"), EditMenuBarLeftMargin + EditMenuBarHeight);
+		FileMenuDropdown = ConstructDropdown(TEXT("Pnl_FileDropdown"), EditMenuBarLeftMargin + EditSaveButtonWidth);
 		UVerticalBox* FileDropdownStack = Cast<UVerticalBox>(FileMenuDropdown->GetContent());
 		UButton* FileNewButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileNew"), TEXT("New"));
 		FileNewButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnFileNewClicked);
 		UButton* FileLoadButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileLoad"), TEXT("Load"));
 		FileLoadButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnFileLoadClicked);
 
-		WindowMenuDropdown = ConstructDropdown(TEXT("Pnl_WindowDropdown"), EditMenuBarLeftMargin + EditMenuBarHeight + EditMenuButtonWidth);
+		WindowMenuDropdown = ConstructDropdown(TEXT("Pnl_WindowDropdown"), EditMenuBarLeftMargin + EditSaveButtonWidth + EditMenuButtonWidth);
 		UVerticalBox* WindowDropdownStack = Cast<UVerticalBox>(WindowMenuDropdown->GetContent());
 		WindowAudioCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowAudio"), TEXT("Audio"));
 		// Unlike UInteriorScreenWidget's own dock-panel checkboxes (all default checked, since those
@@ -324,7 +314,7 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 
 		// Camera dropdown: Reset, the typed move speed, +, -, Set Default View. Stays open after +/- so the speed
 		// can be nudged several times; Reset and Set Default close it.
-		CameraMenuDropdown = ConstructDropdown(TEXT("Pnl_CameraDropdown"), EditMenuBarLeftMargin + EditMenuBarHeight + 2.f * EditMenuButtonWidth);
+		CameraMenuDropdown = ConstructDropdown(TEXT("Pnl_CameraDropdown"), EditMenuBarLeftMargin + EditSaveButtonWidth + 2.f * EditMenuButtonWidth);
 		UVerticalBox* CameraDropdownStack = Cast<UVerticalBox>(CameraMenuDropdown->GetContent());
 		ResetCameraViewButton = AddDropdownButtonRow(CameraDropdownStack, TEXT("Btn_ResetCameraView"), TEXT("Reset"));
 		ResetCameraViewButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnResetCameraViewClicked);
@@ -494,9 +484,21 @@ void UEditScreenWidget::NativeDestruct()
 	Super::NativeDestruct();
 }
 
+void UEditScreenWidget::RefreshSaveIndicator()
+{
+	const ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	const int8 State = PC && PC->HasUnsavedChanges() ? 1 : 0;
+	if (State != SaveIndicatorState)
+	{
+		SaveIndicatorState = State;
+		StartStyle::PaintSaveIndicator(SaveIndicatorOuter, SaveIndicatorCore, State == 1);
+	}
+}
+
 void UEditScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	RefreshSaveIndicator();
 	// Changes only bump a counter. Batch loads therefore cause one UI rebuild on the next frame,
 	// while an idle frame does no building scan, label formatting, sorting, or option comparison.
 	if (MapPanelWidget)
