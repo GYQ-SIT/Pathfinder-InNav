@@ -261,6 +261,10 @@ TSharedRef<SWidget> UStartScreenWidget::RebuildWidget()
 			UScaleBox* SplashScale = WidgetTree->ConstructWidget<UScaleBox>(UScaleBox::StaticClass(), TEXT("Scale_SplashBackground"));
 			SplashScale->SetStretch(EStretch::ScaleToFill);
 			SplashScale->SetVisibility(ESlateVisibility::HitTestInvisible);
+			// A little larger than the page's own framing, grown from the right edge so the buildings stay against it
+			// and the extra is cropped off the top right like the page does.
+			SplashScale->SetRenderTransformPivot(FVector2D(1.f, 0.45f));
+			SplashScale->SetRenderTransform(FWidgetTransform(FVector2D::ZeroVector, FVector2D(1.2f, 1.2f), FVector2D::ZeroVector, 0.f));
 			UImage* SplashImage = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("Img_SplashBackground"));
 			SplashImage->SetBrushFromTexture(ArtTexture, true);
 			SplashScale->SetContent(SplashImage);
