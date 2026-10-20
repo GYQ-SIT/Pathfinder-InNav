@@ -11,7 +11,9 @@
    **New project** asks for a **Project name** (required) and an optional **Description** first. Create writes a blank
    `<project name>.json` into the `InNavi/Data` folder (characters Windows does not allow in a file name are replaced;
    an existing project is never overwritten - you are asked for another name) and opens the editor on it, so **Ctrl+S**
-   saves straight to that file. The name and description are kept in the file (`projectName`, `description`).
+   saves straight to that file. The name and description are kept in the file (`projectName`, `description`). Every saved file also carries a
+   `version` (the format number, currently 1); a file without one is an older file and opens as before, so a later change of
+   format, such as saving into a database, can tell old files from new ones.
 2. Click a building in the 3D exterior view to select it (plays a short selection
    sound) - its details appear in the exterior screen's **Building** panel, with **Open 2D floor
    editor** (see below). Clicking empty space, or clicking the already-selected building again,

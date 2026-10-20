@@ -193,6 +193,12 @@ public:
 	// The project's own name and description, written to the file's top level as "projectName" and
 	// "description" and read back by LoadBuildingsFromFile. Empty for a file made before they existed.
 	const FString& GetProjectName() const { return ProjectName; }
+
+	// The format version written into every project file as "version". A file from before it existed has none and is read as
+	// version 0, which is the same format as 1. Raise this when the format changes in a way an older reader would misread, and
+	// convert older files in LoadBuildingsFromFile by the version it reports here.
+	static constexpr int32 ProjectFileVersion = 1;
+	int32 GetLoadedFileVersion() const { return LoadedFileVersion; }
 	const FString& GetProjectDescription() const { return ProjectDescription; }
 	void SetProjectInfo(const FString& Name, const FString& Description)
 	{
@@ -284,6 +290,7 @@ private:
 	mutable TMap<FString, FString> CachedBuildingOptions;
 	FString ProjectName;
 	FString ProjectDescription;
+	int32 LoadedFileVersion = 0;
 
 	// The lat/lon centroid LoadBuildingsFromDatabase projects around, stashed so
 	// LoadRoadsAndPOIsFromDatabase can project roads/POIs into that exact same local-meters space

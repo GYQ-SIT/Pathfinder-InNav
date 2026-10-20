@@ -130,6 +130,14 @@ int32 ABuildingGenerator::LoadBuildingsFromFile(const FString& FilePath)
 		return 0;
 	}
 
+	// No "version" means a file from before versions existed (read as 0, the same format as 1). A newer file is read as well as it can be.
+	LoadedFileVersion = 0;
+	RootObject->TryGetNumberField(TEXT("version"), LoadedFileVersion);
+	if (LoadedFileVersion > ProjectFileVersion)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s is project file version %d, newer than this build reads (%d); loading what it can"), *FilePath, LoadedFileVersion, ProjectFileVersion);
+	}
+
 	Scale = 1.f;
 	RootObject->TryGetNumberField(TEXT("scale"), Scale);
 
@@ -1030,6 +1038,7 @@ FString ABuildingGenerator::FindBuildingIdByName(const FString& Name) const
 bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath) const
 {
 	TSharedRef<FJsonObject> RootObject = MakeShared<FJsonObject>();
+	RootObject->SetNumberField(TEXT("version"), ProjectFileVersion);
 	RootObject->SetNumberField(TEXT("scale"), Scale);
 	RootObject->SetNumberField(TEXT("floorHeight"), 300.f);
 	if (!ProjectName.IsEmpty())

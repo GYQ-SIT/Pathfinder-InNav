@@ -142,4 +142,44 @@ bool FNewProjectDialogTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// Every project file says which format version wrote it, and older or newer files still open.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectFileVersionTest, "InNavi.Project.FileVersion", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FProjectFileVersionTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	const FString Directory = FPaths::ProjectSavedDir() / TEXT("AutomationTemp") / (TEXT("FileVersion_") + FGuid::NewGuid().ToString());
+
+	// A file from before versions existed has no "version".
+	const FString Legacy = Directory / TEXT("legacy.json");
+	FFileHelper::SaveStringToFile(TEXT("{\"scale\":1,\"floorHeight\":300,\"buildings\":[]}"), *Legacy);
+	Fixture.Generator->LoadBuildingsFromFile(Legacy);
+	TestEqual(TEXT("a file without a version is read as version 0"), Fixture.Generator->GetLoadedFileVersion(), 0);
+
+	// What is saved carries the current version, and reads back as it.
+	const FString Saved = Directory / TEXT("saved.json");
+	TestTrue(TEXT("the project saves"), Fixture.Generator->SaveBuildingsToFile(Saved));
+	FString Json;
+	FFileHelper::LoadFileToString(Json, *Saved);
+	TSharedPtr<FJsonObject> Root;
+	TestTrue(TEXT("the file is valid JSON"), FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Root) && Root.IsValid());
+	if (Root.IsValid())
+	{
+		TestEqual(TEXT("it holds the current version"), (int32)Root->GetNumberField(TEXT("version")), ABuildingGenerator::ProjectFileVersion);
+	}
+	Fixture.Interior->ClearLoadedInterior();
+	Fixture.Generator->ClearAllBuildings();
+	TestTrue(TEXT("the saved file loads"), Fixture.Generator->LoadBuildingsFromFile(Saved) > 0);
+	TestEqual(TEXT("and reads back as it"), Fixture.Generator->GetLoadedFileVersion(), ABuildingGenerator::ProjectFileVersion);
+
+	// A file from a newer build still opens (it is read as well as it can be).
+	const FString Future = Directory / TEXT("future.json");
+	FFileHelper::SaveStringToFile(TEXT("{\"version\":99,\"scale\":1,\"buildings\":[]}"), *Future);
+	AddExpectedError(TEXT("newer than this build reads"), EAutomationExpectedErrorFlags::Contains, 0);
+	Fixture.Generator->LoadBuildingsFromFile(Future);
+	TestEqual(TEXT("a newer file reports its own version"), Fixture.Generator->GetLoadedFileVersion(), 99);
+
+	IFileManager::Get().DeleteDirectory(*Directory, false, true);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
