@@ -82,3 +82,5 @@ InNavi/Saved/
 InNavi/.vs/
 InNavi/*.sln
 InNavi/*.slnx
+# Projects the user deleted from the project library (soft delete)
+InNavi/Data/Deleted/
