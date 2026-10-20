@@ -221,6 +221,7 @@ int32 ABuildingGenerator::LoadBuildingsFromFile(const FString& FilePath)
 		}
 	}
 
+	RefreshWallOpenings();
 	return SpawnedCount;
 }
 
@@ -1118,6 +1119,141 @@ TSharedPtr<FJsonObject> ABuildingGenerator::GetInteriorDataForBuilding(const FSt
 void ABuildingGenerator::SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData)
 {
 	InteriorDataById.Add(BuildingId, InteriorData);
+	RefreshWallOpenings();
+}
+
+TArray<FInteriorEntrance> ABuildingGenerator::GetStoredEntrances(const FString& BuildingId) const
+{
+	return InteriorEntrances::ReadAll(GetInteriorDataForBuilding(BuildingId));
+}
+
+bool ABuildingGenerator::MakeMirrorOfEntrance(const FString& SourceBuildingId, const FInteriorEntrance& Source, const FString& OnBuildingId, FInteriorEntrance& OutMirror) const
+{
+	const APolyBuilding* From = FindBuildingById(SourceBuildingId);
+	const APolyBuilding* To = FindBuildingById(OnBuildingId);
+	if (!From || !To || Scale <= KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+	const TArray<FVector2D>& FromOutline = From->GetFootprint();
+	const TArray<FVector2D>& ToOutline = To->GetFootprint();
+	if (!FromOutline.IsValidIndex(Source.EdgeIndex) || ToOutline.Num() < 3)
+	{
+		return false;
+	}
+
+	// The middle of the source door, in the shared footprint space (each building's own space is shifted by its offset).
+	const FVector2D A = FromOutline[Source.EdgeIndex];
+	const FVector2D B = FromOutline[(Source.EdgeIndex + 1) % FromOutline.Num()];
+	const FVector2D Middle = A + (B - A).GetSafeNormal() * ((Source.Offset + Source.Width * 0.5f) / Scale) + From->BuildingOffset - To->BuildingOffset;
+
+	// The nearest point of the other outline.
+	int32 BestEdge = INDEX_NONE;
+	double BestDistance = TNumericLimits<double>::Max(), BestAlong = 0.0, BestLength = 0.0;
+	for (int32 i = 0; i < ToOutline.Num(); ++i)
+	{
+		const FVector2D& P = ToOutline[i];
+		const FVector2D& Q = ToOutline[(i + 1) % ToOutline.Num()];
+		const double Length = FVector2D::Distance(P, Q);
+		if (Length < KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+		const FVector2D Direction = (Q - P) / Length;
+		const double Along = FMath::Clamp(FVector2D::DotProduct(Middle - P, Direction), 0.0, Length);
+		const double Distance = FVector2D::Distance(Middle, P + Direction * Along);
+		if (Distance < BestDistance)
+		{
+			BestDistance = Distance;
+			BestEdge = i;
+			BestAlong = Along;
+			BestLength = Length;
+		}
+	}
+	const double LengthWorld = BestLength * Scale;
+	if (BestEdge == INDEX_NONE || LengthWorld < Source.Width + 40.0)
+	{
+		return false;
+	}
+	OutMirror = Source;
+	OutMirror.EdgeIndex = BestEdge;
+	OutMirror.Offset = static_cast<float>(FMath::Clamp(BestAlong * Scale - Source.Width * 0.5, 20.0, LengthWorld - Source.Width - 20.0));
+	OutMirror.Kind = EInteriorEntranceKind::Link;
+	OutMirror.ConnectsTo = SourceBuildingId;
+	OutMirror.bMirrored = true;
+	OutMirror.SourceBuildingId = SourceBuildingId;
+	return true;
+}
+
+TArray<FInteriorEntrance> ABuildingGenerator::GetMirroredEntrances(const FString& BuildingId) const
+{
+	TArray<FInteriorEntrance> Result;
+	for (const TPair<FString, APolyBuilding*>& Pair : BuildingsById)
+	{
+		if (Pair.Key == BuildingId)
+		{
+			continue;
+		}
+		for (const FInteriorEntrance& Stored : GetStoredEntrances(Pair.Key))
+		{
+			FInteriorEntrance Mirror;
+			if (Stored.Kind == EInteriorEntranceKind::Link && Stored.ConnectsTo == BuildingId && MakeMirrorOfEntrance(Pair.Key, Stored, BuildingId, Mirror))
+			{
+				Result.Add(Mirror);
+			}
+		}
+	}
+	return Result;
+}
+
+bool ABuildingGenerator::RemoveStoredEntrance(const FString& BuildingId, const FString& EntranceId)
+{
+	const TSharedPtr<FJsonObject> Interior = GetInteriorDataForBuilding(BuildingId);
+	if (!Interior.IsValid())
+	{
+		return false;
+	}
+	TArray<FInteriorEntrance> Entrances = InteriorEntrances::ReadAll(Interior);
+	if (Entrances.RemoveAll([&EntranceId](const FInteriorEntrance& E) { return E.Id == EntranceId; }) == 0)
+	{
+		return false;
+	}
+	TArray<TSharedPtr<FJsonValue>> Values;
+	for (const FInteriorEntrance& Entrance : Entrances)
+	{
+		Values.Add(MakeShared<FJsonValueObject>(InteriorEntrances::ToJson(Entrance)));
+	}
+	if (Values.IsEmpty())
+	{
+		Interior->RemoveField(TEXT("entrances"));
+	}
+	else
+	{
+		Interior->SetArrayField(TEXT("entrances"), Values);
+	}
+	RefreshWallOpenings();
+	return true;
+}
+
+void ABuildingGenerator::RefreshWallOpenings()
+{
+	for (const TPair<FString, APolyBuilding*>& Pair : BuildingsById)
+	{
+		if (!Pair.Value)
+		{
+			continue;
+		}
+		TArray<FPolyWallOpening> Openings;
+		for (const FInteriorEntrance& Entrance : GetStoredEntrances(Pair.Key))
+		{
+			Openings.Add({ Entrance.Level, Entrance.EdgeIndex, Entrance.Offset, Entrance.Width });
+		}
+		for (const FInteriorEntrance& Entrance : GetMirroredEntrances(Pair.Key))
+		{
+			Openings.Add({ Entrance.Level, Entrance.EdgeIndex, Entrance.Offset, Entrance.Width });
+		}
+		Pair.Value->SetWallOpenings(Openings);
+	}
 }
 
 bool ABuildingGenerator::GetBuildingSummary(const FString& BuildingId, FBuildingSummary& OutSummary) const
@@ -1294,6 +1430,7 @@ void ABuildingGenerator::RestoreBuildingBaselines()
 			InteriorDataById.Remove(Pair.Key);
 		}
 	}
+	RefreshWallOpenings();
 }
 
 APolyBuilding* ABuildingGenerator::CreateRectangleBuilding(const FString& Id, const FString& Name, FVector2D Position, float Width, float Depth, float RotationDegrees, int32 FloorCount, float FloorHeight)

@@ -143,6 +143,16 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 				return FReply::Handled();
 			}
 
+			// A door in the building's outer wall.
+			{
+				const FVector2D ClickPoint = LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize());
+				const float PixelReach = static_cast<float>((LocalPositionToFootprintPoint(LocalPosition + FVector2D(12.0, 0.0), InGeometry.GetLocalSize()) - ClickPoint).Size());
+				if (PlayerController->SelectEntranceNear(ClickPoint, PixelReach))
+				{
+					return FReply::Handled();
+				}
+			}
+
 			AInteriorRoom* Room = FindRoomNearLocalPosition(LocalPosition, InGeometry.GetLocalSize());
 			if (!Room)
 			{
@@ -174,6 +184,13 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 			if (AInteriorRoom* Room = FindRoomNearLocalPosition(LocalPosition, InGeometry.GetLocalSize(), &EdgeIndex, &OffsetWorldUnits))
 			{
 				PlayerController->AddDoorToWall(Room->RoomId, EdgeIndex, OffsetWorldUnits);
+			}
+			else
+			{
+				// Not on a room's wall: on the building's own outer wall, a main door or a link door.
+				const FVector2D ClickPoint = LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize());
+				const float PixelReach = static_cast<float>((LocalPositionToFootprintPoint(LocalPosition + FVector2D(14.0, 0.0), InGeometry.GetLocalSize()) - ClickPoint).Size());
+				PlayerController->AddEntranceAtFootprintPosition(ClickPoint, PixelReach);
 			}
 			return FReply::Handled();
 		}
@@ -888,6 +905,33 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			const FVector2D FirstPoint = LinePoints[0];
 			LinePoints.Add(FirstPoint);
 			FSlateDrawElement::MakeLines(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(), LinePoints, ESlateDrawEffect::None, FLinearColor::Black, true, 5.f);
+		}
+	}
+
+	// ---- Doors in the outer wall on this floor: main doors (green) and link doors (blue), the selected one in yellow ----
+	{
+		const TArray<FVector2D>& Boundary = Building->GetFootprint();
+		for (const FInteriorEntrance& Entrance : InteriorGen->GetAllEntrances())
+		{
+			if (Entrance.Level != InteriorGen->GetActiveFloor() || !Boundary.IsValidIndex(Entrance.EdgeIndex))
+			{
+				continue;
+			}
+			const FVector2D A = Boundary[Entrance.EdgeIndex];
+			const FVector2D B = Boundary[(Entrance.EdgeIndex + 1) % Boundary.Num()];
+			const double Length = FVector2D::Distance(A, B);
+			if (Length < KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+			const FVector2D Direction = (B - A) / Length;
+			const FVector2D Start = A + Direction * FMath::Clamp(static_cast<double>(Entrance.Offset) / Scale, 0.0, Length);
+			const FVector2D End = A + Direction * FMath::Clamp(static_cast<double>(Entrance.Offset + Entrance.Width) / Scale, 0.0, Length);
+			const TArray<FVector2D> Opening = { WorldToLocal((Start + Building->BuildingOffset) * Scale), WorldToLocal((End + Building->BuildingOffset) * Scale) };
+			const bool bSelected = PlayerController && PlayerController->GetSelectedEntranceId() == Entrance.Id;
+			const FLinearColor Colour = bSelected ? FLinearColor(1.f, 0.85f, 0.2f, 1.f)
+				: (Entrance.Kind == EInteriorEntranceKind::Main ? FLinearColor(0.18f, 0.8f, 0.45f, 1.f) : FLinearColor(0.26f, 0.59f, 1.f, 1.f));
+			FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, AllottedGeometry.ToPaintGeometry(), Opening, ESlateDrawEffect::None, Colour, true, bSelected ? 13.f : 9.f);
 		}
 	}
 

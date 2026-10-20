@@ -1030,6 +1030,7 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 
 void ANavPlayerController::SelectRoom(const FString& RoomId)
 {
+	SelectEntrance(FString());
 	// Tracked (rather than an early-return once SelectedRoomId itself is unchanged) so
 	// RefreshSelectionHighlight still fires when this call's only real effect was clearing a
 	// previously-selected door/connector - e.g. deselecting by clicking empty space while a connector,
@@ -1065,6 +1066,7 @@ void ANavPlayerController::SelectRoom(const FString& RoomId)
 
 void ANavPlayerController::SelectDoor(const FString& RoomId, const FString& DoorId)
 {
+	SelectEntrance(FString());
 	if (!SelectedRoomId.IsEmpty())
 	{
 		SelectedRoomId.Empty();
@@ -1084,6 +1086,7 @@ void ANavPlayerController::SelectDoor(const FString& RoomId, const FString& Door
 
 void ANavPlayerController::SelectConnector(const FString& GroupId)
 {
+	SelectEntrance(FString());
 	// See SelectRoom's own comment on why this is tracked rather than an early return.
 	bool bChanged = false;
 
@@ -1434,6 +1437,19 @@ bool ANavPlayerController::DeleteSelection()
 		return false;
 	}
 
+	if (!SelectedEntranceId.IsEmpty())
+	{
+		const FString Id = SelectedEntranceId;
+		if (!InteriorGen || !InteriorGen->RemoveEntrance(Id))
+		{
+			return false;
+		}
+		bHasUnsavedChanges = true;
+		SelectEntrance(FString());
+		OnInteriorContentChanged.Broadcast();
+		return true;
+	}
+
 	if (!SelectedDoorId.IsEmpty())
 	{
 		return DeleteDoor(SelectedDoorRoomId, SelectedDoorId);
@@ -1450,6 +1466,70 @@ bool ANavPlayerController::DeleteSelection()
 	}
 
 	return DeleteRoom(SelectedRoomId);
+}
+
+bool ANavPlayerController::AddEntranceAtFootprintPosition(const FVector2D& FootprintPoint, float ToleranceFootprintUnits)
+{
+	if (!InteriorGen)
+	{
+		return false;
+	}
+	FString Error;
+	const FString Id = InteriorGen->AddEntranceAtPoint(FootprintPoint, ToleranceFootprintUnits, Error);
+	if (Id.IsEmpty())
+	{
+		OnActionFailed.Broadcast(Error, EActionFailureSeverity::Warning);
+		return false;
+	}
+	bHasUnsavedChanges = true;
+	OnInteriorContentChanged.Broadcast();
+	return true;
+}
+
+bool ANavPlayerController::SelectEntranceNear(const FVector2D& FootprintPoint, float ToleranceFootprintUnits)
+{
+	const FString Id = InteriorGen ? InteriorGen->FindEntranceNear(FootprintPoint, ToleranceFootprintUnits) : FString();
+	if (Id.IsEmpty())
+	{
+		return false;
+	}
+	SelectEntrance(Id);
+	return true;
+}
+
+const FInteriorEntrance* ANavPlayerController::FindEntrance(const FString& Id) const
+{
+	return InteriorGen ? InteriorGen->FindEntranceById(Id) : nullptr;
+}
+
+void ANavPlayerController::SelectEntrance(const FString& EntranceId)
+{
+	if (EntranceId == SelectedEntranceId)
+	{
+		return;
+	}
+	if (!EntranceId.IsEmpty())
+	{
+		// A door in the outer wall is selected on its own, like a room, a door or a connector.
+		if (!SelectedRoomId.IsEmpty())
+		{
+			SelectedRoomId.Empty();
+			OnSelectedRoomChanged.Broadcast(FString());
+		}
+		if (!SelectedDoorId.IsEmpty())
+		{
+			SelectedDoorRoomId.Empty();
+			SelectedDoorId.Empty();
+			OnSelectedDoorChanged.Broadcast(FString(), FString());
+		}
+		if (!SelectedConnectorGroupId.IsEmpty())
+		{
+			SelectedConnectorGroupId.Empty();
+			OnSelectedConnectorChanged.Broadcast(FString());
+		}
+	}
+	SelectedEntranceId = EntranceId;
+	OnSelectedEntranceChanged.Broadcast(SelectedEntranceId);
 }
 
 bool ANavPlayerController::DeleteSelectedConnector()

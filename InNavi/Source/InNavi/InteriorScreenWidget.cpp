@@ -2,6 +2,7 @@
 #include "DockHostUMG.h"
 #include "InteriorDockLayout.h"
 #include "NavigationSearchUtils.h"
+#include "InteriorEntrance.h"
 #include "RoomTypes.h"
 
 #include "AudioFileRowWidget.h"
@@ -1370,6 +1371,7 @@ void UInteriorScreenWidget::NativeConstruct()
 		// through this widget at all - this is what lets the dock layout still get saved when the
 		// user saves that way instead of through Back's own confirm dialog.
 		PC->OnProjectSaved.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
+		PC->OnSelectedEntranceChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedEntranceChanged);
 		PC->OnBeforeProjectSave.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleBeforeProjectSave);
 		// Same reasoning - the [/]/F/X floor keyboard shortcuts change the active floor without ever
 		// going through this screen's own Floor panel handlers.
@@ -1549,6 +1551,7 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnSelectedConnectorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedConnectorChanged);
 		PC->OnEditModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleEditModeChanged);
 		PC->OnProjectSaved.RemoveDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
+		PC->OnSelectedEntranceChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedEntranceChanged);
 		PC->OnBeforeProjectSave.RemoveDynamic(this, &UInteriorScreenWidget::HandleBeforeProjectSave);
 		PC->OnActiveFloorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleActiveFloorChanged);
 		PC->OnInteriorContentChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleInteriorContentChanged);
@@ -2148,8 +2151,60 @@ void UInteriorScreenWidget::RefreshModeButtonHighlights()
 	SetHighlight(AddEscalatorModeButton, PC->GetActiveConnectorType() == static_cast<int32>(EInteriorNavNodeType::Escalator));
 }
 
+void UInteriorScreenWidget::HandleSelectedEntranceChanged(FString EntranceId)
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!DoorFieldsBox || !PC)
+	{
+		return;
+	}
+	if (EntranceId.IsEmpty())
+	{
+		// Another selection (or none) takes over; a door's own handler shows its fields again.
+		if (PC->GetSelectedDoorId().IsEmpty())
+		{
+			DoorFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
+		}
+		RefreshPropertiesPanelVisibility();
+		return;
+	}
+
+	const FInteriorEntrance* Entrance = PC->FindEntrance(EntranceId);
+	if (!Entrance)
+	{
+		return;
+	}
+	// The door's fields are reused: what kind of door it is and where it leads, and Delete (no Connects to, nothing to save).
+	DoorFieldsBox->SetVisibility(ESlateVisibility::Visible);
+	if (RoomFieldsBox) RoomFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
+	if (ConnectorFieldsBox) ConnectorFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
+	if (ConnectsToRowSizeBox) ConnectsToRowSizeBox->SetVisibility(ESlateVisibility::Collapsed);
+	if (ApplyDoorButton) ApplyDoorButton->SetVisibility(ESlateVisibility::Collapsed);
+	const bool bMain = Entrance->Kind == EInteriorEntranceKind::Main;
+	if (PropertiesTitleText)
+	{
+		PropertiesTitleText->SetText(FText::FromString(bMain ? TEXT("Main door") : TEXT("Link door")));
+	}
+	SetKindTag(bMain ? TEXT("MAIN DOOR") : TEXT("LINK DOOR"), StartStyle::Rgb(60, 78, 104));
+	if (PropertiesKindTag)
+	{
+		PropertiesKindTag->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	}
+	if (DoorRoomText)
+	{
+		DoorRoomText->SetText(FText::FromString(bMain
+			? FString::Printf(TEXT("Floor %d. The way out: leads outside the building."), Entrance->Level)
+			: FString::Printf(TEXT("Floor %d. Connects to building %s%s."), Entrance->Level, *Entrance->ConnectsTo,
+				Entrance->bMirrored ? TEXT(" (opened from that building)") : TEXT(""))));
+	}
+	RefreshPropertiesPanelVisibility();
+}
+
 void UInteriorScreenWidget::HandleSelectedDoorChanged(FString RoomId, FString DoorId)
 {
+	// A room's door has the Connects to field and Save changes, which an outer-wall door's selection hides.
+	if (ConnectsToRowSizeBox) ConnectsToRowSizeBox->SetVisibility(ESlateVisibility::Visible);
+	if (ApplyDoorButton) ApplyDoorButton->SetVisibility(ESlateVisibility::Visible);
 	if (!DoorFieldsBox)
 	{
 		return;
@@ -2466,7 +2521,7 @@ void UInteriorScreenWidget::RefreshPropertiesPanelVisibility()
 	// placeholder instead of disappearing, like a real editor's Details panel. Showing or hiding it is the
 	// dock system's business (Window menu / tab close button), not selection state's.
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
-	const bool bAnySelected = PC && (!PC->GetSelectedRoomId().IsEmpty() || !PC->GetSelectedDoorId().IsEmpty() || !PC->GetSelectedConnectorGroupId().IsEmpty());
+	const bool bAnySelected = PC && (!PC->GetSelectedRoomId().IsEmpty() || !PC->GetSelectedDoorId().IsEmpty() || !PC->GetSelectedConnectorGroupId().IsEmpty() || !PC->GetSelectedEntranceId().IsEmpty());
 	if (!bAnySelected && PropertiesTitleText)
 	{
 		PropertiesTitleText->SetText(FText::FromString(TEXT("Nothing selected")));

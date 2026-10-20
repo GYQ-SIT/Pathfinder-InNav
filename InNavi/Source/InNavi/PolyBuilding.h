@@ -9,6 +9,21 @@
 class UProceduralMeshComponent;
 class UMaterialInstanceDynamic;
 
+// A gap in the outer wall of one floor, for a door in the outer wall (see InteriorEntrance.h). EdgeIndex is an edge of the footprint as
+// given, Offset and Width are in world units along that edge from its start.
+struct FPolyWallOpening
+{
+	int32 Level = 1;
+	int32 EdgeIndex = 0;
+	float Offset = 0.f;
+	float Width = 240.f;
+
+	bool operator==(const FPolyWallOpening& Other) const
+	{
+		return Level == Other.Level && EdgeIndex == Other.EdgeIndex && FMath::IsNearlyEqual(Offset, Other.Offset, 0.01f) && FMath::IsNearlyEqual(Width, Other.Width, 0.01f);
+	}
+};
+
 UCLASS()
 class INNAVI_API APolyBuilding : public AActor
 {
@@ -57,6 +72,12 @@ public:
 	// whole building.
 	// Level must be between 1 and GetFloorCount(); pass 0 to show everything (exterior view).
 	void SetVisibleInteriorLevel(int32 Level);
+
+	// Cuts a gap in the outer wall at each opening, on its floor, and rebuilds the walls. Nothing is rebuilt if the gaps are as they were.
+	void SetWallOpenings(const TArray<FPolyWallOpening>& Openings);
+
+	// The vertices of one floor's outer wall as built, for tests that check where the gaps are.
+	TArray<FVector> GetWallVerticesForTests(int32 Level) const;
 	// 0 = nothing hidden (the normal, whole-building exterior look).
 	int32 GetVisibleInteriorLevel() const { return VisibleInteriorLevel; }
 
@@ -89,7 +110,7 @@ private:
 	// Builds (or rebuilds) one floor's own exterior wall ring - a box per footprint edge, ZBottom to
 	// ZTop - at the given section index. Same bCreateCollision-must-be-respecified reasoning as
 	// BuildCapSection (recreating is the only way to toggle a section's collision).
-	void BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBottom, float ZTop, int32 SectionIndex, bool bCreateCollision);
+	void BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBottom, float ZTop, int32 SectionIndex, bool bCreateCollision, int32 Level);
 
 	// Rebuilds every roof/slab section AND every floor's wall ring (visibility AND collision together)
 	// based on VisibleInteriorLevel - called after RebuildMesh (so a floor add/remove reapplies it) and
@@ -111,6 +132,10 @@ private:
 	// ApplySlabVisibility can rebuild roof/slab sections without redoing RebuildMesh's work.
 	TArray<FVector2D> CachedPoly2D;
 	TArray<int32> CachedCapTris;
+
+	TArray<FPolyWallOpening> WallOpenings;
+	// True when RebuildMesh had to turn the footprint round to make it counter-clockwise (then its edges run the other way).
+	bool bPolyReversed = false;
 
 	// See SetVisibleInteriorLevel. 0 = nothing hidden (normal exterior view).
 	int32 VisibleInteriorLevel = 0;

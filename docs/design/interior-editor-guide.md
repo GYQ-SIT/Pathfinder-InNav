@@ -261,6 +261,25 @@ labels over dark fields, and every kind ends with a red **Delete ...** button (t
   check/uncheck floors and hit **Save changes**. Only shows checkboxes for floors that actually
   exist on the loaded building.
 
+### Doors in the outer wall
+
+The Add door tool also works on the building's **outer wall**: click the outline where there is no room wall, and a door 2.4 m wide
+goes into the outer wall, on the floor being edited. Where it goes decides which of two kinds it is:
+
+- **Main door** - the way out of the building. **Ground floor only**, and only where **no other building's wall is next to this
+  one**. Upstairs, or beside a neighbour, a main door is refused.
+- **Link door** - a door to the building next door. **Any floor** (that building must have it), but only **wholly where the two outer
+  walls are next to each other** (within about 1.5 m). A door half on the shared wall and half off it, or beside two buildings, is
+  refused. The neighbour shows the same door, on the same floor, at the matching spot on its own wall - it is worked out from this
+  door, not stored twice, so opening or deleting it from either building changes both.
+
+Nothing can be made out of the wrong place: the reason for a refusal shows in the Debug panel. Two doors cannot overlap on the same
+floor and wall. A door is a gap in the 3D outer wall on its floor (on both buildings for a link door). On the 2D plan a main door is a
+green mark on the outline and a link door a blue one; in Select mode click one (it turns yellow), and the Properties panel says
+**Main door** or **Link door**, its floor and where it leads (for a link door the building, and when it was opened from that building).
+Backspace or Delete removes it. Doors are saved in the building's `interior.entrances` (an optional list, so older files load as
+before) and covered by undo. Route-finding does not use them yet.
+
 ### Layers panel
 
 An Outliner-style view of everything on the current floor (the heading says which: "LEVEL 3"), with a search box

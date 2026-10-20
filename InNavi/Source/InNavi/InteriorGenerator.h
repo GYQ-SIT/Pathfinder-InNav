@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "InteriorEntrance.h"
 #include "InteriorTypes.h"
 #include "InteriorGenerator.generated.h"
 
@@ -258,6 +259,26 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	const TArray<FInteriorNavNode>& GetNavNodes() const { return NavNodes; }
 
+	// ---- Doors in the building's outer wall (see InteriorEntrance.h) ----
+	// This building's own, saved with its interior and covered by undo.
+	const TArray<FInteriorEntrance>& GetEntrances() const { return Entrances; }
+	// The own doors plus the copies of the neighbouring buildings' Link doors that show here - everything to draw, select and route through.
+	const TArray<FInteriorEntrance>& GetAllEntrances() const { return AllEntrances; }
+	const FInteriorEntrance* FindEntranceById(const FString& Id) const;
+	// The Add door tool on the outer wall: puts a door in the outline at the point nearest FootprintPoint (which must be within
+	// ToleranceFootprintUnits of the outline), on the active floor. Where it goes decides what it is:
+	//  - Away from every other building's wall: a Main door, the way out - ground floor only.
+	//  - Wholly where another building's outer wall is next to this one: a Link door to that building, on any floor both have. The other
+	//    building shows the same door at the matching spot.
+	// Anything in between, or on top of another door, is refused. Returns the new id, or empty with OutError saying why.
+	FString AddEntranceAtPoint(const FVector2D& FootprintPoint, float ToleranceFootprintUnits, FString& OutError);
+	// The id of the active floor's door within ToleranceFootprintUnits of FootprintPoint (own or mirrored), or empty.
+	FString FindEntranceNear(const FVector2D& FootprintPoint, float ToleranceFootprintUnits) const;
+	// Removes a door. A mirrored one is removed from the building it belongs to, which takes it from both.
+	bool RemoveEntrance(const FString& Id);
+	// Works out again which neighbouring buildings' Link doors show here (call after something else changed them).
+	void RefreshMirroredEntrances();
+
 	// Places an Elevator/Stairs/Escalator connector at Position (same pre-scale footprint units as
 	// everything else), creating one FInteriorNavNode per floor listed in ConnectsToFloors, all
 	// sharing a freshly-generated ConnectorGroupId (returned). All-or-nothing: every requested floor
@@ -397,6 +418,9 @@ private:
 	// Wall defaults per loaded floor, keyed by level - kept around after the JSON parse so
 	// AddFloor has something sensible to inherit.
 	TMap<int32, FInteriorFloorInfo> FloorInfoByLevel;
+
+	TArray<FInteriorEntrance> Entrances;
+	TArray<FInteriorEntrance> AllEntrances;
 
 	// Room ids in use for the currently loaded building, for CreateRoomFromFootprint's uniqueness
 	// check. Cleared whenever a different building is loaded.

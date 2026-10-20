@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "BuildingSummary.h"
+#include "InteriorEntrance.h"
 #include "GameFramework/Actor.h"
 #include "RoadSegmentActor.h"
 #include "BuildingGenerator.generated.h"
@@ -221,6 +222,19 @@ public:
 	// Stashes the interior data for a building id, overwriting whatever was there before (e.g.
 	// InteriorGenerator syncing its current in-memory state before a project save).
 	void SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData);
+
+	// --- Doors in the outer wall (see InteriorEntrance.h) ---
+	// Those saved with a building's interior.
+	TArray<FInteriorEntrance> GetStoredEntrances(const FString& BuildingId) const;
+	// Other buildings' Link doors to this one, as they show here: not stored twice, worked out from the other building's door.
+	TArray<FInteriorEntrance> GetMirroredEntrances(const FString& BuildingId) const;
+	// Where Source (a Link door on SourceBuildingId) shows on OnBuildingId: at the nearest point of that building's outline. False if no
+	// edge there is long enough for the opening.
+	bool MakeMirrorOfEntrance(const FString& SourceBuildingId, const FInteriorEntrance& Source, const FString& OnBuildingId, FInteriorEntrance& OutMirror) const;
+	// Takes one saved door out of a building's interior data (also what removes the mirror of it from the building next door).
+	bool RemoveStoredEntrance(const FString& BuildingId, const FString& EntranceId);
+	// Cuts every building's outer wall to match its doors, its own and the mirrored ones.
+	void RefreshWallOpenings();
 
 	// --- "Discard unsaved changes" ---
 	// Editing a building's interior changes things that live on the building itself (its floor count -

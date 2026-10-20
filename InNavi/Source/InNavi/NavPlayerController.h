@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "BuildingSummary.h"
 #include "GameFramework/PlayerController.h"
+#include "InteriorEntrance.h"
 #include "InteriorTypes.h"
 #include "RoadSegmentActor.h"
 #include "NavPlayerController.generated.h"
@@ -56,6 +57,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSelectedDoorChanged, FString, Ro
 // shared FInteriorNavNode::ConnectorGroupId, not one floor-specific node's own Id, since selecting
 // one selects the whole multi-floor connector (see SelectConnector). Empty when deselecting.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedConnectorChanged, FString, GroupId);
+// The same for a door in the building's outer wall; empty when deselecting.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedEntranceChanged, FString, EntranceId);
 // Broadcast after each footprint point is added or cleared, so UI can show a live point count.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFootprintPointCountChanged, int32, PointCount);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRoomPointCountChanged, int32, PointCount);
@@ -630,6 +633,18 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Interior")
 	FOnSelectedConnectorChanged OnSelectedConnectorChanged;
 
+	UPROPERTY(BlueprintAssignable, Category = "Interior")
+	FOnSelectedEntranceChanged OnSelectedEntranceChanged;
+
+	// The Add door tool on the outer wall (see AInteriorGenerator::AddEntranceAtPoint): a main door away from every neighbour (ground
+	// floor), or a link door where the wall is next to a neighbour's. Warns with the reason when it cannot.
+	bool AddEntranceAtFootprintPosition(const FVector2D& FootprintPoint, float ToleranceFootprintUnits);
+	// Selects the active floor's outer-wall door near FootprintPoint (so Delete removes it); false if none is that close.
+	bool SelectEntranceNear(const FVector2D& FootprintPoint, float ToleranceFootprintUnits);
+	void SelectEntrance(const FString& EntranceId);
+	const FString& GetSelectedEntranceId() const { return SelectedEntranceId; }
+	const FInteriorEntrance* FindEntrance(const FString& Id) const;
+
 	// Removes every floor's node for the currently-selected connector (see
 	// AInteriorGenerator::DeleteConnectorGroup) and clears the selection. Bound as part of
 	// DeleteSelection (Backspace). No-op (returns false) if no connector is selected.
@@ -1174,6 +1189,7 @@ private:
 
 	// See HasUnsavedChanges above.
 	bool bHasUnsavedChanges = false;
+	FString SelectedEntranceId;
 
 	bool bBuildMode = false;
 	TArray<FVector2D> PendingFootprint;

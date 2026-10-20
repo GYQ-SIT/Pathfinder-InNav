@@ -131,6 +131,10 @@ private:
 	UFUNCTION()
 	void HandleProjectSaved();
 
+	// Bound to ANavPlayerController::OnSelectedEntranceChanged: shows which kind of door an outer-wall door is and where it leads, with Delete.
+	UFUNCTION()
+	void HandleSelectedEntranceChanged(FString EntranceId);
+
 	// Bound to ANavPlayerController::OnBeforeProjectSave: applies what was typed or picked in the Properties panel but not
 	// applied yet (room name, type and tags; a connector's floors), so a save never leaves it behind.
 	UFUNCTION()

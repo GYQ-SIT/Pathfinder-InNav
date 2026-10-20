@@ -339,6 +339,11 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 	LoadedBuildingId = BuildingId;
 
 	const TSharedPtr<FJsonObject> InteriorData = Generator->GetInteriorDataForBuilding(BuildingId);
+
+	// The doors in the outer wall, if the file has any, and the neighbours' doors that show here.
+	Entrances = InteriorEntrances::ReadAll(InteriorData);
+	RefreshMirroredEntrances();
+
 	const TArray<TSharedPtr<FJsonValue>>* FloorsArray = nullptr;
 	if (!InteriorData.IsValid() || !InteriorData->TryGetArrayField(TEXT("floors"), FloorsArray))
 	{
@@ -590,6 +595,8 @@ void AInteriorGenerator::ClearLoadedInterior()
 		}
 	}
 	NavNodes.Empty();
+	Entrances.Empty();
+	AllEntrances.Empty();
 	FloorInfoByLevel.Empty();
 	UsedRoomIds.Empty();
 	LoadedBuildingId.Empty();
@@ -2080,6 +2087,262 @@ TArray<FString> AInteriorGenerator::GetRoomTags(const FString& RoomId) const
 	return Room ? Room->RoomTags : TArray<FString>();
 }
 
+namespace
+{
+	// The width of a door in the outer wall, and how close another building's wall must be to count as next to this one (metres).
+	constexpr float EntranceWidthWorldUnits = 240.f;
+	constexpr float AdjacentReachMetres = 1.5f;
+}
+
+void AInteriorGenerator::RefreshMirroredEntrances()
+{
+	AllEntrances = Entrances;
+	if (Generator && !LoadedBuildingId.IsEmpty())
+	{
+		AllEntrances.Append(Generator->GetMirroredEntrances(LoadedBuildingId));
+	}
+}
+
+const FInteriorEntrance* AInteriorGenerator::FindEntranceById(const FString& Id) const
+{
+	return AllEntrances.FindByPredicate([&Id](const FInteriorEntrance& E) { return E.Id == Id; });
+}
+
+FString AInteriorGenerator::AddEntranceAtPoint(const FVector2D& FootprintPoint, float ToleranceFootprintUnits, FString& OutError)
+{
+	OutError.Empty();
+	APolyBuilding* Building = (!LoadedBuildingId.IsEmpty() && Generator) ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+	if (!Building)
+	{
+		OutError = TEXT("No building interior is currently loaded.");
+		return FString();
+	}
+	const float Scale = Generator->GetScale();
+	const float UnitsPerMetre = 100.f / Scale;
+	const TArray<FVector2D>& Outline = Building->GetFootprint();
+
+	// The nearest point of the outline.
+	int32 Edge = INDEX_NONE;
+	float Along = 0.f, EdgeLength = 0.f, Nearest = TNumericLimits<float>::Max();
+	for (int32 i = 0; i < Outline.Num(); ++i)
+	{
+		const FVector2D& A = Outline[i];
+		const FVector2D& B = Outline[(i + 1) % Outline.Num()];
+		const float Length = static_cast<float>(FVector2D::Distance(A, B));
+		if (Length < KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+		const FVector2D Direction = (B - A) / Length;
+		const float T = FMath::Clamp(static_cast<float>(FVector2D::DotProduct(FootprintPoint - A, Direction)), 0.f, Length);
+		const float Distance = static_cast<float>(FVector2D::Distance(FootprintPoint, A + Direction * T));
+		if (Distance < Nearest)
+		{
+			Nearest = Distance;
+			Edge = i;
+			Along = T;
+			EdgeLength = Length;
+		}
+	}
+	if (Edge == INDEX_NONE || Nearest > FMath::Max(ToleranceFootprintUnits, 0.3f * UnitsPerMetre))
+	{
+		OutError = TEXT("Click on the building's outer wall to add a door there.");
+		return FString();
+	}
+
+	const float Width = EntranceWidthWorldUnits / Scale;
+	if (EdgeLength < Width + 0.2f * UnitsPerMetre)
+	{
+		OutError = TEXT("That stretch of wall is too short for a door.");
+		return FString();
+	}
+	const float Start = FMath::Clamp(Along - Width * 0.5f, 0.1f * UnitsPerMetre, EdgeLength - Width - 0.1f * UnitsPerMetre);
+
+	// Not on top of another door on this floor, from this building or a neighbour's mirrored one.
+	for (const FInteriorEntrance& Existing : AllEntrances)
+	{
+		if (Existing.Level == ActiveFloor && Existing.EdgeIndex == Edge && Start < (Existing.Offset + Existing.Width) / Scale && Existing.Offset / Scale < Start + Width)
+		{
+			OutError = TEXT("There is already a door there.");
+			return FString();
+		}
+	}
+
+	// Along the span of the door, which other building's wall is next to this one? (Buildings share one footprint space once each is
+	// shifted by its own offset.)
+	const FVector2D EdgeStart = Outline[Edge];
+	const FVector2D EdgeDirection = (Outline[(Edge + 1) % Outline.Num()] - EdgeStart).GetSafeNormal();
+	const float Reach = AdjacentReachMetres * UnitsPerMetre;
+	TSet<FString> Neighbours;
+	int32 Samples = 0, Next = 0;
+	for (float T = 0.f; T <= Width + KINDA_SMALL_NUMBER; T += FMath::Max(Width / 8.f, 0.05f * UnitsPerMetre))
+	{
+		++Samples;
+		const FVector2D Point = EdgeStart + EdgeDirection * (Start + T);
+		FString Closest;
+		float ClosestDistance = Reach;
+		for (const APolyBuilding* Other : Generator->GetAllBuildings())
+		{
+			if (!Other || Other == Building || Other->BuildingId == LoadedBuildingId)
+			{
+				continue;
+			}
+			const TArray<FVector2D>& Theirs = Other->GetFootprint();
+			for (int32 i = 0; i < Theirs.Num(); ++i)
+			{
+				const FVector2D A = Theirs[i] + Other->BuildingOffset - Building->BuildingOffset;
+				const FVector2D B = Theirs[(i + 1) % Theirs.Num()] + Other->BuildingOffset - Building->BuildingOffset;
+				const float Distance = InteriorGen_DistancePointToSegment2D(Point, A, B);
+				if (Distance <= ClosestDistance)
+				{
+					ClosestDistance = Distance;
+					Closest = Other->BuildingId;
+				}
+			}
+		}
+		if (!Closest.IsEmpty())
+		{
+			++Next;
+			Neighbours.Add(Closest);
+		}
+	}
+
+	if (Next == 0)
+	{
+		// Away from every neighbour: the way out.
+		if (ActiveFloor != 1)
+		{
+			OutError = TEXT("A main door (the way out of the building) can only be on the ground floor.");
+			return FString();
+		}
+		FInteriorEntrance Door;
+		Door.Id = FString::Printf(TEXT("%s-EN%02d"), *LoadedBuildingId, Entrances.Num() + 1);
+		while (Entrances.ContainsByPredicate([&Door](const FInteriorEntrance& E) { return E.Id == Door.Id; }))
+		{
+			Door.Id += TEXT("x");
+		}
+		Door.Kind = EInteriorEntranceKind::Main;
+		Door.Level = 1;
+		Door.EdgeIndex = Edge;
+		Door.Offset = Start * Scale;
+		Door.Width = EntranceWidthWorldUnits;
+		Entrances.Add(Door);
+		RefreshMirroredEntrances();
+		Generator->SetInteriorDataForBuilding(LoadedBuildingId, SerializeCurrentInterior());
+		RecordHistorySnapshot();
+		return Door.Id;
+	}
+
+	if (Next < Samples || Neighbours.Num() != 1)
+	{
+		OutError = Neighbours.Num() > 1
+			? TEXT("That spot is next to more than one building. Put the door where it is next to just one.")
+			: TEXT("A door has to be wholly where the two walls meet (a link door) or wholly away from every neighbour (a main door).");
+		return FString();
+	}
+
+	// Wholly on the shared wall: a door to that building, which must have this floor and room for the matching door.
+	const FString NeighbourId = *Neighbours.CreateConstIterator();
+	const APolyBuilding* Neighbour = Generator->FindBuildingById(NeighbourId);
+	if (!Neighbour || ActiveFloor > Neighbour->GetFloorCount())
+	{
+		OutError = FString::Printf(TEXT("%s has no floor %d, so there is nothing to connect to here."), *NeighbourId, ActiveFloor);
+		return FString();
+	}
+	FInteriorEntrance Link;
+	Link.Id = FString::Printf(TEXT("%s-EN%02d"), *LoadedBuildingId, Entrances.Num() + 1);
+	while (Entrances.ContainsByPredicate([&Link](const FInteriorEntrance& E) { return E.Id == Link.Id; }))
+	{
+		Link.Id += TEXT("x");
+	}
+	Link.Kind = EInteriorEntranceKind::Link;
+	Link.Level = ActiveFloor;
+	Link.EdgeIndex = Edge;
+	Link.Offset = Start * Scale;
+	Link.Width = EntranceWidthWorldUnits;
+	Link.ConnectsTo = NeighbourId;
+
+	FInteriorEntrance Mirror;
+	if (!Generator->MakeMirrorOfEntrance(LoadedBuildingId, Link, NeighbourId, Mirror))
+	{
+		OutError = FString::Printf(TEXT("%s has no stretch of wall long enough for the matching door."), *NeighbourId);
+		return FString();
+	}
+	const FString MirrorError = FString::Printf(TEXT("%s already has a door at the matching spot."), *NeighbourId);
+	for (const TArray<FInteriorEntrance>& Theirs : { Generator->GetStoredEntrances(NeighbourId), Generator->GetMirroredEntrances(NeighbourId) })
+	{
+		for (const FInteriorEntrance& Existing : Theirs)
+		{
+			if (Existing.Level == Mirror.Level && Existing.EdgeIndex == Mirror.EdgeIndex && Mirror.Offset < Existing.Offset + Existing.Width && Existing.Offset < Mirror.Offset + Mirror.Width)
+			{
+				OutError = MirrorError;
+				return FString();
+			}
+		}
+	}
+
+	Entrances.Add(Link);
+	RefreshMirroredEntrances();
+	Generator->SetInteriorDataForBuilding(LoadedBuildingId, SerializeCurrentInterior());
+	RecordHistorySnapshot();
+	return Link.Id;
+}
+
+FString AInteriorGenerator::FindEntranceNear(const FVector2D& FootprintPoint, float ToleranceFootprintUnits) const
+{
+	const APolyBuilding* Building = (!LoadedBuildingId.IsEmpty() && Generator) ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+	if (!Building)
+	{
+		return FString();
+	}
+	const float Scale = Generator->GetScale();
+	const TArray<FVector2D>& Outline = Building->GetFootprint();
+	FString Best;
+	float BestDistance = ToleranceFootprintUnits;
+	for (const FInteriorEntrance& Entrance : AllEntrances)
+	{
+		if (Entrance.Level != ActiveFloor || !Outline.IsValidIndex(Entrance.EdgeIndex))
+		{
+			continue;
+		}
+		const FVector2D A = Outline[Entrance.EdgeIndex];
+		const FVector2D Direction = (Outline[(Entrance.EdgeIndex + 1) % Outline.Num()] - A).GetSafeNormal();
+		const float Distance = InteriorGen_DistancePointToSegment2D(FootprintPoint, A + Direction * (Entrance.Offset / Scale), A + Direction * ((Entrance.Offset + Entrance.Width) / Scale));
+		if (Distance <= BestDistance)
+		{
+			BestDistance = Distance;
+			Best = Entrance.Id;
+		}
+	}
+	return Best;
+}
+
+bool AInteriorGenerator::RemoveEntrance(const FString& Id)
+{
+	const FInteriorEntrance* Found = FindEntranceById(Id);
+	if (!Found || !Generator)
+	{
+		return false;
+	}
+	if (Found->bMirrored)
+	{
+		// The door belongs to the building next door; taking it from there takes it from both.
+		const FString Source = Found->SourceBuildingId;
+		if (!Generator->RemoveStoredEntrance(Source, Id))
+		{
+			return false;
+		}
+		RefreshMirroredEntrances();
+		RecordHistorySnapshot();
+		return true;
+	}
+	Entrances.RemoveAll([&Id](const FInteriorEntrance& E) { return E.Id == Id; });
+	RefreshMirroredEntrances();
+	Generator->SetInteriorDataForBuilding(LoadedBuildingId, SerializeCurrentInterior());
+	RecordHistorySnapshot();
+	return true;
+}
+
 bool AInteriorGenerator::SetRoomType(const FString& RoomId, const FString& NewType)
 {
 	AInteriorRoom* Room = GetRoomById(RoomId);
@@ -2269,6 +2532,16 @@ TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 	}
 
 	InteriorObject->SetArrayField(TEXT("floors"), FloorsArray);
+
+	if (!Entrances.IsEmpty())
+	{
+		TArray<TSharedPtr<FJsonValue>> EntranceArray;
+		for (const FInteriorEntrance& Entrance : Entrances)
+		{
+			EntranceArray.Add(MakeShared<FJsonValueObject>(InteriorEntrances::ToJson(Entrance)));
+		}
+		InteriorObject->SetArrayField(TEXT("entrances"), EntranceArray);
+	}
 	return InteriorObject;
 }
 

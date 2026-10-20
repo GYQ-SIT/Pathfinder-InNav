@@ -70,8 +70,10 @@ void APolyBuilding::RebuildMesh()
 
 	// Normalize to counter-clockwise winding so the side walls always face outward,
 	// regardless of which direction the footprint points were traced/clicked in.
+	bPolyReversed = false;
 	if (PolygonSignedArea(Poly2D) < 0.f)
 	{
+		bPolyReversed = true;
 		for (int32 i = 0, j = N - 1; i < j; i++, j--)
 		{
 			Poly2D.Swap(i, j);
@@ -166,7 +168,7 @@ void APolyBuilding::BuildCapSection(const TArray<FVector2D>& Poly2D, const TArra
 	MeshComp->SetMaterial(SectionIndex, DynMaterial);
 }
 
-void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBottom, float ZTop, int32 SectionIndex, bool bCreateCollision)
+void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBottom, float ZTop, int32 SectionIndex, bool bCreateCollision, int32 Level)
 {
 	const int32 N = Poly2D.Num();
 
@@ -196,16 +198,63 @@ void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBot
 		const FVector2D Dir = (B2D - A2D) / EdgeLength;
 		const FVector2D Perp(-Dir.Y, Dir.X);
 
-		const FVector2D Inner0 = A2D - Perp * HalfThickness;
-		const FVector2D Inner1 = B2D - Perp * HalfThickness;
-		const FVector2D Outer0 = A2D + Perp * HalfThickness;
-		const FVector2D Outer1 = B2D + Perp * HalfThickness;
+		// The stretch of this edge between two distances along it, between two heights.
+		auto AddSegment = [&](float T0, float T1, float Z0, float Z1)
+		{
+			if (T1 - T0 <= KINDA_SMALL_NUMBER || Z1 - Z0 <= KINDA_SMALL_NUMBER)
+			{
+				return;
+			}
+			const FVector2D P0 = A2D + Dir * T0;
+			const FVector2D P1 = A2D + Dir * T1;
+			const FVector2D Inner0 = P0 - Perp * HalfThickness;
+			const FVector2D Inner1 = P1 - Perp * HalfThickness;
+			const FVector2D Outer0 = P0 + Perp * HalfThickness;
+			const FVector2D Outer1 = P1 + Perp * HalfThickness;
+			AppendWallBox(Vertices, Triangles,
+				FVector(Inner0.X, Inner0.Y, Z0), FVector(Inner1.X, Inner1.Y, Z0),
+				FVector(Outer0.X, Outer0.Y, Z0), FVector(Outer1.X, Outer1.Y, Z0),
+				FVector(Inner0.X, Inner0.Y, Z1), FVector(Inner1.X, Inner1.Y, Z1),
+				FVector(Outer0.X, Outer0.Y, Z1), FVector(Outer1.X, Outer1.Y, Z1));
+		};
 
-		AppendWallBox(Vertices, Triangles,
-			FVector(Inner0.X, Inner0.Y, ZBottom), FVector(Inner1.X, Inner1.Y, ZBottom),
-			FVector(Outer0.X, Outer0.Y, ZBottom), FVector(Outer1.X, Outer1.Y, ZBottom),
-			FVector(Inner0.X, Inner0.Y, ZTop),    FVector(Inner1.X, Inner1.Y, ZTop),
-			FVector(Outer0.X, Outer0.Y, ZTop),    FVector(Outer1.X, Outer1.Y, ZTop));
+		// Where this floor's openings cut this edge. The polygon may run the other way round from the footprint it was made from.
+		TArray<TPair<float, float>> Gaps;
+		for (const FPolyWallOpening& Opening : WallOpenings)
+		{
+			if (Opening.Level != Level || Opening.EdgeIndex < 0 || Opening.EdgeIndex >= N)
+			{
+				continue;
+			}
+			const int32 PolyEdge = bPolyReversed ? (N - 2 - Opening.EdgeIndex + N) % N : Opening.EdgeIndex;
+			if (PolyEdge != i)
+			{
+				continue;
+			}
+			float T0 = Opening.Offset, T1 = Opening.Offset + Opening.Width;
+			if (bPolyReversed)
+			{
+				T0 = EdgeLength - (Opening.Offset + Opening.Width);
+				T1 = EdgeLength - Opening.Offset;
+			}
+			Gaps.Add(TPair<float, float>(FMath::Clamp(T0, 0.f, EdgeLength), FMath::Clamp(T1, 0.f, EdgeLength)));
+		}
+		if (Gaps.IsEmpty())
+		{
+			AddSegment(0.f, EdgeLength, ZBottom, ZTop);
+			continue;
+		}
+		Gaps.Sort([](const TPair<float, float>& L, const TPair<float, float>& R) { return L.Key < R.Key; });
+		constexpr float OpeningHeight = 240.f;
+		float Cursor = 0.f;
+		for (const TPair<float, float>& Gap : Gaps)
+		{
+			AddSegment(Cursor, Gap.Key, ZBottom, ZTop);
+			// Above the opening the wall carries on.
+			AddSegment(Gap.Key, Gap.Value, ZBottom + OpeningHeight, ZTop);
+			Cursor = FMath::Max(Cursor, Gap.Value);
+		}
+		AddSegment(Cursor, EdgeLength, ZBottom, ZTop);
 	}
 
 	TArray<FVector> Normals;
@@ -216,6 +265,32 @@ void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBot
 	TArray<FColor> VertexColors;
 	MeshComp->CreateMeshSection(SectionIndex, Vertices, Triangles, Normals, UV0, VertexColors, Tangents, bCreateCollision);
 	MeshComp->SetMaterial(SectionIndex, DynMaterial);
+}
+
+void APolyBuilding::SetWallOpenings(const TArray<FPolyWallOpening>& Openings)
+{
+	if (WallOpenings == Openings)
+	{
+		return;
+	}
+	WallOpenings = Openings;
+	ApplySlabVisibility();
+}
+
+TArray<FVector> APolyBuilding::GetWallVerticesForTests(int32 Level) const
+{
+	TArray<FVector> Result;
+	if (MeshComp && Level >= 1 && Level <= FloorCount)
+	{
+		if (const FProcMeshSection* Section = MeshComp->GetProcMeshSection(GetWallSectionIndex(Level)))
+		{
+			for (const FProcMeshVertex& Vertex : Section->ProcVertexBuffer)
+			{
+				Result.Add(Vertex.Position);
+			}
+		}
+	}
+	return Result;
 }
 
 void APolyBuilding::SetVisibleInteriorLevel(int32 Level)
@@ -262,7 +337,7 @@ void APolyBuilding::ApplySlabVisibility()
 		// looking at.
 		const int32 WallSectionIndex = GetWallSectionIndex(L);
 		const bool bHideWall = (VisibleInteriorLevel > 0 && L != VisibleInteriorLevel);
-		BuildWallSection(CachedPoly2D, (L - 1) * FloorHeight, L * FloorHeight, WallSectionIndex, /*bCreateCollision=*/!bHideWall);
+		BuildWallSection(CachedPoly2D, (L - 1) * FloorHeight, L * FloorHeight, WallSectionIndex, /*bCreateCollision=*/!bHideWall, L);
 		MeshComp->SetMeshSectionVisible(WallSectionIndex, !bHideWall);
 	}
 }
