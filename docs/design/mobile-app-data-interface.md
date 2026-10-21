@@ -203,3 +203,16 @@ arrival page both toggle it, so the two pages and the tab always agree. It is ke
 the app starts; a missing or damaged file is an empty list, and without a file (as in tests) nothing is written. A tap on a row opens that place on the map tab: if it belongs to another site
 that site is opened first (`OpenSite`), then the sheet shows the place page with the place on the map. **Remove** takes the place off the list and the place and arrival pages update.
 Real data only needs `FindPlace` to answer for every site's places. For looking at the tab without a file: `-MobileTab=Saved -MobileSave=E2-01-101,PLM-01-102`.
+
+## The Profile tab
+
+`UMobileProfilePageWidget` is the last tab, as in the prototype: "Make it yours" and "Preferences stay on this device.", a Visitor card (there is no account), **Appearance** (a pill for
+"InNav light" and one for "Night theme", and a **Larger text** box), **About InNav**, a **Reset saved places & preferences** button, and the source's `GetDataNote()` at the end. A tap on
+any control says "Appearance updated" (or "Saved places and preferences were reset") under the button, as the prototype's toast does.
+
+The choices are the app's own state, like the saved places: `FMobilePreferences` (theme, larger text), kept in `Saved/MobilePreferences.json`
+(`{ "version": 1, "theme": "light" | "night", "largerText": bool }`), written on every change and read when the app starts; a missing or damaged file is the defaults. Reset takes every
+saved place off (the Saved tab, place page and arrival page follow) and puts the preferences back to light and normal text.
+
+The choices are stored and shown, but **not applied yet**: the night theme and larger text need the colours and text sizes in `MobileStyle.h` (plain constants now) to come from the
+chosen theme and every page to be rebuilt when it changes. That is its own step, to do when the design team's night palette is in.

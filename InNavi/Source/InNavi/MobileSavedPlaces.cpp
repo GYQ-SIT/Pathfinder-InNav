@@ -39,6 +39,15 @@ bool FMobileSavedPlaces::Remove(const FString& PlaceId)
 	return true;
 }
 
+void FMobileSavedPlaces::Clear()
+{
+	if (!Order.IsEmpty())
+	{
+		Order.Reset();
+		Changed();
+	}
+}
+
 void FMobileSavedPlaces::Changed()
 {
 	if (!Path.IsEmpty())

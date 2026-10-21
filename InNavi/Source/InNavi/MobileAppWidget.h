@@ -4,6 +4,7 @@
 #include "Blueprint/UserWidget.h"
 #include "MobileMockSource.h"
 #include "MobileNavSource.h"
+#include "MobilePreferences.h"
 #include "MobileSavedPlaces.h"
 #include "MobileSheetFlow.h"
 #include "MobileAppWidget.generated.h"
@@ -23,6 +24,7 @@ class UMobileNavigatePageWidget;
 class UMobileMapWidget;
 class UMobileExplorePageWidget;
 class UMobileSavedPageWidget;
+class UMobileProfilePageWidget;
 class UVerticalBox;
 class UMobileArrivedPageWidget;
 
@@ -152,6 +154,12 @@ public:
 	void PreviewSave(const FString& CommaIds);
 	// A saved place was tapped: its site opens if it is another, and the place with it.
 	void OpenSavedPlace(const FMobilePlace& Place);
+	UMobileProfilePageWidget* GetProfilePage() const { return ProfilePage; }
+	const FMobilePreferences& GetPreferences() const { return Preferences; }
+	// Keeps the preferences in a file (as for the saved places) and reads what is in it.
+	void UsePreferencesFile(const FString& Path);
+	// The Profile tab's reset: no saved places, the app's own preferences.
+	void ResetSavedAndPreferences();
 	const FString& GetStartPlaceId() const { return StartPlaceId; }
 	int32 GetMyLocationLevel() const { return MyLocationLevel; }
 	const FString& GetMyLocationBuildingId() const { return MyLocationBuildingId; }
@@ -257,6 +265,8 @@ private:
 	UPROPERTY()
 	UMobileSavedPageWidget* SavedPage = nullptr;
 	UPROPERTY()
+	UMobileProfilePageWidget* ProfilePage = nullptr;
+	UPROPERTY()
 	UTextBlock* SiteNameText = nullptr;
 	UPROPERTY()
 	UTextBlock* LevelLabel = nullptr;
@@ -280,6 +290,8 @@ private:
 	int32 MyLocationLevel = 1;
 	// The places the person saved, and the one they chose to start from (empty = their location).
 	FMobileSavedPlaces SavedPlaces;
+	// How the person chose the app to look (the Profile tab).
+	FMobilePreferences Preferences;
 	FString StartPlaceId;
 
 	FMobileSheetFlow Flow;

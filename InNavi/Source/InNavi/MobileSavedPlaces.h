@@ -12,6 +12,8 @@ public:
 	bool Toggle(const FString& PlaceId);
 	void Add(const FString& PlaceId);
 	bool Remove(const FString& PlaceId);
+	// Takes every place off.
+	void Clear();
 	// Newest first.
 	const TArray<FString>& Ids() const { return Order; }
 	int32 Num() const { return Order.Num(); }

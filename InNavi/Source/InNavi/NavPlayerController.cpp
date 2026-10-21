@@ -129,7 +129,8 @@ void ANavPlayerController::MobileApp()
 		{
 			Screen->UseSavedFile(FMobileSavedPlaces::DefaultFile());
 		}
-		// For trying a screen straight away: -MobileTab=Directory and -MobileState=Route.
+		Screen->UsePreferencesFile(FMobilePreferences::DefaultFile());
+			// For trying a screen straight away: -MobileTab=Directory and -MobileState=Route.
 		FString Tab, State;
 		if (FParse::Value(FCommandLine::Get(), TEXT("MobileTab="), Tab))
 		{

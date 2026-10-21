@@ -7,6 +7,7 @@
 #include "MobileTapTarget.h"
 #include "MobilePlacePageWidget.h"
 #include "MobileRoutePageWidget.h"
+#include "MobileProfilePageWidget.h"
 #include "MobileSavedPageWidget.h"
 #include "MobileSelectWidget.h"
 #include "MobileSearchPageWidget.h"
@@ -452,6 +453,36 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		SavedOverlay->SetContent(SavedPage);
 		RefreshSaved();
 		ProfileOverlay = MakeOverlay(TEXT("ProfileOverlay"), TEXT("Profile"), TEXT("Settings and preferences."));
+		// The Profile tab is the page of preferences, not a placeholder.
+		ProfilePage = CreateWidget<UMobileProfilePageWidget>(this, UMobileProfilePageWidget::StaticClass());
+		ProfilePage->SetPreferences(Preferences);
+		ProfilePage->SetNote(Source->GetDataNote());
+		{
+			TWeakObjectPtr<UMobileAppWidget> WeakProfile(this);
+			ProfilePage->SetOnThemeChosen([WeakProfile](EMobileTheme Theme)
+			{
+				if (UMobileAppWidget* Screen = WeakProfile.Get())
+				{
+					Screen->Preferences.SetTheme(Theme);
+				}
+			});
+			ProfilePage->SetOnLargerTextToggled([WeakProfile](bool bLarger)
+			{
+				if (UMobileAppWidget* Screen = WeakProfile.Get())
+				{
+					Screen->Preferences.SetLargerText(bLarger);
+				}
+			});
+			ProfilePage->SetOnReset([WeakProfile]()
+			{
+				if (UMobileAppWidget* Screen = WeakProfile.Get())
+				{
+					Screen->ResetSavedAndPreferences();
+				}
+			});
+		}
+		ProfileOverlay->SetPadding(FMargin(0.f));
+		ProfileOverlay->SetContent(ProfilePage);
 
 		// The tab bar.
 		TabBarBorder = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("TabBar"));
@@ -1320,6 +1351,28 @@ void UMobileAppWidget::UseSavedFile(const FString& Path)
 	RefreshSaved();
 	SelectPlace(SelectedPlace);
 	RefreshArrived();
+}
+
+void UMobileAppWidget::UsePreferencesFile(const FString& Path)
+{
+	Preferences.UseFile(Path);
+	if (ProfilePage)
+	{
+		ProfilePage->SetPreferences(Preferences);
+	}
+}
+
+void UMobileAppWidget::ResetSavedAndPreferences()
+{
+	SavedPlaces.Clear();
+	Preferences.Reset();
+	RefreshSaved();
+	SelectPlace(SelectedPlace);
+	RefreshArrived();
+	if (ProfilePage)
+	{
+		ProfilePage->SetPreferences(Preferences);
+	}
 }
 
 void UMobileAppWidget::OpenSavedPlace(const FMobilePlace& Place)
