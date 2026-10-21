@@ -652,6 +652,24 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 void UMobileAppWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+#if PLATFORM_ANDROID && !UE_BUILD_SHIPPING
+	++PerfFrames;
+	PerfSeconds += InDeltaTime;
+	PerfWorst = FMath::Max(PerfWorst, static_cast<double>(InDeltaTime));
+	PerfSlowFrames += InDeltaTime > 0.0168f ? 1 : 0;
+	PerfVerySlowFrames += InDeltaTime > 0.0334f ? 1 : 0;
+	if (PerfSeconds >= 2.0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[MobilePerf] frames=%d avg=%.1f ms (%.0f fps) worst=%.1f ms over16.7=%d over33=%d tab=%d sheet=%.0f zoom=%.1f"),
+			PerfFrames, PerfSeconds / PerfFrames * 1000.0, PerfFrames / PerfSeconds, PerfWorst * 1000.0, PerfSlowFrames, PerfVerySlowFrames,
+			static_cast<int32>(ActiveTab), SheetHeight, MapView ? MapView->GetZoom() : 1.0);
+		PerfFrames = 0;
+		PerfSlowFrames = 0;
+		PerfVerySlowFrames = 0;
+		PerfSeconds = 0.0;
+		PerfWorst = 0.0;
+	}
+#endif
 	const FVector2D LocalSize = MyGeometry.GetLocalSize();
 	if (LocalSize.X > 1.f && LocalSize.Y > 1.f)
 	{

@@ -367,6 +367,12 @@ private:
 	double SafeTop = 0.0;
 	double SafeBottom = 0.0;
 	float SafeAreaPollSeconds = 0.f;
+	// A line in the log every two seconds with how long the frames took (not in a shipping build), to see how the app runs on a phone.
+	int32 PerfFrames = 0;
+	int32 PerfSlowFrames = 0;
+	int32 PerfVerySlowFrames = 0;
+	double PerfSeconds = 0.0;
+	double PerfWorst = 0.0;
 	double SheetHeight = 0.0;
 	bool bDraggingSheet = false;
 	bool bSheetMoved = false;
