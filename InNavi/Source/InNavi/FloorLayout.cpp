@@ -23,6 +23,10 @@ namespace
 	constexpr double FrontClear = 1.0;
 	constexpr double ConnectorKeepClear = 0.6;
 	constexpr double VoidChance = 0.07;
+	// A room at least this wide and deep may have a corner cut away on the corridor side.
+	constexpr double NotchChance = 0.28;
+	constexpr double NotchMinWidth = 5.5;
+	constexpr double NotchMinDepth = 4.0;
 	// The room nearest a core becomes its toilet (one a core), and how far away it may be.
 	constexpr int32 MaxToiletsPerFloor = 3;
 	constexpr double ToiletReach = 14.0;
@@ -200,7 +204,10 @@ namespace
 
 	struct FPlaced
 	{
+		// The box the room fits in, which is what is checked against its neighbours; the shape is the room itself (an L when a corner is cut).
 		FQuad Quad;
+		FQuad Shape;
+		int32 DoorEdge = 2;
 		int32 Edge = 0;
 		FVector2D Front = FVector2D::ZeroVector;
 		double AreaSquareMetres = 0.0;
@@ -463,7 +470,31 @@ bool FloorLayout::Generate(const FFloorLayoutParams& Params, FFloorLayout& OutLa
 						FPlaced Room;
 						Room.Quad = Quad;
 						Room.Edge = Edge;
-						Room.Front = Frame.At(U + Width * 0.5, (WallMargin + Depth + FrontClear) * K);
+						Room.Shape = Quad;
+						Room.DoorEdge = 2;
+						double DoorMiddleU = U + Width * 0.5, DoorV = (WallMargin + Depth) * K;
+						// Now and then a corner on the corridor side is cut back, which makes the room L-shaped: the recess is the room's entrance, and
+						// the door goes in its back wall, the way a real doorway is set into a plan.
+						if (Width / K >= NotchMinWidth && Depth >= NotchMinDepth && Random.FRand() < NotchChance)
+						{
+							const double NotchWidth = Random.FRandRange(1.8f, static_cast<float>(FMath::Min(3.2, Width / K - 2.5))) * K;
+							const double NotchDepth = Random.FRandRange(1.2f, static_cast<float>(FMath::Min(2.2, Depth - 2.0))) * K;
+							const double V0 = WallMargin * K, V1 = (WallMargin + Depth) * K;
+							DoorV = V1 - NotchDepth;
+							if (Random.FRand() < 0.5f)
+							{
+								Room.Shape = { Frame.At(U, V0), Frame.At(U + Width, V0), Frame.At(U + Width, V1), Frame.At(U + NotchWidth, V1), Frame.At(U + NotchWidth, V1 - NotchDepth), Frame.At(U, V1 - NotchDepth) };
+								Room.DoorEdge = 4;
+								DoorMiddleU = U + NotchWidth * 0.5;
+							}
+							else
+							{
+								Room.Shape = { Frame.At(U, V0), Frame.At(U + Width, V0), Frame.At(U + Width, V1 - NotchDepth), Frame.At(U + Width - NotchWidth, V1 - NotchDepth), Frame.At(U + Width - NotchWidth, V1), Frame.At(U, V1) };
+								Room.DoorEdge = 2;
+								DoorMiddleU = U + Width - NotchWidth * 0.5;
+							}
+						}
+						Room.Front = Frame.At(DoorMiddleU, DoorV + FrontClear * K);
 						Room.AreaSquareMetres = Width / K * Depth;
 						Placed.Add(Room);
 						bPlaced = true;
@@ -549,9 +580,12 @@ bool FloorLayout::Generate(const FFloorLayoutParams& Params, FFloorLayout& OutLa
 		}
 	}
 
-	// The kinds of the others: rooms of one kind sit together, in runs of two to five along the wall; a big room can be a lecture hall.
+	// The kinds of the others: rooms of one kind sit together. A run of three to seven rooms along the wall is one family (teaching,
+	// offices, study), and within it most are the run's main kind - a stretch of classrooms with a lab or two, not a mix. A big room
+	// in a teaching run can be a lecture hall.
 	FRandomStream TypeRandom(Params.Seed + 9973);
 	int32 FamilyIndex = 0, RunLeft = 0;
+	FString RunKind;
 	for (FPlaced& Room : Placed)
 	{
 		FFloorRoom Out;
@@ -565,18 +599,27 @@ bool FloorLayout::Generate(const FFloorLayoutParams& Params, FFloorLayout& OutLa
 			{
 				const int32 Roll = TypeRandom.RandRange(0, 8);
 				FamilyIndex = Roll < 5 ? 0 : (Roll < 8 ? 1 : 2);
-				RunLeft = TypeRandom.RandRange(2, 5);
+				RunLeft = TypeRandom.RandRange(3, 7);
+				RunKind = PickFrom(TypeRandom, Family(FamilyIndex));
 			}
 			--RunLeft;
-			Out.Type = FamilyIndex == 0 && Room.AreaSquareMetres >= 60.0 && TypeRandom.FRand() < 0.3f ? FString(TEXT("Lecture hall")) : PickFrom(TypeRandom, Family(FamilyIndex));
+			if (FamilyIndex == 0 && Room.AreaSquareMetres >= 60.0 && TypeRandom.FRand() < 0.3f)
+			{
+				Out.Type = TEXT("Lecture hall");
+			}
+			else
+			{
+				Out.Type = TypeRandom.FRand() < 0.75f ? RunKind : PickFrom(TypeRandom, Family(FamilyIndex));
+			}
 		}
-		Out.Footprint = Room.Quad;
-		Out.DoorEdgeIndex = 2;
+		Out.Footprint = Room.Shape;
+		Out.DoorEdgeIndex = Room.DoorEdge;
 		if (SignedArea(Out.Footprint) < 0.0)
 		{
+			// Turned round, the edge that was the i-th is now the (n - 2 - i)-th.
+			const int32 Count = Out.Footprint.Num();
 			Algo::Reverse(Out.Footprint);
-			// Turned round, the side that faces the corridor is the first edge.
-			Out.DoorEdgeIndex = 0;
+			Out.DoorEdgeIndex = (Count - 2 - Room.DoorEdge + Count) % Count;
 		}
 		OutLayout.Rooms.Add(MoveTemp(Out));
 	}

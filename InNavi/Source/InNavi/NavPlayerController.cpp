@@ -614,6 +614,10 @@ void ANavPlayerController::ToggleSelectMode()
 void ANavPlayerController::ToggleRoomColours()
 {
 	bRoomColoursVisible = !bRoomColoursVisible;
+	if (InteriorGen)
+	{
+		InteriorGen->SetRoomColoursVisible(bRoomColoursVisible);
+	}
 	OnRoomColoursChanged.Broadcast(bRoomColoursVisible);
 }
 

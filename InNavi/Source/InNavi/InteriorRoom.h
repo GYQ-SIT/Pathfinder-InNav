@@ -98,6 +98,15 @@ public:
 	// when false. Mirrors APolyBuilding::SetHighlighted.
 	void SetHighlighted(bool bHighlighted);
 
+	// The floor slab shows the room's type colour (RoomTypes.h) while this is on, a plain grey when off. A freestanding wall has no floor.
+	void SetTypeColourShown(bool bShown);
+
+	// Re-reads RoomType, for when it changed after the room was built.
+	void RefreshFloorTint();
+
+	// The colour the floor slab has now: highlighted green, else the type colour or grey.
+	FLinearColor GetFloorTint() const { return FloorColour(); }
+
 private:
 	// Regenerates the mesh from the cached inputs below. Called by both BuildWalls and
 	// SetFloorBaseZ.
@@ -123,4 +132,8 @@ private:
 	// different surfaces once the 3D preview mode can actually see both at once.
 	UPROPERTY()
 	UMaterialInstanceDynamic* FloorDynMaterial;
+
+	bool bTypeColourShown = true;
+	bool bHighlightedNow = false;
+	FLinearColor FloorColour() const;
 };

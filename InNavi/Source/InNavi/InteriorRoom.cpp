@@ -3,6 +3,7 @@
 
 #include "InteriorRoom.h"
 #include "PolygonGeometryUtils.h"
+#include "RoomTypes.h"
 #include "ProceduralMeshComponent.h"
 #include "KismetProceduralMeshLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -292,7 +293,7 @@ void AInteriorRoom::RebuildMesh()
 			if (BaseMat)
 			{
 				FloorDynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
-				FloorDynMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.55f, 0.55f, 0.58f));
+				FloorDynMaterial->SetVectorParameterValue(TEXT("Color"), FloorColour());
 			}
 		}
 		MeshComp->SetMaterial(1, FloorDynMaterial);
@@ -305,14 +306,39 @@ void AInteriorRoom::RebuildMesh()
 	UE_LOG(LogTemp, Warning, TEXT("Built room %s: %d edges, %d verts"), *RoomId, N, Vertices.Num());
 }
 
+FLinearColor AInteriorRoom::FloorColour() const
+{
+	if (bHighlightedNow)
+	{
+		return FLinearColor(0.55f, 1.0f, 0.6f);
+	}
+	if (bTypeColourShown && CachedClosedLoop)
+	{
+		return RoomTypes::Color(RoomType);
+	}
+	return FLinearColor(0.55f, 0.55f, 0.58f);
+}
+
+void AInteriorRoom::RefreshFloorTint()
+{
+	if (FloorDynMaterial)
+	{
+		FloorDynMaterial->SetVectorParameterValue(TEXT("Color"), FloorColour());
+	}
+}
+
+void AInteriorRoom::SetTypeColourShown(bool bShown)
+{
+	bTypeColourShown = bShown;
+	RefreshFloorTint();
+}
+
 void AInteriorRoom::SetHighlighted(bool bHighlighted)
 {
+	bHighlightedNow = bHighlighted;
 	if (DynMaterial)
 	{
 		DynMaterial->SetVectorParameterValue(TEXT("Color"), bHighlighted ? FLinearColor(0.55f, 1.0f, 0.6f) : FLinearColor(0.85f, 0.85f, 0.82f));
 	}
-	if (FloorDynMaterial)
-	{
-		FloorDynMaterial->SetVectorParameterValue(TEXT("Color"), bHighlighted ? FLinearColor(0.55f, 1.0f, 0.6f) : FLinearColor(0.55f, 0.55f, 0.58f));
-	}
+	RefreshFloorTint();
 }

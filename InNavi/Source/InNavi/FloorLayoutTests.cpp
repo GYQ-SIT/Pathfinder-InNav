@@ -36,35 +36,26 @@ namespace FloorLayoutTests
 		return bInside;
 	}
 
-	bool InsideQuad(const FVector2D& P, const TArray<FVector2D>& Q)
+	// Whether two segments cross each other properly (not merely touch).
+	bool SegmentsCross(const FVector2D& A, const FVector2D& B, const FVector2D& C, const FVector2D& D)
 	{
-		bool bPositive = false, bNegative = false;
-		for (int32 i = 0; i < Q.Num(); ++i)
-		{
-			const FVector2D A = Q[i], B = Q[(i + 1) % Q.Num()];
-			const double C = (B.X - A.X) * (P.Y - A.Y) - (B.Y - A.Y) * (P.X - A.X);
-			bPositive = bPositive || C > 1e-9;
-			bNegative = bNegative || C < -1e-9;
-		}
-		return !(bPositive && bNegative);
+		auto Side = [](const FVector2D& P, const FVector2D& Q, const FVector2D& R) { return (Q.X - P.X) * (R.Y - P.Y) - (Q.Y - P.Y) * (R.X - P.X); };
+		const double D1 = Side(A, B, C), D2 = Side(A, B, D), D3 = Side(C, D, A), D4 = Side(C, D, B);
+		return ((D1 > 0) != (D2 > 0)) && ((D3 > 0) != (D4 > 0)) && D1 != 0 && D2 != 0 && D3 != 0 && D4 != 0;
 	}
 
-	// Two convex quads overlap unless a side of one separates them.
+	// Two polygons (an L is fine) overlap when a side of one crosses a side of the other or one lies inside the other. Rooms are a
+	// third of a metre apart, so touching does not come up.
 	bool Overlap(const TArray<FVector2D>& A, const TArray<FVector2D>& B)
 	{
-		for (const TArray<FVector2D>* Shape : { &A, &B })
+		for (int32 i = 0; i < A.Num(); ++i)
 		{
-			for (int32 i = 0; i < Shape->Num(); ++i)
+			for (int32 j = 0; j < B.Num(); ++j)
 			{
-				const FVector2D Edge = (*Shape)[(i + 1) % Shape->Num()] - (*Shape)[i];
-				const FVector2D Axis = FVector2D(-Edge.Y, Edge.X).GetSafeNormal();
-				double MinA = 1e30, MaxA = -1e30, MinB = 1e30, MaxB = -1e30;
-				for (const FVector2D& P : A) { MinA = FMath::Min(MinA, FVector2D::DotProduct(P, Axis)); MaxA = FMath::Max(MaxA, FVector2D::DotProduct(P, Axis)); }
-				for (const FVector2D& P : B) { MinB = FMath::Min(MinB, FVector2D::DotProduct(P, Axis)); MaxB = FMath::Max(MaxB, FVector2D::DotProduct(P, Axis)); }
-				if (MaxA <= MinB + 0.01 || MaxB <= MinA + 0.01) return false;
+				if (SegmentsCross(A[i], A[(i + 1) % A.Num()], B[j], B[(j + 1) % B.Num()])) return true;
 			}
 		}
-		return true;
+		return Inside(A[0], B) || Inside(B[0], A);
 	}
 
 	FVector2D FootprintCentre(const TArray<FVector2D>& Footprint)
@@ -157,7 +148,7 @@ bool FFloorLayoutShapeTest::RunTest(const FString& Parameters)
 		{
 			for (const FFloorRoom& Room : Three.Rooms)
 			{
-				TestFalse(TEXT("no room in the way of a door"), InsideQuad(Middle + Inward * Depth, Room.Footprint));
+				TestFalse(TEXT("no room in the way of a door"), Inside(Middle + Inward * Depth, Room.Footprint));
 			}
 		}
 	}
@@ -180,12 +171,11 @@ bool FFloorLayoutShapeTest::RunTest(const FString& Parameters)
 		}
 		const FVector2D A = Room.Footprint[Room.DoorEdgeIndex], B = Room.Footprint[(Room.DoorEdgeIndex + 1) % Room.Footprint.Num()];
 		const FVector2D Edge = (B - A).GetSafeNormal();
-		FVector2D Out(-Edge.Y, Edge.X);
+		const FVector2D Out(Edge.Y, -Edge.X); // footprints run counter-clockwise, so the room is to the left and out is to the right
 		const FVector2D Middle = (A + B) * 0.5;
-		if (FVector2D::DotProduct(Out, Middle - FootprintCentre(Room.Footprint)) < 0) Out = -Out;
 		const FVector2D Front = Middle + Out * 10.0;
 		bool bBlocked = !Inside(Front, Outline);
-		for (int32 j = 0; j < Three.Rooms.Num(); ++j) bBlocked = bBlocked || (j != i && InsideQuad(Front, Three.Rooms[j].Footprint));
+		for (int32 j = 0; j < Three.Rooms.Num(); ++j) bBlocked = bBlocked || (j != i && Inside(Front, Three.Rooms[j].Footprint));
 		TestFalse(TEXT("the room's door opens onto open floor"), bBlocked);
 	}
 
@@ -209,6 +199,35 @@ bool FFloorLayoutShapeTest::RunTest(const FString& Parameters)
 	for (int32 i = 0; !bDifferent && i < FMath::Min(Other.Rooms.Num(), Three.Rooms.Num()); ++i) bDifferent = Other.Rooms[i].Footprint != Three.Rooms[i].Footprint;
 	TestTrue(TEXT("the same seed gives the same floor"), bSame);
 	TestTrue(TEXT("another seed another"), bDifferent);
+
+	// Some rooms have a corner cut away (an L), with the door on the longer front; and rooms of one kind sit together.
+	int32 LRooms = 0, Pairs = 0, SamePairs = 0;
+	for (int32 Seed = 1; Seed <= 20; ++Seed)
+	{
+		FFloorLayoutParams Many = WithDoors;
+		Many.Seed = Seed;
+		FFloorLayout Layout;
+		if (!FloorLayout::Generate(Many, Layout, Error)) continue;
+		for (int32 i = 0; i < Layout.Rooms.Num(); ++i)
+		{
+			const FFloorRoom& Room = Layout.Rooms[i];
+			if (Room.Footprint.Num() == 6)
+			{
+				++LRooms;
+				const int32 Count = Room.Footprint.Num();
+				TestTrue(TEXT("an L's door is in its recess, wide enough for a door"), FVector2D::Distance(Room.Footprint[Room.DoorEdgeIndex], Room.Footprint[(Room.DoorEdgeIndex + 1) % Count]) >= 17.0);
+				for (const FVector2D& Corner : Room.Footprint) TestTrue(TEXT("every corner of an L is inside the building"), Inside(Corner, Outline));
+				for (int32 j = i + 1; j < Layout.Rooms.Num(); ++j) TestFalse(TEXT("an L overlaps nothing"), Overlap(Room.Footprint, Layout.Rooms[j].Footprint));
+			}
+			if (i > 0 && Room.Type != TEXT("Toilet") && Layout.Rooms[i - 1].Type != TEXT("Toilet"))
+			{
+				++Pairs;
+				SamePairs += Room.Type == Layout.Rooms[i - 1].Type ? 1 : 0;
+			}
+		}
+	}
+	TestTrue(*FString::Printf(TEXT("some rooms are L-shaped (%d)"), LRooms), LRooms >= 5);
+	TestTrue(*FString::Printf(TEXT("neighbours are often the same kind (%d of %d)"), SamePairs, Pairs), Pairs > 0 && SamePairs * 100 >= Pairs * 40);
 
 	// A big building gets fewer, larger rooms.
 	FFloorLayout Big;
@@ -414,6 +433,27 @@ bool FRoomColoursToggleTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("one click turns them off"), Controller->AreRoomColoursVisible());
 	Controller->ToggleRoomColours();
 	TestTrue(TEXT("and another back on"), Controller->AreRoomColoursVisible());
+
+	// The floor slabs in 3D follow: the type's colour, grey when off, and the type's own colour after the type changes.
+	Fixture.Interior->SetActiveFloor(1);
+	const TArray<AInteriorRoom*>& Rooms = Fixture.Interior->GetRoomsOnFloor(1);
+	AInteriorRoom* Room = nullptr;
+	for (AInteriorRoom* Candidate : Rooms)
+	{
+		Room = Room ? Room : (Candidate && Candidate->IsClosedLoop() ? Candidate : nullptr);
+	}
+	if (!TestNotNull(TEXT("the ground floor has a room"), Room)) return false;
+	Fixture.Interior->SetRoomType(Room->RoomId, TEXT("Lab"));
+	TestTrue(TEXT("the floor takes its type's colour"), Room->GetFloorTint().Equals(RoomTypes::Color(TEXT("Lab")), 0.001f));
+	Controller->ToggleRoomColours();
+	TestFalse(TEXT("switching the colours off greys it"), Room->GetFloorTint().Equals(RoomTypes::Color(TEXT("Lab")), 0.001f));
+	Fixture.Interior->SetRoomType(Room->RoomId, TEXT("Office"));
+	TestFalse(TEXT("and a new type stays grey while they are off"), Room->GetFloorTint().Equals(RoomTypes::Color(TEXT("Office")), 0.001f));
+	Controller->ToggleRoomColours();
+	TestTrue(TEXT("switching them on again shows the new type"), Room->GetFloorTint().Equals(RoomTypes::Color(TEXT("Office")), 0.001f));
+	Room->SetHighlighted(true);
+	TestFalse(TEXT("a selected room shows the selection, not its type"), Room->GetFloorTint().Equals(RoomTypes::Color(TEXT("Office")), 0.001f));
+	Room->SetHighlighted(false);
 	return true;
 }
 

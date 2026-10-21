@@ -161,7 +161,7 @@ to confirm).
 
 Then, in order: **2D | 3D**, one segmented control (the active mode is blue) that toggles the preview mode (see below);
 **Undo** and **Redo** (the same as `Ctrl+Z`/`Ctrl+Y`); a **Snapping** button (same on/off as pressing `N` - see Snapping
-below), only here, not on the exterior screen; and, only while in 3D preview, a **View**/**Edit** toggle (amber for View,
+below), only here, not on the exterior screen; a **Colours** button (turns the room colours on and off: in the 2D plan each room is filled with its Room type colour, in 3D its floor is; on by default, not saved); and, only while in 3D preview, a **View**/**Edit** toggle (amber for View,
 green for Edit; it is 3D's sub-mode - covered in the 3D preview section below). Drop-downs in the editor share one dark
 look. Which floor you are on is shown by the Floor panel (switch with it or with `[`/`]`). The 3D camera controls are not on this bar: while
 in 3D preview a **Camera** menu appears in the menu bar after **Window**. Its dropdown
@@ -293,9 +293,11 @@ the corridor (it is not drawn).
 - The floor must be **empty** (no rooms or walls), otherwise it is refused and the Debug panel says so.
 - If the building already has lifts or stairs they are used as they are and extended to this floor; no new core is made.
 - Rooms get random sizes of a believable range, have a door onto the corridor, are named "Type floor-number" and tagged `generated`.
-  Rooms of one kind sit together, a few are left out and corners are sometimes open. A floor never gets more than 24 rooms (a big
+  Rooms of one kind sit together (a run of three to seven rooms is one family - teaching, offices or study - mostly of one kind),
+  a few are left out and corners are sometimes open. A floor never gets more than 24 rooms (a big
   building gets bigger rooms instead), because route-finding slows down with many walls.
-- Rooms are rectangles for now; L-shaped or notched rooms and the open areas are a later step. Every room goes through the same
+- Some rooms (roughly one in four of the bigger ones) have a corner cut away on the corridor side, so they are L-shaped; the door is on the
+  longer front. The open areas of the real plans are a later step. Every room goes through the same
   checks as one drawn by hand. The whole floor is **one undo step**. Click it again after undoing to get a different layout.
 
 ### Layers panel

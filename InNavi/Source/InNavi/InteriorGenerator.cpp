@@ -488,6 +488,7 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 				AInteriorRoom* Room = GetWorld()->SpawnActor<AInteriorRoom>(FVector::ZeroVector, FRotator::ZeroRotator);
 				if (Room)
 				{
+					Room->SetTypeColourShown(bRoomColoursVisible);
 					Room->RoomId = RoomId;
 					Room->RoomName = RoomName;
 					const TArray<TSharedPtr<FJsonValue>>* TagValues;
@@ -914,6 +915,7 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprintWithTags(const TArray<
 	AInteriorRoom* Room = GetWorld()->SpawnActor<AInteriorRoom>(FVector::ZeroVector, FRotator::ZeroRotator);
 	if (Room)
 	{
+		Room->SetTypeColourShown(bRoomColoursVisible);
 		Room->RoomId = ResolvedId;
 		Room->RoomName = RoomName.IsEmpty() ? ResolvedId : RoomName;
 		Room->RoomTags = NavigationSearch::NormalizeTags(InTags);
@@ -2529,6 +2531,21 @@ bool AInteriorGenerator::GenerateFloor(int32 Seed, FFloorGenerationResult& OutRe
 	return true;
 }
 
+void AInteriorGenerator::SetRoomColoursVisible(bool bVisible)
+{
+	bRoomColoursVisible = bVisible;
+	for (TPair<int32, FInteriorRoomList>& Pair : RoomsByFloor)
+	{
+		for (AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (Room)
+			{
+				Room->SetTypeColourShown(bVisible);
+			}
+		}
+	}
+}
+
 bool AInteriorGenerator::SetRoomType(const FString& RoomId, const FString& NewType)
 {
 	AInteriorRoom* Room = GetRoomById(RoomId);
@@ -2537,6 +2554,7 @@ bool AInteriorGenerator::SetRoomType(const FString& RoomId, const FString& NewTy
 	if (Room->RoomType != Normalized)
 	{
 		Room->RoomType = Normalized;
+		Room->RefreshFloorTint();
 		RecordHistorySnapshot();
 	}
 	return true;

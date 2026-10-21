@@ -254,6 +254,10 @@ public:
 	// OutResult.Error, when nothing was generated.
 	bool GenerateFloor(int32 Seed, FFloorGenerationResult& OutResult);
 
+	// Whether the floor slabs in 3D show each room's type colour (the 2D plan's Colours button switches both). Applies to every room now and later.
+	void SetRoomColoursVisible(bool bVisible);
+	bool bRoomColoursVisible = true;
+
 	// A room's type (see RoomTypes.h); a value that is not on the list is stored as Other. False if the room is missing or is a wall.
 	bool SetRoomType(const FString& RoomId, const FString& NewType);
 	FString GetRoomType(const FString& RoomId) const;
