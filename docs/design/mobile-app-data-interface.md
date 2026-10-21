@@ -21,22 +21,33 @@ bottom sheet whose content follows one flow:
 ## The interface (what a screen may ask for)
 
 ```cpp
-struct FMobileSite     { FString Id, Name, Subtitle; int32 BuildingCount; FString DistanceLabel; };
+// MobileNavSource.h - plain structs, no UObjects
+struct FMobileSite     { FString Id, Name, Subtitle; int32 BuildingCount, LevelCount; FString DistanceLabel; };
 struct FMobileLevel    { int32 Level; FString Label; };                       // Label "L1", "L2M"
 struct FMobileBuilding { FString Id, Name; TArray<FMobileLevel> Levels; };
-struct FMobilePlace    { FString Id, Name, Code, BuildingId, BuildingName; int32 Level; FString LevelLabel;
-                         FString Category, RoomType; TArray<FString> Tags; FVector2D Position; bool bAvailable; FString PhotoPath; };
-struct FMobileStep     { EMobileStepKind Kind; FString Text; int32 Level; double Metres; FVector2D Position; };
-struct FMobileRoute    { bool bFound; FString Error; double Metres; int32 Minutes; TArray<FMobileStep> Steps; TArray<FNavigationRoutePoint> Points; };
+struct FMobilePlace    { FString Id, Name, Code, SiteId, BuildingId, BuildingName; int32 Level; FString LevelLabel, Category, RoomType;
+                         TArray<FString> Tags; FVector2D Position; bool bAvailable; FString PhotoPath, Description; };
+struct FMobilePlaceFilter { TArray<FString> Categories; bool bAvailableOnly; FString BuildingId; int32 Level; };
+struct FMobileRoutePreferences { bool bAllowLift, bAllowStairs, bAllowEscalator; };   // "use lift only" = LiftOnly()
+struct FMobileRouteRequest { FString FromPlaceId; /* empty = my location */ FString ToPlaceId; FMobileRoutePreferences Preferences; };
+struct FMobileStep     { EMobileStepKind Kind; FString Text, BuildingId; int32 Level; FString LevelLabel; double Metres; FVector2D Position; };
+struct FMobileRoute    { bool bFound; FString Error; double Metres; int32 Minutes; TArray<FMobileStep> Steps; TArray<FMobileRoutePoint> Points; };
 
 class IMobileNavSource
 {
     virtual TArray<FMobileSite>     ListSites() = 0;
     virtual TArray<FMobileBuilding> ListBuildings(const FString& SiteId) = 0;
-    virtual TArray<FMobilePlace>    SearchPlaces(const FString& SiteId, const FString& Query, const FMobileFilter& Filter) = 0;
-    virtual FMobileRoute            FindRoute(const FMobileRouteRequest& Request) = 0;   // from a place or "my location"
+    virtual TArray<FString>         ListCategories(const FString& SiteId) = 0;
+    virtual TArray<FMobilePlace>    SearchPlaces(const FString& SiteId, const FString& Query, const FMobilePlaceFilter& Filter) = 0;
+    virtual bool                    FindPlace(const FString& PlaceId, FMobilePlace& OutPlace) = 0;
+    virtual FMobileRoute            FindRoute(const FMobileRouteRequest& Request) = 0;
 };
 ```
+
+`FMobileMockSource` (`MobileMockSource.h/.cpp`) answers with the prototype's data: the Paya Lebar Mall, the Pathfinder Centre and the SIT Punggol
+campus (E2, E6 with its mezzanine L2M, W2), four places on every level, the mall's closed restaurant, and routes made up from them (lift,
+escalator or stairs by the person's preferences; out of one building and into another). `MobileNavSourceTests.cpp` has a contract check
+(`CheckContract`) that any source must pass - the real one runs the same check.
 
 Saved places are the app's own state (a small file in `Saved/`), not part of the source. The bottom sheet's flow (search -> place ->
 route -> navigating -> arrived) is a state machine of its own; the widgets only send events and show the state.
