@@ -80,6 +80,7 @@ void ANavPlayerController::BeginPlay()
 		// Keeps the 3D preview's route/start/destination markers live as the user picks points and
 		// finds/clears a route - see RefreshRoute3DVisualization's own comment.
 		NavigationPanel->OnStateChanged.AddUniqueDynamic(this, &ANavPlayerController::RefreshRoute3DVisualization);
+		OnInteriorContentChanged.AddUniqueDynamic(NavigationPanel, &UNavigationPanelWidget::NotifyInteriorChanged);
 	}
 
 	for (TActorIterator<ABuildingGenerator> It(GetWorld()); It; ++It)
@@ -2942,7 +2943,7 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 		NavigationPanel->HasStart() ? &NavigationPanel->GetStart() : nullptr,
 		NavigationPanel->HasDestination() ? &NavigationPanel->GetDestination() : nullptr,
 		Building->BuildingOffset, Generator->GetScale(), Building->GetFloorHeight(), InteriorGen->GetActiveFloor(),
-		NavigationPanel->IsRouteGuidanceVisible()));
+		NavigationPanel->IsRouteGuidanceVisible(), Building->BuildingId));
 }
 
 void ANavPlayerController::SetPointerOverUICallback(const UObject* ScreenOwner, TFunction<bool(const FVector2D&)> Callback)
@@ -3625,6 +3626,7 @@ bool ANavPlayerController::UndoInteriorEdit()
 {
 	if (InteriorGen && InteriorGen->Undo())
 	{
+		if (NavigationPanel) NavigationPanel->NotifyInteriorChanged();
 		SelectRoom(FString());
 		bHasUnsavedChanges = true;
 		return true;
@@ -3636,6 +3638,7 @@ bool ANavPlayerController::RedoInteriorEdit()
 {
 	if (InteriorGen && InteriorGen->Redo())
 	{
+		if (NavigationPanel) NavigationPanel->NotifyInteriorChanged();
 		SelectRoom(FString());
 		bHasUnsavedChanges = true;
 		return true;
@@ -3910,6 +3913,10 @@ int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 		Generator->CaptureBuildingBaseline(BuildingId);
 	}
 
+	if (!InteriorGen->GetLoadedBuildingId().IsEmpty() && InteriorGen->GetLoadedBuildingId() != BuildingId)
+	{
+		InteriorGen->SyncInteriorToBuildingGenerator();
+	}
 	const int32 Result = InteriorGen->LoadInteriorForBuilding(BuildingId);
 	if (Result < 0)
 	{
@@ -3920,7 +3927,7 @@ int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 		FocusCameraOnBuilding(Generator->FindBuildingById(BuildingId));
 		if (NavigationPanel)
 		{
-			NavigationPanel->ClearAll();
+			NavigationPanel->NotifyViewedBuildingChanged();
 			// The navigation widget fills the viewport and sits above WBP_InteriorScreen.
 			// Keep the outer widget out of hit testing so its empty canvas does not block
 			// the room-editing controls below it. Its visible children (the navigation

@@ -1167,11 +1167,14 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			NavigationPanel && NavigationPanel->IsRouteGuidanceVisible())
 		{
 			const int32 ActiveFloor = InteriorGen->GetActiveFloor();
-			auto IsVisibleOnCurrentMap = [ActiveFloor](const FNavigationRoutePoint& Point)
+			auto IsVisibleOnCurrentMap = [ActiveFloor, Building](const FNavigationRoutePoint& Point)
 				{
-					return Point.Floor == ActiveFloor
-						|| (ActiveFloor == 1 && Point.Floor == UNavigationPanelWidget::OutdoorFloor);
+					return UNavigationRouteVisualization::IsPointVisible(Point, Building->BuildingId, ActiveFloor);
 				};
+			auto RouteLocal = [&](const FNavigationRoutePoint& Point)
+			{
+				return WorldToLocal(Point.bHasWorldPosition ? FVector2D(Point.WorldPosition) : (Point.Position + Building->BuildingOffset) * Scale);
+			};
 			const TArray<FNavigationRoutePoint>& Route = NavigationPanel->GetRoutePoints();
 			for (int32 I = 1; I < Route.Num(); ++I)
 			{
@@ -1180,8 +1183,8 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 					continue;
 				}
 				TArray<FVector2D> Segment;
-				Segment.Add(WorldToLocal((Route[I - 1].Position + Building->BuildingOffset) * Scale));
-				Segment.Add(WorldToLocal((Route[I].Position + Building->BuildingOffset) * Scale));
+				Segment.Add(RouteLocal(Route[I - 1]));
+				Segment.Add(RouteLocal(Route[I]));
 				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 4,
 					AllottedGeometry.ToPaintGeometry(), Segment, ESlateDrawEffect::None,
 					FLinearColor(1.f, 0.55f, 0.f, 1.f), true, 6.f);
@@ -1208,7 +1211,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 					}
 					constexpr float MarkerSize = 18.f;
 					constexpr float OutlineSize = 24.f;
-					const FVector2D MarkerLocal = WorldToLocal((Point.Position + Building->BuildingOffset) * Scale);
+					const FVector2D MarkerLocal = RouteLocal(Point);
 					if (Point.Floor == UNavigationPanelWidget::OutdoorFloor)
 					{
 						TArray<FVector2D> Diamond;

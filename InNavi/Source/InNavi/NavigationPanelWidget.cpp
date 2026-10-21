@@ -58,9 +58,10 @@ namespace
 
 	FString LocationName(const FNavigationRoutePoint& Point)
 	{
-		return Point.Floor == UNavigationPanelWidget::OutdoorFloor
+		const FString Location = Point.Floor == UNavigationPanelWidget::OutdoorFloor
 			? TEXT("Outside")
 			: FString::Printf(TEXT("Floor %d (indoors)"), Point.Floor);
+		return Point.BuildingId.IsEmpty() ? Location : Point.BuildingId + TEXT(" - ") + Location;
 	}
 
 	FString ConnectorTypeName(EInteriorNavNodeType Type)
@@ -321,6 +322,13 @@ void UNavigationPanelWidget::SetEndpoint(FSelectedEndpoint& Endpoint, const FNav
 	const bool bRouteWasVisible = !RoutePoints.IsEmpty();
 	Endpoint.bValid = true;
 	Endpoint.Point = Point;
+	Endpoint.Point.BuildingId = BuildingId;
+	if (const APolyBuilding* Building = Generator ? Generator->FindBuildingById(BuildingId) : nullptr)
+	{
+		const FVector2D XY = (Point.Position + Building->BuildingOffset) * Generator->GetScale();
+		Endpoint.Point.WorldPosition = FVector(XY.X, XY.Y, FMath::Max(0, Point.Floor - 1) * Building->GetFloorHeight());
+		Endpoint.Point.bHasWorldPosition = true;
+	}
 	Endpoint.BuildingId = BuildingId;
 	Endpoint.bSetViaDropdown = bSetViaDropdown;
 	Endpoint.RoomOptionLabel = RoomOptionLabel;
@@ -461,11 +469,9 @@ bool UNavigationPanelWidget::SetEndpointToRoom(const FString& RoomOptionLabel, b
 
 void UNavigationPanelWidget::RequestFindRoute()
 {
-	if (!Generator || !Interior || !Start.bValid || !Destination.bValid
-		|| Start.BuildingId != Destination.BuildingId
-		|| Start.BuildingId != Interior->GetLoadedBuildingId())
+	if (!CanFindRoute())
 	{
-		SetStatusMessage(TEXT("Set a start and destination in the loaded building."),
+		SetStatusMessage(TEXT("Set a start and destination in the project."),
 			ENavigationMessageKind::Error);
 		return;
 	}
@@ -477,16 +483,14 @@ void UNavigationPanelWidget::RequestFindRoute()
 	}
 
 	FNavigationRouteResult Result;
-	if (!FNavigationRoutePlanner::FindRoute(*Building, *Interior, Generator->GetScale(),
-		Start.Point.Floor, Start.Point.Position, Destination.Point.Floor,
-		Destination.Point.Position, Result))
+	if (!FNavigationRoutePlanner::FindCampusRoute(*Generator, *Interior, Start.Point, Destination.Point, Result))
 	{
 		RoutePoints.Reset();
 		bLastFindRouteFailed = true;
 
 		const FString FailureMessage = !Result.Error.IsEmpty()
 			? Result.Error
-			: TEXT("No route found. Check that a Floor 1 door is marked as Outside.");
+			: TEXT("No route found. Check main/link entrances and floor connectors.");
 
 		SetStatusMessage(FailureMessage, ENavigationMessageKind::Warning);
 		return;
@@ -527,16 +531,19 @@ bool UNavigationPanelWidget::ApplyWorldRouteResult(const FString& BuildingId,
 	FNavigationRouteResult Result;
 	for (const FNavigationWorldRoutePoint& Input : Points)
 	{
+		const FString OwnerId = Input.BuildingId.IsEmpty() ? BuildingId : Input.BuildingId;
+		const APolyBuilding* Owner = Generator->FindBuildingById(OwnerId);
 		if (!FMath::IsFinite(Input.WorldPosition.X) || !FMath::IsFinite(Input.WorldPosition.Y)
 			|| !FMath::IsFinite(Input.WorldPosition.Z) || Input.Floor < OutdoorFloor
-			|| Input.Floor > Building->GetFloorCount())
+			|| !Owner || Input.Floor > Owner->GetFloorCount())
 		{
 			SetStatusMessage(TEXT("The 3D route contains an invalid position or floor."), ENavigationMessageKind::Error);
 			return false;
 		}
 		FNavigationRoutePoint Point;
 		Point.Position = FVector2D(Input.WorldPosition.X, Input.WorldPosition.Y) / Generator->GetScale()
-			- Building->BuildingOffset;
+			- Owner->BuildingOffset;
+		Point.BuildingId = OwnerId;
 		Point.Floor = Input.Floor;
 		Point.ConnectorId = Input.ConnectorId;
 		Point.ConnectorType = Input.ConnectorType;
@@ -546,11 +553,11 @@ bool UNavigationPanelWidget::ApplyWorldRouteResult(const FString& BuildingId,
 	}
 	Start = FSelectedEndpoint();
 	Start.bValid = true;
-	Start.BuildingId = BuildingId;
+	Start.BuildingId = Result.Points[0].BuildingId;
 	Start.Point = Result.Points[0];
 	Destination = FSelectedEndpoint();
 	Destination.bValid = true;
-	Destination.BuildingId = BuildingId;
+	Destination.BuildingId = Result.Points.Last().BuildingId;
 	Destination.Point = Result.Points.Last();
 	SelectionMode = ENavigationSelectionMode::None;
 	ApplyRouteResult(Result);
@@ -573,12 +580,12 @@ void UNavigationPanelWidget::ClearAll()
 void UNavigationPanelWidget::NotifyRoomDeleted(const FString& RoomId)
 {
 	bool bChanged = false;
-	if (Start.bValid && Start.bSetViaDropdown && Start.RoomId == RoomId)
+	if (Start.bValid && Start.bSetViaDropdown && Start.RoomId == RoomId && Interior && Start.BuildingId == Interior->GetLoadedBuildingId())
 	{
 		Start = FSelectedEndpoint();
 		bChanged = true;
 	}
-	if (Destination.bValid && Destination.bSetViaDropdown && Destination.RoomId == RoomId)
+	if (Destination.bValid && Destination.bSetViaDropdown && Destination.RoomId == RoomId && Interior && Destination.BuildingId == Interior->GetLoadedBuildingId())
 	{
 		Destination = FSelectedEndpoint();
 		bChanged = true;
@@ -622,9 +629,34 @@ void UNavigationPanelWidget::BroadcastStateChanged()
 
 bool UNavigationPanelWidget::CanFindRoute() const
 {
-	return Start.bValid && Destination.bValid && Interior
-		&& Start.BuildingId == Destination.BuildingId
-		&& Start.BuildingId == Interior->GetLoadedBuildingId();
+	return Start.bValid && Destination.bValid && Interior && Generator
+		&& IsValid(Generator->FindBuildingById(Start.BuildingId))
+		&& IsValid(Generator->FindBuildingById(Destination.BuildingId));
+}
+
+FString UNavigationPanelWidget::GetStartRoomLabel() const
+{
+	return WasStartSetViaDropdown() && Interior && Start.BuildingId == Interior->GetLoadedBuildingId() ? Start.RoomOptionLabel : FString();
+}
+
+FString UNavigationPanelWidget::GetDestinationRoomLabel() const
+{
+	return WasDestinationSetViaDropdown() && Interior && Destination.BuildingId == Interior->GetLoadedBuildingId() ? Destination.RoomOptionLabel : FString();
+}
+
+void UNavigationPanelWidget::NotifyViewedBuildingChanged()
+{
+	SelectionMode = ENavigationSelectionMode::None;
+	IndexedRoomSearchRevision = MAX_uint64;
+	BroadcastStateChanged();
+}
+
+void UNavigationPanelWidget::NotifyInteriorChanged()
+{
+	if (RoutePoints.IsEmpty()) return;
+	RoutePoints.Reset();
+	bLastFindRouteFailed = false;
+	SetStatusMessage(TEXT("Interior changed. Press Find Route to update the route."), ENavigationMessageKind::Warning);
 }
 
 bool UNavigationPanelWidget::CanClearRoute() const
@@ -668,31 +700,36 @@ FString UNavigationPanelWidget::BuildRouteDetails() const
 	{
 		const FNavigationRoutePoint& From = RoutePoints[I - 1];
 		const FNavigationRoutePoint& To = RoutePoints[I];
+		if (From.BuildingId != To.BuildingId && From.Floor != OutdoorFloor && To.Floor != OutdoorFloor)
+		{
+			Details += FString::Printf(TEXT("Use the link door from %s to %s on Floor %d.\n"), *From.BuildingId, *To.BuildingId, To.Floor);
+			continue;
+		}
 		if (From.Floor == To.Floor)
 		{
 			continue;
 		}
 		if (From.Floor == OutdoorFloor)
 		{
-			Details += TEXT("Enter the building, then continue on Floor 1.\n");
+			Details += FString::Printf(TEXT("Enter the building %s, then continue on Floor 1.\n"), *To.BuildingId);
 		}
 		else if (To.Floor == OutdoorFloor)
 		{
-			Details += TEXT("Exit the building, then continue outside.\n");
+			Details += FString::Printf(TEXT("Exit the building %s, then continue outside.\n"), *From.BuildingId);
 		}
 		else
 		{
 			const FString Connector = ConnectorTypeName(To.ConnectorType);
 			const FString ConnectorLabel = To.ConnectorId.IsEmpty()
 				? Connector : Connector + TEXT(" ") + To.ConnectorId;
-			Details += FString::Printf(TEXT("Take %s from Floor %d to Floor %d.\n"),
-				*ConnectorLabel, From.Floor, To.Floor);
+			Details += FString::Printf(TEXT("Take %s in %s from Floor %d to Floor %d.\n"),
+				*ConnectorLabel, *From.BuildingId, From.Floor, To.Floor);
 		}
-		if (From.Floor == ActiveFloor && NextFloor == INDEX_NONE)
+		if (From.Floor == ActiveFloor && Interior && From.BuildingId == Interior->GetLoadedBuildingId() && NextFloor == INDEX_NONE)
 		{
 			NextFloor = To.Floor;
 		}
-		if (To.Floor == ActiveFloor)
+		if (To.Floor == ActiveFloor && Interior && To.BuildingId == Interior->GetLoadedBuildingId())
 		{
 			PreviousFloor = From.Floor;
 		}

@@ -53,10 +53,11 @@ UNavigationRouteVisualization::UNavigationRouteVisualization()
 
 FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigationRoutePoint>& Route,
 	const FNavigationRoutePoint* Start, const FNavigationRoutePoint* Destination,
-	FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible)
+	FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible, const FString& ActiveBuildingId)
 {
 	FNavigation3DView View;
 	if (!bGuidanceVisible) return View;
+	auto Visible = [&](const FNavigationRoutePoint& Point) { return IsPointVisible(Point, ActiveBuildingId, ActiveFloor); };
 	auto WorldPoint = [&](const FNavigationRoutePoint& Point)
 	{
 		return NavigationWorldPoint(Point, BuildingOffset, Scale, FloorHeight);
@@ -65,9 +66,20 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 	{
 		const FNavigationRoutePoint& From = Route[I - 1];
 		const FNavigationRoutePoint& To = Route[I];
+		if (From.Floor != 0 && To.Floor != 0 && From.BuildingId != To.BuildingId)
+		{
+			for (bool bDeparting : { true, false })
+			{
+				const auto& Local = bDeparting ? From : To;
+				const auto& Other = bDeparting ? To : From;
+				if (Visible(Local)) View.Labels.Add({ WorldPoint(Local) + FVector(0, 0, 95),
+					FString::Printf(TEXT("Link door %s %s - Floor %d"), bDeparting ? TEXT("to") : TEXT("from"), *Other.BuildingId, Other.Floor), NavigationTransitionColor });
+			}
+			continue;
+		}
 		if (From.Floor == To.Floor)
 		{
-			if (NavigationPointVisible(From.Floor, ActiveFloor)
+			if (Visible(From) && Visible(To)
 				&& !WorldPoint(From).Equals(WorldPoint(To), KINDA_SMALL_NUMBER))
 			{
 				View.Segments.Add({ WorldPoint(From), WorldPoint(To), false });
@@ -80,7 +92,7 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 		{
 			const FNavigationRoutePoint& Local = bDeparting ? From : To;
 			const FNavigationRoutePoint& Other = bDeparting ? To : From;
-			if (!NavigationPointVisible(Local.Floor, ActiveFloor))
+			if (!Visible(Local))
 			{
 				continue;
 			}
@@ -93,7 +105,8 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 			FString Text;
 			if (bExterior)
 			{
-				Text = From.Floor == 0 ? TEXT("Enter building - Floor 1") : TEXT("Exit building - Outside");
+				Text = From.Floor == 0 ? FString::Printf(TEXT("Enter building %s - Floor 1"), *To.BuildingId)
+					: FString::Printf(TEXT("Exit building %s - Outside"), *From.BuildingId);
 			}
 			else
 			{
@@ -108,17 +121,23 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 			View.Labels.Add({ Position + FVector(0, 0, 95.f), Text, NavigationTransitionColor });
 		}
 	}
-	if (Start && NavigationPointVisible(Start->Floor, ActiveFloor))
+	if (Start && Visible(*Start))
 	{
 		View.Start = WorldPoint(*Start);
 		View.Labels.Add({ View.Start.GetValue() + FVector(0, 0, 55), TEXT("Start"), FColor::Green });
 	}
-	if (Destination && NavigationPointVisible(Destination->Floor, ActiveFloor))
+	if (Destination && Visible(*Destination))
 	{
 		View.Destination = WorldPoint(*Destination);
 		View.Labels.Add({ View.Destination.GetValue() + FVector(0, 0, 55), TEXT("Destination"), FColor::Red });
 	}
 	return View;
+}
+
+bool UNavigationRouteVisualization::IsPointVisible(const FNavigationRoutePoint& Point, const FString& ActiveBuildingId, int32 ActiveFloor)
+{
+	return NavigationPointVisible(Point.Floor, ActiveFloor) && (Point.Floor == 0 || ActiveBuildingId.IsEmpty()
+		|| Point.BuildingId.IsEmpty() || Point.BuildingId == ActiveBuildingId);
 }
 
 TArray<FNavigationDirectionArrow2D> UNavigationRouteVisualization::BuildDirectionArrows2D(FVector2D From, FVector2D To)

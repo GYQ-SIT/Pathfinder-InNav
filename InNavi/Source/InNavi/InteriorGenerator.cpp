@@ -469,12 +469,7 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 						OpeningObject->TryGetNumberField(TEXT("sillHeight"), Opening.SillHeight);
 						OpeningObject->TryGetStringField(TEXT("inputId"), Opening.InputId);
 						OpeningObject->TryGetStringField(TEXT("connectsTo"), Opening.ConnectsTo);
-						// The way out of a building is a main door in its outer wall now, not a room's door: an older project's room door that
-						// led "outside" leads to the corridor instead (the main door is for the user to add).
-						if (Opening.ConnectsTo.Equals(TEXT("outside"), ESearchCase::IgnoreCase))
-						{
-							Opening.ConnectsTo = TEXT("corridor");
-						}
+						// Retain legacy outside exits so older projects remain routable without reauthoring doors.
 
 						Openings.Add(Opening);
 					}

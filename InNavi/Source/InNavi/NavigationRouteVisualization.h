@@ -46,7 +46,9 @@ public:
 	UNavigationRouteVisualization();
 	static FNavigation3DView BuildView(const TArray<FNavigationRoutePoint>& Route,
 		const FNavigationRoutePoint* Start, const FNavigationRoutePoint* Destination,
-		FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible = true);
+		FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible = true,
+		const FString& ActiveBuildingId = FString());
+	static bool IsPointVisible(const FNavigationRoutePoint& Point, const FString& ActiveBuildingId, int32 ActiveFloor);
 	static TArray<FNavigationDirectionArrow2D> BuildDirectionArrows2D(FVector2D From, FVector2D To);
 	void ShowView(const FNavigation3DView& View);
 	void ClearRoute();
