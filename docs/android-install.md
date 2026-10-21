@@ -7,7 +7,9 @@ This is for teammates who want to **try the phone app** on their own phone. You 
 
 - An **Android phone, Android 8 or newer** (API 26+), with a **64-bit ARM** processor. Nearly every phone from the last several years is. There is **no iPhone version**.
 - About **160 MB** of free space.
-- The file **`InNavi-arm64.apk`** (about 159 MB, one file; the game's data is inside it). Ask the tech lead where the latest one is: it is not in git because it is big.
+- The file **`InNavi-arm64.apk`** (about 159 MB, one file; the game's data is inside it). It is not in git because it is big. Download it from the **latest pre-release on the repository's Releases page**
+  (<https://github.com/GYQ-SIT/Pathfinder-InNav/releases>, "Assets" -> `InNavi-arm64.apk`). The repository is private, so you must be **signed in to GitHub** with an account that can see it;
+  if the phone's browser does not let you sign in or download, download the file on a computer and send it to the phone (USB cable, a cloud drive or a chat app).
 
 What you are installing is a **development build** with **made-up (mock) data**: three sites, their floor plans and places. It is for looking at and trying the screens, not for real navigation yet.
 
