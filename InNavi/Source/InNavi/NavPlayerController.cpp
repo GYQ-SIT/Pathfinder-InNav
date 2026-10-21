@@ -146,6 +146,12 @@ void ANavPlayerController::MobileApp()
 				SearchPage->SetFiltersOpen(true);
 			}
 		}
+		// For the route page: -MobileOpen=From|To|Building|Level opens that drop-down.
+		FString OpenName;
+		if (FParse::Value(FCommandLine::Get(), TEXT("MobileOpen="), OpenName))
+		{
+			Screen->PreviewOpenSelect(OpenName);
+		}
 		if (FParse::Value(FCommandLine::Get(), TEXT("MobileSnap="), SnapName))
 		{
 			Screen->SetSnap(SnapName == TEXT("Full") ? EMobileSheetSnap::Full : SnapName == TEXT("Collapsed") ? EMobileSheetSnap::Collapsed : EMobileSheetSnap::Half);

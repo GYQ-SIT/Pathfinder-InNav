@@ -178,6 +178,26 @@ bool FMobileMockRouteTest::RunTest(const FString& Parameters)
 	SameLevel.ToPlaceId = SameLevel.FromPlaceId;
 	TestFalse(TEXT("a place to itself is no route"), Source.FindRoute(SameLevel).bFound);
 
+	// "My location" in a building and level the person said: the same level needs no lift, another building means walking out and in.
+	FMobileRouteRequest Here;
+	Here.ToPlaceId = TEXT("E2-02-101");
+	Here.MyLocationBuildingId = TEXT("E2");
+	Here.MyLocationLevel = 2;
+	Route = Source.FindRoute(Here);
+	TestTrue(TEXT("from level 2 of E2"), Route.bFound);
+	TestFalse(TEXT("to a place on level 2 there is no lift"), Route.Steps.ContainsByPredicate([](const FMobileStep& S) { return S.Kind == EMobileStepKind::TakeLift; }));
+	Here.MyLocationLevel = 1;
+	TestTrue(TEXT("from level 1 it is a lift ride"), Source.FindRoute(Here).Steps.ContainsByPredicate([](const FMobileStep& S) { return S.Kind == EMobileStepKind::TakeLift; }));
+	Here.MyLocationBuildingId = TEXT("E6");
+	Here.MyLocationLevel = 3;
+	Route = Source.FindRoute(Here);
+	TestTrue(TEXT("from E6's mezzanine to E2"), Route.bFound && Route.Steps.ContainsByPredicate([](const FMobileStep& S) { return S.Kind == EMobileStepKind::ExitBuilding && S.Text == TEXT("Leave E6"); }));
+	Here.MyLocationBuildingId = TEXT("nowhere");
+	TestTrue(TEXT("a building the site does not have is ignored: the door of the destination's building"), Source.FindRoute(Here).bFound);
+	Here.MyLocationBuildingId = TEXT("E2");
+	Here.MyLocationLevel = 9;
+	TestTrue(TEXT("a level the building does not have goes to its first"), Source.FindRoute(Here).bFound);
+
 	// Up a level: by lift unless the person does not want it.
 	FMobileRouteRequest Up;
 	Up.FromPlaceId = TEXT("E2-01-101");

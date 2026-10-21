@@ -2,6 +2,7 @@
 
 #include "MobileAppWidget.h"
 #include "MobilePlacePageWidget.h"
+#include "MobileRoutePageWidget.h"
 #include "MobileSearchPageWidget.h"
 #include "MobileSheetFlow.h"
 #include "MobileMockSource.h"
@@ -90,7 +91,7 @@ bool FMobileScreenLayoutTest::RunTest(const FString& Parameters)
 
 	// Every control is there.
 	for (const TCHAR* Name : { TEXT("Btn_TabExplore"), TEXT("Btn_TabDirectory"), TEXT("Btn_TabSaved"), TEXT("Btn_TabProfile"), TEXT("Btn_Mode2D"), TEXT("Btn_Mode3D"), TEXT("Btn_Level"), TEXT("Btn_Locate"), TEXT("Btn_Overview"),
-		TEXT("Btn_StartNavigation"), TEXT("Btn_Arrive"), TEXT("Btn_FindAnother"), TEXT("Btn_Exit"), TEXT("Btn_ViewDestination"), TEXT("Btn_OpenSite"), TEXT("Sheet"), TEXT("TabBar"), TEXT("SheetPages") })
+		TEXT("Btn_Arrive"), TEXT("Btn_FindAnother"), TEXT("Btn_Exit"), TEXT("Btn_ViewDestination"), TEXT("Btn_OpenSite"), TEXT("Sheet"), TEXT("TabBar"), TEXT("SheetPages") })
 	{
 		TestNotNull(*FString::Printf(TEXT("%s exists"), Name), Screen->FindNamedWidget(Name));
 	}
@@ -157,7 +158,7 @@ bool FMobileScreenLayoutTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("the place page"), Pages->GetActiveWidgetIndex(), 1);
 	Cast<UButton>(Screen->GetPlacePage()->FindNamedWidget(TEXT("Btn_GetDirections")))->OnClicked.Broadcast();
 	TestEqual(TEXT("the route page"), Pages->GetActiveWidgetIndex(), 2);
-	Click(TEXT("Btn_StartNavigation"));
+	Cast<UButton>(Screen->GetRoutePage()->FindNamedWidget(TEXT("Btn_StartNavigation")))->OnClicked.Broadcast();
 	TestEqual(TEXT("the navigating page"), Pages->GetActiveWidgetIndex(), 3);
 	TestEqual(TEXT("with the sheet low"), Screen->GetSnap(), EMobileSheetSnap::Collapsed);
 	Click(TEXT("Btn_Arrive"));

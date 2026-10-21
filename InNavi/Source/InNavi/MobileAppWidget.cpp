@@ -1,6 +1,8 @@
 #include "MobileAppWidget.h"
 
 #include "MobilePlacePageWidget.h"
+#include "MobileRoutePageWidget.h"
+#include "MobileSelectWidget.h"
 #include "MobileSearchPageWidget.h"
 #include "MobileStyle.h"
 #include "StartScreenStyle.h"
@@ -182,6 +184,9 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 					ContextLevel = Buildings[0].Levels[0].Level;
 				}
 				SearchPage->SetSource(Source.Get(), SiteId, ContextBuilding, ContextLevel);
+				// My location starts in the first building, on its first level, as in the prototype.
+				MyLocationBuildingId = ContextBuilding;
+				MyLocationLevel = ContextLevel;
 				TWeakObjectPtr<UMobileAppWidget> WeakThis(this);
 				SearchPage->SetOnPlaceChosen([WeakThis](const FMobilePlace& Place)
 				{
@@ -239,6 +244,36 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 					}
 				});
 				SheetPages->AddChild(PlacePage);
+				continue;
+			}
+			if (Index == 2)
+			{
+				// The third page is the real route page.
+				RoutePage = CreateWidget<UMobileRoutePageWidget>(this, UMobileRoutePageWidget::StaticClass());
+				RoutePage->SetChoices(Source->SearchPlaces(SiteId, FString(), FMobilePlaceFilter()), Source->ListBuildings(SiteId));
+				TWeakObjectPtr<UMobileAppWidget> WeakThis(this);
+				RoutePage->SetOnBack([WeakThis]()
+				{
+					if (UMobileAppWidget* Screen = WeakThis.Get())
+					{
+						Screen->SendSheetEvent(EMobileSheetEvent::Back);
+					}
+				});
+				RoutePage->SetOnRequestChanged([WeakThis](const FMobileRouteRequest& Changed)
+				{
+					if (UMobileAppWidget* Screen = WeakThis.Get())
+					{
+						Screen->ApplyRouteRequest(Changed);
+					}
+				});
+				RoutePage->SetOnStart([WeakThis]()
+				{
+					if (UMobileAppWidget* Screen = WeakThis.Get())
+					{
+						Screen->SendSheetEvent(EMobileSheetEvent::NavigationStarted);
+					}
+				});
+				SheetPages->AddChild(RoutePage);
 				continue;
 			}
 			UBorder* Page = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(TEXT("SheetPage") + Suffix));
@@ -503,7 +538,43 @@ void UMobileAppWidget::SendSheetEvent(EMobileSheetEvent Event)
 	{
 		Snap = MobileSheet::SnapForState(Flow.GetState());
 		RefreshSheetPage();
+		// Arriving at the route page (from the place, from walking, from choosing a place) finds the route again for what is chosen now.
+		if (Flow.GetState() == EMobileSheetState::Route)
+		{
+			RefreshRoute();
+		}
 	}
+}
+
+void UMobileAppWidget::RefreshRoute()
+{
+	if (!RoutePage || !Source.IsValid() || SelectedPlace.Id.IsEmpty())
+	{
+		return;
+	}
+	FMobileRouteRequest Request;
+	Request.FromPlaceId = StartPlaceId;
+	Request.ToPlaceId = SelectedPlace.Id;
+	Request.Preferences = RoutePreferences;
+	Request.MyLocationBuildingId = MyLocationBuildingId;
+	Request.MyLocationLevel = MyLocationLevel;
+	CurrentRoute = Source->FindRoute(Request);
+	RoutePage->SetRequest(Request, CurrentRoute);
+}
+
+void UMobileAppWidget::ApplyRouteRequest(const FMobileRouteRequest& Changed)
+{
+	StartPlaceId = Changed.FromPlaceId;
+	RoutePreferences = Changed.Preferences;
+	MyLocationBuildingId = Changed.MyLocationBuildingId;
+	MyLocationLevel = Changed.MyLocationLevel;
+	// A different destination chosen on the route page is the place the place page shows too.
+	FMobilePlace Destination;
+	if (Changed.ToPlaceId != SelectedPlace.Id && Source.IsValid() && Source->FindPlace(Changed.ToPlaceId, Destination))
+	{
+		SelectPlace(Destination);
+	}
+	RefreshRoute();
 }
 
 void UMobileAppWidget::RefreshSheetPage()
@@ -720,6 +791,7 @@ void UMobileAppWidget::PreviewState(EMobileSheetState Target)
 	{
 		Flow.Handle(Way[Step]);
 	}
+	RefreshRoute();
 	Snap = MobileSheet::SnapForState(Flow.GetState());
 	RefreshSheetPage();
 	SnapSheetNow();
@@ -738,4 +810,17 @@ void UMobileAppWidget::ShowPlace(const FMobilePlace& Place)
 {
 	SelectPlace(Place);
 	SendSheetEvent(EMobileSheetEvent::PlaceChosen);
+}
+
+void UMobileAppWidget::PreviewOpenSelect(const FString& Name)
+{
+	if (!RoutePage)
+	{
+		return;
+	}
+	UMobileSelectWidget* Select = Name == TEXT("To") ? RoutePage->GetToSelect() : Name == TEXT("Building") ? RoutePage->GetBuildingSelect() : Name == TEXT("Level") ? RoutePage->GetLevelSelect() : RoutePage->GetFromSelect();
+	if (Select)
+	{
+		Select->ToggleOpen();
+	}
 }

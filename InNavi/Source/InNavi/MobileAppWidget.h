@@ -17,6 +17,7 @@ class UWidget;
 class UWidgetSwitcher;
 class UMobileSearchPageWidget;
 class UMobilePlacePageWidget;
+class UMobileRoutePageWidget;
 
 // Where the main pieces of the phone screen are, in design pixels (the phone screen is 375 wide however big the window is), so a test can
 // check that nothing falls off a small or a tall screen.
@@ -74,11 +75,17 @@ public:
 	void SetActiveTab(ETab Tab);
 	// For trying the screen on the desktop: goes the way through the flow to a state (Search, Place, Route, Navigating, Arrived).
 	void PreviewState(EMobileSheetState Target);
+	// For trying the route page: opens one of its drop-downs (From, To, Building, Level).
+	void PreviewOpenSelect(const FString& Name);
 	void SendSheetEvent(EMobileSheetEvent Event);
 	// A place was picked on the search page: the sheet moves on to it.
 	void ShowPlace(const FMobilePlace& Place);
 	// Makes a place the one the place page shows, without moving the sheet.
 	void SelectPlace(const FMobilePlace& Place);
+	// Finds the route again for the start, the destination and the ways between levels, and shows it on the route page.
+	void RefreshRoute();
+	// The person changed something on the route page (from, to, where My location is, the ways between levels): the screen keeps it and finds the route again.
+	void ApplyRouteRequest(const FMobileRouteRequest& Changed);
 	void SetSnap(EMobileSheetSnap NewSnap);
 	// The sheet's height right now, mid-drag or mid-move included (design pixels).
 	double GetSheetHeight() const { return SheetHeight; }
@@ -95,8 +102,13 @@ public:
 
 	UMobileSearchPageWidget* GetSearchPage() const { return SearchPage; }
 	UMobilePlacePageWidget* GetPlacePage() const { return PlacePage; }
+	UMobileRoutePageWidget* GetRoutePage() const { return RoutePage; }
+	const FMobileRoute& GetCurrentRoute() const { return CurrentRoute; }
+	const FMobileRoutePreferences& GetRoutePreferences() const { return RoutePreferences; }
 	bool IsPlaceSaved(const FString& PlaceId) const { return SavedPlaceIds.Contains(PlaceId); }
 	const FString& GetStartPlaceId() const { return StartPlaceId; }
+	int32 GetMyLocationLevel() const { return MyLocationLevel; }
+	const FString& GetMyLocationBuildingId() const { return MyLocationBuildingId; }
 	const FMobilePlace& GetSelectedPlace() const { return SelectedPlace; }
 	IMobileNavSource* GetSource() const { return Source.Get(); }
 
@@ -196,6 +208,13 @@ private:
 	UMobileSearchPageWidget* SearchPage = nullptr;
 	UPROPERTY()
 	UMobilePlacePageWidget* PlacePage = nullptr;
+	UPROPERTY()
+	UMobileRoutePageWidget* RoutePage = nullptr;
+	FMobileRoute CurrentRoute;
+	FMobileRoutePreferences RoutePreferences;
+	// Where "My location" is for the route (the prototype lets the person say which building and level they are on).
+	FString MyLocationBuildingId;
+	int32 MyLocationLevel = 1;
 	// The places the person saved, and the one they chose to start from (empty = their location).
 	TSet<FString> SavedPlaceIds;
 	FString StartPlaceId;

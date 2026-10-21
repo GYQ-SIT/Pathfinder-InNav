@@ -29,7 +29,8 @@ struct FMobilePlace    { FString Id, Name, Code, SiteId, BuildingId, BuildingNam
                          TArray<FString> Tags; FVector2D Position; bool bAvailable; FString PhotoPath, Description; };
 struct FMobilePlaceFilter { TArray<FString> Categories; bool bAvailableOnly; FString BuildingId; int32 Level; };
 struct FMobileRoutePreferences { bool bAllowLift, bAllowStairs, bAllowEscalator; };   // "use lift only" = LiftOnly()
-struct FMobileRouteRequest { FString FromPlaceId; /* empty = my location */ FString ToPlaceId; FMobileRoutePreferences Preferences; };
+struct FMobileRouteRequest { FString FromPlaceId; /* empty = my location */ FString ToPlaceId; FMobileRoutePreferences Preferences;
+                            FString MyLocationBuildingId; int32 MyLocationLevel; /* where my location is */ };
 struct FMobileStep     { EMobileStepKind Kind; FString Text, BuildingId; int32 Level; FString LevelLabel; double Metres; FVector2D Position; };
 struct FMobileRoute    { bool bFound; FString Error; double Metres; int32 Minutes; TArray<FMobileStep> Steps; TArray<FMobileRoutePoint> Points; };
 
@@ -122,3 +123,21 @@ has one), the category and an Available / Unavailable pill, the description, Sav
 bottom of the sheet whatever its height (the rest scrolls). It keeps no state of its own: `UMobileAppWidget` keeps the saved places and the starting
 point (empty = my location) and hands the page what to show, so the buttons read "Saved" and "Starting point" when they are on. The page tells the screen
 about Back, Save, Use as starting point and Get directions through callbacks. `-MobileState=Place` shows it on the first place of the site.
+
+## The route page (step 3, third page)
+
+`UMobileRoutePageWidget` is "Your route", as in the prototype: **From** (My location, or any place), **Building** and **Level** (asked for when From is My
+location: where the person is), **To**, the minutes and metres, the ways between levels (chips Escalator, Lift, Stairs - on is blue - and Use lift only),
+the numbered steps with the building and level of each, and Start navigation pinned at the bottom. With no route it shows the reason in red instead of
+the numbers and Start navigation is off.
+
+The drop-downs are `UMobileSelectWidget`, drawn by the screen itself: a field with a small caption and the chosen text, and when it is open the list of
+options right under it (in the page, scrolling when long). The engine's own combo box opens a pop-up menu outside the phone screen's scale, so its
+text would not match the rest; this one scales with the screen. Only one is open at a time. The arrow is a placeholder letter until the design team's
+icon is in.
+
+The page shows the `FMobileRouteRequest` (from, to, where My location is - `MyLocationBuildingId` and `MyLocationLevel` - and the preferences) and the
+route it is given, and reports every change as a new request. `UMobileAppWidget` keeps the start (also set from the place page's Use as starting point),
+where My location is (the first building's first level to begin with) and the preferences, finds the route again (`RefreshRoute`) whenever the sheet
+arrives at the route page or something changes, and a destination chosen on the route page is the place the place page shows too.
+`-MobileState=Route` shows the page, `-MobileOpen=From|To|Building|Level` opens a drop-down.

@@ -98,6 +98,10 @@ struct FMobileRouteRequest
 	FString FromPlaceId;
 	FString ToPlaceId;
 	FMobileRoutePreferences Preferences;
+	// Where "My location" is, when the route starts from it: a building and level of the site (empty and INDEX_NONE = the door of the
+	// destination's building, on level 1).
+	FString MyLocationBuildingId;
+	int32 MyLocationLevel = INDEX_NONE;
 };
 
 enum class EMobileStepKind : uint8

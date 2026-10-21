@@ -260,6 +260,18 @@ FMobileRoute FMobileMockSource::FindRoute(const FMobileRouteRequest& Request)
 	FString FromBuilding = To.BuildingId;
 	int32 FromLevel = 1;
 	FVector2D FromPosition = MobileEntrance;
+	if (Request.FromPlaceId.IsEmpty() && !Request.MyLocationBuildingId.IsEmpty())
+	{
+		// "My location" in a building and level the person said, if the site has them.
+		for (const FMobileBuilding& Building : Data->Buildings)
+		{
+			if (Building.Id == Request.MyLocationBuildingId)
+			{
+				FromBuilding = Building.Id;
+				FromLevel = Building.Levels.ContainsByPredicate([&Request](const FMobileLevel& L) { return L.Level == Request.MyLocationLevel; }) ? Request.MyLocationLevel : (Building.Levels.IsEmpty() ? 1 : Building.Levels[0].Level);
+			}
+		}
+	}
 	if (!Request.FromPlaceId.IsEmpty())
 	{
 		FMobilePlace From;
