@@ -297,7 +297,9 @@ the corridor (it is not drawn).
   a few are left out and corners are sometimes open. A floor never gets more than 24 rooms (a big
   building gets bigger rooms instead), because route-finding slows down with many walls.
 - Some rooms (roughly one in four of the bigger ones) have a corner cut away on the corridor side, so they are L-shaped; the door is on the
-  longer front. The open areas of the real plans are a later step. Every room goes through the same
+  longer front. A convex corner that is not square (a building with slanted walls) gets a corner room of its own, a parallelogram with two
+  sides along the two walls. A room whose door would open into a pocket too narrow to walk out of (between two rooms, or in the tip of an
+  acute corner) is left out, so every room can be reached. Open areas (the big open spaces of the real plans) are not made yet. Every room goes through the same
   checks as one drawn by hand. The whole floor is **one undo step**. Click it again after undoing to get a different layout.
 
 ### Layers panel

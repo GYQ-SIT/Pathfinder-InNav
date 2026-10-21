@@ -4,6 +4,7 @@
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
 #include "NavPlayerController.h"
+#include "BuildingGenerator.h"
 #include "NavigationRoutePlanner.h"
 #include "PolyBuilding.h"
 #include "RoomTypes.h"
@@ -244,7 +245,7 @@ bool FFloorLayoutShapeTest::RunTest(const FString& Parameters)
 	{
 		FFloorLayout ShapeLayout;
 		TestTrue(TEXT("a turned, L-shaped or clockwise building gets a layout"), FloorLayout::Generate(Params(*Shape, 5), ShapeLayout, Error));
-		TestTrue(*FString::Printf(TEXT("with rooms (%d, %d corners)"), ShapeLayout.Rooms.Num(), Shape->Num()), ShapeLayout.Rooms.Num() > 5);
+		TestTrue(*FString::Printf(TEXT("with rooms (%d, %d corners)"), ShapeLayout.Rooms.Num(), Shape->Num()), ShapeLayout.Rooms.Num() >= 4);
 		for (const FFloorRoom& Room : ShapeLayout.Rooms)
 		{
 			for (const FVector2D& Corner : Room.Footprint) TestTrue(TEXT("every corner is inside the outline"), Inside(Corner, *Shape));
@@ -314,6 +315,8 @@ bool FFloorLayoutPreviewTest::RunTest(const FString& Parameters)
 	{
 		Draw(Building->BuildingId, Building->GetFootprint(), 100.0 / Fixture.Generator->GetScale());
 	}
+	Draw(TEXT("Rhombus"), { FVector2D(0, 0), FVector2D(350, 0), FVector2D(525, 303), FVector2D(175, 303) }, 10.0);
+	Draw(TEXT("Pentagon"), { FVector2D(0, 0), FVector2D(400, 0), FVector2D(480, 150), FVector2D(200, 300), FVector2D(0, 220) }, 10.0);
 	Draw(TEXT("Rect49x20"), Rectangle(490, 200), 10.0);
 	Draw(TEXT("Rect30x30"), Rectangle(300, 300), 10.0);
 	Draw(TEXT("LShape"), { FVector2D(0, 0), FVector2D(300, 0), FVector2D(300, 120), FVector2D(160, 120), FVector2D(160, 260), FVector2D(0, 260) }, 10.0);
@@ -454,6 +457,164 @@ bool FRoomColoursToggleTest::RunTest(const FString& Parameters)
 	Room->SetHighlighted(true);
 	TestFalse(TEXT("a selected room shows the selection, not its type"), Room->GetFloorTint().Equals(RoomTypes::Color(TEXT("Office")), 0.001f));
 	Room->SetHighlighted(false);
+	return true;
+}
+
+
+// Walking through a generated floor: every room can be reached from every other through its door, and how long finding a route takes
+// (the planner builds a visibility graph over every wall, so a floor with many rooms is slow).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFloorGenerateRoutingTest, "InNavi.Interior.Floor.Routing", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFloorGenerateRoutingTest::RunTest(const FString& Parameters)
+{
+	using namespace FloorLayoutTests;
+	FNavigationSearchFixture Fixture;
+	AInteriorGenerator* Interior = Fixture.Interior;
+	const float Scale = Fixture.Generator->GetScale();
+
+	auto RouteBetween = [&](const FString& Label, int32 Level, const AInteriorRoom* From, const AInteriorRoom* To, double MaxSeconds)
+	{
+		const APolyBuilding* Building = Fixture.Generator->FindBuildingById(Interior->GetLoadedBuildingId());
+		FNavigationRouteResult Route;
+		const double Start = FPlatformTime::Seconds();
+		const bool bFound = FNavigationRoutePlanner::FindRoute(*Building, *Interior, Scale, Level, FootprintCentre(From->GetFootprint()), Level, FootprintCentre(To->GetFootprint()), Route);
+		const double Seconds = FPlatformTime::Seconds() - Start;
+		AddInfo(FString::Printf(TEXT("%s: %s -> %s %s in %.2f s (%d points) %s"), *Label, *From->RoomName, *To->RoomName, bFound ? TEXT("found") : TEXT("NOT FOUND"), Seconds, Route.Points.Num(), *Route.Error));
+		TestTrue(*FString::Printf(TEXT("%s: a route is found between two generated rooms"), *Label), bFound);
+		TestTrue(*FString::Printf(TEXT("%s: and quickly enough (%.1f s)"), *Label, Seconds), Seconds < MaxSeconds);
+	};
+
+	// A new top floor of E2, using its own lifts.
+	{
+		const int32 Level = Interior->AddFloor();
+		Interior->SetActiveFloor(Level);
+		FFloorGenerationResult Result;
+		if (TestTrue(TEXT("E2's new floor generates"), Interior->GenerateFloor(3, Result)))
+		{
+			const TArray<AInteriorRoom*>& Rooms = Interior->GetRoomsOnFloor(Level);
+			AddInfo(FString::Printf(TEXT("E2 floor %d: %d rooms"), Level, Rooms.Num()));
+			if (Rooms.Num() >= 3)
+			{
+				RouteBetween(TEXT("E2"), Level, Rooms[0], Rooms.Last(), 15.0);
+				RouteBetween(TEXT("E2"), Level, Rooms[1], Rooms[Rooms.Num() / 2], 15.0);
+			}
+		}
+	}
+
+	// A campus-sized building (175 x 64 m), where the cap of 24 rooms applies.
+	{
+		const FVector2D Offset(9000.0, 9000.0);
+		const double Units = 100.0 / Scale;
+		const TArray<FVector2D> Outline = { FVector2D(0, 0), FVector2D(175 * Units, 0), FVector2D(175 * Units, 64 * Units), FVector2D(0, 64 * Units) };
+		Fixture.Generator->SpawnBuildingFromData(TEXT("BIG"), TEXT("Big"), Outline, 2, 400.f, Offset);
+		Interior->LoadInteriorForBuilding(TEXT("BIG"));
+		if (Interior->GetActiveFloor() < 1 || Interior->GetRoomsOnFloor(1).Num() > 0) Interior->AddFloor();
+		Interior->SetActiveFloor(1);
+		FString Error;
+		Interior->AddEntranceAtPoint(FVector2D(Offset.X + 87 * Units, Offset.Y), 15.f, Error);
+		for (int32 Seed : { 1, 2, 3 })
+		{
+			FFloorGenerationResult Result;
+			if (!TestTrue(*FString::Printf(TEXT("the big building generates (seed %d, %s)"), Seed, *Result.Error), Interior->GenerateFloor(Seed, Result))) continue;
+			const TArray<AInteriorRoom*>& Rooms = Interior->GetRoomsOnFloor(1);
+			AddInfo(FString::Printf(TEXT("BIG seed %d: %d rooms, %d skipped, %d doors"), Seed, Rooms.Num(), Result.RoomsSkipped, Result.DoorsCreated));
+			TestTrue(TEXT("no more than the cap"), Rooms.Num() <= 24);
+			if (Rooms.Num() >= 3)
+			{
+				RouteBetween(FString::Printf(TEXT("BIG %d"), Seed), 1, Rooms[0], Rooms.Last(), 30.0);
+			}
+			Interior->Undo();
+		}
+	}
+	return true;
+}
+
+
+// Buildings with slanted walls: corners that are not square get a corner room that follows both walls, and everything stays valid.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFloorLayoutCornersTest, "InNavi.Interior.Floor.Corners", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFloorLayoutCornersTest::RunTest(const FString& Parameters)
+{
+	using namespace FloorLayoutTests;
+	// A rhombus (60 and 120 degrees), a trapezoid, and a pentagon with a pointed end.
+	const TArray<TArray<FVector2D>> Shapes = {
+		{ FVector2D(0, 0), FVector2D(350, 0), FVector2D(525, 303), FVector2D(175, 303) },
+		{ FVector2D(0, 0), FVector2D(450, 0), FVector2D(380, 220), FVector2D(70, 220) },
+		{ FVector2D(0, 0), FVector2D(400, 0), FVector2D(480, 150), FVector2D(200, 300), FVector2D(0, 220) } };
+	int32 AngledRooms = 0;
+	for (int32 ShapeIndex = 0; ShapeIndex < Shapes.Num(); ++ShapeIndex)
+	{
+		const TArray<FVector2D>& Outline = Shapes[ShapeIndex];
+		for (int32 Seed = 1; Seed <= 12; ++Seed)
+		{
+			FFloorLayoutParams Params2 = Params(Outline, Seed);
+			Params2.Doors = { DoorAt(Outline, 0, 0.5) };
+			FFloorLayout Layout;
+			FString Error;
+			if (!TestTrue(*FString::Printf(TEXT("shape %d seed %d generates (%s)"), ShapeIndex, Seed, *Error), FloorLayout::Generate(Params2, Layout, Error))) continue;
+			for (int32 i = 0; i < Layout.Rooms.Num(); ++i)
+			{
+				const FFloorRoom& Room = Layout.Rooms[i];
+				const int32 Count = Room.Footprint.Num();
+				if (Count == 4)
+				{
+					const FVector2D E0 = (Room.Footprint[1] - Room.Footprint[0]).GetSafeNormal(), E1 = (Room.Footprint[2] - Room.Footprint[1]).GetSafeNormal();
+					AngledRooms += FMath::Abs(FVector2D::DotProduct(E0, E1)) > 0.1 ? 1 : 0;
+				}
+				for (const FVector2D& Corner : Room.Footprint) TestTrue(TEXT("every corner is inside the building"), Inside(Corner, Outline));
+				for (int32 j = i + 1; j < Layout.Rooms.Num(); ++j) TestFalse(TEXT("rooms never overlap"), Overlap(Room.Footprint, Layout.Rooms[j].Footprint));
+				const FVector2D A = Room.Footprint[Room.DoorEdgeIndex], B = Room.Footprint[(Room.DoorEdgeIndex + 1) % Count];
+				const FVector2D Edge = (B - A).GetSafeNormal();
+				const FVector2D Front = (A + B) * 0.5 + FVector2D(Edge.Y, -Edge.X) * 10.0;
+				bool bBlocked = !Inside(Front, Outline);
+				for (int32 j = 0; j < Layout.Rooms.Num(); ++j) bBlocked = bBlocked || (j != i && Inside(Front, Layout.Rooms[j].Footprint));
+				TestFalse(TEXT("every door opens onto open floor"), bBlocked);
+			}
+		}
+	}
+	TestTrue(*FString::Printf(TEXT("slanted corners get angled rooms (%d)"), AngledRooms), AngledRooms >= 8);
+	return true;
+}
+
+
+// Every generated room can be reached from every other by the real route planner, also in buildings with slanted walls (a corner room
+// whose door opened into a pocket too narrow to walk out of was found by hand).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFloorGenerateReachableTest, "InNavi.Interior.Floor.Reachable", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFloorGenerateReachableTest::RunTest(const FString& Parameters)
+{
+	using namespace FloorLayoutTests;
+	FNavigationSearchFixture Fixture;
+	AInteriorGenerator* Interior = Fixture.Interior;
+	const float Scale = Fixture.Generator->GetScale();
+	const double Units = 100.0 / Scale;
+	struct FShape { const TCHAR* Name; TArray<FVector2D> Outline; };
+	const TArray<FShape> Shapes = {
+		{ TEXT("Rhombus"), { FVector2D(0, 0), FVector2D(350, 0), FVector2D(525, 303), FVector2D(175, 303) } },
+		{ TEXT("Pentagon"), { FVector2D(0, 0), FVector2D(400, 0), FVector2D(480, 150), FVector2D(200, 300), FVector2D(0, 220) } },
+		{ TEXT("Wedge"), { FVector2D(0, 0), FVector2D(600, 120), FVector2D(580, 260), FVector2D(20, 160) } } };
+	int32 Checked = 0;
+	for (const FShape& Shape : Shapes)
+	{
+		const FString Id = FString::Printf(TEXT("R-%s"), Shape.Name);
+		Fixture.Generator->SpawnBuildingFromData(Id, Id, Shape.Outline, 1, 400.f, FVector2D(9000.0 + 5000.0 * static_cast<double>(&Shape - &Shapes[0]), 9000.0));
+		Interior->LoadInteriorForBuilding(Id);
+		if (Interior->GetRoomsOnFloor(1).Num() > 0 || Interior->GetActiveFloor() < 1) Interior->AddFloor();
+		Interior->SetActiveFloor(1);
+		const APolyBuilding* Building = Fixture.Generator->FindBuildingById(Id);
+		for (int32 Seed = 1; Seed <= 6; ++Seed)
+		{
+			FFloorGenerationResult Result;
+			if (!Interior->GenerateFloor(Seed, Result)) continue;
+			const TArray<AInteriorRoom*>& Rooms = Interior->GetRoomsOnFloor(1);
+			for (int32 i = 1; i < Rooms.Num(); ++i)
+			{
+				FNavigationRouteResult Route;
+				const bool bFound = FNavigationRoutePlanner::FindRoute(*Building, *Interior, Scale, 1, FootprintCentre(Rooms[0]->GetFootprint()), 1, FootprintCentre(Rooms[i]->GetFootprint()), Route);
+				++Checked;
+				if (!bFound) AddError(FString::Printf(TEXT("%s seed %d: no route from %s to %s"), Shape.Name, Seed, *Rooms[0]->RoomName, *Rooms[i]->RoomName));
+			}
+			Interior->Undo();
+		}
+	}
+	AddInfo(FString::Printf(TEXT("%d routes checked"), Checked));
 	return true;
 }
 

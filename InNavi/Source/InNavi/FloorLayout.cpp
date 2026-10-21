@@ -22,11 +22,18 @@ namespace
 	constexpr double CoreSeparation = 14.0;
 	constexpr double FrontClear = 1.0;
 	constexpr double ConnectorKeepClear = 0.6;
+	// How far from every wall and room the floor must be to count as walkable when checking that a door can be reached.
+	constexpr double WalkClearance = 0.5;
 	constexpr double VoidChance = 0.07;
 	// A room at least this wide and deep may have a corner cut away on the corridor side.
 	constexpr double NotchChance = 0.28;
 	constexpr double NotchMinWidth = 5.5;
 	constexpr double NotchMinDepth = 4.0;
+	// A convex corner whose angle is between these (in degrees) and not within the tolerance of square gets a corner room that follows both walls.
+	constexpr double CornerRoomMinAngle = 45.0;
+	constexpr double CornerRoomMaxAngle = 150.0;
+	constexpr double CornerRoomSquareTolerance = 8.0;
+	constexpr double CornerRoomChance = 0.85;
 	// The room nearest a core becomes its toilet (one a core), and how far away it may be.
 	constexpr int32 MaxToiletsPerFloor = 3;
 	constexpr double ToiletReach = 14.0;
@@ -221,6 +228,135 @@ namespace
 		TArray<FFloorConnector> Connectors;
 	};
 
+	// Distance from a point to a polygon's boundary.
+	double DistanceToBoundary(const FVector2D& P, const TArray<FVector2D>& Poly)
+	{
+		double Best = 1e30;
+		for (int32 i = 0; i < Poly.Num(); ++i)
+		{
+			const FVector2D& A = Poly[i];
+			const FVector2D Edge = Poly[(i + 1) % Poly.Num()] - A;
+			const double T = FMath::Clamp(FVector2D::DotProduct(P - A, Edge) / FMath::Max(Edge.SizeSquared(), 1e-9), 0.0, 1.0);
+			Best = FMath::Min(Best, FVector2D::Distance(P, A + Edge * T));
+		}
+		return Best;
+	}
+
+	// Takes out the rooms whose door opens onto floor that cannot be walked out of: a pocket between two rooms, or between a room and a
+	// wall, narrower than a person plus the planner's clearance from the walls. The floor is cut into cells; a cell is free when it is
+	// inside the building and well clear of every wall and room, and a room is kept only if some free cell near its door is in the biggest
+	// connected stretch of free cells (the corridor).
+	void PruneUnreachable(TArray<FPlaced>& Placed, const TArray<FVector2D>& Outline, double K)
+	{
+		if (Placed.IsEmpty())
+		{
+			return;
+		}
+		const double Cell = 0.5 * K;
+		const double Clearance = WalkClearance * K;
+		FVector2D Min(1e30, 1e30), Max(-1e30, -1e30);
+		for (const FVector2D& P : Outline)
+		{
+			Min = FVector2D(FMath::Min(Min.X, P.X), FMath::Min(Min.Y, P.Y));
+			Max = FVector2D(FMath::Max(Max.X, P.X), FMath::Max(Max.Y, P.Y));
+		}
+		const int32 Nx = FMath::Max(1, FMath::CeilToInt((Max.X - Min.X) / Cell)), Ny = FMath::Max(1, FMath::CeilToInt((Max.Y - Min.Y) / Cell));
+		if (static_cast<int64>(Nx) * Ny > 2000000)
+		{
+			return;
+		}
+		auto CellCentre = [&](int32 X, int32 Y) { return FVector2D(Min.X + (X + 0.5) * Cell, Min.Y + (Y + 0.5) * Cell); };
+
+		for (int32 Pass = 0; Pass < 3; ++Pass)
+		{
+			TArray<int32> Component;
+			Component.Init(-1, Nx * Ny);
+			TArray<bool> Free;
+			Free.Init(false, Nx * Ny);
+			for (int32 Y = 0; Y < Ny; ++Y)
+			{
+				for (int32 X = 0; X < Nx; ++X)
+				{
+					const FVector2D P = CellCentre(X, Y);
+					if (!PointInPolygon(P, Outline) || DistanceToBoundary(P, Outline) < Clearance)
+					{
+						continue;
+					}
+					bool bClear = true;
+					for (int32 i = 0; i < Placed.Num() && bClear; ++i)
+					{
+						const FPlaced& Room = Placed[i];
+						bClear = !PointInPolygon(P, Room.Shape) && DistanceToBoundary(P, Room.Shape) >= Clearance;
+					}
+					Free[Y * Nx + X] = bClear;
+				}
+			}
+			// The connected stretches of free cells; the biggest is the corridor.
+			TArray<int32> Sizes;
+			TArray<int32> Stack;
+			for (int32 Start = 0; Start < Nx * Ny; ++Start)
+			{
+				if (!Free[Start] || Component[Start] >= 0)
+				{
+					continue;
+				}
+				const int32 Id = Sizes.Add(0);
+				Stack.Reset();
+				Stack.Add(Start);
+				Component[Start] = Id;
+				while (!Stack.IsEmpty())
+				{
+					const int32 Index = Stack.Pop();
+					++Sizes[Id];
+					const int32 X = Index % Nx, Y = Index / Nx;
+					const int32 Neighbours[4][2] = { { X + 1, Y }, { X - 1, Y }, { X, Y + 1 }, { X, Y - 1 } };
+					for (const int32* N : Neighbours)
+					{
+						if (N[0] >= 0 && N[0] < Nx && N[1] >= 0 && N[1] < Ny && Free[N[1] * Nx + N[0]] && Component[N[1] * Nx + N[0]] < 0)
+						{
+							Component[N[1] * Nx + N[0]] = Id;
+							Stack.Add(N[1] * Nx + N[0]);
+						}
+					}
+				}
+			}
+			if (Sizes.IsEmpty())
+			{
+				return;
+			}
+			int32 Main = 0;
+			for (int32 i = 1; i < Sizes.Num(); ++i)
+			{
+				Main = Sizes[i] > Sizes[Main] ? i : Main;
+			}
+
+			bool bRemoved = false;
+			for (int32 i = Placed.Num() - 1; i >= 0; --i)
+			{
+				const FVector2D& Front = Placed[i].Front;
+				const int32 CentreX = FMath::FloorToInt((Front.X - Min.X) / Cell), CentreY = FMath::FloorToInt((Front.Y - Min.Y) / Cell);
+				const int32 Reach = FMath::CeilToInt(1.0 * K / Cell);
+				bool bReaches = false;
+				for (int32 Y = CentreY - Reach; Y <= CentreY + Reach && !bReaches; ++Y)
+				{
+					for (int32 X = CentreX - Reach; X <= CentreX + Reach && !bReaches; ++X)
+					{
+						bReaches = X >= 0 && X < Nx && Y >= 0 && Y < Ny && Component[Y * Nx + X] == Main && FVector2D::Distance(CellCentre(X, Y), Front) <= 1.0 * K;
+					}
+				}
+				if (!bReaches)
+				{
+					Placed.RemoveAt(i);
+					bRemoved = true;
+				}
+			}
+			if (!bRemoved)
+			{
+				return;
+			}
+		}
+	}
+
 	struct FWeightedType
 	{
 		const TCHAR* Type;
@@ -402,9 +538,79 @@ bool FloorLayout::Generate(const FFloorLayoutParams& Params, FFloorLayout& OutLa
 		{
 			EdgeOwnsStartCorner.Add(Random.FRand() < 0.5f);
 		}
+		// A convex corner that is not square (a building with slanted or odd walls) gets a corner room of its own: a parallelogram whose two
+		// sides run along the two walls, so it fits the corner exactly instead of leaving a wedge of nothing. Its door is on the side that
+		// faces the first wall's corridor. The rows of the two edges stop short of it.
+		TArray<double> CornerTrimEnd, CornerTrimStart;
+		CornerTrimEnd.Init(-1.0, N);
+		CornerTrimStart.Init(-1.0, N);
+		for (int32 Vertex = 0; Vertex < N; ++Vertex)
+		{
+			const FEdgeFrame& FrameA = Frames[(Vertex + N - 1) % N];
+			const FEdgeFrame& FrameB = Frames[Vertex];
+			const double Turn = FMath::Atan2(Orient * Cross2(FrameA.U, FrameB.U), FVector2D::DotProduct(FrameA.U, FrameB.U));
+			const double Interior = UE_PI - Turn;
+			const double Degrees = FMath::RadiansToDegrees(Interior);
+			if (Turn <= 0.05 || Degrees < CornerRoomMinAngle || Degrees > CornerRoomMaxAngle || FMath::Abs(Degrees - 90.0) < CornerRoomSquareTolerance
+				|| FrameA.Length < 12.0 * K || FrameB.Length < 12.0 * K || Random.FRand() > CornerRoomChance)
+			{
+				continue;
+			}
+			const double Sine = FMath::Sin(Interior);
+			const double DepthA = Random.FRandRange(3.5f, 6.0f), DepthB = Random.FRandRange(3.5f, 6.0f);
+			// How far along wall B the room reaches (its depth in from wall A divided by the sine), and along wall A back from the corner.
+			const double AlongB = DepthA / Sine * K, AlongA = DepthB / Sine * K;
+			// Where the two walls, each moved in by the wall margin, meet.
+			const double Determinant = FrameA.V.X * FrameB.V.Y - FrameA.V.Y * FrameB.V.X;
+			if (FMath::Abs(Determinant) < 1e-6)
+			{
+				continue;
+			}
+			const double M = WallMargin * K;
+			const FVector2D Inner = Outline[Vertex] + FVector2D((M * FrameB.V.Y - FrameA.V.Y * M) / Determinant, (FrameA.V.X * M - M * FrameB.V.X) / Determinant);
+			const FVector2D Back = -FrameA.U, Forward = FrameB.U;
+			FPlaced Room;
+			Room.Shape = { Inner, Inner + Back * AlongA, Inner + Back * AlongA + Forward * AlongB, Inner + Forward * AlongB };
+			Room.Quad = Room.Shape;
+			Room.Edge = (Vertex + N - 1) % N;
+			Room.DoorEdge = 2;
+			Room.Front = (Room.Shape[2] + Room.Shape[3]) * 0.5 + FrameA.V * FrontClear * K;
+			Room.AreaSquareMetres = FMath::Abs(SignedArea(Room.Shape)) / (K * K);
+			if (!QuadInside(Outline, Room.Shape))
+			{
+				continue;
+			}
+			bool bClear = true;
+			for (const FQuad& Other : Blocked)
+			{
+				bClear = bClear && !QuadsOverlap(Room.Shape, Other, 0.02 * K);
+			}
+			for (const FPlaced& Other : Placed)
+			{
+				bClear = bClear && !QuadsOverlap(Room.Shape, Other.Quad, 0.02 * K);
+			}
+			if (!bClear)
+			{
+				continue;
+			}
+			double ReachA = 0.0, ReachB = 0.0;
+			for (const FVector2D& Corner : Room.Shape)
+			{
+				ReachA = FMath::Max(ReachA, FVector2D::DotProduct(Corner - Outline[Vertex], Back));
+				ReachB = FMath::Max(ReachB, FVector2D::DotProduct(Corner - Outline[Vertex], Forward));
+			}
+			CornerTrimEnd[Vertex] = ReachA + RoomGap * K;
+			CornerTrimStart[Vertex] = ReachB + RoomGap * K;
+			Placed.Add(Room);
+		}
 		auto TrimAt = [&](int32 Edge, bool bStart) -> double
 		{
 			const int32 Vertex = bStart ? Edge : (Edge + 1) % N;
+			const double CornerTrim = bStart ? CornerTrimStart[Vertex] : CornerTrimEnd[Vertex];
+			if (CornerTrim >= 0.0)
+			{
+				return CornerTrim;
+			}
 			const FVector2D& DirectionIn = Frames[(Vertex + N - 1) % N].U;
 			const FVector2D& DirectionOut = Frames[Vertex].U;
 			const double Turn = FMath::Atan2(Orient * Cross2(DirectionIn, DirectionOut), FVector2D::DotProduct(DirectionIn, DirectionOut));
@@ -517,6 +723,8 @@ bool FloorLayout::Generate(const FFloorLayoutParams& Params, FFloorLayout& OutLa
 				Placed.RemoveAt(i);
 			}
 		}
+		// A door that opens into a pocket nobody could walk out of is no door: the room goes.
+		PruneUnreachable(Placed, Outline, K);
 		if (Placed.Num() <= Params.MaxRooms)
 		{
 			break;
