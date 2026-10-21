@@ -47,29 +47,30 @@ namespace MobileSheet
 {
 	namespace
 	{
-		constexpr double CollapsedHeight = 196.0;
-		constexpr double HalfFraction = 0.46;
+		constexpr double CollapsedFraction = 0.26;
+		constexpr double HalfFraction = 0.44;
+		constexpr double FullFraction = 0.88;
 	}
 
-	double SnapHeight(EMobileSheetSnap Snap, double ScreenHeight, double TabBarHeight, double TopMargin)
+	double SnapHeight(EMobileSheetSnap Snap, double ScreenHeight, double TabBarHeight, double HeaderHeight)
 	{
-		const double Available = FMath::Max(ScreenHeight - TabBarHeight - TopMargin, CollapsedHeight);
+		const double Workspace = FMath::Max(ScreenHeight - TabBarHeight - HeaderHeight, 100.0);
 		switch (Snap)
 		{
-		case EMobileSheetSnap::Collapsed: return FMath::Min(CollapsedHeight, Available);
-		case EMobileSheetSnap::Half: return FMath::Clamp(ScreenHeight * HalfFraction, CollapsedHeight, Available);
-		case EMobileSheetSnap::Full: return Available;
+		case EMobileSheetSnap::Collapsed: return Workspace * CollapsedFraction;
+		case EMobileSheetSnap::Half: return Workspace * HalfFraction;
+		case EMobileSheetSnap::Full: return Workspace * FullFraction;
 		}
-		return CollapsedHeight;
+		return Workspace * HalfFraction;
 	}
 
-	EMobileSheetSnap NearestSnap(double Height, double ScreenHeight, double TabBarHeight, double TopMargin)
+	EMobileSheetSnap NearestSnap(double Height, double ScreenHeight, double TabBarHeight, double HeaderHeight)
 	{
 		EMobileSheetSnap Best = EMobileSheetSnap::Collapsed;
 		double BestDistance = TNumericLimits<double>::Max();
 		for (EMobileSheetSnap Candidate : { EMobileSheetSnap::Collapsed, EMobileSheetSnap::Half, EMobileSheetSnap::Full })
 		{
-			const double Distance = FMath::Abs(Height - SnapHeight(Candidate, ScreenHeight, TabBarHeight, TopMargin));
+			const double Distance = FMath::Abs(Height - SnapHeight(Candidate, ScreenHeight, TabBarHeight, HeaderHeight));
 			if (Distance < BestDistance)
 			{
 				BestDistance = Distance;
@@ -83,9 +84,10 @@ namespace MobileSheet
 	{
 		switch (Snap)
 		{
-		case EMobileSheetSnap::Collapsed: return EMobileSheetSnap::Half;
+		// A tap on the handle, as in the prototype: open all the way, or from all the way back to the middle.
+		case EMobileSheetSnap::Collapsed: return EMobileSheetSnap::Full;
 		case EMobileSheetSnap::Half: return EMobileSheetSnap::Full;
-		case EMobileSheetSnap::Full: return EMobileSheetSnap::Collapsed;
+		case EMobileSheetSnap::Full: return EMobileSheetSnap::Half;
 		}
 		return EMobileSheetSnap::Half;
 	}

@@ -24,22 +24,6 @@ TSharedRef<SWidget> UMobileExplorePageWidget::RebuildWidget()
 		UVerticalBox* Page = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ExplorePage"));
 		Tree->RootWidget = Page;
 
-		// The app's name, with a small logo (a placeholder until the real one is in).
-		UHorizontalBox* Brand = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ExploreBrand"));
-		UBorder* Logo = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("ExploreLogo"));
-		Logo->SetBrush(Rounded(Blue, FLinearColor::Transparent, 7.f, 0.f));
-		Logo->SetBrushColor(FLinearColor::White);
-		Logo->SetHorizontalAlignment(HAlign_Center);
-		Logo->SetVerticalAlignment(VAlign_Center);
-		Logo->SetContent(MakeText(Tree, TEXT("Txt_ExploreLogo"), TEXT("N"), 14.f, OnBlue, true));
-		USizeBox* LogoSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("ExploreLogoSize"));
-		LogoSize->SetWidthOverride(26.f);
-		LogoSize->SetHeightOverride(26.f);
-		LogoSize->SetContent(Logo);
-		Brand->AddChildToHorizontalBox(LogoSize)->SetVerticalAlignment(VAlign_Center);
-		Brand->AddChildToHorizontalBox(MakeText(Tree, TEXT("Txt_ExploreBrand"), TEXT("InNav"), 16.f, Ink, true))->SetPadding(FMargin(10.f, 0.f, 0.f, 0.f));
-		Page->AddChildToVerticalBox(Brand)->SetPadding(FMargin(16.f, 14.f, 16.f, 0.f));
-
 		UScrollBox* Scroll = Tree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("ExploreScroll"));
 		UVerticalBox* Content = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ExploreContent"));
 		Scroll->AddChild(Content);

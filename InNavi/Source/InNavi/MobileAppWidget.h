@@ -38,6 +38,7 @@ struct FMobileLayoutSnapshot
 	double SheetHeight = 0.0;
 	double TabBarTop = 0.0;
 	double TabBarHeight = 0.0;
+	double HeaderBottom = 0.0;
 	double TopBarBottom = 0.0;
 	double ControlsBottom = 0.0;
 	bool bControlsVisible = false;
@@ -56,13 +57,17 @@ class INNAVI_API UMobileAppWidget : public UUserWidget
 
 public:
 	static constexpr double DesignWidth = 375.0;
-	static constexpr double TabBarHeight = 56.0;
-	// What stays clear above the sheet when it is fully open: the top bar.
-	static constexpr double TopMargin = 64.0;
+	// As in the prototype: a header (the app's name) of 44 at the top of every tab, and a tab bar of 60 at the bottom. The status bar and the gesture bar
+	// of a phone come on top of them (SafeTop, SafeBottom).
+	static constexpr double HeaderHeight = 44.0;
+	static constexpr double TabBarHeight = 60.0;
 	// The part of the sheet's top that drags it: the handle and a little around it.
-	static constexpr double HandleZoneHeight = 36.0;
-	// The level and locate buttons stacked, and the gap above the sheet: they are hidden when the sheet is open so far that they would cover the top bar.
-	static constexpr double ControlsHeight = 88.0;
+	static constexpr double HandleZoneHeight = 28.0;
+	// The map's toolbar (level, locate, more) and its gap above the sheet. The top row (the title, Overview, 2D / 3D) is 54 tall, 8 below the map's top.
+	// The toolbar and the plan are hidden while the sheet is open to its top (88 percent), as in the prototype.
+	static constexpr double TopRowTop = 8.0;
+	static constexpr double TopRowHeight = 54.0;
+	static constexpr double ControlsHeight = 54.0;
 	static constexpr double ControlsGap = 12.0;
 
 	enum class ETab : uint8 { Explore, Directory, Saved, Profile };
@@ -144,6 +149,13 @@ public:
 	void ToggleOverview();
 	void LocateMe();
 	void SetMap3D(bool bShow3DMap);
+	// The map's tools (the More button above the sheet): the Move switch (drag and pinch move the view only when it is on, as in the prototype)
+	// and the zoom buttons, which always work.
+	void SetMapToolsOpen(bool bOpen);
+	bool IsMapToolsOpen() const { return bMapToolsOpen; }
+	void ToggleMapGestures();
+	bool AreMapGesturesOn() const { return bMapGestures; }
+	void ZoomMap(double Delta);
 	// A tap on a building of the overview opens it.
 	void OpenBuilding(const FString& BuildingId);
 	UMobileArrivedPageWidget* GetArrivedPage() const { return ArrivedPage; }
@@ -205,12 +217,21 @@ private:
 	void OnShow2DClicked();
 	UFUNCTION()
 	void OnShow3DClicked();
+	UFUNCTION()
+	void OnMapMoreClicked();
+	UFUNCTION()
+	void OnMapMoveClicked();
+	UFUNCTION()
+	void OnZoomInClicked();
+	UFUNCTION()
+	void OnZoomOutClicked();
 
 	// Turns the screen's position (Slate units, from the window's top left) into design pixels.
 	FVector2D ToDesign(const FGeometry& Geometry, const FVector2D& ScreenSpacePosition) const;
 
 	void RefreshTabs();
 	void RefreshModeButtons();
+	void RefreshMapTools();
 	void RefreshSiteName();
 	// On a phone: reads the safe area the system reports (a camera cut-out, the status and gesture bars) and lays the screen out inside it.
 	void ApplyDeviceSafeArea();
@@ -221,6 +242,8 @@ private:
 	void PositionSheet();
 	// Whether the level and locate buttons have room between the top bar and the sheet.
 	bool ControlsFit() const;
+	// Whether the sheet is open to the top (80 percent of the space between the header and the tab bar or more).
+	bool SheetIsOpen() const;
 	double RestHeight(EMobileSheetSnap Target) const;
 
 	UPROPERTY()
@@ -237,6 +260,12 @@ private:
 	UBorder* TabBarBorder = nullptr;
 	UPROPERTY()
 	UBorder* TopBarBorder = nullptr;
+	UPROPERTY()
+	UBorder* HeaderBorder = nullptr;
+	UPROPERTY()
+	UButton* OverviewButton = nullptr;
+	UPROPERTY()
+	UTextBlock* OverviewLabel = nullptr;
 	UPROPERTY()
 	UWidget* ControlsBox = nullptr;
 	UPROPERTY()
@@ -292,6 +321,23 @@ private:
 	int32 MapLevel = 1;
 	bool bMapOverview = false;
 	bool bLevelPopupOpen = false;
+	// The map tools: the pop-up beside the More button, the Move switch, and the zoom buttons.
+	UPROPERTY()
+	UBorder* MapToolsBorder = nullptr;
+	UPROPERTY()
+	UButton* MapMoveButton = nullptr;
+	UPROPERTY()
+	UTextBlock* MapMoveLabel = nullptr;
+	UPROPERTY()
+	UButton* ZoomInButton = nullptr;
+	UPROPERTY()
+	UButton* ZoomOutButton = nullptr;
+	UPROPERTY()
+	UTextBlock* ZoomInLabel = nullptr;
+	UPROPERTY()
+	UTextBlock* ZoomOutLabel = nullptr;
+	bool bMapToolsOpen = false;
+	bool bMapGestures = false;
 	UPROPERTY()
 	UMobileArrivedPageWidget* ArrivedPage = nullptr;
 	// Which step of the route the person is on while walking (0-based).

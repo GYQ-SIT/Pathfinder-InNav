@@ -58,12 +58,12 @@ enum class EMobileSheetSnap : uint8
 
 namespace MobileSheet
 {
-	// How tall the sheet is at each rest height, for a screen ScreenHeight tall whose bottom TabBarHeight is the tab bar and whose top
-	// TopMargin stays clear (the status bar, the top controls).
-	INNAVI_API double SnapHeight(EMobileSheetSnap Snap, double ScreenHeight, double TabBarHeight, double TopMargin);
+	// How tall the sheet is at each rest height, as in the prototype: 26, 44 and 88 percent of the part of the screen between the header at the top
+	// (HeaderHeight, with the status bar) and the tab bar at the bottom (TabBarHeight, with the gesture bar). ScreenHeight is the whole screen.
+	INNAVI_API double SnapHeight(EMobileSheetSnap Snap, double ScreenHeight, double TabBarHeight, double HeaderHeight);
 
 	// The rest height closest to a height the sheet was dragged to.
-	INNAVI_API EMobileSheetSnap NearestSnap(double Height, double ScreenHeight, double TabBarHeight, double TopMargin);
+	INNAVI_API EMobileSheetSnap NearestSnap(double Height, double ScreenHeight, double TabBarHeight, double HeaderHeight);
 
 	// A tap on the handle: collapsed, then half, then full, then back to collapsed.
 	INNAVI_API EMobileSheetSnap NextSnap(EMobileSheetSnap Snap);

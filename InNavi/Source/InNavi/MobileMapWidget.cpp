@@ -118,6 +118,8 @@ void UMobileMapWidget::SetSource(IMobileNavSource* InSource, const FString& InSi
 
 void UMobileMapWidget::ShowLevel(const FString& BuildingId, int32 Level)
 {
+	// The screen asks again whenever anything on the map changes; the view starts again only for another level (or from the overview).
+	const bool bSame = !bOverview && LevelMap.BuildingId == BuildingId && LevelMap.Level == Level;
 	bOverview = false;
 	FMobileLevelMap Loaded;
 	if (Source && Source->GetLevelMap(BuildingId, Level, Loaded))
@@ -128,10 +130,18 @@ void UMobileMapWidget::ShowLevel(const FString& BuildingId, int32 Level)
 	{
 		LevelMap = FMobileLevelMap();
 	}
+	if (!bSame)
+	{
+		ResetView();
+	}
 }
 
 void UMobileMapWidget::ShowOverview()
 {
+	if (!bOverview)
+	{
+		ResetView();
+	}
 	bOverview = true;
 }
 
@@ -140,7 +150,15 @@ void UMobileMapWidget::ClearRoute() { Route = FMobileRoute(); }
 void UMobileMapWidget::SetHighlightPlace(const FString& PlaceId) { HighlightPlaceId = PlaceId; }
 void UMobileMapWidget::SetPosition(const FMobileRoutePoint& InPosition) { Position = InPosition; bHasPosition = true; }
 void UMobileMapWidget::ClearPosition() { bHasPosition = false; }
-void UMobileMapWidget::Set3D(bool bInShow3D) { bShow3D = bInShow3D; }
+void UMobileMapWidget::Set3D(bool bInShow3D)
+{
+	// The tilted plan has other extent, so a pan made on the flat one means nothing on it.
+	if (bShow3D != bInShow3D)
+	{
+		ResetView();
+	}
+	bShow3D = bInShow3D;
+}
 
 void UMobileMapWidget::SetFitInsets(double Top, double Bottom)
 {
@@ -203,9 +221,13 @@ void UMobileMapWidget::ComputeFit(double WidgetWidth, double WidgetHeight, doubl
 	const double AvailW = FMath::Max(WidgetWidth - 2.0 * Margin, 10.0);
 	const double AvailH = FMath::Max(WidgetHeight - InsetTop - InsetBottom - (bShow3D ? SlabHeight : 0.0), 10.0);
 	const FVector2D Size = Bounds.GetSize();
-	OutScale = FMath::Min(AvailW / FMath::Max(Size.X, 1e-6), AvailH / FMath::Max(Size.Y, 1e-6));
+	const double FitScale = FMath::Min(AvailW / FMath::Max(Size.X, 1e-6), AvailH / FMath::Max(Size.Y, 1e-6));
 	// The plan is centred in the part that is not covered.
-	OutOffset = FVector2D(Margin + (AvailW - Size.X * OutScale) * 0.5, InsetTop + (AvailH - Size.Y * OutScale) * 0.5) - Bounds.Min * OutScale;
+	const FVector2D FitOffset = FVector2D(Margin + (AvailW - Size.X * FitScale) * 0.5, InsetTop + (AvailH - Size.Y * FitScale) * 0.5) - Bounds.Min * FitScale;
+	// Then zoomed about the middle of that part, and moved by the person's pan.
+	const FVector2D Centre(WidgetWidth * 0.5, InsetTop + AvailH * 0.5);
+	OutScale = FitScale * Zoom;
+	OutOffset = (FitOffset - Centre) * Zoom + Centre + Pan;
 }
 
 FVector2D UMobileMapWidget::ToWidget(const FVector2D& PlanPoint, double WidgetWidth, double WidgetHeight) const
@@ -301,30 +323,11 @@ void UMobileMapWidget::Tap(const FVector2D& LocalPosition, double WidgetWidth, d
 	}
 }
 
-FReply UMobileMapWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
-{
-	if (InMouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
-	{
-		return FReply::Unhandled();
-	}
-	const FVector2D Local = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
-	const bool bHit = bOverview ? !BuildingAt(Local, InGeometry.GetLocalSize().X, InGeometry.GetLocalSize().Y).IsEmpty() : !PlaceAt(Local, InGeometry.GetLocalSize().X, InGeometry.GetLocalSize().Y).IsEmpty();
-	Tap(Local, InGeometry.GetLocalSize().X, InGeometry.GetLocalSize().Y);
-	return bHit ? FReply::Handled() : FReply::Unhandled();
-}
-
-FReply UMobileMapWidget::NativeOnTouchEnded(const FGeometry& InGeometry, const FPointerEvent& InGestureEvent)
-{
-	const FVector2D Local = InGeometry.AbsoluteToLocal(InGestureEvent.GetScreenSpacePosition());
-	const bool bHit = bOverview ? !BuildingAt(Local, InGeometry.GetLocalSize().X, InGeometry.GetLocalSize().Y).IsEmpty() : !PlaceAt(Local, InGeometry.GetLocalSize().X, InGeometry.GetLocalSize().Y).IsEmpty();
-	Tap(Local, InGeometry.GetLocalSize().X, InGeometry.GetLocalSize().Y);
-	return bHit ? FReply::Handled() : FReply::Unhandled();
-}
-
 int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
 {
 	LayerId = Super::NativePaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
 	const double W = AllottedGeometry.GetLocalSize().X, H = AllottedGeometry.GetLocalSize().Y;
+	ViewSize = FVector2D(W, H);
 	const double Lift = bShow3D ? SlabHeight : 0.0;
 	int32 Layer = LayerId;
 
@@ -447,21 +450,206 @@ UMobileMapWidget::UMobileMapWidget(const FObjectInitializer& ObjectInitializer)
 	SetVisibility(ESlateVisibility::Visible);
 }
 
-FReply UMobileMapWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+// ---- The view: zoom and pan ----
+
+void UMobileMapWidget::ResetView()
 {
-	// A press on a room or a building is ours (so its release is too); elsewhere it is not.
-	if (InMouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
+	Zoom = 1.0;
+	Pan = FVector2D::ZeroVector;
+}
+
+void UMobileMapWidget::ZoomAround(const FVector2D& Local, double Factor)
+{
+	const double NewZoom = FMath::Clamp(Zoom * Factor, MinZoom, MaxZoom);
+	const double Actual = NewZoom / Zoom;
+	// The point under the finger (or the middle) stays where it is: the plan is scaled about the middle of the uncovered part, then moved.
+	const FVector2D Centre(ViewSize.X * 0.5, InsetTop + FMath::Max(ViewSize.Y - InsetTop - InsetBottom - (bShow3D ? SlabHeight : 0.0), 10.0) * 0.5);
+	Pan = (Local - Centre) - (Local - Centre - Pan) * Actual;
+	Zoom = NewZoom;
+	ClampPan();
+}
+
+void UMobileMapWidget::ZoomBy(double Delta)
+{
+	const double Target = FMath::Clamp(Zoom + Delta, MinZoom, MaxZoom);
+	const FVector2D Centre(ViewSize.X * 0.5, InsetTop + FMath::Max(ViewSize.Y - InsetTop - InsetBottom - (bShow3D ? SlabHeight : 0.0), 10.0) * 0.5);
+	ZoomAround(Centre, Target / Zoom);
+}
+
+void UMobileMapWidget::PanBy(const FVector2D& Delta)
+{
+	Pan += Delta;
+	ClampPan();
+}
+
+void UMobileMapWidget::ClampPan()
+{
+	const FBox2D Extent = GetPlanExtentInWidget(ViewSize.X, ViewSize.Y);
+	if (!Extent.bIsValid)
+	{
+		return;
+	}
+	// Some of the plan always stays in the uncovered part (80 pixels of it, or all of it if it is smaller).
+	const double KeepX = FMath::Min(80.0, Extent.GetSize().X);
+	const double KeepY = FMath::Min(80.0, Extent.GetSize().Y);
+	const double Top = InsetTop;
+	const double Bottom = ViewSize.Y - InsetBottom;
+	FVector2D Shift = FVector2D::ZeroVector;
+	if (Extent.Max.X < KeepX) Shift.X = KeepX - Extent.Max.X;
+	else if (Extent.Min.X > ViewSize.X - KeepX) Shift.X = (ViewSize.X - KeepX) - Extent.Min.X;
+	if (Extent.Max.Y < Top + KeepY) Shift.Y = Top + KeepY - Extent.Max.Y;
+	else if (Extent.Min.Y > Bottom - KeepY) Shift.Y = (Bottom - KeepY) - Extent.Min.Y;
+	Pan += Shift;
+}
+
+// ---- Pointers ----
+
+namespace
+{
+	// A finger and the mouse are told apart (an emulator sends both for one click).
+	int32 PointerKey(const FPointerEvent& Event)
+	{
+		return static_cast<int32>(Event.GetPointerIndex()) + (Event.IsTouchEvent() ? 1000 : 0);
+	}
+	constexpr double TapSlop = 6.0;
+}
+
+FReply UMobileMapWidget::HandlePointerDown(const FGeometry& Geometry, const FPointerEvent& Event)
+{
+	ViewSize = FVector2D(Geometry.GetLocalSize());
+	const FVector2D Local = Geometry.AbsoluteToLocal(Event.GetScreenSpacePosition());
+	if (Pointers.IsEmpty())
+	{
+		PressLocal = Local;
+		bPressMoved = false;
+		bMultiTouch = false;
+	}
+	else
+	{
+		// A second finger: this is a pinch, not a tap.
+		bMultiTouch = true;
+		bPressMoved = true;
+	}
+	Pointers.Add(PointerKey(Event), Local);
+	return Pointers.Num() == 1 ? FReply::Handled().CaptureMouse(TakeWidget()) : FReply::Handled();
+}
+
+FReply UMobileMapWidget::HandlePointerMove(const FGeometry& Geometry, const FPointerEvent& Event)
+{
+	FVector2D* Known = Pointers.Find(PointerKey(Event));
+	if (!Known)
 	{
 		return FReply::Unhandled();
 	}
-	const FVector2D Local = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
-	const bool bHit = bOverview ? !BuildingAt(Local, InGeometry.GetLocalSize().X, InGeometry.GetLocalSize().Y).IsEmpty() : !PlaceAt(Local, InGeometry.GetLocalSize().X, InGeometry.GetLocalSize().Y).IsEmpty();
-	return bHit ? FReply::Handled() : FReply::Unhandled();
+	ViewSize = FVector2D(Geometry.GetLocalSize());
+	const FVector2D Local = Geometry.AbsoluteToLocal(Event.GetScreenSpacePosition());
+	const FVector2D Before = *Known;
+	*Known = Local;
+	if (Pointers.Num() == 1)
+	{
+		if (!bPressMoved && (Local - PressLocal).Size() > TapSlop)
+		{
+			bPressMoved = true;
+		}
+		if (bPressMoved && bGestures)
+		{
+			PanBy(Local - Before);
+		}
+	}
+	else if (Pointers.Num() == 2 && bGestures)
+	{
+		// Two fingers: the distance between them zooms, and where their middle goes moves the view.
+		FVector2D Other = Local;
+		const int32 ThisKey = PointerKey(Event);
+		for (const TPair<int32, FVector2D>& Pair : Pointers)
+		{
+			if (Pair.Key != ThisKey)
+			{
+				Other = Pair.Value;
+			}
+		}
+		const double OldDistance = (Before - Other).Size();
+		const double NewDistance = (Local - Other).Size();
+		const FVector2D OldMiddle = (Before + Other) * 0.5;
+		const FVector2D NewMiddle = (Local + Other) * 0.5;
+		if (OldDistance > 1.0)
+		{
+			ZoomAround(OldMiddle, NewDistance / OldDistance);
+		}
+		PanBy(NewMiddle - OldMiddle);
+	}
+	return FReply::Handled();
+}
+
+FReply UMobileMapWidget::HandlePointerUp(const FGeometry& Geometry, const FPointerEvent& Event)
+{
+	if (!Pointers.Contains(PointerKey(Event)))
+	{
+		return FReply::Unhandled();
+	}
+	const FVector2D Local = Geometry.AbsoluteToLocal(Event.GetScreenSpacePosition());
+	const bool bWasOnly = Pointers.Num() == 1;
+	Pointers.Remove(PointerKey(Event));
+	if (!Pointers.IsEmpty())
+	{
+		return FReply::Handled();
+	}
+	// The last pointer went up: a press that did not move is a tap on a room.
+	if (bWasOnly && !bPressMoved && !bMultiTouch)
+	{
+		Tap(Local, Geometry.GetLocalSize().X, Geometry.GetLocalSize().Y);
+	}
+	return FReply::Handled().ReleaseMouseCapture();
+}
+
+FReply UMobileMapWidget::HandleWheel(const FGeometry& Geometry, const FPointerEvent& Event)
+{
+	if (!bGestures)
+	{
+		return FReply::Unhandled();
+	}
+	ViewSize = FVector2D(Geometry.GetLocalSize());
+	ZoomAround(Geometry.AbsoluteToLocal(Event.GetScreenSpacePosition()), FMath::Pow(1.12, Event.GetWheelDelta()));
+	return FReply::Handled();
+}
+
+FReply UMobileMapWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	return InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton ? HandlePointerDown(InGeometry, InMouseEvent) : FReply::Unhandled();
+}
+
+FReply UMobileMapWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	return HandlePointerMove(InGeometry, InMouseEvent);
+}
+
+FReply UMobileMapWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	return InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton ? HandlePointerUp(InGeometry, InMouseEvent) : FReply::Unhandled();
+}
+
+FReply UMobileMapWidget::NativeOnMouseWheel(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+	return HandleWheel(InGeometry, InMouseEvent);
 }
 
 FReply UMobileMapWidget::NativeOnTouchStarted(const FGeometry& InGeometry, const FPointerEvent& InGestureEvent)
 {
-	const FVector2D Local = InGeometry.AbsoluteToLocal(InGestureEvent.GetScreenSpacePosition());
-	const bool bHit = bOverview ? !BuildingAt(Local, InGeometry.GetLocalSize().X, InGeometry.GetLocalSize().Y).IsEmpty() : !PlaceAt(Local, InGeometry.GetLocalSize().X, InGeometry.GetLocalSize().Y).IsEmpty();
-	return bHit ? FReply::Handled() : FReply::Unhandled();
+	return HandlePointerDown(InGeometry, InGestureEvent);
+}
+
+FReply UMobileMapWidget::NativeOnTouchMoved(const FGeometry& InGeometry, const FPointerEvent& InGestureEvent)
+{
+	return HandlePointerMove(InGeometry, InGestureEvent);
+}
+
+FReply UMobileMapWidget::NativeOnTouchEnded(const FGeometry& InGeometry, const FPointerEvent& InGestureEvent)
+{
+	return HandlePointerUp(InGeometry, InGestureEvent);
+}
+
+void UMobileMapWidget::NativeOnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
+{
+	Super::NativeOnMouseCaptureLost(CaptureLostEvent);
+	Pointers.Reset();
 }

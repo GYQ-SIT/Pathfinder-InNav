@@ -73,7 +73,7 @@ bool FMobileOpenSiteTest::RunTest(const FString& Parameters)
 	Explore->ChooseSite(TEXT("paya-lebar"));
 	TestEqual(TEXT("the map tab"), Screen->GetActiveTab(), UMobileAppWidget::ETab::Directory);
 	TestEqual(TEXT("the mall"), Screen->GetSiteId(), FString(TEXT("paya-lebar")));
-	TestEqual(TEXT("its name at the top"), SiteName(), FString(TEXT("Paya Lebar Mall")));
+	TestEqual(TEXT("its building and level at the top"), SiteName(), FString(TEXT("Paya Lebar Mall · L1")));
 	TestEqual(TEXT("started again at Where to?"), Screen->GetFlow().GetState(), EMobileSheetState::Search);
 	TestTrue(TEXT("with no place chosen and no start"), Screen->GetSelectedPlace().Id.IsEmpty() && Screen->GetStartPlaceId().IsEmpty());
 	TestEqual(TEXT("the search lists the mall's first level"), Screen->GetSearchPage()->GetShownPlaces().Num(), 4);
@@ -93,7 +93,7 @@ bool FMobileOpenSiteTest::RunTest(const FString& Parameters)
 	// Opening another site in the middle of a walk starts that site again.
 	Screen->SetActiveTab(UMobileAppWidget::ETab::Explore);
 	Explore->ChooseSite(TEXT("sit-punggol"));
-	TestEqual(TEXT("the campus (by its short name at the top)"), SiteName(), FString(TEXT("SIT Campus")));
+	TestEqual(TEXT("the campus (its first building and level at the top)"), SiteName(), FString(TEXT("E2 · L1")));
 	TestEqual(TEXT("back at Where to?"), Screen->GetFlow().GetState(), EMobileSheetState::Search);
 	TestTrue(TEXT("no route is left"), !Screen->GetCurrentRoute().bFound && Screen->GetCurrentRoute().Steps.IsEmpty());
 	TestTrue(TEXT("the ways between levels are all on again"), Screen->GetRoutePreferences().bAllowLift && Screen->GetRoutePreferences().bAllowStairs && Screen->GetRoutePreferences().bAllowEscalator);

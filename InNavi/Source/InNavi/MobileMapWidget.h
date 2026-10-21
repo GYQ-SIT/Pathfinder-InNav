@@ -39,6 +39,24 @@ public:
 	bool IsShowing3D() const { return bShow3D; }
 	void SetFitInsets(double Top, double Bottom);
 
+	// The view: how far in the person has zoomed (1 = the plan fits) and how far they moved it (design pixels). Zoom is kept within the prototype's
+	// 0.7 to 2, and the plan cannot be moved out of sight. A different level, the overview, or the tilt starts again at the fit (ResetView).
+	static constexpr double MinZoom = 0.7;
+	static constexpr double MaxZoom = 2.0;
+	static constexpr double ZoomStep = 0.2;
+	double GetZoom() const { return Zoom; }
+	const FVector2D& GetPan() const { return Pan; }
+	void ResetView();
+	// Dragging and pinching move the view only when the person has turned gestures on (the prototype's "Move" switch); the zoom buttons always work.
+	void SetGesturesEnabled(bool bEnabled) { bGestures = bEnabled; }
+	bool AreGesturesEnabled() const { return bGestures; }
+	// The size the map is drawn at (design pixels); it learns it when it is drawn or touched, tests say it.
+	void SetViewSize(double Width, double Height) { ViewSize = FVector2D(Width, Height); }
+	// Zooms by a step about the middle of the uncovered part (the buttons), or by a factor about a point (a pinch, the wheel).
+	void ZoomBy(double Delta);
+	void ZoomAround(const FVector2D& Local, double Factor);
+	void PanBy(const FVector2D& Delta);
+
 	void SetOnPlaceTapped(TFunction<void(const FString&)> InCallback) { OnPlaceTapped = MoveTemp(InCallback); }
 	void SetOnBuildingTapped(TFunction<void(const FString&)> InCallback) { OnBuildingTapped = MoveTemp(InCallback); }
 
@@ -56,14 +74,28 @@ public:
 	// The extent the plan fills in the widget, to check it stays inside the uncovered part.
 	FBox2D GetPlanExtentInWidget(double WidgetWidth, double WidgetHeight) const;
 
+	// What a press, a move and a release of one pointer (a finger or the mouse) do: a tap picks a room; a drag moves the view and two fingers
+	// zoom it, when gestures are on. Only pointers that pressed on the map are followed (an emulator also reports the mouse cursor's moves with
+	// a touch). The mouse and touch events below call these; tests call them with made-up events.
+	FReply HandlePointerDown(const FGeometry& Geometry, const FPointerEvent& Event);
+	FReply HandlePointerMove(const FGeometry& Geometry, const FPointerEvent& Event);
+	FReply HandlePointerUp(const FGeometry& Geometry, const FPointerEvent& Event);
+	FReply HandleWheel(const FGeometry& Geometry, const FPointerEvent& Event);
+
 protected:
 	virtual int32 NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
 	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual FReply NativeOnMouseWheel(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual FReply NativeOnTouchStarted(const FGeometry& InGeometry, const FPointerEvent& InGestureEvent) override;
+	virtual FReply NativeOnTouchMoved(const FGeometry& InGeometry, const FPointerEvent& InGestureEvent) override;
 	virtual FReply NativeOnTouchEnded(const FGeometry& InGeometry, const FPointerEvent& InGestureEvent) override;
+	virtual void NativeOnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent) override;
 
 private:
+	// Keeps some of the plan in the uncovered part of the widget after a move or a zoom.
+	void ClampPan();
 	// The plan's own units to the flat or tilted drawing space, and the fit of that space into the widget.
 	FVector2D Project(const FVector2D& PlanPoint) const;
 	FBox2D PlanBounds() const;
@@ -82,6 +114,16 @@ private:
 	bool bShow3D = false;
 	double InsetTop = 64.0;
 	double InsetBottom = 300.0;
+	double Zoom = 1.0;
+	FVector2D Pan = FVector2D::ZeroVector;
+	bool bGestures = false;
+	mutable FVector2D ViewSize = FVector2D(375.0, 812.0);
+
+	// The pointers that are down (a finger or the mouse button), where they are, and what the press so far is: a tap or a drag.
+	TMap<int32, FVector2D> Pointers;
+	FVector2D PressLocal = FVector2D::ZeroVector;
+	bool bPressMoved = false;
+	bool bMultiTouch = false;
 
 	TFunction<void(const FString&)> OnPlaceTapped;
 	TFunction<void(const FString&)> OnBuildingTapped;

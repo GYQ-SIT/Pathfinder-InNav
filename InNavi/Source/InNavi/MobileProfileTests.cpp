@@ -205,7 +205,7 @@ bool FMobileAppearanceTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("to the same place"), Screen->GetSelectedPlace().Id, FString(TEXT("E2-02-101")));
 	TestTrue(TEXT("the place is still saved, on the page too"), Screen->IsPlaceSaved(TEXT("E2-02-101")) && Screen->GetSavedPage()->GetShownPlaces().Num() == 1 && Screen->GetPlacePage()->IsSaved());
 	TestTrue(TEXT("the map shows the same level, tilted, with the route"), Screen->GetMapBuildingId() == MapBuilding && Screen->GetMapLevel() == MapLevel && Screen->IsShowing3D() && Screen->GetMapView()->IsShowing3D() && Screen->GetMapView()->GetRoutePointsOnLevel() > 0);
-	TestEqual(TEXT("and the site's name"), Cast<UTextBlock>(Screen->FindNamedWidget(TEXT("SiteName")))->GetText().ToString(), FString(TEXT("SIT Campus")));
+	TestEqual(TEXT("and the title (the building and the level)"), Cast<UTextBlock>(Screen->FindNamedWidget(TEXT("SiteName")))->GetText().ToString(), FString(TEXT("E2 · L1")));
 	TestTrue(TEXT("the same theme again waits for nothing"), (Screen->GetProfilePage()->ChooseTheme(EMobileTheme::Night), !Screen->IsAppearanceRebuildQueued()));
 
 	// Larger text: the text is a little bigger (1.125 times).

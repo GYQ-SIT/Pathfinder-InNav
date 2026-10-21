@@ -65,19 +65,20 @@ bool FMobileSheetHeightsTest::RunTest(const FString& Parameters)
 {
 	for (double ScreenHeight : { 640.0, 812.0, 915.0 })
 	{
-		const double Collapsed = MobileSheet::SnapHeight(EMobileSheetSnap::Collapsed, ScreenHeight, 56.0, 64.0);
-		const double Half = MobileSheet::SnapHeight(EMobileSheetSnap::Half, ScreenHeight, 56.0, 64.0);
-		const double Full = MobileSheet::SnapHeight(EMobileSheetSnap::Full, ScreenHeight, 56.0, 64.0);
+		const double Collapsed = MobileSheet::SnapHeight(EMobileSheetSnap::Collapsed, ScreenHeight, 60.0, 44.0);
+		const double Half = MobileSheet::SnapHeight(EMobileSheetSnap::Half, ScreenHeight, 60.0, 44.0);
+		const double Full = MobileSheet::SnapHeight(EMobileSheetSnap::Full, ScreenHeight, 60.0, 44.0);
 		TestTrue(*FString::Printf(TEXT("%.0f: collapsed < half < full"), ScreenHeight), Collapsed < Half && Half < Full);
-		TestTrue(TEXT("full leaves the top bar clear"), ScreenHeight - 56.0 - Full >= 64.0 - 0.001);
-		TestEqual(TEXT("the nearest height to each is itself"), MobileSheet::NearestSnap(Half, ScreenHeight, 56.0, 64.0), EMobileSheetSnap::Half);
-		TestEqual(TEXT("a drag just under half is half"), MobileSheet::NearestSnap(Half - 10.0, ScreenHeight, 56.0, 64.0), EMobileSheetSnap::Half);
-		TestEqual(TEXT("a drag nearly to the bottom is collapsed"), MobileSheet::NearestSnap(Collapsed * 0.7, ScreenHeight, 56.0, 64.0), EMobileSheetSnap::Collapsed);
-		TestEqual(TEXT("a drag nearly to the top is full"), MobileSheet::NearestSnap(Full - 5.0, ScreenHeight, 56.0, 64.0), EMobileSheetSnap::Full);
+		const double Workspace = ScreenHeight - 60.0 - 44.0;
+		TestTrue(TEXT("26, 44 and 88 percent of the space between the header and the tab bar"), FMath::IsNearlyEqual(Collapsed, Workspace * 0.26, 0.01) && FMath::IsNearlyEqual(Half, Workspace * 0.44, 0.01) && FMath::IsNearlyEqual(Full, Workspace * 0.88, 0.01));
+		TestEqual(TEXT("the nearest height to each is itself"), MobileSheet::NearestSnap(Half, ScreenHeight, 60.0, 44.0), EMobileSheetSnap::Half);
+		TestEqual(TEXT("a drag just under half is half"), MobileSheet::NearestSnap(Half - 10.0, ScreenHeight, 60.0, 44.0), EMobileSheetSnap::Half);
+		TestEqual(TEXT("a drag nearly to the bottom is collapsed"), MobileSheet::NearestSnap(Collapsed * 0.7, ScreenHeight, 60.0, 44.0), EMobileSheetSnap::Collapsed);
+		TestEqual(TEXT("a drag nearly to the top is full"), MobileSheet::NearestSnap(Full - 5.0, ScreenHeight, 60.0, 44.0), EMobileSheetSnap::Full);
 	}
-	TestEqual(TEXT("a tap on collapsed opens to half"), MobileSheet::NextSnap(EMobileSheetSnap::Collapsed), EMobileSheetSnap::Half);
-	TestEqual(TEXT("then full"), MobileSheet::NextSnap(EMobileSheetSnap::Half), EMobileSheetSnap::Full);
-	TestEqual(TEXT("then collapsed again"), MobileSheet::NextSnap(EMobileSheetSnap::Full), EMobileSheetSnap::Collapsed);
+	TestEqual(TEXT("a tap on collapsed opens all the way, as in the prototype"), MobileSheet::NextSnap(EMobileSheetSnap::Collapsed), EMobileSheetSnap::Full);
+	TestEqual(TEXT("so does one on half"), MobileSheet::NextSnap(EMobileSheetSnap::Half), EMobileSheetSnap::Full);
+	TestEqual(TEXT("and one on full goes back to half"), MobileSheet::NextSnap(EMobileSheetSnap::Full), EMobileSheetSnap::Half);
 	TestEqual(TEXT("walking keeps the sheet low"), MobileSheet::SnapForState(EMobileSheetState::Navigating), EMobileSheetSnap::Collapsed);
 	TestEqual(TEXT("searching opens it half way"), MobileSheet::SnapForState(EMobileSheetState::Search), EMobileSheetSnap::Half);
 	return true;
@@ -139,8 +140,9 @@ bool FMobileScreenLayoutTest::RunTest(const FString& Parameters)
 	Screen->SetSnap(EMobileSheetSnap::Full);
 	Screen->SnapSheetNow();
 	const FMobileLayoutSnapshot Safe = Screen->GetLayoutSnapshot();
-	TestTrue(TEXT("the tab bar is taller by the gesture bar"), FMath::IsNearlyEqual(Safe.TabBarHeight, 56.0 + 34.0, 0.01));
-	TestTrue(TEXT("the open sheet stays below the status bar and top bar"), Safe.SheetTop >= 44.0 + 12.0 + 40.0 - 0.01);
+	TestTrue(TEXT("the tab bar is taller by the gesture bar"), FMath::IsNearlyEqual(Safe.TabBarHeight, 60.0 + 34.0, 0.01));
+	TestTrue(TEXT("the header takes the status bar's place"), FMath::IsNearlyEqual(Safe.HeaderBottom, 44.0 + 44.0, 0.01));
+	TestTrue(TEXT("the open sheet stays below the status bar, the header and the top row"), Safe.SheetTop >= Safe.TopBarBottom - 0.01);
 	Screen->SetSafeInsets(0.0, 0.0);
 
 	// Tabs show their pages; only the Directory tab shows the map and the sheet.
@@ -187,7 +189,7 @@ bool FMobileScreenLayoutTest::RunTest(const FString& Parameters)
 	const FMobileLayoutSnapshot Open = Screen->GetLayoutSnapshot();
 	TestTrue(TEXT("a press on the handle of the open sheet starts a drag"), Screen->BeginSheetDrag(FVector2D(187.0, Open.SheetTop + 10.0)));
 	Screen->EndSheetDrag(FVector2D(187.0, Open.SheetTop + 10.0));
-	TestEqual(TEXT("and a tap with no movement goes to the next height, after full the collapsed one"), Screen->GetSnap(), EMobileSheetSnap::Collapsed);
+	TestEqual(TEXT("and a tap with no movement on the open sheet goes back to half"), Screen->GetSnap(), EMobileSheetSnap::Half);
 	Screen->SetActiveTab(UMobileAppWidget::ETab::Profile);
 	TestFalse(TEXT("on another tab the handle does nothing"), Screen->BeginSheetDrag(FVector2D(187.0, 700.0)));
 

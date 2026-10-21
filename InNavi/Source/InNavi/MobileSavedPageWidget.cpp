@@ -22,7 +22,7 @@ TSharedRef<SWidget> UMobileSavedPageWidget::RebuildWidget()
 		UWidgetTree* Tree = WidgetTree;
 		UVerticalBox* Page = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("SavedPage"));
 		Tree->RootWidget = Page;
-		Page->AddChildToVerticalBox(MakeText(Tree, TEXT("Txt_SavedTitle"), TEXT("Saved"), 26.f, Ink, true))->SetPadding(FMargin(16.f, 62.f, 16.f, 0.f));
+		Page->AddChildToVerticalBox(MakeText(Tree, TEXT("Txt_SavedTitle"), TEXT("Saved"), 26.f, Ink, true))->SetPadding(FMargin(16.f, 22.f, 16.f, 0.f));
 		CountText = MakeText(Tree, TEXT("Txt_SavedCount"), TEXT(""), 13.f, Grey);
 		Page->AddChildToVerticalBox(CountText)->SetPadding(FMargin(16.f, 6.f, 16.f, 0.f));
 		UScrollBox* Scroll = Tree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("SavedScroll"));

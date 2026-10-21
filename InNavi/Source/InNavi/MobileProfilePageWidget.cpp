@@ -25,7 +25,7 @@ TSharedRef<SWidget> UMobileProfilePageWidget::RebuildWidget()
 		UVerticalBox* Content = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ProfileContent"));
 		UBorder* Pad = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
 		Pad->SetBrushColor(FLinearColor::Transparent);
-		Pad->SetPadding(FMargin(16.f, 62.f, 16.f, 24.f));
+		Pad->SetPadding(FMargin(16.f, 22.f, 16.f, 24.f));
 		Pad->SetContent(Content);
 		Scroll->AddChild(Pad);
 
