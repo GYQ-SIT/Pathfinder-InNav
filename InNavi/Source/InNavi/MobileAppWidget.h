@@ -2,6 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "MobileMockSource.h"
+#include "MobileNavSource.h"
 #include "MobileSheetFlow.h"
 #include "MobileAppWidget.generated.h"
 
@@ -13,6 +15,7 @@ class USizeBox;
 class UTextBlock;
 class UWidget;
 class UWidgetSwitcher;
+class UMobileSearchPageWidget;
 
 // Where the main pieces of the phone screen are, in design pixels (the phone screen is 375 wide however big the window is), so a test can
 // check that nothing falls off a small or a tall screen.
@@ -71,6 +74,8 @@ public:
 	// For trying the screen on the desktop: goes the way through the flow to a state (Search, Place, Route, Navigating, Arrived).
 	void PreviewState(EMobileSheetState Target);
 	void SendSheetEvent(EMobileSheetEvent Event);
+	// A place was picked on the search page: the sheet moves on to it.
+	void ShowPlace(const FMobilePlace& Place);
 	void SetSnap(EMobileSheetSnap NewSnap);
 	// The sheet's height right now, mid-drag or mid-move included (design pixels).
 	double GetSheetHeight() const { return SheetHeight; }
@@ -84,6 +89,10 @@ public:
 	bool IsDraggingSheet() const { return bDraggingSheet; }
 
 	UWidget* FindNamedWidget(const FName& Name) const;
+
+	UMobileSearchPageWidget* GetSearchPage() const { return SearchPage; }
+	const FMobilePlace& GetSelectedPlace() const { return SelectedPlace; }
+	IMobileNavSource* GetSource() const { return Source.Get(); }
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -106,8 +115,6 @@ private:
 	void OnTabProfileClicked();
 	UFUNCTION()
 	void OnOpenSiteClicked();
-	UFUNCTION()
-	void OnPickPlaceClicked();
 	UFUNCTION()
 	void OnGetDirectionsClicked();
 	UFUNCTION()
@@ -177,6 +184,13 @@ private:
 	UTextBlock* Mode2DLabel = nullptr;
 	UPROPERTY()
 	UTextBlock* Mode3DLabel = nullptr;
+	// Where the places come from (the prototype's data for now), the site shown, and the place the person picked.
+	TSharedPtr<IMobileNavSource> Source;
+	FString SiteId = TEXT("sit-punggol");
+	FMobilePlace SelectedPlace;
+	UPROPERTY()
+	UMobileSearchPageWidget* SearchPage = nullptr;
+
 	FMobileSheetFlow Flow;
 	ETab ActiveTab = ETab::Explore;
 	EMobileSheetSnap Snap = EMobileSheetSnap::Half;

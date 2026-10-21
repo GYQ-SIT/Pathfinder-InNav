@@ -49,9 +49,9 @@ namespace
 	}
 
 	// Where a person standing at the building's door starts.
-	const FVector2D Entrance(50.0, 95.0);
+	const FVector2D MobileEntrance(50.0, 95.0);
 	// Where the lift, stairs and escalator are on every level.
-	const FVector2D ConnectorPosition(50.0, 50.0);
+	const FVector2D MobileConnectorPosition(50.0, 50.0);
 }
 
 FMobileMockSource::FMobileMockSource()
@@ -259,7 +259,7 @@ FMobileRoute FMobileMockSource::FindRoute(const FMobileRouteRequest& Request)
 	// Where the walk starts: a place, or "my location" - at the door of the destination's building, on level 1.
 	FString FromBuilding = To.BuildingId;
 	int32 FromLevel = 1;
-	FVector2D FromPosition = Entrance;
+	FVector2D FromPosition = MobileEntrance;
 	if (!Request.FromPlaceId.IsEmpty())
 	{
 		FMobilePlace From;
@@ -313,15 +313,15 @@ FMobileRoute FMobileMockSource::FindRoute(const FMobileRouteRequest& Request)
 		const int32 Levels = FMath::Abs(To2 - From);
 		if (Request.Preferences.bAllowLift)
 		{
-			AddStep(EMobileStepKind::TakeLift, FString::Printf(TEXT("Take the lift to %s"), *Target), BuildingId, To2, 12.0 + 4.0 * Levels, ConnectorPosition);
+			AddStep(EMobileStepKind::TakeLift, FString::Printf(TEXT("Take the lift to %s"), *Target), BuildingId, To2, 12.0 + 4.0 * Levels, MobileConnectorPosition);
 		}
 		else if (Request.Preferences.bAllowEscalator && Data->bHasEscalators)
 		{
-			AddStep(EMobileStepKind::TakeEscalator, FString::Printf(TEXT("Take the escalator to %s"), *Target), BuildingId, To2, 18.0 + 6.0 * Levels, ConnectorPosition);
+			AddStep(EMobileStepKind::TakeEscalator, FString::Printf(TEXT("Take the escalator to %s"), *Target), BuildingId, To2, 18.0 + 6.0 * Levels, MobileConnectorPosition);
 		}
 		else if (Request.Preferences.bAllowStairs)
 		{
-			AddStep(EMobileStepKind::TakeStairs, FString::Printf(TEXT("Take the stairs to %s"), *Target), BuildingId, To2, 20.0 + 8.0 * Levels, ConnectorPosition);
+			AddStep(EMobileStepKind::TakeStairs, FString::Printf(TEXT("Take the stairs to %s"), *Target), BuildingId, To2, 20.0 + 8.0 * Levels, MobileConnectorPosition);
 		}
 		else
 		{
@@ -339,12 +339,12 @@ FMobileRoute FMobileMockSource::FindRoute(const FMobileRouteRequest& Request)
 			Route.Error = TEXT("There is no way between levels with the options you chose.");
 			return NoRoute(Route.Error);
 		}
-		AddStep(EMobileStepKind::Straight, TEXT("Follow the corridor to the exit"), FromBuilding, 1, 40.0, Entrance);
-		AddStep(EMobileStepKind::ExitBuilding, FString::Printf(TEXT("Leave %s"), *FromBuilding), FromBuilding, 1, 5.0, Entrance);
-		AddStep(EMobileStepKind::Straight, FString::Printf(TEXT("Walk along the campus path to %s"), *To.BuildingName), To.BuildingId, 1, 90.0, Entrance);
-		AddStep(EMobileStepKind::EnterBuilding, FString::Printf(TEXT("Enter %s"), *To.BuildingName), To.BuildingId, 1, 5.0, Entrance);
+		AddStep(EMobileStepKind::Straight, TEXT("Follow the corridor to the exit"), FromBuilding, 1, 40.0, MobileEntrance);
+		AddStep(EMobileStepKind::ExitBuilding, FString::Printf(TEXT("Leave %s"), *FromBuilding), FromBuilding, 1, 5.0, MobileEntrance);
+		AddStep(EMobileStepKind::Straight, FString::Printf(TEXT("Walk along the campus path to %s"), *To.BuildingName), To.BuildingId, 1, 90.0, MobileEntrance);
+		AddStep(EMobileStepKind::EnterBuilding, FString::Printf(TEXT("Enter %s"), *To.BuildingName), To.BuildingId, 1, 5.0, MobileEntrance);
 		FromLevel = 1;
-		FromPosition = Entrance;
+		FromPosition = MobileEntrance;
 	}
 	if (!ChangeLevel(To.BuildingId, FromLevel, To.Level))
 	{
@@ -353,7 +353,7 @@ FMobileRoute FMobileMockSource::FindRoute(const FMobileRouteRequest& Request)
 	}
 	if (FromLevel != To.Level)
 	{
-		FromPosition = ConnectorPosition;
+		FromPosition = MobileConnectorPosition;
 	}
 	AddStep(EMobileStepKind::Straight, TEXT("Follow the corridor"), To.BuildingId, To.Level, FMath::Max(20.0, FVector2D::Distance(FromPosition, To.Position) * 0.8), FromPosition);
 	AddStep(To.Position.X < 50.0 ? EMobileStepKind::TurnLeft : EMobileStepKind::TurnRight, FString::Printf(TEXT("Turn towards %s"), *To.Name), To.BuildingId, To.Level, 20.0, To.Position);

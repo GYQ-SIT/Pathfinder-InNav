@@ -103,3 +103,14 @@ UnrealEditor.exe InNavi.uproject -game -windowed -ResX=375 -ResY=812 -MobileApp
 Add `-MobileTab=Directory` to open the map tab, and `-MobileState=Place|Route|Navigating|Arrived` to open the sheet at that step. In a running
 game the console command `MobileApp` does the same. Tests: `InNavi.Mobile.*` (the flow, the sheet heights, and the screen on a small, an
 ordinary, a tall and a scaled-up window, with a status bar and a gesture bar, and dragging the handle).
+
+## The search page (step 3, first page)
+
+`UMobileSearchPageWidget` is the "Where to?" page of the sheet. It asks an `IMobileNavSource` (the mock for now) and never anything else: a search box,
+a Filters toggle (one chip for each category the site has, Available only, Clear), and the places grouped by "building . level". With nothing typed
+and no filter it lists the places of the building and level the person is in (the first building's first level in the mock), with a Browse all
+places button; a search or a filter lists every match. Tapping a place hands it to the screen, which moves the sheet on. The back arrow goes to the
+Explore tab. A row or a chip is a `UMobileTapTarget`, which carries its own payload (a place id, a filter name) to whoever made it.
+
+The category icons and the search box's magnifier are placeholders (a letter on a soft square); the design team's icons replace them. More launch
+options for looking at it: `-MobileQuery=lounge`, `-MobileBrowse`, `-MobileFilters`, `-MobileSnap=Collapsed|Half|Full`.

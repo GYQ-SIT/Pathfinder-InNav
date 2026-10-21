@@ -1,5 +1,7 @@
 #include "MobileAppWidget.h"
 
+#include "MobileSearchPageWidget.h"
+#include "MobileStyle.h"
 #include "StartScreenStyle.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -19,70 +21,10 @@
 #include "Components/WidgetSwitcher.h"
 #include "Framework/Application/SlateApplication.h"
 
+using namespace MobileStyle;
+
 namespace
 {
-	// The prototype's colours.
-	const FLinearColor Blue = StartStyle::Rgb(30, 100, 240);
-	const FLinearColor BlueSoft = StartStyle::Rgb(226, 236, 253);
-	const FLinearColor Ink = StartStyle::Rgb(17, 24, 39);
-	const FLinearColor Grey = StartStyle::Rgb(107, 114, 128);
-	const FLinearColor Line = StartStyle::Rgb(229, 231, 235);
-	const FLinearColor White = StartStyle::Rgb(255, 255, 255);
-	const FLinearColor MapBackground = StartStyle::Rgb(222, 231, 238);
-
-	// Radii and sizes in the phone screen are plain design pixels (the screen as a whole is scaled), so the helpers of StartStyle, which
-	// multiply by the desktop's UI scale, are given sizes that cancel it.
-	FSlateBrush Rounded(const FLinearColor& Fill, const FLinearColor& Outline, float Radius, float OutlineWidth = 1.f)
-	{
-		return StartStyle::Rounded(Fill, Outline, Radius / StartStyle::DesignToUi, OutlineWidth);
-	}
-
-	FSlateBrush RoundedTop(const FLinearColor& Fill, float Radius)
-	{
-		const float R = Radius / StartStyle::DesignToUi;
-		return StartStyle::Rounded(Fill, FLinearColor::Transparent, R, R, 0.f, 0.f, 0.f);
-	}
-
-	UTextBlock* MakeText(UWidgetTree* Tree, const FString& Name, const FString& Value, float PixelSize, const FLinearColor& Color, bool bBold = false)
-	{
-		UTextBlock* Block = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(Name));
-		Block->SetText(FText::FromString(Value));
-		Block->SetColorAndOpacity(FSlateColor(Color));
-		FSlateFontInfo Font = Block->GetFont();
-		Font.Size = FMath::RoundToInt(PixelSize * StartStyle::PixelsToFont);
-		if (bBold)
-		{
-			Font.TypefaceFontName = TEXT("Bold");
-		}
-		Block->SetFont(Font);
-		return Block;
-	}
-
-	// A rounded button with a centred label.
-	UButton* MakeButton(UWidgetTree* Tree, const FString& Name, const FString& Label, const FLinearColor& Fill, const FLinearColor& TextColor, float Radius, float Height, UTextBlock** OutLabel = nullptr, float HorizontalPadding = 16.f)
-	{
-		UButton* Button = Tree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-		Button->SetStyle(StartStyle::Button(Fill, Fill * 0.94f, Fill * 0.86f, Line, Radius / StartStyle::DesignToUi));
-		Button->SetBackgroundColor(FLinearColor::White);
-		UTextBlock* Text = MakeText(Tree, Name + TEXT("_Label"), Label, 14.f, TextColor, true);
-		Text->SetJustification(ETextJustify::Center);
-		USizeBox* Box = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(Name + TEXT("_Size")));
-		Box->SetMinDesiredHeight(Height);
-		UBorder* Pad = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(Name + TEXT("_Pad")));
-		Pad->SetBrushColor(FLinearColor::Transparent);
-		Pad->SetPadding(FMargin(HorizontalPadding, 0.f));
-		Pad->SetVerticalAlignment(VAlign_Center);
-		Pad->SetHorizontalAlignment(HAlign_Center);
-		Pad->SetContent(Text);
-		Box->SetContent(Pad);
-		Button->SetContent(Box);
-		if (OutLabel)
-		{
-			*OutLabel = Text;
-		}
-		return Button;
-	}
-
 	UCanvasPanelSlot* CanvasSlot(UWidget* Widget)
 	{
 		return Widget ? Cast<UCanvasPanelSlot>(Widget->Slot) : nullptr;
@@ -225,6 +167,38 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		{
 			const FPageSpec& Spec = Specs[Index];
 			const FString Suffix = FString::FromInt(Index);
+			if (Index == 0)
+			{
+				// The first page is the real search page, on the prototype's data.
+				Source = MakeShared<FMobileMockSource>();
+				SearchPage = CreateWidget<UMobileSearchPageWidget>(this, UMobileSearchPageWidget::StaticClass());
+				FString ContextBuilding;
+				int32 ContextLevel = 1;
+				const TArray<FMobileBuilding> Buildings = Source->ListBuildings(SiteId);
+				if (!Buildings.IsEmpty() && !Buildings[0].Levels.IsEmpty())
+				{
+					ContextBuilding = Buildings[0].Id;
+					ContextLevel = Buildings[0].Levels[0].Level;
+				}
+				SearchPage->SetSource(Source.Get(), SiteId, ContextBuilding, ContextLevel);
+				TWeakObjectPtr<UMobileAppWidget> WeakThis(this);
+				SearchPage->SetOnPlaceChosen([WeakThis](const FMobilePlace& Place)
+				{
+					if (UMobileAppWidget* Screen = WeakThis.Get())
+					{
+						Screen->ShowPlace(Place);
+					}
+				});
+				SearchPage->SetOnBack([WeakThis]()
+				{
+					if (UMobileAppWidget* Screen = WeakThis.Get())
+					{
+						Screen->SetActiveTab(ETab::Explore);
+					}
+				});
+				SheetPages->AddChild(SearchPage);
+				continue;
+			}
 			UBorder* Page = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(TEXT("SheetPage") + Suffix));
 			Page->SetBrushColor(FLinearColor::Transparent);
 			Page->SetPadding(FMargin(16.f, 4.f, 16.f, 12.f));
@@ -244,7 +218,6 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 			Content->AddChildToVerticalBox(Primary);
 			switch (Index)
 			{
-			case 0: Primary->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnPickPlaceClicked); break;
 			case 1: Primary->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnGetDirectionsClicked); break;
 			case 2: Primary->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnStartNavigationClicked); break;
 			case 3: Primary->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnArriveClicked); break;
@@ -670,7 +643,6 @@ void UMobileAppWidget::OnTabDirectoryClicked() { SetActiveTab(ETab::Directory); 
 void UMobileAppWidget::OnTabSavedClicked() { SetActiveTab(ETab::Saved); }
 void UMobileAppWidget::OnTabProfileClicked() { SetActiveTab(ETab::Profile); }
 void UMobileAppWidget::OnOpenSiteClicked() { SetActiveTab(ETab::Directory); }
-void UMobileAppWidget::OnPickPlaceClicked() { SendSheetEvent(EMobileSheetEvent::PlaceChosen); }
 void UMobileAppWidget::OnGetDirectionsClicked() { SendSheetEvent(EMobileSheetEvent::DirectionsRequested); }
 void UMobileAppWidget::OnStartNavigationClicked() { SendSheetEvent(EMobileSheetEvent::NavigationStarted); }
 void UMobileAppWidget::OnArriveClicked() { SendSheetEvent(EMobileSheetEvent::ArrivedAtDestination); }
@@ -702,4 +674,19 @@ void UMobileAppWidget::PreviewState(EMobileSheetState Target)
 	Snap = MobileSheet::SnapForState(Flow.GetState());
 	RefreshSheetPage();
 	SnapSheetNow();
+}
+
+void UMobileAppWidget::ShowPlace(const FMobilePlace& Place)
+{
+	SelectedPlace = Place;
+	// The place page is still a placeholder: it says which place it is for.
+	if (UTextBlock* Title = Cast<UTextBlock>(FindNamedWidget(TEXT("Txt_Title1"))))
+	{
+		Title->SetText(FText::FromString(Place.Name));
+	}
+	if (UTextBlock* Note = Cast<UTextBlock>(FindNamedWidget(TEXT("Txt_Note1"))))
+	{
+		Note->SetText(FText::FromString(FString::Printf(TEXT("%s \u00B7 %s \u00B7 %s"), *Place.Code, *Place.Category, *Place.GroupLabel())));
+	}
+	SendSheetEvent(EMobileSheetEvent::PlaceChosen);
 }

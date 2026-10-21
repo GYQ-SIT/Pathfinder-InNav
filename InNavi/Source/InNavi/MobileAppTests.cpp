@@ -1,10 +1,14 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "MobileAppWidget.h"
+#include "MobileSearchPageWidget.h"
 #include "MobileSheetFlow.h"
+#include "MobileMockSource.h"
+#include "MobileTapTarget.h"
 
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/EditableTextBox.h"
 #include "Components/WidgetSwitcher.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
@@ -85,7 +89,7 @@ bool FMobileScreenLayoutTest::RunTest(const FString& Parameters)
 
 	// Every control is there.
 	for (const TCHAR* Name : { TEXT("Btn_TabExplore"), TEXT("Btn_TabDirectory"), TEXT("Btn_TabSaved"), TEXT("Btn_TabProfile"), TEXT("Btn_Mode2D"), TEXT("Btn_Mode3D"), TEXT("Btn_Level"), TEXT("Btn_Locate"), TEXT("Btn_Overview"),
-		TEXT("Btn_PickPlace"), TEXT("Btn_GetDirections"), TEXT("Btn_StartNavigation"), TEXT("Btn_Arrive"), TEXT("Btn_FindAnother"), TEXT("Btn_Exit"), TEXT("Btn_ViewDestination"), TEXT("Btn_OpenSite"), TEXT("Sheet"), TEXT("TabBar"), TEXT("SheetPages") })
+		TEXT("Btn_GetDirections"), TEXT("Btn_StartNavigation"), TEXT("Btn_Arrive"), TEXT("Btn_FindAnother"), TEXT("Btn_Exit"), TEXT("Btn_ViewDestination"), TEXT("Btn_OpenSite"), TEXT("Sheet"), TEXT("TabBar"), TEXT("SheetPages") })
 	{
 		TestNotNull(*FString::Printf(TEXT("%s exists"), Name), Screen->FindNamedWidget(Name));
 	}
@@ -148,7 +152,7 @@ bool FMobileScreenLayoutTest::RunTest(const FString& Parameters)
 	UWidgetSwitcher* Pages = Cast<UWidgetSwitcher>(Screen->FindNamedWidget(TEXT("SheetPages")));
 	auto Click = [&](const TCHAR* Name) { Cast<UButton>(Screen->FindNamedWidget(Name))->OnClicked.Broadcast(); };
 	TestEqual(TEXT("the search page first"), Pages->GetActiveWidgetIndex(), 0);
-	Click(TEXT("Btn_PickPlace"));
+	Screen->GetSearchPage()->ChoosePlace(TEXT("E2-01-102"));
 	TestEqual(TEXT("the place page"), Pages->GetActiveWidgetIndex(), 1);
 	Click(TEXT("Btn_GetDirections"));
 	TestEqual(TEXT("the route page"), Pages->GetActiveWidgetIndex(), 2);
@@ -180,6 +184,105 @@ bool FMobileScreenLayoutTest::RunTest(const FString& Parameters)
 	Screen->SetActiveTab(UMobileAppWidget::ETab::Profile);
 	TestFalse(TEXT("on another tab the handle does nothing"), Screen->BeginSheetDrag(FVector2D(187.0, 700.0)));
 
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileSearchPageTest, "InNavi.Mobile.SearchPage", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileSearchPageTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	FMobileMockSource Source;
+	UMobileSearchPageWidget* Page = CreateWidget<UMobileSearchPageWidget>(World, UMobileSearchPageWidget::StaticClass());
+	if (!TestNotNull(TEXT("the page is created"), Page)) return false;
+	Page->TakeWidget();
+	Page->SetSource(&Source, TEXT("sit-punggol"), TEXT("E2"), 1);
+
+	// Every control is there.
+	for (const TCHAR* Name : { TEXT("Txt_Search"), TEXT("Btn_Filters"), TEXT("Btn_SearchBack"), TEXT("ListScroll"), TEXT("FilterPanel"), TEXT("Btn_BrowseAll") })
+	{
+		TestNotNull(*FString::Printf(TEXT("%s exists"), Name), Page->FindNamedWidget(Name));
+	}
+
+	// At first: the places of the building and level the person is in, under one heading, and a way to see the rest.
+	TestEqual(TEXT("four places around the person"), Page->GetShownPlaces().Num(), 4);
+	TestEqual(TEXT("under one heading"), Page->GetGroupCount(), 1);
+	TestEqual(TEXT("all on E2's first level"), Page->GetShownPlaces()[0].GroupLabel(), FString(TEXT("E2 \u00B7 L1")));
+	TestFalse(TEXT("the filters are closed"), Page->AreFiltersOpen());
+	TestEqual(TEXT("so their panel is hidden"), Cast<UWidget>(Page->FindNamedWidget(TEXT("FilterPanel")))->GetVisibility(), ESlateVisibility::Collapsed);
+
+	// Browse all places: every place, a heading for each building and level, and the button goes away.
+	Page->BrowseAll();
+	TestEqual(TEXT("every place of the campus"), Page->GetShownPlaces().Num(), 36);
+	TestEqual(TEXT("under a heading for each of the nine levels"), Page->GetGroupCount(), 9);
+	TestNull(TEXT("and the button is gone"), Page->FindNamedWidget(TEXT("Btn_BrowseAll")));
+
+	// A search lists every match, wherever it is.
+	Page->SetQuery(TEXT("classroom"));
+	TestEqual(TEXT("a classroom on every level"), Page->GetShownPlaces().Num(), 9);
+	Page->SetQuery(TEXT("e6 restrooms"));
+	TestEqual(TEXT("E6's restrooms"), Page->GetShownPlaces().Num(), 4);
+	Page->SetQuery(TEXT("zzqxjw"));
+	TestTrue(TEXT("nothing matches"), Page->GetShownPlaces().IsEmpty());
+	TestNotNull(TEXT("and the page says so"), Page->FindNamedWidget(TEXT("Empty")));
+	Page->SetQuery(FString());
+
+	// Filters.
+	Page->SetFiltersOpen(true);
+	TestEqual(TEXT("the filters open"), Cast<UWidget>(Page->FindNamedWidget(TEXT("FilterPanel")))->GetVisibility(), ESlateVisibility::Visible);
+	Page->ToggleCategory(TEXT("Facilities"));
+	TestEqual(TEXT("a category keeps its places"), Page->GetShownPlaces().Num(), 18);
+	Page->ToggleCategory(TEXT("Learning"));
+	TestEqual(TEXT("two categories keep both"), Page->GetShownPlaces().Num(), 36);
+	Page->ToggleCategory(TEXT("Facilities"));
+	Page->ToggleCategory(TEXT("Learning"));
+	Page->ToggleCategory(TEXT("Learning"));
+	Page->SetQuery(TEXT("e2"));
+	TestEqual(TEXT("a word and a category together"), Page->GetShownPlaces().Num(), 6);
+	Page->ClearFilters();
+	TestTrue(TEXT("clearing the filters clears them"), Page->GetFilter().Categories.IsEmpty() && !Page->GetFilter().bAvailableOnly);
+	Page->SetQuery(FString());
+	Page->ToggleAvailableOnly();
+	TestEqual(TEXT("the campus has no closed place"), Page->GetShownPlaces().Num(), 36);
+	Page->ClearFilters();
+
+	// Picking a place hands it on; the back arrow too.
+	FString Chosen;
+	bool bWentBack = false;
+	Page->SetOnPlaceChosen([&Chosen](const FMobilePlace& Place) { Chosen = Place.Id; });
+	Page->SetOnBack([&bWentBack]() { bWentBack = true; });
+	Page->ChoosePlace(TEXT("E6-2M-103"));
+	TestEqual(TEXT("the chosen place arrives"), Chosen, FString(TEXT("E6-2M-103")));
+	Cast<UButton>(Page->FindNamedWidget(TEXT("Btn_SearchBack")))->OnClicked.Broadcast();
+	TestTrue(TEXT("and so does the back arrow"), bWentBack);
+
+	// Typing in the box searches.
+	Cast<UEditableTextBox>(Page->FindNamedWidget(TEXT("Txt_Search")))->OnTextChanged.Broadcast(FText::FromString(TEXT("lounge")));
+	TestEqual(TEXT("a study lounge on each level"), Page->GetShownPlaces().Num(), 9);
+
+	// The mall, where one restaurant is closed.
+	Page->SetSource(&Source, TEXT("paya-lebar"), TEXT("PLM"), 1);
+	TestEqual(TEXT("four places on the mall's first level"), Page->GetShownPlaces().Num(), 4);
+	Page->ToggleAvailableOnly();
+	TestEqual(TEXT("a filter lists every match: all 28 of the mall but the closed one"), Page->GetShownPlaces().Num(), 27);
+	Page->ClearFilters();
+
+	World->DestroyWorld(false);
+	return true;
+}
+
+// A tap target hands its payload to whoever made it.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileTapTargetTest, "InNavi.Mobile.TapTarget", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileTapTargetTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	UMobileTapTarget* Target = CreateWidget<UMobileTapTarget>(World, UMobileTapTarget::StaticClass());
+	if (!TestNotNull(TEXT("created"), Target)) return false;
+	FString Got;
+	Target->Setup(nullptr, TEXT("payload"), FLinearColor::Transparent, 0.f);
+	Target->SetOnTapped([&Got](const FString& Payload) { Got = Payload; });
+	Target->Tap();
+	TestEqual(TEXT("a tap gives the payload"), Got, FString(TEXT("payload")));
 	World->DestroyWorld(false);
 	return true;
 }

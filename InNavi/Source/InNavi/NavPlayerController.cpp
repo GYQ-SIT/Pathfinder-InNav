@@ -4,6 +4,7 @@
 #include "NavPlayerController.h"
 #include "NavigationPanelWidget.h"
 #include "MobileAppWidget.h"
+#include "MobileSearchPageWidget.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "TimerManager.h"
 #include "NavigationRouteVisualization.h"
@@ -127,6 +128,28 @@ void ANavPlayerController::MobileApp()
 		if (FParse::Value(FCommandLine::Get(), TEXT("MobileState="), State))
 		{
 			Screen->PreviewState(State == TEXT("Place") ? EMobileSheetState::Place : State == TEXT("Route") ? EMobileSheetState::Route : State == TEXT("Navigating") ? EMobileSheetState::Navigating : State == TEXT("Arrived") ? EMobileSheetState::Arrived : EMobileSheetState::Search);
+		}
+		// For trying the search page: -MobileQuery=lounge, -MobileBrowse, -MobileFilters, and the sheet's height with -MobileSnap=Full.
+		FString Query, SnapName;
+		if (UMobileSearchPageWidget* SearchPage = Screen->GetSearchPage())
+		{
+			if (FParse::Value(FCommandLine::Get(), TEXT("MobileQuery="), Query))
+			{
+				SearchPage->SetQuery(Query);
+			}
+			if (FParse::Param(FCommandLine::Get(), TEXT("MobileBrowse")))
+			{
+				SearchPage->BrowseAll();
+			}
+			if (FParse::Param(FCommandLine::Get(), TEXT("MobileFilters")))
+			{
+				SearchPage->SetFiltersOpen(true);
+			}
+		}
+		if (FParse::Value(FCommandLine::Get(), TEXT("MobileSnap="), SnapName))
+		{
+			Screen->SetSnap(SnapName == TEXT("Full") ? EMobileSheetSnap::Full : SnapName == TEXT("Collapsed") ? EMobileSheetSnap::Collapsed : EMobileSheetSnap::Half);
+			Screen->SnapSheetNow();
 		}
 	}
 }
