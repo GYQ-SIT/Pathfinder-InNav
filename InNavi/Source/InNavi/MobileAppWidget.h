@@ -18,6 +18,8 @@ class UWidgetSwitcher;
 class UMobileSearchPageWidget;
 class UMobilePlacePageWidget;
 class UMobileRoutePageWidget;
+class UMobileNavigatePageWidget;
+class UMobileArrivedPageWidget;
 
 // Where the main pieces of the phone screen are, in design pixels (the phone screen is 375 wide however big the window is), so a test can
 // check that nothing falls off a small or a tall screen.
@@ -86,6 +88,10 @@ public:
 	void RefreshRoute();
 	// The person changed something on the route page (from, to, where My location is, the ways between levels): the screen keeps it and finds the route again.
 	void ApplyRouteRequest(const FMobileRouteRequest& Changed);
+	// Walking: the next instruction (on a real phone this follows the person; here a button), and the last one is the arrival.
+	void AdvanceNavigation();
+	void RefreshNavigation();
+	void RefreshArrived();
 	void SetSnap(EMobileSheetSnap NewSnap);
 	// The sheet's height right now, mid-drag or mid-move included (design pixels).
 	double GetSheetHeight() const { return SheetHeight; }
@@ -103,6 +109,9 @@ public:
 	UMobileSearchPageWidget* GetSearchPage() const { return SearchPage; }
 	UMobilePlacePageWidget* GetPlacePage() const { return PlacePage; }
 	UMobileRoutePageWidget* GetRoutePage() const { return RoutePage; }
+	UMobileNavigatePageWidget* GetNavigatePage() const { return NavigatePage; }
+	UMobileArrivedPageWidget* GetArrivedPage() const { return ArrivedPage; }
+	int32 GetNavStepIndex() const { return NavStepIndex; }
 	const FMobileRoute& GetCurrentRoute() const { return CurrentRoute; }
 	const FMobileRoutePreferences& GetRoutePreferences() const { return RoutePreferences; }
 	bool IsPlaceSaved(const FString& PlaceId) const { return SavedPlaceIds.Contains(PlaceId); }
@@ -133,18 +142,6 @@ private:
 	void OnTabProfileClicked();
 	UFUNCTION()
 	void OnOpenSiteClicked();
-	UFUNCTION()
-	void OnStartNavigationClicked();
-	UFUNCTION()
-	void OnArriveClicked();
-	UFUNCTION()
-	void OnBackClicked();
-	UFUNCTION()
-	void OnExitNavigationClicked();
-	UFUNCTION()
-	void OnFindAnotherClicked();
-	UFUNCTION()
-	void OnViewDestinationClicked();
 	UFUNCTION()
 	void OnShow2DClicked();
 	UFUNCTION()
@@ -210,6 +207,12 @@ private:
 	UMobilePlacePageWidget* PlacePage = nullptr;
 	UPROPERTY()
 	UMobileRoutePageWidget* RoutePage = nullptr;
+	UPROPERTY()
+	UMobileNavigatePageWidget* NavigatePage = nullptr;
+	UPROPERTY()
+	UMobileArrivedPageWidget* ArrivedPage = nullptr;
+	// Which step of the route the person is on while walking (0-based).
+	int32 NavStepIndex = 0;
 	FMobileRoute CurrentRoute;
 	FMobileRoutePreferences RoutePreferences;
 	// Where "My location" is for the route (the prototype lets the person say which building and level they are on).

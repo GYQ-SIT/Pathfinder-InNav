@@ -1,5 +1,7 @@
 #include "MobileAppWidget.h"
 
+#include "MobileArrivedPageWidget.h"
+#include "MobileNavigatePageWidget.h"
 #include "MobilePlacePageWidget.h"
 #include "MobileRoutePageWidget.h"
 #include "MobileSelectWidget.h"
@@ -150,26 +152,9 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		SheetPages = Tree->ConstructWidget<UWidgetSwitcher>(UWidgetSwitcher::StaticClass(), TEXT("SheetPages"));
 		SheetColumn->AddChildToVerticalBox(SheetPages)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 
-		// One placeholder page for each state of the flow: its name, what goes there, and the button that moves the flow on.
-		struct FPageSpec
+		// One page for each state of the flow, in the order of EMobileSheetState.
+		for (int32 Index = 0; Index < 5; ++Index)
 		{
-			const TCHAR* Title;
-			const TCHAR* Note;
-			const TCHAR* PrimaryName;
-			const TCHAR* PrimaryLabel;
-			bool bHasBack;
-		};
-		const FPageSpec Specs[] = {
-			{ TEXT("Where to?"), TEXT("Search box, filters and the places, grouped by building and level."), TEXT("Btn_PickPlace"), TEXT("Pick a place (demo)"), false },
-			{ TEXT("Place"), TEXT("Name, code, category, Save place, Use as starting point."), TEXT("Btn_GetDirections"), TEXT("Get directions"), true },
-			{ TEXT("Your route"), TEXT("From, To, minutes, metres and the steps."), TEXT("Btn_StartNavigation"), TEXT("Start navigation"), true },
-			{ TEXT("Navigating"), TEXT("The next step and what is left."), TEXT("Btn_Arrive"), TEXT("Arrive (demo)"), false },
-			{ TEXT("You have arrived"), TEXT("Find another place, save this place, view the destination."), TEXT("Btn_FindAnother"), TEXT("Find another place"), false },
-		};
-		for (int32 Index = 0; Index < UE_ARRAY_COUNT(Specs); ++Index)
-		{
-			const FPageSpec& Spec = Specs[Index];
-			const FString Suffix = FString::FromInt(Index);
 			if (Index == 0)
 			{
 				// The first page is the real search page, on the prototype's data.
@@ -276,42 +261,58 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 				SheetPages->AddChild(RoutePage);
 				continue;
 			}
-			UBorder* Page = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(TEXT("SheetPage") + Suffix));
-			Page->SetBrushColor(FLinearColor::Transparent);
-			Page->SetPadding(FMargin(16.f, 4.f, 16.f, 12.f));
-			UVerticalBox* Content = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), FName(TEXT("SheetPageContent") + Suffix));
-			Page->SetContent(Content);
-			if (Spec.bHasBack)
-			{
-				UButton* Back = MakeButton(Tree, TEXT("Btn_Back") + Suffix, TEXT("Back"), BlueSoft, Blue, 8.f, 30.f, nullptr, 12.f);
-				Back->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnBackClicked);
-				Content->AddChildToVerticalBox(Back)->SetHorizontalAlignment(HAlign_Left);
-			}
-			Content->AddChildToVerticalBox(MakeText(Tree, TEXT("Txt_Title") + Suffix, Spec.Title, 22.f, Ink, true))->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
-			UTextBlock* Note = MakeText(Tree, TEXT("Txt_Note") + Suffix, Spec.Note, 13.f, Grey);
-			Note->SetAutoWrapText(true);
-			Content->AddChildToVerticalBox(Note)->SetPadding(FMargin(0.f, 6.f, 0.f, 14.f));
-			UButton* Primary = MakeButton(Tree, Spec.PrimaryName, Spec.PrimaryLabel, Blue, White, 12.f, 48.f);
-			Content->AddChildToVerticalBox(Primary);
-			switch (Index)
-			{
-			case 2: Primary->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnStartNavigationClicked); break;
-			case 3: Primary->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnArriveClicked); break;
-			default: Primary->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnFindAnotherClicked); break;
-			}
 			if (Index == 3)
 			{
-				UButton* Exit = MakeButton(Tree, TEXT("Btn_Exit"), TEXT("Exit"), BlueSoft, Blue, 12.f, 44.f);
-				Exit->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnExitNavigationClicked);
-				Content->AddChildToVerticalBox(Exit)->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
+				// The fourth page is the real page for walking.
+				NavigatePage = CreateWidget<UMobileNavigatePageWidget>(this, UMobileNavigatePageWidget::StaticClass());
+				TWeakObjectPtr<UMobileAppWidget> WeakThis(this);
+				NavigatePage->SetOnExit([WeakThis]()
+				{
+					if (UMobileAppWidget* Screen = WeakThis.Get())
+					{
+						Screen->SendSheetEvent(EMobileSheetEvent::ExitNavigation);
+					}
+				});
+				NavigatePage->SetOnNext([WeakThis]()
+				{
+					if (UMobileAppWidget* Screen = WeakThis.Get())
+					{
+						Screen->AdvanceNavigation();
+					}
+				});
+				SheetPages->AddChild(NavigatePage);
+				continue;
 			}
-			if (Index == 4)
+			// The fifth page: arrived.
+			ArrivedPage = CreateWidget<UMobileArrivedPageWidget>(this, UMobileArrivedPageWidget::StaticClass());
+			TWeakObjectPtr<UMobileAppWidget> WeakThis(this);
+			ArrivedPage->SetOnFindAnother([WeakThis]()
 			{
-				UButton* View = MakeButton(Tree, TEXT("Btn_ViewDestination"), TEXT("View destination"), BlueSoft, Blue, 12.f, 44.f);
-				View->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnViewDestinationClicked);
-				Content->AddChildToVerticalBox(View)->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
-			}
-			SheetPages->AddChild(Page);
+				if (UMobileAppWidget* Screen = WeakThis.Get())
+				{
+					Screen->SendSheetEvent(EMobileSheetEvent::FindAnotherPlace);
+				}
+			});
+			ArrivedPage->SetOnSaveToggled([WeakThis](const FMobilePlace& Place)
+			{
+				if (UMobileAppWidget* Screen = WeakThis.Get())
+				{
+					if (Screen->SavedPlaceIds.Remove(Place.Id) == 0)
+					{
+						Screen->SavedPlaceIds.Add(Place.Id);
+					}
+					Screen->SelectPlace(Place);
+					Screen->RefreshArrived();
+				}
+			});
+			ArrivedPage->SetOnViewDestination([WeakThis]()
+			{
+				if (UMobileAppWidget* Screen = WeakThis.Get())
+				{
+					Screen->SendSheetEvent(EMobileSheetEvent::ViewDestination);
+				}
+			});
+			SheetPages->AddChild(ArrivedPage);
 		}
 		UCanvasPanelSlot* SheetSlot = Phone->AddChildToCanvas(SheetBorder);
 		SheetSlot->SetAnchors(FAnchors(0.f, 1.f, 1.f, 1.f));
@@ -543,6 +544,47 @@ void UMobileAppWidget::SendSheetEvent(EMobileSheetEvent Event)
 		{
 			RefreshRoute();
 		}
+		// Setting off starts at the first instruction; arriving shows the place.
+		if (Flow.GetState() == EMobileSheetState::Navigating && Event == EMobileSheetEvent::NavigationStarted)
+		{
+			NavStepIndex = 0;
+		}
+		RefreshNavigation();
+		RefreshArrived();
+	}
+}
+
+void UMobileAppWidget::AdvanceNavigation()
+{
+	if (Flow.GetState() != EMobileSheetState::Navigating)
+	{
+		return;
+	}
+	if (NavStepIndex < CurrentRoute.Steps.Num() - 1)
+	{
+		++NavStepIndex;
+		RefreshNavigation();
+	}
+	else
+	{
+		// The last instruction was the arrival.
+		SendSheetEvent(EMobileSheetEvent::ArrivedAtDestination);
+	}
+}
+
+void UMobileAppWidget::RefreshNavigation()
+{
+	if (NavigatePage)
+	{
+		NavigatePage->SetNavigation(SelectedPlace, CurrentRoute, NavStepIndex);
+	}
+}
+
+void UMobileAppWidget::RefreshArrived()
+{
+	if (ArrivedPage)
+	{
+		ArrivedPage->SetPlace(SelectedPlace, SavedPlaceIds.Contains(SelectedPlace.Id));
 	}
 }
 
@@ -755,12 +797,6 @@ void UMobileAppWidget::OnTabDirectoryClicked() { SetActiveTab(ETab::Directory); 
 void UMobileAppWidget::OnTabSavedClicked() { SetActiveTab(ETab::Saved); }
 void UMobileAppWidget::OnTabProfileClicked() { SetActiveTab(ETab::Profile); }
 void UMobileAppWidget::OnOpenSiteClicked() { SetActiveTab(ETab::Directory); }
-void UMobileAppWidget::OnStartNavigationClicked() { SendSheetEvent(EMobileSheetEvent::NavigationStarted); }
-void UMobileAppWidget::OnArriveClicked() { SendSheetEvent(EMobileSheetEvent::ArrivedAtDestination); }
-void UMobileAppWidget::OnBackClicked() { SendSheetEvent(EMobileSheetEvent::Back); }
-void UMobileAppWidget::OnExitNavigationClicked() { SendSheetEvent(EMobileSheetEvent::ExitNavigation); }
-void UMobileAppWidget::OnFindAnotherClicked() { SendSheetEvent(EMobileSheetEvent::FindAnotherPlace); }
-void UMobileAppWidget::OnViewDestinationClicked() { SendSheetEvent(EMobileSheetEvent::ViewDestination); }
 
 void UMobileAppWidget::OnShow2DClicked()
 {
@@ -792,6 +828,8 @@ void UMobileAppWidget::PreviewState(EMobileSheetState Target)
 		Flow.Handle(Way[Step]);
 	}
 	RefreshRoute();
+	RefreshNavigation();
+	RefreshArrived();
 	Snap = MobileSheet::SnapForState(Flow.GetState());
 	RefreshSheetPage();
 	SnapSheetNow();

@@ -141,3 +141,15 @@ route it is given, and reports every change as a new request. `UMobileAppWidget`
 where My location is (the first building's first level to begin with) and the preferences, finds the route again (`RefreshRoute`) whenever the sheet
 arrives at the route page or something changes, and a destination chosen on the route page is the place the place page shows too.
 `-MobileState=Route` shows the page, `-MobileOpen=From|To|Building|Level` opens a drop-down.
+
+## The walking and arrival pages (step 3, last two pages)
+
+`UMobileNavigatePageWidget` is the sheet while walking, kept low so the map has room: where to ("To Study lounge . E2 . L1"), Exit, the instruction of
+the step the person is on, "Step 2 of 3", the metres still to walk (that step's distance and every later one's), the step's building and level, and
+Next instruction. On the last step, which is the arrival, the button says "I have arrived". On a real phone the step would follow the person; here
+the screen (`UMobileAppWidget::AdvanceNavigation`) moves on when the button is pressed, and pressing it on the arrival opens the arrival page. Exit
+goes back to the route; setting off again starts at the first step.
+
+`UMobileArrivedPageWidget` is "You have arrived": the place with its code and level, Find another place (to the search), Save this place (the screen
+keeps the saved places, the same ones the place page shows), and View destination (to the place page). No page is a placeholder any more: the sheet
+has five real pages, one for each state of the flow. `-MobileState=Navigating|Arrived` shows them.

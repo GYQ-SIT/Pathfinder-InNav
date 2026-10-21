@@ -47,7 +47,7 @@ namespace MobileSheet
 {
 	namespace
 	{
-		constexpr double CollapsedHeight = 170.0;
+		constexpr double CollapsedHeight = 196.0;
 		constexpr double HalfFraction = 0.46;
 	}
 
