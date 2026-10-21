@@ -92,3 +92,8 @@ InNavi/Data/Deleted/
 *.pfx
 *.pepk
 signing-secrets*
+
+# Written by Unreal when it packages for Android (made again every time), and a personal test save
+InNavi/Build/Android/src/
+InNavi/Build/Android_ASTC/
+InNavi/Data/NewProject.json
