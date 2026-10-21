@@ -4,6 +4,7 @@
 #include "Blueprint/UserWidget.h"
 #include "MobileMockSource.h"
 #include "MobileNavSource.h"
+#include "MobileSavedPlaces.h"
 #include "MobileSheetFlow.h"
 #include "MobileAppWidget.generated.h"
 
@@ -21,6 +22,7 @@ class UMobileRoutePageWidget;
 class UMobileNavigatePageWidget;
 class UMobileMapWidget;
 class UMobileExplorePageWidget;
+class UMobileSavedPageWidget;
 class UVerticalBox;
 class UMobileArrivedPageWidget;
 
@@ -99,6 +101,7 @@ public:
 	void RefreshMap();
 	// Tells the search page where the walk starts (a place the person chose, or nothing for My location).
 	void RefreshSearchStart();
+	void RefreshSaved();
 	void ApplyMap();
 	void SetSnap(EMobileSheetSnap NewSnap);
 	// The sheet's height right now, mid-drag or mid-move included (design pixels).
@@ -140,7 +143,15 @@ public:
 	int32 GetNavStepIndex() const { return NavStepIndex; }
 	const FMobileRoute& GetCurrentRoute() const { return CurrentRoute; }
 	const FMobileRoutePreferences& GetRoutePreferences() const { return RoutePreferences; }
-	bool IsPlaceSaved(const FString& PlaceId) const { return SavedPlaceIds.Contains(PlaceId); }
+	bool IsPlaceSaved(const FString& PlaceId) const { return SavedPlaces.Contains(PlaceId); }
+	const FMobileSavedPlaces& GetSavedPlaces() const { return SavedPlaces; }
+	UMobileSavedPageWidget* GetSavedPage() const { return SavedPage; }
+	// Keeps the saved places in a file (the real app does; tests do not touch one unless they ask), and reads what is in it.
+	void UseSavedFile(const FString& Path);
+	// For trying the Saved tab: saves some places (comma separated ids) without a file.
+	void PreviewSave(const FString& CommaIds);
+	// A saved place was tapped: its site opens if it is another, and the place with it.
+	void OpenSavedPlace(const FMobilePlace& Place);
 	const FString& GetStartPlaceId() const { return StartPlaceId; }
 	int32 GetMyLocationLevel() const { return MyLocationLevel; }
 	const FString& GetMyLocationBuildingId() const { return MyLocationBuildingId; }
@@ -244,6 +255,8 @@ private:
 	UPROPERTY()
 	UMobileExplorePageWidget* ExplorePage = nullptr;
 	UPROPERTY()
+	UMobileSavedPageWidget* SavedPage = nullptr;
+	UPROPERTY()
 	UTextBlock* SiteNameText = nullptr;
 	UPROPERTY()
 	UTextBlock* LevelLabel = nullptr;
@@ -266,7 +279,7 @@ private:
 	FString MyLocationBuildingId;
 	int32 MyLocationLevel = 1;
 	// The places the person saved, and the one they chose to start from (empty = their location).
-	TSet<FString> SavedPlaceIds;
+	FMobileSavedPlaces SavedPlaces;
 	FString StartPlaceId;
 
 	FMobileSheetFlow Flow;

@@ -7,6 +7,7 @@
 #include "MobileTapTarget.h"
 #include "MobilePlacePageWidget.h"
 #include "MobileRoutePageWidget.h"
+#include "MobileSavedPageWidget.h"
 #include "MobileSelectWidget.h"
 #include "MobileSearchPageWidget.h"
 #include "MobileStyle.h"
@@ -279,10 +280,8 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 				{
 					if (UMobileAppWidget* Screen = WeakThis.Get())
 					{
-						if (Screen->SavedPlaceIds.Remove(Place.Id) == 0)
-						{
-							Screen->SavedPlaceIds.Add(Place.Id);
-						}
+						Screen->SavedPlaces.Toggle(Place.Id);
+						Screen->RefreshSaved();
 						Screen->SelectPlace(Place);
 					}
 				});
@@ -374,10 +373,8 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 			{
 				if (UMobileAppWidget* Screen = WeakThis.Get())
 				{
-					if (Screen->SavedPlaceIds.Remove(Place.Id) == 0)
-					{
-						Screen->SavedPlaceIds.Add(Place.Id);
-					}
+					Screen->SavedPlaces.Toggle(Place.Id);
+					Screen->RefreshSaved();
 					Screen->SelectPlace(Place);
 					Screen->RefreshArrived();
 				}
@@ -428,6 +425,32 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		ExploreOverlay->SetPadding(FMargin(0.f));
 		ExploreOverlay->SetContent(ExplorePage);
 		SavedOverlay = MakeOverlay(TEXT("SavedOverlay"), TEXT("Saved"), TEXT("The places you saved."));
+		// The Saved tab is the list of saved places, not a placeholder.
+		SavedPage = CreateWidget<UMobileSavedPageWidget>(this, UMobileSavedPageWidget::StaticClass());
+		SavedPage->SetSource(Source.Get());
+		{
+			TWeakObjectPtr<UMobileAppWidget> WeakSaved(this);
+			SavedPage->SetOnPlaceChosen([WeakSaved](const FMobilePlace& Place)
+			{
+				if (UMobileAppWidget* Screen = WeakSaved.Get())
+				{
+					Screen->OpenSavedPlace(Place);
+				}
+			});
+			SavedPage->SetOnRemove([WeakSaved](const FMobilePlace& Place)
+			{
+				if (UMobileAppWidget* Screen = WeakSaved.Get())
+				{
+					Screen->SavedPlaces.Remove(Place.Id);
+					Screen->RefreshSaved();
+					Screen->SelectPlace(Screen->SelectedPlace);
+					Screen->RefreshArrived();
+				}
+			});
+		}
+		SavedOverlay->SetPadding(FMargin(0.f));
+		SavedOverlay->SetContent(SavedPage);
+		RefreshSaved();
 		ProfileOverlay = MakeOverlay(TEXT("ProfileOverlay"), TEXT("Profile"), TEXT("Settings and preferences."));
 
 		// The tab bar.
@@ -678,7 +701,7 @@ void UMobileAppWidget::RefreshArrived()
 {
 	if (ArrivedPage)
 	{
-		ArrivedPage->SetPlace(SelectedPlace, SavedPlaceIds.Contains(SelectedPlace.Id));
+		ArrivedPage->SetPlace(SelectedPlace, SavedPlaces.Contains(SelectedPlace.Id));
 	}
 }
 
@@ -928,7 +951,7 @@ void UMobileAppWidget::SelectPlace(const FMobilePlace& Place)
 	SelectedPlace = Place;
 	if (PlacePage)
 	{
-		PlacePage->SetPlace(Place, SavedPlaceIds.Contains(Place.Id), StartPlaceId == Place.Id);
+		PlacePage->SetPlace(Place, SavedPlaces.Contains(Place.Id), StartPlaceId == Place.Id);
 	}
 }
 
@@ -1279,4 +1302,48 @@ void UMobileAppWidget::OpenSite(const FString& NewSiteId)
 	SnapSheetNow();
 	RefreshMap();
 	SetActiveTab(ETab::Directory);
+}
+
+// ---- Saved places ----
+
+void UMobileAppWidget::RefreshSaved()
+{
+	if (SavedPage)
+	{
+		SavedPage->SetSaved(SavedPlaces.Ids());
+	}
+}
+
+void UMobileAppWidget::UseSavedFile(const FString& Path)
+{
+	SavedPlaces.UseFile(Path);
+	RefreshSaved();
+	SelectPlace(SelectedPlace);
+	RefreshArrived();
+}
+
+void UMobileAppWidget::OpenSavedPlace(const FMobilePlace& Place)
+{
+	// Another site opens first (which starts the app again for it); then the place, from Where to?, on the map tab.
+	if (Place.SiteId != SiteId)
+	{
+		OpenSite(Place.SiteId);
+	}
+	const FString KeptStart = StartPlaceId;
+	Flow.Reset();
+	StartPlaceId = KeptStart;
+	SetActiveTab(ETab::Directory);
+	RefreshSheetPage();
+	ShowPlace(Place);
+}
+
+void UMobileAppWidget::PreviewSave(const FString& CommaIds)
+{
+	TArray<FString> Ids;
+	CommaIds.ParseIntoArray(Ids, TEXT(","));
+	for (int32 i = Ids.Num() - 1; i >= 0; --i)
+	{
+		SavedPlaces.Add(Ids[i]);
+	}
+	RefreshSaved();
 }

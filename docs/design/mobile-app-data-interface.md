@@ -191,3 +191,15 @@ empty (the mock's is "All maps, places and positioning are simulated.") a "Mock 
 `UMobileAppWidget::OpenSite`, which starts everything again for that site: the sheet at Where to?, no chosen place, no start, no route, every way between levels on, My location in
 the site's first building on its first level, the search, route choices and map taken from the site, the top bar showing its short name (`FMobileSite::ShortName`, else its name), and
 the map tab shown. Opening another site in the middle of a walk does the same. An unknown site is ignored.
+
+## The Saved tab
+
+`UMobileSavedPageWidget` is the Saved tab: the places the person saved, newest first, grouped under the name of their site (sites in the order they first come up), each row with a
+placeholder icon, the name, "code . building . level", and a **Remove** button. With nothing saved it says "No saved places yet" and how to save one. The page shows ids it is given and
+asks the source for what they are (`FindPlace`); an id the source no longer knows is left out.
+
+The list itself is the app's own state, not the site's data: `FMobileSavedPlaces` (ids only, newest first, no duplicates). **Save place** on the place page and **Save this place** on the
+arrival page both toggle it, so the two pages and the tab always agree. It is kept in `Saved/MobileSavedPlaces.json` (`{ "version": 1, "saved": [ids] }`), written on every change and read when
+the app starts; a missing or damaged file is an empty list, and without a file (as in tests) nothing is written. A tap on a row opens that place on the map tab: if it belongs to another site
+that site is opened first (`OpenSite`), then the sheet shows the place page with the place on the map. **Remove** takes the place off the list and the place and arrival pages update.
+Real data only needs `FindPlace` to answer for every site's places. For looking at the tab without a file: `-MobileTab=Saved -MobileSave=E2-01-101,PLM-01-102`.

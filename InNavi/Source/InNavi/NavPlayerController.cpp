@@ -119,6 +119,16 @@ void ANavPlayerController::MobileApp()
 	if (UMobileAppWidget* Screen = CreateWidget<UMobileAppWidget>(this, UMobileAppWidget::StaticClass()))
 	{
 		Screen->AddToViewport();
+		// The saved places are kept in a file; for looking at the tab, -MobileSave=E2-01-101,PLM-01-102 saves some without one.
+		FString PreviewIds;
+		if (FParse::Value(FCommandLine::Get(), TEXT("MobileSave="), PreviewIds, false))
+		{
+			Screen->PreviewSave(PreviewIds);
+		}
+		else
+		{
+			Screen->UseSavedFile(FMobileSavedPlaces::DefaultFile());
+		}
 		// For trying a screen straight away: -MobileTab=Directory and -MobileState=Route.
 		FString Tab, State;
 		if (FParse::Value(FCommandLine::Get(), TEXT("MobileTab="), Tab))
