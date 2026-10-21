@@ -31,7 +31,7 @@ TSharedRef<SWidget> UMobileExplorePageWidget::RebuildWidget()
 		Logo->SetBrushColor(FLinearColor::White);
 		Logo->SetHorizontalAlignment(HAlign_Center);
 		Logo->SetVerticalAlignment(VAlign_Center);
-		Logo->SetContent(MakeText(Tree, TEXT("Txt_ExploreLogo"), TEXT("N"), 14.f, White, true));
+		Logo->SetContent(MakeText(Tree, TEXT("Txt_ExploreLogo"), TEXT("N"), 14.f, OnBlue, true));
 		USizeBox* LogoSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("ExploreLogoSize"));
 		LogoSize->SetWidthOverride(26.f);
 		LogoSize->SetHeightOverride(26.f);
@@ -51,7 +51,7 @@ TSharedRef<SWidget> UMobileExplorePageWidget::RebuildWidget()
 		Heading->AddChildToHorizontalBox(MakeText(Tree, TEXT("Txt_ExploreSites"), TEXT("Sites"), 15.f, Ink, true))->SetVerticalAlignment(VAlign_Center);
 		Heading->AddChildToHorizontalBox(Tree->ConstructWidget<USpacer>(USpacer::StaticClass(), TEXT("ExploreHeadingSpacer")))->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		NotePill = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("ExploreNotePill"));
-		NotePill->SetBrush(Rounded(StartStyle::Rgb(241, 245, 249), Line, 12.f));
+		NotePill->SetBrush(Rounded(SoftPanel, Line, 12.f));
 		NotePill->SetBrushColor(FLinearColor::White);
 		NotePill->SetPadding(FMargin(10.f, 4.f));
 		NotePill->SetVisibility(ESlateVisibility::Collapsed);

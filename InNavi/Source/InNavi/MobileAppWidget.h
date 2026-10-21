@@ -160,6 +160,11 @@ public:
 	void UsePreferencesFile(const FString& Path);
 	// The Profile tab's reset: no saved places, the app's own preferences.
 	void ResetSavedAndPreferences();
+	// The theme or the text size changed: every page is built again in the new look, and the screen is put back as it was (the same tab, site,
+	// place, route and step). The Profile tab asks for it while one of its own buttons is being tapped, so it happens a moment later; tests call
+	// it themselves.
+	void RebuildForAppearance();
+	bool IsAppearanceRebuildQueued() const { return bAppearanceRebuildQueued; }
 	const FString& GetStartPlaceId() const { return StartPlaceId; }
 	int32 GetMyLocationLevel() const { return MyLocationLevel; }
 	const FString& GetMyLocationBuildingId() const { return MyLocationBuildingId; }
@@ -204,6 +209,10 @@ private:
 
 	void RefreshTabs();
 	void RefreshModeButtons();
+	void RefreshSiteName();
+	// Makes the look of the preferences the open one, and asks for the pages to be built again if they were built in another.
+	void SyncAppearance();
+	void QueueAppearanceRebuild();
 	void RefreshSheetPage();
 	void PositionSheet();
 	// Whether the level and locate buttons have room between the top bar and the sheet.
@@ -292,6 +301,10 @@ private:
 	FMobileSavedPlaces SavedPlaces;
 	// How the person chose the app to look (the Profile tab).
 	FMobilePreferences Preferences;
+	// The look the pages were built in, and whether a build again is waiting.
+	EMobileTheme BuiltTheme = EMobileTheme::Light;
+	bool bBuiltLarger = false;
+	bool bAppearanceRebuildQueued = false;
 	FString StartPlaceId;
 
 	FMobileSheetFlow Flow;

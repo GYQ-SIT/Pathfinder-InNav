@@ -15,6 +15,7 @@
 #include "StartScreenStyle.h"
 
 #include "Blueprint/WidgetTree.h"
+#include "Containers/Ticker.h"
 #include "Components/Border.h"
 #include "Components/BorderSlot.h"
 #include "Components/Button.h"
@@ -52,7 +53,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		Tree->RootWidget = Root;
 
 		UBorder* Backdrop = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Backdrop"));
-		Backdrop->SetBrushColor(White);
+		Backdrop->SetBrushColor(PageBg);
 		UCanvasPanelSlot* BackdropSlot = Root->AddChildToCanvas(Backdrop);
 		BackdropSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
 		BackdropSlot->SetOffsets(FMargin(0.f));
@@ -136,7 +137,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		ModeBox->SetPadding(FMargin(3.f));
 		UHorizontalBox* ModeRow = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ModeRow"));
 		ModeBox->SetContent(ModeRow);
-		Mode2DButton = MakeButton(Tree, TEXT("Btn_Mode2D"), TEXT("2D"), Blue, White, 8.f, 28.f, &Mode2DLabel, 12.f);
+		Mode2DButton = MakeButton(Tree, TEXT("Btn_Mode2D"), TEXT("2D"), Blue, OnBlue, 8.f, 28.f, &Mode2DLabel, 12.f);
 		Mode3DButton = MakeButton(Tree, TEXT("Btn_Mode3D"), TEXT("3D"), White, Ink, 8.f, 28.f, &Mode3DLabel, 12.f);
 		Mode2DButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnShow2DClicked);
 		Mode3DButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnShow3DClicked);
@@ -194,7 +195,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		HandleSize->SetWidthOverride(40.f);
 		HandleSize->SetHeightOverride(5.f);
 		UBorder* HandleBar = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SheetHandle"));
-		HandleBar->SetBrush(Rounded(StartStyle::Rgb(209, 213, 219), FLinearColor::Transparent, 3.f, 0.f));
+		HandleBar->SetBrush(Rounded(IconGrey, FLinearColor::Transparent, 3.f, 0.f));
 		HandleBar->SetBrushColor(FLinearColor::White);
 		HandleSize->SetContent(HandleBar);
 		HandleZone->SetContent(HandleSize);
@@ -397,7 +398,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		auto MakeOverlay = [&](const TCHAR* Name, const TCHAR* Title, const TCHAR* Note) -> UBorder*
 		{
 			UBorder* Overlay = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(Name));
-			Overlay->SetBrushColor(White);
+			Overlay->SetBrushColor(PageBg);
 			Overlay->SetPadding(FMargin(16.f, 64.f, 16.f, 0.f));
 			UVerticalBox* Content = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), FName(FString(Name) + TEXT("_Content")));
 			Overlay->SetContent(Content);
@@ -464,6 +465,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 				if (UMobileAppWidget* Screen = WeakProfile.Get())
 				{
 					Screen->Preferences.SetTheme(Theme);
+					Screen->SyncAppearance();
 				}
 			});
 			ProfilePage->SetOnLargerTextToggled([WeakProfile](bool bLarger)
@@ -471,6 +473,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 				if (UMobileAppWidget* Screen = WeakProfile.Get())
 				{
 					Screen->Preferences.SetLargerText(bLarger);
+					Screen->SyncAppearance();
 				}
 			});
 			ProfilePage->SetOnReset([WeakProfile]()
@@ -531,6 +534,8 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		RefreshSheetPage();
 		PositionSheet();
 		SnapSheetNow();
+		BuiltTheme = CurrentTheme;
+		bBuiltLarger = bCurrentLarger;
 	}
 	return Super::RebuildWidget();
 }
@@ -789,7 +794,7 @@ void UMobileAppWidget::RefreshTabs()
 		if (TabIcons[Index])
 		{
 			// Placeholder icons: a rounded square, blue for the open tab.
-			TabIcons[Index]->SetBrush(Rounded(bActive ? Blue : StartStyle::Rgb(209, 213, 219), FLinearColor::Transparent, 6.f, 0.f));
+			TabIcons[Index]->SetBrush(Rounded(bActive ? Blue : IconGrey, FLinearColor::Transparent, 6.f, 0.f));
 			TabIcons[Index]->SetBrushColor(FLinearColor::White);
 		}
 	}
@@ -806,7 +811,7 @@ void UMobileAppWidget::RefreshModeButtons()
 		}
 		if (Label)
 		{
-			Label->SetColorAndOpacity(FSlateColor(bOn ? White : Ink));
+			Label->SetColorAndOpacity(FSlateColor(bOn ? OnBlue : Ink));
 		}
 	};
 	Style(Mode2DButton, Mode2DLabel, !bShow3D);
@@ -1166,7 +1171,7 @@ void UMobileAppWidget::ApplyMap()
 					Pad->SetBrushColor(FLinearColor::Transparent);
 					Pad->SetPadding(FMargin(14.f, 9.f));
 					Pad->SetHorizontalAlignment(HAlign_Center);
-					Pad->SetContent(MakeText(WidgetTree, FString(), Level.Label, 14.f, bChosen ? White : Ink, true));
+					Pad->SetContent(MakeText(WidgetTree, FString(), Level.Label, 14.f, bChosen ? OnBlue : Ink, true));
 					UMobileTapTarget* Row = CreateWidget<UMobileTapTarget>(this, UMobileTapTarget::StaticClass());
 					Row->Setup(Pad, FString::FromInt(Level.Level), bChosen ? Blue : FLinearColor::Transparent, 8.f);
 					TWeakObjectPtr<UMobileAppWidget> WeakThis(this);
@@ -1315,19 +1320,7 @@ void UMobileAppWidget::OpenSite(const FString& NewSiteId)
 	{
 		MapView->SetSource(Source.Get(), SiteId);
 	}
-	// The name at the top: a campus by its name, a single building with its level.
-	if (SiteNameText)
-	{
-		FString Name = SiteId;
-		for (const FMobileSite& Site : Source->ListSites())
-		{
-			if (Site.Id == SiteId)
-			{
-				Name = Site.ShortName.IsEmpty() ? Site.Name : Site.ShortName;
-			}
-		}
-		SiteNameText->SetText(FText::FromString(Name));
-	}
+	RefreshSiteName();
 	Snap = MobileSheet::SnapForState(Flow.GetState());
 	RefreshSheetPage();
 	SnapSheetNow();
@@ -1360,6 +1353,7 @@ void UMobileAppWidget::UsePreferencesFile(const FString& Path)
 	{
 		ProfilePage->SetPreferences(Preferences);
 	}
+	SyncAppearance();
 }
 
 void UMobileAppWidget::ResetSavedAndPreferences()
@@ -1372,6 +1366,120 @@ void UMobileAppWidget::ResetSavedAndPreferences()
 	if (ProfilePage)
 	{
 		ProfilePage->SetPreferences(Preferences);
+	}
+	SyncAppearance();
+}
+
+// ---- The look: theme and text size ----
+
+void UMobileAppWidget::SyncAppearance()
+{
+	ApplyAppearance(Preferences.GetTheme(), Preferences.IsLargerText());
+	// A screen that is not built yet is built in the look that is open now; one that is built in another look is built again.
+	if (SearchPage && (BuiltTheme != CurrentTheme || bBuiltLarger != bCurrentLarger))
+	{
+		QueueAppearanceRebuild();
+	}
+}
+
+void UMobileAppWidget::QueueAppearanceRebuild()
+{
+	if (bAppearanceRebuildQueued)
+	{
+		return;
+	}
+	bAppearanceRebuildQueued = true;
+	TWeakObjectPtr<UMobileAppWidget> WeakThis(this);
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakThis](float)
+	{
+		if (UMobileAppWidget* Screen = WeakThis.Get())
+		{
+			if (Screen->bAppearanceRebuildQueued)
+			{
+				Screen->RebuildForAppearance();
+			}
+		}
+		return false;
+	}));
+}
+
+void UMobileAppWidget::RebuildForAppearance()
+{
+	bAppearanceRebuildQueued = false;
+	ApplyAppearance(Preferences.GetTheme(), Preferences.IsLargerText());
+	if (!SearchPage)
+	{
+		return;
+	}
+	// What is not kept in the members the build starts from: the map's level and where My location is (the build puts both back at the first
+	// building), and the line the Profile tab shows.
+	const FString KeptMapBuilding = MapBuildingId;
+	const int32 KeptMapLevel = MapLevel;
+	const FString KeptMyBuilding = MyLocationBuildingId;
+	const int32 KeptMyLevel = MyLocationLevel;
+	const FString KeptStatus = ProfilePage ? ProfilePage->GetStatusString() : FString();
+
+	const bool bInViewport = IsInViewport();
+	if (bInViewport)
+	{
+		RemoveFromParent();
+	}
+	ReleaseSlateResources(true);
+	WidgetTree = NewObject<UWidgetTree>(this, UWidgetTree::StaticClass(), NAME_None, RF_Transient);
+	if (bInViewport)
+	{
+		AddToViewport();
+	}
+	else
+	{
+		TakeWidget();
+	}
+
+	// The members that say where the person is in the app stayed; the new pages are told.
+	MapBuildingId = KeptMapBuilding;
+	MapLevel = KeptMapLevel;
+	MyLocationBuildingId = KeptMyBuilding;
+	MyLocationLevel = KeptMyLevel;
+	RefreshSiteName();
+	RefreshSearchStart();
+	if (!SelectedPlace.Id.IsEmpty())
+	{
+		SelectPlace(SelectedPlace);
+		RefreshRoute();
+	}
+	RefreshNavigation();
+	RefreshArrived();
+	RefreshSaved();
+	if (MapView)
+	{
+		MapView->Set3D(bShow3D);
+	}
+	RefreshModeButtons();
+	RefreshSheetPage();
+	RefreshMap();
+	SnapSheetNow();
+	SetActiveTab(ActiveTab);
+	if (ProfilePage)
+	{
+		ProfilePage->SetPreferences(Preferences);
+		ProfilePage->ShowStatus(KeptStatus);
+	}
+}
+
+void UMobileAppWidget::RefreshSiteName()
+{
+	// The name at the top: a campus by its name, a single building with its level.
+	if (SiteNameText && Source.IsValid())
+	{
+		FString Name = SiteId;
+		for (const FMobileSite& Site : Source->ListSites())
+		{
+			if (Site.Id == SiteId)
+			{
+				Name = Site.ShortName.IsEmpty() ? Site.Name : Site.ShortName;
+			}
+		}
+		SiteNameText->SetText(FText::FromString(Name));
 	}
 }
 

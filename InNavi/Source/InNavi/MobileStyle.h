@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "MobilePreferences.h"
 #include "StartScreenStyle.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -17,15 +18,113 @@
 // desktop's UI scale; where they call StartStyle (which does) they hand it sizes that cancel it.
 namespace MobileStyle
 {
-	inline const FLinearColor Blue = StartStyle::Rgb(30, 100, 240);
-	inline const FLinearColor BlueSoft = StartStyle::Rgb(226, 236, 253);
-	inline const FLinearColor Ink = StartStyle::Rgb(17, 24, 39);
-	inline const FLinearColor Grey = StartStyle::Rgb(107, 114, 128);
-	inline const FLinearColor Line = StartStyle::Rgb(229, 231, 235);
-	inline const FLinearColor White = StartStyle::Rgb(255, 255, 255);
-	inline const FLinearColor MapBackground = StartStyle::Rgb(222, 231, 238);
-	inline const FLinearColor Red = StartStyle::Rgb(185, 28, 28);
-	inline const FLinearColor RedSoft = StartStyle::Rgb(254, 226, 226);
+	// The colours of the open theme (light, or the prototype's night theme). They are plain variables, set together by ApplyAppearance, and the
+	// pages read them when they are built, so a change of theme builds the pages again. Light is what they start as.
+	//   White: what cards, the sheet and the tab bar are made of (the surface); PageBg: what lies behind them; OnBlue: text and ticks on a Blue fill.
+	inline FLinearColor Blue = StartStyle::Rgb(30, 100, 240);
+	inline FLinearColor BlueSoft = StartStyle::Rgb(226, 236, 253);
+	inline FLinearColor Ink = StartStyle::Rgb(17, 24, 39);
+	inline FLinearColor Grey = StartStyle::Rgb(107, 114, 128);
+	inline FLinearColor Line = StartStyle::Rgb(229, 231, 235);
+	inline FLinearColor White = StartStyle::Rgb(255, 255, 255);
+	inline FLinearColor PageBg = StartStyle::Rgb(255, 255, 255);
+	inline FLinearColor OnBlue = StartStyle::Rgb(255, 255, 255);
+	inline FLinearColor FieldEdge = StartStyle::Rgb(203, 213, 225);
+	inline FLinearColor SoftPanel = StartStyle::Rgb(241, 245, 249);
+	inline FLinearColor IconGrey = StartStyle::Rgb(209, 213, 219);
+	inline FLinearColor MapBackground = StartStyle::Rgb(222, 231, 238);
+	inline FLinearColor Red = StartStyle::Rgb(185, 28, 28);
+	inline FLinearColor RedSoft = StartStyle::Rgb(254, 226, 226);
+	inline FLinearColor Green = StartStyle::Rgb(22, 101, 52);
+	inline FLinearColor GreenSoft = StartStyle::Rgb(220, 252, 231);
+	// What a row shows under a finger that is over it.
+	inline FLinearColor TapHover = FLinearColor(0.f, 0.f, 0.f, 0.04f);
+
+	// What the map is painted with.
+	struct FMapColours
+	{
+		FLinearColor Grass = StartStyle::Rgb(209, 235, 200);
+		FLinearColor Water = StartStyle::Rgb(186, 220, 245);
+		FLinearColor Slab = StartStyle::Rgb(148, 163, 184);
+		FLinearColor BuildingTop = StartStyle::Rgb(245, 247, 250);
+		FLinearColor Floor = StartStyle::Rgb(248, 250, 252);
+		FLinearColor Edge = StartStyle::Rgb(100, 116, 139);
+		FLinearColor RoomEdge = StartStyle::Rgb(148, 163, 184);
+		FLinearColor Room = StartStyle::Rgb(226, 232, 240);
+		FLinearColor Learning = StartStyle::Rgb(219, 234, 254);
+		FLinearColor Facilities = StartStyle::Rgb(209, 250, 229);
+		FLinearColor Dining = StartStyle::Rgb(254, 243, 199);
+		FLinearColor Highlight = StartStyle::Rgb(191, 219, 254);
+	};
+	inline FMapColours MapColours;
+
+	// How much bigger the text is when "Larger text" is on (the prototype raises its base size from 16 to 18).
+	inline float TextScale = 1.f;
+	// What ApplyAppearance last set, so a screen can tell whether it was built in the look that is open now.
+	inline EMobileTheme CurrentTheme = EMobileTheme::Light;
+	inline bool bCurrentLarger = false;
+
+	inline void ApplyAppearance(EMobileTheme Theme, bool bLargerText)
+	{
+		TextScale = bLargerText ? 1.125f : 1.f;
+		CurrentTheme = Theme;
+		bCurrentLarger = bLargerText;
+		if (Theme == EMobileTheme::Night)
+		{
+			Blue = StartStyle::Rgb(120, 173, 255);
+			BlueSoft = StartStyle::Rgb(42, 63, 95);
+			Ink = StartStyle::Rgb(237, 243, 252);
+			Grey = StartStyle::Rgb(178, 193, 214);
+			Line = StartStyle::Rgb(60, 77, 101);
+			White = StartStyle::Rgb(25, 36, 55);
+			PageBg = StartStyle::Rgb(16, 24, 39);
+			OnBlue = StartStyle::Rgb(15, 23, 42);
+			FieldEdge = StartStyle::Rgb(81, 99, 125);
+			SoftPanel = StartStyle::Rgb(36, 50, 71);
+			IconGrey = StartStyle::Rgb(81, 99, 125);
+			MapBackground = StartStyle::Rgb(31, 45, 65);
+			Red = StartStyle::Rgb(253, 164, 175);
+			RedSoft = StartStyle::Rgb(74, 34, 48);
+			Green = StartStyle::Rgb(134, 239, 172);
+			GreenSoft = StartStyle::Rgb(29, 59, 42);
+			TapHover = FLinearColor(1.f, 1.f, 1.f, 0.06f);
+			FMapColours Night;
+			Night.Grass = StartStyle::Rgb(36, 61, 52);
+			Night.Water = StartStyle::Rgb(38, 70, 92);
+			Night.Slab = StartStyle::Rgb(71, 85, 105);
+			Night.BuildingTop = StartStyle::Rgb(48, 65, 90);
+			Night.Floor = StartStyle::Rgb(37, 51, 72);
+			Night.Edge = StartStyle::Rgb(148, 163, 184);
+			Night.RoomEdge = StartStyle::Rgb(100, 116, 139);
+			Night.Room = StartStyle::Rgb(48, 65, 90);
+			Night.Learning = StartStyle::Rgb(43, 67, 110);
+			Night.Facilities = StartStyle::Rgb(36, 84, 72);
+			Night.Dining = StartStyle::Rgb(94, 76, 38);
+			Night.Highlight = StartStyle::Rgb(55, 90, 150);
+			MapColours = Night;
+		}
+		else
+		{
+			Blue = StartStyle::Rgb(30, 100, 240);
+			BlueSoft = StartStyle::Rgb(226, 236, 253);
+			Ink = StartStyle::Rgb(17, 24, 39);
+			Grey = StartStyle::Rgb(107, 114, 128);
+			Line = StartStyle::Rgb(229, 231, 235);
+			White = StartStyle::Rgb(255, 255, 255);
+			PageBg = StartStyle::Rgb(255, 255, 255);
+			OnBlue = StartStyle::Rgb(255, 255, 255);
+			FieldEdge = StartStyle::Rgb(203, 213, 225);
+			SoftPanel = StartStyle::Rgb(241, 245, 249);
+			IconGrey = StartStyle::Rgb(209, 213, 219);
+			MapBackground = StartStyle::Rgb(222, 231, 238);
+			Red = StartStyle::Rgb(185, 28, 28);
+			RedSoft = StartStyle::Rgb(254, 226, 226);
+			Green = StartStyle::Rgb(22, 101, 52);
+			GreenSoft = StartStyle::Rgb(220, 252, 231);
+			TapHover = FLinearColor(0.f, 0.f, 0.f, 0.04f);
+			MapColours = FMapColours();
+		}
+	}
 
 	inline FSlateBrush Rounded(const FLinearColor& Fill, const FLinearColor& Outline, float Radius, float OutlineWidth = 1.f)
 	{
@@ -45,7 +144,7 @@ namespace MobileStyle
 			return;
 		}
 		FSlateFontInfo Font = Block->GetFont();
-		Font.Size = FMath::RoundToInt(PixelSize * StartStyle::PixelsToFont);
+		Font.Size = FMath::RoundToInt(PixelSize * TextScale * StartStyle::PixelsToFont);
 		if (bBold)
 		{
 			Font.TypefaceFontName = TEXT("Bold");
@@ -91,14 +190,14 @@ namespace MobileStyle
 	inline FEditableTextBoxStyle SearchField(float PixelSize)
 	{
 		FEditableTextBoxStyle Style;
-		Style.BackgroundImageNormal = Rounded(White, StartStyle::Rgb(203, 213, 225), 12.f);
-		Style.BackgroundImageHovered = Rounded(White, StartStyle::Rgb(148, 163, 184), 12.f);
+		Style.BackgroundImageNormal = Rounded(White, FieldEdge, 12.f);
+		Style.BackgroundImageHovered = Rounded(White, FieldEdge * 0.8f, 12.f);
 		Style.BackgroundImageFocused = Rounded(White, Blue, 12.f, 1.5f);
 		Style.BackgroundImageReadOnly = Rounded(White, Line, 12.f);
 		Style.Padding = FMargin(14.f, 12.f);
 		Style.ForegroundColor = FSlateColor(Ink);
 		Style.FocusedForegroundColor = FSlateColor(Ink);
-		Style.TextStyle.Font.Size = FMath::RoundToInt(PixelSize * StartStyle::PixelsToFont);
+		Style.TextStyle.Font.Size = FMath::RoundToInt(PixelSize * TextScale * StartStyle::PixelsToFont);
 		Style.TextStyle.ColorAndOpacity = FSlateColor(Ink);
 		return Style;
 	}

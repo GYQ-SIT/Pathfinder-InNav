@@ -118,6 +118,8 @@ void ANavPlayerController::MobileApp()
 	UWidgetLayoutLibrary::RemoveAllWidgets(this);
 	if (UMobileAppWidget* Screen = CreateWidget<UMobileAppWidget>(this, UMobileAppWidget::StaticClass()))
 	{
+		// The look (theme and text size) is read before the screen is built, so it is built in it.
+		Screen->UsePreferencesFile(FMobilePreferences::DefaultFile());
 		Screen->AddToViewport();
 		// The saved places are kept in a file; for looking at the tab, -MobileSave=E2-01-101,PLM-01-102 saves some without one.
 		FString PreviewIds;
@@ -129,8 +131,7 @@ void ANavPlayerController::MobileApp()
 		{
 			Screen->UseSavedFile(FMobileSavedPlaces::DefaultFile());
 		}
-		Screen->UsePreferencesFile(FMobilePreferences::DefaultFile());
-			// For trying a screen straight away: -MobileTab=Directory and -MobileState=Route.
+		// For trying a screen straight away: -MobileTab=Directory and -MobileState=Route.
 		FString Tab, State;
 		if (FParse::Value(FCommandLine::Get(), TEXT("MobileTab="), Tab))
 		{

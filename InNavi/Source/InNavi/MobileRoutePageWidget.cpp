@@ -110,7 +110,7 @@ TSharedRef<SWidget> UMobileRoutePageWidget::RebuildWidget()
 		Content->AddChildToVerticalBox(StepBox)->SetPadding(FMargin(16.f, 4.f, 16.f, 12.f));
 		Page->AddChildToVerticalBox(Scroll)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 
-		StartButton = MakeButton(Tree, TEXT("Btn_StartNavigation"), TEXT("Start navigation"), Blue, White, 12.f, 48.f);
+		StartButton = MakeButton(Tree, TEXT("Btn_StartNavigation"), TEXT("Start navigation"), Blue, OnBlue, 12.f, 48.f);
 		StartButton->OnClicked.AddUniqueDynamic(this, &UMobileRoutePageWidget::HandleStartClicked);
 		Page->AddChildToVerticalBox(StartButton)->SetPadding(FMargin(16.f, 8.f, 16.f, 12.f));
 
@@ -212,7 +212,7 @@ void UMobileRoutePageWidget::RefreshOptions()
 		UBorder* Pill = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
 		Pill->SetBrushColor(FLinearColor::Transparent);
 		Pill->SetPadding(FMargin(14.f, 8.f));
-		Pill->SetContent(MakeText(WidgetTree, FString(), Label, 13.f, bOn ? White : Blue, true));
+		Pill->SetContent(MakeText(WidgetTree, FString(), Label, 13.f, bOn ? OnBlue : Blue, true));
 		Chip->Setup(Pill, Payload, bOn ? Blue : BlueSoft, 16.f);
 		TWeakObjectPtr<UMobileRoutePageWidget> WeakThis(this);
 		Chip->SetOnTapped([WeakThis](const FString& Tapped)

@@ -200,7 +200,7 @@ void UMobileSearchPageWidget::RefreshFilterChips()
 		UBorder* Pill = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
 		Pill->SetBrushColor(FLinearColor::Transparent);
 		Pill->SetPadding(FMargin(14.f, 8.f));
-		Pill->SetContent(MakeText(WidgetTree, FString(), Label, 13.f, bOn ? White : Blue, true));
+		Pill->SetContent(MakeText(WidgetTree, FString(), Label, 13.f, bOn ? OnBlue : Blue, true));
 		Chip->Setup(Pill, Payload, bOn ? Blue : BlueSoft, 16.f);
 		TWeakObjectPtr<UMobileSearchPageWidget> WeakThis(this);
 		Chip->SetOnTapped([WeakThis](const FString& Tapped)

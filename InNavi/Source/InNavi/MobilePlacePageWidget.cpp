@@ -18,8 +18,6 @@ using namespace MobileStyle;
 
 namespace
 {
-	const FLinearColor GreenSoft = StartStyle::Rgb(220, 252, 231);
-	const FLinearColor Green = StartStyle::Rgb(22, 101, 52);
 
 	UBorder* MakePill(UWidgetTree* Tree, const FString& Text, const FLinearColor& Fill, const FLinearColor& TextColor)
 	{
@@ -64,7 +62,7 @@ TSharedRef<SWidget> UMobilePlacePageWidget::RebuildWidget()
 		Scroll->AddChild(Content);
 
 		UBorder* Photo = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("PlacePhoto"));
-		Photo->SetBrush(Rounded(StartStyle::Rgb(241, 245, 249), Line, 14.f));
+		Photo->SetBrush(Rounded(SoftPanel, Line, 14.f));
 		Photo->SetBrushColor(FLinearColor::White);
 		Photo->SetHorizontalAlignment(HAlign_Center);
 		Photo->SetVerticalAlignment(VAlign_Center);
@@ -91,7 +89,7 @@ TSharedRef<SWidget> UMobilePlacePageWidget::RebuildWidget()
 		Page->AddChildToVerticalBox(Scroll)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 
 		// Get directions stays at the bottom whatever the height of the sheet.
-		UButton* Directions = MakeButton(Tree, TEXT("Btn_GetDirections"), TEXT("Get directions"), Blue, White, 12.f, 48.f);
+		UButton* Directions = MakeButton(Tree, TEXT("Btn_GetDirections"), TEXT("Get directions"), Blue, OnBlue, 12.f, 48.f);
 		Directions->OnClicked.AddUniqueDynamic(this, &UMobilePlacePageWidget::HandleDirectionsClicked);
 		Page->AddChildToVerticalBox(Directions)->SetPadding(FMargin(16.f, 8.f, 16.f, 12.f));
 
@@ -139,7 +137,7 @@ void UMobilePlacePageWidget::Refresh()
 		Label->SetText(FText::FromString(bOn ? On : Off));
 		const FLinearColor Fill = bOn ? Blue : White;
 		Button->SetStyle(StartStyle::Button(Fill, Fill * 0.94f, Fill * 0.86f, Line, 12.f / StartStyle::DesignToUi));
-		Label->SetColorAndOpacity(FSlateColor(bOn ? White : Blue));
+		Label->SetColorAndOpacity(FSlateColor(bOn ? OnBlue : Blue));
 	};
 	Style(SaveButton, SaveLabel, TEXT("Save place"), TEXT("Saved"), bSaved);
 	Style(StartButton, StartLabel, TEXT("Use as starting point"), TEXT("Starting point"), bIsStart);

@@ -214,5 +214,15 @@ The choices are the app's own state, like the saved places: `FMobilePreferences`
 (`{ "version": 1, "theme": "light" | "night", "largerText": bool }`), written on every change and read when the app starts; a missing or damaged file is the defaults. Reset takes every
 saved place off (the Saved tab, place page and arrival page follow) and puts the preferences back to light and normal text.
 
-The choices are stored and shown, but **not applied yet**: the night theme and larger text need the colours and text sizes in `MobileStyle.h` (plain constants now) to come from the
-chosen theme and every page to be rebuilt when it changes. That is its own step, to do when the design team's night palette is in.
+### The night theme and larger text
+
+Both are applied. `MobileStyle::ApplyAppearance(theme, largerText)` sets the colours the pages are built with (`Blue`, `Ink`, `Grey`, `Line`, `White` for surfaces, `PageBg` behind them,
+`OnBlue` for text on a Blue fill, and the map's own `MapColours`) and `TextScale`. The night palette is the prototype's (`#101827` page, `#192437` surface, `#243247` panel, `#edf3fc` text,
+`#b2c1d6` muted, `#78adff` primary, `#0f172a` on primary); the map's night colours are ours, as the prototype keeps its map as it is. Larger text is 1.125 times every text size (the
+prototype raises its base size from 16 to 18 px).
+
+Pages read the colours when they are built, so a change builds them again: `UMobileAppWidget::RebuildForAppearance()` gives the screen a new widget tree and puts it back as it was (the tab,
+the site, the place, the route and the step, the map's level and 2D or 3D, the saved places, the line the Profile tab was showing). The Profile tab asks for it while one of its own buttons
+is being tapped, so it runs a moment later from a ticker. The look is read from `Saved/MobilePreferences.json` before the screen is first built, so the app opens in it. The colours are
+process-wide variables, so a test that changes them puts them back (`FAppearanceGuard`). Not scaled by larger text: the labels drawn on the map. Not themed yet: the placeholder pictures
+(the buildings on the Explore cards).

@@ -35,7 +35,7 @@ TSharedRef<SWidget> UMobileSelectWidget::RebuildWidget()
 		// The arrow is a placeholder letter until the design team's icon is in.
 		Row->AddChildToHorizontalBox(MakeText(Tree, TEXT("Txt_SelectArrow"), TEXT("v"), 13.f, Grey, true))->SetVerticalAlignment(VAlign_Center);
 		UBorder* Box = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SelectBox"));
-		Box->SetBrush(Rounded(White, StartStyle::Rgb(203, 213, 225), 12.f));
+		Box->SetBrush(Rounded(White, FieldEdge, 12.f));
 		Box->SetBrushColor(FLinearColor::White);
 		Box->SetPadding(FMargin(14.f, 10.f));
 		Box->SetContent(Row);
@@ -53,7 +53,7 @@ TSharedRef<SWidget> UMobileSelectWidget::RebuildWidget()
 
 		// The options, under the field when it is open.
 		ListPanel = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SelectList"));
-		ListPanel->SetBrush(Rounded(White, StartStyle::Rgb(203, 213, 225), 12.f));
+		ListPanel->SetBrush(Rounded(White, FieldEdge, 12.f));
 		ListPanel->SetBrushColor(FLinearColor::White);
 		ListPanel->SetPadding(FMargin(0.f, 4.f));
 		ListPanel->SetVisibility(ESlateVisibility::Collapsed);

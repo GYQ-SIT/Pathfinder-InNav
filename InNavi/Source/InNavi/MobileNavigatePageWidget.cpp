@@ -45,7 +45,7 @@ TSharedRef<SWidget> UMobileNavigatePageWidget::RebuildWidget()
 		Info->AddChildToHorizontalBox(LevelText)->SetPadding(FMargin(12.f, 0.f, 0.f, 0.f));
 		Page->AddChildToVerticalBox(Info)->SetPadding(FMargin(16.f, 4.f, 16.f, 0.f));
 
-		UButton* Next = MakeButton(Tree, TEXT("Btn_NextInstruction"), TEXT("Next instruction"), Blue, White, 12.f, 48.f, &NextLabel);
+		UButton* Next = MakeButton(Tree, TEXT("Btn_NextInstruction"), TEXT("Next instruction"), Blue, OnBlue, 12.f, 48.f, &NextLabel);
 		Next->OnClicked.AddUniqueDynamic(this, &UMobileNavigatePageWidget::HandleNextClicked);
 		Page->AddChildToVerticalBox(Next)->SetPadding(FMargin(16.f, 10.f, 16.f, 12.f));
 

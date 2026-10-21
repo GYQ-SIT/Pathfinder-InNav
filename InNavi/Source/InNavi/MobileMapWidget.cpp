@@ -15,10 +15,10 @@ namespace
 	// What the map's colours are: soft by kind of room, the way the prototype's plans are.
 	FLinearColor RoomColour(const FString& Category, bool bAvailable)
 	{
-		FLinearColor Colour = StartStyle::Rgb(226, 232, 240);
-		if (Category == TEXT("Learning")) Colour = StartStyle::Rgb(219, 234, 254);
-		else if (Category == TEXT("Facilities")) Colour = StartStyle::Rgb(209, 250, 229);
-		else if (Category == TEXT("Dining")) Colour = StartStyle::Rgb(254, 243, 199);
+		FLinearColor Colour = MapColours.Room;
+		if (Category == TEXT("Learning")) Colour = MapColours.Learning;
+		else if (Category == TEXT("Facilities")) Colour = MapColours.Facilities;
+		else if (Category == TEXT("Dining")) Colour = MapColours.Dining;
 		return bAvailable ? Colour : Colour * 0.8f;
 	}
 
@@ -334,18 +334,18 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 		{
 			const TArray<FVector2D> Shape = ToWidgetPolygon(Feature.Outline, W, H, 0.0);
 			const bool bWater = Feature.Name == TEXT("Pond");
-			FillPolygon(OutDrawElements, Layer, AllottedGeometry, Shape, bWater ? StartStyle::Rgb(186, 220, 245) : StartStyle::Rgb(209, 235, 200));
+			FillPolygon(OutDrawElements, Layer, AllottedGeometry, Shape, bWater ? MapColours.Water : MapColours.Grass);
 			DrawLabel(OutDrawElements, Layer + 1, AllottedGeometry, Feature.Name, Centre(Shape), 11.f, Grey);
 		}
 		for (const FMobileCampusBuilding& Building : CampusMap.Buildings)
 		{
 			if (bShow3D)
 			{
-				FillPolygon(OutDrawElements, Layer + 1, AllottedGeometry, ToWidgetPolygon(Building.Outline, W, H, 0.0), StartStyle::Rgb(148, 163, 184));
+				FillPolygon(OutDrawElements, Layer + 1, AllottedGeometry, ToWidgetPolygon(Building.Outline, W, H, 0.0), MapColours.Slab);
 			}
 			const TArray<FVector2D> Top = ToWidgetPolygon(Building.Outline, W, H, Lift);
-			FillPolygon(OutDrawElements, Layer + 2, AllottedGeometry, Top, StartStyle::Rgb(245, 247, 250));
-			OutlinePolygon(OutDrawElements, Layer + 3, AllottedGeometry, Top, StartStyle::Rgb(100, 116, 139), 2.f);
+			FillPolygon(OutDrawElements, Layer + 2, AllottedGeometry, Top, MapColours.BuildingTop);
+			OutlinePolygon(OutDrawElements, Layer + 3, AllottedGeometry, Top, MapColours.Edge, 2.f);
 			DrawLabel(OutDrawElements, Layer + 4, AllottedGeometry, Building.Name, Centre(Top), 15.f, Ink);
 		}
 		return Layer + 5;
@@ -358,19 +358,19 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 	// The floor: in the tilted view it stands on a slab.
 	if (bShow3D)
 	{
-		FillPolygon(OutDrawElements, Layer, AllottedGeometry, ToWidgetPolygon(LevelMap.Outline, W, H, 0.0), StartStyle::Rgb(148, 163, 184));
+		FillPolygon(OutDrawElements, Layer, AllottedGeometry, ToWidgetPolygon(LevelMap.Outline, W, H, 0.0), MapColours.Slab);
 	}
 	const TArray<FVector2D> Floor = ToWidgetPolygon(LevelMap.Outline, W, H, Lift);
-	FillPolygon(OutDrawElements, Layer + 1, AllottedGeometry, Floor, StartStyle::Rgb(248, 250, 252));
-	OutlinePolygon(OutDrawElements, Layer + 3, AllottedGeometry, Floor, StartStyle::Rgb(100, 116, 139), 2.5f);
+	FillPolygon(OutDrawElements, Layer + 1, AllottedGeometry, Floor, MapColours.Floor);
+	OutlinePolygon(OutDrawElements, Layer + 3, AllottedGeometry, Floor, MapColours.Edge, 2.5f);
 
 	// The rooms.
 	for (const FMobileMapRoom& Room : LevelMap.Rooms)
 	{
 		const TArray<FVector2D> Shape = ToWidgetPolygon(Room.Polygon, W, H, Lift);
 		const bool bHighlight = !Room.PlaceId.IsEmpty() && Room.PlaceId == HighlightPlaceId;
-		FillPolygon(OutDrawElements, Layer + 2, AllottedGeometry, Shape, bHighlight ? StartStyle::Rgb(191, 219, 254) : RoomColour(Room.Category, Room.bAvailable));
-		OutlinePolygon(OutDrawElements, Layer + 3, AllottedGeometry, Shape, bHighlight ? Blue : StartStyle::Rgb(148, 163, 184), bHighlight ? 3.f : 1.2f);
+		FillPolygon(OutDrawElements, Layer + 2, AllottedGeometry, Shape, bHighlight ? MapColours.Highlight : RoomColour(Room.Category, Room.bAvailable));
+		OutlinePolygon(OutDrawElements, Layer + 3, AllottedGeometry, Shape, bHighlight ? Blue : MapColours.RoomEdge, bHighlight ? 3.f : 1.2f);
 		DrawLabel(OutDrawElements, Layer + 4, AllottedGeometry, Room.Name, Centre(Shape), 10.f, Ink);
 	}
 
@@ -379,7 +379,7 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 	{
 		const FVector2D At = ToWidgetPolygon({ Connector.Position }, W, H, Lift)[0];
 		FillPolygon(OutDrawElements, Layer + 4, AllottedGeometry, Circle(At, 8.0), Connector.Kind == EMobileConnectorKind::Lift ? StartStyle::Rgb(30, 100, 240) : (Connector.Kind == EMobileConnectorKind::Stairs ? StartStyle::Rgb(100, 116, 139) : StartStyle::Rgb(13, 148, 136)));
-		DrawLabel(OutDrawElements, Layer + 5, AllottedGeometry, Connector.Kind == EMobileConnectorKind::Lift ? TEXT("L") : (Connector.Kind == EMobileConnectorKind::Stairs ? TEXT("S") : TEXT("E")), At, 9.f, White);
+		DrawLabel(OutDrawElements, Layer + 5, AllottedGeometry, Connector.Kind == EMobileConnectorKind::Lift ? TEXT("L") : (Connector.Kind == EMobileConnectorKind::Stairs ? TEXT("S") : TEXT("E")), At, 9.f, FLinearColor::White);
 	}
 
 	// The way in, on the ground level.
@@ -417,14 +417,14 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 		if (Start.BuildingId == LevelMap.BuildingId && Start.Level == LevelMap.Level)
 		{
 			const FVector2D At = ToWidgetPolygon({ Start.Position }, W, H, Lift)[0];
-			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(At, 7.0), White);
+			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(At, 7.0), FLinearColor::White);
 			FillPolygon(OutDrawElements, Layer + 8, AllottedGeometry, Circle(At, 4.5), Blue);
 		}
 		const FMobileRoutePoint& End = Route.Points.Last();
 		if (End.BuildingId == LevelMap.BuildingId && End.Level == LevelMap.Level)
 		{
 			const FVector2D At = ToWidgetPolygon({ End.Position }, W, H, Lift)[0];
-			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(At, 9.0), White);
+			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(At, 9.0), FLinearColor::White);
 			FillPolygon(OutDrawElements, Layer + 8, AllottedGeometry, Circle(At, 6.5), Red);
 		}
 	}
@@ -434,7 +434,7 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 	{
 		const FVector2D At = ToWidgetPolygon({ Position.Position }, W, H, Lift)[0];
 		FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, Circle(At, 12.0), FLinearColor(0.12f, 0.39f, 0.94f, 0.25f));
-		FillPolygon(OutDrawElements, Layer + 10, AllottedGeometry, Circle(At, 7.5), White);
+		FillPolygon(OutDrawElements, Layer + 10, AllottedGeometry, Circle(At, 7.5), FLinearColor::White);
 		FillPolygon(OutDrawElements, Layer + 11, AllottedGeometry, Circle(At, 5.5), Blue);
 	}
 	return Layer + 12;

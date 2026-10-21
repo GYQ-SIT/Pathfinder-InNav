@@ -255,17 +255,17 @@ void UMobileProfilePageWidget::Refresh()
 		}
 		if (Label)
 		{
-			Label->SetColorAndOpacity(FSlateColor(bChosen ? White : Ink));
+			Label->SetColorAndOpacity(FSlateColor(bChosen ? OnBlue : Ink));
 		}
 	};
 	Style(LightPill, LightLabel, Theme == EMobileTheme::Light);
 	Style(NightPill, NightLabel, Theme == EMobileTheme::Night);
 	if (LargerBox)
 	{
-		LargerBox->SetBrush(Rounded(bLargerText ? Blue : White, bLargerText ? Blue : StartStyle::Rgb(156, 163, 175), 5.f));
+		LargerBox->SetBrush(Rounded(bLargerText ? Blue : White, bLargerText ? Blue : Grey, 5.f));
 	}
 	if (LargerTick)
 	{
-		LargerTick->SetBrush(Rounded(bLargerText ? White : FLinearColor::Transparent, FLinearColor::Transparent, 2.f, 0.f));
+		LargerTick->SetBrush(Rounded(bLargerText ? OnBlue : FLinearColor::Transparent, FLinearColor::Transparent, 2.f, 0.f));
 	}
 }

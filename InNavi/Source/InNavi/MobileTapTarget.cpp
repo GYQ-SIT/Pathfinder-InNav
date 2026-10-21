@@ -25,7 +25,7 @@ void UMobileTapTarget::Setup(UWidget* Content, const FString& InPayload, const F
 	if (Button)
 	{
 		const FLinearColor Pressed = Fill.A > 0.f ? Fill * 0.9f : MobileStyle::BlueSoft;
-		const FLinearColor Hover = Fill.A > 0.f ? Fill * 0.96f : FLinearColor(0.f, 0.f, 0.f, 0.04f);
+		const FLinearColor Hover = Fill.A > 0.f ? Fill * 0.96f : MobileStyle::TapHover;
 		Button->SetStyle(StartStyle::Button(Fill, Hover, Pressed, FLinearColor::Transparent, CornerRadius / StartStyle::DesignToUi));
 		Button->SetBackgroundColor(FLinearColor::White);
 		if (UPanelSlot* ContentSlot = Button->SetContent(Content))

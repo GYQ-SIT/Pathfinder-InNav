@@ -36,6 +36,8 @@ public:
 	// The line under the controls that says what the last tap did ("Appearance updated"); empty before any.
 	FString GetStatusString() const;
 	FString GetNoteString() const;
+	// Shows a line under the controls (the screen puts back the one the person was reading after it builds the page again).
+	void ShowStatus(const FString& Text) { SetStatus(Text); }
 	UWidget* FindNamedWidget(const FName& Name) const;
 
 protected:

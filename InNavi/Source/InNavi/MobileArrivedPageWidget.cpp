@@ -23,7 +23,7 @@ TSharedRef<SWidget> UMobileArrivedPageWidget::RebuildWidget()
 		PlaceText->SetAutoWrapText(true);
 		Page->AddChildToVerticalBox(PlaceText)->SetPadding(FMargin(16.f, 4.f, 16.f, 0.f));
 
-		UButton* Another = MakeButton(Tree, TEXT("Btn_FindAnother"), TEXT("Find another place"), Blue, White, 12.f, 48.f);
+		UButton* Another = MakeButton(Tree, TEXT("Btn_FindAnother"), TEXT("Find another place"), Blue, OnBlue, 12.f, 48.f);
 		Another->OnClicked.AddUniqueDynamic(this, &UMobileArrivedPageWidget::HandleFindAnotherClicked);
 		Page->AddChildToVerticalBox(Another)->SetPadding(FMargin(16.f, 16.f, 16.f, 0.f));
 		SaveButton = MakeButton(Tree, TEXT("Btn_SaveThisPlace"), TEXT("Save this place"), White, Blue, 12.f, 44.f, &SaveLabel);
@@ -60,7 +60,7 @@ void UMobileArrivedPageWidget::Refresh()
 	SaveLabel->SetText(FText::FromString(bSaved ? TEXT("Saved") : TEXT("Save this place")));
 	const FLinearColor Fill = bSaved ? Blue : White;
 	SaveButton->SetStyle(StartStyle::Button(Fill, Fill * 0.94f, Fill * 0.86f, Line, 12.f / StartStyle::DesignToUi));
-	SaveLabel->SetColorAndOpacity(FSlateColor(bSaved ? White : Blue));
+	SaveLabel->SetColorAndOpacity(FSlateColor(bSaved ? OnBlue : Blue));
 }
 
 void UMobileArrivedPageWidget::HandleFindAnotherClicked()
