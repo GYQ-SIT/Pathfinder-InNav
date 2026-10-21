@@ -16,6 +16,7 @@ class UTextBlock;
 class UWidget;
 class UWidgetSwitcher;
 class UMobileSearchPageWidget;
+class UMobilePlacePageWidget;
 
 // Where the main pieces of the phone screen are, in design pixels (the phone screen is 375 wide however big the window is), so a test can
 // check that nothing falls off a small or a tall screen.
@@ -76,6 +77,8 @@ public:
 	void SendSheetEvent(EMobileSheetEvent Event);
 	// A place was picked on the search page: the sheet moves on to it.
 	void ShowPlace(const FMobilePlace& Place);
+	// Makes a place the one the place page shows, without moving the sheet.
+	void SelectPlace(const FMobilePlace& Place);
 	void SetSnap(EMobileSheetSnap NewSnap);
 	// The sheet's height right now, mid-drag or mid-move included (design pixels).
 	double GetSheetHeight() const { return SheetHeight; }
@@ -91,6 +94,9 @@ public:
 	UWidget* FindNamedWidget(const FName& Name) const;
 
 	UMobileSearchPageWidget* GetSearchPage() const { return SearchPage; }
+	UMobilePlacePageWidget* GetPlacePage() const { return PlacePage; }
+	bool IsPlaceSaved(const FString& PlaceId) const { return SavedPlaceIds.Contains(PlaceId); }
+	const FString& GetStartPlaceId() const { return StartPlaceId; }
 	const FMobilePlace& GetSelectedPlace() const { return SelectedPlace; }
 	IMobileNavSource* GetSource() const { return Source.Get(); }
 
@@ -115,8 +121,6 @@ private:
 	void OnTabProfileClicked();
 	UFUNCTION()
 	void OnOpenSiteClicked();
-	UFUNCTION()
-	void OnGetDirectionsClicked();
 	UFUNCTION()
 	void OnStartNavigationClicked();
 	UFUNCTION()
@@ -190,6 +194,11 @@ private:
 	FMobilePlace SelectedPlace;
 	UPROPERTY()
 	UMobileSearchPageWidget* SearchPage = nullptr;
+	UPROPERTY()
+	UMobilePlacePageWidget* PlacePage = nullptr;
+	// The places the person saved, and the one they chose to start from (empty = their location).
+	TSet<FString> SavedPlaceIds;
+	FString StartPlaceId;
 
 	FMobileSheetFlow Flow;
 	ETab ActiveTab = ETab::Explore;

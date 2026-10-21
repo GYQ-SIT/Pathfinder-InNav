@@ -114,3 +114,11 @@ Explore tab. A row or a chip is a `UMobileTapTarget`, which carries its own payl
 
 The category icons and the search box's magnifier are placeholders (a letter on a soft square); the design team's icons replace them. More launch
 options for looking at it: `-MobileQuery=lounge`, `-MobileBrowse`, `-MobileFilters`, `-MobileSnap=Collapsed|Half|Full`.
+
+## The place page (step 3, second page)
+
+`UMobilePlacePageWidget` shows one place: the back arrow, the name with its code, building and level under it, a photo box ("No photo" until a place
+has one), the category and an Available / Unavailable pill, the description, Save place and Use as starting point, and Get directions pinned at the
+bottom of the sheet whatever its height (the rest scrolls). It keeps no state of its own: `UMobileAppWidget` keeps the saved places and the starting
+point (empty = my location) and hands the page what to show, so the buttons read "Saved" and "Starting point" when they are on. The page tells the screen
+about Back, Save, Use as starting point and Get directions through callbacks. `-MobileState=Place` shows it on the first place of the site.

@@ -1,5 +1,6 @@
 #include "MobileAppWidget.h"
 
+#include "MobilePlacePageWidget.h"
 #include "MobileSearchPageWidget.h"
 #include "MobileStyle.h"
 #include "StartScreenStyle.h"
@@ -199,6 +200,47 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 				SheetPages->AddChild(SearchPage);
 				continue;
 			}
+			if (Index == 1)
+			{
+				// The second page is the real place page: it shows the place and tells the screen what the person did.
+				PlacePage = CreateWidget<UMobilePlacePageWidget>(this, UMobilePlacePageWidget::StaticClass());
+				TWeakObjectPtr<UMobileAppWidget> WeakThis(this);
+				PlacePage->SetOnBack([WeakThis]()
+				{
+					if (UMobileAppWidget* Screen = WeakThis.Get())
+					{
+						Screen->SendSheetEvent(EMobileSheetEvent::Back);
+					}
+				});
+				PlacePage->SetOnDirections([WeakThis](const FMobilePlace&)
+				{
+					if (UMobileAppWidget* Screen = WeakThis.Get())
+					{
+						Screen->SendSheetEvent(EMobileSheetEvent::DirectionsRequested);
+					}
+				});
+				PlacePage->SetOnSaveToggled([WeakThis](const FMobilePlace& Place)
+				{
+					if (UMobileAppWidget* Screen = WeakThis.Get())
+					{
+						if (Screen->SavedPlaceIds.Remove(Place.Id) == 0)
+						{
+							Screen->SavedPlaceIds.Add(Place.Id);
+						}
+						Screen->SelectPlace(Place);
+					}
+				});
+				PlacePage->SetOnUseAsStart([WeakThis](const FMobilePlace& Place)
+				{
+					if (UMobileAppWidget* Screen = WeakThis.Get())
+					{
+						Screen->StartPlaceId = Screen->StartPlaceId == Place.Id ? FString() : Place.Id;
+						Screen->SelectPlace(Place);
+					}
+				});
+				SheetPages->AddChild(PlacePage);
+				continue;
+			}
 			UBorder* Page = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(TEXT("SheetPage") + Suffix));
 			Page->SetBrushColor(FLinearColor::Transparent);
 			Page->SetPadding(FMargin(16.f, 4.f, 16.f, 12.f));
@@ -218,7 +260,6 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 			Content->AddChildToVerticalBox(Primary);
 			switch (Index)
 			{
-			case 1: Primary->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnGetDirectionsClicked); break;
 			case 2: Primary->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnStartNavigationClicked); break;
 			case 3: Primary->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnArriveClicked); break;
 			default: Primary->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnFindAnotherClicked); break;
@@ -643,7 +684,6 @@ void UMobileAppWidget::OnTabDirectoryClicked() { SetActiveTab(ETab::Directory); 
 void UMobileAppWidget::OnTabSavedClicked() { SetActiveTab(ETab::Saved); }
 void UMobileAppWidget::OnTabProfileClicked() { SetActiveTab(ETab::Profile); }
 void UMobileAppWidget::OnOpenSiteClicked() { SetActiveTab(ETab::Directory); }
-void UMobileAppWidget::OnGetDirectionsClicked() { SendSheetEvent(EMobileSheetEvent::DirectionsRequested); }
 void UMobileAppWidget::OnStartNavigationClicked() { SendSheetEvent(EMobileSheetEvent::NavigationStarted); }
 void UMobileAppWidget::OnArriveClicked() { SendSheetEvent(EMobileSheetEvent::ArrivedAtDestination); }
 void UMobileAppWidget::OnBackClicked() { SendSheetEvent(EMobileSheetEvent::Back); }
@@ -666,6 +706,15 @@ void UMobileAppWidget::OnShow3DClicked()
 void UMobileAppWidget::PreviewState(EMobileSheetState Target)
 {
 	static const EMobileSheetEvent Way[] = { EMobileSheetEvent::PlaceChosen, EMobileSheetEvent::DirectionsRequested, EMobileSheetEvent::NavigationStarted, EMobileSheetEvent::ArrivedAtDestination };
+	// A preview past the search needs a place to show: the first one of the site.
+	if (Target != EMobileSheetState::Search && SelectedPlace.Id.IsEmpty() && Source.IsValid())
+	{
+		const TArray<FMobilePlace> All = Source->SearchPlaces(SiteId, FString(), FMobilePlaceFilter());
+		if (!All.IsEmpty())
+		{
+			SelectPlace(All[0]);
+		}
+	}
 	Flow.Reset();
 	for (int32 Step = 0; Step < UE_ARRAY_COUNT(Way) && Flow.GetState() != Target; ++Step)
 	{
@@ -676,17 +725,17 @@ void UMobileAppWidget::PreviewState(EMobileSheetState Target)
 	SnapSheetNow();
 }
 
-void UMobileAppWidget::ShowPlace(const FMobilePlace& Place)
+void UMobileAppWidget::SelectPlace(const FMobilePlace& Place)
 {
 	SelectedPlace = Place;
-	// The place page is still a placeholder: it says which place it is for.
-	if (UTextBlock* Title = Cast<UTextBlock>(FindNamedWidget(TEXT("Txt_Title1"))))
+	if (PlacePage)
 	{
-		Title->SetText(FText::FromString(Place.Name));
+		PlacePage->SetPlace(Place, SavedPlaceIds.Contains(Place.Id), StartPlaceId == Place.Id);
 	}
-	if (UTextBlock* Note = Cast<UTextBlock>(FindNamedWidget(TEXT("Txt_Note1"))))
-	{
-		Note->SetText(FText::FromString(FString::Printf(TEXT("%s \u00B7 %s \u00B7 %s"), *Place.Code, *Place.Category, *Place.GroupLabel())));
-	}
+}
+
+void UMobileAppWidget::ShowPlace(const FMobilePlace& Place)
+{
+	SelectPlace(Place);
 	SendSheetEvent(EMobileSheetEvent::PlaceChosen);
 }
