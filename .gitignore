@@ -84,3 +84,11 @@ InNavi/*.sln
 InNavi/*.slnx
 # Projects the user deleted from the project library (soft delete)
 InNavi/Data/Deleted/
+
+# Signing keys and their passwords: never in the repository (see docs/android-signing.md)
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pepk
+signing-secrets*
