@@ -15,12 +15,12 @@
 
 namespace
 {
-	constexpr double W = 375.0;
-	constexpr double H = 812.0;
+	constexpr double MapViewW = 375.0;
+	constexpr double MapViewH = 812.0;
 
 	FGeometry ViewGeometry()
 	{
-		return FGeometry::MakeRoot(FVector2f(static_cast<float>(W), static_cast<float>(H)), FSlateLayoutTransform());
+		return FGeometry::MakeRoot(FVector2f(static_cast<float>(MapViewW), static_cast<float>(MapViewH)), FSlateLayoutTransform());
 	}
 
 	FPointerEvent Finger(int32 Index, const FVector2D& At, bool bPressed)
@@ -73,18 +73,18 @@ bool FMobileMapZoomTest::RunTest(const FString& Parameters)
 	Map->TakeWidget();
 	Map->SetSource(&Source, TEXT("sit-punggol"));
 	Map->SetFitInsets(64.0, 300.0);
-	Map->SetViewSize(W, H);
+	Map->SetViewSize(MapViewW, MapViewH);
 	Map->ShowLevel(TEXT("E2"), 1);
 
 	// At the start the plan fits.
 	TestTrue(TEXT("zoom 1 and no pan"), FMath::IsNearlyEqual(Map->GetZoom(), 1.0) && Map->GetPan().IsNearlyZero());
-	const FBox2D Fit = Map->GetPlanExtentInWidget(W, H);
+	const FBox2D Fit = Map->GetPlanExtentInWidget(MapViewW, MapViewH);
 	const FVector2D FitCentre = (Fit.Min + Fit.Max) * 0.5;
 
 	// Zoom buttons: 0.2 a step, about the middle of what is uncovered, never past 0.7 and 2.
 	Map->ZoomBy(UMobileMapWidget::ZoomStep);
 	TestTrue(TEXT("a step in is 1.2"), FMath::IsNearlyEqual(Map->GetZoom(), 1.2));
-	const FBox2D In = Map->GetPlanExtentInWidget(W, H);
+	const FBox2D In = Map->GetPlanExtentInWidget(MapViewW, MapViewH);
 	TestTrue(TEXT("the plan is 1.2 times as big"), FMath::IsNearlyEqual(In.GetSize().X, Fit.GetSize().X * 1.2, 0.5));
 	TestTrue(TEXT("about the same middle"), ((In.Min + In.Max) * 0.5 - FitCentre).Size() < 0.5);
 	for (int32 i = 0; i < 20; ++i)
@@ -102,20 +102,20 @@ bool FMobileMapZoomTest::RunTest(const FString& Parameters)
 
 	// A zoom about a point keeps what is under it there.
 	const FVector2D Study = RoomCentre(LevelOf(Source), TEXT("E2-01-101"));
-	const FVector2D Under = Map->ToWidget(Study, W, H);
+	const FVector2D Under = Map->ToWidget(Study, MapViewW, MapViewH);
 	Map->ZoomAround(Under, 1.6);
-	TestTrue(TEXT("the point under the finger stays under it"), (Map->ToWidget(Study, W, H) - Under).Size() < 0.5);
+	TestTrue(TEXT("the point under the finger stays under it"), (Map->ToWidget(Study, MapViewW, MapViewH) - Under).Size() < 0.5);
 	Map->ResetView();
 
 	// A move moves the plan by that much; far too far is held back so some of it stays in view.
 	Map->PanBy(FVector2D(20.0, -10.0));
-	const FBox2D Moved = Map->GetPlanExtentInWidget(W, H);
+	const FBox2D Moved = Map->GetPlanExtentInWidget(MapViewW, MapViewH);
 	TestTrue(TEXT("moved by the pan"), ((Moved.Min - Fit.Min) - FVector2D(20.0, -10.0)).Size() < 0.5);
 	Map->PanBy(FVector2D(5000.0, 5000.0));
-	const FBox2D Far = Map->GetPlanExtentInWidget(W, H);
-	TestTrue(TEXT("pushed off to the right and down, some of the plan is still in the uncovered part"), Far.Min.X < W - 10.0 && Far.Min.Y < (H - 300.0) - 10.0);
+	const FBox2D Far = Map->GetPlanExtentInWidget(MapViewW, MapViewH);
+	TestTrue(TEXT("pushed off to the right and down, some of the plan is still in the uncovered part"), Far.Min.X < MapViewW - 10.0 && Far.Min.Y < (MapViewH - 300.0) - 10.0);
 	Map->PanBy(FVector2D(-9000.0, -9000.0));
-	const FBox2D Gone = Map->GetPlanExtentInWidget(W, H);
+	const FBox2D Gone = Map->GetPlanExtentInWidget(MapViewW, MapViewH);
 	TestTrue(TEXT("and off to the left and up"), Gone.Max.X > 10.0 && Gone.Max.Y > 64.0 + 10.0);
 	Map->ResetView();
 
@@ -154,7 +154,7 @@ bool FMobileMapGesturesTest::RunTest(const FString& Parameters)
 	const FGeometry Geometry = ViewGeometry();
 	FString Tapped;
 	Map->SetOnPlaceTapped([&Tapped](const FString& Id) { Tapped = Id; });
-	const FVector2D Study = Map->ToWidget(RoomCentre(LevelOf(Source), TEXT("E2-01-101")), W, H);
+	const FVector2D Study = Map->ToWidget(RoomCentre(LevelOf(Source), TEXT("E2-01-101")), MapViewW, MapViewH);
 
 	// A tap on a room picks it, with gestures off or on.
 	Map->HandlePointerDown(Geometry, Finger(0, Study, true));
