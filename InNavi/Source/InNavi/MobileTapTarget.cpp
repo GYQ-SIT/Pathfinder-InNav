@@ -12,6 +12,9 @@ TSharedRef<SWidget> UMobileTapTarget::RebuildWidget()
 	{
 		Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("TapButton"));
 		Button->SetStyle(StartStyle::Button(FLinearColor::Transparent, FLinearColor(0.f, 0.f, 0.f, 0.04f), MobileStyle::BlueSoft, FLinearColor::Transparent, 0.f));
+		// Rows sit in lists that scroll. A button that takes hold of the finger the moment it touches never lets the list scroll; a precise tap
+		// clicks only if the finger lifts where it went down, and a drag goes to the scroll box.
+		Button->SetTouchMethod(EButtonTouchMethod::PreciseTap);
 		Button->OnClicked.AddUniqueDynamic(this, &UMobileTapTarget::HandleClicked);
 		WidgetTree->RootWidget = Button;
 	}
@@ -43,6 +46,11 @@ void UMobileTapTarget::Setup(UWidget* Content, const FString& InPayload, const F
 void UMobileTapTarget::HandleClicked()
 {
 	Tap();
+}
+
+bool UMobileTapTarget::IsScrollFriendly() const
+{
+	return Button && Button->GetTouchMethod() == EButtonTouchMethod::PreciseTap;
 }
 
 void UMobileTapTarget::Tap()

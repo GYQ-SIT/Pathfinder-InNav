@@ -23,6 +23,8 @@ public:
 
 	// What a tap does; tests call it.
 	void Tap();
+	// Whether a drag that starts on this row can scroll the list it is in (a precise tap), instead of the button taking hold of the finger.
+	bool IsScrollFriendly() const;
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;

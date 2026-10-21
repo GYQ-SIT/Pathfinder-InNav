@@ -292,6 +292,7 @@ bool FMobileTapTargetTest::RunTest(const FString& Parameters)
 	Target->SetOnTapped([&Got](const FString& Payload) { Got = Payload; });
 	Target->Tap();
 	TestEqual(TEXT("a tap gives the payload"), Got, FString(TEXT("payload")));
+	TestTrue(TEXT("a drag over a row can scroll its list (the button does not take the finger)"), Target->IsScrollFriendly());
 	World->DestroyWorld(false);
 	return true;
 }
