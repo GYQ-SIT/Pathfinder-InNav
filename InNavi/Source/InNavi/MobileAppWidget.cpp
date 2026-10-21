@@ -1,6 +1,7 @@
 #include "MobileAppWidget.h"
 
 #include "MobileArrivedPageWidget.h"
+#include "MobileExplorePageWidget.h"
 #include "MobileMapWidget.h"
 #include "MobileNavigatePageWidget.h"
 #include "MobileTapTarget.h"
@@ -118,7 +119,8 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		SiteChip->SetBrush(Rounded(White, Line, 10.f));
 		SiteChip->SetBrushColor(FLinearColor::White);
 		SiteChip->SetPadding(FMargin(12.f, 8.f));
-		SiteChip->SetContent(MakeText(Tree, TEXT("SiteName"), TEXT("SIT Campus"), 13.f, Ink, true));
+		SiteNameText = MakeText(Tree, TEXT("SiteName"), TEXT("SIT Campus"), 13.f, Ink, true);
+		SiteChip->SetContent(SiteNameText);
 		UHorizontalBoxSlot* ChipSlot = TopRow->AddChildToHorizontalBox(SiteChip);
 		ChipSlot->SetVerticalAlignment(VAlign_Center);
 		USpacer* TopSpacer = Tree->ConstructWidget<USpacer>(USpacer::StaticClass(), TEXT("TopSpacer"));
@@ -394,7 +396,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		SheetSlot->SetAlignment(FVector2D(0.f, 1.f));
 
 		// The pages of the other tabs lie over the map and the sheet.
-		auto MakeOverlay = [&](const TCHAR* Name, const TCHAR* Title, const TCHAR* Note, bool bWithOpenButton) -> UBorder*
+		auto MakeOverlay = [&](const TCHAR* Name, const TCHAR* Title, const TCHAR* Note) -> UBorder*
 		{
 			UBorder* Overlay = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(Name));
 			Overlay->SetBrushColor(White);
@@ -405,19 +407,28 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 			UTextBlock* Text = MakeText(Tree, FString(Name) + TEXT("_Note"), Note, 13.f, Grey);
 			Text->SetAutoWrapText(true);
 			Content->AddChildToVerticalBox(Text)->SetPadding(FMargin(0.f, 8.f, 0.f, 16.f));
-			if (bWithOpenButton)
-			{
-				UButton* Open = MakeButton(Tree, TEXT("Btn_OpenSite"), TEXT("Open SIT Campus (demo)"), Blue, White, 12.f, 48.f);
-				Open->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnOpenSiteClicked);
-				Content->AddChildToVerticalBox(Open);
-			}
 			UCanvasPanelSlot* OverlaySlot = Phone->AddChildToCanvas(Overlay);
 			OverlaySlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
 			return Overlay;
 		};
-		ExploreOverlay = MakeOverlay(TEXT("ExploreOverlay"), TEXT("Find your way indoors"), TEXT("The sites to choose from, as cards."), true);
-		SavedOverlay = MakeOverlay(TEXT("SavedOverlay"), TEXT("Saved"), TEXT("The places you saved."), false);
-		ProfileOverlay = MakeOverlay(TEXT("ProfileOverlay"), TEXT("Profile"), TEXT("Settings and preferences."), false);
+		ExploreOverlay = MakeOverlay(TEXT("ExploreOverlay"), TEXT("Find your way indoors"), TEXT("The sites to choose from, as cards."));
+		// The Explore tab is the page of sites, not a placeholder.
+		ExplorePage = CreateWidget<UMobileExplorePageWidget>(this, UMobileExplorePageWidget::StaticClass());
+		ExplorePage->SetSource(Source.Get());
+		{
+			TWeakObjectPtr<UMobileAppWidget> WeakExplore(this);
+			ExplorePage->SetOnSiteChosen([WeakExplore](const FString& Chosen)
+			{
+				if (UMobileAppWidget* Screen = WeakExplore.Get())
+				{
+					Screen->OpenSite(Chosen);
+				}
+			});
+		}
+		ExploreOverlay->SetPadding(FMargin(0.f));
+		ExploreOverlay->SetContent(ExplorePage);
+		SavedOverlay = MakeOverlay(TEXT("SavedOverlay"), TEXT("Saved"), TEXT("The places you saved."));
+		ProfileOverlay = MakeOverlay(TEXT("ProfileOverlay"), TEXT("Profile"), TEXT("Settings and preferences."));
 
 		// The tab bar.
 		TabBarBorder = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("TabBar"));
@@ -881,7 +892,6 @@ void UMobileAppWidget::OnTabExploreClicked() { SetActiveTab(ETab::Explore); }
 void UMobileAppWidget::OnTabDirectoryClicked() { SetActiveTab(ETab::Directory); }
 void UMobileAppWidget::OnTabSavedClicked() { SetActiveTab(ETab::Saved); }
 void UMobileAppWidget::OnTabProfileClicked() { SetActiveTab(ETab::Profile); }
-void UMobileAppWidget::OnOpenSiteClicked() { SetActiveTab(ETab::Directory); }
 
 void UMobileAppWidget::OnShow2DClicked() { SetMap3D(false); }
 void UMobileAppWidget::OnShow3DClicked() { SetMap3D(true); }
@@ -1202,4 +1212,71 @@ void UMobileAppWidget::RefreshSearchStart()
 	{
 		SearchPage->SetStartLabel(FString());
 	}
+}
+
+void UMobileAppWidget::OpenSite(const FString& NewSiteId)
+{
+	if (!Source.IsValid())
+	{
+		return;
+	}
+	const TArray<FMobileBuilding> Buildings = Source->ListBuildings(NewSiteId);
+	if (Buildings.IsEmpty())
+	{
+		return;
+	}
+	// Everything starts again for the site: no place, no start, no route, the sheet at "Where to?", My location in its first building.
+	SiteId = NewSiteId;
+	Flow.Reset();
+	SelectedPlace = FMobilePlace();
+	StartPlaceId.Reset();
+	CurrentRoute = FMobileRoute();
+	RoutePreferences = FMobileRoutePreferences();
+	NavStepIndex = 0;
+	bMapOverview = false;
+	bLevelPopupOpen = false;
+	const FMobileBuilding& First = Buildings[0];
+	const int32 FirstLevel = First.Levels.IsEmpty() ? 1 : First.Levels[0].Level;
+	MyLocationBuildingId = First.Id;
+	MyLocationLevel = FirstLevel;
+	MapBuildingId = First.Id;
+	MapLevel = FirstLevel;
+	if (SearchPage)
+	{
+		SearchPage->SetSource(Source.Get(), SiteId, First.Id, FirstLevel);
+	}
+	RefreshSearchStart();
+	if (RoutePage)
+	{
+		RoutePage->SetChoices(Source->SearchPlaces(SiteId, FString(), FMobilePlaceFilter()), Buildings);
+		RoutePage->SetRequest(FMobileRouteRequest(), FMobileRoute());
+	}
+	if (PlacePage)
+	{
+		PlacePage->SetPlace(FMobilePlace(), false, false);
+	}
+	RefreshNavigation();
+	RefreshArrived();
+	if (MapView)
+	{
+		MapView->SetSource(Source.Get(), SiteId);
+	}
+	// The name at the top: a campus by its name, a single building with its level.
+	if (SiteNameText)
+	{
+		FString Name = SiteId;
+		for (const FMobileSite& Site : Source->ListSites())
+		{
+			if (Site.Id == SiteId)
+			{
+				Name = Site.ShortName.IsEmpty() ? Site.Name : Site.ShortName;
+			}
+		}
+		SiteNameText->SetText(FText::FromString(Name));
+	}
+	Snap = MobileSheet::SnapForState(Flow.GetState());
+	RefreshSheetPage();
+	SnapSheetNow();
+	RefreshMap();
+	SetActiveTab(ETab::Directory);
 }

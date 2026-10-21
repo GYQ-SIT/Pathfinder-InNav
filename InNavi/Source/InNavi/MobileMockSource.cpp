@@ -80,6 +80,7 @@ FMobileMockSource::FMobileMockSource()
 	FMobileSite Campus;
 	Campus.Id = TEXT("sit-punggol");
 	Campus.Name = TEXT("SIT Punggol Campus");
+	Campus.ShortName = TEXT("SIT Campus");
 	Campus.Subtitle = TEXT("Campus demo · Schematic maps");
 	Campus.BuildingCount = 3;
 	Campus.LevelCount = 4;
@@ -484,4 +485,9 @@ FMobileCampusMap FMobileMockSource::GetCampusMap(const FString& SiteId)
 	Map.Features.Add({ TEXT("Courtyard"), Box(44.0, 12.0, 56.0, 40.0) });
 	Map.Features.Add({ TEXT("Pond"), Box(58.0, 58.0, 94.0, 88.0) });
 	return Map;
+}
+
+FString FMobileMockSource::GetDataNote()
+{
+	return TEXT("Interactive design prototype \u00B7 All maps, places and positioning are simulated.");
 }

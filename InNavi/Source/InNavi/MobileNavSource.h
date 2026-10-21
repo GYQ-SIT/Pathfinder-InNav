@@ -16,6 +16,8 @@ struct FMobileSite
 {
 	FString Id;
 	FString Name;
+	// What the top bar calls it, when that is shorter ("SIT Campus"); empty = Name.
+	FString ShortName;
 	// "Learning & community spaces", "Campus demo . Schematic maps"
 	FString Subtitle;
 	int32 BuildingCount = 1;
@@ -212,6 +214,8 @@ class INNAVI_API IMobileNavSource
 public:
 	virtual ~IMobileNavSource() = default;
 
+	// A line about the data for the app to show, when the data is not real ("All maps, places and positioning are simulated."); empty for real data.
+	virtual FString GetDataNote() { return FString(); }
 	virtual TArray<FMobileSite> ListSites() = 0;
 	virtual TArray<FMobileBuilding> ListBuildings(const FString& SiteId) = 0;
 	// The categories places of the site have, for the filters.

@@ -20,6 +20,7 @@ class UMobilePlacePageWidget;
 class UMobileRoutePageWidget;
 class UMobileNavigatePageWidget;
 class UMobileMapWidget;
+class UMobileExplorePageWidget;
 class UVerticalBox;
 class UMobileArrivedPageWidget;
 
@@ -118,6 +119,10 @@ public:
 	UMobileRoutePageWidget* GetRoutePage() const { return RoutePage; }
 	UMobileNavigatePageWidget* GetNavigatePage() const { return NavigatePage; }
 	UMobileMapWidget* GetMapView() const { return MapView; }
+	UMobileExplorePageWidget* GetExplorePage() const { return ExplorePage; }
+	const FString& GetSiteId() const { return SiteId; }
+	// Opens a site (a card on Explore): everything starts again for it, on the map tab.
+	void OpenSite(const FString& NewSiteId);
 	const FString& GetMapBuildingId() const { return MapBuildingId; }
 	int32 GetMapLevel() const { return MapLevel; }
 	bool IsMapOverview() const { return bMapOverview; }
@@ -161,8 +166,6 @@ private:
 	void OnTabSavedClicked();
 	UFUNCTION()
 	void OnTabProfileClicked();
-	UFUNCTION()
-	void OnOpenSiteClicked();
 	UFUNCTION()
 	void OnOverviewClicked();
 	UFUNCTION()
@@ -238,6 +241,10 @@ private:
 	UMobileNavigatePageWidget* NavigatePage = nullptr;
 	UPROPERTY()
 	UMobileMapWidget* MapView = nullptr;
+	UPROPERTY()
+	UMobileExplorePageWidget* ExplorePage = nullptr;
+	UPROPERTY()
+	UTextBlock* SiteNameText = nullptr;
 	UPROPERTY()
 	UTextBlock* LevelLabel = nullptr;
 	UPROPERTY()

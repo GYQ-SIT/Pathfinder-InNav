@@ -182,3 +182,12 @@ On the place page, **Use as starting point** makes that place the start of the w
 search page shows "Starting from <place> . <building> . <level>" under its title with a **Clear** button that goes back to My location, and the map puts the person's dot on
 that place. Choosing a place there and pressing Get directions finds the route from the start to it. Pressing the button on a place that is already the start takes the start
 back and stays on the place page.
+
+## The Explore tab (site cards)
+
+`UMobileExplorePageWidget` is the first tab: the app's name, "Find your way indoors", and a card for each site from `ListSites()`: a picture (a placeholder drawing of buildings
+until there are pictures), the name, what it is, the distance (`DistanceLabel`), and how many buildings (a campus) or levels (one building). When the source's `GetDataNote()` is not
+empty (the mock's is "All maps, places and positioning are simulated.") a "Mock locations" pill sits by "Sites" and the note closes the page. A tap on a card calls
+`UMobileAppWidget::OpenSite`, which starts everything again for that site: the sheet at Where to?, no chosen place, no start, no route, every way between levels on, My location in
+the site's first building on its first level, the search, route choices and map taken from the site, the top bar showing its short name (`FMobileSite::ShortName`, else its name), and
+the map tab shown. Opening another site in the middle of a walk does the same. An unknown site is ignored.

@@ -12,6 +12,7 @@ class INNAVI_API FMobileMockSource : public IMobileNavSource
 public:
 	FMobileMockSource();
 
+	virtual FString GetDataNote() override;
 	virtual TArray<FMobileSite> ListSites() override;
 	virtual TArray<FMobileBuilding> ListBuildings(const FString& SiteId) override;
 	virtual TArray<FString> ListCategories(const FString& SiteId) override;

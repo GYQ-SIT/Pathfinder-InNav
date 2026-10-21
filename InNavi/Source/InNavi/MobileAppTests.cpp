@@ -93,7 +93,7 @@ bool FMobileScreenLayoutTest::RunTest(const FString& Parameters)
 
 	// Every control is there.
 	for (const TCHAR* Name : { TEXT("Btn_TabExplore"), TEXT("Btn_TabDirectory"), TEXT("Btn_TabSaved"), TEXT("Btn_TabProfile"), TEXT("Btn_Mode2D"), TEXT("Btn_Mode3D"), TEXT("Btn_Level"), TEXT("Btn_Locate"), TEXT("Btn_Overview"),
-		TEXT("Btn_OpenSite"), TEXT("Sheet"), TEXT("TabBar"), TEXT("SheetPages") })
+		TEXT("Sheet"), TEXT("TabBar"), TEXT("SheetPages") })
 	{
 		TestNotNull(*FString::Printf(TEXT("%s exists"), Name), Screen->FindNamedWidget(Name));
 	}
