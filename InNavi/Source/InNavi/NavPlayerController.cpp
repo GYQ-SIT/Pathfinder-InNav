@@ -3,6 +3,9 @@
 
 #include "NavPlayerController.h"
 #include "NavigationPanelWidget.h"
+#include "MobileAppWidget.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
+#include "TimerManager.h"
 #include "NavigationRouteVisualization.h"
 #include "InteriorFloorPlanWidget.h"
 #include "Blueprint/UserWidget.h"
@@ -100,6 +103,32 @@ void ANavPlayerController::BeginPlay()
 	UE_LOG(LogTemp, Warning, TEXT("[Navigation] BeginPlay references: Generator=%s Interior=%s"),
 		Generator ? TEXT("valid") : TEXT("NULL"),
 		InteriorGen ? TEXT("valid") : TEXT("NULL"));
+
+	// -MobileApp: the start screen is put up by the level a moment after this, so wait a little before taking everything down.
+	if (FParse::Param(FCommandLine::Get(), TEXT("MobileApp")))
+	{
+		FTimerHandle Handle;
+		GetWorldTimerManager().SetTimer(Handle, this, &ANavPlayerController::MobileApp, 0.5f, false);
+	}
+}
+
+void ANavPlayerController::MobileApp()
+{
+	UWidgetLayoutLibrary::RemoveAllWidgets(this);
+	if (UMobileAppWidget* Screen = CreateWidget<UMobileAppWidget>(this, UMobileAppWidget::StaticClass()))
+	{
+		Screen->AddToViewport();
+		// For trying a screen straight away: -MobileTab=Directory and -MobileState=Route.
+		FString Tab, State;
+		if (FParse::Value(FCommandLine::Get(), TEXT("MobileTab="), Tab))
+		{
+			Screen->SetActiveTab(Tab == TEXT("Directory") ? UMobileAppWidget::ETab::Directory : Tab == TEXT("Saved") ? UMobileAppWidget::ETab::Saved : Tab == TEXT("Profile") ? UMobileAppWidget::ETab::Profile : UMobileAppWidget::ETab::Explore);
+		}
+		if (FParse::Value(FCommandLine::Get(), TEXT("MobileState="), State))
+		{
+			Screen->PreviewState(State == TEXT("Place") ? EMobileSheetState::Place : State == TEXT("Route") ? EMobileSheetState::Route : State == TEXT("Navigating") ? EMobileSheetState::Navigating : State == TEXT("Arrived") ? EMobileSheetState::Arrived : EMobileSheetState::Search);
+		}
+	}
 }
 
 bool ANavPlayerController::IsSelectingNavigationPoint() const

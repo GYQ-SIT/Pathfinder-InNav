@@ -464,6 +464,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void ToggleRoomColours();
 
+	// Console command "MobileApp" (and the launch option -MobileApp): shows the phone app's screen in place of everything else, to build and
+	// try it in a phone-sized window on the desktop (for example -windowed -ResX=375 -ResY=812).
+	UFUNCTION(Exec)
+	void MobileApp();
+
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	bool AreRoomColoursVisible() const { return bRoomColoursVisible; }
 
