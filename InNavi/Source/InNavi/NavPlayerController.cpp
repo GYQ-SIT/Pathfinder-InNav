@@ -25,8 +25,10 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
+#if PLATFORM_DESKTOP
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
+#endif
 #include "Framework/Application/SlateApplication.h"
 #include "UObject/UObjectIterator.h"
 #include "HAL/FileManager.h"
@@ -86,16 +88,14 @@ void ANavPlayerController::BeginPlay()
 		NavigationPanel->OnStateChanged.AddUniqueDynamic(this, &ANavPlayerController::RefreshRoute3DVisualization);
 	}
 
-	for (TActorIterator<ABuildingGenerator> It(GetWorld()); It; ++It)
+	if (TActorIterator<ABuildingGenerator> It(GetWorld()); It)
 	{
 		Generator = *It;
-		break;
 	}
 
-	for (TActorIterator<AInteriorGenerator> It(GetWorld()); It; ++It)
+	if (TActorIterator<AInteriorGenerator> It(GetWorld()); It)
 	{
 		InteriorGen = *It;
-		break;
 	}
 	if (NavigationPanel)
 	{
@@ -105,8 +105,13 @@ void ANavPlayerController::BeginPlay()
 		Generator ? TEXT("valid") : TEXT("NULL"),
 		InteriorGen ? TEXT("valid") : TEXT("NULL"));
 
-	// -MobileApp: the start screen is put up by the level a moment after this, so wait a little before taking everything down.
-	if (FParse::Param(FCommandLine::Get(), TEXT("MobileApp")))
+	// -MobileApp (always on a phone): the start screen is put up by the level a moment after this, so wait a little before taking everything down.
+#if PLATFORM_ANDROID || PLATFORM_IOS
+	const bool bPhone = true;
+#else
+	const bool bPhone = FParse::Param(FCommandLine::Get(), TEXT("MobileApp"));
+#endif
+	if (bPhone)
 	{
 		FTimerHandle Handle;
 		GetWorldTimerManager().SetTimer(Handle, this, &ANavPlayerController::MobileApp, 0.5f, false);
@@ -2092,6 +2097,11 @@ APolyBuilding* ANavPlayerController::CreateRegularPolygonBuilding(const FString&
 
 FString ANavPlayerController::BrowseForBuildingDataFile()
 {
+#if !PLATFORM_DESKTOP
+	// The native file dialog exists on desktop only; the phone app has no import.
+	OnActionFailed.Broadcast(TEXT("Could not open the file picker on this system."), EActionFailureSeverity::Warning);
+	return FString();
+#else
 	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
 	if (!DesktopPlatform)
 	{
@@ -2136,6 +2146,7 @@ FString ANavPlayerController::BrowseForBuildingDataFile()
 	}
 
 	return OutFiles[0];
+#endif
 }
 
 int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
@@ -3613,6 +3624,10 @@ bool ANavPlayerController::SaveCurrentProject()
 
 FString ANavPlayerController::BrowseForSaveLocation()
 {
+#if !PLATFORM_DESKTOP
+	OnActionFailed.Broadcast(TEXT("Could not open the save dialog on this system."), EActionFailureSeverity::Warning);
+	return FString();
+#else
 	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
 	if (!DesktopPlatform)
 	{
@@ -3648,6 +3663,7 @@ FString ANavPlayerController::BrowseForSaveLocation()
 	}
 
 	return OutFiles[0];
+#endif
 }
 
 bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)

@@ -116,6 +116,11 @@ public:
 	void MoveSheetDrag(const FVector2D& DesignPosition);
 	void EndSheetDrag(const FVector2D& DesignPosition);
 	bool IsDraggingSheet() const { return bDraggingSheet; }
+	// What a press, a move and a release of one pointer do to the sheet (the mouse and touch events above call these). Only the pointer that
+	// pressed on the handle moves it; a second one (the mouse cursor of an emulator click, which comes with the touch) is ignored.
+	FReply HandlePointerDown(const FGeometry& Geometry, const FPointerEvent& Event);
+	FReply HandlePointerMove(const FGeometry& Geometry, const FPointerEvent& Event);
+	FReply HandlePointerUp(const FGeometry& Geometry, const FPointerEvent& Event);
 
 	UWidget* FindNamedWidget(const FName& Name) const;
 
@@ -203,13 +208,12 @@ private:
 
 	// Turns the screen's position (Slate units, from the window's top left) into design pixels.
 	FVector2D ToDesign(const FGeometry& Geometry, const FVector2D& ScreenSpacePosition) const;
-	FReply HandlePointerDown(const FGeometry& Geometry, const FPointerEvent& Event);
-	FReply HandlePointerMove(const FGeometry& Geometry, const FPointerEvent& Event);
-	FReply HandlePointerUp(const FGeometry& Geometry, const FPointerEvent& Event);
 
 	void RefreshTabs();
 	void RefreshModeButtons();
 	void RefreshSiteName();
+	// On a phone: reads the safe area the system reports (a camera cut-out, the status and gesture bars) and lays the screen out inside it.
+	void ApplyDeviceSafeArea();
 	// Makes the look of the preferences the open one, and asks for the pages to be built again if they were built in another.
 	void SyncAppearance();
 	void QueueAppearanceRebuild();
@@ -316,9 +320,14 @@ private:
 	double Scale = 1.0;
 	double SafeTop = 0.0;
 	double SafeBottom = 0.0;
+	float SafeAreaPollSeconds = 0.f;
 	double SheetHeight = 0.0;
 	bool bDraggingSheet = false;
 	bool bSheetMoved = false;
+	// The pointer that started the drag (a finger, or the mouse). A phone can report both for one click (the emulator sends the touch and the
+	// mouse cursor's moves), and only the one that pressed may move the sheet.
+	int32 DragPointerIndex = INDEX_NONE;
+	bool bDragIsTouch = false;
 	double DragStartY = 0.0;
 	double DragStartHeight = 0.0;
 	bool bSheetSettled = false;

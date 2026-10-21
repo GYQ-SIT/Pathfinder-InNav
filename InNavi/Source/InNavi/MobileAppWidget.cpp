@@ -32,6 +32,7 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Components/WidgetSwitcher.h"
 #include "Framework/Application/SlateApplication.h"
+#include "GenericPlatform/GenericApplication.h"
 
 using namespace MobileStyle;
 
@@ -548,6 +549,14 @@ void UMobileAppWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime
 	{
 		ApplyViewportSize(LocalSize.X, LocalSize.Y);
 	}
+#if PLATFORM_ANDROID || PLATFORM_IOS
+	SafeAreaPollSeconds -= InDeltaTime;
+	if (SafeAreaPollSeconds <= 0.f)
+	{
+		SafeAreaPollSeconds = 0.5f;
+		ApplyDeviceSafeArea();
+	}
+#endif
 	if (!bDraggingSheet)
 	{
 		const double Target = RestHeight(Snap);
@@ -586,6 +595,24 @@ void UMobileAppWidget::SetSafeInsets(double Top, double Bottom)
 	SafeBottom = FMath::Max(Bottom, 0.0);
 	SheetHeight = RestHeight(Snap);
 	PositionSheet();
+}
+
+void UMobileAppWidget::ApplyDeviceSafeArea()
+{
+	FDisplayMetrics Metrics;
+	FDisplayMetrics::RebuildDisplayMetrics(Metrics);
+	if (Metrics.PrimaryDisplayHeight <= 0)
+	{
+		return;
+	}
+	// The insets are in screen pixels; the screen is laid out in design pixels, DesignHeight of them over the display's height.
+	const double PerPixel = DesignHeight / Metrics.PrimaryDisplayHeight;
+	const double Top = Metrics.TitleSafePaddingSize.Y * PerPixel;
+	const double Bottom = Metrics.TitleSafePaddingSize.W * PerPixel;
+	if (!FMath::IsNearlyEqual(Top, SafeTop, 0.5) || !FMath::IsNearlyEqual(Bottom, SafeBottom, 0.5))
+	{
+		SetSafeInsets(Top, Bottom);
+	}
 }
 
 double UMobileAppWidget::RestHeight(EMobileSheetSnap Target) const
@@ -629,6 +656,11 @@ void UMobileAppWidget::PositionSheet()
 		if (UCanvasPanelSlot* PanelSlot = CanvasSlot(Overlay))
 		{
 			PanelSlot->SetOffsets(FMargin(0.f, 0.f, 0.f, static_cast<float>(TabTotal)));
+		}
+		// The page's own colour reaches the top of the screen; its content starts below the status bar or camera.
+		if (Overlay)
+		{
+			Overlay->SetPadding(FMargin(0.f, static_cast<float>(SafeTop), 0.f, 0.f));
 		}
 	}
 	if (MapView)
@@ -888,8 +920,11 @@ FVector2D UMobileAppWidget::ToDesign(const FGeometry& Geometry, const FVector2D&
 
 FReply UMobileAppWidget::HandlePointerDown(const FGeometry& Geometry, const FPointerEvent& Event)
 {
-	if (BeginSheetDrag(ToDesign(Geometry, Event.GetScreenSpacePosition())))
+	// A second press while a drag is on (the mouse of the same click) is not a new drag.
+	if (!bDraggingSheet && BeginSheetDrag(ToDesign(Geometry, Event.GetScreenSpacePosition())))
 	{
+		DragPointerIndex = Event.GetPointerIndex();
+		bDragIsTouch = Event.IsTouchEvent();
 		return FReply::Handled().CaptureMouse(TakeWidget());
 	}
 	return FReply::Unhandled();
@@ -897,7 +932,7 @@ FReply UMobileAppWidget::HandlePointerDown(const FGeometry& Geometry, const FPoi
 
 FReply UMobileAppWidget::HandlePointerMove(const FGeometry& Geometry, const FPointerEvent& Event)
 {
-	if (bDraggingSheet)
+	if (bDraggingSheet && Event.GetPointerIndex() == DragPointerIndex && Event.IsTouchEvent() == bDragIsTouch)
 	{
 		MoveSheetDrag(ToDesign(Geometry, Event.GetScreenSpacePosition()));
 		return FReply::Handled();
@@ -907,7 +942,7 @@ FReply UMobileAppWidget::HandlePointerMove(const FGeometry& Geometry, const FPoi
 
 FReply UMobileAppWidget::HandlePointerUp(const FGeometry& Geometry, const FPointerEvent& Event)
 {
-	if (bDraggingSheet)
+	if (bDraggingSheet && Event.GetPointerIndex() == DragPointerIndex && Event.IsTouchEvent() == bDragIsTouch)
 	{
 		EndSheetDrag(ToDesign(Geometry, Event.GetScreenSpacePosition()));
 		return FReply::Handled().ReleaseMouseCapture();

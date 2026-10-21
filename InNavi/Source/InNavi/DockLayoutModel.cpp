@@ -1813,7 +1813,7 @@ bool FDockLayout::FromJson(const TSharedPtr<FJsonObject>& Root, const FVector2D&
 	const TSharedPtr<FJsonObject>* HiddenObject = nullptr;
 	if (Root->TryGetObjectField(TEXT("hidden"), HiddenObject))
 	{
-		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*HiddenObject)->Values)
+		for (const auto& Pair : (*HiddenObject)->Values)
 		{
 			const FName Panel(*Pair.Key);
 			const TSharedPtr<FJsonObject>* HintObject = nullptr;
