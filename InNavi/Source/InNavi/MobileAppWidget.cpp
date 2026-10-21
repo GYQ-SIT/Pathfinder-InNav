@@ -1,7 +1,9 @@
 #include "MobileAppWidget.h"
 
 #include "MobileArrivedPageWidget.h"
+#include "MobileMapWidget.h"
 #include "MobileNavigatePageWidget.h"
+#include "MobileTapTarget.h"
 #include "MobilePlacePageWidget.h"
 #include "MobileRoutePageWidget.h"
 #include "MobileSelectWidget.h"
@@ -18,6 +20,7 @@
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/ScaleBox.h"
+#include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/Spacer.h"
 #include "Components/TextBlock.h"
@@ -65,16 +68,45 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		Phone = Tree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("Phone"));
 		PhoneSize->SetContent(Phone);
 
-		// The map: a placeholder for now.
+		// The map: a floor plan of the level, or the site's overview, on the map's own colour. It fills the screen; the sheet covers its lower part.
 		UBorder* MapArea = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("MapArea"));
 		MapArea->SetBrushColor(MapBackground);
-		MapArea->SetHorizontalAlignment(HAlign_Center);
-		MapArea->SetVerticalAlignment(VAlign_Top);
-		MapArea->SetPadding(FMargin(0.f, 220.f, 0.f, 0.f));
-		MapArea->SetContent(MakeText(Tree, TEXT("MapPlaceholder"), TEXT("Map"), 18.f, Grey, true));
 		UCanvasPanelSlot* MapSlot = Phone->AddChildToCanvas(MapArea);
 		MapSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
 		MapSlot->SetOffsets(FMargin(0.f));
+		MapView = CreateWidget<UMobileMapWidget>(this, UMobileMapWidget::StaticClass());
+		TWeakObjectPtr<UMobileAppWidget> WeakMapOwner(this);
+		MapView->SetOnPlaceTapped([WeakMapOwner](const FString& PlaceId)
+		{
+			if (UMobileAppWidget* Screen = WeakMapOwner.Get())
+			{
+				// A tap on a room opens its place while looking for one.
+				FMobilePlace Place;
+				const EMobileSheetState State = Screen->Flow.GetState();
+				if ((State == EMobileSheetState::Search || State == EMobileSheetState::Place) && Screen->Source.IsValid() && Screen->Source->FindPlace(PlaceId, Place))
+				{
+					if (State == EMobileSheetState::Place)
+					{
+						Screen->SelectPlace(Place);
+						Screen->RefreshMap();
+					}
+					else
+					{
+						Screen->ShowPlace(Place);
+					}
+				}
+			}
+		});
+		MapView->SetOnBuildingTapped([WeakMapOwner](const FString& BuildingId)
+		{
+			if (UMobileAppWidget* Screen = WeakMapOwner.Get())
+			{
+				Screen->OpenBuilding(BuildingId);
+			}
+		});
+		UCanvasPanelSlot* MapViewSlot = Phone->AddChildToCanvas(MapView);
+		MapViewSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
+		MapViewSlot->SetOffsets(FMargin(0.f));
 
 		// Top bar: the site's name, Overview, and 2D | 3D.
 		TopBarBorder = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("TopBar"));
@@ -92,6 +124,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		USpacer* TopSpacer = Tree->ConstructWidget<USpacer>(USpacer::StaticClass(), TEXT("TopSpacer"));
 		TopRow->AddChildToHorizontalBox(TopSpacer)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		UButton* OverviewButton = MakeButton(Tree, TEXT("Btn_Overview"), TEXT("Overview"), White, Ink, 10.f, 34.f, nullptr, 12.f);
+		OverviewButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnOverviewClicked);
 		TopRow->AddChildToHorizontalBox(OverviewButton)->SetVerticalAlignment(VAlign_Center);
 		UBorder* ModeBox = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("ModeBox"));
 		ModeBox->SetBrush(Rounded(White, Line, 10.f));
@@ -114,9 +147,26 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 
 		// The level picker and the locate button, floating above the sheet's top edge.
 		UVerticalBox* Controls = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("MapControls"));
-		UButton* LevelButton = MakeButton(Tree, TEXT("Btn_Level"), TEXT("L1"), White, Ink, 10.f, 40.f, nullptr, 16.f);
+		// The levels of the building, in a list that opens upward from the level button.
+		LevelPopupBorder = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("LevelPopup"));
+		LevelPopupBorder->SetBrush(Rounded(White, Line, 10.f));
+		LevelPopupBorder->SetBrushColor(FLinearColor::White);
+		LevelPopupBorder->SetPadding(FMargin(4.f));
+		LevelPopupBorder->SetVisibility(ESlateVisibility::Collapsed);
+		LevelPopupList = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LevelPopupList"));
+		UScrollBox* LevelScroll = Tree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("LevelPopupScroll"));
+		LevelScroll->AddChild(LevelPopupList);
+		USizeBox* LevelLimit = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("LevelPopupLimit"));
+		LevelLimit->SetMaxDesiredHeight(200.f);
+		LevelLimit->SetMinDesiredWidth(64.f);
+		LevelLimit->SetContent(LevelScroll);
+		LevelPopupBorder->SetContent(LevelLimit);
+		Controls->AddChildToVerticalBox(LevelPopupBorder)->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f));
+		UButton* LevelButton = MakeButton(Tree, TEXT("Btn_Level"), TEXT("L1"), White, Ink, 10.f, 40.f, &LevelLabel, 16.f);
+		LevelButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnLevelClicked);
 		Controls->AddChildToVerticalBox(LevelButton);
 		UButton* LocateButton = MakeButton(Tree, TEXT("Btn_Locate"), TEXT("Locate"), White, Blue, 10.f, 40.f, nullptr, 12.f);
+		LocateButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnLocateClicked);
 		Controls->AddChildToVerticalBox(LocateButton)->SetPadding(FMargin(0.f, 8.f, 0.f, 0.f));
 		ControlsBox = Controls;
 		UCanvasPanelSlot* ControlsSlot = Phone->AddChildToCanvas(Controls);
@@ -169,6 +219,20 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 					ContextLevel = Buildings[0].Levels[0].Level;
 				}
 				SearchPage->SetSource(Source.Get(), SiteId, ContextBuilding, ContextLevel);
+				TWeakObjectPtr<UMobileAppWidget> WeakSearchOwner(this);
+				SearchPage->SetOnClearStart([WeakSearchOwner]()
+				{
+					if (UMobileAppWidget* Screen = WeakSearchOwner.Get())
+					{
+						Screen->StartPlaceId.Reset();
+						Screen->RefreshSearchStart();
+						Screen->SelectPlace(Screen->SelectedPlace);
+						Screen->RefreshMap();
+					}
+				});
+				MapView->SetSource(Source.Get(), SiteId);
+				MapBuildingId = ContextBuilding;
+				MapLevel = ContextLevel;
 				// My location starts in the first building, on its first level, as in the prototype.
 				MyLocationBuildingId = ContextBuilding;
 				MyLocationLevel = ContextLevel;
@@ -224,8 +288,19 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 				{
 					if (UMobileAppWidget* Screen = WeakThis.Get())
 					{
-						Screen->StartPlaceId = Screen->StartPlaceId == Place.Id ? FString() : Place.Id;
+						// Setting a start moves on to "Where to?" to choose the destination; tapping it again takes it back.
+						const bool bWasStart = Screen->StartPlaceId == Place.Id;
+						Screen->StartPlaceId = bWasStart ? FString() : Place.Id;
 						Screen->SelectPlace(Place);
+						Screen->RefreshSearchStart();
+						if (!bWasStart)
+						{
+							Screen->SendSheetEvent(EMobileSheetEvent::Back);
+						}
+						else
+						{
+							Screen->RefreshMap();
+						}
 					}
 				});
 				SheetPages->AddChild(PlacePage);
@@ -385,6 +460,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		TabSlot->SetAnchors(FAnchors(0.f, 1.f, 1.f, 1.f));
 		TabSlot->SetAlignment(FVector2D(0.f, 1.f));
 
+		RefreshMap();
 		SetActiveTab(ActiveTab);
 		RefreshModeButtons();
 		RefreshSheetPage();
@@ -485,6 +561,11 @@ void UMobileAppWidget::PositionSheet()
 			PanelSlot->SetOffsets(FMargin(0.f, 0.f, 0.f, static_cast<float>(TabTotal)));
 		}
 	}
+	if (MapView)
+	{
+		// The plan fits between the top bar and the top of the sheet at its usual height, so it does not jump as the sheet is dragged.
+		MapView->SetFitInsets(SafeTop + 12.0 + 40.0 + 8.0, TabTotal + RestHeight(EMobileSheetSnap::Half) + 8.0);
+	}
 	SheetBorder->SetVisibility(bMapPage ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	ControlsBox->SetVisibility(bMapPage && ControlsFit() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	TopBarBorder->SetVisibility(bMapPage ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
@@ -551,6 +632,7 @@ void UMobileAppWidget::SendSheetEvent(EMobileSheetEvent Event)
 		}
 		RefreshNavigation();
 		RefreshArrived();
+		RefreshMap();
 	}
 }
 
@@ -564,6 +646,7 @@ void UMobileAppWidget::AdvanceNavigation()
 	{
 		++NavStepIndex;
 		RefreshNavigation();
+		RefreshMap();
 	}
 	else
 	{
@@ -602,11 +685,13 @@ void UMobileAppWidget::RefreshRoute()
 	Request.MyLocationLevel = MyLocationLevel;
 	CurrentRoute = Source->FindRoute(Request);
 	RoutePage->SetRequest(Request, CurrentRoute);
+	RefreshMap();
 }
 
 void UMobileAppWidget::ApplyRouteRequest(const FMobileRouteRequest& Changed)
 {
 	StartPlaceId = Changed.FromPlaceId;
+	RefreshSearchStart();
 	RoutePreferences = Changed.Preferences;
 	MyLocationBuildingId = Changed.MyLocationBuildingId;
 	MyLocationLevel = Changed.MyLocationLevel;
@@ -798,17 +883,9 @@ void UMobileAppWidget::OnTabSavedClicked() { SetActiveTab(ETab::Saved); }
 void UMobileAppWidget::OnTabProfileClicked() { SetActiveTab(ETab::Profile); }
 void UMobileAppWidget::OnOpenSiteClicked() { SetActiveTab(ETab::Directory); }
 
-void UMobileAppWidget::OnShow2DClicked()
-{
-	bShow3D = false;
-	RefreshModeButtons();
-}
+void UMobileAppWidget::OnShow2DClicked() { SetMap3D(false); }
+void UMobileAppWidget::OnShow3DClicked() { SetMap3D(true); }
 
-void UMobileAppWidget::OnShow3DClicked()
-{
-	bShow3D = true;
-	RefreshModeButtons();
-}
 
 void UMobileAppWidget::PreviewState(EMobileSheetState Target)
 {
@@ -830,6 +907,7 @@ void UMobileAppWidget::PreviewState(EMobileSheetState Target)
 	RefreshRoute();
 	RefreshNavigation();
 	RefreshArrived();
+	RefreshMap();
 	Snap = MobileSheet::SnapForState(Flow.GetState());
 	RefreshSheetPage();
 	SnapSheetNow();
@@ -860,5 +938,268 @@ void UMobileAppWidget::PreviewOpenSelect(const FString& Name)
 	if (Select)
 	{
 		Select->ToggleOpen();
+	}
+}
+
+// ---- The map ----
+
+void UMobileAppWidget::RefreshMap()
+{
+	if (!MapView || !Source.IsValid())
+	{
+		return;
+	}
+	// What the sheet is about decides what the map shows; the person's own choice of level or overview lasts until the sheet moves on.
+	const EMobileSheetState State = Flow.GetState();
+	if (State != EMobileSheetState::Search)
+	{
+		bMapOverview = false;
+	}
+	auto Follow = [this](const FString& BuildingId, int32 Level)
+	{
+		if (!BuildingId.IsEmpty())
+		{
+			MapBuildingId = BuildingId;
+			MapLevel = Level;
+		}
+	};
+	if (State == EMobileSheetState::Place || State == EMobileSheetState::Arrived)
+	{
+		Follow(SelectedPlace.BuildingId, SelectedPlace.Level);
+	}
+	else if ((State == EMobileSheetState::Route || State == EMobileSheetState::Navigating) && CurrentRoute.bFound && !CurrentRoute.Points.IsEmpty())
+	{
+		if (State == EMobileSheetState::Navigating && CurrentRoute.Steps.IsValidIndex(NavStepIndex))
+		{
+			// Walking: the level the person is on now.
+			Follow(CurrentRoute.Steps[NavStepIndex].BuildingId, CurrentRoute.Steps[NavStepIndex].Level);
+		}
+		else
+		{
+			Follow(CurrentRoute.Points[0].BuildingId, CurrentRoute.Points[0].Level);
+		}
+	}
+	else if (MapBuildingId.IsEmpty())
+	{
+		// At the start: the building the person is in.
+		const TArray<FMobileBuilding> Buildings = Source->ListBuildings(SiteId);
+		if (!Buildings.IsEmpty() && !Buildings[0].Levels.IsEmpty())
+		{
+			Follow(Buildings[0].Id, Buildings[0].Levels[0].Level);
+		}
+	}
+	bLevelPopupOpen = false;
+	ApplyMap();
+}
+
+void UMobileAppWidget::ApplyMap()
+{
+	if (!MapView || !Source.IsValid())
+	{
+		return;
+	}
+	const EMobileSheetState State = Flow.GetState();
+	if (bMapOverview)
+	{
+		MapView->ShowOverview();
+	}
+	else
+	{
+		MapView->ShowLevel(MapBuildingId, MapLevel);
+	}
+	const bool bWalking = State == EMobileSheetState::Route || State == EMobileSheetState::Navigating;
+	if (bWalking && CurrentRoute.bFound)
+	{
+		MapView->SetRoute(CurrentRoute);
+	}
+	else
+	{
+		MapView->ClearRoute();
+	}
+	const bool bShowsPlace = State == EMobileSheetState::Place || State == EMobileSheetState::Route || State == EMobileSheetState::Navigating || State == EMobileSheetState::Arrived;
+	MapView->SetHighlightPlace(bShowsPlace ? SelectedPlace.Id : FString());
+
+	// The dot: the step the person is at while walking, otherwise My location (at the door of the building they said they are in).
+	if (State == EMobileSheetState::Navigating && CurrentRoute.bFound && CurrentRoute.Steps.IsValidIndex(NavStepIndex))
+	{
+		const FMobileStep& Step = CurrentRoute.Steps[NavStepIndex];
+		FMobileRoutePoint Here;
+		Here.BuildingId = Step.BuildingId;
+		Here.Level = Step.Level;
+		Here.Position = Step.Position;
+		MapView->SetPosition(Here);
+	}
+	else if (!StartPlaceId.IsEmpty())
+	{
+		// Starting from a place: the dot is there.
+		FMobilePlace Start;
+		if (Source->FindPlace(StartPlaceId, Start))
+		{
+			FMobileRoutePoint Here;
+			Here.BuildingId = Start.BuildingId;
+			Here.Level = Start.Level;
+			Here.Position = Start.Position;
+			MapView->SetPosition(Here);
+		}
+		else
+		{
+			MapView->ClearPosition();
+		}
+	}
+	else if (StartPlaceId.IsEmpty() && !MyLocationBuildingId.IsEmpty())
+	{
+		FMobileLevelMap Mine;
+		FMobileRoutePoint Here;
+		Here.BuildingId = MyLocationBuildingId;
+		Here.Level = MyLocationLevel;
+		if (Source->GetLevelMap(MyLocationBuildingId, MyLocationLevel, Mine))
+		{
+			Here.Position = Mine.Entrance;
+		}
+		MapView->SetPosition(Here);
+	}
+	else
+	{
+		MapView->ClearPosition();
+	}
+
+	// The level button says which level, and its list (when open) the building's levels, the top one first.
+	if (LevelLabel)
+	{
+		FString Label = TEXT("Map");
+		if (!bMapOverview)
+		{
+			for (const FMobileBuilding& Building : Source->ListBuildings(SiteId))
+			{
+				for (const FMobileLevel& Level : Building.Levels)
+				{
+					if (Building.Id == MapBuildingId && Level.Level == MapLevel)
+					{
+						Label = Level.Label;
+					}
+				}
+			}
+		}
+		LevelLabel->SetText(FText::FromString(Label));
+	}
+	if (LevelPopupBorder && LevelPopupList)
+	{
+		LevelPopupBorder->SetVisibility(bLevelPopupOpen ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		LevelPopupList->ClearChildren();
+		if (bLevelPopupOpen)
+		{
+			for (const FMobileBuilding& Building : Source->ListBuildings(SiteId))
+			{
+				if (Building.Id != MapBuildingId)
+				{
+					continue;
+				}
+				for (int32 i = Building.Levels.Num() - 1; i >= 0; --i)
+				{
+					const FMobileLevel& Level = Building.Levels[i];
+					const bool bChosen = Level.Level == MapLevel;
+					UBorder* Pad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+					Pad->SetBrushColor(FLinearColor::Transparent);
+					Pad->SetPadding(FMargin(14.f, 9.f));
+					Pad->SetHorizontalAlignment(HAlign_Center);
+					Pad->SetContent(MakeText(WidgetTree, FString(), Level.Label, 14.f, bChosen ? White : Ink, true));
+					UMobileTapTarget* Row = CreateWidget<UMobileTapTarget>(this, UMobileTapTarget::StaticClass());
+					Row->Setup(Pad, FString::FromInt(Level.Level), bChosen ? Blue : FLinearColor::Transparent, 8.f);
+					TWeakObjectPtr<UMobileAppWidget> WeakThis(this);
+					Row->SetOnTapped([WeakThis](const FString& Value)
+					{
+						if (UMobileAppWidget* Screen = WeakThis.Get())
+						{
+							Screen->ChooseMapLevel(FCString::Atoi(*Value));
+						}
+					});
+					LevelPopupList->AddChildToVerticalBox(Row);
+				}
+			}
+		}
+	}
+}
+
+void UMobileAppWidget::SetLevelPopupOpen(bool bOpen)
+{
+	bLevelPopupOpen = bOpen && !bMapOverview;
+	ApplyMap();
+}
+
+void UMobileAppWidget::ChooseMapLevel(int32 Level)
+{
+	MapLevel = Level;
+	bMapOverview = false;
+	bLevelPopupOpen = false;
+	ApplyMap();
+}
+
+void UMobileAppWidget::ToggleOverview()
+{
+	bMapOverview = !bMapOverview;
+	bLevelPopupOpen = false;
+	ApplyMap();
+}
+
+void UMobileAppWidget::OpenBuilding(const FString& BuildingId)
+{
+	if (!Source.IsValid())
+	{
+		return;
+	}
+	for (const FMobileBuilding& Building : Source->ListBuildings(SiteId))
+	{
+		if (Building.Id == BuildingId && !Building.Levels.IsEmpty())
+		{
+			MapBuildingId = BuildingId;
+			MapLevel = BuildingId == MyLocationBuildingId ? MyLocationLevel : Building.Levels[0].Level;
+			bMapOverview = false;
+			bLevelPopupOpen = false;
+			ApplyMap();
+			return;
+		}
+	}
+}
+
+void UMobileAppWidget::LocateMe()
+{
+	if (!MyLocationBuildingId.IsEmpty())
+	{
+		MapBuildingId = MyLocationBuildingId;
+		MapLevel = MyLocationLevel;
+	}
+	bMapOverview = false;
+	bLevelPopupOpen = false;
+	ApplyMap();
+}
+
+void UMobileAppWidget::SetMap3D(bool bShow3DMap)
+{
+	bShow3D = bShow3DMap;
+	if (MapView)
+	{
+		MapView->Set3D(bShow3D);
+	}
+	RefreshModeButtons();
+}
+
+void UMobileAppWidget::OnOverviewClicked() { ToggleOverview(); }
+void UMobileAppWidget::OnLevelClicked() { SetLevelPopupOpen(!bLevelPopupOpen); }
+void UMobileAppWidget::OnLocateClicked() { LocateMe(); }
+
+void UMobileAppWidget::RefreshSearchStart()
+{
+	if (!SearchPage)
+	{
+		return;
+	}
+	FMobilePlace Start;
+	if (!StartPlaceId.IsEmpty() && Source.IsValid() && Source->FindPlace(StartPlaceId, Start))
+	{
+		SearchPage->SetStartLabel(Start.Name + TEXT(" \u00B7 ") + Start.GroupLabel());
+	}
+	else
+	{
+		SearchPage->SetStartLabel(FString());
 	}
 }

@@ -137,6 +137,65 @@ struct FMobileRoutePoint
 	FVector2D Position = FVector2D::ZeroVector;
 };
 
+// ---- What the map draws ----
+
+// A room on a level's map. It is a place when PlaceId is not empty (a corridor or a store room may not be).
+struct FMobileMapRoom
+{
+	FString PlaceId;
+	FString Name;
+	FString Category;
+	bool bAvailable = true;
+	// Counter-clockwise, in the level's own units.
+	TArray<FVector2D> Polygon;
+};
+
+enum class EMobileConnectorKind : uint8
+{
+	Lift,
+	Stairs,
+	Escalator,
+};
+
+struct FMobileMapConnector
+{
+	EMobileConnectorKind Kind = EMobileConnectorKind::Lift;
+	FVector2D Position = FVector2D::ZeroVector;
+};
+
+// One level of one building, to draw as a floor plan.
+struct FMobileLevelMap
+{
+	FString BuildingId;
+	int32 Level = 1;
+	TArray<FVector2D> Outline;
+	TArray<FMobileMapRoom> Rooms;
+	TArray<FMobileMapConnector> Connectors;
+	// Where people come in, on the ground level.
+	FVector2D Entrance = FVector2D::ZeroVector;
+};
+
+// The site seen from above: its buildings (and the things between them), in the site's own units.
+struct FMobileCampusBuilding
+{
+	FString BuildingId;
+	FString Name;
+	TArray<FVector2D> Outline;
+};
+
+struct FMobileCampusFeature
+{
+	// "Courtyard", "Pond"
+	FString Name;
+	TArray<FVector2D> Outline;
+};
+
+struct FMobileCampusMap
+{
+	TArray<FMobileCampusBuilding> Buildings;
+	TArray<FMobileCampusFeature> Features;
+};
+
 struct FMobileRoute
 {
 	bool bFound = false;
@@ -162,6 +221,10 @@ public:
 	// False if there is no such place.
 	virtual bool FindPlace(const FString& PlaceId, FMobilePlace& OutPlace) = 0;
 	virtual FMobileRoute FindRoute(const FMobileRouteRequest& Request) = 0;
+	// A level of a building as a floor plan; false if the site has no such level.
+	virtual bool GetLevelMap(const FString& BuildingId, int32 Level, FMobileLevelMap& OutMap) = 0;
+	// The site from above (a single building site has just that building).
+	virtual FMobileCampusMap GetCampusMap(const FString& SiteId) = 0;
 };
 
 namespace MobileNav

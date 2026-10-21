@@ -28,6 +28,13 @@ public:
 	void SetOnPlaceChosen(TFunction<void(const FMobilePlace&)> InCallback) { OnPlaceChosen = MoveTemp(InCallback); }
 	void SetOnBack(TFunction<void()> InCallback) { OnBack = MoveTemp(InCallback); }
 
+	// Where the person is starting from, when they chose a place for it ("Use as starting point"): shown under the title, with a way to clear it. Empty = My location.
+	void SetStartLabel(const FString& Label);
+	void SetOnClearStart(TFunction<void()> InCallback) { OnClearStart = MoveTemp(InCallback); }
+	FString GetStartLabel() const { return StartLabel; }
+	bool IsStartRowShown() const { return StartLabel.Len() > 0; }
+	void ClearStart() { if (OnClearStart) OnClearStart(); }
+
 	// What is typed, what is filtered, and what is listed; each of them rebuilds the list.
 	void SetQuery(const FString& NewQuery);
 	void ToggleCategory(const FString& Category);
@@ -59,12 +66,18 @@ private:
 	void HandleFiltersClicked();
 	UFUNCTION()
 	void HandleBrowseAllClicked();
+	UFUNCTION()
+	void HandleClearStartClicked();
 
 	void Refresh();
 	void RefreshFilterChips();
 	void AddGroupHeading(const FString& Label);
 	void AddPlaceRow(const FMobilePlace& Place);
 
+	UPROPERTY()
+	UBorder* StartRow = nullptr;
+	UPROPERTY()
+	UTextBlock* StartText = nullptr;
 	UPROPERTY()
 	UEditableTextBox* SearchBox = nullptr;
 	UPROPERTY()
@@ -83,6 +96,7 @@ private:
 	FString ContextBuildingId;
 	int32 ContextLevel = 1;
 	FString Query;
+	FString StartLabel;
 	FMobilePlaceFilter Filter;
 	bool bFiltersOpen = false;
 	bool bBrowseAll = false;
@@ -92,4 +106,5 @@ private:
 
 	TFunction<void(const FMobilePlace&)> OnPlaceChosen;
 	TFunction<void()> OnBack;
+	TFunction<void()> OnClearStart;
 };

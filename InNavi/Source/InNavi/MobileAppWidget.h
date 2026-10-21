@@ -19,6 +19,8 @@ class UMobileSearchPageWidget;
 class UMobilePlacePageWidget;
 class UMobileRoutePageWidget;
 class UMobileNavigatePageWidget;
+class UMobileMapWidget;
+class UVerticalBox;
 class UMobileArrivedPageWidget;
 
 // Where the main pieces of the phone screen are, in design pixels (the phone screen is 375 wide however big the window is), so a test can
@@ -92,6 +94,11 @@ public:
 	void AdvanceNavigation();
 	void RefreshNavigation();
 	void RefreshArrived();
+	// Shows on the map what the sheet is about: the place, the route, the person walking; and keeps the level button right.
+	void RefreshMap();
+	// Tells the search page where the walk starts (a place the person chose, or nothing for My location).
+	void RefreshSearchStart();
+	void ApplyMap();
 	void SetSnap(EMobileSheetSnap NewSnap);
 	// The sheet's height right now, mid-drag or mid-move included (design pixels).
 	double GetSheetHeight() const { return SheetHeight; }
@@ -110,6 +117,20 @@ public:
 	UMobilePlacePageWidget* GetPlacePage() const { return PlacePage; }
 	UMobileRoutePageWidget* GetRoutePage() const { return RoutePage; }
 	UMobileNavigatePageWidget* GetNavigatePage() const { return NavigatePage; }
+	UMobileMapWidget* GetMapView() const { return MapView; }
+	const FString& GetMapBuildingId() const { return MapBuildingId; }
+	int32 GetMapLevel() const { return MapLevel; }
+	bool IsMapOverview() const { return bMapOverview; }
+	// The level popup (the L1 button above the sheet): open or closed, and a choice in it.
+	bool IsLevelPopupOpen() const { return bLevelPopupOpen; }
+	void SetLevelPopupOpen(bool bOpen);
+	void ChooseMapLevel(int32 Level);
+	// The Overview, Locate and 2D / 3D buttons.
+	void ToggleOverview();
+	void LocateMe();
+	void SetMap3D(bool bShow3DMap);
+	// A tap on a building of the overview opens it.
+	void OpenBuilding(const FString& BuildingId);
 	UMobileArrivedPageWidget* GetArrivedPage() const { return ArrivedPage; }
 	int32 GetNavStepIndex() const { return NavStepIndex; }
 	const FMobileRoute& GetCurrentRoute() const { return CurrentRoute; }
@@ -142,6 +163,12 @@ private:
 	void OnTabProfileClicked();
 	UFUNCTION()
 	void OnOpenSiteClicked();
+	UFUNCTION()
+	void OnOverviewClicked();
+	UFUNCTION()
+	void OnLevelClicked();
+	UFUNCTION()
+	void OnLocateClicked();
 	UFUNCTION()
 	void OnShow2DClicked();
 	UFUNCTION()
@@ -209,6 +236,19 @@ private:
 	UMobileRoutePageWidget* RoutePage = nullptr;
 	UPROPERTY()
 	UMobileNavigatePageWidget* NavigatePage = nullptr;
+	UPROPERTY()
+	UMobileMapWidget* MapView = nullptr;
+	UPROPERTY()
+	UTextBlock* LevelLabel = nullptr;
+	UPROPERTY()
+	UVerticalBox* LevelPopupList = nullptr;
+	UPROPERTY()
+	UBorder* LevelPopupBorder = nullptr;
+	// What the map shows: a level of a building, or the overview of the site.
+	FString MapBuildingId;
+	int32 MapLevel = 1;
+	bool bMapOverview = false;
+	bool bLevelPopupOpen = false;
 	UPROPERTY()
 	UMobileArrivedPageWidget* ArrivedPage = nullptr;
 	// Which step of the route the person is on while walking (0-based).

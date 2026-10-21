@@ -63,6 +63,39 @@ namespace MobileNavSourceTests
 			Test.TestTrue(TEXT("a search gives only the site's places"), Hits.Num() <= All.Num());
 			Test.TestTrue(TEXT("a word that is nowhere gives nothing"), Source.SearchPlaces(Site.Id, TEXT("zzqxjw"), FMobilePlaceFilter()).IsEmpty());
 
+			// Every level of every building has a floor plan whose rooms are its places, and the site has an overview with every building.
+			for (const FMobileBuilding& Building : Buildings)
+			{
+				for (const FMobileLevel& Level : Building.Levels)
+				{
+					FMobileLevelMap Map;
+					Test.TestTrue(TEXT("a level has a floor plan"), Source.GetLevelMap(Building.Id, Level.Level, Map));
+					Test.TestTrue(TEXT("with an outline"), Map.Outline.Num() >= 3);
+					TArray<FString> OnThisLevel;
+					for (const FMobilePlace& Place : All)
+					{
+						if (Place.BuildingId == Building.Id && Place.Level == Level.Level) OnThisLevel.Add(Place.Id);
+					}
+					for (const FMobileMapRoom& Room : Map.Rooms)
+					{
+						Test.TestTrue(TEXT("a room has a shape"), Room.Polygon.Num() >= 3);
+						Test.TestTrue(TEXT("a room that is a place is one of the level's"), Room.PlaceId.IsEmpty() || OnThisLevel.Contains(Room.PlaceId));
+					}
+					for (const FString& PlaceId : OnThisLevel)
+					{
+						Test.TestTrue(TEXT("every place of the level is a room on its plan"), Map.Rooms.ContainsByPredicate([&PlaceId](const FMobileMapRoom& R) { return R.PlaceId == PlaceId; }));
+					}
+				}
+				FMobileLevelMap NoSuchLevel;
+				Test.TestFalse(TEXT("a level the building does not have has no plan"), Source.GetLevelMap(Building.Id, 99, NoSuchLevel));
+			}
+			const FMobileCampusMap Campus = Source.GetCampusMap(Site.Id);
+			Test.TestEqual(TEXT("the overview has every building"), Campus.Buildings.Num(), Buildings.Num());
+			for (const FMobileCampusBuilding& CampusBuilding : Campus.Buildings)
+			{
+				Test.TestTrue(TEXT("a building on the overview has a shape and is one of the site's"), CampusBuilding.Outline.Num() >= 3 && BuildingIds.Contains(CampusBuilding.BuildingId));
+			}
+
 			// A route between two places ends where the person goes, in a time that fits its length.
 			if (All.Num() >= 2)
 			{

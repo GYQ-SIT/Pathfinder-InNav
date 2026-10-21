@@ -2,6 +2,8 @@
 
 #include "MobileAppWidget.h"
 #include "MobileMockSource.h"
+#include "MobileMapWidget.h"
+#include "MobileRoutePageWidget.h"
 #include "MobilePlacePageWidget.h"
 #include "MobileSearchPageWidget.h"
 
@@ -91,25 +93,41 @@ bool FMobilePlaceFlowTest::RunTest(const FString& Parameters)
 	Click(TEXT("Btn_SavePlace"));
 	TestTrue(TEXT("and unsaved by another tap"), !Screen->IsPlaceSaved(TEXT("E6-2M-102")) && !Page->IsSaved());
 
-	// The starting point toggles the same way.
+	// Use as starting point sets the start and moves on to "Where to?" to choose where to go; the search page says where the walk starts.
 	Click(TEXT("Btn_UseAsStart"));
 	TestEqual(TEXT("the starting point is this place"), Screen->GetStartPlaceId(), FString(TEXT("E6-2M-102")));
-	TestTrue(TEXT("and the page shows it"), Page->IsStart());
-	Click(TEXT("Btn_UseAsStart"));
-	TestTrue(TEXT("another tap goes back to my location"), Screen->GetStartPlaceId().IsEmpty() && !Page->IsStart());
-	Click(TEXT("Btn_UseAsStart"));
+	TestEqual(TEXT("and the sheet goes to Where to?"), Screen->GetFlow().GetState(), EMobileSheetState::Search);
+	TestTrue(TEXT("the search page says where the walk starts"), Screen->GetSearchPage()->IsStartRowShown() && Screen->GetSearchPage()->GetStartLabel().Contains(TEXT("E6")));
+	TestTrue(TEXT("the place page shows it as the start"), Page->IsStart());
+	TestTrue(TEXT("the person is on the map at that place"), Screen->GetMapView()->HasPosition() && Screen->GetMapView()->GetBuildingId() == TEXT("E6"));
 
-	// Back, and another place: the starting point stays, the page follows the place.
-	Click(TEXT("Btn_PlaceBack"));
-	TestEqual(TEXT("back goes to the search"), Screen->GetFlow().GetState(), EMobileSheetState::Search);
+	// Another place becomes the destination; the start is remembered.
 	Screen->GetSearchPage()->ChoosePlace(TEXT("E2-01-101"));
 	TestEqual(TEXT("another place on the page"), Page->GetPlace().Id, FString(TEXT("E2-01-101")));
 	TestFalse(TEXT("which is not the starting point"), Page->IsStart());
 	TestEqual(TEXT("while the starting point is remembered"), Screen->GetStartPlaceId(), FString(TEXT("E6-2M-102")));
 
-	// Get directions goes on to the route.
+	// The route goes from the start to the destination.
 	Click(TEXT("Btn_GetDirections"));
 	TestEqual(TEXT("the route"), Screen->GetFlow().GetState(), EMobileSheetState::Route);
+	TestEqual(TEXT("from the place chosen as the start"), Screen->GetRoutePage()->GetRequest().FromPlaceId, FString(TEXT("E6-2M-102")));
+	TestTrue(TEXT("a route is found"), Screen->GetCurrentRoute().bFound);
+
+	// Back to the place and the search; Clear on the search page goes back to My location.
+	Cast<UButton>(Screen->GetRoutePage()->FindNamedWidget(TEXT("Btn_RouteBack")))->OnClicked.Broadcast();
+	Click(TEXT("Btn_PlaceBack"));
+	TestEqual(TEXT("back at Where to?"), Screen->GetFlow().GetState(), EMobileSheetState::Search);
+	Cast<UButton>(Screen->GetSearchPage()->FindNamedWidget(TEXT("Btn_ClearStart")))->OnClicked.Broadcast();
+	TestTrue(TEXT("Clear goes back to My location"), Screen->GetStartPlaceId().IsEmpty() && !Screen->GetSearchPage()->IsStartRowShown());
+
+	// On a place that is already the start, tapping the button takes the start back and stays on the page.
+	Screen->GetSearchPage()->ChoosePlace(TEXT("E2-01-102"));
+	Click(TEXT("Btn_UseAsStart"));
+	TestEqual(TEXT("a start is set again"), Screen->GetStartPlaceId(), FString(TEXT("E2-01-102")));
+	Screen->GetSearchPage()->ChoosePlace(TEXT("E2-01-102"));
+	Click(TEXT("Btn_UseAsStart"));
+	TestTrue(TEXT("tapping it again takes it back"), Screen->GetStartPlaceId().IsEmpty());
+	TestEqual(TEXT("and stays on the place"), Screen->GetFlow().GetState(), EMobileSheetState::Place);
 	World->DestroyWorld(false);
 	return true;
 }

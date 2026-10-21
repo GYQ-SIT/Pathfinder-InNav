@@ -152,6 +152,24 @@ void ANavPlayerController::MobileApp()
 		{
 			Screen->PreviewOpenSelect(OpenName);
 		}
+		// For the map: -MobileOverview, -Mobile3D, -MobileLevelList, and -MobileMapLevel=2 (a level of the building shown).
+		FString MapLevelText;
+		if (FParse::Param(FCommandLine::Get(), TEXT("MobileOverview")))
+		{
+			Screen->ToggleOverview();
+		}
+		if (FParse::Param(FCommandLine::Get(), TEXT("Mobile3D")))
+		{
+			Screen->SetMap3D(true);
+		}
+		if (FParse::Value(FCommandLine::Get(), TEXT("MobileMapLevel="), MapLevelText))
+		{
+			Screen->ChooseMapLevel(FCString::Atoi(*MapLevelText));
+		}
+		if (FParse::Param(FCommandLine::Get(), TEXT("MobileLevelList")))
+		{
+			Screen->SetLevelPopupOpen(true);
+		}
 		if (FParse::Value(FCommandLine::Get(), TEXT("MobileSnap="), SnapName))
 		{
 			Screen->SetSnap(SnapName == TEXT("Full") ? EMobileSheetSnap::Full : SnapName == TEXT("Collapsed") ? EMobileSheetSnap::Collapsed : EMobileSheetSnap::Half);

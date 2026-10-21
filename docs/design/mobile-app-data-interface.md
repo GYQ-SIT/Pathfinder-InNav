@@ -42,6 +42,8 @@ class IMobileNavSource
     virtual TArray<FMobilePlace>    SearchPlaces(const FString& SiteId, const FString& Query, const FMobilePlaceFilter& Filter) = 0;
     virtual bool                    FindPlace(const FString& PlaceId, FMobilePlace& OutPlace) = 0;
     virtual FMobileRoute            FindRoute(const FMobileRouteRequest& Request) = 0;
+    virtual bool                    GetLevelMap(const FString& BuildingId, int32 Level, FMobileLevelMap& OutMap) = 0;   // a floor plan
+    virtual FMobileCampusMap        GetCampusMap(const FString& SiteId) = 0;                                       // the site from above
 };
 ```
 
@@ -153,3 +155,30 @@ goes back to the route; setting off again starts at the first step.
 `UMobileArrivedPageWidget` is "You have arrived": the place with its code and level, Find another place (to the search), Save this place (the screen
 keeps the saved places, the same ones the place page shows), and View destination (to the place page). No page is a placeholder any more: the sheet
 has five real pages, one for each state of the flow. `-MobileState=Navigating|Arrived` shows them.
+
+## The map (step 3, the map area)
+
+`UMobileMapWidget` fills the screen behind the sheet and draws what the source gives it: `GetLevelMap` (one level of a building: its outline, its rooms -
+each a place or not - and its lifts, stairs and escalators) or `GetCampusMap` (the Overview: the buildings, and features such as the pond). Rooms are coloured
+by what they are (Learning blue, Facilities green, Dining yellow, closed ones darker) and named; an L-shaped room is fine (the polygons are ear-clipped).
+It also draws, on the level it shows: the route (a line, a white-ringed blue dot at the start, a red dot at the destination), the chosen place (blue outline), and
+the person (a blue dot with a halo). 3D is the same plan tilted (turned a quarter, squashed, standing on a slab). The plan is fitted into the part of the screen
+the top bar and the sheet (at its half height, so it does not jump while the sheet is dragged) do not cover. A tap on a room opens its place (while searching or
+looking at a place); on the Overview a tap on a building opens it.
+
+What it shows follows the sheet (`UMobileAppWidget::RefreshMap`): the place's level for a place and the arrival, the start of the route for the route, the level
+of the step the person is at while walking (so it follows them up a lift and out of a building). The person's own choices last until the sheet moves on:
+the **level button** (opens a list of the building's levels, top one first, upward from the button; "Map" on the Overview), **Overview** (toggles the site view),
+**Locate** (back to My location's building and level) and **2D | 3D**. The dot is the step's position while walking, otherwise My location (the door of the
+building the person said they are in; the real source will give a position).
+
+In the mock, rooms are drawn around the places' positions and the route is a path along the corridors (to the crossing, along to the room's door, in), with
+`FMobileStep::Position` the place where the instruction applies and `FMobileRoute::Points` the line to draw. Options for looking at it: `-MobileOverview`, `-Mobile3D`,
+`-MobileLevelList`, `-MobileMapLevel=2`.
+
+## Use as starting point
+
+On the place page, **Use as starting point** makes that place the start of the walk (the route's From) and moves the sheet on to **Where to?** to choose the destination. The
+search page shows "Starting from <place> . <building> . <level>" under its title with a **Clear** button that goes back to My location, and the map puts the person's dot on
+that place. Choosing a place there and pressing Get directions finds the route from the start to it. Pressing the button on a place that is already the start takes the start
+back and stays on the place page.

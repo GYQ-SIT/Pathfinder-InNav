@@ -38,6 +38,24 @@ TSharedRef<SWidget> UMobileSearchPageWidget::RebuildWidget()
 		Header->AddChildToHorizontalBox(MakeText(Tree, TEXT("Txt_SearchTitle"), TEXT("Where to?"), 22.f, Ink, true))->SetVerticalAlignment(VAlign_Center);
 		Page->AddChildToVerticalBox(Header)->SetPadding(FMargin(16.f, 0.f, 16.f, 0.f));
 
+		// Where the walk starts, when the person chose a place for it: a line under the title, and Clear to go back to My location.
+		StartRow = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("StartRow"));
+		StartRow->SetBrush(Rounded(BlueSoft, FLinearColor::Transparent, 10.f, 0.f));
+		StartRow->SetBrushColor(FLinearColor::White);
+		StartRow->SetPadding(FMargin(12.f, 8.f));
+		StartRow->SetVisibility(ESlateVisibility::Collapsed);
+		UHorizontalBox* StartLine = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("StartLine"));
+		StartText = MakeText(Tree, TEXT("Txt_StartingFrom"), TEXT(""), 12.f, Blue, true);
+		StartText->SetAutoWrapText(true);
+		UHorizontalBoxSlot* StartTextSlot = StartLine->AddChildToHorizontalBox(StartText);
+		StartTextSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		StartTextSlot->SetVerticalAlignment(VAlign_Center);
+		UButton* ClearStartButton = MakeButton(Tree, TEXT("Btn_ClearStart"), TEXT("Clear"), White, Blue, 8.f, 28.f, nullptr, 12.f);
+		ClearStartButton->OnClicked.AddUniqueDynamic(this, &UMobileSearchPageWidget::HandleClearStartClicked);
+		StartLine->AddChildToHorizontalBox(ClearStartButton)->SetVerticalAlignment(VAlign_Center);
+		StartRow->SetContent(StartLine);
+		Page->AddChildToVerticalBox(StartRow)->SetPadding(FMargin(16.f, 8.f, 16.f, 0.f));
+
 		// The search box and the filters toggle.
 		UHorizontalBox* SearchRow = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("SearchRow"));
 		SearchBox = Tree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_Search"));
@@ -361,4 +379,19 @@ void UMobileSearchPageWidget::Refresh()
 		Browse->OnClicked.AddUniqueDynamic(this, &UMobileSearchPageWidget::HandleBrowseAllClicked);
 		ListBox->AddChildToVerticalBox(Browse)->SetPadding(FMargin(16.f, 14.f, 16.f, 16.f));
 	}
+}
+
+void UMobileSearchPageWidget::SetStartLabel(const FString& Label)
+{
+	StartLabel = Label;
+	if (StartRow && StartText)
+	{
+		StartRow->SetVisibility(Label.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+		StartText->SetText(FText::FromString(Label.IsEmpty() ? FString() : TEXT("Starting from ") + Label));
+	}
+}
+
+void UMobileSearchPageWidget::HandleClearStartClicked()
+{
+	ClearStart();
 }
