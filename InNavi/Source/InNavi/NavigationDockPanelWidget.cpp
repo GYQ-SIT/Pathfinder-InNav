@@ -162,6 +162,10 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 		WrapText(RouteDetailsText);
 		ApplyStandardFont(RouteDetailsText);
 		Stack->AddChildToVerticalBox(RouteDetailsText);
+
+		RouteStepsBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Box_NavRouteSteps"));
+		RouteStepsBox->SetVisibility(ESlateVisibility::Collapsed);
+		Stack->AddChildToVerticalBox(RouteStepsBox);
 	}
 	return Super::RebuildWidget();
 }
@@ -395,10 +399,39 @@ void UNavigationDockPanelWidget::RefreshDisplay()
 		StatusText->SetText(FText::FromString(Nav->GetDisplayStatusMessage()));
 		StatusText->SetColorAndOpacity(FSlateColor(Nav->GetStatusColor()));
 	}
+	// The route found is shown as steps (each its own line, the last one in green); until there is a route, the plain text shows
+	// what has been chosen so far.
+	const bool bGuidanceVisible = Nav->IsRouteGuidanceVisible();
+	const TArray<UNavigationPanelWidget::FNavigationRouteStep> Steps = Nav->BuildRouteSteps();
+	if (RouteStepsBox)
+	{
+		FString Signature;
+		for (const UNavigationPanelWidget::FNavigationRouteStep& Step : Steps)
+		{
+			Signature += Step.Text + (Step.bFinal ? TEXT("\x1f1\n") : TEXT("\x1f0\n"));
+		}
+		if (Signature != ShownRouteSteps)
+		{
+			ShownRouteSteps = Signature;
+			RouteStepsBox->ClearChildren();
+			static const FLinearColor StepColor(0.45f, 0.92f, 1.f, 1.f);
+			static const FLinearColor FinalStepColor(0.35f, 0.95f, 0.45f, 1.f);
+			for (int32 Index = 0; Index < Steps.Num(); ++Index)
+			{
+				UTextBlock* StepText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+				StepText->SetText(FText::FromString(FString::Printf(TEXT("Step %d: %s"), Index + 1, *Steps[Index].Text)));
+				StepText->SetColorAndOpacity(FSlateColor(Steps[Index].bFinal ? FinalStepColor : StepColor));
+				WrapText(StepText);
+				ApplyStandardFont(StepText);
+				RouteStepsBox->AddChildToVerticalBox(StepText)->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+			}
+		}
+		RouteStepsBox->SetVisibility(bGuidanceVisible && !Steps.IsEmpty() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
 	if (RouteDetailsText)
 	{
-		RouteDetailsText->SetText(FText::FromString(Nav->BuildRouteDetails()));
-		RouteDetailsText->SetVisibility(Nav->IsRouteGuidanceVisible() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		RouteDetailsText->SetText(FText::FromString(Steps.IsEmpty() ? Nav->BuildRouteDetails() : FString()));
+		RouteDetailsText->SetVisibility(bGuidanceVisible && Steps.IsEmpty() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 }
 

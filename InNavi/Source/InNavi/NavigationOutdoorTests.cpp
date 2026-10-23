@@ -2,6 +2,9 @@
 
 #include "UiTestFixture.h"
 #include "PolyBuilding.h"
+#include "InteriorScreenWidget.h"
+#include "Components/TextBlock.h"
+#include "Components/VerticalBox.h"
 #include "NavigationRoutePlanner.h"
 #include "NavigationRouteVisualization.h"
 #include "Misc/AutomationTest.h"
@@ -153,6 +156,77 @@ bool FNavigationOutdoorKeepsStateTest::RunTest(const FString& Parameters)
 	Fixture.Interior->LoadInteriorForBuilding(TEXT("A"));
 	TestEqual(TEXT("inside a building the door is an extra entry, named as it was"), Nav->GetDestinationOtherBuildingLabel(), DoorLabel);
 	TestTrue(TEXT("and Clear removes both"), (Nav->RequestClearRoute(), !Nav->HasStart() && !Nav->HasDestination()));
+	return true;
+}
+
+// The directions are numbered steps, in words (building names, no ids), and the last step is the one shown in green.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationRouteStepsTest, "InNavi.Navigation.Directions.Steps",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationRouteStepsTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationOutdoorTests;
+	FNavigationSearchFixture Fixture;
+	if (!TestTrue(TEXT("test project loads"), LoadTestProject(Fixture))) return false;
+	UNavigationPanelWidget* Nav = Fixture.Nav;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>();
+	Screen->Initialize(); Screen->TakeWidget(); Screen->SetOwningPlayer(Controller);
+	FScriptDelegate Repaint;
+	Repaint.BindUFunction(Screen, TEXT("HandleNavigationStateChanged"));
+	Nav->OnStateChanged.AddUnique(Repaint);
+
+	TestTrue(TEXT("no steps before a route"), Nav->BuildRouteSteps().IsEmpty());
+
+	// Start in a room of A on floor 1, Destination in a room of B on floor 3: through the link door, then up.
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("A"));
+	Fixture.Interior->SetActiveFloor(1);
+	const auto* StartRoom = Nav->GetSelectableRooms().FindByPredicate([](const UNavigationPanelWidget::FNavigationRoomOption& O) { return O.Floor == 1; });
+	if (!TestNotNull(TEXT("a room in A"), StartRoom)) return false;
+	TestTrue(TEXT("Start in A"), Nav->SetStartToRoom(StartRoom->GetDisplayLabel()));
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("B"));
+	Fixture.Interior->SetActiveFloor(3);
+	const auto* DestinationRoom = Nav->GetSelectableRooms().FindByPredicate([](const UNavigationPanelWidget::FNavigationRoomOption& O) { return O.Floor == 3; });
+	if (!TestNotNull(TEXT("a room in B on floor 3"), DestinationRoom)) return false;
+	const FString DestinationName = DestinationRoom->RoomName;
+	TestTrue(TEXT("Destination in B"), Nav->SetDestinationToRoom(DestinationRoom->GetDisplayLabel()));
+	Nav->RequestFindRoute();
+
+	const TArray<UNavigationPanelWidget::FNavigationRouteStep> Steps = Nav->BuildRouteSteps();
+	if (!TestTrue(TEXT("a route has steps"), Steps.Num() >= 4)) return false;
+	TestTrue(TEXT("starts where the Start is"), Steps[0].Text == FString::Printf(TEXT("Start at %s in Building A, Floor 1."), *StartRoom->RoomName));
+	TestTrue(TEXT("uses the link door, by building name"), Steps.ContainsByPredicate([](const UNavigationPanelWidget::FNavigationRouteStep& S) { return S.Text == TEXT("Use the link door from Building A to Building B on Floor 1."); }));
+	TestTrue(TEXT("takes a lift or stairs up"), Steps.ContainsByPredicate([](const UNavigationPanelWidget::FNavigationRouteStep& S) { return S.Text.StartsWith(TEXT("Take the ")) && S.Text.Contains(TEXT("in Building B")) && S.Text.EndsWith(TEXT("to Floor 3.")); }));
+	TestEqual(TEXT("ends where the Destination is"), Steps.Last().Text, FString::Printf(TEXT("Arrive at %s in Building B, Floor 3."), *DestinationName));
+	int32 FinalCount = 0;
+	for (const auto& Step : Steps)
+	{
+		FinalCount += Step.bFinal ? 1 : 0;
+		TestFalse(TEXT("no id in a step"), Step.Text.Contains(TEXT("[")) || Step.Text.Contains(TEXT("-NAV-")));
+	}
+	TestTrue(TEXT("only the last step is final"), FinalCount == 1 && Steps.Last().bFinal);
+	TestTrue(TEXT("the text lists them as Step 1, Step 2, ..."), Nav->BuildRouteDetails().StartsWith(TEXT("Step 1: Start at ")) && Nav->BuildRouteDetails().Contains(FString::Printf(TEXT("Step %d: Arrive at"), Steps.Num())));
+
+	// On screen: one line per step, the last one green.
+	UVerticalBox* Box = Cast<UVerticalBox>(Screen->FindScreenWidget(TEXT("Box_NavRouteSteps")));
+	if (!TestNotNull(TEXT("the steps are on screen"), Box)) return false;
+	TestEqual(TEXT("one line per step"), Box->GetChildrenCount(), Steps.Num());
+	TestEqual(TEXT("shown"), Box->GetVisibility(), ESlateVisibility::Visible);
+	const UTextBlock* First = Cast<UTextBlock>(Box->GetChildAt(0));
+	const UTextBlock* Last = Cast<UTextBlock>(Box->GetChildAt(Box->GetChildrenCount() - 1));
+	if (!TestTrue(TEXT("lines are text"), First && Last)) return false;
+	TestTrue(TEXT("numbered"), First->GetText().ToString().StartsWith(TEXT("Step 1: ")));
+	const FLinearColor FirstColor = First->GetColorAndOpacity().GetSpecifiedColor();
+	const FLinearColor LastColor = Last->GetColorAndOpacity().GetSpecifiedColor();
+	TestTrue(TEXT("the last step is green"), LastColor.G > LastColor.R + 0.3f && LastColor.G > LastColor.B + 0.3f);
+	TestTrue(TEXT("the others are not green"), !(FirstColor.G > FirstColor.R + 0.3f && FirstColor.G > FirstColor.B + 0.3f && FirstColor.B < 0.6f));
+
+	// Hiding the route hides the steps, and a new Start clears them.
+	Nav->ToggleRouteGuidance();
+	TestEqual(TEXT("hidden with the route"), Box->GetVisibility(), ESlateVisibility::Collapsed);
+	Nav->ToggleRouteGuidance();
+	Nav->RequestClearRoute();
+	TestEqual(TEXT("cleared with the route"), Box->GetChildrenCount(), 0);
+	Nav->OnStateChanged.Remove(Repaint);
 	return true;
 }
 

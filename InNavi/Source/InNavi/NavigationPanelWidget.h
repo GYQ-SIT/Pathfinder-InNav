@@ -142,6 +142,15 @@ public:
 	// private state (FSelectedEndpoint::BuildingId) that has no other public accessor.
 	FString GetDisplayStatusMessage() const;
 	FLinearColor GetStatusColor() const;
+	// The directions of the route found, one step after another: where to start, each door, lift or staircase to take, and the
+	// arrival. The last step is marked (the panel shows it in green). Empty until a route is found.
+	struct FNavigationRouteStep
+	{
+		FString Text;
+		bool bFinal = false;
+	};
+	TArray<FNavigationRouteStep> BuildRouteSteps() const;
+	// The same as text: "Step 1: ..." per line when a route is found; before that, just the Start and Destination chosen so far.
 	FString BuildRouteDetails() const;
 	bool CanFindRoute() const;
 	bool CanClearRoute() const;
@@ -255,6 +264,9 @@ private:
 	};
 
 	FString OtherBuildingLabel(const FSelectedEndpoint& Endpoint) const;
+	// A building by its name (its id when it has none), and where an endpoint is, in words, for the directions.
+	FString BuildingDisplayName(const FString& BuildingId) const;
+	FString EndpointPhrase(const FSelectedEndpoint& Endpoint) const;
 	// Whether the room dropdowns list this endpoint's place as one of their own entries (a room of the open building, or in outdoor
 	// mode a main door), as opposed to needing an extra entry.
 	bool EndpointIsInCurrentList(const FSelectedEndpoint& Endpoint) const;

@@ -56,14 +56,6 @@ namespace
 		return bInside;
 	}
 
-	FString LocationName(const FNavigationRoutePoint& Point)
-	{
-		const FString Location = Point.Floor == UNavigationPanelWidget::OutdoorFloor
-			? TEXT("Outside")
-			: FString::Printf(TEXT("Floor %d (indoors)"), Point.Floor);
-		return Point.BuildingId.IsEmpty() ? Location : Point.BuildingId + TEXT(" - ") + Location;
-	}
-
 	FString ConnectorTypeName(EInteriorNavNodeType Type)
 	{
 		switch (Type)
@@ -907,28 +899,58 @@ FString UNavigationPanelWidget::GetDisplayStatusMessage() const
 	}
 }
 
-FString UNavigationPanelWidget::BuildRouteDetails() const
+FString UNavigationPanelWidget::BuildingDisplayName(const FString& BuildingId) const
 {
-	FString Details;
+	const APolyBuilding* Building = Generator ? Generator->FindBuildingById(BuildingId) : nullptr;
+	return (Building && !Building->BuildingName.IsEmpty()) ? Building->BuildingName : BuildingId;
+}
+
+FString UNavigationPanelWidget::EndpointPhrase(const FSelectedEndpoint& Endpoint) const
+{
+	const FString Building = BuildingDisplayName(Endpoint.BuildingId);
+	if (Endpoint.Point.Floor == OutdoorFloor)
+	{
+		// A main door picked from the list already names its building ("T1 · Main door").
+		if (Endpoint.bSetViaDropdown && !Endpoint.RoomOptionLabel.IsEmpty())
+		{
+			return Endpoint.RoomOptionLabel;
+		}
+		return Building.IsEmpty() ? FString(TEXT("a spot outside")) : FString::Printf(TEXT("a spot outside near %s"), *Building);
+	}
+	const FString Floor = FString::Printf(TEXT("Floor %d"), Endpoint.Point.Floor);
+	if (Endpoint.bSetViaDropdown && !Endpoint.RoomOptionLabel.IsEmpty())
+	{
+		// The label is "Room name (Floor N)"; the floor is said after the building instead.
+		FString Room = Endpoint.RoomOptionLabel;
+		const int32 FloorStart = Room.Find(TEXT(" (Floor "), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+		if (FloorStart != INDEX_NONE)
+		{
+			Room.LeftInline(FloorStart);
+		}
+		return Building.IsEmpty() ? FString::Printf(TEXT("%s, %s"), *Room, *Floor) : FString::Printf(TEXT("%s in %s, %s"), *Room, *Building, *Floor);
+	}
+	return Building.IsEmpty() ? FString::Printf(TEXT("a spot on %s"), *Floor) : FString::Printf(TEXT("a spot on %s of %s"), *Floor, *Building);
+}
+
+TArray<UNavigationPanelWidget::FNavigationRouteStep> UNavigationPanelWidget::BuildRouteSteps() const
+{
+	TArray<FNavigationRouteStep> Steps;
+	if (RoutePoints.IsEmpty())
+	{
+		return Steps;
+	}
 	if (Start.bValid)
 	{
-		Details += FString::Printf(TEXT("Start: %s\n"), *LocationName(Start.Point));
+		Steps.Add({ FString::Printf(TEXT("Start at %s."), *EndpointPhrase(Start)) });
 	}
-	if (Destination.bValid)
-	{
-		Details += FString::Printf(TEXT("Destination: %s\n"), *LocationName(Destination.Point));
-	}
-
-	const int32 ActiveFloor = Interior ? Interior->GetActiveFloor() : INDEX_NONE;
-	int32 NextFloor = INDEX_NONE;
-	int32 PreviousFloor = INDEX_NONE;
 	for (int32 I = 1; I < RoutePoints.Num(); ++I)
 	{
 		const FNavigationRoutePoint& From = RoutePoints[I - 1];
 		const FNavigationRoutePoint& To = RoutePoints[I];
 		if (From.BuildingId != To.BuildingId && From.Floor != OutdoorFloor && To.Floor != OutdoorFloor)
 		{
-			Details += FString::Printf(TEXT("Use the link door from %s to %s on Floor %d.\n"), *From.BuildingId, *To.BuildingId, To.Floor);
+			Steps.Add({ FString::Printf(TEXT("Use the link door from %s to %s on Floor %d."),
+				*BuildingDisplayName(From.BuildingId), *BuildingDisplayName(To.BuildingId), To.Floor) });
 			continue;
 		}
 		if (From.Floor == To.Floor)
@@ -937,40 +959,50 @@ FString UNavigationPanelWidget::BuildRouteDetails() const
 		}
 		if (From.Floor == OutdoorFloor)
 		{
-			Details += FString::Printf(TEXT("Enter the building %s, then continue on Floor 1.\n"), *To.BuildingId);
+			Steps.Add({ To.BuildingId.IsEmpty() ? FString(TEXT("Enter the building and continue on Floor 1."))
+				: FString::Printf(TEXT("Enter the building %s and continue on Floor 1."), *BuildingDisplayName(To.BuildingId)) });
 		}
 		else if (To.Floor == OutdoorFloor)
 		{
-			Details += FString::Printf(TEXT("Exit the building %s, then continue outside.\n"), *From.BuildingId);
+			Steps.Add({ From.BuildingId.IsEmpty() ? FString(TEXT("Exit the building and continue outside."))
+				: FString::Printf(TEXT("Exit the building %s and continue outside."), *BuildingDisplayName(From.BuildingId)) });
 		}
 		else
 		{
-			const FString Connector = ConnectorTypeName(To.ConnectorType);
-			const FString ConnectorLabel = To.ConnectorId.IsEmpty()
-				? Connector : Connector + TEXT(" ") + To.ConnectorId;
-			Details += FString::Printf(TEXT("Take %s in %s from Floor %d to Floor %d.\n"),
-				*ConnectorLabel, *From.BuildingId, From.Floor, To.Floor);
-		}
-		if (From.Floor == ActiveFloor && Interior && From.BuildingId == Interior->GetLoadedBuildingId() && NextFloor == INDEX_NONE)
-		{
-			NextFloor = To.Floor;
-		}
-		if (To.Floor == ActiveFloor && Interior && To.BuildingId == Interior->GetLoadedBuildingId())
-		{
-			PreviousFloor = From.Floor;
+			const FString Where = From.BuildingId.IsEmpty() ? FString() : FString::Printf(TEXT(" in %s"), *BuildingDisplayName(From.BuildingId));
+			Steps.Add({ FString::Printf(TEXT("Take the %s%s from Floor %d to Floor %d."), *ConnectorTypeName(To.ConnectorType), *Where, From.Floor, To.Floor) });
 		}
 	}
-	if (NextFloor != INDEX_NONE)
+	if (Destination.bValid)
 	{
-		Details += NextFloor == OutdoorFloor
-			? TEXT("Route continues outside.")
-			: FString::Printf(TEXT("Route continues to Floor %d."), NextFloor);
+		Steps.Add({ FString::Printf(TEXT("Arrive at %s."), *EndpointPhrase(Destination)) });
 	}
-	else if (PreviousFloor != INDEX_NONE)
+	if (!Steps.IsEmpty())
 	{
-		Details += PreviousFloor == OutdoorFloor
-			? TEXT("Route arrives from outside.")
-			: FString::Printf(TEXT("Route arrives from Floor %d."), PreviousFloor);
+		Steps.Last().bFinal = true;
+	}
+	return Steps;
+}
+
+FString UNavigationPanelWidget::BuildRouteDetails() const
+{
+	const TArray<FNavigationRouteStep> Steps = BuildRouteSteps();
+	FString Details;
+	if (Steps.IsEmpty())
+	{
+		// No route yet: show what has been chosen so far.
+		if (Start.bValid)
+		{
+			Details += FString::Printf(TEXT("Start: %s\n"), *EndpointPhrase(Start));
+		}
+		if (Destination.bValid)
+		{
+			Details += FString::Printf(TEXT("Destination: %s\n"), *EndpointPhrase(Destination));
+		}
+	}
+	for (int32 Index = 0; Index < Steps.Num(); ++Index)
+	{
+		Details += FString::Printf(TEXT("Step %d: %s\n"), Index + 1, *Steps[Index].Text);
 	}
 	Details.RemoveFromEnd(TEXT("\n"));
 	return Details;

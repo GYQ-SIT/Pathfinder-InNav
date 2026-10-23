@@ -168,7 +168,7 @@ bool FNavigationEntranceStateTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Find Route permits endpoints in different buildings"), Fixture.Nav->CanFindRoute());
 	Fixture.Nav->RequestFindRoute();
 	TestFalse(TEXT("Actual button handler computes cross-building route"), Fixture.Nav->GetRoutePoints().IsEmpty());
-	TestTrue(TEXT("Directions name both buildings and the link"), Fixture.Nav->BuildRouteDetails().Contains(TEXT("from A to B")));
+	TestTrue(TEXT("Directions name both buildings and the link"), Fixture.Nav->BuildRouteDetails().Contains(TEXT("from Alpha to Beta")));
 	const auto& Points = Fixture.Nav->GetRoutePoints();
 	auto View = UNavigationRouteVisualization::BuildView(Points, &Fixture.Nav->GetStart(), &Fixture.Nav->GetDestination(),
 		FVector2D(110,0), 10, 300, 1, true, TEXT("B"));

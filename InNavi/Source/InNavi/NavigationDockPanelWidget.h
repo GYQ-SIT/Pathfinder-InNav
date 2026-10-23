@@ -10,6 +10,7 @@ class UButton;
 class UComboBoxString;
 class UEditableTextBox;
 class UTextBlock;
+class UVerticalBox;
 
 // The Navigation dock panel, shared by the interior editor and the exterior screen: where Start and Destination are chosen
 // (from a room dropdown, or by clicking the map), Find Route / Clear Route, and the route's status and directions.
@@ -101,6 +102,10 @@ private:
 	UTextBlock* StatusText = nullptr;
 	UPROPERTY()
 	UTextBlock* RouteDetailsText = nullptr;
+	// The route found, one text block per step ("Step 1: ..."), the last one in green. Rebuilt only when the steps change.
+	UPROPERTY()
+	UVerticalBox* RouteStepsBox = nullptr;
+	FString ShownRouteSteps;
 
 	// The extra entry each dropdown currently carries for a Start / Destination picked in another building
 	// (UNavigationPanelWidget::GetStartOtherBuildingLabel), empty if none - so the lists are rebuilt only when it changes.
