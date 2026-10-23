@@ -48,11 +48,12 @@ struct INNAVI_API FNavigationWorldRoutePoint
 	FString BuildingId;
 };
 
-// Navigation selection/route-planning state and logic. No UI of its own any more -
-// UInteriorScreenWidget's own Navigation dock panel is the presentation layer; this
-// class stays alive as a UUserWidget owned/added-to-viewport by ANavPlayerController
-// purely so its existing PC-side lifecycle (create/AddToViewport/visibility toggles)
-// doesn't need to change. See UInteriorScreenWidget::RefreshNavigationPanelDisplay.
+// Navigation selection/route-planning state and logic. No UI of its own any more - the shared
+// Navigation dock panel (UNavigationDockPanelWidget), on the interior editor and the exterior
+// screen, is the presentation layer; this class stays alive as a UUserWidget owned/added-to-viewport
+// by ANavPlayerController purely so its existing PC-side lifecycle (create/AddToViewport/visibility
+// toggles) doesn't need to change. Outdoor mode (SetOutdoorMode) is on while the exterior screen
+// is the one shown: the room list is then each building's main door and clicks pick ground points.
 UCLASS()
 class INNAVI_API UNavigationPanelWidget : public UUserWidget
 {
@@ -97,9 +98,9 @@ public:
 
 	// The FNavigationRoomOption::GetDisplayLabel() string the room dropdowns should show for the
 	// current Start/Destination, if it was set via that dropdown (empty otherwise) - lets
-	// UInteriorScreenWidget::RefreshNavRoomDropdowns restore the combo box's visible text after
+	// UNavigationDockPanelWidget::RefreshRoomDropdowns restore the combo box's visible text after
 	// rebuilding its option list (ClearOptions() wipes the displayed text, but doesn't touch this
-	// class's own Start/Destination state - see that function's own comment for the full bug).
+	// class's own Start/Destination state).
 	FString GetStartRoomLabel() const;
 	FString GetDestinationRoomLabel() const;
 
@@ -116,7 +117,7 @@ public:
 	static bool IsOutdoorPoint(const APolyBuilding& Building, FVector2D Point);
 
 	// Former OnXClicked handlers, renamed and made public now that they're called from
-	// UInteriorScreenWidget's own buttons instead of being bound to widgets this class
+	// the Navigation dock panel's own buttons instead of being bound to widgets this class
 	// no longer builds. Bodies are unchanged from the original implementation.
 	UFUNCTION(BlueprintCallable, Category = "Navigation")
 	void ToggleSelectStart();
@@ -137,7 +138,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Navigation")
 	bool ApplyWorldRouteResult(const FString& BuildingId, const TArray<FNavigationWorldRoutePoint>& Points);
 
-	// What UInteriorScreenWidget's Navigation panel needs to display itself - kept here
+	// What the Navigation dock panel (UNavigationDockPanelWidget) needs to display itself - kept here
 	// rather than duplicated on the display side, since some of it (CanFindRoute) needs
 	// private state (FSelectedEndpoint::BuildingId) that has no other public accessor.
 	FString GetDisplayStatusMessage() const;
@@ -179,7 +180,7 @@ public:
 		FString DisplayLabel;
 		FString SearchableText;
 
-		// Shared by both the dropdown's own population (UInteriorScreenWidget) and matching a
+		// Shared by both the dropdown's own population (UNavigationDockPanelWidget) and matching a
 		// selection back to its option (SetStartToRoom/SetDestinationToRoom). Stable room IDs and
 		// floors disambiguate names reused by copied rooms or on different floors.
 		const FString& GetDisplayLabel() const { return DisplayLabel; }
@@ -220,11 +221,9 @@ public:
 	// dangling reference to a room that no longer exists.
 	void NotifyRoomDeleted(const FString& RoomId);
 
-	// Hit-tests against this instead of a widget of its own now - UInteriorScreenWidget
-	// hands it the Border of its own Navigation dock panel (see SetPanelBorderForHitTest)
-	// so ANavPlayerController::OnClick's existing IsPointerOverPanel() guard (skip
-	// treating a click on the panel's own buttons as picking a route point) keeps
-	// working unchanged.
+	// Hit-tests against the Navigation dock panel (the screen that shows it hands over a callback,
+	// see SetPointerOverPanelCallback) so ANavPlayerController::OnClick's existing IsPointerOverPanel()
+	// guard (skip treating a click on the panel's own buttons as picking a route point) keeps working.
 	bool IsPointerOverPanel() const;
 	void SetPanelBorderForHitTest(UBorder* Border) { HitTestBorder = Border; }
 	// Alternative to the border check: the owner says whether a screen position is over the panel's visible
@@ -233,8 +232,8 @@ public:
 	void SetPointerOverPanelCallback(TFunction<bool(const FVector2D&)> InCallback) { PointerOverPanelCallback = MoveTemp(InCallback); }
 
 	// Broadcast whenever anything display-relevant changes (selection mode, a point
-	// accepted/rejected, a route found/cleared, a status message) - UInteriorScreenWidget
-	// subscribes to refresh its own Navigation panel display.
+	// accepted/rejected, a route found/cleared, a status message) - the interior and exterior
+	// screens subscribe to refresh their Navigation panel's display.
 	UPROPERTY(BlueprintAssignable)
 	FOnNavigationStateChanged OnStateChanged;
 

@@ -146,8 +146,8 @@ bool UNavigationPanelWidget::IsOutdoorPoint(const APolyBuilding& Building, FVect
 
 TSharedRef<SWidget> UNavigationPanelWidget::RebuildWidget()
 {
-	// No UI of its own any more - UInteriorScreenWidget's own Navigation dock panel is the
-	// presentation layer (see RefreshNavigationPanelDisplay). Still needs a root widget since this
+	// No UI of its own any more - the Navigation dock panel (UNavigationDockPanelWidget) is the
+	// presentation layer (see its RefreshDisplay). Still needs a root widget since this
 	// stays a UUserWidget added to the viewport by ANavPlayerController.
 	if (WidgetTree && !WidgetTree->RootWidget)
 	{
@@ -1028,8 +1028,8 @@ bool UNavigationPanelWidget::IsPointerOverPanel() const
 {
 	// The full-screen user widget is SelfHitTestInvisible so WBP_InteriorScreen remains
 	// interactive underneath it. Check general visibility rather than requiring the
-	// exact Visible enum value; only HitTestBorder (UInteriorScreenWidget's own Navigation
-	// dock panel Border - see SetPanelBorderForHitTest) should own pointer input.
+	// exact Visible enum value; only the Navigation dock panel (PointerOverPanelCallback, or
+	// HitTestBorder - see SetPanelBorderForHitTest) should own pointer input.
 	if (PointerOverPanelCallback)
 	{
 		return IsVisible() && FSlateApplication::IsInitialized() && PointerOverPanelCallback(FSlateApplication::Get().GetCursorPos());

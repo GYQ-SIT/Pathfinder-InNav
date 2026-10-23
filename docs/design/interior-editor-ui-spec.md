@@ -1,5 +1,11 @@
 # Interior Editor — UI Integration Spec
 
+> **This is the original spec (2026-09), kept as a reference for the editing functions on `ANavPlayerController`.** The UI it was
+> written for is built, and has grown past it: the editor now also edits in the 3D view, has doors in the outer wall, a floor
+> generator, dockable panels and a Navigation panel that works on both screens. For how the editor behaves **now**, read
+> [interior-editor-guide.md](interior-editor-guide.md); for how panels are built, [ui-panels-guide.md](ui-panels-guide.md).
+> Where this page says there is no 3D editing, it is out of date.
+
 > Written for Padre. This lists the C++ interface the UMG UI needs to call, what each
 > tool needs to collect as input, and how to handle each function's return value. The
 > code lives in `ANavPlayerController` (`InNavi/Source/InNavi/NavPlayerController.h`,

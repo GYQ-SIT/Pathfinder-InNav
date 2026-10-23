@@ -1,6 +1,6 @@
 # Interior Editor — How to Use It
 
-> Current state as of 2026-09-30, branch `YQ_CUI`. The editor now has a real UMG UI
+> Current state as of 2026-10-23, `main`. The editor now has a real UMG UI
 > (menu bar, dockable panels, buttons) - every action below also still has a keyboard
 > shortcut, and both do the same thing under the hood.
 
@@ -51,8 +51,8 @@ menu bar, same look as the interior editor's:
 
 - **File** — **New**/**Load**, same behavior and unsaved-changes check as the interior
   editor's own File menu below.
-- **Window** — **Audio** (see Audio panel below), **Map** (see Map panel below) and
-  **Debug**, plus **Reset Layout**.
+- **Window** — **Audio** (see Audio panel below), **Map** (see Map panel below),
+  **Building**, **Debug** and **Navigation** (see Navigation panel below), plus **Reset Layout**.
 - **Camera** — the free-fly camera's controls, in a dropdown: **Reset**, the typed move
   speed (Enter or clicking away commits it), **+** / **-** to nudge it, and **Set Default**
   (see below). The menu stays open after +/- and closes after Reset/Set Default.
@@ -67,8 +67,9 @@ loaded building; **Set Default** stores the camera's *current* position/angle as
 instead (persisted to disk, so it survives closing and reopening the project) — for
 tuning what "Reset" snaps back to once you've found an angle you like.
 
-This screen's four panels — **Map** (shown by default, docked on the left), **Building**
-(shown by default, docked on the right), **Audio** and **Debug** (hidden by default, tabs of
+This screen's five panels — **Map** (shown by default, docked on the left), **Building**
+(shown by default, docked on the right), **Navigation** (hidden by default; when shown it is a
+tab beside Building), **Audio** and **Debug** (hidden by default, tabs of
 one group along the bottom) — use the same docking
 system as the interior editor (see **Dockable panels** below: tabs, splits, screen edges,
 floating windows, Reset Layout). Its arrangement is saved separately, in
@@ -77,7 +78,7 @@ shows the selected building, camera speed, unsaved-changes flag, FPS and frame t
 **Last Error** line for the most recent failed action (yellow: rejected, nothing lost; red:
 data may have been lost) - File > New/Load failures used to be silent on this screen.
 
-> Audio, Map and Debug are the same widgets on this screen and in the interior editor; how panels are built and added is in [UI Panels Guide](ui-panels-guide.md).
+> Audio, Map, Debug and Navigation are the same widgets on this screen and in the interior editor; how panels are built and added is in [UI Panels Guide](ui-panels-guide.md).
 
 ### Building panel (the selected building)
 
@@ -146,7 +147,7 @@ Pinned across the very top of the interior editor screen.
   exterior does.
 - **Window** — a checklist of the eight dockable panels (Toolbar/Floor/Properties/
   Layers/Navigation/Audio/Map/Debug, see below). Unchecking one hides it; re-checking
-  puts it back where it was. Navigation, Audio and Debug start hidden; the other five
+  puts it back where it was. Navigation, Audio, Map and Debug start hidden; the other four
   start visible. **Reset Layout** puts every panel back in the team default
   arrangement.
 - **Back**, on the right — same as described above.
@@ -279,7 +280,7 @@ floor and wall. A door is a gap in the 3D outer wall on its floor (on both build
 green mark on the outline and a link door a blue one; in Select mode click one (it turns yellow), and the Properties panel says
 **Main door** or **Link door**, its floor and where it leads (for a link door the building, and when it was opened from that building).
 Backspace or Delete removes it. Doors are saved in the building's `interior.entrances` (an optional list, so older files load as
-before) and covered by undo. Route-finding does not use them yet.
+before) and covered by undo. **Route-finding uses them**: a link door joins two buildings' floors, and a main door joins a building to the outside, so a route can go from one building to another, over a link door or out through the main doors and back in (see the Navigation panel).
 
 
 ### Generate floor (File > Generate floor)
@@ -316,17 +317,33 @@ toggling a category affects everything in it at once.
 
 ### Navigation panel
 
-Pick Start/Destination Room from the dropdowns (populated from the current floor's
-rooms, refreshed live as rooms are added/renamed/deleted) and it marks the room's
-centroid on the floor plan, or click **Set Start**/**Set Destination** and then click a
-point directly on the floor plan instead - either way the button turns green once set.
-A **search box above Destination Room** filters the destination list across every floor of
-the building by room name, id or tag (every word must match, ignoring case), with a line
-saying how many destinations match; typing never changes the Start you already picked.
-**Find Route** enables once both are set on the same building and computes/draws the
-route (including cross-floor connector instructions where relevant); **Clear Route**
-resets both endpoints. **Hide Route** / **Show Route** hides or restores the route lines,
-direction arrows, markers and written instructions without clearing the route.
+Where Start and Destination are chosen and the route is found. The same panel is on the interior editor and on the exterior
+screen (Window > Navigation; it starts hidden on both). From the top: a **search box** (with a line saying how many places
+match), **Start**, **Destination**, **Click to Set Start** / **Click to Set Destination**, **Find Route**, **Clear Route**,
+**Hide Route** / **Show Route**, a status line and the directions.
+
+**Inside a building.** The Start and Destination dropdowns list the open building's rooms across every floor, written as
+"Room name (Floor N)" (no id; the id can still be searched). Start lists them floor by floor, Destination by name. Picking a room
+marks its centre; or press **Click to Set Start/Destination** and click a point on the floor plan (or on the floor in the 3D view)
+instead. Either way the button (or the dropdown's frame) turns green for the Start and red for the Destination once it is set.
+The **one search box above Start filters both dropdowns** by room name, id, tag or room type (every word must match, ignoring
+case); a place you have already picked stays shown even when the search hides it.
+
+**Between buildings.** Start and Destination can be in different buildings: pick the Start, switch building with the building
+switcher, pick the Destination. The Start is kept, and the dropdown shows it as its first entry, "Building · Room (Floor N)".
+**Find Route** enables once both are set and finds the way over the link doors, or out of one building and into the other
+through their main doors (see **Doors in the outer wall**).
+
+**Outside (the exterior screen).** No building is open, so the dropdowns list **each building's main door**, written
+"Building · Main door" (the point is a metre outside the door), and the search box narrows them by building name. To pick a spot
+instead, press **Click to Set Start/Destination** and click the **ground** next to a building (inside its outside area). A click
+on a building, inside one, or too far from every building is refused, and the status line says why. The points and the route are
+**kept when you open or leave a building**, and the route is drawn on the exterior 3D map with Start and Destination markers.
+
+**Directions.** A found route is written as numbered steps, one per line - "Step 1: Start at ...", the doors, lifts or stairs to
+take (with building names, not ids), and "Step N: **Arrive at ...**" - the last step in green. Before a route is found the panel
+shows the Start and Destination chosen so far. **Clear Route** resets both endpoints and the route. **Hide Route** / **Show
+Route** hides or restores the route lines, direction arrows, markers and written steps without clearing the route.
 
 ### Audio panel
 
@@ -441,6 +458,9 @@ arbitrary files under `Data/Audio/` on demand (background music, effects, etc.).
   placement tool right now).
 - No "3D Preview" floating thumbnail overlaid on the 2D view (the mockup's own stretch
   goal, separate from the full-screen 2D/3D toggle that's already built).
+- Outside, a point can only be picked within a building's **outside area** (the building's outline grown by a quarter of its
+  size, at least 4 m), by a main door or a ground click; there is no free choice of any spot on the campus yet, and the route
+  across the open ground is the planner's straight-line path around the buildings (no roads or paths).
 - The 3D route visualization is plain persistent debug lines/spheres, not a proper mesh
   - a route redraw (e.g. picking a new Start point) also clears any in-progress
   draw-room/wall point markers in 3D if the two happen to overlap in time.
