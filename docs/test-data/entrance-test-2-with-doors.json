@@ -1,0 +1,2653 @@
+{
+	"version": 1,
+	"scale": 10,
+	"floorHeight": 300,
+	"projectName": "Entrance test 2 (with doors)",
+	"description": "The same three buildings with doors already in the outer walls: main doors on A, B and C, link doors between A and B on floors 1 and 2.",
+	"buildings": [
+		{
+			"id": "A",
+			"name": "Building A",
+			"offset": [
+				0,
+				0
+			],
+			"floorCount": 3,
+			"floorHeight": 300,
+			"footprint": [
+				[
+					0,
+					0
+				],
+				[
+					300,
+					0
+				],
+				[
+					300,
+					200
+				],
+				[
+					0,
+					200
+				]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 1,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [
+							{
+								"id": "A-01-01",
+								"name": "Toilet 1-01",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Toilet",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										96.499992437929848,
+										3.5
+									],
+									[
+										146.29817945537064,
+										3.5
+									],
+									[
+										146.29817945537064,
+										73.5
+									],
+									[
+										96.499992437929848,
+										73.5
+									]
+								],
+								"openings": [
+									{
+										"id": "A-01-01-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 203.99093627929688,
+										"width": 90,
+										"inputId": "A-01-01",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "A-01-02",
+								"name": "Classroom 1-02",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										149.29817945537064,
+										3.5
+									],
+									[
+										213.50000756207015,
+										3.5
+									],
+									[
+										213.50000756207015,
+										73.5
+									],
+									[
+										173.91132478042817,
+										73.5
+									],
+									[
+										173.91132478042817,
+										51.926749706268311
+									],
+									[
+										149.29817945537064,
+										51.926749706268311
+									]
+								],
+								"openings": [
+									{
+										"id": "A-01-02-D01",
+										"type": "door",
+										"edgeIndex": 4,
+										"offset": 78.065727233886719,
+										"width": 90,
+										"inputId": "A-01-02",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "A-01-03",
+								"name": "Classroom 1-03",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										296.5,
+										3.5
+									],
+									[
+										296.5,
+										71.622218251228333
+									],
+									[
+										245.91402554512024,
+										71.622218251228333
+									],
+									[
+										245.91402554512024,
+										50.586039217119264
+									],
+									[
+										226.5,
+										50.586039217119264
+									],
+									[
+										226.5,
+										3.5
+									]
+								],
+								"openings": [
+									{
+										"id": "A-01-03-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 60.180892944335938,
+										"width": 90,
+										"inputId": "A-01-03",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "A-01-04",
+								"name": "Toilet 1-04",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Toilet",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										206.5,
+										196.5
+									],
+									[
+										140.16231441497803,
+										196.5
+									],
+									[
+										140.16231441497803,
+										126.5
+									],
+									[
+										206.5,
+										126.5
+									]
+								],
+								"openings": [
+									{
+										"id": "A-01-04-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 286.68841552734375,
+										"width": 90,
+										"inputId": "A-01-04",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "A-01-05",
+								"name": "Classroom 1-05",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										137.16231441497803,
+										196.5
+									],
+									[
+										97.461716294288635,
+										196.5
+									],
+									[
+										97.461716294288635,
+										126.5
+									],
+									[
+										137.16231441497803,
+										126.5
+									]
+								],
+								"openings": [
+									{
+										"id": "A-01-05-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 153.50299072265625,
+										"width": 90,
+										"inputId": "A-01-05",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "A-01-06",
+								"name": "Classroom 1-06",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										94.461716294288635,
+										196.5
+									],
+									[
+										51.479161858558655,
+										196.5
+									],
+									[
+										51.479161858558655,
+										126.5
+									],
+									[
+										94.461716294288635,
+										126.5
+									]
+								],
+								"openings": [
+									{
+										"id": "A-01-06-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 169.91278076171875,
+										"width": 90,
+										"inputId": "A-01-06",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "A-01-07",
+								"name": "Classroom 1-07",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										48.479161858558655,
+										196.5
+									],
+									[
+										3.5,
+										196.5
+									],
+									[
+										3.5,
+										126.5
+									],
+									[
+										48.479161858558655,
+										126.5
+									]
+								],
+								"openings": [
+									{
+										"id": "A-01-07-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 179.89579772949219,
+										"width": 90,
+										"inputId": "A-01-07",
+										"connectsTo": "corridor"
+									}
+								]
+							}
+						],
+						"navNodes": [
+							{
+								"id": "A-NAV-01-F01",
+								"type": "elevator",
+								"position": [
+									16.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-01"
+							},
+							{
+								"id": "A-NAV-04-F01",
+								"type": "elevator",
+								"position": [
+									40.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-04"
+							},
+							{
+								"id": "A-NAV-07-F01",
+								"type": "stairs",
+								"position": [
+									72.5,
+									15
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-07"
+							},
+							{
+								"id": "A-NAV-09-F01",
+								"type": "elevator",
+								"position": [
+									283.5,
+									183
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-09",
+								"rotationDegrees": 180
+							},
+							{
+								"id": "A-NAV-12-F01",
+								"type": "elevator",
+								"position": [
+									259.5,
+									183
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-12",
+								"rotationDegrees": 180
+							},
+							{
+								"id": "A-NAV-15-F01",
+								"type": "stairs",
+								"position": [
+									227.5,
+									185
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-15",
+								"rotationDegrees": 180
+							}
+						]
+					},
+					{
+						"level": 2,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [
+							{
+								"id": "A-02-01",
+								"name": "Meeting room 2-01",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Meeting room",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										93.5,
+										3.5
+									],
+									[
+										153.4299418926239,
+										3.5
+									],
+									[
+										153.4299418926239,
+										73.5
+									],
+									[
+										93.5,
+										73.5
+									]
+								],
+								"openings": [
+									{
+										"id": "A-02-01-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 254.64971923828125,
+										"width": 90,
+										"inputId": "A-02-01",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "A-02-02",
+								"name": "Classroom 2-02",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										156.4299418926239,
+										3.5
+									],
+									[
+										213.50000756207015,
+										3.5
+									],
+									[
+										213.50000756207015,
+										73.5
+									],
+									[
+										156.4299418926239,
+										73.5
+									]
+								],
+								"openings": [
+									{
+										"id": "A-02-02-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 240.35031127929688,
+										"width": 90,
+										"inputId": "A-02-02",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "A-02-03",
+								"name": "Toilet 2-03",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Toilet",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										206.5,
+										196.5
+									],
+									[
+										142.10757040977478,
+										196.5
+									],
+									[
+										142.10757040977478,
+										146.24874973297119
+									],
+									[
+										173.52262087652002,
+										146.24874973297119
+									],
+									[
+										173.52262087652002,
+										126.5
+									],
+									[
+										206.5,
+										126.5
+									]
+								],
+								"openings": [
+									{
+										"id": "A-02-03-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 112.07525634765625,
+										"width": 90,
+										"inputId": "A-02-03",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "A-02-04",
+								"name": "Classroom 2-04",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										139.10757040977478,
+										196.5
+									],
+									[
+										70.387600421905518,
+										196.5
+									],
+									[
+										70.387600421905518,
+										144.49519538879395
+									],
+									[
+										100.897720235424,
+										144.49519538879395
+									],
+									[
+										100.897720235424,
+										126.5
+									],
+									[
+										139.10757040977478,
+										126.5
+									]
+								],
+								"openings": [
+									{
+										"id": "A-02-04-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 107.55059814453125,
+										"width": 90,
+										"inputId": "A-02-04",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "A-02-05",
+								"name": "Toilet 2-05",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Toilet",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										3.5,
+										120
+									],
+									[
+										3.5,
+										80
+									],
+									[
+										73.5,
+										80
+									],
+									[
+										73.5,
+										120
+									]
+								],
+								"openings": [
+									{
+										"id": "A-02-05-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 155,
+										"width": 90,
+										"inputId": "A-02-05",
+										"connectsTo": "corridor"
+									}
+								]
+							}
+						],
+						"navNodes": [
+							{
+								"id": "A-NAV-01-F02",
+								"type": "elevator",
+								"position": [
+									16.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-01"
+							},
+							{
+								"id": "A-NAV-04-F02",
+								"type": "elevator",
+								"position": [
+									40.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-04"
+							},
+							{
+								"id": "A-NAV-07-F02",
+								"type": "stairs",
+								"position": [
+									72.5,
+									15
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-07"
+							},
+							{
+								"id": "A-NAV-09-F02",
+								"type": "elevator",
+								"position": [
+									283.5,
+									183
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-09",
+								"rotationDegrees": 180
+							},
+							{
+								"id": "A-NAV-12-F02",
+								"type": "elevator",
+								"position": [
+									259.5,
+									183
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-12",
+								"rotationDegrees": 180
+							},
+							{
+								"id": "A-NAV-15-F02",
+								"type": "stairs",
+								"position": [
+									227.5,
+									185
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-15",
+								"rotationDegrees": 180
+							}
+						]
+					},
+					{
+						"level": 3,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [
+							{
+								"id": "A-03-01",
+								"name": "Lab 3-01",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Lab",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										93.5,
+										3.5
+									],
+									[
+										143.13432013988495,
+										3.5
+									],
+									[
+										143.13432013988495,
+										73.5
+									],
+									[
+										93.5,
+										73.5
+									]
+								],
+								"openings": [
+									{
+										"id": "A-03-01-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 203.17160034179688,
+										"width": 90,
+										"inputId": "A-03-01",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "A-03-02",
+								"name": "Toilet 3-02",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Toilet",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										296.5,
+										79.632895827293396
+									],
+									[
+										296.5,
+										120
+									],
+									[
+										226.5,
+										120
+									],
+									[
+										226.5,
+										79.632895827293396
+									]
+								],
+								"openings": [
+									{
+										"id": "A-03-02-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 156.83551025390625,
+										"width": 90,
+										"inputId": "A-03-02",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "A-03-03",
+								"name": "Classroom 3-03",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										206.5,
+										196.5
+									],
+									[
+										162.68608951568604,
+										196.5
+									],
+									[
+										162.68608951568604,
+										126.5
+									],
+									[
+										206.5,
+										126.5
+									]
+								],
+								"openings": [
+									{
+										"id": "A-03-03-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 174.06954956054688,
+										"width": 90,
+										"inputId": "A-03-03",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "A-03-04",
+								"name": "Classroom 3-04",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										159.68608951568604,
+										196.5
+									],
+									[
+										104.83145034313202,
+										196.5
+									],
+									[
+										104.83145034313202,
+										126.5
+									],
+									[
+										159.68608951568604,
+										126.5
+									]
+								],
+								"openings": [
+									{
+										"id": "A-03-04-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 229.273193359375,
+										"width": 90,
+										"inputId": "A-03-04",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "A-03-05",
+								"name": "Toilet 3-05",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Toilet",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										3.5,
+										120
+									],
+									[
+										3.5,
+										80
+									],
+									[
+										73.5,
+										80
+									],
+									[
+										73.5,
+										120
+									]
+								],
+								"openings": [
+									{
+										"id": "A-03-05-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 155,
+										"width": 90,
+										"inputId": "A-03-05",
+										"connectsTo": "corridor"
+									}
+								]
+							}
+						],
+						"navNodes": [
+							{
+								"id": "A-NAV-01-F03",
+								"type": "elevator",
+								"position": [
+									16.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-01"
+							},
+							{
+								"id": "A-NAV-04-F03",
+								"type": "elevator",
+								"position": [
+									40.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-04"
+							},
+							{
+								"id": "A-NAV-09-F03",
+								"type": "elevator",
+								"position": [
+									283.5,
+									183
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-09",
+								"rotationDegrees": 180
+							},
+							{
+								"id": "A-NAV-12-F03",
+								"type": "elevator",
+								"position": [
+									259.5,
+									183
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-12",
+								"rotationDegrees": 180
+							},
+							{
+								"id": "A-NAV-07-F03",
+								"type": "stairs",
+								"position": [
+									72.5,
+									15
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-07"
+							},
+							{
+								"id": "A-NAV-15-F03",
+								"type": "stairs",
+								"position": [
+									227.5,
+									185
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "A-NAV-15",
+								"rotationDegrees": 180
+							}
+						]
+					}
+				],
+				"entrances": [
+					{
+						"id": "A-EN01",
+						"kind": "main",
+						"level": 1,
+						"edge": 3,
+						"offset": 880,
+						"width": 240
+					},
+					{
+						"id": "A-EN02",
+						"kind": "link",
+						"level": 1,
+						"edge": 1,
+						"offset": 880,
+						"width": 240,
+						"connectsTo": "B"
+					},
+					{
+						"id": "A-EN03",
+						"kind": "link",
+						"level": 2,
+						"edge": 1,
+						"offset": 880,
+						"width": 240,
+						"connectsTo": "B"
+					}
+				]
+			}
+		},
+		{
+			"id": "B",
+			"name": "Building B",
+			"offset": [
+				0,
+				0
+			],
+			"floorCount": 3,
+			"floorHeight": 300,
+			"footprint": [
+				[
+					310,
+					0
+				],
+				[
+					560,
+					0
+				],
+				[
+					560,
+					200
+				],
+				[
+					310,
+					200
+				]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 1,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [
+							{
+								"id": "B-01-01",
+								"name": "Toilet 1-01",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Toilet",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										406.49999243792985,
+										3.5
+									],
+									[
+										446.01530355987046,
+										3.5
+									],
+									[
+										446.01530355987046,
+										73.5
+									],
+									[
+										406.49999243792985,
+										73.5
+									]
+								],
+								"openings": [
+									{
+										"id": "B-01-01-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 152.57656860351562,
+										"width": 90,
+										"inputId": "B-01-01",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "B-01-02",
+								"name": "Office 1-02",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Office",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										449.01530355987046,
+										3.5
+									],
+									[
+										497.84004718837235,
+										3.5
+									],
+									[
+										497.84004718837235,
+										73.5
+									],
+									[
+										449.01530355987046,
+										73.5
+									]
+								],
+								"openings": [
+									{
+										"id": "B-01-02-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 199.12371826171875,
+										"width": 90,
+										"inputId": "B-01-02",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "B-01-03",
+								"name": "Office 1-03",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Office",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										500.84004718837235,
+										3.5
+									],
+									[
+										556.5,
+										3.5
+									],
+									[
+										556.5,
+										73.5
+									],
+									[
+										527.44202100605298,
+										73.5
+									],
+									[
+										527.44202100605298,
+										60.399867057800293
+									],
+									[
+										500.84004718837235,
+										60.399867057800293
+									]
+								],
+								"openings": [
+									{
+										"id": "B-01-03-D01",
+										"type": "door",
+										"edgeIndex": 4,
+										"offset": 88.009872436523438,
+										"width": 90,
+										"inputId": "B-01-03",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "B-01-04",
+								"name": "Toilet 1-04",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Toilet",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										466.5,
+										196.5
+									],
+									[
+										396.49999243792985,
+										196.5
+									],
+									[
+										396.49999243792985,
+										126.5
+									],
+									[
+										466.5,
+										126.5
+									]
+								],
+								"openings": [
+									{
+										"id": "B-01-04-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 305.00003051757812,
+										"width": 90,
+										"inputId": "B-01-04",
+										"connectsTo": "corridor"
+									}
+								]
+							}
+						],
+						"navNodes": [
+							{
+								"id": "B-NAV-01-F01",
+								"type": "elevator",
+								"position": [
+									543.5,
+									183
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-01",
+								"rotationDegrees": 180
+							},
+							{
+								"id": "B-NAV-04-F01",
+								"type": "elevator",
+								"position": [
+									519.5,
+									183
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-04",
+								"rotationDegrees": 180
+							},
+							{
+								"id": "B-NAV-07-F01",
+								"type": "stairs",
+								"position": [
+									487.5,
+									185
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-07",
+								"rotationDegrees": 180
+							},
+							{
+								"id": "B-NAV-09-F01",
+								"type": "elevator",
+								"position": [
+									326.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-09"
+							},
+							{
+								"id": "B-NAV-12-F01",
+								"type": "elevator",
+								"position": [
+									350.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-12"
+							},
+							{
+								"id": "B-NAV-15-F01",
+								"type": "stairs",
+								"position": [
+									382.5,
+									15
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-15"
+							}
+						]
+					},
+					{
+						"level": 2,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [
+							{
+								"id": "B-02-01",
+								"name": "Toilet 2-01",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Toilet",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										426.94361770153046,
+										3.5
+									],
+									[
+										489.55691123008728,
+										3.5
+									],
+									[
+										489.55691123008728,
+										73.5
+									],
+									[
+										426.94361770153046,
+										73.5
+									]
+								],
+								"openings": [
+									{
+										"id": "B-02-01-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 268.06646728515625,
+										"width": 90,
+										"inputId": "B-02-01",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "B-02-02",
+								"name": "Toilet 2-02",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Toilet",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										466.5,
+										196.5
+									],
+									[
+										396.49999243792985,
+										196.5
+									],
+									[
+										396.49999243792985,
+										126.5
+									],
+									[
+										466.5,
+										126.5
+									]
+								],
+								"openings": [
+									{
+										"id": "B-02-02-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 305.00003051757812,
+										"width": 90,
+										"inputId": "B-02-02",
+										"connectsTo": "corridor"
+									}
+								]
+							}
+						],
+						"navNodes": [
+							{
+								"id": "B-NAV-01-F02",
+								"type": "elevator",
+								"position": [
+									543.5,
+									183
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-01",
+								"rotationDegrees": 180
+							},
+							{
+								"id": "B-NAV-04-F02",
+								"type": "elevator",
+								"position": [
+									519.5,
+									183
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-04",
+								"rotationDegrees": 180
+							},
+							{
+								"id": "B-NAV-07-F02",
+								"type": "stairs",
+								"position": [
+									487.5,
+									185
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-07",
+								"rotationDegrees": 180
+							},
+							{
+								"id": "B-NAV-09-F02",
+								"type": "elevator",
+								"position": [
+									326.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-09"
+							},
+							{
+								"id": "B-NAV-12-F02",
+								"type": "elevator",
+								"position": [
+									350.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-12"
+							},
+							{
+								"id": "B-NAV-15-F02",
+								"type": "stairs",
+								"position": [
+									382.5,
+									15
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-15"
+							}
+						]
+					},
+					{
+						"level": 3,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [
+							{
+								"id": "B-03-01",
+								"name": "Classroom 3-01",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										402.31688225269318,
+										3.5
+									],
+									[
+										474.43230891227722,
+										3.5
+									],
+									[
+										474.43230891227722,
+										73.5
+									],
+									[
+										402.31688225269318,
+										73.5
+									]
+								],
+								"openings": [
+									{
+										"id": "B-03-01-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 315.57711791992188,
+										"width": 90,
+										"inputId": "B-03-01",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "B-03-02",
+								"name": "Toilet 3-02",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Toilet",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										556.5,
+										80
+									],
+									[
+										556.5,
+										120
+									],
+									[
+										486.5,
+										120
+									],
+									[
+										486.5,
+										80
+									]
+								],
+								"openings": [
+									{
+										"id": "B-03-02-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 155,
+										"width": 90,
+										"inputId": "B-03-02",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "B-03-03",
+								"name": "Classroom 3-03",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										449.02523672580719,
+										196.5
+									],
+									[
+										396.49999243792985,
+										196.5
+									],
+									[
+										396.49999243792985,
+										126.5
+									],
+									[
+										449.02523672580719,
+										126.5
+									]
+								],
+								"openings": [
+									{
+										"id": "B-03-03-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 217.626220703125,
+										"width": 90,
+										"inputId": "B-03-03",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "B-03-04",
+								"name": "Toilet 3-04",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Toilet",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										313.5,
+										141.15788793563843
+									],
+									[
+										313.5,
+										80
+									],
+									[
+										370.78057503700256,
+										80
+									],
+									[
+										370.78057503700256,
+										102.50486762216212
+									],
+									[
+										383.5,
+										102.50486762216212
+									],
+									[
+										383.5,
+										141.15788793563843
+									]
+								],
+								"openings": [
+									{
+										"id": "B-03-04-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 67.524337768554688,
+										"width": 90,
+										"inputId": "B-03-04",
+										"connectsTo": "corridor"
+									}
+								]
+							}
+						],
+						"navNodes": [
+							{
+								"id": "B-NAV-01-F03",
+								"type": "elevator",
+								"position": [
+									543.5,
+									183
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-01",
+								"rotationDegrees": 180
+							},
+							{
+								"id": "B-NAV-04-F03",
+								"type": "elevator",
+								"position": [
+									519.5,
+									183
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-04",
+								"rotationDegrees": 180
+							},
+							{
+								"id": "B-NAV-09-F03",
+								"type": "elevator",
+								"position": [
+									326.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-09"
+							},
+							{
+								"id": "B-NAV-12-F03",
+								"type": "elevator",
+								"position": [
+									350.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-12"
+							},
+							{
+								"id": "B-NAV-07-F03",
+								"type": "stairs",
+								"position": [
+									487.5,
+									185
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-07",
+								"rotationDegrees": 180
+							},
+							{
+								"id": "B-NAV-15-F03",
+								"type": "stairs",
+								"position": [
+									382.5,
+									15
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "B-NAV-15"
+							}
+						]
+					}
+				],
+				"entrances": [
+					{
+						"id": "B-EN01",
+						"kind": "main",
+						"level": 1,
+						"edge": 1,
+						"offset": 880,
+						"width": 240
+					}
+				]
+			}
+		},
+		{
+			"id": "C",
+			"name": "Building C",
+			"offset": [
+				0,
+				0
+			],
+			"floorCount": 3,
+			"floorHeight": 300,
+			"footprint": [
+				[
+					800,
+					0
+				],
+				[
+					1050,
+					0
+				],
+				[
+					1050,
+					200
+				],
+				[
+					800,
+					200
+				]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 1,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [
+							{
+								"id": "C-01-01",
+								"name": "Toilet 1-01",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Toilet",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										896.4999924379299,
+										3.5
+									],
+									[
+										963.5000075620701,
+										3.5
+									],
+									[
+										963.5000075620701,
+										73.5
+									],
+									[
+										896.4999924379299,
+										73.5
+									]
+								],
+								"openings": [
+									{
+										"id": "C-01-01-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 290.00006103515625,
+										"width": 90,
+										"inputId": "C-01-01",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "C-01-02",
+								"name": "Office 1-02",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Office",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										1046.5,
+										70.450353264808655
+									],
+									[
+										1046.5,
+										133.43401694297791
+									],
+									[
+										988.74594235420227,
+										133.43401694297791
+									],
+									[
+										988.74594235420227,
+										102.14202837998607
+									],
+									[
+										976.5,
+										102.14202837998607
+									],
+									[
+										976.5,
+										70.450353264808655
+									]
+								],
+								"openings": [
+									{
+										"id": "C-01-02-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 111.45994567871094,
+										"width": 90,
+										"inputId": "C-01-02",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "C-01-03",
+								"name": "Office 1-03",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Office",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										1046.5,
+										136.43401694297791
+									],
+									[
+										1046.5,
+										196.5
+									],
+									[
+										976.5,
+										196.5
+									],
+									[
+										976.5,
+										155.83073244072477
+									],
+									[
+										992.50233793258667,
+										155.83073244072477
+									],
+									[
+										992.50233793258667,
+										136.43401694297791
+									]
+								],
+								"openings": [
+									{
+										"id": "C-01-03-D01",
+										"type": "door",
+										"edgeIndex": 4,
+										"offset": 51.983573913574219,
+										"width": 90,
+										"inputId": "C-01-03",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "C-01-04",
+								"name": "Office 1-04",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Office",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										963.5000075620701,
+										196.5
+									],
+									[
+										889.12609653893014,
+										196.5
+									],
+									[
+										889.12609653893014,
+										126.5
+									],
+									[
+										934.74667540675182,
+										126.5
+									],
+									[
+										934.74667540675182,
+										146.34760165214539
+									],
+									[
+										963.5000075620701,
+										146.34760165214539
+									]
+								],
+								"openings": [
+									{
+										"id": "C-01-04-D01",
+										"type": "door",
+										"edgeIndex": 4,
+										"offset": 98.76666259765625,
+										"width": 90,
+										"inputId": "C-01-04",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "C-01-05",
+								"name": "Lab 1-05",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Lab",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										886.12609653893014,
+										196.5
+									],
+									[
+										803.5,
+										196.5
+									],
+									[
+										803.5,
+										126.5
+									],
+									[
+										886.12609653893014,
+										126.5
+									]
+								],
+								"openings": [
+									{
+										"id": "C-01-05-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 368.1304931640625,
+										"width": 90,
+										"inputId": "C-01-05",
+										"connectsTo": "corridor"
+									}
+								]
+							}
+						],
+						"navNodes": [
+							{
+								"id": "C-NAV-01-F01",
+								"type": "elevator",
+								"position": [
+									816.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "C-NAV-01"
+							},
+							{
+								"id": "C-NAV-04-F01",
+								"type": "elevator",
+								"position": [
+									840.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "C-NAV-04"
+							},
+							{
+								"id": "C-NAV-07-F01",
+								"type": "stairs",
+								"position": [
+									872.5,
+									15
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "C-NAV-07"
+							}
+						]
+					},
+					{
+						"level": 2,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [
+							{
+								"id": "C-02-01",
+								"name": "Meeting room 2-01",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Meeting room",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										896.4999924379299,
+										3.5
+									],
+									[
+										963.5000075620701,
+										3.5
+									],
+									[
+										963.5000075620701,
+										73.5
+									],
+									[
+										896.4999924379299,
+										73.5
+									]
+								],
+								"openings": [
+									{
+										"id": "C-02-01-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 290.00006103515625,
+										"width": 90,
+										"inputId": "C-02-01",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "C-02-02",
+								"name": "Classroom 2-02",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										1046.5,
+										61.906900644302368
+									],
+									[
+										1046.5,
+										120
+									],
+									[
+										976.5,
+										120
+									],
+									[
+										976.5,
+										61.906900644302368
+									]
+								],
+								"openings": [
+									{
+										"id": "C-02-02-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 245.46548461914062,
+										"width": 90,
+										"inputId": "C-02-02",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "C-02-03",
+								"name": "Classroom 2-03",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										956.80465149879456,
+										196.5
+									],
+									[
+										916.82156312465668,
+										196.5
+									],
+									[
+										916.82156312465668,
+										126.5
+									],
+									[
+										956.80465149879456,
+										126.5
+									]
+								],
+								"openings": [
+									{
+										"id": "C-02-03-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 154.91545104980469,
+										"width": 90,
+										"inputId": "C-02-03",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "C-02-04",
+								"name": "Lab 2-04",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Lab",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										913.82156312465668,
+										196.5
+									],
+									[
+										853.32064867019653,
+										196.5
+									],
+									[
+										853.32064867019653,
+										126.5
+									],
+									[
+										882.86523313479222,
+										126.5
+									],
+									[
+										882.86523313479222,
+										146.66934156417847
+									],
+									[
+										913.82156312465668,
+										146.66934156417847
+									]
+								],
+								"openings": [
+									{
+										"id": "C-02-04-D01",
+										"type": "door",
+										"edgeIndex": 4,
+										"offset": 109.78164672851562,
+										"width": 90,
+										"inputId": "C-02-04",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "C-02-05",
+								"name": "Toilet 2-05",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Toilet",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										803.5,
+										120
+									],
+									[
+										803.5,
+										64.349485039710999
+									],
+									[
+										873.5,
+										64.349485039710999
+									],
+									[
+										873.5,
+										120
+									]
+								],
+								"openings": [
+									{
+										"id": "C-02-05-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 233.25259399414062,
+										"width": 90,
+										"inputId": "C-02-05",
+										"connectsTo": "corridor"
+									}
+								]
+							}
+						],
+						"navNodes": [
+							{
+								"id": "C-NAV-01-F02",
+								"type": "elevator",
+								"position": [
+									816.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "C-NAV-01"
+							},
+							{
+								"id": "C-NAV-04-F02",
+								"type": "elevator",
+								"position": [
+									840.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "C-NAV-04"
+							},
+							{
+								"id": "C-NAV-07-F02",
+								"type": "stairs",
+								"position": [
+									872.5,
+									15
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "C-NAV-07"
+							}
+						]
+					},
+					{
+						"level": 3,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [
+							{
+								"id": "C-03-01",
+								"name": "Lab 3-01",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Lab",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										1046.5,
+										3.5
+									],
+									[
+										1046.5,
+										72.301246285438538
+									],
+									[
+										995.11291408538818,
+										72.301246285438538
+									],
+									[
+										995.11291408538818,
+										51.712023439460268
+									],
+									[
+										976.5,
+										51.712023439460268
+									],
+									[
+										976.5,
+										3.5
+									]
+								],
+								"openings": [
+									{
+										"id": "C-03-01-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 57.94610595703125,
+										"width": 90,
+										"inputId": "C-03-01",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "C-03-02",
+								"name": "Classroom 3-02",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										1046.5,
+										75.301246285438538
+									],
+									[
+										1046.5,
+										120
+									],
+									[
+										976.5,
+										120
+									],
+									[
+										976.5,
+										75.301246285438538
+									]
+								],
+								"openings": [
+									{
+										"id": "C-03-02-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 178.4937744140625,
+										"width": 90,
+										"inputId": "C-03-02",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "C-03-03",
+								"name": "Classroom 3-03",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										999.57146799564362,
+										196.5
+									],
+									[
+										934.29313695430756,
+										196.5
+									],
+									[
+										934.29313695430756,
+										126.5
+									],
+									[
+										999.57146799564362,
+										126.5
+									]
+								],
+								"openings": [
+									{
+										"id": "C-03-03-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 281.39163208007812,
+										"width": 90,
+										"inputId": "C-03-03",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "C-03-04",
+								"name": "Classroom 3-04",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										931.29313695430756,
+										196.5
+									],
+									[
+										869.69067144393921,
+										196.5
+									],
+									[
+										869.69067144393921,
+										126.5
+									],
+									[
+										931.29313695430756,
+										126.5
+									]
+								],
+								"openings": [
+									{
+										"id": "C-03-04-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 263.0123291015625,
+										"width": 90,
+										"inputId": "C-03-04",
+										"connectsTo": "corridor"
+									}
+								]
+							},
+							{
+								"id": "C-03-05",
+								"name": "Toilet 3-05",
+								"tags": [
+									"generated"
+								],
+								"roomType": "Toilet",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										803.5,
+										120
+									],
+									[
+										803.5,
+										80
+									],
+									[
+										873.5,
+										80
+									],
+									[
+										873.5,
+										120
+									]
+								],
+								"openings": [
+									{
+										"id": "C-03-05-D01",
+										"type": "door",
+										"edgeIndex": 2,
+										"offset": 155,
+										"width": 90,
+										"inputId": "C-03-05",
+										"connectsTo": "corridor"
+									}
+								]
+							}
+						],
+						"navNodes": [
+							{
+								"id": "C-NAV-01-F03",
+								"type": "elevator",
+								"position": [
+									816.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "C-NAV-01"
+							},
+							{
+								"id": "C-NAV-04-F03",
+								"type": "elevator",
+								"position": [
+									840.5,
+									17
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "C-NAV-04"
+							},
+							{
+								"id": "C-NAV-07-F03",
+								"type": "stairs",
+								"position": [
+									872.5,
+									15
+								],
+								"connectsFloors": [
+									1,
+									2,
+									3
+								],
+								"connectorGroupId": "C-NAV-07"
+							}
+						]
+					}
+				],
+				"entrances": [
+					{
+						"id": "C-EN01",
+						"kind": "main",
+						"level": 1,
+						"edge": 3,
+						"offset": 880,
+						"width": 240
+					}
+				]
+			}
+		}
+	]
+}
