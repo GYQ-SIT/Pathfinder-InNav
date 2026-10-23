@@ -16,3 +16,8 @@ nav:
       - Interior Editor Guide: design/interior-editor-guide.md
       - UI Panels Guide: design/ui-panels-guide.md
       - Interior Editor UI Spec: design/interior-editor-ui-spec.md
+  - Mobile app:
+      - Installing the test build: android-install.md
+      - Signing and building the APK: android-signing.md
+      - Connecting real data (read first): mobile-real-data-guide.md
+      - Data interface and screens: design/mobile-app-data-interface.md
