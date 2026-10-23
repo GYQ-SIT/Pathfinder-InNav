@@ -20,6 +20,7 @@ class UInteriorFloorPlanWidget;
 class ULayerRowWidget;
 class UAudioFileRowWidget;
 class UAudioPanelWidget;
+class UNavigationDockPanelWidget;
 class UMapPanelWidget;
 class UDebugPanelWidget;
 class UPanelWidget;
@@ -471,27 +472,9 @@ private:
 	// could have changed (floor switch/add/remove, building switch).
 	void RefreshLayersList();
 
-	// Navigation panel - presentation layer for ws/jh's UNavigationPanelWidget (route selection/
-	// planning logic), restyled to match this screen's own panels instead of its original bespoke
-	// draggable-overlay look. Each handler just forwards to ANavPlayerController::GetNavigationPanel()'s
-	// public request methods; HandleNavigationStateChanged (bound to NavigationPanel's own
-	// OnStateChanged) is what actually repaints this panel's text/button state - see
-	// RefreshNavigationPanelDisplay.
-	UFUNCTION()
-	void OnNavSetStartClicked();
-
-	UFUNCTION()
-	void OnNavSetDestinationClicked();
-
-	UFUNCTION()
-	void OnNavFindRouteClicked();
-
-	UFUNCTION()
-	void OnNavClearRouteClicked();
-
-	UFUNCTION()
-	void OnNavToggleRouteClicked();
-
+	// Navigation panel - the shared UNavigationDockPanelWidget (see NavigationDockPanelWidget.h), which shows the state of
+	// ws/jh's UNavigationPanelWidget (route selection/planning logic). HandleNavigationStateChanged (bound to that
+	// state's OnStateChanged) repaints it.
 	UFUNCTION()
 	void HandleNavigationStateChanged();
 
@@ -507,19 +490,6 @@ private:
 	UFUNCTION()
 	void PlayButtonClickSound();
 
-	// Start/Destination room dropdowns - an alternative to clicking a point on the floor plan.
-	// Populated from UNavigationPanelWidget::GetSelectableRooms() (real rooms only, across every
-	// floor); picking one calls straight through to SetStartToRoom/SetDestinationToRoom, which sets
-	// the room's own centroid as the point (see that function's own comment for why a centroid, not
-	// a door). Only repopulated when the room list could actually have changed (building/floor
-	// structure), not on every click - see the RefreshNavRoomDropdowns call sites.
-	UFUNCTION()
-	void HandleNavStartRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
-
-	UFUNCTION()
-	void HandleNavDestinationRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
-	UFUNCTION()
-	void HandleDestinationSearchChanged(const FText& Text);
 	// Deletes whatever is selected (room, wall, door or connector) - what Backspace does.
 	UFUNCTION()
 	void OnDeleteSelectionClicked();
@@ -536,8 +506,9 @@ private:
 	// Fills the read-only position / size fields from the selected room's bounding box.
 	void RefreshRoomBoundsFields();
 
+	// Refills the navigation panel's Start/Destination dropdowns. Only needed when the room list could actually have
+	// changed (building/floor structure), not on every click - see the call sites.
 	void RefreshNavRoomDropdowns();
-	void RefreshDestinationRoomDropdown();
 
 	// --- Docking ---
 	// The eight panels are laid out by the dock system (DockLayoutModel / DockHostWidget / DockHostUMG): tab
@@ -805,69 +776,10 @@ private:
 	// as every other widget's expand/collapse state here already does).
 	TSet<FString> ExpandedLayerCategories;
 
-	// Navigation panel - see the comment above OnNavSetStartClicked. NavigationPanel here is this
-	// screen's own dock panel Border, distinct from ANavPlayerController::NavigationPanel (the
-	// UNavigationPanelWidget instance holding the actual selection/route state this panel displays).
+	// The Navigation dock panel (shared with the exterior screen, see NavigationDockPanelWidget.h). The state it shows lives in
+	// ANavPlayerController::GetNavigationPanel.
 	UPROPERTY()
-	UBorder* NavigationPanel = nullptr;
-
-	UPROPERTY()
-	UTextBlock* NavContextText = nullptr;
-
-	UPROPERTY()
-	UComboBoxString* NavStartRoomComboBox = nullptr;
-
-	// Frame around NavStartRoomComboBox, tinted green only when Start was set by picking this
-	// dropdown (as opposed to clicking a point on the floor plan) - see RefreshNavigationPanelDisplay.
-	// Transparent otherwise, so it doesn't read as a permanent gray box.
-	UPROPERTY()
-	UBorder* NavStartRoomBorder = nullptr;
-
-	// The extra entry each room dropdown currently carries for a Start / Destination that was picked in another building
-	// (UNavigationPanelWidget::GetStartOtherBuildingLabel), empty if none - so the list is rebuilt only when it changes.
-	FString NavShownOtherBuildingStart;
-	FString NavShownOtherBuildingDestination;
-
-	UPROPERTY()
-	UComboBoxString* NavDestinationRoomComboBox = nullptr;
-	UPROPERTY()
-	UEditableTextBox* DestinationSearchBox = nullptr;
-	UPROPERTY()
-	UTextBlock* DestinationSearchResultsText = nullptr;
-
-	// Same as NavStartRoomBorder, tinted red for Destination.
-	UPROPERTY()
-	UBorder* NavDestinationRoomBorder = nullptr;
-
-	UPROPERTY()
-	UButton* NavSetStartButton = nullptr;
-
-	UPROPERTY()
-	UTextBlock* NavSetStartButtonLabel = nullptr;
-
-	UPROPERTY()
-	UButton* NavSetDestinationButton = nullptr;
-
-	UPROPERTY()
-	UTextBlock* NavSetDestinationButtonLabel = nullptr;
-
-	UPROPERTY()
-	UButton* NavFindRouteButton = nullptr;
-
-	UPROPERTY()
-	UButton* NavClearRouteButton = nullptr;
-
-	UPROPERTY()
-	UButton* NavToggleRouteButton = nullptr;
-
-	UPROPERTY()
-	UTextBlock* NavToggleRouteButtonLabel = nullptr;
-
-	UPROPERTY()
-	UTextBlock* NavStatusText = nullptr;
-
-	UPROPERTY()
-	UTextBlock* NavRouteDetailsText = nullptr;
+	UNavigationDockPanelWidget* NavigationPanelWidget = nullptr;
 
 	// The Audio dock panel (shared with the exterior screen, see AudioPanelWidget.h). Starts hidden (see
 	// InteriorDock::BuildDefaultLayout).

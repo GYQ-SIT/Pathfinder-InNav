@@ -128,6 +128,9 @@ public:
 	// Used by the 2D floor plan while a navigation endpoint is armed.
 	bool IsSelectingNavigationPoint() const;
 	void SelectNavigationPoint(FVector2D FootprintPosition, int32 Floor);
+	// The click that sets a navigation point on the exterior screen: the spot of the ground under the cursor (see
+	// UNavigationPanelWidget::SelectOutdoorGroundPoint).
+	void SelectOutdoorPointUnderCursor();
 	UFUNCTION(BlueprintPure, Category = "Navigation")
 	UNavigationPanelWidget* GetNavigationPanel() const { return NavigationPanel; }
 

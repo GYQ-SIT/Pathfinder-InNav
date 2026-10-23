@@ -201,6 +201,37 @@ bool ANavPlayerController::IsSelectingNavigationPoint() const
 	return NavigationPanel && NavigationPanel->IsSelectingPoint();
 }
 
+void ANavPlayerController::SelectOutdoorPointUnderCursor()
+{
+	if (!NavigationPanel || !Generator || Generator->GetScale() <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	// A click on a building is not a click on the ground: the ray into the ground behind it would give a spot the user did not point at.
+	FHitResult Hit;
+	GetHitResultUnderCursor(ECC_Visibility, false, Hit);
+	const bool bOnBuilding = Hit.bBlockingHit && Cast<APolyBuilding>(Hit.GetActor()) != nullptr;
+
+	FVector Origin, Direction;
+	if (!bOnBuilding && !DeprojectMousePositionToWorld(Origin, Direction))
+	{
+		return;
+	}
+	FVector2D CampusPosition = FVector2D::ZeroVector;
+	if (!bOnBuilding)
+	{
+		// The ground is the plane the buildings stand on, Z = 0.
+		if (FMath::Abs(Direction.Z) < KINDA_SMALL_NUMBER)
+		{
+			return;
+		}
+		const FVector OnGround = FMath::RayPlaneIntersection(Origin, Direction, FPlane(FVector::ZeroVector, FVector::UpVector));
+		CampusPosition = FVector2D(OnGround.X, OnGround.Y) / Generator->GetScale();
+	}
+	NavigationPanel->SelectOutdoorGroundPoint(CampusPosition, bOnBuilding);
+}
+
 void ANavPlayerController::SelectNavigationPoint(FVector2D FootprintPosition, int32 Floor)
 {
 	UE_LOG(LogTemp, Warning,
@@ -288,6 +319,13 @@ void ANavPlayerController::OnClick()
 	// to the custom floor-plan widget.
 	if (IsSelectingNavigationPoint())
 	{
+		// On the exterior screen no building is open: the click picks a spot on the ground.
+		if (NavigationPanel && NavigationPanel->IsOutdoorMode())
+		{
+			SelectOutdoorPointUnderCursor();
+			return;
+		}
+
 		// In 3D preview the floor-plan widget is Collapsed, so there is nothing to hit-test there: the click is
 		// turned into a point on the active floor instead, by casting the mouse ray onto that floor's plane (a
 		// hit on a wall or a floor edge would shift the point sideways on an oblique camera). The panel then
@@ -3026,6 +3064,17 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 {
 	RouteVisualization->ClearRoute();
 
+	// The exterior screen draws the whole route on the campus.
+	if (NavigationPanel && NavigationPanel->IsOutdoorMode())
+	{
+		RouteVisualization->ShowView(UNavigationRouteVisualization::BuildCampusView(
+			NavigationPanel->GetRoutePoints(),
+			NavigationPanel->HasStart() ? &NavigationPanel->GetStart() : nullptr,
+			NavigationPanel->HasDestination() ? &NavigationPanel->GetDestination() : nullptr,
+			NavigationPanel->IsRouteGuidanceVisible()));
+		return;
+	}
+
 	if (!bIsIn3DPreviewMode || !Generator || !InteriorGen || !NavigationPanel)
 	{
 		return;
@@ -3522,9 +3571,11 @@ void ANavPlayerController::RestoreExteriorCameraView()
 		SetIn3DPreviewMode(false);
 	}
 
+	// The navigation points and route are kept: the exterior screen has its own Navigation panel (outdoor mode) and the same
+	// state is used there. Only a click-to-pick in progress ends here.
 	if (NavigationPanel)
 	{
-		NavigationPanel->ClearAll();
+		NavigationPanel->CancelSelection();
 		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
 	}
 	// Leaving interior editing entirely - cancel any in-progress draw room/wall/delete/prefab mode

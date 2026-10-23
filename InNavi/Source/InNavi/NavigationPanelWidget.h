@@ -162,6 +162,9 @@ public:
 		TArray<FString> Tags;
 		FString RoomType;
 		int32 Floor = 1;
+		// Set for outdoor options (Floor == OutdoorFloor): the building the point belongs to. Empty for a room, which belongs to the
+		// open building.
+		FString BuildingId;
 		FVector2D Centroid = FVector2D::ZeroVector;
 		// Built with the centroid when the room index changes; queries reuse these strings.
 		FString DisplayLabel;
@@ -176,8 +179,11 @@ public:
 	// Every closed-loop room (walls/standalone partitions are excluded - see AInteriorRoom::
 	// IsClosedLoop) across every floor of the currently loaded building. Empty if nothing's loaded.
 	// The cached array is refreshed by the next query after an edit; copy it if keeping a snapshot.
+	// In outdoor mode (see SetOutdoorMode) the list is instead each building's main doors, as points just outside them.
 	const TArray<FNavigationRoomOption>& GetSelectableRooms() const;
 	TArray<FNavigationRoomOption> SearchDestinations(const FString& Query) const;
+	// The same matching, in the order of GetSelectableRooms (floor by floor) instead of by name - for the Start dropdown.
+	TArray<FNavigationRoomOption> SearchRooms(const FString& Query) const;
 
 	// Sets Start/Destination directly to the named room's centroid, bypassing the click-to-pick flow
 	// (and cancelling one if it was in progress) - what the Navigation panel's room dropdowns call.
@@ -187,6 +193,16 @@ public:
 	// centroid falls outside its own footprint).
 	bool SetStartToRoom(const FString& RoomOptionLabel);
 	bool SetDestinationToRoom(const FString& RoomOptionLabel);
+
+	// Outdoor mode is on while the exterior screen (the campus, no building open) is the one on screen. The room dropdowns then list
+	// each building's main doors, and clicks pick points on the ground. Off in the interior editor.
+	void SetOutdoorMode(bool bOutdoor);
+	bool IsOutdoorMode() const { return bOutdoorMode; }
+
+	// Sets the point being picked (Start or Destination) to a spot on the ground, in campus footprint space (world position divided
+	// by the scale). The spot belongs to the building whose outside area it is in. bOnBuilding is true when the click landed on a
+	// building rather than the ground. Says why in the status line, and changes nothing, if the spot is not usable.
+	void SelectOutdoorGroundPoint(FVector2D CampusPosition, bool bOnBuilding);
 
 	// Called by ANavPlayerController::DeleteRoom right after a room is actually removed. A point
 	// picked by clicking the floor plan is an absolute position, independent of any room, so it stays
@@ -224,6 +240,9 @@ private:
 	mutable uint64 IndexedRoomSearchRevision = MAX_uint64;
 	mutable TWeakObjectPtr<APolyBuilding> IndexedBuilding;
 	mutable int32 IndexedFloorCount = 0;
+	mutable bool bIndexedOutdoor = false;
+	mutable int32 IndexedBuildingCount = 0;
+	bool bOutdoorMode = false;
 
 	struct FSelectedEndpoint
 	{
@@ -236,6 +255,11 @@ private:
 	};
 
 	FString OtherBuildingLabel(const FSelectedEndpoint& Endpoint) const;
+	// Whether the room dropdowns list this endpoint's place as one of their own entries (a room of the open building, or in outdoor
+	// mode a main door), as opposed to needing an extra entry.
+	bool EndpointIsInCurrentList(const FSelectedEndpoint& Endpoint) const;
+	void BuildOutdoorOptions() const;
+	bool SetEndpointToOutdoorOption(const FNavigationRoomOption& Option, bool bIsStart);
 	void SetSelectionMode(ENavigationSelectionMode NewMode);
 	void SetStatusMessage(const FString& Message, ENavigationMessageKind Kind);
 	void BroadcastStateChanged();

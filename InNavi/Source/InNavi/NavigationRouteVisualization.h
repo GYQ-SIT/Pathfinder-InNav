@@ -49,6 +49,10 @@ public:
 		FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible = true,
 		const FString& ActiveBuildingId = FString());
 	static bool IsPointVisible(const FNavigationRoutePoint& Point, const FString& ActiveBuildingId, int32 ActiveFloor);
+	// The route as the exterior screen draws it: the parts outside, a label where it enters or leaves a building, and the Start and
+	// Destination markers (also when they are indoors, then at their spot inside the building). Points carry their world positions.
+	static FNavigation3DView BuildCampusView(const TArray<FNavigationRoutePoint>& Route,
+		const FNavigationRoutePoint* Start, const FNavigationRoutePoint* Destination, bool bGuidanceVisible = true);
 	static TArray<FNavigationDirectionArrow2D> BuildDirectionArrows2D(FVector2D From, FVector2D To);
 	void ShowView(const FNavigation3DView& View);
 	void ClearRoute();

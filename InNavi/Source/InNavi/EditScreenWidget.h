@@ -11,6 +11,7 @@ class UBorder;
 class UButton;
 class UAudioPanelWidget;
 class UDebugPanelWidget;
+class UNavigationDockPanelWidget;
 class UMapPanelWidget;
 class UBuildingInfoPanelWidget;
 class UCheckBox;
@@ -200,6 +201,13 @@ private:
 	UFUNCTION()
 	void OnWindowDebugCheckChanged(bool bIsChecked);
 
+	UFUNCTION()
+	void OnWindowNavigationCheckChanged(bool bIsChecked);
+
+	// Bound to UNavigationPanelWidget::OnStateChanged: repaints the Navigation panel.
+	UFUNCTION()
+	void HandleNavigationStateChanged();
+
 	// Window > Reset Layout - back to the team default arrangement.
 	UFUNCTION()
 	void OnWindowResetLayoutClicked();
@@ -223,6 +231,7 @@ private:
 	void SyncAudioPanelWidth();
 	// Same for the Map panel's building controls.
 	void SyncMapPanelWidth();
+	void SyncNavigationPanelWidth();
 	// And the Building panel.
 	void SyncBuildingPanelWidth();
 
@@ -297,6 +306,9 @@ private:
 	UPROPERTY()
 	UCheckBox* WindowDebugCheckbox = nullptr;
 
+	UPROPERTY()
+	UCheckBox* WindowNavigationCheckbox = nullptr;
+
 	// The dock system's host: lays out the three panels below. Stretches over the whole canvas; only its
 	// chrome takes mouse input, so clicks on the empty area still reach the 3D scene.
 	UPROPERTY()
@@ -324,6 +336,11 @@ private:
 	// The Debug dock panel (shared with the interior editor, see DebugPanelWidget.h). Starts hidden.
 	UPROPERTY()
 	UDebugPanelWidget* DebugPanelWidget = nullptr;
+
+	// The Navigation dock panel (shared with the interior editor, see NavigationDockPanelWidget.h): where Start and Destination
+	// are chosen outside (a building's main door, or a click on the ground), Find Route and the directions. Starts hidden.
+	UPROPERTY()
+	UNavigationDockPanelWidget* NavigationPanelWidget = nullptr;
 
 	// Full-screen, fully transparent, Collapsed by default - see
 	// UInteriorScreenWidget::OnMenuClickCatcherMouseButtonDown's own comment for why this is how

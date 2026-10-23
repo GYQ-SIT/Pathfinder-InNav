@@ -3,6 +3,7 @@
 #include "UiTestFixture.h"
 #include "InteriorScreenWidget.h"
 #include "PolyBuilding.h"
+#include "NavigationRoutePlanner.h"
 #include "Components/Button.h"
 #include "Components/ComboBoxString.h"
 #include "Misc/AutomationTest.h"
@@ -89,6 +90,29 @@ bool FNavigationOtherBuildingDropdownTest::RunTest(const FString& Parameters)
 	ClearRoute->OnClicked.Broadcast();
 	TestTrue(TEXT("Clear Route empties the Start dropdown"), Starts->GetSelectedOption().IsEmpty());
 	TestTrue(TEXT("and the Destination dropdown"), Destinations->GetSelectedOption().IsEmpty());
+	return true;
+}
+
+// A room is listed by name and floor, without its id. (Room names are unique in a building, so name and floor are enough to pick one.)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationRoomLabelsTest, "InNavi.Navigation.Search.RoomLabelsWithoutId",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationRoomLabelsTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	UNavigationPanelWidget* Nav = Fixture.Nav;
+	// A reachable room on the first floor.
+	const APolyBuilding* E2 = Fixture.Generator->FindBuildingById(TEXT("E2"));
+	TArray<UNavigationPanelWidget::FNavigationRoomOption> Rooms;
+	for (const auto& Option : Nav->GetSelectableRooms())
+	{
+		FString Error;
+		if (Option.Floor == 1 && FNavigationRoutePlanner::IsValidPoint(*E2, *Fixture.Interior, Fixture.Generator->GetScale(), 1, Option.Centroid, Error)) Rooms.Add(Option);
+	}
+	if (!TestTrue(TEXT("a reachable room on floor 1"), Rooms.Num() >= 1)) return false;
+	TestFalse(TEXT("a label has no id in it"), Rooms[0].GetDisplayLabel().Contains(TEXT("[")));
+	TestTrue(TEXT("a label is the name and the floor"), Rooms[0].GetDisplayLabel() == FString::Printf(TEXT("%s (Floor 1)"), *Rooms[0].RoomName));
+	TestEqual(TEXT("the id can still be searched for"), Nav->SearchDestinations(Rooms[0].RoomId).Num() >= 1, true);
+
 	return true;
 }
 

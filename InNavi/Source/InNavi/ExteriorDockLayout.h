@@ -12,6 +12,7 @@ namespace ExteriorDock
 	INNAVI_API extern const FName Map;
 	INNAVI_API extern const FName Building;
 	INNAVI_API extern const FName Debug;
+	INNAVI_API extern const FName Navigation;
 
 	INNAVI_API const TArray<FName>& AllPanels();
 	INNAVI_API TSet<FName> KnownPanels();
