@@ -84,3 +84,16 @@ InNavi/*.sln
 InNavi/*.slnx
 # Projects the user deleted from the project library (soft delete)
 InNavi/Data/Deleted/
+
+# Signing keys and their passwords: never in the repository (see docs/android-signing.md)
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pepk
+signing-secrets*
+
+# Written by Unreal when it packages for Android (made again every time), and a personal test save
+InNavi/Build/Android/src/
+InNavi/Build/Android_ASTC/
+InNavi/Data/NewProject.json

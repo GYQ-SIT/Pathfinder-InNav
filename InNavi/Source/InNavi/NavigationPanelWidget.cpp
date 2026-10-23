@@ -56,14 +56,6 @@ namespace
 		return bInside;
 	}
 
-	FString LocationName(const FNavigationRoutePoint& Point)
-	{
-		const FString Location = Point.Floor == UNavigationPanelWidget::OutdoorFloor
-			? TEXT("Outside")
-			: FString::Printf(TEXT("Floor %d (indoors)"), Point.Floor);
-		return Point.BuildingId.IsEmpty() ? Location : Point.BuildingId + TEXT(" - ") + Location;
-	}
-
 	FString ConnectorTypeName(EInteriorNavNodeType Type)
 	{
 		switch (Type)
@@ -345,14 +337,27 @@ void UNavigationPanelWidget::SetEndpoint(FSelectedEndpoint& Endpoint, const FNav
 
 void UNavigationPanelWidget::RefreshRoomSearchIndex() const
 {
+	// Outside, the list is each building's main doors; it is rebuilt when asked to (see SetOutdoorMode,
+	// NotifyViewedBuildingChanged, NotifyInteriorChanged) or when the number of buildings changes.
+	if (bOutdoorMode)
+	{
+		const int32 BuildingCount = Generator ? Generator->GetAllBuildings().Num() : 0;
+		if (!bIndexedOutdoor || IndexedRoomSearchRevision == MAX_uint64 || IndexedBuildingCount != BuildingCount)
+		{
+			BuildOutdoorOptions();
+		}
+		return;
+	}
+
 	APolyBuilding* Building = Generator && Interior
 		? Generator->FindBuildingById(Interior->GetLoadedBuildingId()) : nullptr;
 	const uint64 Revision = Interior ? Interior->GetRoomSearchRevision() : 0;
 	const int32 FloorCount = IsValid(Building) ? Building->GetFloorCount() : 0;
-	if (IndexedRoomSearchRevision == Revision && IndexedBuilding.Get() == Building && IndexedFloorCount == FloorCount)
+	if (!bIndexedOutdoor && IndexedRoomSearchRevision == Revision && IndexedBuilding.Get() == Building && IndexedFloorCount == FloorCount)
 	{
 		return;
 	}
+	bIndexedOutdoor = false;
 	IndexedRoomSearchRevision = Revision;
 	IndexedBuilding = Building;
 	IndexedFloorCount = FloorCount;
@@ -381,8 +386,9 @@ void UNavigationPanelWidget::RefreshRoomSearchIndex() const
 			Option.RoomName = Room->RoomName.IsEmpty() ? Room->RoomId : Room->RoomName;
 			Option.Floor = Floor;
 			Option.Centroid = ComputePolygonCentroid(Room->GetFootprint());
-			Option.DisplayLabel = FString::Printf(TEXT("%s [%s] (Floor %d)"), *Option.RoomName, *Option.RoomId, Floor);
-			Option.SearchableText = Option.DisplayLabel + TEXT(" ") + FString::Join(Option.Tags, TEXT(" "));
+			// The id is not shown (a room is picked by name and floor); it can still be searched for.
+			Option.DisplayLabel = FString::Printf(TEXT("%s (Floor %d)"), *Option.RoomName, Floor);
+			Option.SearchableText = Option.DisplayLabel + TEXT(" ") + Option.RoomId + TEXT(" ") + FString::Join(Option.Tags, TEXT(" "));
 			// Other says nothing, and would make a search for the word "other" match every untyped room.
 			if (Option.RoomType != RoomTypes::Default())
 			{
@@ -403,6 +409,19 @@ const TArray<UNavigationPanelWidget::FNavigationRoomOption>& UNavigationPanelWid
 {
 	RefreshRoomSearchIndex();
 	return CachedRooms;
+}
+
+TArray<UNavigationPanelWidget::FNavigationRoomOption> UNavigationPanelWidget::SearchRooms(const FString& Query) const
+{
+	RefreshRoomSearchIndex();
+	TArray<FString> Words;
+	Query.ParseIntoArrayWS(Words);
+	TArray<FNavigationRoomOption> Options;
+	for (const FNavigationRoomOption& Option : CachedRooms)
+	{
+		if (NavigationSearch::MatchesWords(Words, Option.SearchableText)) Options.Add(Option);
+	}
+	return Options;
 }
 
 TArray<UNavigationPanelWidget::FNavigationRoomOption> UNavigationPanelWidget::SearchDestinations(const FString& Query) const
@@ -440,6 +459,10 @@ bool UNavigationPanelWidget::SetEndpointToRoom(const FString& RoomOptionLabel, b
 	{
 		SetStatusMessage(TEXT("Could not find that room."), ENavigationMessageKind::Error);
 		return false;
+	}
+	if (Found->Floor == OutdoorFloor)
+	{
+		return SetEndpointToOutdoorOption(*Found, bIsStart);
 	}
 
 	APolyBuilding* Building = Generator ? Generator->FindBuildingById(Interior->GetLoadedBuildingId()) : nullptr;
@@ -636,12 +659,205 @@ bool UNavigationPanelWidget::CanFindRoute() const
 
 FString UNavigationPanelWidget::GetStartRoomLabel() const
 {
-	return WasStartSetViaDropdown() && Interior && Start.BuildingId == Interior->GetLoadedBuildingId() ? Start.RoomOptionLabel : FString();
+	return WasStartSetViaDropdown() && EndpointIsInCurrentList(Start) ? Start.RoomOptionLabel : FString();
 }
 
 FString UNavigationPanelWidget::GetDestinationRoomLabel() const
 {
-	return WasDestinationSetViaDropdown() && Interior && Destination.BuildingId == Interior->GetLoadedBuildingId() ? Destination.RoomOptionLabel : FString();
+	return WasDestinationSetViaDropdown() && EndpointIsInCurrentList(Destination) ? Destination.RoomOptionLabel : FString();
+}
+
+FString UNavigationPanelWidget::OtherBuildingLabel(const FSelectedEndpoint& Endpoint) const
+{
+	if (!Endpoint.bValid || !Endpoint.bSetViaDropdown || !Interior || !Generator || EndpointIsInCurrentList(Endpoint))
+	{
+		return FString();
+	}
+	// A main door already names its building.
+	if (Endpoint.Point.Floor == OutdoorFloor)
+	{
+		return Endpoint.RoomOptionLabel;
+	}
+	const APolyBuilding* Building = Generator->FindBuildingById(Endpoint.BuildingId);
+	const FString BuildingName = (Building && !Building->BuildingName.IsEmpty()) ? Building->BuildingName : Endpoint.BuildingId;
+	// The label is "Name [Id] (Floor N)"; this entry shows the building, then the name and the floor, without the id.
+	const FString RoomLabel = Endpoint.RoomOptionLabel.Replace(*FString::Printf(TEXT(" [%s]"), *Endpoint.RoomId), TEXT(""));
+	return BuildingName + TEXT(" · ") + RoomLabel;
+}
+
+FString UNavigationPanelWidget::GetStartOtherBuildingLabel() const
+{
+	return OtherBuildingLabel(Start);
+}
+
+FString UNavigationPanelWidget::GetDestinationOtherBuildingLabel() const
+{
+	return OtherBuildingLabel(Destination);
+}
+
+bool UNavigationPanelWidget::EndpointIsInCurrentList(const FSelectedEndpoint& Endpoint) const
+{
+	if (!Endpoint.bValid || !Interior)
+	{
+		return false;
+	}
+	// Outside the list holds main doors (points outdoors); inside it holds the open building's rooms.
+	if (bOutdoorMode)
+	{
+		return Endpoint.Point.Floor == OutdoorFloor;
+	}
+	return Endpoint.Point.Floor != OutdoorFloor && Endpoint.BuildingId == Interior->GetLoadedBuildingId();
+}
+
+void UNavigationPanelWidget::SetOutdoorMode(bool bOutdoor)
+{
+	if (bOutdoorMode == bOutdoor)
+	{
+		return;
+	}
+	bOutdoorMode = bOutdoor;
+	SelectionMode = ENavigationSelectionMode::None;
+	IndexedRoomSearchRevision = MAX_uint64;
+	BroadcastStateChanged();
+}
+
+void UNavigationPanelWidget::SelectOutdoorGroundPoint(FVector2D CampusPosition, bool bOnBuilding)
+{
+	if (SelectionMode == ENavigationSelectionMode::None || !Generator)
+	{
+		return;
+	}
+	if (bOnBuilding)
+	{
+		SetStatusMessage(TEXT("That is a building. Click the ground next to it, or pick its main door in the list."), ENavigationMessageKind::Error);
+		return;
+	}
+
+	// The point belongs to the building whose outside area it is in (the nearest one if several), and must not be inside any building.
+	const APolyBuilding* Owner = nullptr;
+	float OwnerDistance = TNumericLimits<float>::Max();
+	for (const APolyBuilding* Building : Generator->GetAllBuildings())
+	{
+		if (!Building)
+		{
+			continue;
+		}
+		const FVector2D Local = CampusPosition - Building->BuildingOffset;
+		if (IsInsideOrOnFootprint(Local, Building->GetFootprint()))
+		{
+			SetStatusMessage(TEXT("That spot is inside a building. Click the ground outside, or use the room list."), ENavigationMessageKind::Error);
+			return;
+		}
+		if (!IsOutdoorPoint(*Building, Local))
+		{
+			continue;
+		}
+		const TArray<FVector2D>& Outline = Building->GetFootprint();
+		float Nearest = TNumericLimits<float>::Max();
+		for (int32 i = 0; i < Outline.Num(); ++i)
+		{
+			const FVector2D Closest = FMath::ClosestPointOnSegment2D(Local, Outline[i], Outline[(i + 1) % Outline.Num()]);
+			Nearest = FMath::Min(Nearest, static_cast<float>(FVector2D::Distance(Local, Closest)));
+		}
+		if (Nearest < OwnerDistance)
+		{
+			OwnerDistance = Nearest;
+			Owner = Building;
+		}
+	}
+	if (!Owner)
+	{
+		SetStatusMessage(TEXT("Too far from every building. Click the ground closer to one."), ENavigationMessageKind::Error);
+		return;
+	}
+
+	FNavigationRoutePoint Point;
+	Point.Position = CampusPosition - Owner->BuildingOffset;
+	Point.Floor = OutdoorFloor;
+	FSelectedEndpoint& Endpoint = SelectionMode == ENavigationSelectionMode::Start ? Start : Destination;
+	const FString EndpointName = SelectionMode == ENavigationSelectionMode::Start ? TEXT("Start") : TEXT("Destination");
+	SelectionMode = ENavigationSelectionMode::None;
+	SetEndpoint(Endpoint, Point, Owner->BuildingId, EndpointName, TEXT("outside"), false);
+}
+
+void UNavigationPanelWidget::BuildOutdoorOptions() const
+{
+	IndexedRoomSearchRevision = 0;
+	bIndexedOutdoor = true;
+	CachedRooms.Reset();
+	SortedDestinationIndices.Reset();
+	IndexedBuildingCount = 0;
+	if (!Generator || Generator->GetScale() <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+	const float Scale = Generator->GetScale();
+	TArray<APolyBuilding*> Buildings = Generator->GetAllBuildings();
+	IndexedBuildingCount = Buildings.Num();
+	Buildings.Sort([](const APolyBuilding& A, const APolyBuilding& B) { return A.BuildingName.Compare(B.BuildingName, ESearchCase::IgnoreCase) < 0; });
+	for (const APolyBuilding* Building : Buildings)
+	{
+		if (!Building)
+		{
+			continue;
+		}
+		const TArray<FVector2D>& Outline = Building->GetFootprint();
+		TArray<FInteriorEntrance> Doors;
+		for (const FInteriorEntrance& Entrance : Generator->GetStoredEntrances(Building->BuildingId))
+		{
+			if (Entrance.Kind == EInteriorEntranceKind::Main && Outline.IsValidIndex(Entrance.EdgeIndex))
+			{
+				Doors.Add(Entrance);
+			}
+		}
+		const FString BuildingName = Building->BuildingName.IsEmpty() ? Building->BuildingId : Building->BuildingName;
+		for (int32 DoorNumber = 0; DoorNumber < Doors.Num(); ++DoorNumber)
+		{
+			const FInteriorEntrance& Door = Doors[DoorNumber];
+			const FVector2D A = Outline[Door.EdgeIndex];
+			const FVector2D B = Outline[(Door.EdgeIndex + 1) % Outline.Num()];
+			const FVector2D Direction = (B - A).GetSafeNormal();
+			// Offset and Width are world units along the wall; a footprint unit is Scale of them.
+			const FVector2D Middle = A + Direction * ((Door.Offset + Door.Width * 0.5f) / Scale);
+			// A metre out from the wall, on the side that is not the building (a door in the wall is not a valid spot to stand).
+			const float OutDistance = 100.f / Scale;
+			const FVector2D Normal(Direction.Y, -Direction.X);
+			FVector2D Outside = Middle + Normal * OutDistance;
+			if (IsInsideOrOnFootprint(Outside, Outline))
+			{
+				Outside = Middle - Normal * OutDistance;
+			}
+			FNavigationRoomOption Option;
+			Option.RoomId = Door.Id;
+			Option.RoomName = Doors.Num() > 1 ? FString::Printf(TEXT("Main door %d"), DoorNumber + 1) : FString(TEXT("Main door"));
+			Option.Floor = OutdoorFloor;
+			Option.BuildingId = Building->BuildingId;
+			Option.Centroid = Outside;
+			Option.DisplayLabel = FString::Printf(TEXT("%s · %s"), *BuildingName, *Option.RoomName);
+			Option.SearchableText = Option.DisplayLabel + TEXT(" entrance gate outside");
+			SortedDestinationIndices.Add(CachedRooms.Num());
+			CachedRooms.Add(MoveTemp(Option));
+		}
+	}
+}
+
+bool UNavigationPanelWidget::SetEndpointToOutdoorOption(const FNavigationRoomOption& Option, bool bIsStart)
+{
+	const APolyBuilding* Building = Generator ? Generator->FindBuildingById(Option.BuildingId) : nullptr;
+	FString Error;
+	if (!Building || !FNavigationRoutePlanner::IsValidPoint(*Building, *Interior, Generator->GetScale(), OutdoorFloor, Option.Centroid, Error))
+	{
+		SetStatusMessage(FString::Printf(TEXT("'%s' cannot be used as a point (%s)."), *Option.DisplayLabel, *Error), ENavigationMessageKind::Error);
+		return false;
+	}
+	SelectionMode = ENavigationSelectionMode::None;
+	FSelectedEndpoint& Endpoint = bIsStart ? Start : Destination;
+	FNavigationRoutePoint Point;
+	Point.Position = Option.Centroid;
+	Point.Floor = OutdoorFloor;
+	SetEndpoint(Endpoint, Point, Building->BuildingId, bIsStart ? TEXT("Start") : TEXT("Destination"),
+		FString::Printf(TEXT("to '%s'"), *Option.DisplayLabel), true, Option.DisplayLabel, Option.RoomId);
+	return true;
 }
 
 void UNavigationPanelWidget::NotifyViewedBuildingChanged()
@@ -673,36 +889,68 @@ FString UNavigationPanelWidget::GetDisplayStatusMessage() const
 	switch (SelectionMode)
 	{
 	case ENavigationSelectionMode::Start:
-		return TEXT("Select a start indoors, or in the blue outside area on Floor 1.");
+		return bOutdoorMode ? TEXT("Click the ground next to a building to set the start.")
+			: TEXT("Select a start indoors, or in the blue outside area on Floor 1.");
 	case ENavigationSelectionMode::Destination:
-		return TEXT("Select a destination indoors, or in the blue outside area on Floor 1.");
+		return bOutdoorMode ? TEXT("Click the ground next to a building to set the destination.")
+			: TEXT("Select a destination indoors, or in the blue outside area on Floor 1.");
 	default:
 		return TEXT("Choose Set Start or Set Destination.");
 	}
 }
 
-FString UNavigationPanelWidget::BuildRouteDetails() const
+FString UNavigationPanelWidget::BuildingDisplayName(const FString& BuildingId) const
 {
-	FString Details;
+	const APolyBuilding* Building = Generator ? Generator->FindBuildingById(BuildingId) : nullptr;
+	return (Building && !Building->BuildingName.IsEmpty()) ? Building->BuildingName : BuildingId;
+}
+
+FString UNavigationPanelWidget::EndpointPhrase(const FSelectedEndpoint& Endpoint) const
+{
+	const FString Building = BuildingDisplayName(Endpoint.BuildingId);
+	if (Endpoint.Point.Floor == OutdoorFloor)
+	{
+		// A main door picked from the list already names its building ("T1 · Main door").
+		if (Endpoint.bSetViaDropdown && !Endpoint.RoomOptionLabel.IsEmpty())
+		{
+			return Endpoint.RoomOptionLabel;
+		}
+		return Building.IsEmpty() ? FString(TEXT("a spot outside")) : FString::Printf(TEXT("a spot outside near %s"), *Building);
+	}
+	const FString Floor = FString::Printf(TEXT("Floor %d"), Endpoint.Point.Floor);
+	if (Endpoint.bSetViaDropdown && !Endpoint.RoomOptionLabel.IsEmpty())
+	{
+		// The label is "Room name (Floor N)"; the floor is said after the building instead.
+		FString Room = Endpoint.RoomOptionLabel;
+		const int32 FloorStart = Room.Find(TEXT(" (Floor "), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+		if (FloorStart != INDEX_NONE)
+		{
+			Room.LeftInline(FloorStart);
+		}
+		return Building.IsEmpty() ? FString::Printf(TEXT("%s, %s"), *Room, *Floor) : FString::Printf(TEXT("%s in %s, %s"), *Room, *Building, *Floor);
+	}
+	return Building.IsEmpty() ? FString::Printf(TEXT("a spot on %s"), *Floor) : FString::Printf(TEXT("a spot on %s of %s"), *Floor, *Building);
+}
+
+TArray<UNavigationPanelWidget::FNavigationRouteStep> UNavigationPanelWidget::BuildRouteSteps() const
+{
+	TArray<FNavigationRouteStep> Steps;
+	if (RoutePoints.IsEmpty())
+	{
+		return Steps;
+	}
 	if (Start.bValid)
 	{
-		Details += FString::Printf(TEXT("Start: %s\n"), *LocationName(Start.Point));
+		Steps.Add({ FString::Printf(TEXT("Start at %s."), *EndpointPhrase(Start)) });
 	}
-	if (Destination.bValid)
-	{
-		Details += FString::Printf(TEXT("Destination: %s\n"), *LocationName(Destination.Point));
-	}
-
-	const int32 ActiveFloor = Interior ? Interior->GetActiveFloor() : INDEX_NONE;
-	int32 NextFloor = INDEX_NONE;
-	int32 PreviousFloor = INDEX_NONE;
 	for (int32 I = 1; I < RoutePoints.Num(); ++I)
 	{
 		const FNavigationRoutePoint& From = RoutePoints[I - 1];
 		const FNavigationRoutePoint& To = RoutePoints[I];
 		if (From.BuildingId != To.BuildingId && From.Floor != OutdoorFloor && To.Floor != OutdoorFloor)
 		{
-			Details += FString::Printf(TEXT("Use the link door from %s to %s on Floor %d.\n"), *From.BuildingId, *To.BuildingId, To.Floor);
+			Steps.Add({ FString::Printf(TEXT("Use the link door from %s to %s on Floor %d."),
+				*BuildingDisplayName(From.BuildingId), *BuildingDisplayName(To.BuildingId), To.Floor) });
 			continue;
 		}
 		if (From.Floor == To.Floor)
@@ -711,40 +959,50 @@ FString UNavigationPanelWidget::BuildRouteDetails() const
 		}
 		if (From.Floor == OutdoorFloor)
 		{
-			Details += FString::Printf(TEXT("Enter the building %s, then continue on Floor 1.\n"), *To.BuildingId);
+			Steps.Add({ To.BuildingId.IsEmpty() ? FString(TEXT("Enter the building and continue on Floor 1."))
+				: FString::Printf(TEXT("Enter the building %s and continue on Floor 1."), *BuildingDisplayName(To.BuildingId)) });
 		}
 		else if (To.Floor == OutdoorFloor)
 		{
-			Details += FString::Printf(TEXT("Exit the building %s, then continue outside.\n"), *From.BuildingId);
+			Steps.Add({ From.BuildingId.IsEmpty() ? FString(TEXT("Exit the building and continue outside."))
+				: FString::Printf(TEXT("Exit the building %s and continue outside."), *BuildingDisplayName(From.BuildingId)) });
 		}
 		else
 		{
-			const FString Connector = ConnectorTypeName(To.ConnectorType);
-			const FString ConnectorLabel = To.ConnectorId.IsEmpty()
-				? Connector : Connector + TEXT(" ") + To.ConnectorId;
-			Details += FString::Printf(TEXT("Take %s in %s from Floor %d to Floor %d.\n"),
-				*ConnectorLabel, *From.BuildingId, From.Floor, To.Floor);
-		}
-		if (From.Floor == ActiveFloor && Interior && From.BuildingId == Interior->GetLoadedBuildingId() && NextFloor == INDEX_NONE)
-		{
-			NextFloor = To.Floor;
-		}
-		if (To.Floor == ActiveFloor && Interior && To.BuildingId == Interior->GetLoadedBuildingId())
-		{
-			PreviousFloor = From.Floor;
+			const FString Where = From.BuildingId.IsEmpty() ? FString() : FString::Printf(TEXT(" in %s"), *BuildingDisplayName(From.BuildingId));
+			Steps.Add({ FString::Printf(TEXT("Take the %s%s from Floor %d to Floor %d."), *ConnectorTypeName(To.ConnectorType), *Where, From.Floor, To.Floor) });
 		}
 	}
-	if (NextFloor != INDEX_NONE)
+	if (Destination.bValid)
 	{
-		Details += NextFloor == OutdoorFloor
-			? TEXT("Route continues outside.")
-			: FString::Printf(TEXT("Route continues to Floor %d."), NextFloor);
+		Steps.Add({ FString::Printf(TEXT("Arrive at %s."), *EndpointPhrase(Destination)) });
 	}
-	else if (PreviousFloor != INDEX_NONE)
+	if (!Steps.IsEmpty())
 	{
-		Details += PreviousFloor == OutdoorFloor
-			? TEXT("Route arrives from outside.")
-			: FString::Printf(TEXT("Route arrives from Floor %d."), PreviousFloor);
+		Steps.Last().bFinal = true;
+	}
+	return Steps;
+}
+
+FString UNavigationPanelWidget::BuildRouteDetails() const
+{
+	const TArray<FNavigationRouteStep> Steps = BuildRouteSteps();
+	FString Details;
+	if (Steps.IsEmpty())
+	{
+		// No route yet: show what has been chosen so far.
+		if (Start.bValid)
+		{
+			Details += FString::Printf(TEXT("Start: %s\n"), *EndpointPhrase(Start));
+		}
+		if (Destination.bValid)
+		{
+			Details += FString::Printf(TEXT("Destination: %s\n"), *EndpointPhrase(Destination));
+		}
+	}
+	for (int32 Index = 0; Index < Steps.Num(); ++Index)
+	{
+		Details += FString::Printf(TEXT("Step %d: %s\n"), Index + 1, *Steps[Index].Text);
 	}
 	Details.RemoveFromEnd(TEXT("\n"));
 	return Details;

@@ -134,6 +134,30 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 	return View;
 }
 
+FNavigation3DView UNavigationRouteVisualization::BuildCampusView(const TArray<FNavigationRoutePoint>& Route,
+	const FNavigationRoutePoint* Start, const FNavigationRoutePoint* Destination, bool bGuidanceVisible)
+{
+	// Floor 0 is "outside": the outdoor stretches and the entering/leaving labels are what shows. No building is open, so no
+	// building is active and the offset, scale and floor height are not used (points carry their world positions).
+	FNavigation3DView View = BuildView(Route, Start, Destination, FVector2D::ZeroVector, 1.f, 1.f, 0, bGuidanceVisible, FString());
+	if (!bGuidanceVisible)
+	{
+		return View;
+	}
+	// An endpoint inside a building is not drawn by the view above (its floor is not shown); mark where it is.
+	auto MarkIndoor = [&View](const FNavigationRoutePoint* Point, TOptional<FVector>& OutMarker, const TCHAR* Text, const FColor& Color)
+	{
+		if (Point && Point->Floor != 0 && Point->bHasWorldPosition)
+		{
+			OutMarker = Point->WorldPosition + FVector(0, 0, RouteDisplayLift);
+			View.Labels.Add({ OutMarker.GetValue() + FVector(0, 0, 55), Text, Color });
+		}
+	};
+	MarkIndoor(Start, View.Start, TEXT("Start"), FColor::Green);
+	MarkIndoor(Destination, View.Destination, TEXT("Destination"), FColor::Red);
+	return View;
+}
+
 bool UNavigationRouteVisualization::IsPointVisible(const FNavigationRoutePoint& Point, const FString& ActiveBuildingId, int32 ActiveFloor)
 {
 	return NavigationPointVisible(Point.Floor, ActiveFloor) && (Point.Floor == 0 || ActiveBuildingId.IsEmpty()

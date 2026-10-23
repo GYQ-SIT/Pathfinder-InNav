@@ -3,6 +3,10 @@
 
 #include "NavPlayerController.h"
 #include "NavigationPanelWidget.h"
+#include "MobileAppWidget.h"
+#include "MobileSearchPageWidget.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
+#include "TimerManager.h"
 #include "NavigationRouteVisualization.h"
 #include "InteriorFloorPlanWidget.h"
 #include "Blueprint/UserWidget.h"
@@ -21,8 +25,10 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
+#if PLATFORM_DESKTOP
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
+#endif
 #include "Framework/Application/SlateApplication.h"
 #include "UObject/UObjectIterator.h"
 #include "HAL/FileManager.h"
@@ -83,16 +89,14 @@ void ANavPlayerController::BeginPlay()
 		OnInteriorContentChanged.AddUniqueDynamic(NavigationPanel, &UNavigationPanelWidget::NotifyInteriorChanged);
 	}
 
-	for (TActorIterator<ABuildingGenerator> It(GetWorld()); It; ++It)
+	if (TActorIterator<ABuildingGenerator> It(GetWorld()); It)
 	{
 		Generator = *It;
-		break;
 	}
 
-	for (TActorIterator<AInteriorGenerator> It(GetWorld()); It; ++It)
+	if (TActorIterator<AInteriorGenerator> It(GetWorld()); It)
 	{
 		InteriorGen = *It;
-		break;
 	}
 	if (NavigationPanel)
 	{
@@ -101,11 +105,131 @@ void ANavPlayerController::BeginPlay()
 	UE_LOG(LogTemp, Warning, TEXT("[Navigation] BeginPlay references: Generator=%s Interior=%s"),
 		Generator ? TEXT("valid") : TEXT("NULL"),
 		InteriorGen ? TEXT("valid") : TEXT("NULL"));
+
+	// -MobileApp (always on a phone): the start screen is put up by the level a moment after this, so wait a little before taking everything down.
+#if PLATFORM_ANDROID || PLATFORM_IOS
+	const bool bPhone = true;
+#else
+	const bool bPhone = FParse::Param(FCommandLine::Get(), TEXT("MobileApp"));
+#endif
+	if (bPhone)
+	{
+		FTimerHandle Handle;
+		GetWorldTimerManager().SetTimer(Handle, this, &ANavPlayerController::MobileApp, 0.5f, false);
+	}
+}
+
+void ANavPlayerController::MobileApp()
+{
+	UWidgetLayoutLibrary::RemoveAllWidgets(this);
+	if (UMobileAppWidget* Screen = CreateWidget<UMobileAppWidget>(this, UMobileAppWidget::StaticClass()))
+	{
+		// The look (theme and text size) is read before the screen is built, so it is built in it.
+		Screen->UsePreferencesFile(FMobilePreferences::DefaultFile());
+		Screen->AddToViewport();
+		// The saved places are kept in a file; for looking at the tab, -MobileSave=E2-01-101,PLM-01-102 saves some without one.
+		FString PreviewIds;
+		if (FParse::Value(FCommandLine::Get(), TEXT("MobileSave="), PreviewIds, false))
+		{
+			Screen->PreviewSave(PreviewIds);
+		}
+		else
+		{
+			Screen->UseSavedFile(FMobileSavedPlaces::DefaultFile());
+		}
+		// For trying a screen straight away: -MobileTab=Directory and -MobileState=Route.
+		FString Tab, State;
+		if (FParse::Value(FCommandLine::Get(), TEXT("MobileTab="), Tab))
+		{
+			Screen->SetActiveTab(Tab == TEXT("Directory") ? UMobileAppWidget::ETab::Directory : Tab == TEXT("Saved") ? UMobileAppWidget::ETab::Saved : Tab == TEXT("Profile") ? UMobileAppWidget::ETab::Profile : UMobileAppWidget::ETab::Explore);
+		}
+		if (FParse::Value(FCommandLine::Get(), TEXT("MobileState="), State))
+		{
+			Screen->PreviewState(State == TEXT("Place") ? EMobileSheetState::Place : State == TEXT("Route") ? EMobileSheetState::Route : State == TEXT("Navigating") ? EMobileSheetState::Navigating : State == TEXT("Arrived") ? EMobileSheetState::Arrived : EMobileSheetState::Search);
+		}
+		// For trying the search page: -MobileQuery=lounge, -MobileBrowse, -MobileFilters, and the sheet's height with -MobileSnap=Full.
+		FString Query, SnapName;
+		if (UMobileSearchPageWidget* SearchPage = Screen->GetSearchPage())
+		{
+			if (FParse::Value(FCommandLine::Get(), TEXT("MobileQuery="), Query))
+			{
+				SearchPage->SetQuery(Query);
+			}
+			if (FParse::Param(FCommandLine::Get(), TEXT("MobileBrowse")))
+			{
+				SearchPage->BrowseAll();
+			}
+			if (FParse::Param(FCommandLine::Get(), TEXT("MobileFilters")))
+			{
+				SearchPage->SetFiltersOpen(true);
+			}
+		}
+		// For the route page: -MobileOpen=From|To|Building|Level opens that drop-down.
+		FString OpenName;
+		if (FParse::Value(FCommandLine::Get(), TEXT("MobileOpen="), OpenName))
+		{
+			Screen->PreviewOpenSelect(OpenName);
+		}
+		// For the map: -MobileOverview, -Mobile3D, -MobileLevelList, and -MobileMapLevel=2 (a level of the building shown).
+		FString MapLevelText;
+		if (FParse::Param(FCommandLine::Get(), TEXT("MobileOverview")))
+		{
+			Screen->ToggleOverview();
+		}
+		if (FParse::Param(FCommandLine::Get(), TEXT("Mobile3D")))
+		{
+			Screen->SetMap3D(true);
+		}
+		if (FParse::Value(FCommandLine::Get(), TEXT("MobileMapLevel="), MapLevelText))
+		{
+			Screen->ChooseMapLevel(FCString::Atoi(*MapLevelText));
+		}
+		if (FParse::Param(FCommandLine::Get(), TEXT("MobileLevelList")))
+		{
+			Screen->SetLevelPopupOpen(true);
+		}
+		if (FParse::Value(FCommandLine::Get(), TEXT("MobileSnap="), SnapName))
+		{
+			Screen->SetSnap(SnapName == TEXT("Full") ? EMobileSheetSnap::Full : SnapName == TEXT("Collapsed") ? EMobileSheetSnap::Collapsed : EMobileSheetSnap::Half);
+			Screen->SnapSheetNow();
+		}
+	}
 }
 
 bool ANavPlayerController::IsSelectingNavigationPoint() const
 {
 	return NavigationPanel && NavigationPanel->IsSelectingPoint();
+}
+
+void ANavPlayerController::SelectOutdoorPointUnderCursor()
+{
+	if (!NavigationPanel || !Generator || Generator->GetScale() <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	// A click on a building is not a click on the ground: the ray into the ground behind it would give a spot the user did not point at.
+	FHitResult Hit;
+	GetHitResultUnderCursor(ECC_Visibility, false, Hit);
+	const bool bOnBuilding = Hit.bBlockingHit && Cast<APolyBuilding>(Hit.GetActor()) != nullptr;
+
+	FVector Origin, Direction;
+	if (!bOnBuilding && !DeprojectMousePositionToWorld(Origin, Direction))
+	{
+		return;
+	}
+	FVector2D CampusPosition = FVector2D::ZeroVector;
+	if (!bOnBuilding)
+	{
+		// The ground is the plane the buildings stand on, Z = 0.
+		if (FMath::Abs(Direction.Z) < KINDA_SMALL_NUMBER)
+		{
+			return;
+		}
+		const FVector OnGround = FMath::RayPlaneIntersection(Origin, Direction, FPlane(FVector::ZeroVector, FVector::UpVector));
+		CampusPosition = FVector2D(OnGround.X, OnGround.Y) / Generator->GetScale();
+	}
+	NavigationPanel->SelectOutdoorGroundPoint(CampusPosition, bOnBuilding);
 }
 
 void ANavPlayerController::SelectNavigationPoint(FVector2D FootprintPosition, int32 Floor)
@@ -195,6 +319,13 @@ void ANavPlayerController::OnClick()
 	// to the custom floor-plan widget.
 	if (IsSelectingNavigationPoint())
 	{
+		// On the exterior screen no building is open: the click picks a spot on the ground.
+		if (NavigationPanel && NavigationPanel->IsOutdoorMode())
+		{
+			SelectOutdoorPointUnderCursor();
+			return;
+		}
+
 		// In 3D preview the floor-plan widget is Collapsed, so there is nothing to hit-test there: the click is
 		// turned into a point on the active floor instead, by casting the mouse ray onto that floor's plane (a
 		// hit on a wall or a floor edge would shift the point sideways on an oblique camera). The panel then
@@ -2005,6 +2136,11 @@ APolyBuilding* ANavPlayerController::CreateRegularPolygonBuilding(const FString&
 
 FString ANavPlayerController::BrowseForBuildingDataFile()
 {
+#if !PLATFORM_DESKTOP
+	// The native file dialog exists on desktop only; the phone app has no import.
+	OnActionFailed.Broadcast(TEXT("Could not open the file picker on this system."), EActionFailureSeverity::Warning);
+	return FString();
+#else
 	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
 	if (!DesktopPlatform)
 	{
@@ -2049,6 +2185,7 @@ FString ANavPlayerController::BrowseForBuildingDataFile()
 	}
 
 	return OutFiles[0];
+#endif
 }
 
 int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
@@ -2927,6 +3064,17 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 {
 	RouteVisualization->ClearRoute();
 
+	// The exterior screen draws the whole route on the campus.
+	if (NavigationPanel && NavigationPanel->IsOutdoorMode())
+	{
+		RouteVisualization->ShowView(UNavigationRouteVisualization::BuildCampusView(
+			NavigationPanel->GetRoutePoints(),
+			NavigationPanel->HasStart() ? &NavigationPanel->GetStart() : nullptr,
+			NavigationPanel->HasDestination() ? &NavigationPanel->GetDestination() : nullptr,
+			NavigationPanel->IsRouteGuidanceVisible()));
+		return;
+	}
+
 	if (!bIsIn3DPreviewMode || !Generator || !InteriorGen || !NavigationPanel)
 	{
 		return;
@@ -3423,9 +3571,11 @@ void ANavPlayerController::RestoreExteriorCameraView()
 		SetIn3DPreviewMode(false);
 	}
 
+	// The navigation points and route are kept: the exterior screen has its own Navigation panel (outdoor mode) and the same
+	// state is used there. Only a click-to-pick in progress ends here.
 	if (NavigationPanel)
 	{
-		NavigationPanel->ClearAll();
+		NavigationPanel->CancelSelection();
 		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
 	}
 	// Leaving interior editing entirely - cancel any in-progress draw room/wall/delete/prefab mode
@@ -3526,6 +3676,10 @@ bool ANavPlayerController::SaveCurrentProject()
 
 FString ANavPlayerController::BrowseForSaveLocation()
 {
+#if !PLATFORM_DESKTOP
+	OnActionFailed.Broadcast(TEXT("Could not open the save dialog on this system."), EActionFailureSeverity::Warning);
+	return FString();
+#else
 	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
 	if (!DesktopPlatform)
 	{
@@ -3561,6 +3715,7 @@ FString ANavPlayerController::BrowseForSaveLocation()
 	}
 
 	return OutFiles[0];
+#endif
 }
 
 bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)

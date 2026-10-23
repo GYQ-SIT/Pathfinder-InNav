@@ -128,6 +128,9 @@ public:
 	// Used by the 2D floor plan while a navigation endpoint is armed.
 	bool IsSelectingNavigationPoint() const;
 	void SelectNavigationPoint(FVector2D FootprintPosition, int32 Floor);
+	// The click that sets a navigation point on the exterior screen: the spot of the ground under the cursor (see
+	// UNavigationPanelWidget::SelectOutdoorGroundPoint).
+	void SelectOutdoorPointUnderCursor();
 	UFUNCTION(BlueprintPure, Category = "Navigation")
 	UNavigationPanelWidget* GetNavigationPanel() const { return NavigationPanel; }
 
@@ -463,6 +466,11 @@ public:
 	// Whether the 2D plan fills each room with its type's colour. A view setting like the Layers panel's, on by default and not saved.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void ToggleRoomColours();
+
+	// Console command "MobileApp" (and the launch option -MobileApp): shows the phone app's screen in place of everything else, to build and
+	// try it in a phone-sized window on the desktop (for example -windowed -ResX=375 -ResY=812).
+	UFUNCTION(Exec)
+	void MobileApp();
 
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	bool AreRoomColoursVisible() const { return bRoomColoursVisible; }

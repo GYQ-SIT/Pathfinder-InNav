@@ -13,10 +13,11 @@ namespace ExteriorDock
 	const FName Map(TEXT("Map"));
 	const FName Building(TEXT("Building"));
 	const FName Debug(TEXT("Debug"));
+	const FName Navigation(TEXT("Navigation"));
 
 	const TArray<FName>& AllPanels()
 	{
-		static const TArray<FName> Panels = { Audio, Map, Building, Debug };
+		static const TArray<FName> Panels = { Audio, Map, Building, Debug, Navigation };
 		return Panels;
 	}
 
@@ -32,14 +33,14 @@ namespace ExteriorDock
 
 	EDockSide DefaultSideFor(FName Panel)
 	{
-		return Panel == Map ? EDockSide::Left : (Panel == Building ? EDockSide::Right : EDockSide::Bottom);
+		return Panel == Map ? EDockSide::Left : ((Panel == Building || Panel == Navigation) ? EDockSide::Right : EDockSide::Bottom);
 	}
 
 	namespace
 	{
 		bool IsHiddenByDefault(FName Panel)
 		{
-			return Panel == Audio || Panel == Debug;
+			return Panel == Audio || Panel == Debug || Panel == Navigation;
 		}
 	}
 
@@ -51,6 +52,10 @@ namespace ExteriorDock
 		L.SetAreaExtent(EDockSide::Left, 250.f);
 		L.DockPanelToEdge(Building, EDockSide::Right);
 		L.SetAreaExtent(EDockSide::Right, 280.f);
+
+		// Navigation shares the Building panel's tab group when shown (Window > Navigation); hidden until then.
+		L.DockPanel(Navigation, Building, EDockDropZone::Center);
+		L.HidePanel(Navigation);
 
 		// Hidden panels are placed first and then hidden so the layout remembers where each one belongs.
 		L.DockPanelToEdge(Audio, EDockSide::Bottom);
