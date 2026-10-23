@@ -644,6 +644,29 @@ FString UNavigationPanelWidget::GetDestinationRoomLabel() const
 	return WasDestinationSetViaDropdown() && Interior && Destination.BuildingId == Interior->GetLoadedBuildingId() ? Destination.RoomOptionLabel : FString();
 }
 
+FString UNavigationPanelWidget::OtherBuildingLabel(const FSelectedEndpoint& Endpoint) const
+{
+	if (!Endpoint.bValid || !Endpoint.bSetViaDropdown || !Interior || !Generator || Endpoint.BuildingId == Interior->GetLoadedBuildingId())
+	{
+		return FString();
+	}
+	const APolyBuilding* Building = Generator->FindBuildingById(Endpoint.BuildingId);
+	const FString BuildingName = (Building && !Building->BuildingName.IsEmpty()) ? Building->BuildingName : Endpoint.BuildingId;
+	// The label is "Name [Id] (Floor N)"; this entry shows the building, then the name and the floor, without the id.
+	const FString RoomLabel = Endpoint.RoomOptionLabel.Replace(*FString::Printf(TEXT(" [%s]"), *Endpoint.RoomId), TEXT(""));
+	return BuildingName + TEXT(" · ") + RoomLabel;
+}
+
+FString UNavigationPanelWidget::GetStartOtherBuildingLabel() const
+{
+	return OtherBuildingLabel(Start);
+}
+
+FString UNavigationPanelWidget::GetDestinationOtherBuildingLabel() const
+{
+	return OtherBuildingLabel(Destination);
+}
+
 void UNavigationPanelWidget::NotifyViewedBuildingChanged()
 {
 	SelectionMode = ENavigationSelectionMode::None;

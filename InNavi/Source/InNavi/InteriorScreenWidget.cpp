@@ -3082,9 +3082,18 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 	// Keep the dropdown's own displayed text in sync with who actually set Start last - without this,
 	// picking a room from the dropdown and then overwriting Start by clicking the floor plan left the
 	// old room's name still showing, as if Start were still that room.
+	// A Start / Destination picked in another building is an extra entry in its dropdown; rebuild the lists when that changes.
+	if (Nav->GetStartOtherBuildingLabel() != NavShownOtherBuildingStart || Nav->GetDestinationOtherBuildingLabel() != NavShownOtherBuildingDestination)
+	{
+		RefreshNavRoomDropdowns();
+	}
 	if (NavStartRoomComboBox)
 	{
-		if (bStartSetViaDropdown)
+		if (!NavShownOtherBuildingStart.IsEmpty())
+		{
+			NavStartRoomComboBox->SetSelectedOption(NavShownOtherBuildingStart);
+		}
+		else if (bStartSetViaDropdown)
 		{
 			NavStartRoomComboBox->SetSelectedOption(Nav->GetStartRoomLabel());
 		}
@@ -3112,7 +3121,11 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 	}
 	if (NavDestinationRoomComboBox)
 	{
-		if (bDestSetViaDropdown)
+		if (!NavShownOtherBuildingDestination.IsEmpty())
+		{
+			NavDestinationRoomComboBox->SetSelectedOption(NavShownOtherBuildingDestination);
+		}
+		else if (bDestSetViaDropdown)
 		{
 			NavDestinationRoomComboBox->SetSelectedOption(Nav->GetDestinationRoomLabel());
 		}
@@ -3182,7 +3195,8 @@ void UInteriorScreenWidget::HandleNavStartRoomChanged(FString SelectedItem, ESel
 	// Same reasoning as HandleBuildingSwitcherChanged - only react to the user's own pick, not this
 	// function's own SetSelectedOption calls (RefreshNavRoomDropdowns doesn't currently make any,
 	// but matching the established guard here costs nothing and avoids a future footgun).
-	if (SelectionType == ESelectInfo::Direct)
+	// The extra entry for a Start in another building is only a display of the current Start; picking it changes nothing.
+	if (SelectionType == ESelectInfo::Direct || (!NavShownOtherBuildingStart.IsEmpty() && SelectedItem == NavShownOtherBuildingStart))
 	{
 		return;
 	}
@@ -3197,7 +3211,7 @@ void UInteriorScreenWidget::HandleNavStartRoomChanged(FString SelectedItem, ESel
 
 void UInteriorScreenWidget::HandleNavDestinationRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
 {
-	if (SelectionType == ESelectInfo::Direct)
+	if (SelectionType == ESelectInfo::Direct || (!NavShownOtherBuildingDestination.IsEmpty() && SelectedItem == NavShownOtherBuildingDestination))
 	{
 		return;
 	}
@@ -3225,6 +3239,12 @@ void UInteriorScreenWidget::RefreshNavRoomDropdowns()
 
 	const FString PreviousStart = NavStartRoomComboBox->GetSelectedOption();
 	NavStartRoomComboBox->ClearOptions();
+	// A Start picked in another building is not in this building's room list: it stays shown as the list's first entry.
+	NavShownOtherBuildingStart = Nav->GetStartOtherBuildingLabel();
+	if (!NavShownOtherBuildingStart.IsEmpty())
+	{
+		NavStartRoomComboBox->AddOption(NavShownOtherBuildingStart);
+	}
 	for (const UNavigationPanelWidget::FNavigationRoomOption& Option : Nav->GetSelectableRooms())
 	{
 		const FString Label = Option.GetDisplayLabel();
@@ -3232,7 +3252,11 @@ void UInteriorScreenWidget::RefreshNavRoomDropdowns()
 	}
 	// ClearOptions() also wipes the combo box's displayed text although it does not touch Nav's own Start state;
 	// restore it when the room still exists (it is simply absent from the rebuilt list if that room was deleted).
-	if (Nav->WasStartSetViaDropdown())
+	if (!NavShownOtherBuildingStart.IsEmpty())
+	{
+		NavStartRoomComboBox->SetSelectedOption(NavShownOtherBuildingStart);
+	}
+	else if (Nav->WasStartSetViaDropdown())
 	{
 		NavStartRoomComboBox->SetSelectedOption(Nav->GetStartRoomLabel());
 	}
@@ -3252,10 +3276,20 @@ void UInteriorScreenWidget::RefreshDestinationRoomDropdown()
 	NavDestinationRoomComboBox->ClearOptions();
 	const TArray<UNavigationPanelWidget::FNavigationRoomOption> Matches = Nav->SearchDestinations(
 		DestinationSearchBox ? DestinationSearchBox->GetText().ToString() : FString());
+	// Same as the Start combo box: a Destination picked in another building stays as the first entry, whatever the search says.
+	NavShownOtherBuildingDestination = Nav->GetDestinationOtherBuildingLabel();
+	if (!NavShownOtherBuildingDestination.IsEmpty())
+	{
+		NavDestinationRoomComboBox->AddOption(NavShownOtherBuildingDestination);
+	}
 	for (const auto& Option : Matches) NavDestinationRoomComboBox->AddOption(Option.GetDisplayLabel());
 	// Same reasoning as the Start combo box: put the displayed text back for a destination that was picked from
 	// the list (it stays absent if the current search filters it out, or if the room was deleted).
-	if (Nav->WasDestinationSetViaDropdown())
+	if (!NavShownOtherBuildingDestination.IsEmpty())
+	{
+		NavDestinationRoomComboBox->SetSelectedOption(NavShownOtherBuildingDestination);
+	}
+	else if (Nav->WasDestinationSetViaDropdown())
 	{
 		NavDestinationRoomComboBox->SetSelectedOption(Nav->GetDestinationRoomLabel());
 	}

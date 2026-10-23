@@ -823,6 +823,11 @@ private:
 	UPROPERTY()
 	UBorder* NavStartRoomBorder = nullptr;
 
+	// The extra entry each room dropdown currently carries for a Start / Destination that was picked in another building
+	// (UNavigationPanelWidget::GetStartOtherBuildingLabel), empty if none - so the list is rebuilt only when it changes.
+	FString NavShownOtherBuildingStart;
+	FString NavShownOtherBuildingDestination;
+
 	UPROPERTY()
 	UComboBoxString* NavDestinationRoomComboBox = nullptr;
 	UPROPERTY()

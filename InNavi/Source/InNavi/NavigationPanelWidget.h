@@ -103,6 +103,13 @@ public:
 	FString GetStartRoomLabel() const;
 	FString GetDestinationRoomLabel() const;
 
+	// What the room dropdowns show for a Start/Destination that was picked from the dropdown while another building was
+	// open: its building's name followed by that room's name and floor, e.g. "Building A · Lab 3-01 (Floor 3)". The
+	// dropdown lists only the open building's rooms, so these are added to it as an extra entry. Empty when the endpoint
+	// is not set from the dropdown, or is in the open building (then GetStartRoomLabel / GetDestinationRoomLabel apply).
+	FString GetStartOtherBuildingLabel() const;
+	FString GetDestinationOtherBuildingLabel() const;
+
 	// Shared with the floor-plan view so the highlighted outdoor area and the clickable outdoor
 	// area always use the same bounds. Coordinates are unscaled footprint coordinates.
 	static FBox2D GetOutdoorBounds(const APolyBuilding& Building);
@@ -228,6 +235,7 @@ private:
 		FString RoomId;
 	};
 
+	FString OtherBuildingLabel(const FSelectedEndpoint& Endpoint) const;
 	void SetSelectionMode(ENavigationSelectionMode NewMode);
 	void SetStatusMessage(const FString& Message, ENavigationMessageKind Kind);
 	void BroadcastStateChanged();
