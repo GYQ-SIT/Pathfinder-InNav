@@ -3,8 +3,8 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "NavigationRoutePlanner.h"
+#include "NavigationDictionary.h"
 #include "NavigationPanelWidget.generated.h"
-
 class ABuildingGenerator;
 class AInteriorGenerator;
 class APolyBuilding;
@@ -207,6 +207,7 @@ protected:
 
 private:
 	void RefreshRoomSearchIndex() const;
+	mutable FNavigationDictionary NavigationDictionary;
 	mutable TArray<FNavigationRoomOption> CachedRooms;
 	mutable TArray<int32> SortedDestinationIndices;
 	mutable uint64 IndexedRoomSearchRevision = MAX_uint64;

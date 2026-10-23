@@ -350,6 +350,7 @@ void UNavigationPanelWidget::RefreshRoomSearchIndex() const
 	IndexedFloorCount = FloorCount;
 	CachedRooms.Reset();
 	SortedDestinationIndices.Reset();
+	NavigationDictionary.Clear();
 	if (!IsValid(Building))
 	{
 		return;
@@ -386,9 +387,14 @@ void UNavigationPanelWidget::RefreshRoomSearchIndex() const
 	}
 	// Keep Start's existing floor order; destinations are sorted once, then filtered in that order.
 	SortedDestinationIndices.Sort([this](int32 A, int32 B)
-	{
-		return CachedRooms[A].DisplayLabel.Compare(CachedRooms[B].DisplayLabel, ESearchCase::IgnoreCase) < 0;
-	});
+		{
+			const FString& NameA = CachedRooms[A].DisplayLabel;
+			const FString& NameB = CachedRooms[B].DisplayLabel;
+
+			return NameA < NameB;
+		});
+
+	NavigationDictionary.Rebuild(Interior);
 }
 
 const TArray<UNavigationPanelWidget::FNavigationRoomOption>& UNavigationPanelWidget::GetSelectableRooms() const
@@ -397,17 +403,36 @@ const TArray<UNavigationPanelWidget::FNavigationRoomOption>& UNavigationPanelWid
 	return CachedRooms;
 }
 
-TArray<UNavigationPanelWidget::FNavigationRoomOption> UNavigationPanelWidget::SearchDestinations(const FString& Query) const
+TArray<UNavigationPanelWidget::FNavigationRoomOption>
+UNavigationPanelWidget::SearchDestinations(const FString& Query) const
 {
 	RefreshRoomSearchIndex();
-	TArray<FString> Words;
-	Query.ParseIntoArrayWS(Words);
+
+	// Search using PAT-109 Navigation Dictionary.
+	const TArray<FNavigationDestinationEntry> Matches =
+		NavigationDictionary.Search(Query);
+
+	TSet<FString> MatchingRoomIds;
+
+	for (const FNavigationDestinationEntry& Entry : Matches)
+	{
+		MatchingRoomIds.Add(Entry.RoomId);
+	}
+
+	// Preserve the existing room options, coordinates,
+	// display labels and sorting.
 	TArray<FNavigationRoomOption> Options;
+
 	for (int32 Index : SortedDestinationIndices)
 	{
 		const FNavigationRoomOption& Option = CachedRooms[Index];
-		if (NavigationSearch::MatchesWords(Words, Option.SearchableText)) Options.Add(Option);
+
+		if (MatchingRoomIds.Contains(Option.RoomId))
+		{
+			Options.Add(Option);
+		}
 	}
+
 	return Options;
 }
 

@@ -1,4 +1,5 @@
-﻿{
+{
+	"version": 1,
 	"scale": 10,
 	"floorHeight": 300,
 	"buildings": [
@@ -230,10 +231,22 @@
 								"requireKey": false,
 								"closed": true,
 								"footprint": [
-									[ 95.4285714286, 80 ],
-									[ 125, 80 ],
-									[ 125, 120 ],
-									[ 94.7142857143, 120 ]
+									[
+										95.428571428599994,
+										80
+									],
+									[
+										125,
+										80
+									],
+									[
+										125,
+										120
+									],
+									[
+										94.714285714300004,
+										120
+									]
 								],
 								"openings": [
 									{
@@ -249,7 +262,7 @@
 										"id": "E2-01-OUTSIDE-ENTRY-D02",
 										"type": "door",
 										"edgeIndex": 3,
-										"offset": 155.0319,
+										"offset": 155.03190000000001,
 										"width": 90,
 										"inputId": "E2-01-OUTSIDE-ENTRY",
 										"connectsTo": "outside"
@@ -1043,7 +1056,40 @@
 						"level": 3,
 						"wallHeight": 280,
 						"wallThickness": 20,
-						"rooms": [],
+						"rooms": [
+							{
+								"id": "E6-03-01",
+								"name": "Computer Lab 1",
+								"tags": [
+									"CL1",
+									"Computer",
+									"Programming"
+								],
+								"roomType": "Classroom",
+								"access": "public",
+								"requireKey": false,
+								"closed": true,
+								"footprint": [
+									[
+										428.29927153078182,
+										338.89985833515652
+									],
+									[
+										375.59607266352288,
+										436.04680463464985
+									],
+									[
+										455.04418917816338,
+										351.87899894509519
+									],
+									[
+										428.29927153078182,
+										341.65300265206406
+									]
+								],
+								"openings": []
+							}
+						],
 						"navNodes": []
 					},
 					{
