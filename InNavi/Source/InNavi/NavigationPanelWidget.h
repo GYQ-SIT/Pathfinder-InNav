@@ -44,6 +44,8 @@ struct INNAVI_API FNavigationWorldRoutePoint
 	FString ConnectorId;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
 	EInteriorNavNodeType ConnectorType = EInteriorNavNodeType::PathNode;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Navigation")
+	FString BuildingId;
 };
 
 // Navigation selection/route-planning state and logic. No UI of its own any more -
@@ -69,6 +71,9 @@ public:
 	void CancelSelection();
 	void ClearAll();
 	void SetNavigationContext(ABuildingGenerator* InGenerator, AInteriorGenerator* InInterior);
+	void NotifyViewedBuildingChanged();
+	UFUNCTION()
+	void NotifyInteriorChanged();
 	void SelectPoint(FVector2D FootprintPosition, int32 Floor);
 	bool IsSelectingPoint() const { return SelectionMode != ENavigationSelectionMode::None; }
 
@@ -95,8 +100,8 @@ public:
 	// UInteriorScreenWidget::RefreshNavRoomDropdowns restore the combo box's visible text after
 	// rebuilding its option list (ClearOptions() wipes the displayed text, but doesn't touch this
 	// class's own Start/Destination state - see that function's own comment for the full bug).
-	FString GetStartRoomLabel() const { return WasStartSetViaDropdown() ? Start.RoomOptionLabel : FString(); }
-	FString GetDestinationRoomLabel() const { return WasDestinationSetViaDropdown() ? Destination.RoomOptionLabel : FString(); }
+	FString GetStartRoomLabel() const;
+	FString GetDestinationRoomLabel() const;
 
 	// Shared with the floor-plan view so the highlighted outdoor area and the clickable outdoor
 	// area always use the same bounds. Coordinates are unscaled footprint coordinates.

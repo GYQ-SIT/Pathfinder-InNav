@@ -148,10 +148,7 @@ bool FNavigationRoutePlannerIntegrationTest::RunTest(const FString& Parameters)
 					FVector2D(231.8666, 107.3725), FVector2D(231.8666, 116.3725));
 		}
 		TestTrue(TEXT("Door route uses the authored opening"), bUsesDoor);
-		// E2's Floor 1 vestibule has a door marked "outside". Loading turns such a room door into one that leads to the corridor (the
-		// way out is a main door in the outer wall now), so it is set back here: the planner still honours a room door that leads outside.
-		TestTrue(TEXT("The vestibule door can be set to lead outside"),
-			Interior->SetDoorConnectsTo(TEXT("E2-01-OUTSIDE-ENTRY"), TEXT("E2-01-OUTSIDE-ENTRY-D02"), TEXT("outside")));
+		// The legacy outside exit must work as loaded, without reauthoring its destination.
 		// Verify outdoor-point validation and that the indoor/outdoor route crosses through that exit.
 		const int32 OutsideFloor = UNavigationPanelWidget::OutdoorFloor;
 		const FVector2D OutsidePoint(80.f, 100.f);

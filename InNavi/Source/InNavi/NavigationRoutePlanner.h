@@ -5,6 +5,7 @@
 
 class AInteriorGenerator;
 class APolyBuilding;
+class ABuildingGenerator;
 
 // Positions are in the interior's unscaled footprint coordinates, not screen coordinates.
 struct FNavigationRoutePoint
@@ -17,6 +18,8 @@ struct FNavigationRoutePoint
 	// coordinate so the existing map and directions continue to use the same route.
 	FVector WorldPosition = FVector::ZeroVector;
 	bool bHasWorldPosition = false;
+	// Position is local to this building. Outdoor points retain a coordinate owner too.
+	FString BuildingId;
 };
 
 struct FNavigationRouteResult
@@ -30,6 +33,8 @@ struct FNavigationRouteResult
 class INNAVI_API FNavigationRoutePlanner
 {
 public:
+	static bool FindCampusRoute(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
+		const FNavigationRoutePoint& Start, const FNavigationRoutePoint& Destination, FNavigationRouteResult& OutResult);
 	static bool IsValidPoint(const APolyBuilding& Building, const AInteriorGenerator& Interior,
 		float Scale, int32 Floor, FVector2D Point, FString& OutError);
 
