@@ -717,6 +717,31 @@ bool FDockJsonRoundTripTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// A layout saved while the screen's canvas was a made-up size can hold a window 50 times the canvas; loading brings it back to a
+// size that fits.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDockOversizedFloatingWindowTest, "InNavi.Dock.OversizedFloatingWindow", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FDockOversizedFloatingWindowTest::RunTest(const FString& Parameters)
+{
+	const FName A = P(TEXT("A"));
+	const TSet<FName> Known = KnownSet({ A });
+	FDockLayout Source;
+	Source.FloatPanel(A, FVector2D(100.0, 100.0), FVector2D(300.0, 300.0));
+	TSharedPtr<FJsonObject> Json = StringToJson(JsonToString(Source.ToJson(HD)));
+	const TArray<TSharedPtr<FJsonValue>>* Windows = nullptr;
+	if (!TestTrue(TEXT("saved layout has a floating window"), Json.IsValid() && Json->TryGetArrayField(TEXT("floating"), Windows) && Windows && Windows->Num() == 1)) return false;
+	const TSharedPtr<FJsonObject> Window = (*Windows)[0]->AsObject();
+	Window->SetNumberField(TEXT("w"), 50.0);
+	Window->SetNumberField(TEXT("h"), 50.0);
+
+	FDockLayout Loaded;
+	TArray<FName> Missing;
+	TestTrue(TEXT("loads"), Loaded.FromJson(Json, HD, Known, Missing));
+	if (!TestEqual(TEXT("the window is kept"), Loaded.GetFloating().Num(), 1)) return false;
+	TestTrue(TEXT("no wider than the canvas"), Loaded.GetFloating()[0].Size.X <= HD.X + KINDA_SMALL_NUMBER);
+	TestTrue(TEXT("no taller than the canvas"), Loaded.GetFloating()[0].Size.Y <= HD.Y + KINDA_SMALL_NUMBER);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDockJsonRepairTest, "InNavi.Dock.JsonRepair", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FDockJsonRepairTest::RunTest(const FString& Parameters)
 {

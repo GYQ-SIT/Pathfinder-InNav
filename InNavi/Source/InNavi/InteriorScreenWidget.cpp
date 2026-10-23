@@ -1810,6 +1810,7 @@ bool UInteriorScreenWidget::GetReliableCanvasSize(FVector2D& OutSize) const
 		return false;
 	}
 	OutSize = LocalSize;
+	LastKnownCanvasSize = LocalSize;
 	return true;
 }
 
@@ -1831,9 +1832,16 @@ const TCHAR* UInteriorScreenWidget::GetDockPanelName(EDockPanelId Id)
 
 void UInteriorScreenWidget::SaveDockLayoutToDisk() const
 {
-	if (DockHost)
+	// Sizes are stored as fractions of the canvas, so a layout saved against a guessed size (a screen that never got on screen,
+	// as in a headless test) would replace the user's own with one that restores far too big or small.
+	FVector2D Size;
+	if (DockHost && (GetReliableCanvasSize(Size) || (LastKnownCanvasSize.X > 0.f && LastKnownCanvasSize.Y > 0.f)))
 	{
-		InteriorDock::SaveToFile(*DockHost->GetLayout(), InteriorDock::UserLayoutPath(), GetCanvasSize());
+		if (!GetReliableCanvasSize(Size))
+		{
+			Size = LastKnownCanvasSize;
+		}
+		InteriorDock::SaveToFile(*DockHost->GetLayout(), InteriorDock::UserLayoutPath(), Size);
 	}
 }
 

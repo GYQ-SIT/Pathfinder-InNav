@@ -563,6 +563,10 @@ private:
 	// if RootCanvas's cached geometry isn't valid yet.
 	bool GetReliableCanvasSize(FVector2D& OutSize) const;
 
+	// The last canvas size that was real (the screen had been laid out), kept for saving the dock layout when the screen is
+	// being torn down and no longer has a geometry. Zero until the screen has been on screen.
+	mutable FVector2D LastKnownCanvasSize = FVector2D::ZeroVector;
+
 	// Window menu show/hide for one panel (restores its last position when shown again).
 	void SetDockPanelUserHidden(EDockPanelId Id, bool bHidden);
 
