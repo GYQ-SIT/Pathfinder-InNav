@@ -1558,7 +1558,7 @@ private:
 	// Thin wrapper over PlayWavFile for the short, fire-and-forget UI sound effects (click/select/
 	// quit-confirm) - see PlayButtonClickSound's own comment for why nothing needs to track these.
 	void PlayShortSoundEffect(const TCHAR* FileName);
-
+	void UpdateBuildingTransparency();
 	// See IsButtonClickSoundEnabled/SetButtonClickSoundEnabled's own comment.
 	bool bButtonClickSoundEnabled = true;
 

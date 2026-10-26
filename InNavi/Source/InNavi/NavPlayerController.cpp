@@ -445,7 +445,43 @@ void ANavPlayerController::ToggleShapeTestMode()
 		UE_LOG(LogTemp, Warning, TEXT("Shape test mode OFF"));
 	}
 }
+void ANavPlayerController::UpdateBuildingTransparency()
+{
+	UE_LOG(LogTemp, Warning, TEXT("TRANSPARENCY FUNCTION CALLED"));
 
+	if (!bIsIn3DPreviewMode || !Generator || !InteriorGen)
+		return;
+
+	APolyBuilding* Building = Generator->FindBuildingById(
+		InteriorGen->GetLoadedBuildingId());
+
+	if (!IsValid(Building))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TRANSPARENCY: Building not found"));
+		return;
+	}
+
+	APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn)
+		return;
+
+	FVector BuildingOrigin;
+	FVector BuildingExtent;
+	Building->GetActorBounds(false, BuildingOrigin, BuildingExtent);
+
+	const float Distance = FVector::Distance(
+		ControlledPawn->GetActorLocation(),
+		BuildingOrigin);
+
+	const float Opacity = FMath::GetMappedRangeValueClamped(
+		FVector2D(800.0f, 2500.0f),
+		FVector2D(0.2f, 1.0f),
+		Distance);
+
+	Building->SetBuildingOpacity(Opacity);
+
+	UE_LOG(LogTemp, Warning, TEXT("BUILDING OPACITY = %f"), Opacity);
+}
 void ANavPlayerController::ToggleDrawRoomMode()
 {
 	if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
@@ -2420,6 +2456,7 @@ void ANavPlayerController::ZoomIn3DPreview()
 	if (APawn* ControlledPawn = GetPawn())
 	{
 		ControlledPawn->AddActorWorldOffset(GetControlRotation().Vector() * ThreeDPreviewZoomStep);
+		UpdateBuildingTransparency();
 	}
 }
 
@@ -2559,6 +2596,14 @@ void ANavPlayerController::SetIn3DPreviewMode(bool bEnable)
 	}
 
 	bIsIn3DPreviewMode = bEnable;
+	if (bEnable)
+	{
+		UpdateBuildingTransparency();
+	}
+	else
+	{
+		Building->SetBuildingOpacity(1.0f);
+	}
 	if (bEnable)
 	{
 		ResetFloorFraming(Building);

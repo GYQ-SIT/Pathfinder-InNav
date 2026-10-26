@@ -91,10 +91,24 @@ void APolyBuilding::RebuildMesh()
 	if (!DynMaterial)
 	{
 		UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(
-			nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+			nullptr,
+			TEXT("/Game/ImageAssets/Materials/M_BuildingTransparent.M_BuildingTransparent")
+		);
+
 		if (BaseMat)
 		{
 			DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
+
+			DynMaterial->SetScalarParameterValue(TEXT("Opacity"), 1.0f);
+			DynMaterial->SetVectorParameterValue(
+				TEXT("Color"),
+				FLinearColor(0.6f, 0.6f, 0.6f)
+			);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error,
+				TEXT("Failed to load M_BuildingTransparent material"));
 		}
 	}
 
@@ -357,4 +371,18 @@ void APolyBuilding::SetHighlighted(bool bHighlighted)
 	{
 		DynMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.6f, 0.6f, 0.6f));
 	}
+}
+void APolyBuilding::SetBuildingOpacity(float NewOpacity)
+{
+	if (!DynMaterial)
+	{
+		return;
+	}
+
+	const float ClampedOpacity = FMath::Clamp(NewOpacity, 0.0f, 1.0f);
+
+	DynMaterial->SetScalarParameterValue(
+		TEXT("Opacity"),
+		ClampedOpacity
+	);
 }

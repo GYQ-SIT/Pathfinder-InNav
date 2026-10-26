@@ -60,7 +60,9 @@ public:
 
 	// Highlight / unhighlight this building
 	void SetHighlighted(bool bHighlighted);
-
+	// Controls building exterior transparency.
+    // 1.0 = fully visible, 0.0 = invisible.
+	void SetBuildingOpacity(float NewOpacity);
 	// Shows the given floor's plan by hiding every ceiling from that floor up through the roof
 	// (both visually and its collision, so clicks reach the floor below too) - every slab AT or BELOW
 	// the given floor stay visible/solid, so you don't see (or click) through into whatever's

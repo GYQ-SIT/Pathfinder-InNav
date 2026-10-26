@@ -231,13 +231,29 @@ void AInteriorRoom::RebuildMesh()
 	if (!DynMaterial)
 	{
 		UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(
-			nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+			nullptr,
+			TEXT("/Game/ImageAssets/Materials/M_BuildingTransparent.M_BuildingTransparent")
+		);
+
 		if (BaseMat)
 		{
 			DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
-			DynMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.85f, 0.85f, 0.82f));
+
+			// Test with very low opacity
+			DynMaterial->SetScalarParameterValue(TEXT("Opacity"), 0.05f);
+
+			// Bright red so we can confirm the material is applied
+			DynMaterial->SetVectorParameterValue(
+				TEXT("Color"),
+				FLinearColor(1.0f, 0.0f, 0.0f)
+			);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("Failed to load interior wall material"));
 		}
 	}
+
 	MeshComp->SetMaterial(0, DynMaterial);
 
 	// -- Section 1: floor slab - a flat, upward-facing cap of the room's own footprint. Not visible
