@@ -1,4 +1,4 @@
-#include "InteriorScreenWidget.h"
+﻿#include "InteriorScreenWidget.h"
 #include "NavigationSearchUtils.h"
 
 #include "AudioFileRowWidget.h"
@@ -222,10 +222,10 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// Safety net, not the primary fix - wraps to a second line instead of spilling past the
 		// button on the rare label that's still too wide for StandardButtonWidth at default font size.
 		auto ApplyStandardTextWrap = [](UTextBlock* TextBlock)
-		{
-			TextBlock->SetAutoWrapText(true);
-			ApplyStandardFont(TextBlock);
-		};
+			{
+				TextBlock->SetAutoWrapText(true);
+				ApplyStandardFont(TextBlock);
+			};
 
 		// Each of the 3 dockable panels (Toolbar/Floor/Properties) is a UBorder wrapped in a
 		// USizeBox, added DIRECTLY to Canvas (no shared bar/VerticalBox) - the SizeBox is what
@@ -238,96 +238,96 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// constructs the widgets and gives them a starting Canvas slot; InitializeDefaultDockLayout
 		// (called once from NativeConstruct) positions everything for the first time.
 		auto ConstructDockPanel = [this, Canvas](EDockPanelId Id, const TCHAR* BorderName, const FLinearColor& BrushColor, float BorderPadding) -> UBorder*
-		{
-			const int32 Index = (int32)Id;
-			DockPanelBorderPadding[Index] = BorderPadding;
+			{
+				const int32 Index = (int32)Id;
+				DockPanelBorderPadding[Index] = BorderPadding;
 
-			UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(BorderName));
-			Border->SetBrushColor(BrushColor);
-			Border->SetPadding(FMargin(BorderPadding));
-			// A SizeBox's height/width override only constrains LAYOUT size, not paint size - content
-			// taller than a squeezed-down panel (e.g. Properties' fields when a splitter drag or the
-			// screen's own edge leaves it little room) would otherwise paint straight past the panel's
-			// own border, potentially off the visible screen entirely. Clip it to its own bounds instead.
-			Border->SetClipping(EWidgetClipping::ClipToBoundsAlways);
-			// BindDynamic is a macro that stringifies its function-pointer argument at compile time
-			// (to look up the UFUNCTION by name for reflection-based invocation) - it can't take a
-			// ternary/runtime-selected pointer, only a literal &Class::Method token. So this lambda
-			// only constructs the widgets; each panel's actual event bindings are 3 tiny literal
-			// BindDynamic calls right after its ConstructDockPanel call site below.
-			DockPanelBorders[Index] = Border;
+				UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(BorderName));
+				Border->SetBrushColor(BrushColor);
+				Border->SetPadding(FMargin(BorderPadding));
+				// A SizeBox's height/width override only constrains LAYOUT size, not paint size - content
+				// taller than a squeezed-down panel (e.g. Properties' fields when a splitter drag or the
+				// screen's own edge leaves it little room) would otherwise paint straight past the panel's
+				// own border, potentially off the visible screen entirely. Clip it to its own bounds instead.
+				Border->SetClipping(EWidgetClipping::ClipToBoundsAlways);
+				// BindDynamic is a macro that stringifies its function-pointer argument at compile time
+				// (to look up the UFUNCTION by name for reflection-based invocation) - it can't take a
+				// ternary/runtime-selected pointer, only a literal &Class::Method token. So this lambda
+				// only constructs the widgets; each panel's actual event bindings are 3 tiny literal
+				// BindDynamic calls right after its ConstructDockPanel call site below.
+				DockPanelBorders[Index] = Border;
 
-			USizeBox* Wrapper = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(BorderName) + TEXT("SizeBox")));
-			Wrapper->SetWidthOverride(DockPanelWidths[Index]);
-			Wrapper->SetContent(Border);
+				USizeBox* Wrapper = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(BorderName) + TEXT("SizeBox")));
+				Wrapper->SetWidthOverride(DockPanelWidths[Index]);
+				Wrapper->SetContent(Border);
 
-			UCanvasPanelSlot* PanelCanvasSlot = Canvas->AddChildToCanvas(Wrapper);
-			PanelCanvasSlot->SetAnchors(FAnchors(0.f, 0.f));
-			PanelCanvasSlot->SetAlignment(FVector2D(0.f, 0.f));
-			PanelCanvasSlot->SetAutoSize(true);
-			PanelCanvasSlot->SetZOrder(2);
-			DockPanelCanvasSlots[Index] = PanelCanvasSlot;
+				UCanvasPanelSlot* PanelCanvasSlot = Canvas->AddChildToCanvas(Wrapper);
+				PanelCanvasSlot->SetAnchors(FAnchors(0.f, 0.f));
+				PanelCanvasSlot->SetAlignment(FVector2D(0.f, 0.f));
+				PanelCanvasSlot->SetAutoSize(true);
+				PanelCanvasSlot->SetZOrder(2);
+				DockPanelCanvasSlots[Index] = PanelCanvasSlot;
 
-			UBorder* Handle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(BorderName) + TEXT("ResizeHandle")));
-			Handle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
-			Handle->SetCursor(EMouseCursor::ResizeLeftRight);
-			// Same reasoning as Border above - bound with literal calls at each call site instead.
-			DockResizeHandles[Index] = Handle;
+				UBorder* Handle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(BorderName) + TEXT("ResizeHandle")));
+				Handle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
+				Handle->SetCursor(EMouseCursor::ResizeLeftRight);
+				// Same reasoning as Border above - bound with literal calls at each call site instead.
+				DockResizeHandles[Index] = Handle;
 
-			UCanvasPanelSlot* HandleSlot = Canvas->AddChildToCanvas(Handle);
-			HandleSlot->SetAnchors(FAnchors(0.f, 0.f));
-			HandleSlot->SetAlignment(FVector2D(0.f, 0.f));
-			HandleSlot->SetZOrder(3);
-			DockResizeHandleSlots[Index] = HandleSlot;
+				UCanvasPanelSlot* HandleSlot = Canvas->AddChildToCanvas(Handle);
+				HandleSlot->SetAnchors(FAnchors(0.f, 0.f));
+				HandleSlot->SetAlignment(FVector2D(0.f, 0.f));
+				HandleSlot->SetZOrder(3);
+				DockResizeHandleSlots[Index] = HandleSlot;
 
-			// A second handle on the panel's LEFT edge too - free-floating panels can end up
-			// anywhere on screen, and a panel sitting near the right edge of the viewport can have
-			// its own right edge crowded right up against it (or past it), making the right handle
-			// awkward or impossible to grab. Dragging this one keeps the panel's RIGHT edge fixed
-			// and grows/shrinks it from the left instead (see HandleLeftResizeMouseMove).
-			UBorder* LeftHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(BorderName) + TEXT("LeftResizeHandle")));
-			LeftHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
-			LeftHandle->SetCursor(EMouseCursor::ResizeLeftRight);
-			DockLeftResizeHandles[Index] = LeftHandle;
+				// A second handle on the panel's LEFT edge too - free-floating panels can end up
+				// anywhere on screen, and a panel sitting near the right edge of the viewport can have
+				// its own right edge crowded right up against it (or past it), making the right handle
+				// awkward or impossible to grab. Dragging this one keeps the panel's RIGHT edge fixed
+				// and grows/shrinks it from the left instead (see HandleLeftResizeMouseMove).
+				UBorder* LeftHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(BorderName) + TEXT("LeftResizeHandle")));
+				LeftHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
+				LeftHandle->SetCursor(EMouseCursor::ResizeLeftRight);
+				DockLeftResizeHandles[Index] = LeftHandle;
 
-			UCanvasPanelSlot* LeftHandleSlot = Canvas->AddChildToCanvas(LeftHandle);
-			LeftHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
-			LeftHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
-			LeftHandleSlot->SetZOrder(3);
-			DockLeftResizeHandleSlots[Index] = LeftHandleSlot;
+				UCanvasPanelSlot* LeftHandleSlot = Canvas->AddChildToCanvas(LeftHandle);
+				LeftHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
+				LeftHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
+				LeftHandleSlot->SetZOrder(3);
+				DockLeftResizeHandleSlots[Index] = LeftHandleSlot;
 
-			// The move-drag handle - see DockDragHandleSize's own comment. Same muted tone as the resize
-			// handles (not brighter) so it reads as part of the same UI language instead of looking like
-			// a stray highlighted square sitting on top of the title.
-			UBorder* DragHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(BorderName) + TEXT("DragHandle")));
-			DragHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
-			DragHandle->SetCursor(EMouseCursor::CardinalCross);
-			DockDragHandles[Index] = DragHandle;
+				// The move-drag handle - see DockDragHandleSize's own comment. Same muted tone as the resize
+				// handles (not brighter) so it reads as part of the same UI language instead of looking like
+				// a stray highlighted square sitting on top of the title.
+				UBorder* DragHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(BorderName) + TEXT("DragHandle")));
+				DragHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
+				DragHandle->SetCursor(EMouseCursor::CardinalCross);
+				DockDragHandles[Index] = DragHandle;
 
-			UCanvasPanelSlot* DragHandleSlot = Canvas->AddChildToCanvas(DragHandle);
-			DragHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
-			DragHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
-			DragHandleSlot->SetAutoSize(false);
-			DragHandleSlot->SetSize(FVector2D(DockDragHandleSize, DockDragHandleSize));
-			DragHandleSlot->SetZOrder(3);
-			DockDragHandleSlots[Index] = DragHandleSlot;
+				UCanvasPanelSlot* DragHandleSlot = Canvas->AddChildToCanvas(DragHandle);
+				DragHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
+				DragHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
+				DragHandleSlot->SetAutoSize(false);
+				DragHandleSlot->SetSize(FVector2D(DockDragHandleSize, DockDragHandleSize));
+				DragHandleSlot->SetZOrder(3);
+				DockDragHandleSlots[Index] = DragHandleSlot;
 
-			// BOTTOM-edge height handle - see DockBottomResizeHandles' own comment (RefreshDockLayout
-			// only ever shows this while floating). Same style/thickness as the right/left width
-			// handles, just horizontal instead.
-			UBorder* BottomHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(BorderName) + TEXT("BottomResizeHandle")));
-			BottomHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
-			BottomHandle->SetCursor(EMouseCursor::ResizeUpDown);
-			DockBottomResizeHandles[Index] = BottomHandle;
+				// BOTTOM-edge height handle - see DockBottomResizeHandles' own comment (RefreshDockLayout
+				// only ever shows this while floating). Same style/thickness as the right/left width
+				// handles, just horizontal instead.
+				UBorder* BottomHandle = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(BorderName) + TEXT("BottomResizeHandle")));
+				BottomHandle->SetBrushColor(FLinearColor(0.4f, 0.4f, 0.4f, 0.6f));
+				BottomHandle->SetCursor(EMouseCursor::ResizeUpDown);
+				DockBottomResizeHandles[Index] = BottomHandle;
 
-			UCanvasPanelSlot* BottomHandleSlot = Canvas->AddChildToCanvas(BottomHandle);
-			BottomHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
-			BottomHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
-			BottomHandleSlot->SetZOrder(3);
-			DockBottomResizeHandleSlots[Index] = BottomHandleSlot;
+				UCanvasPanelSlot* BottomHandleSlot = Canvas->AddChildToCanvas(BottomHandle);
+				BottomHandleSlot->SetAnchors(FAnchors(0.f, 0.f));
+				BottomHandleSlot->SetAlignment(FVector2D(0.f, 0.f));
+				BottomHandleSlot->SetZOrder(3);
+				DockBottomResizeHandleSlots[Index] = BottomHandleSlot;
 
-			return Border;
-		};
+				return Border;
+			};
 
 		// 4 splitter handles - the most that can ever be needed at once (all 5 panels docked together
 		// in one column has 4 internal boundaries). RefreshSplitterLayout shows/hides and repositions
@@ -405,15 +405,15 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		ToolbarPanel->SetContent(LeftSidebar);
 
 		auto AddToolGroupLabel = [this, LeftSidebar](const TCHAR* Name, const TCHAR* Label) -> UTextBlock*
-		{
-			UTextBlock* GroupLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(Name));
-			GroupLabel->SetText(FText::FromString(FString(Label)));
-			GroupLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.75f, 0.75f, 1.f)));
-			ApplyStandardFont(GroupLabel);
-			UVerticalBoxSlot* GroupLabelSlot = LeftSidebar->AddChildToVerticalBox(GroupLabel);
-			GroupLabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
-			return GroupLabel;
-		};
+			{
+				UTextBlock* GroupLabel = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(Name));
+				GroupLabel->SetText(FText::FromString(FString(Label)));
+				GroupLabel->SetColorAndOpacity(FSlateColor(FLinearColor(0.75f, 0.75f, 0.75f, 1.f)));
+				ApplyStandardFont(GroupLabel);
+				UVerticalBoxSlot* GroupLabelSlot = LeftSidebar->AddChildToVerticalBox(GroupLabel);
+				GroupLabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+				return GroupLabel;
+			};
 
 		// Icon-only now instead of a text label - sidesteps the font-size/overflow fight entirely
 		// (an icon has no line-wrap or width-overflow failure mode), at the cost of needing a
@@ -424,38 +424,38 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		constexpr float ModeButtonSize = 36.f;
 
 		auto AddModeButton = [this, LeftSidebar](const TCHAR* Name, const TCHAR* IconAssetName, const TCHAR* TooltipLabel) -> UButton*
-		{
-			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-			Button->SetToolTip(MakeToolTipWidget(TooltipLabel));
-			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
-
-			UImage* Icon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), FName(FString(Name) + TEXT("Icon")));
-			const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), IconAssetName, IconAssetName);
-			if (UTexture2D* IconTexture = LoadObject<UTexture2D>(nullptr, *IconPath))
 			{
-				// Not bMatchSize - these source PNGs weren't authored at a consistent resolution, so
-				// matching native size would make icons different sizes (and some bigger than the
-				// button itself). DesiredSizeOverride forces every icon to render at the same size
-				// regardless of its source image's actual resolution.
-				Icon->SetBrushFromTexture(IconTexture, false);
-				Icon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
-			}
+				UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+				Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+				Button->SetToolTip(MakeToolTipWidget(TooltipLabel));
+				Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 
-			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
-			SizeBox->SetWidthOverride(ModeButtonSize);
-			SizeBox->SetHeightOverride(ModeButtonSize);
-			if (USizeBoxSlot* IconSlot = Cast<USizeBoxSlot>(SizeBox->SetContent(Icon)))
-			{
-				IconSlot->SetHorizontalAlignment(HAlign_Center);
-				IconSlot->SetVerticalAlignment(VAlign_Center);
-			}
-			Button->SetContent(SizeBox);
+				UImage* Icon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), FName(FString(Name) + TEXT("Icon")));
+				const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), IconAssetName, IconAssetName);
+				if (UTexture2D* IconTexture = LoadObject<UTexture2D>(nullptr, *IconPath))
+				{
+					// Not bMatchSize - these source PNGs weren't authored at a consistent resolution, so
+					// matching native size would make icons different sizes (and some bigger than the
+					// button itself). DesiredSizeOverride forces every icon to render at the same size
+					// regardless of its source image's actual resolution.
+					Icon->SetBrushFromTexture(IconTexture, false);
+					Icon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
+				}
 
-			UVerticalBoxSlot* ButtonSlot = LeftSidebar->AddChildToVerticalBox(Button);
-			ButtonSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-			return Button;
-		};
+				USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
+				SizeBox->SetWidthOverride(ModeButtonSize);
+				SizeBox->SetHeightOverride(ModeButtonSize);
+				if (USizeBoxSlot* IconSlot = Cast<USizeBoxSlot>(SizeBox->SetContent(Icon)))
+				{
+					IconSlot->SetHorizontalAlignment(HAlign_Center);
+					IconSlot->SetVerticalAlignment(VAlign_Center);
+				}
+				Button->SetContent(SizeBox);
+
+				UVerticalBoxSlot* ButtonSlot = LeftSidebar->AddChildToVerticalBox(Button);
+				ButtonSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+				return Button;
+			};
 
 		// Same 10 tools as before, just regrouped to match the hand-drawn layout's
 		// Default/Draw/Navigate sections - no new tools added. Tooltips describe the actual
@@ -500,38 +500,38 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		constexpr float GizmoButtonSize = 26.f;
 		constexpr float GizmoIconSizeLarge = 18.f;
 		auto AddGizmoIconButton = [this, GizmoButtonSize](UHorizontalBox* Row, const TCHAR* Name, const TCHAR* IconAssetName, float IconSize, float IconRotationDegrees, const TCHAR* TooltipLabel) -> UButton*
-		{
-			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-			Button->SetToolTip(MakeToolTipWidget(TooltipLabel));
-			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
-
-			UImage* Icon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), FName(FString(Name) + TEXT("Icon")));
-			const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), IconAssetName, IconAssetName);
-			if (UTexture2D* IconTexture = LoadObject<UTexture2D>(nullptr, *IconPath))
 			{
-				Icon->SetBrushFromTexture(IconTexture, false);
-				Icon->SetDesiredSizeOverride(FVector2D(IconSize, IconSize));
-			}
-			if (!FMath::IsNearlyZero(IconRotationDegrees))
-			{
-				Icon->SetRenderTransformAngle(IconRotationDegrees);
-			}
+				UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+				Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+				Button->SetToolTip(MakeToolTipWidget(TooltipLabel));
+				Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 
-			USizeBox* GizmoSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
-			GizmoSizeBox->SetWidthOverride(GizmoButtonSize);
-			GizmoSizeBox->SetHeightOverride(GizmoButtonSize);
-			if (USizeBoxSlot* GizmoIconSlot = Cast<USizeBoxSlot>(GizmoSizeBox->SetContent(Icon)))
-			{
-				GizmoIconSlot->SetHorizontalAlignment(HAlign_Center);
-				GizmoIconSlot->SetVerticalAlignment(VAlign_Center);
-			}
-			Button->SetContent(GizmoSizeBox);
+				UImage* Icon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), FName(FString(Name) + TEXT("Icon")));
+				const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), IconAssetName, IconAssetName);
+				if (UTexture2D* IconTexture = LoadObject<UTexture2D>(nullptr, *IconPath))
+				{
+					Icon->SetBrushFromTexture(IconTexture, false);
+					Icon->SetDesiredSizeOverride(FVector2D(IconSize, IconSize));
+				}
+				if (!FMath::IsNearlyZero(IconRotationDegrees))
+				{
+					Icon->SetRenderTransformAngle(IconRotationDegrees);
+				}
 
-			UHorizontalBoxSlot* GizmoRowSlot = Row->AddChildToHorizontalBox(Button);
-			GizmoRowSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
-			return Button;
-		};
+				USizeBox* GizmoSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
+				GizmoSizeBox->SetWidthOverride(GizmoButtonSize);
+				GizmoSizeBox->SetHeightOverride(GizmoButtonSize);
+				if (USizeBoxSlot* GizmoIconSlot = Cast<USizeBoxSlot>(GizmoSizeBox->SetContent(Icon)))
+				{
+					GizmoIconSlot->SetHorizontalAlignment(HAlign_Center);
+					GizmoIconSlot->SetVerticalAlignment(VAlign_Center);
+				}
+				Button->SetContent(GizmoSizeBox);
+
+				UHorizontalBoxSlot* GizmoRowSlot = Row->AddChildToHorizontalBox(Button);
+				GizmoRowSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
+				return Button;
+			};
 
 		UHorizontalBox* GizmoScaleRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("GizmoScaleRow"));
 		UVerticalBoxSlot* GizmoScaleRowSlot = LeftSidebar->AddChildToVerticalBox(GizmoScaleRow);
@@ -637,13 +637,13 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// PropertiesTitleText ("Room property"/"Wall property"/...) and DoorRoomText/ConnectorTypeText,
 		// whose content is dynamic (room/connector names) and so can't just be eyeballed to fit.
 		auto WrapLabelToPanelWidth = [this, SidebarContentWidth](UTextBlock* TextBlock, const TCHAR* SizeBoxName) -> USizeBox*
-		{
-			TextBlock->SetAutoWrapText(true);
-			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(SizeBoxName));
-			SizeBox->SetWidthOverride(SidebarContentWidth);
-			SizeBox->SetContent(TextBlock);
-			return SizeBox;
-		};
+			{
+				TextBlock->SetAutoWrapText(true);
+				USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(SizeBoxName));
+				SizeBox->SetWidthOverride(SidebarContentWidth);
+				SizeBox->SetContent(TextBlock);
+				return SizeBox;
+			};
 
 		// -- Top menu bar (File/Window/Back) - fixed chrome, NOT part of the docking system (always
 		// stays put, like a permanent menu bar in most editors). A thin full-width background strip
@@ -672,27 +672,27 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		MenuBarBackground->SetContent(MenuBarRow);
 
 		auto AddMenuButton = [this, MenuBarRow, MenuButtonWidth](const TCHAR* Name, const TCHAR* Label) -> UButton*
-		{
-			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.f)); // transparent - just the bar's own background shows through
-			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
-			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-			Text->SetText(FText::FromString(FString(Label)));
-			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-			Text->SetJustification(ETextJustify::Center);
-			ApplyStandardFont(Text);
-			USizeBox* MenuButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-			MenuButtonSizeBox->SetWidthOverride(MenuButtonWidth);
-			MenuButtonSizeBox->SetHeightOverride(MenuBarHeight);
-			if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(MenuButtonSizeBox->SetContent(Text)))
 			{
-				TextSlot->SetHorizontalAlignment(HAlign_Center);
-				TextSlot->SetVerticalAlignment(VAlign_Center);
-			}
-			Button->SetContent(MenuButtonSizeBox);
-			MenuBarRow->AddChildToHorizontalBox(Button);
-			return Button;
-		};
+				UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+				Button->SetBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.f)); // transparent - just the bar's own background shows through
+				Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+				UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+				Text->SetText(FText::FromString(FString(Label)));
+				Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+				Text->SetJustification(ETextJustify::Center);
+				ApplyStandardFont(Text);
+				USizeBox* MenuButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+				MenuButtonSizeBox->SetWidthOverride(MenuButtonWidth);
+				MenuButtonSizeBox->SetHeightOverride(MenuBarHeight);
+				if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(MenuButtonSizeBox->SetContent(Text)))
+				{
+					TextSlot->SetHorizontalAlignment(HAlign_Center);
+					TextSlot->SetVerticalAlignment(VAlign_Center);
+				}
+				Button->SetContent(MenuButtonSizeBox);
+				MenuBarRow->AddChildToHorizontalBox(Button);
+				return Button;
+			};
 
 		// Save icon button, left of File - a plain icon rather than a labeled AddMenuButton, since it
 		// takes no dropdown of its own (unlike File/Window) and just fires PC->SaveCurrentProject()
@@ -778,62 +778,62 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// instead of returning/storing every intermediate" convention already used throughout this
 		// function (e.g. ConstructDockPanel's own resize handles).
 		auto ConstructDropdown = [this, Canvas, DockPanelColor](const TCHAR* Name, float PositionX) -> UBorder*
-		{
-			UVerticalBox* Stack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), FName(FString(Name) + TEXT("Stack")));
-			UBorder* Dropdown = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(Name));
-			Dropdown->SetBrushColor(DockPanelColor);
-			Dropdown->SetPadding(FMargin(4.f));
-			Dropdown->SetContent(Stack);
-			Dropdown->SetVisibility(ESlateVisibility::Collapsed);
-			UCanvasPanelSlot* DropdownSlot = Canvas->AddChildToCanvas(Dropdown);
-			DropdownSlot->SetAnchors(FAnchors(0.f, 0.f));
-			DropdownSlot->SetAlignment(FVector2D(0.f, 0.f));
-			// Below BOTH fixed bars (menu bar + building switcher bar), not just the menu bar - otherwise
-			// an open dropdown would visually sit on top of the switcher bar instead of below it.
-			DropdownSlot->SetPosition(FVector2D(PositionX, SidebarTopMargin + 4.f));
-			DropdownSlot->SetAutoSize(true);
-			DropdownSlot->SetZOrder(7);
-			return Dropdown;
-		};
+			{
+				UVerticalBox* Stack = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), FName(FString(Name) + TEXT("Stack")));
+				UBorder* Dropdown = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(Name));
+				Dropdown->SetBrushColor(DockPanelColor);
+				Dropdown->SetPadding(FMargin(4.f));
+				Dropdown->SetContent(Stack);
+				Dropdown->SetVisibility(ESlateVisibility::Collapsed);
+				UCanvasPanelSlot* DropdownSlot = Canvas->AddChildToCanvas(Dropdown);
+				DropdownSlot->SetAnchors(FAnchors(0.f, 0.f));
+				DropdownSlot->SetAlignment(FVector2D(0.f, 0.f));
+				// Below BOTH fixed bars (menu bar + building switcher bar), not just the menu bar - otherwise
+				// an open dropdown would visually sit on top of the switcher bar instead of below it.
+				DropdownSlot->SetPosition(FVector2D(PositionX, SidebarTopMargin + 4.f));
+				DropdownSlot->SetAutoSize(true);
+				DropdownSlot->SetZOrder(7);
+				return Dropdown;
+			};
 
 		auto AddDropdownButtonRow = [this](UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label) -> UButton*
-		{
-			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
-			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-			Text->SetText(FText::FromString(FString(Label)));
-			Text->SetJustification(ETextJustify::Center);
-			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-			ApplyStandardFont(Text);
-			USizeBox* RowSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-			RowSizeBox->SetWidthOverride(90.f);
-			RowSizeBox->SetMinDesiredHeight(24.f);
-			RowSizeBox->SetContent(Text);
-			Button->SetContent(RowSizeBox);
-			UVerticalBoxSlot* RowSlot = Stack->AddChildToVerticalBox(Button);
-			RowSlot->SetPadding(FMargin(2.f));
-			return Button;
-		};
+			{
+				UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+				Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+				Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+				UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+				Text->SetText(FText::FromString(FString(Label)));
+				Text->SetJustification(ETextJustify::Center);
+				Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+				ApplyStandardFont(Text);
+				USizeBox* RowSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+				RowSizeBox->SetWidthOverride(90.f);
+				RowSizeBox->SetMinDesiredHeight(24.f);
+				RowSizeBox->SetContent(Text);
+				Button->SetContent(RowSizeBox);
+				UVerticalBoxSlot* RowSlot = Stack->AddChildToVerticalBox(Button);
+				RowSlot->SetPadding(FMargin(2.f));
+				return Button;
+			};
 
 		auto AddDropdownCheckRow = [this](UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label) -> UCheckBox*
-		{
-			UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-			UCheckBox* CheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), FName(Name));
-			CheckBox->SetIsChecked(true);
-			UHorizontalBoxSlot* CheckSlot = Row->AddChildToHorizontalBox(CheckBox);
-			CheckSlot->SetVerticalAlignment(VAlign_Center);
-			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-			Text->SetText(FText::FromString(FString(Label)));
-			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-			ApplyStandardFont(Text);
-			UHorizontalBoxSlot* TextSlot = Row->AddChildToHorizontalBox(Text);
-			TextSlot->SetPadding(FMargin(4.f, 0.f, 0.f, 0.f));
-			TextSlot->SetVerticalAlignment(VAlign_Center);
-			UVerticalBoxSlot* RowSlot = Stack->AddChildToVerticalBox(Row);
-			RowSlot->SetPadding(FMargin(2.f));
-			return CheckBox;
-		};
+			{
+				UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+				UCheckBox* CheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), FName(Name));
+				CheckBox->SetIsChecked(true);
+				UHorizontalBoxSlot* CheckSlot = Row->AddChildToHorizontalBox(CheckBox);
+				CheckSlot->SetVerticalAlignment(VAlign_Center);
+				UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+				Text->SetText(FText::FromString(FString(Label)));
+				Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+				ApplyStandardFont(Text);
+				UHorizontalBoxSlot* TextSlot = Row->AddChildToHorizontalBox(Text);
+				TextSlot->SetPadding(FMargin(4.f, 0.f, 0.f, 0.f));
+				TextSlot->SetVerticalAlignment(VAlign_Center);
+				UVerticalBoxSlot* RowSlot = Stack->AddChildToVerticalBox(Row);
+				RowSlot->SetPadding(FMargin(2.f));
+				return CheckBox;
+			};
 
 		FileMenuDropdown = ConstructDropdown(TEXT("Pnl_FileDropdown"), MenuBarLeftMargin);
 		UVerticalBox* FileDropdownStack = Cast<UVerticalBox>(FileMenuDropdown->GetContent());
@@ -975,29 +975,29 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		constexpr float SwitcherButtonWidth = 48.f;
 		constexpr float SwitcherButtonHeight = 36.f;
 		auto AddSwitcherButton = [this, SwitcherButtonWidth, SwitcherButtonHeight](UHorizontalBox* TargetRow, const TCHAR* Name, const TCHAR* Label) -> UButton*
-		{
-			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
-			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-			Text->SetText(FText::FromString(FString(Label)));
-			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-			Text->SetJustification(ETextJustify::Center);
-			ApplyStandardFont(Text);
-			USizeBox* ButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-			ButtonSizeBox->SetWidthOverride(SwitcherButtonWidth);
-			ButtonSizeBox->SetHeightOverride(SwitcherButtonHeight);
-			if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(ButtonSizeBox->SetContent(Text)))
 			{
-				TextSlot->SetHorizontalAlignment(HAlign_Center);
-				TextSlot->SetVerticalAlignment(VAlign_Center);
-			}
-			Button->SetContent(ButtonSizeBox);
-			UHorizontalBoxSlot* RowSlot = TargetRow->AddChildToHorizontalBox(Button);
-			RowSlot->SetVerticalAlignment(VAlign_Center);
-			RowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
-			return Button;
-		};
+				UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+				Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+				Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+				UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+				Text->SetText(FText::FromString(FString(Label)));
+				Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+				Text->SetJustification(ETextJustify::Center);
+				ApplyStandardFont(Text);
+				USizeBox* ButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+				ButtonSizeBox->SetWidthOverride(SwitcherButtonWidth);
+				ButtonSizeBox->SetHeightOverride(SwitcherButtonHeight);
+				if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(ButtonSizeBox->SetContent(Text)))
+				{
+					TextSlot->SetHorizontalAlignment(HAlign_Center);
+					TextSlot->SetVerticalAlignment(VAlign_Center);
+				}
+				Button->SetContent(ButtonSizeBox);
+				UHorizontalBoxSlot* RowSlot = TargetRow->AddChildToHorizontalBox(Button);
+				RowSlot->SetVerticalAlignment(VAlign_Center);
+				RowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
+				return Button;
+			};
 
 		Switch2DButton = AddSwitcherButton(SwitcherRow, TEXT("Btn_Switch2D"), TEXT("2D"));
 		Switch2DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSwitch2DClicked);
@@ -1033,35 +1033,35 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// hidden by preview mode) - forwards to PC->UndoInteriorEdit()/RedoInteriorEdit() (also bound
 		// to Ctrl+Z/Ctrl+Y). Icons are static (unlike SnapToggleIcon, which swaps between two states).
 		auto AddSwitcherIconButton = [this, SwitcherButtonWidth, SwitcherButtonHeight](UHorizontalBox* TargetRow, const TCHAR* Name, const TCHAR* IconAssetName, const TCHAR* TooltipLabel) -> UButton*
-		{
-			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-			Button->SetToolTip(MakeToolTipWidget(TooltipLabel));
-			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+			{
+				UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+				Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+				Button->SetToolTip(MakeToolTipWidget(TooltipLabel));
+				Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 
-			UImage* Icon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), FName(FString(Name) + TEXT("Icon")));
-			const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), IconAssetName, IconAssetName);
-			if (UTexture2D* IconTexture = LoadObject<UTexture2D>(nullptr, *IconPath))
-			{
-				Icon->SetBrushFromTexture(IconTexture, false);
-				Icon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
-			}
-			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
-			SizeBox->SetWidthOverride(SwitcherButtonWidth);
-			SizeBox->SetHeightOverride(SwitcherButtonHeight);
-			if (USizeBoxSlot* IconSlot = Cast<USizeBoxSlot>(SizeBox->SetContent(Icon)))
-			{
-				IconSlot->SetHorizontalAlignment(HAlign_Center);
-				IconSlot->SetVerticalAlignment(VAlign_Center);
-			}
-			Button->SetContent(SizeBox);
-			if (UHorizontalBoxSlot* RowSlot = Cast<UHorizontalBoxSlot>(TargetRow->AddChildToHorizontalBox(Button)))
-			{
-				RowSlot->SetVerticalAlignment(VAlign_Center);
-				RowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
-			}
-			return Button;
-		};
+				UImage* Icon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), FName(FString(Name) + TEXT("Icon")));
+				const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), IconAssetName, IconAssetName);
+				if (UTexture2D* IconTexture = LoadObject<UTexture2D>(nullptr, *IconPath))
+				{
+					Icon->SetBrushFromTexture(IconTexture, false);
+					Icon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
+				}
+				USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
+				SizeBox->SetWidthOverride(SwitcherButtonWidth);
+				SizeBox->SetHeightOverride(SwitcherButtonHeight);
+				if (USizeBoxSlot* IconSlot = Cast<USizeBoxSlot>(SizeBox->SetContent(Icon)))
+				{
+					IconSlot->SetHorizontalAlignment(HAlign_Center);
+					IconSlot->SetVerticalAlignment(VAlign_Center);
+				}
+				Button->SetContent(SizeBox);
+				if (UHorizontalBoxSlot* RowSlot = Cast<UHorizontalBoxSlot>(TargetRow->AddChildToHorizontalBox(Button)))
+				{
+					RowSlot->SetVerticalAlignment(VAlign_Center);
+					RowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
+				}
+				return Button;
+			};
 
 		UndoButton = AddSwitcherIconButton(SwitcherRow, TEXT("Btn_Undo"), TEXT("Icon_Undo"), TEXT("Undo [Ctrl+Z]"));
 		UndoButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnUndoClicked);
@@ -1125,15 +1125,15 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// without these the eye can't tell where one ends and the next begins.
 		constexpr float SeparatorLineHeight = 2.f;
 		auto AddHorizontalSeparator = [this, Canvas, SeparatorLineHeight](float PositionY)
-		{
-			UBorder* Separator = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-			Separator->SetBrushColor(FLinearColor(1.f, 1.f, 1.f, 0.5f));
-			UCanvasPanelSlot* SeparatorSlot = Canvas->AddChildToCanvas(Separator);
-			SeparatorSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
-			SeparatorSlot->SetAlignment(FVector2D(0.f, 0.f));
-			SeparatorSlot->SetOffsets(FMargin(0.f, PositionY, 0.f, SeparatorLineHeight));
-			SeparatorSlot->SetZOrder(6);
-		};
+			{
+				UBorder* Separator = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+				Separator->SetBrushColor(FLinearColor(1.f, 1.f, 1.f, 0.5f));
+				UCanvasPanelSlot* SeparatorSlot = Canvas->AddChildToCanvas(Separator);
+				SeparatorSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
+				SeparatorSlot->SetAlignment(FVector2D(0.f, 0.f));
+				SeparatorSlot->SetOffsets(FMargin(0.f, PositionY, 0.f, SeparatorLineHeight));
+				SeparatorSlot->SetZOrder(6);
+			};
 		AddHorizontalSeparator(MenuBarHeight - SeparatorLineHeight);
 		AddHorizontalSeparator(SidebarTopMargin - SeparatorLineHeight);
 
@@ -1447,39 +1447,39 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// above HandleNavStartRoomChanged). Populated with every real room across every floor, so
 		// picking one can jump straight to a room on a different floor than the one currently shown.
 		auto AddNavRoomDropdown = [this, NavStack](const TCHAR* Name, const TCHAR* LabelText, UBorder*& OutBorder) -> UComboBoxString*
-		{
-			UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
-			Label->SetText(FText::FromString(FString(LabelText)));
-			Label->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-			ApplyStandardFont(Label);
-			UVerticalBoxSlot* LabelSlot = NavStack->AddChildToVerticalBox(Label);
-			LabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+			{
+				UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
+				Label->SetText(FText::FromString(FString(LabelText)));
+				Label->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+				ApplyStandardFont(Label);
+				UVerticalBoxSlot* LabelSlot = NavStack->AddChildToVerticalBox(Label);
+				LabelSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
 
-			UComboBoxString* ComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), FName(Name));
-			ComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
-			USizeBox* ComboSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
-			ComboSizeBox->SetWidthOverride(StandardButtonWidth);
-			ComboSizeBox->SetContent(ComboBox);
+				UComboBoxString* ComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), FName(Name));
+				ComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
+				USizeBox* ComboSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
+				ComboSizeBox->SetWidthOverride(StandardButtonWidth);
+				ComboSizeBox->SetContent(ComboBox);
 
-			// Frame that tints green/red when this endpoint was set by picking from THIS dropdown,
-			// rather than by clicking a point on the floor plan - see RefreshNavigationPanelDisplay.
-			// Transparent by default so an unset/click-set dropdown shows no frame at all.
-			UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(Name) + TEXT("Border")));
-			Border->SetPadding(FMargin(3.f));
-			Border->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
-			Border->SetContent(ComboSizeBox);
-			UVerticalBoxSlot* ComboSlot = NavStack->AddChildToVerticalBox(Border);
-			ComboSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-			OutBorder = Border;
-			return ComboBox;
-		};
+				// Frame that tints green/red when this endpoint was set by picking from THIS dropdown,
+				// rather than by clicking a point on the floor plan - see RefreshNavigationPanelDisplay.
+				// Transparent by default so an unset/click-set dropdown shows no frame at all.
+				UBorder* Border = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(Name) + TEXT("Border")));
+				Border->SetPadding(FMargin(3.f));
+				Border->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.f));
+				Border->SetContent(ComboSizeBox);
+				UVerticalBoxSlot* ComboSlot = NavStack->AddChildToVerticalBox(Border);
+				ComboSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+				OutBorder = Border;
+				return ComboBox;
+			};
 
 		NavStartRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavStartRoom"), TEXT("Start Room"), NavStartRoomBorder);
 		NavStartRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavStartRoomChanged);
 		// Search the destination list across every floor of the loaded building.
 		DestinationSearchBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_DestinationSearch"));
 		ApplyStandardFont(DestinationSearchBox);
-		DestinationSearchBox->SetHintText(FText::FromString(TEXT("Search destinations by name, ID or tag")));
+		DestinationSearchBox->SetHintText(FText::FromString(TEXT("Search rooms by name, ID or tag")));
 		DestinationSearchBox->OnTextChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleDestinationSearchChanged);
 		USizeBox* DestinationSearchSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 		DestinationSearchSize->SetWidthOverride(StandardButtonWidth);
@@ -1490,27 +1490,30 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		ApplyStandardTextWrap(DestinationSearchResultsText);
 		NavStack->AddChildToVerticalBox(DestinationSearchResultsText)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 		NavDestinationRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavDestinationRoomChanged);
+		UBorder* UnusedStopRoomBorder = nullptr;
+		NavStopRoomComboBox = AddNavRoomDropdown(TEXT("Cbx_NavStopRoom"), TEXT("Intermediate Stop to Add"), UnusedStopRoomBorder);
+		NavStopRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavStopRoomChanged);
 
 		auto AddNavButton = [this, NavStack, ApplyStandardTextWrap](const TCHAR* Name, const TCHAR* Label, UTextBlock*& OutLabel) -> UButton*
-		{
-			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
-			Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
-			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
-			Text->SetText(FText::FromString(FString(Label)));
-			Text->SetJustification(ETextJustify::Center);
-			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-			ApplyStandardTextWrap(Text);
-			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
-			SizeBox->SetWidthOverride(StandardButtonWidth);
-			SizeBox->SetMinDesiredHeight(StandardButtonHeight);
-			SizeBox->SetContent(Text);
-			Button->SetContent(SizeBox);
-			UVerticalBoxSlot* ButtonSlot = NavStack->AddChildToVerticalBox(Button);
-			ButtonSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-			OutLabel = Text;
-			return Button;
-		};
+			{
+				UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+				Button->SetBackgroundColor(FLinearColor(0.6f, 0.6f, 0.6f, 1.f));
+				Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+				UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
+				Text->SetText(FText::FromString(FString(Label)));
+				Text->SetJustification(ETextJustify::Center);
+				Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+				ApplyStandardTextWrap(Text);
+				USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
+				SizeBox->SetWidthOverride(StandardButtonWidth);
+				SizeBox->SetMinDesiredHeight(StandardButtonHeight);
+				SizeBox->SetContent(Text);
+				Button->SetContent(SizeBox);
+				UVerticalBoxSlot* ButtonSlot = NavStack->AddChildToVerticalBox(Button);
+				ButtonSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+				OutLabel = Text;
+				return Button;
+			};
 
 		UTextBlock* UnusedFindRouteLabel = nullptr;
 		UTextBlock* UnusedClearRouteLabel = nullptr;
@@ -1518,6 +1521,45 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		NavSetStartButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavSetStartClicked);
 		NavSetDestinationButton = AddNavButton(TEXT("Btn_NavSetDestination"), TEXT("Click to Set Destination"), NavSetDestinationButtonLabel);
 		NavSetDestinationButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavSetDestinationClicked);
+		NavAddStopButton = AddNavButton(TEXT("Btn_NavAddStop"), TEXT("Add Selected Room as Stop"), NavAddStopButtonLabel);
+		NavAddStopButton->SetIsEnabled(false);
+		NavAddStopButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavAddStopClicked);
+		NavStopsCountText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_NavStopsCount"));
+		ApplyStandardFont(NavStopsCountText);
+		NavStopsCountText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+		NavStack->AddChildToVerticalBox(NavStopsCountText)->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+		UBorder* UnusedStopsBorder = nullptr;
+		NavStopsComboBox = AddNavRoomDropdown(TEXT("Cbx_NavStops"), TEXT("Ordered Stops"), UnusedStopsBorder);
+		NavStopsComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavStopSelected);
+		UHorizontalBox* StopActions = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("Row_NavStopActions"));
+		auto AddStopActionButton = [this, StopActions](const TCHAR* Name, const TCHAR* Label) -> UButton*
+			{
+				UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+				Button->SetBackgroundColor(FLinearColor(0.35f, 0.4f, 0.48f, 1.f));
+				Button->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+				UTextBlock* ButtonText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
+				ButtonText->SetText(FText::FromString(FString(Label)));
+				ButtonText->SetJustification(ETextJustify::Center);
+				ButtonText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+				USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+				SizeBox->SetMinDesiredHeight(30.f);
+				SizeBox->SetContent(ButtonText);
+				Button->SetContent(SizeBox);
+				UHorizontalBoxSlot* Slot = StopActions->AddChildToHorizontalBox(Button);
+				Slot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+				Slot->SetPadding(FMargin(2.f, 0.f, 2.f, 4.f));
+				return Button;
+			};
+		NavMoveStopUpButton = AddStopActionButton(TEXT("Btn_NavMoveStopUp"), TEXT("Move Up"));
+		NavMoveStopUpButton->SetIsEnabled(false);
+		NavMoveStopUpButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavMoveStopUpClicked);
+		NavMoveStopDownButton = AddStopActionButton(TEXT("Btn_NavMoveStopDown"), TEXT("Move Down"));
+		NavMoveStopDownButton->SetIsEnabled(false);
+		NavMoveStopDownButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavMoveStopDownClicked);
+		NavRemoveStopButton = AddStopActionButton(TEXT("Btn_NavRemoveStop"), TEXT("Remove"));
+		NavRemoveStopButton->SetIsEnabled(false);
+		NavRemoveStopButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavRemoveStopClicked);
+		NavStack->AddChildToVerticalBox(StopActions)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 		NavFindRouteButton = AddNavButton(TEXT("Btn_NavFindRoute"), TEXT("Find Route"), UnusedFindRouteLabel);
 		NavFindRouteButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnNavFindRouteClicked);
 		NavClearRouteButton = AddNavButton(TEXT("Btn_NavClearRoute"), TEXT("Clear Route"), UnusedClearRouteLabel);
@@ -1591,23 +1633,23 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// below - own rows, not UAudioFileRowWidgets, since these are settings rather than playable
 		// files.
 		auto AddAudioCheckRow = [this, AudioStack](const TCHAR* Name, const TCHAR* Label, bool bDefaultChecked) -> UCheckBox*
-		{
-			UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-			UCheckBox* CheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), FName(Name));
-			CheckBox->SetIsChecked(bDefaultChecked);
-			UHorizontalBoxSlot* CheckSlot = Row->AddChildToHorizontalBox(CheckBox);
-			CheckSlot->SetVerticalAlignment(VAlign_Center);
-			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-			Text->SetText(FText::FromString(FString(Label)));
-			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
-			ApplyStandardFont(Text);
-			UHorizontalBoxSlot* TextSlot = Row->AddChildToHorizontalBox(Text);
-			TextSlot->SetPadding(FMargin(4.f, 0.f, 0.f, 0.f));
-			TextSlot->SetVerticalAlignment(VAlign_Center);
-			UVerticalBoxSlot* RowSlot = AudioStack->AddChildToVerticalBox(Row);
-			RowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
-			return CheckBox;
-		};
+			{
+				UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+				UCheckBox* CheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), FName(Name));
+				CheckBox->SetIsChecked(bDefaultChecked);
+				UHorizontalBoxSlot* CheckSlot = Row->AddChildToHorizontalBox(CheckBox);
+				CheckSlot->SetVerticalAlignment(VAlign_Center);
+				UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+				Text->SetText(FText::FromString(FString(Label)));
+				Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+				ApplyStandardFont(Text);
+				UHorizontalBoxSlot* TextSlot = Row->AddChildToHorizontalBox(Text);
+				TextSlot->SetPadding(FMargin(4.f, 0.f, 0.f, 0.f));
+				TextSlot->SetVerticalAlignment(VAlign_Center);
+				UVerticalBoxSlot* RowSlot = AudioStack->AddChildToVerticalBox(Row);
+				RowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+				return CheckBox;
+			};
 
 		AudioClickSoundCheckbox = AddAudioCheckRow(TEXT("Chk_AudioClickSound"), TEXT("Button Click Sound"), true);
 		AudioClickSoundCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAudioClickSoundCheckChanged);
@@ -2059,8 +2101,8 @@ void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 				// been cleared, or a save may have silently failed - see EActionFailureSeverity.
 				DebugLastErrorText->SetColorAndOpacity(FSlateColor(
 					LastActionFailedSeverity == EActionFailureSeverity::Critical
-						? FLinearColor::Red
-						: FLinearColor::Yellow));
+					? FLinearColor::Red
+					: FLinearColor::Yellow));
 			}
 		}
 	}
@@ -3724,15 +3766,15 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 	if (RoomTagsFieldsSizeBox) RoomTagsFieldsSizeBox->SetWidthOverride(PropertiesButtonWidth);
 
 	auto ResizeButton = [](UButton* Button, float Width)
-	{
-		if (Button)
 		{
-			if (USizeBox* SizeBox = Cast<USizeBox>(Button->GetContent()))
+			if (Button)
 			{
-				SizeBox->SetWidthOverride(Width);
+				if (USizeBox* SizeBox = Cast<USizeBox>(Button->GetContent()))
+				{
+					SizeBox->SetWidthOverride(Width);
+				}
 			}
-		}
-	};
+		};
 	ResizeButton(AddFloorButton, FloorButtonWidth);
 	ResizeButton(RemoveFloorButton, FloorButtonWidth);
 	ResizeButton(ApplyDoorButton, PropertiesButtonWidth);
@@ -3740,15 +3782,15 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 	ResizeButton(ApplyConnectorButton, PropertiesButtonWidth);
 
 	auto ResizeLabelWrap = [](UTextBlock* TextBlock, float Width)
-	{
-		if (TextBlock)
 		{
-			if (USizeBox* SizeBox = Cast<USizeBox>(TextBlock->GetParent()))
+			if (TextBlock)
 			{
-				SizeBox->SetWidthOverride(Width);
+				if (USizeBox* SizeBox = Cast<USizeBox>(TextBlock->GetParent()))
+				{
+					SizeBox->SetWidthOverride(Width);
+				}
 			}
-		}
-	};
+		};
 	ResizeLabelWrap(PropertiesTitleText, PropertiesButtonWidth);
 	ResizeLabelWrap(DoorRoomText, PropertiesButtonWidth);
 	ResizeLabelWrap(ConnectorTypeText, PropertiesButtonWidth);
@@ -3813,6 +3855,7 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 	const float NavigationButtonWidth = ComputePanelButtonWidth(EDockPanelId::Navigation);
 	ResizeButton(NavSetStartButton, NavigationButtonWidth);
 	ResizeButton(NavSetDestinationButton, NavigationButtonWidth);
+	ResizeButton(NavAddStopButton, NavigationButtonWidth);
 	ResizeButton(NavFindRouteButton, NavigationButtonWidth);
 	ResizeButton(NavClearRouteButton, NavigationButtonWidth);
 	ResizeButton(NavToggleRouteButton, NavigationButtonWidth);
@@ -3830,6 +3873,20 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 	if (NavDestinationRoomComboBox)
 	{
 		if (USizeBox* SizeBox = Cast<USizeBox>(NavDestinationRoomComboBox->GetParent()))
+		{
+			SizeBox->SetWidthOverride(NavigationButtonWidth);
+		}
+	}
+	if (NavStopRoomComboBox)
+	{
+		if (USizeBox* SizeBox = Cast<USizeBox>(NavStopRoomComboBox->GetParent()))
+		{
+			SizeBox->SetWidthOverride(NavigationButtonWidth);
+		}
+	}
+	if (NavStopsComboBox)
+	{
+		if (USizeBox* SizeBox = Cast<USizeBox>(NavStopsComboBox->GetParent()))
 		{
 			SizeBox->SetWidthOverride(NavigationButtonWidth);
 		}
@@ -3862,12 +3919,12 @@ void UInteriorScreenWidget::RefreshModeButtonHighlights()
 	const FLinearColor ActiveColor(0.2f, 0.75f, 0.3f, 1.f);
 	const FLinearColor InactiveColor(0.6f, 0.6f, 0.6f, 1.f);
 	auto SetHighlight = [&ActiveColor, &InactiveColor](UButton* Button, bool bActive)
-	{
-		if (Button)
 		{
-			Button->SetBackgroundColor(bActive ? ActiveColor : InactiveColor);
-		}
-	};
+			if (Button)
+			{
+				Button->SetBackgroundColor(bActive ? ActiveColor : InactiveColor);
+			}
+		};
 
 	SetHighlight(SelectModeButton, PC->IsInSelectMode());
 	SetHighlight(DrawRoomModeButton, PC->IsInDrawRoomMode());
@@ -4211,21 +4268,21 @@ void UInteriorScreenWidget::RefreshLayersList()
 	// Category headers are never filtered out by search (only their children are) - if they were,
 	// searching for an item would also hide the very row you'd expand to find more like it.
 	auto AddRow = [this, PC, RowWidth](const FString& RowKey, const FString& Label, float IndentPx, bool bShowExpandArrow, bool bIsExpanded, bool bIsVisible)
-	{
-		ULayerRowWidget* Row = CreateWidget<ULayerRowWidget>(PC, ULayerRowWidget::StaticClass());
-		if (!Row)
 		{
-			return;
-		}
-		Row->Setup(RowKey, Label, IndentPx, bShowExpandArrow, bIsExpanded, bIsVisible);
-		Row->SetWidth(RowWidth);
-		Row->OnExpandClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleLayerRowExpandClicked);
-		Row->OnVisibilityClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleLayerRowVisibilityClicked);
-		if (UScrollBoxSlot* RowSlot = Cast<UScrollBoxSlot>(LayersListBox->AddChild(Row)))
-		{
-			RowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
-		}
-	};
+			ULayerRowWidget* Row = CreateWidget<ULayerRowWidget>(PC, ULayerRowWidget::StaticClass());
+			if (!Row)
+			{
+				return;
+			}
+			Row->Setup(RowKey, Label, IndentPx, bShowExpandArrow, bIsExpanded, bIsVisible);
+			Row->SetWidth(RowWidth);
+			Row->OnExpandClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleLayerRowExpandClicked);
+			Row->OnVisibilityClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleLayerRowVisibilityClicked);
+			if (UScrollBoxSlot* RowSlot = Cast<UScrollBoxSlot>(LayersListBox->AddChild(Row)))
+			{
+				RowSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 2.f));
+			}
+		};
 
 	const int32 ActiveFloor = PC->GetActiveFloor();
 
@@ -4378,11 +4435,11 @@ void UInteriorScreenWidget::HandleLayerRowVisibilityClicked(FString RowKey)
 	if (Parts[0] == TEXT("category"))
 	{
 		const FString& Category = Parts[1];
-		if (Category == TEXT("Boundary"))       { PC->SetBoundaryVisible(!PC->IsBoundaryVisible()); }
-		else if (Category == TEXT("Rooms"))     { PC->SetRoomsVisible(!PC->AreRoomsVisible()); }
-		else if (Category == TEXT("Walls"))     { PC->SetWallsVisible(!PC->AreWallsVisible()); }
+		if (Category == TEXT("Boundary")) { PC->SetBoundaryVisible(!PC->IsBoundaryVisible()); }
+		else if (Category == TEXT("Rooms")) { PC->SetRoomsVisible(!PC->AreRoomsVisible()); }
+		else if (Category == TEXT("Walls")) { PC->SetWallsVisible(!PC->AreWallsVisible()); }
 		else if (Category == TEXT("PathNodes")) { PC->SetPathNodesVisible(!PC->ArePathNodesVisible()); }
-		else if (Category == TEXT("IONodes"))   { PC->SetIONodesVisible(!PC->AreIONodesVisible()); }
+		else if (Category == TEXT("IONodes")) { PC->SetIONodesVisible(!PC->AreIONodesVisible()); }
 	}
 	else if (Parts[0] == TEXT("item") && Parts.Num() >= 3)
 	{
@@ -4395,11 +4452,11 @@ void UInteriorScreenWidget::HandleLayerRowVisibilityClicked(FString RowKey)
 			Id += TEXT(":") + Parts[i];
 		}
 
-		if (Category == TEXT("Boundary"))       { /* single item, nothing more specific to toggle than the category itself */ PC->SetBoundaryVisible(!PC->IsBoundaryVisible()); }
-		else if (Category == TEXT("Rooms"))     { PC->SetRoomHidden(Id, !PC->IsRoomHidden(Id)); }
-		else if (Category == TEXT("Walls"))     { PC->SetRoomHidden(Id, !PC->IsRoomHidden(Id)); }
+		if (Category == TEXT("Boundary")) { /* single item, nothing more specific to toggle than the category itself */ PC->SetBoundaryVisible(!PC->IsBoundaryVisible()); }
+		else if (Category == TEXT("Rooms")) { PC->SetRoomHidden(Id, !PC->IsRoomHidden(Id)); }
+		else if (Category == TEXT("Walls")) { PC->SetRoomHidden(Id, !PC->IsRoomHidden(Id)); }
 		else if (Category == TEXT("PathNodes")) { PC->SetPathNodeHidden(Id, !PC->IsPathNodeHidden(Id)); }
-		else if (Category == TEXT("IONodes"))   { PC->SetIONodeHidden(Id, !PC->IsIONodeHidden(Id)); }
+		else if (Category == TEXT("IONodes")) { PC->SetIONodeHidden(Id, !PC->IsIONodeHidden(Id)); }
 	}
 
 	RefreshLayersList();
@@ -4478,6 +4535,26 @@ void UInteriorScreenWidget::OnNavFindRouteClicked()
 	}
 }
 
+void UInteriorScreenWidget::OnNavAddStopClicked()
+{
+	if (!NavStopRoomComboBox) return;
+	const FString SelectedRoom = NavStopRoomComboBox->GetSelectedOption();
+	if (SelectedRoom.IsEmpty()) return;
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			if (Nav->AddStopToRoom(SelectedRoom))
+			{
+				// Allow the same room to be added again later if the user intentionally wants to
+				// revisit it; ComboBoxString only reports a changed selection.
+				NavStopRoomComboBox->ClearSelection();
+			}
+		}
+	}
+	RefreshNavigationPanelDisplay();
+}
+
 void UInteriorScreenWidget::OnNavClearRouteClicked()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
@@ -4499,6 +4576,10 @@ void UInteriorScreenWidget::OnNavClearRouteClicked()
 	if (NavDestinationRoomComboBox)
 	{
 		NavDestinationRoomComboBox->ClearSelection();
+	}
+	if (NavStopRoomComboBox)
+	{
+		NavStopRoomComboBox->ClearSelection();
 	}
 }
 
@@ -4594,6 +4675,17 @@ void UInteriorScreenWidget::RefreshNavigationPanelDisplay()
 			NavDestinationRoomComboBox->ClearSelection();
 		}
 	}
+	if (NavAddStopButton)
+	{
+		const bool bHasSelectedRoom = NavStopRoomComboBox && !NavStopRoomComboBox->GetSelectedOption().IsEmpty();
+		NavAddStopButton->SetIsEnabled(bHasSelectedRoom && Nav->GetStops().Num() < UNavigationPanelWidget::MaxRouteStops);
+	}
+	if (NavAddStopButtonLabel)
+	{
+		NavAddStopButtonLabel->SetText(FText::FromString(FString::Printf(TEXT("Add Stop (%d/%d)"),
+			Nav->GetStops().Num(), UNavigationPanelWidget::MaxRouteStops)));
+	}
+	RefreshNavStopsList();
 	if (NavFindRouteButton)
 	{
 		NavFindRouteButton->SetIsEnabled(Nav->CanFindRoute());
@@ -4784,6 +4876,112 @@ void UInteriorScreenWidget::HandleNavDestinationRoomChanged(FString SelectedItem
 	}
 }
 
+void UInteriorScreenWidget::HandleNavStopRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
+{
+	if (SelectionType == ESelectInfo::Direct) return;
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	UNavigationPanelWidget* Nav = PC ? PC->GetNavigationPanel() : nullptr;
+	if (NavAddStopButton)
+	{
+		NavAddStopButton->SetIsEnabled(Nav && !SelectedItem.IsEmpty()
+			&& Nav->GetStops().Num() < UNavigationPanelWidget::MaxRouteStops);
+	}
+}
+
+void UInteriorScreenWidget::HandleNavStopSelected(FString SelectedItem, ESelectInfo::Type SelectionType)
+{
+	if (SelectionType == ESelectInfo::Direct) return;
+	SelectedNavigationStopIndex = NavStopsComboBox ? NavStopsComboBox->FindOptionIndex(SelectedItem) : INDEX_NONE;
+	const int32 StopCount = [&]()
+		{
+			if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+			{
+				if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel()) return Nav->GetStops().Num();
+			}
+			return 0;
+		}();
+	if (NavMoveStopUpButton) NavMoveStopUpButton->SetIsEnabled(SelectedNavigationStopIndex > 0);
+	if (NavMoveStopDownButton) NavMoveStopDownButton->SetIsEnabled(SelectedNavigationStopIndex >= 0 && SelectedNavigationStopIndex + 1 < StopCount);
+	if (NavRemoveStopButton) NavRemoveStopButton->SetIsEnabled(SelectedNavigationStopIndex >= 0 && SelectedNavigationStopIndex < StopCount);
+}
+
+void UInteriorScreenWidget::OnNavMoveStopUpClicked()
+{
+	if (SelectedNavigationStopIndex <= 0) return;
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			const int32 NewIndex = SelectedNavigationStopIndex - 1;
+			if (Nav->MoveStop(SelectedNavigationStopIndex, NewIndex))
+			{
+				SelectedNavigationStopIndex = NewIndex;
+				RefreshNavStopsList();
+				if (NavStopsComboBox && Nav->GetStops().IsValidIndex(NewIndex))
+				{
+					NavStopsComboBox->SetSelectedOption(FString::Printf(TEXT("%d. %s"), NewIndex + 1, *Nav->GetStops()[NewIndex].RoomOptionLabel));
+					SelectedNavigationStopIndex = NewIndex;
+					if (NavMoveStopUpButton) NavMoveStopUpButton->SetIsEnabled(NewIndex > 0);
+					if (NavMoveStopDownButton) NavMoveStopDownButton->SetIsEnabled(NewIndex + 1 < Nav->GetStops().Num());
+					if (NavRemoveStopButton) NavRemoveStopButton->SetIsEnabled(true);
+				}
+			}
+		}
+	}
+}
+
+void UInteriorScreenWidget::OnNavMoveStopDownClicked()
+{
+	if (SelectedNavigationStopIndex < 0) return;
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			const int32 NewIndex = SelectedNavigationStopIndex + 1;
+			if (Nav->MoveStop(SelectedNavigationStopIndex, NewIndex))
+			{
+				SelectedNavigationStopIndex = NewIndex;
+				RefreshNavStopsList();
+				if (NavStopsComboBox && Nav->GetStops().IsValidIndex(NewIndex))
+				{
+					NavStopsComboBox->SetSelectedOption(FString::Printf(TEXT("%d. %s"), NewIndex + 1, *Nav->GetStops()[NewIndex].RoomOptionLabel));
+					SelectedNavigationStopIndex = NewIndex;
+					if (NavMoveStopUpButton) NavMoveStopUpButton->SetIsEnabled(NewIndex > 0);
+					if (NavMoveStopDownButton) NavMoveStopDownButton->SetIsEnabled(NewIndex + 1 < Nav->GetStops().Num());
+					if (NavRemoveStopButton) NavRemoveStopButton->SetIsEnabled(true);
+				}
+			}
+		}
+	}
+}
+
+void UInteriorScreenWidget::OnNavRemoveStopClicked()
+{
+	if (SelectedNavigationStopIndex < 0) return;
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			const int32 RemovedIndex = SelectedNavigationStopIndex;
+			if (Nav->RemoveStop(RemovedIndex))
+			{
+				const int32 NewSelectionIndex = Nav->GetStops().IsEmpty()
+					? INDEX_NONE : FMath::Min(RemovedIndex, Nav->GetStops().Num() - 1);
+				RefreshNavStopsList();
+				SelectedNavigationStopIndex = NewSelectionIndex;
+				if (NavStopsComboBox && Nav->GetStops().IsValidIndex(NewSelectionIndex))
+				{
+					NavStopsComboBox->SetSelectedOption(FString::Printf(TEXT("%d. %s"),
+						NewSelectionIndex + 1, *Nav->GetStops()[NewSelectionIndex].RoomOptionLabel));
+					if (NavMoveStopUpButton) NavMoveStopUpButton->SetIsEnabled(NewSelectionIndex > 0);
+					if (NavMoveStopDownButton) NavMoveStopDownButton->SetIsEnabled(NewSelectionIndex + 1 < Nav->GetStops().Num());
+					if (NavRemoveStopButton) NavRemoveStopButton->SetIsEnabled(true);
+				}
+			}
+		}
+	}
+}
+
 void UInteriorScreenWidget::RefreshNavRoomDropdowns()
 {
 	if (!NavStartRoomComboBox || !NavDestinationRoomComboBox)
@@ -4812,20 +5010,82 @@ void UInteriorScreenWidget::RefreshDestinationRoomDropdown()
 {
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
 	UNavigationPanelWidget* Nav = PC ? PC->GetNavigationPanel() : nullptr;
-	if (!Nav || !NavDestinationRoomComboBox) return;
-	const FString PreviousDestination = NavDestinationRoomComboBox->GetSelectedOption();
-	NavDestinationRoomComboBox->ClearOptions();
+	if (!Nav || (!NavDestinationRoomComboBox && !NavStopRoomComboBox)) return;
+	const FString PreviousDestination = NavDestinationRoomComboBox ? NavDestinationRoomComboBox->GetSelectedOption() : FString();
+	const FString PreviousStop = NavStopRoomComboBox ? NavStopRoomComboBox->GetSelectedOption() : FString();
+	if (NavDestinationRoomComboBox) NavDestinationRoomComboBox->ClearOptions();
+	if (NavStopRoomComboBox) NavStopRoomComboBox->ClearOptions();
 	const TArray<UNavigationPanelWidget::FNavigationRoomOption> Matches = Nav->SearchDestinations(
 		DestinationSearchBox ? DestinationSearchBox->GetText().ToString() : FString());
-	for (const auto& Option : Matches) NavDestinationRoomComboBox->AddOption(Option.GetDisplayLabel());
-	if (NavDestinationRoomComboBox->FindOptionIndex(PreviousDestination) != INDEX_NONE) NavDestinationRoomComboBox->SetSelectedOption(PreviousDestination);
-	NavDestinationRoomComboBox->SetIsEnabled(!Matches.IsEmpty());
+	for (const auto& Option : Matches)
+	{
+		if (NavDestinationRoomComboBox) NavDestinationRoomComboBox->AddOption(Option.GetDisplayLabel());
+		if (NavStopRoomComboBox) NavStopRoomComboBox->AddOption(Option.GetDisplayLabel());
+	}
+	if (NavDestinationRoomComboBox)
+	{
+		if (NavDestinationRoomComboBox->FindOptionIndex(PreviousDestination) != INDEX_NONE) NavDestinationRoomComboBox->SetSelectedOption(PreviousDestination);
+		NavDestinationRoomComboBox->SetIsEnabled(!Matches.IsEmpty());
+	}
+	if (NavStopRoomComboBox)
+	{
+		if (NavStopRoomComboBox->FindOptionIndex(PreviousStop) != INDEX_NONE) NavStopRoomComboBox->SetSelectedOption(PreviousStop);
+		NavStopRoomComboBox->SetIsEnabled(!Matches.IsEmpty());
+	}
+	if (NavAddStopButton)
+	{
+		NavAddStopButton->SetIsEnabled(NavStopRoomComboBox
+			&& !NavStopRoomComboBox->GetSelectedOption().IsEmpty()
+			&& Nav->GetStops().Num() < UNavigationPanelWidget::MaxRouteStops);
+	}
 	if (DestinationSearchResultsText)
 	{
 		DestinationSearchResultsText->SetText(FText::FromString(Matches.IsEmpty()
-			? TEXT("No matching destinations. Try another name or tag.")
-			: FString::Printf(TEXT("%d destinations in this building. Choose a room above."), Matches.Num())));
+			? TEXT("No matching rooms. Try another name or tag.")
+			: FString::Printf(TEXT("%d matching rooms in this building."), Matches.Num())));
 	}
+}
+
+void UInteriorScreenWidget::RefreshNavStopsList()
+{
+	if (!NavStopsComboBox) return;
+
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	UNavigationPanelWidget* Nav = PC ? PC->GetNavigationPanel() : nullptr;
+	const TArray<FNavigationStop>* Stops = Nav ? &Nav->GetStops() : nullptr;
+	const int32 StopCount = Stops ? Stops->Num() : 0;
+	const FString PreviousSelection = NavStopsComboBox->GetSelectedOption();
+	NavStopsComboBox->ClearOptions();
+	if (NavStopsCountText)
+	{
+		NavStopsCountText->SetText(FText::FromString(FString::Printf(TEXT("Intermediate stops (%d/%d)"),
+			StopCount, UNavigationPanelWidget::MaxRouteStops)));
+	}
+	if (Stops)
+	{
+		for (int32 StopIndex = 0; StopIndex < Stops->Num(); ++StopIndex)
+		{
+			NavStopsComboBox->AddOption(FString::Printf(TEXT("%d. %s"), StopIndex + 1, *(*Stops)[StopIndex].RoomOptionLabel));
+		}
+	}
+	if (NavStopsComboBox->FindOptionIndex(PreviousSelection) != INDEX_NONE)
+	{
+		NavStopsComboBox->SetSelectedOption(PreviousSelection);
+		SelectedNavigationStopIndex = NavStopsComboBox->FindOptionIndex(PreviousSelection);
+	}
+	else
+	{
+		SelectedNavigationStopIndex = StopCount > 0 ? 0 : INDEX_NONE;
+		if (SelectedNavigationStopIndex != INDEX_NONE)
+		{
+			NavStopsComboBox->SetSelectedOption(FString::Printf(TEXT("%d. %s"),
+				SelectedNavigationStopIndex + 1, *(*Stops)[SelectedNavigationStopIndex].RoomOptionLabel));
+		}
+	}
+	NavStopsComboBox->SetIsEnabled(StopCount > 0);
+	if (NavMoveStopUpButton) NavMoveStopUpButton->SetIsEnabled(SelectedNavigationStopIndex > 0);
+	if (NavMoveStopDownButton) NavMoveStopDownButton->SetIsEnabled(SelectedNavigationStopIndex >= 0 && SelectedNavigationStopIndex + 1 < StopCount);
+	if (NavRemoveStopButton) NavRemoveStopButton->SetIsEnabled(SelectedNavigationStopIndex >= 0 && SelectedNavigationStopIndex < StopCount);
 }
 
 void UInteriorScreenWidget::HandleDestinationSearchChanged(const FText& Text)

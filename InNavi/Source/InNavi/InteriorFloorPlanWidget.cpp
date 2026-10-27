@@ -36,15 +36,15 @@ void UInteriorFloorPlanWidget::NativeConstruct()
 	}
 
 	auto LoadConnectorIcon = [](const TCHAR* AssetPath, TObjectPtr<UTexture2D>& OutTexture, FSlateBrush& OutBrush)
-	{
-		OutTexture = LoadObject<UTexture2D>(nullptr, AssetPath);
-		if (OutTexture)
 		{
-			OutBrush.SetResourceObject(OutTexture);
-			OutBrush.ImageSize = FVector2D(OutTexture->GetSizeX(), OutTexture->GetSizeY());
-			OutBrush.DrawAs = ESlateBrushDrawType::Image;
-		}
-	};
+			OutTexture = LoadObject<UTexture2D>(nullptr, AssetPath);
+			if (OutTexture)
+			{
+				OutBrush.SetResourceObject(OutTexture);
+				OutBrush.ImageSize = FVector2D(OutTexture->GetSizeX(), OutTexture->GetSizeY());
+				OutBrush.DrawAs = ESlateBrushDrawType::Image;
+			}
+		};
 	LoadConnectorIcon(TEXT("/Game/ImageAssets/Icon_AddElevator.Icon_AddElevator"), ElevatorIconTexture, ElevatorIconBrush);
 	LoadConnectorIcon(TEXT("/Game/ImageAssets/Icon_AddStairs.Icon_AddStairs"), StairsIconTexture, StairsIconBrush);
 	LoadConnectorIcon(TEXT("/Game/ImageAssets/Icon_AddEscalator.Icon_AddEscalator"), EscalatorIconTexture, EscalatorIconBrush);
@@ -1091,6 +1091,14 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			NavigationPanel && NavigationPanel->IsRouteGuidanceVisible())
 		{
 			const int32 ActiveFloor = InteriorGen->GetActiveFloor();
+			const TArray<FNavigationRouteLeg>& RouteLegs = NavigationPanel->GetRouteLegs();
+			const TArray<FLinearColor> LegColors = {
+				FLinearColor(1.f, 0.55f, 0.f, 1.f),
+				FLinearColor(0.1f, 0.62f, 0.95f, 1.f),
+				FLinearColor(0.72f, 0.32f, 0.92f, 1.f),
+				FLinearColor(0.1f, 0.72f, 0.42f, 1.f),
+				FLinearColor(0.95f, 0.7f, 0.08f, 1.f)
+			};
 			auto IsVisibleOnCurrentMap = [ActiveFloor](const FNavigationRoutePoint& Point)
 				{
 					return Point.Floor == ActiveFloor
@@ -1106,9 +1114,21 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 				TArray<FVector2D> Segment;
 				Segment.Add(WorldToLocal((Route[I - 1].Position + Building->BuildingOffset) * Scale));
 				Segment.Add(WorldToLocal((Route[I].Position + Building->BuildingOffset) * Scale));
+				FLinearColor SegmentColor(1.f, 0.55f, 0.f, 1.f);
+				if (RouteLegs.Num() > 1)
+				{
+					for (int32 LegIndex = 0; LegIndex < RouteLegs.Num(); ++LegIndex)
+					{
+						if (I > RouteLegs[LegIndex].FirstPointIndex && I <= RouteLegs[LegIndex].LastPointIndex)
+						{
+							SegmentColor = LegColors[LegIndex % LegColors.Num()];
+							break;
+						}
+					}
+				}
 				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 4,
 					AllottedGeometry.ToPaintGeometry(), Segment, ESlateDrawEffect::None,
-					FLinearColor(1.f, 0.55f, 0.f, 1.f), true, 6.f);
+					SegmentColor, true, 6.f);
 				for (const FNavigationDirectionArrow2D& Arrow :
 					UNavigationRouteVisualization::BuildDirectionArrows2D(Segment[0], Segment[1]))
 				{
@@ -1168,8 +1188,58 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			{
 				DrawEndpoint(NavigationPanel->GetDestination(), FLinearColor(0.9f, 0.1f, 0.1f, 1.f));
 			}
+			const TArray<FNavigationStop>& Stops = NavigationPanel->GetStops();
+			for (int32 StopIndex = 0; StopIndex < Stops.Num(); ++StopIndex)
+			{
+				const FNavigationRoutePoint& StopPoint = Stops[StopIndex].Point;
+				if (!IsVisibleOnCurrentMap(StopPoint)) continue;
+				const FVector2D MarkerLocal = WorldToLocal((StopPoint.Position + Building->BuildingOffset) * Scale);
+				const FLinearColor StopColor = LegColors[StopIndex % LegColors.Num()];
+				const FSlateBrush* StopBrush = FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox"));
+				constexpr float StopMarkerSize = 22.f;
+				constexpr float StopOutlineSize = 28.f;
+				if (StopPoint.Floor == UNavigationPanelWidget::OutdoorFloor)
+				{
+					TArray<FVector2D> Diamond = {
+						MarkerLocal + FVector2D(0.f, -StopOutlineSize * 0.5f),
+						MarkerLocal + FVector2D(StopOutlineSize * 0.5f, 0.f),
+						MarkerLocal + FVector2D(0.f, StopOutlineSize * 0.5f),
+						MarkerLocal + FVector2D(-StopOutlineSize * 0.5f, 0.f),
+						MarkerLocal + FVector2D(0.f, -StopOutlineSize * 0.5f)
+					};
+					FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 5,
+						AllottedGeometry.ToPaintGeometry(), Diamond, ESlateDrawEffect::None,
+						FLinearColor::White, true, 7.f);
+					FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 6,
+						AllottedGeometry.ToPaintGeometry(), Diamond, ESlateDrawEffect::None,
+						StopColor, true, 4.f);
+					const FPaintGeometry NumberBackground = AllottedGeometry.ToPaintGeometry(
+						FVector2f(StopMarkerSize, StopMarkerSize),
+						FSlateLayoutTransform(MarkerLocal - FVector2D(StopMarkerSize * 0.5f)));
+					FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 6,
+						NumberBackground, StopBrush, ESlateDrawEffect::None, StopColor);
+				}
+				else
+				{
+					const FPaintGeometry OutlineGeometry = AllottedGeometry.ToPaintGeometry(
+						FVector2f(StopOutlineSize, StopOutlineSize),
+						FSlateLayoutTransform(MarkerLocal - FVector2D(StopOutlineSize * 0.5f)));
+					FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 5,
+						OutlineGeometry, StopBrush, ESlateDrawEffect::None, FLinearColor::White);
+					const FPaintGeometry StopGeometry = AllottedGeometry.ToPaintGeometry(
+						FVector2f(StopMarkerSize, StopMarkerSize),
+						FSlateLayoutTransform(MarkerLocal - FVector2D(StopMarkerSize * 0.5f)));
+					FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 6,
+						StopGeometry, StopBrush, ESlateDrawEffect::None, StopColor);
+				}
+				const FVector2D TextOffset = MarkerLocal - FVector2D(5.f, 8.f);
+				FSlateDrawElement::MakeText(OutDrawElements, LayerId + 7,
+					AllottedGeometry.ToPaintGeometry(FVector2f(12.f, 16.f), FSlateLayoutTransform(TextOffset)),
+					FText::AsNumber(StopIndex + 1), FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 11),
+					ESlateDrawEffect::None, FLinearColor::White);
+			}
 		}
 	}
 
-	return LayerId + 7;
+	return LayerId + 8;
 }

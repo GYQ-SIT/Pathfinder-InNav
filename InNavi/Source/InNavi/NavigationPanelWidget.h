@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
@@ -46,6 +46,27 @@ struct INNAVI_API FNavigationWorldRoutePoint
 	EInteriorNavNodeType ConnectorType = EInteriorNavNodeType::PathNode;
 };
 
+// A named intermediate waypoint. The existing Destination remains the final endpoint, so
+// journeys with no intermediate waypoints retain the current start-to-destination behavior.
+struct FNavigationStop
+{
+	FNavigationRoutePoint Point;
+	FString BuildingId;
+	FString RoomOptionLabel;
+	FString RoomId;
+};
+
+// One successfully planned section of a multi-stop journey. Point ranges refer to the combined
+// RoutePoints array, allowing the direction panel to keep the sections separate while the map
+// and 3D view draw one continuous route.
+struct FNavigationRouteLeg
+{
+	int32 FirstPointIndex = INDEX_NONE;
+	int32 LastPointIndex = INDEX_NONE;
+	FString FromLabel;
+	FString ToLabel;
+};
+
 // Navigation selection/route-planning state and logic. No UI of its own any more -
 // UInteriorScreenWidget's own Navigation dock panel is the presentation layer; this
 // class stays alive as a UUserWidget owned/added-to-viewport by ANavPlayerController
@@ -61,6 +82,7 @@ public:
 	// above remain indoor building floors. This is the UI contract Person A's combined planner can
 	// return without adding an Unreal-reflected enum to the existing route data structure.
 	static constexpr int32 OutdoorFloor = 0;
+	static constexpr int32 MaxRouteStops = 8;
 
 	UFUNCTION(BlueprintPure, Category = "Navigation")
 	ENavigationSelectionMode GetSelectionMode() const { return SelectionMode; }
@@ -77,6 +99,12 @@ public:
 	const FNavigationRoutePoint& GetStart() const { return Start.Point; }
 	const FNavigationRoutePoint& GetDestination() const { return Destination.Point; }
 	const TArray<FNavigationRoutePoint>& GetRoutePoints() const { return RoutePoints; }
+	const TArray<FNavigationStop>& GetStops() const { return Stops; }
+	const TArray<FNavigationRouteLeg>& GetRouteLegs() const { return RouteLegs; }
+	bool AddStopToRoom(const FString& RoomOptionLabel);
+	bool RemoveStop(int32 StopIndex);
+	bool MoveStop(int32 FromIndex, int32 ToIndex);
+	void ClearStops();
 	// Presentation visibility is independent of the stored route and the navigation dock.
 	UFUNCTION(BlueprintPure, Category = "Navigation")
 	bool IsRouteGuidanceVisible() const { return bRouteGuidanceVisible; }
@@ -240,7 +268,9 @@ private:
 
 	FSelectedEndpoint Start;
 	FSelectedEndpoint Destination;
+	TArray<FNavigationStop> Stops;
 	TArray<FNavigationRoutePoint> RoutePoints;
+	TArray<FNavigationRouteLeg> RouteLegs;
 	FString StatusMessage;
 	ENavigationMessageKind StatusKind = ENavigationMessageKind::Instruction;
 	ENavigationSelectionMode SelectionMode = ENavigationSelectionMode::None;

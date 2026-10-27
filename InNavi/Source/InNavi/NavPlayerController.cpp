@@ -155,7 +155,7 @@ void ANavPlayerController::SetupInputComponent()
 	InputComponent->BindKey(FInputChord(EKeys::S, /*Shift*/false, /*Ctrl*/true, /*Alt*/false, /*Cmd*/false), IE_Pressed, this, &ANavPlayerController::SaveCurrentProjectKeyHandler);
 	InputComponent->BindKey(FInputChord(EKeys::Z, false, true, false, false), IE_Pressed, this, &ANavPlayerController::UndoInteriorKeyHandler);
 	InputComponent->BindKey(FInputChord(EKeys::Y, false, true, false, false), IE_Pressed, this, &ANavPlayerController::RedoInteriorKeyHandler);
-	InputComponent->BindKey(FInputChord(EKeys::C, false, true, false, false),IE_Pressed,this,&ANavPlayerController::CopyInteriorKeyHandler);
+	InputComponent->BindKey(FInputChord(EKeys::C, false, true, false, false), IE_Pressed, this, &ANavPlayerController::CopyInteriorKeyHandler);
 	InputComponent->BindKey(FInputChord(EKeys::V, false, true, false, false), IE_Pressed, this, &ANavPlayerController::PasteInteriorKeyHandler);
 	InputComponent->BindKey(EKeys::G, IE_Pressed, this, &ANavPlayerController::LogCameraTransform);
 	InputComponent->BindKey(EKeys::MouseScrollUp, IE_Pressed, this, &ANavPlayerController::ZoomIn3DPreview);
@@ -244,7 +244,7 @@ void ANavPlayerController::OnClick()
 			SelectNavigationPoint(FootprintPosition, Floor);
 			return;
 		}
-	
+
 		// Do not fall back to the 3D camera for a 2D floor-plan click. If the
 		// widget cannot be found or the cursor is outside it, report the problem
 		// instead of producing a misleading random footprint position.
@@ -1581,7 +1581,7 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter
 	default:
 		return nullptr;
 	}
-	
+
 	FString CreateError;
 	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(Footprint, FString(), FString(), true, false, /*bAllowOverlap=*/false, CreateError);
 	if (!NewRoom)
@@ -2674,9 +2674,9 @@ void ANavPlayerController::DrawPendingRoomPointMarker3D()
 	const float Z = (InteriorGen->GetActiveFloor() - 1) * Building->GetFloorHeight() + 10.f;
 
 	auto ToWorld = [&](const FVector2D& FootprintPoint) -> FVector
-	{
-		return FVector((FootprintPoint.X + Building->BuildingOffset.X) * Scale, (FootprintPoint.Y + Building->BuildingOffset.Y) * Scale, Z);
-	};
+		{
+			return FVector((FootprintPoint.X + Building->BuildingOffset.X) * Scale, (FootprintPoint.Y + Building->BuildingOffset.Y) * Scale, Z);
+		};
 
 	const FVector NewWorld = ToWorld(PendingRoomFootprint.Last());
 	if (PendingRoomFootprint.Num() > 1)
@@ -2707,7 +2707,7 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 		NavigationPanel->HasStart() ? &NavigationPanel->GetStart() : nullptr,
 		NavigationPanel->HasDestination() ? &NavigationPanel->GetDestination() : nullptr,
 		Building->BuildingOffset, Generator->GetScale(), Building->GetFloorHeight(), InteriorGen->GetActiveFloor(),
-		NavigationPanel->IsRouteGuidanceVisible()));
+		NavigationPanel->IsRouteGuidanceVisible(), &NavigationPanel->GetStops(), &NavigationPanel->GetRouteLegs()));
 }
 
 void ANavPlayerController::OnLeftMouseDown3DEdit()
@@ -3487,7 +3487,7 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 		for (FVector2D& Point : NewFootprint)
 		{
 			Point += Offset;
-			
+
 		}
 		bFoundPastePosition = true;
 		break;
@@ -4279,17 +4279,17 @@ UAudioComponent* ANavPlayerController::PlayWavFile(const FString& FileName, bool
 	FTimerHandle StopTimerHandle;
 	TWeakObjectPtr<UAudioComponent> WeakAudioComponent = AudioComponent;
 	GetWorldTimerManager().SetTimer(StopTimerHandle, [WeakAudioComponent, bDestroyWhenFinished]()
-	{
-		if (!WeakAudioComponent.IsValid())
 		{
-			return;
-		}
-		WeakAudioComponent->Stop();
-		if (bDestroyWhenFinished)
-		{
-			WeakAudioComponent->DestroyComponent();
-		}
-	}, Duration, false);
+			if (!WeakAudioComponent.IsValid())
+			{
+				return;
+			}
+			WeakAudioComponent->Stop();
+			if (bDestroyWhenFinished)
+			{
+				WeakAudioComponent->DestroyComponent();
+			}
+		}, Duration, false);
 
 	return AudioComponent;
 }

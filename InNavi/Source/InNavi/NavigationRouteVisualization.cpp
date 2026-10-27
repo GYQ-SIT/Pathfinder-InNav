@@ -8,6 +8,15 @@ namespace
 	constexpr float RouteDisplayLift = 15.f;
 	const FColor NavigationRouteColor(255, 140, 0);
 	const FColor NavigationTransitionColor(70, 210, 255);
+	const FColor NavigationLegColors[] = {
+		FColor(255, 140, 0), FColor(25, 158, 242), FColor(184, 82, 235),
+		FColor(26, 184, 107), FColor(242, 179, 20)
+	};
+
+	FColor NavigationLegColor(int32 LegIndex)
+	{
+		return NavigationLegColors[LegIndex % UE_ARRAY_COUNT(NavigationLegColors)];
+	}
 
 	bool NavigationPointVisible(int32 Floor, int32 ActiveFloor)
 	{
@@ -53,14 +62,28 @@ UNavigationRouteVisualization::UNavigationRouteVisualization()
 
 FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigationRoutePoint>& Route,
 	const FNavigationRoutePoint* Start, const FNavigationRoutePoint* Destination,
-	FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible)
+	FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible,
+	const TArray<FNavigationStop>* Stops, const TArray<FNavigationRouteLeg>* RouteLegs)
 {
 	FNavigation3DView View;
 	if (!bGuidanceVisible) return View;
 	auto WorldPoint = [&](const FNavigationRoutePoint& Point)
-	{
-		return NavigationWorldPoint(Point, BuildingOffset, Scale, FloorHeight);
-	};
+		{
+			return NavigationWorldPoint(Point, BuildingOffset, Scale, FloorHeight);
+		};
+	auto FindLegForSegment = [RouteLegs](int32 SegmentEndPointIndex) -> int32
+		{
+			if (!RouteLegs) return INDEX_NONE;
+			for (int32 LegIndex = 0; LegIndex < RouteLegs->Num(); ++LegIndex)
+			{
+				if (SegmentEndPointIndex > (*RouteLegs)[LegIndex].FirstPointIndex
+					&& SegmentEndPointIndex <= (*RouteLegs)[LegIndex].LastPointIndex)
+				{
+					return LegIndex;
+				}
+			}
+			return INDEX_NONE;
+		};
 	for (int32 I = 1; I < Route.Num(); ++I)
 	{
 		const FNavigationRoutePoint& From = Route[I - 1];
@@ -70,7 +93,7 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 			if (NavigationPointVisible(From.Floor, ActiveFloor)
 				&& !WorldPoint(From).Equals(WorldPoint(To), KINDA_SMALL_NUMBER))
 			{
-				View.Segments.Add({ WorldPoint(From), WorldPoint(To), false });
+				View.Segments.Add({ WorldPoint(From), WorldPoint(To), false, FindLegForSegment(I) });
 			}
 			continue;
 		}
@@ -103,7 +126,8 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 					: FString::Printf(TEXT("Arrive via %s from %s"), *Connector, *NavigationFloorLabel(Other.Floor));
 				const FVector Upper = Position + FVector(0, 0, 70.f);
 				const bool bUpward = To.Floor > From.Floor;
-				View.Segments.Add({ bUpward ? Position : Upper, bUpward ? Upper : Position, true });
+				View.Segments.Add({ bUpward ? Position : Upper, bUpward ? Upper : Position, true,
+					FindLegForSegment(I) });
 			}
 			View.Labels.Add({ Position + FVector(0, 0, 95.f), Text, NavigationTransitionColor });
 		}
@@ -117,6 +141,18 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 	{
 		View.Destination = WorldPoint(*Destination);
 		View.Labels.Add({ View.Destination.GetValue() + FVector(0, 0, 55), TEXT("Destination"), FColor::Red });
+	}
+	if (Stops)
+	{
+		for (int32 StopIndex = 0; StopIndex < Stops->Num(); ++StopIndex)
+		{
+			const FNavigationRoutePoint& Stop = (*Stops)[StopIndex].Point;
+			if (!NavigationPointVisible(Stop.Floor, ActiveFloor)) continue;
+			const FVector Position = WorldPoint(Stop);
+			const FColor Color = NavigationLegColor(StopIndex);
+			View.Stops.Add({ Position, StopIndex + 1, Color });
+			View.Labels.Add({ Position + FVector(0, 0, 55), FString::Printf(TEXT("Stop %d"), StopIndex + 1), Color });
+		}
 	}
 	return View;
 }
@@ -160,7 +196,10 @@ void UNavigationRouteVisualization::ShowView(const FNavigation3DView& View)
 	ClearRoute();
 	for (const FNavigationDisplaySegment& Segment : View.Segments)
 	{
-		const FLinearColor Color(Segment.bTransition ? NavigationTransitionColor : NavigationRouteColor);
+		const FColor SegmentColor = Segment.bTransition
+			? NavigationTransitionColor
+			: (Segment.RouteLegIndex == INDEX_NONE ? NavigationRouteColor : NavigationLegColor(Segment.RouteLegIndex));
+		const FLinearColor Color(SegmentColor);
 		DrawLine(Segment.From, Segment.To, Color, 0, 6.f, -1.f);
 		const float Length = FVector::Distance(Segment.From, Segment.To);
 		const FVector Direction = (Segment.To - Segment.From).GetSafeNormal();
@@ -180,6 +219,10 @@ void UNavigationRouteVisualization::ShowView(const FNavigation3DView& View)
 	}
 	if (View.Start.IsSet()) DrawSphere(View.Start.GetValue(), 25.f, 12, FLinearColor::Green, -1.f, 0, 3.f);
 	if (View.Destination.IsSet()) DrawSphere(View.Destination.GetValue(), 25.f, 12, FLinearColor::Red, -1.f, 0, 3.f);
+	for (const FNavigationDisplayStop& Stop : View.Stops)
+	{
+		DrawSphere(Stop.Position, 20.f, 12, FLinearColor(Stop.Color), -1.f, 0, 3.f);
+	}
 	if (!GetOwner()) return;
 	for (const FNavigationDisplayLabel& Input : View.Labels)
 	{

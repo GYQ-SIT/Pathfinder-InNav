@@ -1,7 +1,8 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "Components/LineBatchComponent.h"
+#include "NavigationPanelWidget.h"
 #include "NavigationRoutePlanner.h"
 #include "NavigationRouteVisualization.generated.h"
 
@@ -12,6 +13,7 @@ struct FNavigationDisplaySegment
 	FVector From;
 	FVector To;
 	bool bTransition = false;
+	int32 RouteLegIndex = INDEX_NONE;
 };
 
 struct FNavigationDisplayLabel
@@ -21,10 +23,18 @@ struct FNavigationDisplayLabel
 	FColor Color = FColor::White;
 };
 
+struct FNavigationDisplayStop
+{
+	FVector Position;
+	int32 Number = 0;
+	FColor Color = FColor::White;
+};
+
 struct FNavigation3DView
 {
 	TArray<FNavigationDisplaySegment> Segments;
 	TArray<FNavigationDisplayLabel> Labels;
+	TArray<FNavigationDisplayStop> Stops;
 	TOptional<FVector> Start;
 	TOptional<FVector> Destination;
 };
@@ -46,7 +56,8 @@ public:
 	UNavigationRouteVisualization();
 	static FNavigation3DView BuildView(const TArray<FNavigationRoutePoint>& Route,
 		const FNavigationRoutePoint* Start, const FNavigationRoutePoint* Destination,
-		FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible = true);
+		FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible = true,
+		const TArray<FNavigationStop>* Stops = nullptr, const TArray<FNavigationRouteLeg>* RouteLegs = nullptr);
 	static TArray<FNavigationDirectionArrow2D> BuildDirectionArrows2D(FVector2D From, FVector2D To);
 	void ShowView(const FNavigation3DView& View);
 	void ClearRoute();

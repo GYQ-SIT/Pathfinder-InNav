@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -472,6 +472,9 @@ private:
 	void OnNavFindRouteClicked();
 
 	UFUNCTION()
+	void OnNavAddStopClicked();
+
+	UFUNCTION()
 	void OnNavClearRouteClicked();
 
 	UFUNCTION()
@@ -540,10 +543,21 @@ private:
 	UFUNCTION()
 	void HandleDestinationSearchChanged(const FText& Text);
 	UFUNCTION()
+	void HandleNavStopRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+	UFUNCTION()
+	void HandleNavStopSelected(FString SelectedItem, ESelectInfo::Type SelectionType);
+	UFUNCTION()
+	void OnNavMoveStopUpClicked();
+	UFUNCTION()
+	void OnNavMoveStopDownClicked();
+	UFUNCTION()
+	void OnNavRemoveStopClicked();
+	UFUNCTION()
 	void OnApplyRoomTagsClicked();
 
 	void RefreshNavRoomDropdowns();
 	void RefreshDestinationRoomDropdown();
+	void RefreshNavStopsList();
 
 	// --- Docking system for the Toolbar/Floor/Properties/Layers/Navigation/Audio panels ---
 	// Each of the 6 panels below is an independently draggable UBorder placed directly on the root
@@ -558,8 +572,9 @@ private:
 	// see the Window menu. Map (the road-filter panel ported from UEditScreenWidget's own "Map" panel,
 	// Roads section only - no Buildings section, since this screen has no exterior building-visibility
 	// concept) starts VISIBLE, matching that panel's own default there.
-	enum class EDockPanelId : uint8{Toolbar,Floor,Properties,Layers,Navigation,Audio,Map,Debug
-};
+	enum class EDockPanelId : uint8 {
+		Toolbar, Floor, Properties, Layers, Navigation, Audio, Map, Debug
+	};
 
 	static constexpr int32 NumDockPanels = 8;
 	static constexpr int32 MaxDockSplitters = NumDockPanels - 1; // worst case: all 7 panels in one column
@@ -1044,6 +1059,34 @@ private:
 	UEditableTextBox* DestinationSearchBox = nullptr;
 	UPROPERTY()
 	UTextBlock* DestinationSearchResultsText = nullptr;
+
+	// PAT110 stop picker uses the same destination search index and query, while keeping the
+	// existing Destination dropdown available for the final endpoint.
+	UPROPERTY()
+	UComboBoxString* NavStopRoomComboBox = nullptr;
+
+	UPROPERTY()
+	UButton* NavAddStopButton = nullptr;
+
+	UPROPERTY()
+	UTextBlock* NavAddStopButtonLabel = nullptr;
+
+	UPROPERTY()
+	UComboBoxString* NavStopsComboBox = nullptr;
+
+	UPROPERTY()
+	UButton* NavMoveStopUpButton = nullptr;
+
+	UPROPERTY()
+	UButton* NavMoveStopDownButton = nullptr;
+
+	UPROPERTY()
+	UButton* NavRemoveStopButton = nullptr;
+
+	UPROPERTY()
+	UTextBlock* NavStopsCountText = nullptr;
+
+	int32 SelectedNavigationStopIndex = INDEX_NONE;
 
 	// Same as NavStartRoomBorder, tinted red for Destination.
 	UPROPERTY()

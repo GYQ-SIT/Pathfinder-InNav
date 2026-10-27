@@ -1,4 +1,4 @@
-#if WITH_DEV_AUTOMATION_TESTS
+﻿#if WITH_DEV_AUTOMATION_TESTS
 
 #include "NavigationRouteVisualization.h"
 #include "NavigationPanelWidget.h"
@@ -20,7 +20,7 @@
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationM2ToggleTest, "InNavi.Navigation.M2.PanelToggle",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FNavigationM2ToggleTest::RunTest(const FString& Parameters)
+	bool FNavigationM2ToggleTest::RunTest(const FString& Parameters)
 {
 	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>();
 	Screen->Initialize();
@@ -57,7 +57,7 @@ bool FNavigationM2ToggleTest::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationM2WorldRouteTest, "InNavi.Navigation.M2.WorldRouteDisplay",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FNavigationM2WorldRouteTest::RunTest(const FString& Parameters)
+	bool FNavigationM2WorldRouteTest::RunTest(const FString& Parameters)
 {
 	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
 	ABuildingGenerator* Generator = World->SpawnActor<ABuildingGenerator>();
@@ -110,6 +110,34 @@ bool FNavigationM2WorldRouteTest::RunTest(const FString& Parameters)
 		}
 		TestTrue(TEXT("Connector departure label identifies next floor"), Lower.Labels.ContainsByPredicate(
 			[](const FNavigationDisplayLabel& Label) { return Label.Text.Contains(TEXT("Lift-A to Floor 2")); }));
+
+		TArray<FNavigationStop> Stops;
+		FNavigationStop FirstStop;
+		FirstStop.Point = Route[0];
+		Stops.Add(FirstStop);
+		TArray<FNavigationRouteLeg> Legs;
+		FNavigationRouteLeg FirstLeg;
+		FirstLeg.FirstPointIndex = 0;
+		FirstLeg.LastPointIndex = 1;
+		Legs.Add(FirstLeg);
+		FNavigationRouteLeg SecondLeg;
+		SecondLeg.FirstPointIndex = 1;
+		SecondLeg.LastPointIndex = 3;
+		Legs.Add(SecondLeg);
+		const FNavigation3DView MultiStopLower = UNavigationRouteVisualization::BuildView(Route,
+			&Panel->GetStart(), &Panel->GetDestination(), Building->BuildingOffset, Scale, 300, 1, true, &Stops, &Legs);
+		TestEqual(TEXT("Visible intermediate stops become 3D markers"), MultiStopLower.Stops.Num(), 1);
+		if (!MultiStopLower.Stops.IsEmpty())
+		{
+			TestEqual(TEXT("3D stop marker uses one-based numbering"), MultiStopLower.Stops[0].Number, 1);
+		}
+		TestTrue(TEXT("3D view labels the intermediate stop"), MultiStopLower.Labels.ContainsByPredicate(
+			[](const FNavigationDisplayLabel& Label) { return Label.Text == TEXT("Stop 1"); }));
+		if (MultiStopLower.Segments.Num() == 2)
+		{
+			TestEqual(TEXT("First route segment belongs to the first leg"), MultiStopLower.Segments[0].RouteLegIndex, 0);
+			TestEqual(TEXT("Floor transition belongs to the second leg"), MultiStopLower.Segments[1].RouteLegIndex, 1);
+		}
 		const FNavigation3DView Upper = UNavigationRouteVisualization::BuildView(Route,
 			&Panel->GetStart(), &Panel->GetDestination(), Building->BuildingOffset, Scale, 300, 2);
 		TestTrue(TEXT("Destination appears on its floor"), Upper.Destination.IsSet());
