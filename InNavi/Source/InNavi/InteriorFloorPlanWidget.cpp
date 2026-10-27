@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "InteriorFloorPlanWidget.h"
@@ -9,6 +9,7 @@
 #include "BuildingGenerator.h"
 #include "PolyBuilding.h"
 #include "NavPlayerController.h"
+#include "LayoutValidationSession.h"
 #include "NavigationPanelWidget.h"
 #include "NavigationRouteVisualization.h"
 #include "PolygonGeometryUtils.h"
@@ -1250,5 +1251,17 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		}
 	}
 
-	return LayerId + 7;
+	if (PlayerController)
+	{
+		const auto* Issue = PlayerController->GetLayoutValidationSession()->GetFocusedIssue();
+		if (Issue && Issue->bHasPosition && Issue->BuildingId == InteriorGen->GetLoadedBuildingId() && Issue->Floor == InteriorGen->GetActiveFloor())
+		{
+			const FVector2D World = (Issue->Position + Building->BuildingOffset) * Generator->GetScale();
+			const FVector2D Center = WidgetSize * .5 + (World - Origin) * PixelsPerUnit;
+			TArray<FVector2D> Ring;
+			for (int32 I = 0; I <= 24; ++I) { const double Angle = I * 2.0 * PI / 24; Ring.Add(Center + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * 14.0); }
+			FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 8, AllottedGeometry.ToPaintGeometry(), Ring, ESlateDrawEffect::None, FLinearColor::Yellow, true, 3.f);
+		}
+	}
+	return LayerId + 9;
 }

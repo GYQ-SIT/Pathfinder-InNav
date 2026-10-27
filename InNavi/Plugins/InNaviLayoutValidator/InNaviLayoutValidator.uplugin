@@ -1,0 +1,10 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0",
+  "FriendlyName": "InNavi Layout Validator",
+  "Description": "Read-only validation of indoor navigation project data.",
+  "Category": "Navigation",
+  "CanContainContent": false,
+  "Modules": [{ "Name": "InNaviLayoutValidator", "Type": "Runtime", "LoadingPhase": "Default" }]
+}

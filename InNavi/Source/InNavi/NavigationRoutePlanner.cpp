@@ -5,6 +5,8 @@
 #include "PolyBuilding.h"
 #include "BuildingGenerator.h"
 #include "InteriorEntrance.h"
+#include "LayoutValidation.h"
+#include "PolygonGeometryUtils.h"
 
 namespace
 {
@@ -69,6 +71,7 @@ namespace
 		TMap<int32, FFloorGeometry> Floors;
 		TArray<FInteriorNavNode> Nodes;
 		TArray<FInteriorEntrance> Entrances;
+		TMap<int32, TArray<FRouteRoom>> Rooms;
 	};
 
 	struct FRouteGraphEdge
@@ -733,6 +736,8 @@ namespace
 		{
 			if (bLive)
 			{
+				for (const auto* Room : Live.GetRoomsOnFloor(Level)) if (IsValid(Room))
+					Model.Rooms.FindOrAdd(Level).Add({ Room->RoomId, Room->GetFootprint(), Room->GetOpenings(), Room->IsClosedLoop() });
 				Model.Floors.Add(Level, MakeFloorGeometry(Live, Scale, Level, Building.GetFootprint()));
 				continue;
 			}
@@ -797,6 +802,7 @@ namespace
 			TArray<const FRouteRoom*> Rooms;
 			for (const auto& Room : Values) Rooms.Add(&Room);
 			Model.Floors.Add(Level, MakeFloorGeometryFromRooms(Rooms, Thickness, Scale, Level, Building.GetFootprint()));
+			Model.Rooms.Add(Level, MoveTemp(Values));
 		}
 		if (bLive) Model.Nodes = Live.GetNavNodes();
 		for (const auto& Door : Entrances)
@@ -813,11 +819,18 @@ namespace
 		return IsExteriorExitVertex(Point) || Point.ConnectorId.StartsWith(TEXT("BuildingLink:"));
 	}
 
-	bool SolveCampus(const TArray<FRouteBuilding>& Models, float Scale, FNavigationRoutePoint Start,
-		FNavigationRoutePoint Destination, FNavigationRouteResult& Result)
+	struct FCampusGraph
 	{
-		Result = {};
-		if (!FMath::IsFinite(Scale) || Scale <= KINDA_SMALL_NUMBER) { Result.Error = TEXT("The project scale is invalid."); return false; }
+		TArray<FVertex> Vertices;
+		TArray<TArray<FRouteGraphEdge>> Edges;
+		TArray<int32> SeedVertices;
+	};
+
+	bool BuildCampusGraph(const TArray<FRouteBuilding>& Models, float Scale,
+		const TArray<FNavigationRoutePoint>& Seeds, FCampusGraph& Out, FString& Error)
+	{
+		Out = {};
+		if (!FMath::IsFinite(Scale) || Scale <= KINDA_SMALL_NUMBER) { Error = TEXT("The project scale is invalid."); return false; }
 		auto ModelFor = [&](const FString& Id) -> const FRouteBuilding*
 		{
 			return Models.FindByPredicate([&](const auto& M) { return M.Building->BuildingId == Id; });
@@ -847,13 +860,13 @@ namespace
 			Stamp(Point, *M->Building);
 			return true;
 		};
-		if (!Validate(Start) || !Validate(Destination))
+		TArray<FVertex>& Vertices = Out.Vertices;
+		bool bNeedsOutdoor = false;
+		for (auto Seed : Seeds)
 		{
-			Result.Error = TEXT("A selected point is no longer reachable. Check its building, floor, and wall clearance, then select it again.");
-			return false;
+			Out.SeedVertices.Add(Validate(Seed) ? Vertices.Add({ Seed, {} }) : INDEX_NONE);
+			bNeedsOutdoor |= Seed.Floor == 0;
 		}
-		TArray<FVertex> Vertices = { { Start, {} }, { Destination, {} } };
-		bool bNeedsOutdoor = Start.Floor == 0 || Destination.Floor == 0;
 		for (const auto& M : Models) for (const auto& Floor : M.Floors)
 			bNeedsOutdoor |= !Floor.Value.ExteriorExits.IsEmpty();
 		auto Add = [&](const FRouteBuilding& M, FVector2D P, int32 Floor, const FString& Id = FString(),
@@ -897,7 +910,7 @@ namespace
 				if (bFree) Add(M, P, 0);
 			}
 		}
-		TArray<TArray<FRouteGraphEdge>> Graph;
+		TArray<TArray<FRouteGraphEdge>>& Graph = Out.Edges;
 		Graph.SetNum(Vertices.Num());
 		for (int32 I = 0; I < Vertices.Num(); ++I) for (int32 J = I + 1; J < Vertices.Num(); ++J)
 		{
@@ -951,6 +964,22 @@ namespace
 			}
 			Graph[I].Add({ J, Cost }); Graph[J].Add({ I, Cost });
 		}
+		return true;
+	}
+
+	bool SolveCampus(const TArray<FRouteBuilding>& Models, float Scale, FNavigationRoutePoint Start,
+		FNavigationRoutePoint Destination, FNavigationRouteResult& Result)
+	{
+		Result = {};
+		FCampusGraph Built;
+		if (!BuildCampusGraph(Models, Scale, { Start, Destination }, Built, Result.Error)) return false;
+		if (Built.SeedVertices[0] == INDEX_NONE || Built.SeedVertices[1] == INDEX_NONE)
+		{
+			Result.Error = TEXT("A selected point is no longer reachable. Check its building, floor, and wall clearance, then select it again.");
+			return false;
+		}
+		const auto& Vertices = Built.Vertices;
+		const auto& Graph = Built.Edges;
 		TArray<float> Distances; TArray<int32> Previous; TArray<bool> Visited;
 		Distances.Init(TNumericLimits<float>::Max(), Vertices.Num()); Previous.Init(INDEX_NONE, Vertices.Num()); Visited.Init(false, Vertices.Num());
 		Distances[0] = 0;
@@ -981,31 +1010,165 @@ bool FNavigationRoutePlanner::FindRoute(const APolyBuilding& Building, const AIn
 	return SolveCampus({ ReadRouteBuilding(Building, Interior, nullptr, Interior.GetAllEntrances(), Scale, true) }, Scale, A, B, OutResult);
 }
 
+namespace
+{
+	TArray<FRouteBuilding> ReadCampusModels(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
+		const FString& StartBuilding, const FString& DestinationBuilding, bool bAllFloors)
+	{
+		const float Scale = Generator.GetScale();
+		const auto Buildings = Generator.GetAllBuildings();
+		TMap<FString, TArray<FInteriorEntrance>> Entrances;
+		for (const auto* Building : Buildings) if (IsValid(Building)) Entrances.Add(Building->BuildingId,
+			Building->BuildingId == Interior.GetLoadedBuildingId() ? Interior.GetEntrances() : Generator.GetStoredEntrances(Building->BuildingId));
+		// Generate each mirror once. In particular, use live unsaved source entrances.
+		for (const auto* Building : Buildings) if (IsValid(Building))
+		{
+			const auto Own = Entrances.FindChecked(Building->BuildingId);
+			for (const auto& Door : Own) if (!Door.bMirrored && Door.Kind == EInteriorEntranceKind::Link && Door.ConnectsTo != Building->BuildingId)
+			{
+				FInteriorEntrance Mirror;
+				if (auto* Target = Entrances.Find(Door.ConnectsTo); Target && Generator.MakeMirrorOfEntrance(Building->BuildingId, Door, Door.ConnectsTo, Mirror)) Target->Add(Mirror);
+			}
+		}
+		TArray<FRouteBuilding> Models;
+		for (const auto* Building : Buildings) if (IsValid(Building))
+		{
+			const auto& Doors = Entrances.FindChecked(Building->BuildingId);
+			Models.Add(ReadRouteBuilding(*Building, Interior, Generator.GetInteriorDataForBuilding(Building->BuildingId), Doors, Scale,
+				bAllFloors || !Doors.IsEmpty() || Building->BuildingId == StartBuilding || Building->BuildingId == DestinationBuilding));
+		}
+		return Models;
+	}
+}
+
 bool FNavigationRoutePlanner::FindCampusRoute(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
 	const FNavigationRoutePoint& Start, const FNavigationRoutePoint& Destination, FNavigationRouteResult& OutResult)
 {
 	const float Scale = Generator.GetScale();
 	if (Scale <= KINDA_SMALL_NUMBER) { OutResult = {}; OutResult.Error = TEXT("The project scale is invalid."); return false; }
-	const auto Buildings = Generator.GetAllBuildings();
-	TMap<FString, TArray<FInteriorEntrance>> Entrances;
-	for (const auto* Building : Buildings) if (IsValid(Building)) Entrances.Add(Building->BuildingId,
-		Building->BuildingId == Interior.GetLoadedBuildingId() ? Interior.GetEntrances() : Generator.GetStoredEntrances(Building->BuildingId));
-	// Generate each mirror once. In particular, use live unsaved source entrances.
-	for (const auto* Building : Buildings) if (IsValid(Building))
+	const auto Models = ReadCampusModels(Generator, Interior, Start.BuildingId, Destination.BuildingId, false);
+	return SolveCampus(Models, Scale, Start, Destination, OutResult);
+}
+
+void FNavigationRoutePlanner::ValidateLayoutConnectivity(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
+	const FString& ScopeBuildingId, LayoutValidation::FReport& Report)
+{
+	using namespace LayoutValidation;
+	auto Models = ReadCampusModels(Generator, Interior, FString(), FString(), true);
+	const float Scale = Generator.GetScale();
+	auto AddIssue = [&](const TCHAR* Rule, ESeverity Severity, const FString& Building, int32 Floor, EObjectKind Kind,
+		const FString& Id, const FString& Message, const FString& Suggestion, FVector2D Position)
 	{
-		const auto Own = Entrances.FindChecked(Building->BuildingId);
-		for (const auto& Door : Own) if (!Door.bMirrored && Door.Kind == EInteriorEntranceKind::Link && Door.ConnectsTo != Building->BuildingId)
+		FIssue Issue; Issue.Rule = Rule; Issue.Severity = Severity; Issue.BuildingId = Building; Issue.Floor = Floor;
+		Issue.Kind = Kind; Issue.ObjectId = Id; Issue.Message = Message; Issue.Suggestion = Suggestion;
+		Issue.Position = Position; Issue.bHasPosition = true; Report.Issues.Add(MoveTemp(Issue));
+	};
+	// Shell-only floors must not become invented walkable interiors during validation.
+	for (auto& Model : Models)
+	{
+		const auto Data = Interior.GetLoadedBuildingId() == Model.Building->BuildingId
+			? Interior.CaptureInteriorSnapshot() : Generator.GetInteriorDataForBuilding(Model.Building->BuildingId);
+		TSet<int32> Authored;
+		const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
+		if (Data && Data->TryGetArrayField(TEXT("floors"), Floors)) for (const auto& Value : *Floors)
 		{
-			FInteriorEntrance Mirror;
-			if (auto* Target = Entrances.Find(Door.ConnectsTo); Target && Generator.MakeMirrorOfEntrance(Building->BuildingId, Door, Door.ConnectsTo, Mirror)) Target->Add(Mirror);
+			int32 Level = 1;
+			Value->AsObject()->TryGetNumberField(TEXT("level"), Level); Authored.Add(Level);
+		}
+		for (auto It = Model.Floors.CreateIterator(); It; ++It) if (!Authored.Contains(It.Key())) It.RemoveCurrent();
+	}
+	struct FRoomProbe { FString Building, Room; int32 Floor, Seed; FVector2D Position; };
+	TArray<FRoomProbe> Probes;
+	TArray<FNavigationRoutePoint> Seeds;
+	for (const auto& Model : Models)
+	{
+		if (!ScopeBuildingId.IsEmpty() && Model.Building->BuildingId != ScopeBuildingId) continue;
+		for (const auto& Pair : Model.Rooms)
+		{
+			const auto* Geometry = Model.Floors.Find(Pair.Key); if (!Geometry) continue;
+			for (const auto& Room : Pair.Value)
+			{
+				if (!Room.bClosed) continue;
+				TArray<int32> Triangles; TriangulatePolygon(Room.Footprint, Triangles);
+				bool bFound = false;
+				for (int32 T = 0; T + 2 < Triangles.Num(); T += 3)
+				{
+					const FVector2D P = (Room.Footprint[Triangles[T]] + Room.Footprint[Triangles[T + 1]] + Room.Footprint[Triangles[T + 2]]) / 3.0;
+					if (!InsideOrOnBoundary(P, Room.Footprint) || !IsPointClearOfWalls(P, Model.Building->GetFootprint(), *Geometry)) continue;
+					FNavigationRoutePoint Point; Point.BuildingId = Model.Building->BuildingId; Point.Floor = Pair.Key; Point.Position = P;
+					Probes.Add({ Point.BuildingId, Room.RoomId, Pair.Key, Seeds.Add(Point), P }); bFound = true; break;
+				}
+				if (!bFound)
+				{
+					++Report.RoomsSkipped;
+					AddIssue(TEXT("ROOM_PROBE_UNAVAILABLE"), ESeverity::Warning, Model.Building->BuildingId, Pair.Key, EObjectKind::Room, Room.RoomId,
+						TEXT("No destination point with the planner's wall clearance could be established in this room."),
+						TEXT("Review room size, internal walls and clearance. Reachability for this room was not checked."), Room.Footprint[0]);
+				}
+			}
 		}
 	}
-	TArray<FRouteBuilding> Models;
-	for (const auto* Building : Buildings) if (IsValid(Building))
+	FCampusGraph Graph; FString Error;
+	if (!BuildCampusGraph(Models, Scale, Seeds, Graph, Error))
 	{
-		const auto& Doors = Entrances.FindChecked(Building->BuildingId);
-		Models.Add(ReadRouteBuilding(*Building, Interior, Generator.GetInteriorDataForBuilding(Building->BuildingId), Doors, Scale,
-			!Doors.IsEmpty() || Building->BuildingId == Start.BuildingId || Building->BuildingId == Destination.BuildingId));
+		FIssue Issue; Issue.Rule = TEXT("NAVIGATION_SKIPPED"); Issue.Severity = ESeverity::Warning; Issue.Message = Error;
+		Report.Issues.Add(MoveTemp(Issue)); Report.RoomsSkipped += Probes.Num(); return;
 	}
-	return SolveCampus(Models, Scale, Start, Destination, OutResult);
+	TArray<bool> Reachable; Reachable.Init(false, Graph.Vertices.Num());
+	TArray<int32> Queue;
+	for (int32 I = 0; I < Graph.Vertices.Num(); ++I)
+	{
+		const auto& Point = Graph.Vertices[I].Point;
+		if (Point.Floor == 0 && IsExteriorExitVertex(Point)) { Reachable[I] = true; Queue.Add(I); }
+	}
+	// Also inspect authored links when no main entrance exists: a valid link is stored on only one side.
+	for (const auto& Model : Models) for (const auto& Door : Model.Entrances)
+	{
+		if (Door.bMirrored || Door.Kind != EInteriorEntranceKind::Link || (!ScopeBuildingId.IsEmpty() && Model.Building->BuildingId != ScopeBuildingId)) continue;
+		const FString Id = TEXT("BuildingLink:") + Model.Building->BuildingId + TEXT(":") + Door.Id;
+		bool bConnected = false;
+		for (int32 I = 0; I < Graph.Vertices.Num(); ++I)
+		{
+			const auto& P = Graph.Vertices[I].Point;
+			if (P.BuildingId != Model.Building->BuildingId || P.ConnectorId != Id) continue;
+			for (const auto& Edge : Graph.Edges[I]) bConnected |= Graph.Vertices[Edge.To].Point.BuildingId == Door.ConnectsTo;
+		}
+		if (!bConnected)
+		{
+			FVector2D Position = FVector2D::ZeroVector; EntrancePosition(Model, Door, Scale, Position);
+			AddIssue(TEXT("LINK_UNUSABLE"), ESeverity::Error, Model.Building->BuildingId, Door.Level, EObjectKind::Entrance, Door.Id,
+				TEXT("The route planner cannot join this link entrance to the target building."),
+				TEXT("Check target floors, floor elevations, wall proximity and whether the mirrored opening fits."), Position);
+		}
+	}
+	if (Queue.IsEmpty())
+	{
+		FIssue Issue; Issue.Rule = TEXT("NO_ENTRY_POINTS"); Issue.Severity = ESeverity::Warning;
+		Issue.Message = TEXT("Entrance-based reachability was not checked: the campus has no usable exterior entry points.");
+		Issue.Suggestion = TEXT("Add a main entrance or a supported ground-floor outside door, then validate again.");
+		Report.Issues.Add(MoveTemp(Issue)); Report.RoomsSkipped += Probes.Num(); return;
+	}
+	for (int32 Head = 0; Head < Queue.Num(); ++Head) for (const auto& Edge : Graph.Edges[Queue[Head]])
+	{
+		if (!Reachable[Edge.To]) { Reachable[Edge.To] = true; Queue.Add(Edge.To); }
+	}
+	Report.bNavigationChecked = true;
+	for (const auto& Probe : Probes)
+	{
+		const int32 Vertex = Graph.SeedVertices[Probe.Seed];
+		if (Vertex == INDEX_NONE) { ++Report.RoomsSkipped; continue; }
+		++Report.RoomsChecked;
+		if (!Reachable[Vertex]) AddIssue(TEXT("ROOM_UNREACHABLE"), ESeverity::Error, Probe.Building, Probe.Floor, EObjectKind::Room, Probe.Room,
+			TEXT("No route reaches this room's tested destination from any campus entrance."),
+			TEXT("Check room openings, corridor walls, floor connectors and main/link entrances."), Probe.Position);
+	}
+	for (const auto& Model : Models) for (const auto& Node : Model.Nodes)
+	{
+		if (!ScopeBuildingId.IsEmpty() && Model.Building->BuildingId != ScopeBuildingId) continue;
+		const auto* Geometry = Model.Floors.Find(Node.Level);
+		if (!Geometry || !IsPointClearOfWalls(Node.Position, Model.Building->GetFootprint(), *Geometry))
+			AddIssue(TEXT("CONNECTOR_CLEARANCE"), ESeverity::Error, Model.Building->BuildingId, Node.Level, EObjectKind::Connector,
+				Node.ConnectorGroupId.IsEmpty() ? Node.Id : Node.ConnectorGroupId, TEXT("Navigation node is not clear of the floor's walls."),
+				TEXT("Move the node away from walls using the existing connector tools."), Node.Position);
+	}
 }

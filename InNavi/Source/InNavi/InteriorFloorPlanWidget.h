@@ -34,6 +34,7 @@ public:
 	// Returns (0,0) if nothing is loaded.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	FVector2D LocalPositionToFootprintPoint(FVector2D LocalPosition, FVector2D WidgetSize) const;
+	void ResetView() { PanOffset = FVector2D::ZeroVector; ZoomMultiplier = 1.f; }
 
 protected:
 	virtual void NativeConstruct() override;

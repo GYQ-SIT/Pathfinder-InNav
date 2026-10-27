@@ -16,10 +16,11 @@ namespace InteriorDock
 	const FName Audio(TEXT("Audio"));
 	const FName Map(TEXT("Map"));
 	const FName Debug(TEXT("Debug"));
+	const FName Validation(TEXT("Validation"));
 
 	const TArray<FName>& AllPanels()
 	{
-		static const TArray<FName> Panels = { Toolbar, Floor, Properties, Layers, Navigation, Audio, Map, Debug };
+		static const TArray<FName> Panels = { Toolbar, Floor, Properties, Layers, Navigation, Audio, Map, Debug, Validation };
 		return Panels;
 	}
 
@@ -39,7 +40,7 @@ namespace InteriorDock
 		{
 			return EDockSide::Left;
 		}
-		if (Panel == Audio || Panel == Debug)
+		if (Panel == Audio || Panel == Debug || Panel == Validation)
 		{
 			return EDockSide::Bottom;
 		}
@@ -50,7 +51,7 @@ namespace InteriorDock
 	{
 		bool IsHiddenByDefault(FName Panel)
 		{
-			return Panel == Navigation || Panel == Audio || Panel == Debug || Panel == Map;
+			return Panel == Navigation || Panel == Audio || Panel == Debug || Panel == Map || Panel == Validation;
 		}
 
 		void SetRatios(const TSharedPtr<FDockNode>& Root, const TArray<float>& Ratios)
@@ -88,6 +89,8 @@ namespace InteriorDock
 
 		L.DockPanelToEdge(Audio, EDockSide::Bottom);
 		L.DockPanel(Debug, Audio, EDockDropZone::Center);
+		L.DockPanel(Validation, Audio, EDockDropZone::Center);
+		L.HidePanel(Validation);
 		L.SetAreaExtent(EDockSide::Bottom, 220.f);
 		L.HidePanel(Debug);
 		L.HidePanel(Audio);

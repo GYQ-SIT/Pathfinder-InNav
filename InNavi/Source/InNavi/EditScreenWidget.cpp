@@ -3,6 +3,7 @@
 #include "AudioFileRowWidget.h"
 #include "AudioPanelWidget.h"
 #include "DebugPanelWidget.h"
+#include "LayoutValidationPanelWidget.h"
 #include "BuildingInfoPanelWidget.h"
 #include "MapPanelWidget.h"
 #include "NavigationDockPanelWidget.h"
@@ -310,6 +311,9 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		WindowDebugCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowDebug"), TEXT("Debug"));
 		WindowDebugCheckbox->SetIsChecked(false);
 		WindowDebugCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowDebugCheckChanged);
+		WindowValidationCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowValidation"), TEXT("Validation"));
+		WindowValidationCheckbox->SetIsChecked(false);
+		WindowValidationCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowValidationCheckChanged);
 
 		// Starts unchecked - the Navigation panel starts hidden, like the interior editor's own.
 		WindowNavigationCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowNavigation"), TEXT("Navigation"));
@@ -427,6 +431,20 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			return FString::Printf(TEXT("Selected Building: %s\nCamera Speed: %s\nUnsaved Changes: %s"), *SelectedBuilding, *CameraSpeed, *UnsavedChanges);
 		});
 		DockHost->RegisterPanel(ExteriorDock::Debug, FText::FromName(ExteriorDock::Debug), DebugPanelWidget);
+		ValidationPanelWidget = CreateWidget<ULayoutValidationPanelWidget>(this, ULayoutValidationPanelWidget::StaticClass());
+		ValidationPanelWidget->SetOwnerScreen(this);
+		ValidationPanelWidget->SetExteriorMode(true);
+		ValidationPanelWidget->OnIssueShown = [this]()
+		{
+			if (auto* PC = GetOwningPlayer<ANavPlayerController>())
+			{
+				if (auto* Screen = CreateWidget<UInteriorScreenWidget>(PC, UInteriorScreenWidget::StaticClass()))
+				{
+					Screen->AddToViewport(); Screen->ShowValidationPanel(); RemoveFromParent();
+				}
+			}
+		};
+		DockHost->RegisterPanel(ExteriorDock::Validation, FText::FromName(ExteriorDock::Validation), ValidationPanelWidget);
 
 		// --- Navigation panel (Window > Navigation): the shared one (NavigationDockPanelWidget.h), also used by the interior
 		// editor. Here its dropdowns list each building's main door and a click on the ground sets a point. Starts hidden.
@@ -552,6 +570,8 @@ void UEditScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 	SyncMapPanelWidth();
 	SyncNavigationPanelWidth();
 	SyncBuildingPanelWidth();
+	if (ValidationPanelWidget && DockHost && DockHost->GetPanelWidth(ExteriorDock::Validation) > 0.f)
+		ValidationPanelWidget->SetContentWidth(FMath::Max(100.f, DockHost->GetPanelWidth(ExteriorDock::Validation) - 48.f));
 	if (BuildingInfoPanelWidget)
 	{
 		BuildingInfoPanelWidget->RefreshIfChanged();
@@ -946,6 +966,10 @@ UWidget* UEditScreenWidget::FindScreenWidget(FName Name) const
 			return Found;
 		}
 	}
+	if (ValidationPanelWidget)
+	{
+		if (UWidget* Found = ValidationPanelWidget->FindContentWidget(Name)) return Found;
+	}
 	if (DebugPanelWidget)
 	{
 		if (UWidget* Found = DebugPanelWidget->FindContentWidget(Name))
@@ -1073,6 +1097,7 @@ void UEditScreenWidget::RefreshWindowMenuChecks()
 	Sync(WindowRoadsCheckbox, ExteriorDock::Map);
 	Sync(WindowBuildingCheckbox, ExteriorDock::Building);
 	Sync(WindowDebugCheckbox, ExteriorDock::Debug);
+	Sync(WindowValidationCheckbox, ExteriorDock::Validation);
 	Sync(WindowNavigationCheckbox, ExteriorDock::Navigation);
 }
 
@@ -1171,6 +1196,11 @@ void UEditScreenWidget::OnWindowBuildingCheckChanged(bool bIsChecked)
 void UEditScreenWidget::OnWindowDebugCheckChanged(bool bIsChecked)
 {
 	SetDockPanelHidden(ExteriorDock::Debug, !bIsChecked);
+}
+
+void UEditScreenWidget::OnWindowValidationCheckChanged(bool bIsChecked)
+{
+	SetDockPanelHidden(ExteriorDock::Validation, !bIsChecked);
 }
 
 void UEditScreenWidget::OnWindowNavigationCheckChanged(bool bIsChecked)

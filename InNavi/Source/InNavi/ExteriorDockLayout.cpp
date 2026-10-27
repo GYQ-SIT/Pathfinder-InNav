@@ -13,11 +13,12 @@ namespace ExteriorDock
 	const FName Map(TEXT("Map"));
 	const FName Building(TEXT("Building"));
 	const FName Debug(TEXT("Debug"));
+	const FName Validation(TEXT("Validation"));
 	const FName Navigation(TEXT("Navigation"));
 
 	const TArray<FName>& AllPanels()
 	{
-		static const TArray<FName> Panels = { Audio, Map, Building, Debug, Navigation };
+		static const TArray<FName> Panels = { Audio, Map, Building, Debug, Navigation, Validation };
 		return Panels;
 	}
 
@@ -40,7 +41,7 @@ namespace ExteriorDock
 	{
 		bool IsHiddenByDefault(FName Panel)
 		{
-			return Panel == Audio || Panel == Debug || Panel == Navigation;
+			return Panel == Audio || Panel == Debug || Panel == Navigation || Panel == Validation;
 		}
 	}
 
@@ -60,6 +61,8 @@ namespace ExteriorDock
 		// Hidden panels are placed first and then hidden so the layout remembers where each one belongs.
 		L.DockPanelToEdge(Audio, EDockSide::Bottom);
 		L.DockPanel(Debug, Audio, EDockDropZone::Center);
+		L.DockPanel(Validation, Audio, EDockDropZone::Center);
+		L.HidePanel(Validation);
 		L.SetAreaExtent(EDockSide::Bottom, 220.f);
 		L.HidePanel(Debug);
 		L.HidePanel(Audio);

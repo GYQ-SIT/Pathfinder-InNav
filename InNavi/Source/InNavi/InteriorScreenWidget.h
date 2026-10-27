@@ -23,6 +23,7 @@ class UAudioPanelWidget;
 class UNavigationDockPanelWidget;
 class UMapPanelWidget;
 class UDebugPanelWidget;
+class ULayoutValidationPanelWidget;
 class UPanelWidget;
 class UScrollBox;
 class USizeBox;
@@ -47,11 +48,13 @@ public:
 	class UDockHostWidget* GetDockHost() const { return DockHost; }
 	UAudioPanelWidget* GetAudioPanelForTests() const { return AudioPanelWidget; }
 	UDebugPanelWidget* GetDebugPanelForTests() const { return DebugPanelWidget; }
+	ULayoutValidationPanelWidget* GetValidationPanelForTests() const { return ValidationPanelWidget; }
 
 	// Finds a widget of this screen by name. GetWidgetFromName cannot see the dock panels' contents - they are
 	// registered with DockHost and are not parented in the widget tree - so this also looks at everything the
 	// screen created. For tests and tooling.
 	UWidget* FindScreenWidget(FName Name) const;
+	void ShowValidationPanel();
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -426,6 +429,8 @@ private:
 	void OnWindowMapCheckChanged(bool bIsChecked);
 	UFUNCTION()
 	void OnWindowDebugCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnWindowValidationCheckChanged(bool bIsChecked);
 
 	// Floor panel - lists every floor of the loaded building (top first, matching the mockup),
 	// highlighting the active one; clicking a row switches to it. "+Add floor"/"Delete floor" call
@@ -515,10 +520,10 @@ private:
 	// groups, splits, edge areas, drag-to-dock, floating. This class only builds each panel's content, registers
 	// it with DockHost, and reacts to layout changes. Back and the menu bars are fixed chrome, not dockable.
 	// Navigation, Audio and Debug start hidden (see InteriorDock::BuildDefaultLayout); the Window menu shows them.
-	enum class EDockPanelId : uint8{Toolbar,Floor,Properties,Layers,Navigation,Audio,Map,Debug
+	enum class EDockPanelId : uint8{Toolbar,Floor,Properties,Layers,Navigation,Audio,Map,Debug,Validation
 };
 
-	static constexpr int32 NumDockPanels = 8;
+	static constexpr int32 NumDockPanels = 9;
 
 	void InitializeDockRuntimeArrays();
 
@@ -794,6 +799,8 @@ private:
 	// The Debug dock panel (shared with the exterior screen, see DebugPanelWidget.h). Starts hidden.
 	UPROPERTY()
 	UDebugPanelWidget* DebugPanelWidget = nullptr;
+	UPROPERTY()
+	ULayoutValidationPanelWidget* ValidationPanelWidget = nullptr;
 
 	UPROPERTY()
 	UComboBoxString* BuildingSwitcherComboBox = nullptr;
@@ -944,6 +951,8 @@ private:
 	UCheckBox* WindowMapCheckbox = nullptr;
 	UPROPERTY()
 	UCheckBox* WindowDebugCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* WindowValidationCheckbox = nullptr;
 
 	// Shared width bounds for every dock panel, and the snap/splitter tuning constants - also used
 	// by RebuildWidget for the panels' initial width. Originally 340 (raised from 260, which wasn't

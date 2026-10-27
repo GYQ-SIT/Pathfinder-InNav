@@ -13,7 +13,7 @@ public class InNavi : ModuleRules
 		// audio-specific module needed. (An earlier pass vendored a third-party mp3-decoding plugin
 		// here, back when mp3 support was a hard requirement; removed once wav-only was confirmed
 		// sufficient - see docs/deliverables.md.)
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "Json", "JsonUtilities", "ProceduralMeshComponent", "UMG" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "Json", "JsonUtilities", "ProceduralMeshComponent", "UMG", "InNaviLayoutValidator" });
 
 		// DesktopPlatform: native "open file" dialog for importing building data.
 		// Slate/SlateCore: needed to get the active window handle to parent that dialog to.

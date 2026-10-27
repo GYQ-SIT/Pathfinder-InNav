@@ -6,6 +6,10 @@
 
 ## Getting to the interior editor
 
+**Window > Validation** opens the advisory layout checker on either screen. Choose a scope and
+press **Validate layout**; select a finding to show the affected object, then fix it with the normal
+tools and validate again. Editing and saving remain available. See [Layout validator](layout-validator.md).
+
 1. Launch the project, pick **New project** (blank), **Open project** (the project library, below), or **Quit**, from
    the start screen.
    **New project** asks for a **Project name** (required) and an optional **Description** first. Create writes a blank

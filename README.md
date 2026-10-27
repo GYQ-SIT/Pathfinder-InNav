@@ -68,6 +68,11 @@ own View/Edit sub-mode, and a Navigation panel that picks Start and Destination 
 building's main door, or a click on the floor plan or the ground) and finds the route.
 See `docs/design/interior-editor-guide.md` for the full control list and workflow.
 
+**Window > Validation** opens the read-only layout validator on either screen. It checks
+data, geometry, doors, connectors and room reachability, with clickable findings and JSON
+report export. Findings never block editing or saving. See
+[`docs/design/layout-validator.md`](docs/design/layout-validator.md) for usage and headless file validation.
+
 ## Running the tests
 
 About 120 automation tests (`InNavi.*`). With the editor closed:
@@ -77,7 +82,7 @@ UnrealEditor-Cmd.exe InNavi/InNavi.uproject -ExecCmds="Automation RunTests InNav
 ```
 
 (`UnrealEditor-Cmd.exe` is in `Engine/Binaries/Win64` of the Unreal install.) A part can be run on its own, e.g. `InNavi.Mobile` or
-`InNavi.Navigation`. They do not run in CI yet.
+`InNavi.Navigation`. Windows CI runs the layout validator, navigation, docking and UI guard tests.
 
 ## The phone app
 

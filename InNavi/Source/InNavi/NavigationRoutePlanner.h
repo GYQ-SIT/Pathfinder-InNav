@@ -6,6 +6,7 @@
 class AInteriorGenerator;
 class APolyBuilding;
 class ABuildingGenerator;
+namespace LayoutValidation { struct FReport; }
 
 // Positions are in the interior's unscaled footprint coordinates, not screen coordinates.
 struct FNavigationRoutePoint
@@ -33,6 +34,9 @@ struct FNavigationRouteResult
 class INNAVI_API FNavigationRoutePlanner
 {
 public:
+	// Uses the same visibility graph as routing, without switching buildings or changing layout data.
+	static void ValidateLayoutConnectivity(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
+		const FString& ScopeBuildingId, LayoutValidation::FReport& Report);
 	static bool FindCampusRoute(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
 		const FNavigationRoutePoint& Start, const FNavigationRoutePoint& Destination, FNavigationRouteResult& OutResult);
 	static bool IsValidPoint(const APolyBuilding& Building, const AInteriorGenerator& Interior,

@@ -11,6 +11,7 @@ class UBorder;
 class UButton;
 class UAudioPanelWidget;
 class UDebugPanelWidget;
+class ULayoutValidationPanelWidget;
 class UNavigationDockPanelWidget;
 class UMapPanelWidget;
 class UBuildingInfoPanelWidget;
@@ -56,6 +57,7 @@ public:
 	UWidget* FindScreenWidget(FName Name) const;
 	UAudioPanelWidget* GetAudioPanelForTests() const { return AudioPanelWidget; }
 	UDebugPanelWidget* GetDebugPanelForTests() const { return DebugPanelWidget; }
+	ULayoutValidationPanelWidget* GetValidationPanelForTests() const { return ValidationPanelWidget; }
 	UMapPanelWidget* GetMapPanelForTests() const { return MapPanelWidget; }
 	UBuildingInfoPanelWidget* GetBuildingInfoPanelForTests() const { return BuildingInfoPanelWidget; }
 
@@ -200,6 +202,8 @@ private:
 
 	UFUNCTION()
 	void OnWindowDebugCheckChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnWindowValidationCheckChanged(bool bIsChecked);
 
 	UFUNCTION()
 	void OnWindowNavigationCheckChanged(bool bIsChecked);
@@ -305,6 +309,8 @@ private:
 
 	UPROPERTY()
 	UCheckBox* WindowDebugCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* WindowValidationCheckbox = nullptr;
 
 	UPROPERTY()
 	UCheckBox* WindowNavigationCheckbox = nullptr;
@@ -336,6 +342,8 @@ private:
 	// The Debug dock panel (shared with the interior editor, see DebugPanelWidget.h). Starts hidden.
 	UPROPERTY()
 	UDebugPanelWidget* DebugPanelWidget = nullptr;
+	UPROPERTY()
+	ULayoutValidationPanelWidget* ValidationPanelWidget = nullptr;
 
 	// The Navigation dock panel (shared with the interior editor, see NavigationDockPanelWidget.h): where Start and Destination
 	// are chosen outside (a building's main door, or a click on the ground), Find Route and the directions. Starts hidden.

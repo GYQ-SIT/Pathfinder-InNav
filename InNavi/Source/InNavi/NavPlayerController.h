@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -12,6 +12,7 @@
 
 class APolyBuilding;
 class ABuildingGenerator;
+class ULayoutValidationSession;
 class AInteriorGenerator;
 class AInteriorRoom;
 class AInteriorConnectorMarker;
@@ -307,6 +308,7 @@ public:
 	// for a database-loaded building, where Scale is much larger than buildings.json's own ~10).
 	UFUNCTION(BlueprintPure, Category = "Building")
 	float GetBuildingScale() const;
+	ULayoutValidationSession* GetLayoutValidationSession();
 
 	// The "New" button should call this before switching to the edit screen: destroys every
 	// currently-spawned building/interior and resets back to a blank project (no file path, no
@@ -1203,6 +1205,9 @@ private:
 	// The single BuildingGenerator placed in the level; found in BeginPlay.
 	UPROPERTY()
 	ABuildingGenerator* Generator;
+
+	UPROPERTY()
+	ULayoutValidationSession* LayoutValidationSession = nullptr;
 
 	// The single InteriorGenerator placed in the level (if any); found in BeginPlay.
 	UPROPERTY()

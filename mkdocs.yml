@@ -15,6 +15,7 @@ nav:
       - Product Design: design/product-design.md
       - Interior Editor Guide: design/interior-editor-guide.md
       - UI Panels Guide: design/ui-panels-guide.md
+      - Layout Validator: design/layout-validator.md
       - Interior Editor UI Spec: design/interior-editor-ui-spec.md
   - Mobile app:
       - Installing the test build: android-install.md
