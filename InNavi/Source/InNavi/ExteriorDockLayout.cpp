@@ -2,6 +2,7 @@
 
 #include "InteriorDockLayout.h"
 
+#include "PluginToolHost.h"
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -18,7 +19,9 @@ namespace ExteriorDock
 
 	const TArray<FName>& AllPanels()
 	{
-		static const TArray<FName> Panels = { Audio, Map, Building, Debug, Navigation, Validation };
+		static TArray<FName> Panels;
+		Panels = { Audio, Map, Building, Debug, Navigation };
+		PluginTools::AppendPanels(Panels, LayoutTools::EScreen::Exterior);
 		return Panels;
 	}
 
@@ -34,6 +37,8 @@ namespace ExteriorDock
 
 	EDockSide DefaultSideFor(FName Panel)
 	{
+		for (const auto& Tool : LayoutTools::FRegistry::Get().Tools(LayoutTools::EScreen::Exterior))
+			if (Tool.Id == Panel) return PluginTools::DockSide(Tool.DefaultSide);
 		return Panel == Map ? EDockSide::Left : ((Panel == Building || Panel == Navigation) ? EDockSide::Right : EDockSide::Bottom);
 	}
 
@@ -41,7 +46,7 @@ namespace ExteriorDock
 	{
 		bool IsHiddenByDefault(FName Panel)
 		{
-			return Panel == Audio || Panel == Debug || Panel == Navigation || Panel == Validation;
+			return PluginTools::HiddenByDefault(Panel, LayoutTools::EScreen::Exterior) || Panel == Audio || Panel == Debug || Panel == Navigation;
 		}
 	}
 
@@ -61,11 +66,10 @@ namespace ExteriorDock
 		// Hidden panels are placed first and then hidden so the layout remembers where each one belongs.
 		L.DockPanelToEdge(Audio, EDockSide::Bottom);
 		L.DockPanel(Debug, Audio, EDockDropZone::Center);
-		L.DockPanel(Validation, Audio, EDockDropZone::Center);
-		L.HidePanel(Validation);
 		L.SetAreaExtent(EDockSide::Bottom, 220.f);
 		L.HidePanel(Debug);
 		L.HidePanel(Audio);
+		PluginTools::PlaceDefaults(L, LayoutTools::EScreen::Exterior);
 	}
 
 	void PlaceMissingPanels(FDockLayout& L, const TArray<FName>& Missing)

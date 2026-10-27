@@ -42,13 +42,17 @@ Input JSON is checked before loading. If structural checks pass, routing runs in
 
 ## Implementation
 
-- `InNavi/Plugins/InNaviLayoutValidator/`: independent Runtime module with JSON rules and report types. It depends on Core/Json, not game actors or UnrealEd.
+- `InNavi/Plugins/InNaviLayoutValidator/`: versioned Runtime module with JSON rules, report types and a public tool registry. It depends on Core/CoreUObject/Json, without dependencies on game actors or UnrealEd.
 - `LayoutValidationSession`: controller-owned report shared by both screens; detached snapshots, scope, stale detection, focus and report export.
 - `LayoutValidationPanelWidget`: shared dock content. Its one-second UI poll only checks snapshot fingerprints; it never reruns validation. Fingerprinting stops after a report becomes stale.
 - `NavigationRoutePlanner`: ordinary routing and validation share `BuildCampusGraph`. Validation builds the graph once per run and traverses it from exterior entries. Geometry and graph generation run synchronously on demand on the game thread.
 - `InNaviValidationTools`: Editor-only commandlet module. It is excluded from packaged games; the plugin and panel use Runtime code.
 
-The plugin is enabled and linked by the project. To fully remove it, remove the host integration and build dependency as well; it is not an independently hot-swappable panel.
+The plugin is enabled and linked by the project. `LayoutTools::IProvider` and `FRegistry` expose tools; `ILayoutToolPanel` defines their UI adapter contract. `PluginToolHost` discovers tools in both screens and handles their menus, widgets, sizing and dock defaults. The validator uses this registration path. New plugin tools provide their own descriptors and adapter classes without editing either screen or dock-layout switches. InNavi selects its validation adapter through `[InNavi.ToolPanels]` in `DefaultGame.ini`. Module registration happens at startup; reopen screens/application after enabling an extension.
+
+The package-local [README](../../InNavi/Plugins/InNaviLayoutValidator/README.md), [CHANGELOG](../../InNavi/Plugins/InNaviLayoutValidator/CHANGELOG.md) and [standalone example](../../InNavi/Plugins/InNaviLayoutValidator/Examples/README.md) cover installation, API use, extension and release procedures. The root npm manifest pins the source package to `1.0.0`; CI installs from GitHub Packages and verifies that the offline source mirror matches. npm distributes the source archive; UnrealBuildTool compiles the native Unreal plugin.
+
+See [M2 compliance evidence](layout-validator-m2-compliance.md) for the D1–D5 mapping.
 
 ## Verification
 

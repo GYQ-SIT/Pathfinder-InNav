@@ -1,0 +1,2 @@
+# Registry archives and the checked-in source mirror must hash identically on Windows/Linux.
+InNavi/Plugins/InNaviLayoutValidator/** text=auto eol=lf

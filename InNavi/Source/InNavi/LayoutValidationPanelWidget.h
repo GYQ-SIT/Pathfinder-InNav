@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "DockPanelContent.h"
 #include "Components/Button.h"
+#include "LayoutToolPanel.h"
 #include "LayoutValidationPanelWidget.generated.h"
 
 class UComboBoxString;
@@ -25,10 +26,15 @@ private:
 };
 
 UCLASS()
-class INNAVI_API ULayoutValidationPanelWidget : public UDockPanelContentWidget
+class INNAVI_API ULayoutValidationPanelWidget : public UDockPanelContentWidget, public ILayoutToolPanel
 {
     GENERATED_BODY()
 public:
+    virtual void InitializeToolPanel(UUserWidget* Screen, bool bExteriorMode, TFunction<void()> FocusCompleted) override
+    {
+        SetOwnerScreen(Screen); SetExteriorMode(bExteriorMode); OnIssueShown = MoveTemp(FocusCompleted);
+    }
+    virtual void SetToolPanelWidth(float Width) override { SetContentWidth(Width); }
     void SetContentWidth(float Width);
     void SetExteriorMode(bool bValue) { bExterior = bValue; }
     void RefreshDisplay();

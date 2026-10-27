@@ -1,0 +1,8 @@
+{
+  "name": "pathfinder-innav-plugin-consumer",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Exact-version source package installation for the Unreal product",
+  "dependencies": { "@gyq-sit/innavi-layout-validator": "1.0.0" },
+  "scripts": { "install:plugins": "node scripts/install-layout-validator.mjs" }
+}

@@ -72,6 +72,9 @@ See `docs/design/interior-editor-guide.md` for the full control list and workflo
 data, geometry, doors, connectors and room reachability, with clickable findings and JSON
 report export. Findings never block editing or saving. See
 [`docs/design/layout-validator.md`](docs/design/layout-validator.md) for usage and headless file validation.
+The reusable plugin is versioned as `1.0.0` and distributed through GitHub Packages. See its
+[package README](InNavi/Plugins/InNaviLayoutValidator/README.md) for exact-version installation,
+and the [M2 evidence](docs/design/layout-validator-m2-compliance.md) for the D1–D5 mapping.
 
 ## Running the tests
 

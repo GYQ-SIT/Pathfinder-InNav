@@ -1,0 +1,14 @@
+{
+  "name": "@gyq-sit/innavi-layout-validator",
+  "version": "1.0.0",
+  "description": "Reusable Unreal Engine layout validation and tool registration plugin",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GYQ-SIT/Pathfinder-InNav.git",
+    "directory": "InNavi/Plugins/InNaviLayoutValidator"
+  },
+  "publishConfig": { "registry": "https://npm.pkg.github.com" },
+  "files": ["InNaviLayoutValidator.uplugin", "Source/", "README.md", "CHANGELOG.md", "Examples/README.md", "Examples/*.json", "Examples/Consumer/*.uproject", "Examples/Consumer/Source/"],
+  "scripts": { "prepack": "node -e \"const fs=require('fs'); const p=require('./package.json'); const d=JSON.parse(fs.readFileSync('InNaviLayoutValidator.uplugin')); if(d.VersionName!==p.version) throw Error('Plugin/package version mismatch');\"" }
+}

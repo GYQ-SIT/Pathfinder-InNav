@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "scale": 1,
+  "buildings": [
+    {
+      "id": "A",
+      "name": "Building A",
+      "floorCount": 2,
+      "floorHeight": 300,
+      "footprint": [
+        [
+          0,
+          0
+        ],
+        [
+          1000,
+          0
+        ],
+        [
+          1000,
+          1000
+        ],
+        [
+          0,
+          1000
+        ]
+      ],
+      "interior": {
+        "entrances": [
+          {
+            "id": "Main",
+            "kind": "main",
+            "level": 1,
+            "edge": 0,
+            "offset": 500,
+            "width": 120
+          }
+        ],
+        "floors": [
+          {
+            "level": 1,
+            "rooms": [
+              {
+                "id": "R1",
+                "name": "Room 1",
+                "footprint": [
+                  [
+                    100,
+                    100
+                  ],
+                  [
+                    400,
+                    100
+                  ],
+                  [
+                    400,
+                    400
+                  ],
+                  [
+                    100,
+                    400
+                  ]
+                ],
+                "openings": [
+                  {
+                    "id": "D1",
+                    "type": "door",
+                    "edgeIndex": 0,
+                    "offset": 99999,
+                    "width": 120,
+                    "connectsTo": "corridor"
+                  }
+                ]
+              }
+            ],
+            "navNodes": [
+              {
+                "id": "Lift1",
+                "type": "elevator",
+                "connectorGroupId": "Lift",
+                "position": [
+                  800,
+                  800
+                ],
+                "connectsFloors": [
+                  1,
+                  2
+                ]
+              }
+            ]
+          },
+          {
+            "level": 2,
+            "rooms": [
+              {
+                "id": "R2",
+                "name": "Room 2",
+                "footprint": [
+                  [
+                    100,
+                    100
+                  ],
+                  [
+                    400,
+                    100
+                  ],
+                  [
+                    400,
+                    400
+                  ],
+                  [
+                    100,
+                    400
+                  ]
+                ],
+                "openings": [
+                  {
+                    "id": "D1",
+                    "type": "door",
+                    "edgeIndex": 0,
+                    "offset": 100,
+                    "width": 120
+                  }
+                ]
+              }
+            ],
+            "navNodes": [
+              {
+                "id": "Lift2",
+                "type": "elevator",
+                "connectorGroupId": "Lift",
+                "position": [
+                  800,
+                  800
+                ],
+                "connectsFloors": [
+                  1,
+                  2
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -12,6 +12,7 @@
 #include "MapPanelWidget.h"
 #include "DebugPanelWidget.h"
 #include "LayoutValidationPanelWidget.h"
+#include "PluginToolHost.h"
 #include "ConfirmDialogWidget.h"
 #include "EditScreenWidget.h"
 #include "FloorListEntryWidget.h"
@@ -662,9 +663,11 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		WindowDebugCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowDebug"), TEXT("Debug"));
 		WindowDebugCheckbox->SetIsChecked(false);
 		WindowDebugCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowDebugCheckChanged);
-		WindowValidationCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowValidation"), TEXT("Validation"));
-		WindowValidationCheckbox->SetIsChecked(false);
-		WindowValidationCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowValidationCheckChanged);
+		PluginToolHost = NewObject<UPluginToolHost>(this);
+		PluginToolHost->AddMenu(LayoutTools::EScreen::Interior, [&AddDropdownCheckRow, WindowDropdownStack](const FString& Name, const FString& Label)
+		{
+			return AddDropdownCheckRow(WindowDropdownStack, *Name, *Label);
+		});
 		UButton* WindowResetLayoutButton = AddDropdownButtonRow(WindowDropdownStack, TEXT("Btn_WindowResetLayout"), TEXT("Reset Layout"));
 		WindowResetLayoutButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowResetLayoutClicked);
 
@@ -1196,10 +1199,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		DebugPanelWidget->SetOwnerScreen(this);
 		DebugPanelWidget->SetInfoProvider([this]() { return BuildDebugInfo(); });
 		DockHost->RegisterPanel(FName(GetDockPanelName(EDockPanelId::Debug)), FText::FromString(GetDockPanelName(EDockPanelId::Debug)), DebugPanelWidget);
-		ValidationPanelWidget = CreateWidget<ULayoutValidationPanelWidget>(this, ULayoutValidationPanelWidget::StaticClass());
-		ValidationPanelWidget->SetOwnerScreen(this);
-		ValidationPanelWidget->OnIssueShown = [this]() { ShowValidationPanel(); };
-		DockHost->RegisterPanel(InteriorDock::Validation, FText::FromName(InteriorDock::Validation), ValidationPanelWidget);
+		PluginToolHost->CreatePanels(this, DockHost, LayoutTools::EScreen::Interior, [this]() { ShowValidationPanel(); });
+		ValidationPanelWidget = Cast<ULayoutValidationPanelWidget>(PluginToolHost->FindPanel(TEXT("Validation")));
 
 		// The dock frames' tabs already show each panel's name, so the static title text at the top of a
 		// panel's content would just repeat it. Properties keeps its own - that one changes with the
@@ -1412,7 +1413,7 @@ void UInteriorScreenWidget::RefreshWindowMenuChecks()
 	Sync(WindowAudioCheckbox, EDockPanelId::Audio);
 	Sync(WindowMapCheckbox, EDockPanelId::Map);
 	Sync(WindowDebugCheckbox, EDockPanelId::Debug);
-	Sync(WindowValidationCheckbox, EDockPanelId::Validation);
+	if (PluginToolHost) PluginToolHost->Sync();
 }
 
 void UInteriorScreenWidget::ResetDockLayout()
@@ -1505,6 +1506,7 @@ void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 	Super::NativeTick(MyGeometry, InDeltaTime);
 	// Panel content sizes itself from its panel's width, which the user can change at any time.
 	SyncDockPanelWidths();
+	if (PluginToolHost) PluginToolHost->Sync();
 }
 
 FString UInteriorScreenWidget::BuildDebugInfo() const
@@ -1678,9 +1680,9 @@ UWidget* UInteriorScreenWidget::FindScreenWidget(FName Name) const
 			return Found;
 		}
 	}
-	if (ValidationPanelWidget)
+	if (PluginToolHost)
 	{
-		if (UWidget* Found = ValidationPanelWidget->FindContentWidget(Name)) return Found;
+		if (UWidget* Found = PluginToolHost->FindControl(Name)) return Found;
 	}
 	if (DebugPanelWidget)
 	{
@@ -2035,7 +2037,7 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 		NavigationPanelWidget->SetContentWidth(ComputePanelButtonWidth(EDockPanelId::Navigation));
 	}
 
-	if (ValidationPanelWidget) ValidationPanelWidget->SetContentWidth(ComputePanelButtonWidth(EDockPanelId::Validation));
+	if (PluginToolHost) PluginToolHost->Sync();
 
 	// Audio: the shared panel sizes its own controls from the width it is given.
 	if (AudioPanelWidget)
@@ -3586,10 +3588,6 @@ void UInteriorScreenWidget::OnWindowMapCheckChanged(bool bIsChecked)
 void UInteriorScreenWidget::OnWindowDebugCheckChanged(bool bIsChecked)
 {
 	SetDockPanelUserHidden(EDockPanelId::Debug, !bIsChecked);
-}
-void UInteriorScreenWidget::OnWindowValidationCheckChanged(bool bIsChecked)
-{
-	SetDockPanelUserHidden(EDockPanelId::Validation, !bIsChecked);
 }
 
 void UInteriorScreenWidget::ShowValidationPanel()
