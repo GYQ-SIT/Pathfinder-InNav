@@ -12,6 +12,7 @@ class UButton;
 class UAudioPanelWidget;
 class UDebugPanelWidget;
 class ULayoutValidationPanelWidget;
+class UPluginToolHost;
 class UNavigationDockPanelWidget;
 class UMapPanelWidget;
 class UBuildingInfoPanelWidget;
@@ -202,8 +203,6 @@ private:
 
 	UFUNCTION()
 	void OnWindowDebugCheckChanged(bool bIsChecked);
-	UFUNCTION()
-	void OnWindowValidationCheckChanged(bool bIsChecked);
 
 	UFUNCTION()
 	void OnWindowNavigationCheckChanged(bool bIsChecked);
@@ -309,8 +308,6 @@ private:
 
 	UPROPERTY()
 	UCheckBox* WindowDebugCheckbox = nullptr;
-	UPROPERTY()
-	UCheckBox* WindowValidationCheckbox = nullptr;
 
 	UPROPERTY()
 	UCheckBox* WindowNavigationCheckbox = nullptr;
@@ -344,6 +341,7 @@ private:
 	UDebugPanelWidget* DebugPanelWidget = nullptr;
 	UPROPERTY()
 	ULayoutValidationPanelWidget* ValidationPanelWidget = nullptr;
+	UPROPERTY() UPluginToolHost* PluginToolHost = nullptr;
 
 	// The Navigation dock panel (shared with the interior editor, see NavigationDockPanelWidget.h): where Start and Destination
 	// are chosen outside (a building's main door, or a click on the ground), Find Route and the directions. Starts hidden.

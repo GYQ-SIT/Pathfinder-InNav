@@ -97,3 +97,10 @@ signing-secrets*
 InNavi/Build/Android/src/
 InNavi/Build/Android_ASTC/
 InNavi/Data/NewProject.json
+
+# Versioned plugin source packages exclude local build products and npm installs.
+**/Plugins/**/Binaries/
+**/Plugins/**/Intermediate/
+node_modules/
+*.tgz
+*.install-stage/

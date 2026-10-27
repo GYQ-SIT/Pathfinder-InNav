@@ -16,6 +16,7 @@ nav:
       - Interior Editor Guide: design/interior-editor-guide.md
       - UI Panels Guide: design/ui-panels-guide.md
       - Layout Validator: design/layout-validator.md
+      - Layout Validator M2 Evidence: design/layout-validator-m2-compliance.md
       - Interior Editor UI Spec: design/interior-editor-ui-spec.md
   - Mobile app:
       - Installing the test build: android-install.md

@@ -24,6 +24,7 @@ class UNavigationDockPanelWidget;
 class UMapPanelWidget;
 class UDebugPanelWidget;
 class ULayoutValidationPanelWidget;
+class UPluginToolHost;
 class UPanelWidget;
 class UScrollBox;
 class USizeBox;
@@ -429,8 +430,6 @@ private:
 	void OnWindowMapCheckChanged(bool bIsChecked);
 	UFUNCTION()
 	void OnWindowDebugCheckChanged(bool bIsChecked);
-	UFUNCTION()
-	void OnWindowValidationCheckChanged(bool bIsChecked);
 
 	// Floor panel - lists every floor of the loaded building (top first, matching the mockup),
 	// highlighting the active one; clicking a row switches to it. "+Add floor"/"Delete floor" call
@@ -801,6 +800,7 @@ private:
 	UDebugPanelWidget* DebugPanelWidget = nullptr;
 	UPROPERTY()
 	ULayoutValidationPanelWidget* ValidationPanelWidget = nullptr;
+	UPROPERTY() UPluginToolHost* PluginToolHost = nullptr;
 
 	UPROPERTY()
 	UComboBoxString* BuildingSwitcherComboBox = nullptr;
@@ -951,8 +951,6 @@ private:
 	UCheckBox* WindowMapCheckbox = nullptr;
 	UPROPERTY()
 	UCheckBox* WindowDebugCheckbox = nullptr;
-	UPROPERTY()
-	UCheckBox* WindowValidationCheckbox = nullptr;
 
 	// Shared width bounds for every dock panel, and the snap/splitter tuning constants - also used
 	// by RebuildWidget for the panels' initial width. Originally 340 (raised from 260, which wasn't
