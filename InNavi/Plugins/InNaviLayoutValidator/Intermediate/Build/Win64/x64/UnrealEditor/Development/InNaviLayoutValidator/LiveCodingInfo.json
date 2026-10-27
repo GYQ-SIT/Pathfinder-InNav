@@ -1,0 +1,10 @@
+{
+	"RemapUnityFiles": 
+	{
+		"Module.InNaviLayoutValidator.cpp.obj": [
+			"PerModuleInline.gen.cpp.obj",
+			"InNaviLayoutValidatorModule.cpp.obj",
+			"LayoutValidation.cpp.obj"
+		]
+	}
+}

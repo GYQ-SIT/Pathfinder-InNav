@@ -1,0 +1,13 @@
+{
+    "Version": "1.2",
+    "Data": {
+        "Source": "c:\\users\\ongwe\\documents\\github\\pathfinder-innav\\innavi\\plugins\\innavilayoutvalidator\\source\\innavilayoutvalidator\\private\\innavilayoutvalidatormodule.cpp",
+        "ProvidedModule": "",
+        "PCH": "c:\\users\\ongwe\\documents\\github\\pathfinder-innav\\innavi\\intermediate\\build\\win64\\x64\\innavieditor\\development\\core\\sharedpch.core.project.valapi.valexpapi.cpp20.h.pch",
+        "Includes": [
+            "c:\\users\\ongwe\\documents\\github\\pathfinder-innav\\innavi\\plugins\\innavilayoutvalidator\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\innavilayoutvalidator\\definitions.innavilayoutvalidator.h"
+        ],
+        "ImportedModules": [],
+        "ImportedHeaderUnits": []
+    }
+}
