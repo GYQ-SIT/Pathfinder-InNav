@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 
 // What the phone app's screens may ask for. A screen never reaches into AInteriorGenerator, the route planner or the project files: it asks an
-// IMobileNavSource. FMobileMockSource answers with the design team's prototype data; a real source answers from the real code later, and no
+// IMobileNavSource. FMobileMockSource answers with the design team's prototype data; FMobileRealSource reads project data, and no
 // screen changes when it does. See docs/design/mobile-app-data-interface.md.
 
 namespace MobileNav
@@ -175,6 +175,8 @@ struct FMobileLevelMap
 	TArray<FMobileMapConnector> Connectors;
 	// Where people come in, on the ground level.
 	FVector2D Entrance = FVector2D::ZeroVector;
+	// False when the project has no mapped starting point on this level. No positioning is inferred.
+	bool bHasEntrance = true;
 };
 
 // The site seen from above: its buildings (and the things between them), in the site's own units.
@@ -183,6 +185,8 @@ struct FMobileCampusBuilding
 	FString BuildingId;
 	FString Name;
 	TArray<FVector2D> Outline;
+	// Converts this building's local map/route coordinates to the campus coordinate frame.
+	FVector2D Offset = FVector2D::ZeroVector;
 };
 
 struct FMobileCampusFeature

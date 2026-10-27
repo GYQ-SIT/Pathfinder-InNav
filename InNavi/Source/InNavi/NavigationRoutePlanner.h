@@ -29,6 +29,18 @@ struct FNavigationRouteResult
 	FString Error;
 };
 
+struct FNavigationRoutePreferences
+{
+	bool bAllowLift = true;
+	bool bAllowStairs = true;
+	bool bAllowEscalator = true;
+	bool Allows(EInteriorNavNodeType Type) const
+	{
+		return Type == EInteriorNavNodeType::Elevator ? bAllowLift : Type == EInteriorNavNodeType::Stairs ? bAllowStairs
+			: Type == EInteriorNavNodeType::Escalator ? bAllowEscalator : true;
+	}
+};
+
 // Routes through the authored floor geometry. It leaves Jiahao's graph storage untouched;
 // a future navigation service can replace this planner while keeping the UI contract.
 class INNAVI_API FNavigationRoutePlanner
@@ -38,7 +50,11 @@ public:
 	static void ValidateLayoutConnectivity(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
 		const FString& ScopeBuildingId, LayoutValidation::FReport& Report);
 	static bool FindCampusRoute(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
-		const FNavigationRoutePoint& Start, const FNavigationRoutePoint& Destination, FNavigationRouteResult& OutResult);
+		const FNavigationRoutePoint& Start, const FNavigationRoutePoint& Destination, FNavigationRouteResult& OutResult,
+		const FNavigationRoutePreferences& Preferences = FNavigationRoutePreferences());
+	// Find an interior destination with actual planner clearance, including for concave rooms.
+	static bool FindRoomDestination(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
+		const FString& BuildingId, int32 Floor, const TArray<FVector2D>& Polygon, FVector2D& OutPosition);
 	static bool IsValidPoint(const APolyBuilding& Building, const AInteriorGenerator& Interior,
 		float Scale, int32 Floor, FVector2D Point, FString& OutError);
 

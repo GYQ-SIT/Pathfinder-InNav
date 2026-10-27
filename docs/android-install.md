@@ -6,12 +6,14 @@ This is for teammates who want to **try the phone app** on their own phone. You 
 ## What you need
 
 - An **Android phone, Android 8 or newer** (API 26+), with a **64-bit ARM** processor. Nearly every phone from the last several years is. There is **no iPhone version**.
-- About **160 MB** of free space.
-- The file **`InNavi-arm64.apk`** (about 152 MB as the Releases page shows it, one file; the game's data is inside it). It is not in git because it is big. Download it from the **latest pre-release on the repository's Releases page**
+- Enough free space for the APK and the installed app's data.
+- The file **`InNavi-arm64.apk`** (one file; the game's data is inside it). It is not in git because it is big. Download it from the **mobile-test-2 pre-release on the repository's Releases page**
   (<https://github.com/GYQ-SIT/Pathfinder-InNav/releases>, "Assets" -> `InNavi-arm64.apk`). The repository is private, so you must be **signed in to GitHub** with an account that can see it;
   if the phone's browser does not let you sign in or download, download the file on a computer and send it to the phone (USB cable, a cloud drive or a chat app).
 
-What you are installing is a **development build** with **made-up (mock) data**: three sites, their floor plans and places. It is for looking at and trying the screens, not for real navigation yet.
+**Mobile test build 2 (version 1.1, Android version code 2)** reads packaged project files and uses the real campus route planner. Its sites, buildings, room names and maps follow the authored data. Positioning is still a manual building/level choice; there is no automatic indoor tracking. See [the real-data guide](mobile-real-data-guide.md) for the available data and test cases.
+
+This is a **separately signed release**, with a different key from `mobile-test-1`. If Android reports a signature conflict, uninstall the old app first, then install this APK. Uninstalling removes the old app's saved places and preferences. The old release remains available separately.
 
 ## Install
 
@@ -21,7 +23,7 @@ What you are installing is a **development build** with **made-up (mock) data**:
 4. If Google Play Protect or the phone's security scan says the app is from an unknown developer or has not been scanned, choose **Install anyway** (仍然安装) or **Continue**. That is expected: the app is signed with the team's own key, not published in a store.
 5. Tap **Open**. The first start takes up to about half a minute while the app sets up; later starts are quicker.
 
-You should see the **Explore** page with three site cards (Paya Lebar Mall, Pathfinder Centre, SIT Punggol Campus) and a tab bar at the bottom.
+You should see **Explore** with sites from the packaged project library (`buildings.json` and the footprint-only `map_extended.db`) and a tab bar at the bottom. The old prototype's mall/centre/demo-campus sites are available only when a build is launched with `-MobileMock`.
 
 ## Things to try
 
@@ -46,7 +48,7 @@ You should see the **Explore** page with three site cards (Paya Lebar Mall, Path
 
 ## Updating and removing
 
-- A **new build** installs over the old one: tap the new APK and choose **Update** / **Install**. Your saved places and settings stay.
+- Builds signed with the same key can update each other and keep saved data. This separately signed `mobile-test-2` APK cannot update the original team-key APK; uninstall that older app first if there is a signature conflict.
 - To **remove** the app: press and hold its icon -> App info -> Uninstall. This also deletes the saved places and settings.
 
 ## Reporting a problem

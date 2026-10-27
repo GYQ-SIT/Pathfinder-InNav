@@ -49,7 +49,7 @@ each mapped to one product feature, plus the phone app that reads their data:
 | Building Data Editor & JSON I/O | T02 | F02 | UMG editor to enter interior data (2D plan, 3D preview, doors, floor generator); dockable panels; save/load as JSON |
 | Procedural Interior Generator | T03 | F03 | Read JSON; spawn schematic interior at runtime; record connectors as nodes |
 | Indoor Navigation System | T04 | F04 | Plan routes over the generated geometry, across floors, between buildings and outdoors; show them as numbered steps and on the 2D and 3D maps |
-| Phone app | T04 stretch | - | Android screens (Explore, Directory, Saved, Profile) over one data interface, `IMobileNavSource`; on made-up data until a real source is written |
+| Phone app | T04 stretch | - | Android screens (Explore, Directory, Saved, Profile) over one data interface, `IMobileNavSource`; on cached project data and campus routes; -MobileMock retains the prototype |
 
 Where they live in the code (`InNavi/Source/InNavi/`):
 
@@ -123,7 +123,7 @@ The connector nodes and doors produced in steps 2-4 are the contract between gen
 navigation (T04): the generator must emit them consistently for routing to work.
 
 The phone app does not read any of this itself. Its screens ask `IMobileNavSource` for sites, buildings, places, floor plans and routes;
-a real source will answer from the project file and from T04's planner (see `mobile-real-data-guide.md`).
+`FMobileRealSource` answers from cached project snapshots and the campus planner (see `mobile-real-data-guide.md`).
 
 ## 6. Main technical risks
 
@@ -133,7 +133,7 @@ a real source will answer from the project file and from T04's planner (see `mob
 | Runtime dynamic NavMesh | Interior is generated at runtime, so the NavMesh must rebuild at runtime (not editor-baked) | **Avoided**: routing does not use a NavMesh; the planner reads the generated geometry directly each time |
 | Cross-floor routing via NavLinks | Vertical connections are the hard part of the navigation | **Resolved**: connectors (`ConnectorGroupId`) join floors in the planner's graph; between buildings too (link doors) |
 | Route-finding speed on big floors | Many walls make the visibility graph slow | **Managed**: a generated floor never has more than 24 rooms; a route is found in well under 100 ms in the test project |
-| Mobile performance | Runtime generation + pathfinding may be heavy on mobile | **Checked** for the phone app on a Samsung Galaxy S24+ (steady 60 fps) and on emulators; the phone app does not yet run the planner, so this is open for real data |
+| Mobile performance | Runtime generation + pathfinding may be heavy on mobile | **Checked** for the phone app on a Samsung Galaxy S24+ (steady 60 fps) and on emulators; those measurements used mock data; performance with real project routing still needs a rebuilt-device check |
 | Real data on the phone | The project file has to reach the phone and the planner has to run there | **Open**: not tried yet (see `mobile-real-data-guide.md`) |
 
 ## 7. Component ownership

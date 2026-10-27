@@ -1042,12 +1042,38 @@ namespace
 }
 
 bool FNavigationRoutePlanner::FindCampusRoute(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
-	const FNavigationRoutePoint& Start, const FNavigationRoutePoint& Destination, FNavigationRouteResult& OutResult)
+	const FNavigationRoutePoint& Start, const FNavigationRoutePoint& Destination, FNavigationRouteResult& OutResult,
+	const FNavigationRoutePreferences& Preferences)
 {
 	const float Scale = Generator.GetScale();
 	if (Scale <= KINDA_SMALL_NUMBER) { OutResult = {}; OutResult.Error = TEXT("The project scale is invalid."); return false; }
-	const auto Models = ReadCampusModels(Generator, Interior, Start.BuildingId, Destination.BuildingId, false);
+	auto Models = ReadCampusModels(Generator, Interior, Start.BuildingId, Destination.BuildingId, false);
+	for (auto& Model : Models) Model.Nodes.RemoveAll([&](const FInteriorNavNode& Node) { return !Preferences.Allows(Node.Type); });
 	return SolveCampus(Models, Scale, Start, Destination, OutResult);
+}
+
+bool FNavigationRoutePlanner::FindRoomDestination(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
+	const FString& BuildingId, int32 Floor, const TArray<FVector2D>& Polygon, FVector2D& OutPosition)
+{
+	const auto* Building = Generator.FindBuildingById(BuildingId);
+	if (!Building || Polygon.Num() < 3 || Generator.GetScale() <= KINDA_SMALL_NUMBER) return false;
+	const auto Model = ReadRouteBuilding(*Building, Interior, Generator.GetInteriorDataForBuilding(BuildingId),
+		Generator.GetStoredEntrances(BuildingId), Generator.GetScale(), true);
+	const auto* Geometry = Model.Floors.Find(Floor);
+	if (!Geometry) return false;
+	TArray<int32> Triangles; TriangulatePolygon(Polygon, Triangles);
+	double BestArea = -1;
+	for (int32 I = 0; I + 2 < Triangles.Num(); I += 3)
+	{
+		const auto A = Polygon[Triangles[I]], B = Polygon[Triangles[I + 1]], C = Polygon[Triangles[I + 2]];
+		const auto Point = (A + B + C) / 3.0;
+		const double Area = FMath::Abs(Cross(A, B, C));
+		if (Area > BestArea && InsideOrOnBoundary(Point, Polygon) && IsPointClearOfWalls(Point, Building->GetFootprint(), *Geometry))
+		{
+			OutPosition = Point; BestArea = Area;
+		}
+	}
+	return BestArea >= 0;
 }
 
 void FNavigationRoutePlanner::ValidateLayoutConnectivity(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,

@@ -56,6 +56,8 @@ public:
 	// Returns how many buildings were successfully spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingsFromFile(const FString& FilePath);
+	// Same loader for a detached in-memory project (mobile navigation never writes a temporary project file).
+	int32 LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& RootObject);
 
 	// Second, database-backed way to load exterior buildings - queries a SQLite file (schema:
 	// buildings(building_id, building_type), building_nodes(building_id, node_id, sequence, lat,

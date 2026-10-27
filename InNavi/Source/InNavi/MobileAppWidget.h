@@ -2,7 +2,6 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "MobileMockSource.h"
 #include "MobileNavSource.h"
 #include "MobilePreferences.h"
 #include "MobileSavedPlaces.h"
@@ -45,8 +44,7 @@ struct FMobileLayoutSnapshot
 };
 
 // The phone app's screen: a full-screen map area with a draggable bottom sheet, a top bar, the level and locate controls, and four tabs
-// at the bottom. Portrait only. This is the skeleton: the map area and every page of the sheet are placeholders for now, and nothing here
-// reads the real navigation data (that goes through IMobileNavSource later). The sheet's flow is FMobileSheetFlow.
+// at the bottom. Portrait only. Pages read navigation data through IMobileNavSource. The sheet's flow is FMobileSheetFlow.
 //
 // The layout is always 375 design pixels wide: the whole screen is scaled to the window's width, so a bigger or smaller phone looks the
 // same, only taller or shorter. A window 375 pixels wide shows design pixels one to one.
@@ -187,6 +185,8 @@ public:
 	const FString& GetMyLocationBuildingId() const { return MyLocationBuildingId; }
 	const FMobilePlace& GetSelectedPlace() const { return SelectedPlace; }
 	IMobileNavSource* GetSource() const { return Source.Get(); }
+	// Inject a source before TakeWidget/AddToViewport (tests and alternative data providers).
+	void SetSource(TSharedPtr<IMobileNavSource> InSource, const FString& InitialSite = FString());
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -290,7 +290,7 @@ private:
 	UTextBlock* Mode3DLabel = nullptr;
 	// Where the places come from (the prototype's data for now), the site shown, and the place the person picked.
 	TSharedPtr<IMobileNavSource> Source;
-	FString SiteId = TEXT("sit-punggol");
+	FString SiteId;
 	FMobilePlace SelectedPlace;
 	UPROPERTY()
 	UMobileSearchPageWidget* SearchPage = nullptr;

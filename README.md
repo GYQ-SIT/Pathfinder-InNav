@@ -7,7 +7,7 @@ school's 3D model: select a building (the campus itself loads from a SQL-backed
 database), enter or import interior data (JSON), generate a schematic interior
 in 3D, and navigate — inside a building, across floors, between buildings and
 across the open ground between them. It also has an Android phone app (a test
-build, on made-up data for now).
+build, reading project data and routes through a mobile data adapter).
 
 ## Repository layout
 
@@ -90,7 +90,7 @@ UnrealEditor-Cmd.exe InNavi/InNavi.uproject -ExecCmds="Automation RunTests InNav
 ## The phone app
 
 An Android app (portrait) with Explore, Directory (map, search, route, walking, arrival), Saved and Profile tabs, built to the design
-team's prototype. It runs on **made-up data** behind one interface; connecting the real data is described in
+team's prototype. New builds use **real project data and routes** through `IMobileNavSource`; `-MobileMock` keeps the prototype available. Data selection, Android packaging and testing are described in
 `docs/mobile-real-data-guide.md`. To try it on the desktop, in a phone-sized window:
 
 ```bash

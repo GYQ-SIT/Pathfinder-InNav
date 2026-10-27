@@ -3,7 +3,7 @@
 The mobile app (portrait only, built first as screens on mock data, wired to the real planner afterwards) follows the design team's
 prototype: <https://innavappprototype.onrender.com/>. Every screen talks to **one data interface** (`IMobileNavSource`), never to
 `AInteriorGenerator`, `NavigationPanelWidget` or the route planner directly. `FMobileMockSource` answers it with the prototype's fake
-data; `FMobileRealSource` (later) answers it from the real code. Swapping one for the other must not touch a screen.
+data when `-MobileMock` is specified. `FMobileRealSource` is the default and reads cached project snapshots and the campus planner. Pages use the same interface for either source. See [the real-data guide](../mobile-real-data-guide.md) for data selection, packaging and verification.
 
 ## The prototype's screens
 
@@ -63,19 +63,19 @@ route -> navigating -> arrived) is a state machine of its own; the widgets only 
 | Building count | buildings in the project file | real |
 | Distance label ("2.4 km") | - | mock / drop |
 | Building id, name, floor count | `APolyBuilding`, `AInteriorGenerator` floors | real |
-| Level label "L1", "L2M" | floors are integers only | **new**: a floor display name in the project file (default "L" + number) |
+| Level label "L1", "L2M" | real floors use `L<number>` | custom floor labels remain future schema work |
 | Place id, name, tags, type, floor, centre | `AInteriorRoom` / `FNavigationRoomOption` (`RoomId`, `RoomName`, `Tags`, `RoomType`, `Floor`, `Centroid`) | real |
 | Place code "E2-01-101" | room ids of the example data look like it; generated rooms are named "Classroom 3-04" | partly: show the id as is, or derive |
-| Category (Learning, Facilities) | Room type (12 fixed values) | **new**: a mapping table Room type -> category |
-| Search | `NavigationSearch::Matches`, `SearchDestinations` | real, **but only for the one building that is loaded** |
-| Places across every building of a campus | the interior of one building is loaded at a time (it spawns the room actors) | **new**: a light index read from the project file without spawning actors |
-| Route, distance | `FNavigationRoutePlanner::FindRoute` (points with floor and connector); metres = length x scale | real |
-| Minutes | - | **new**: metres / walking speed (about 1.2 m/s) |
+| Category (Learning, Facilities) | `FMobileRealSource` maps the 12 room types to categories | built |
+| Search | `NavigationSearch::MatchesWords` over the cached mobile place index | built across the project's buildings |
+| Places across every building of a campus | `FMobileRealSource` indexes stored room JSON without opening editor interiors | built |
+| Route, distance | `FNavigationRoutePlanner::FindCampusRoute`; world-space polyline centimetres / 100 | real |
+| Minutes | `MobileNav::MinutesForMetres` at 1.2 m/s | built |
 | Steps with floor changes | `BuildRouteDetails` ("Take Elevator from Floor 1 to Floor 2") | real, text only |
-| Steps "turn left / follow the corridor / arrived" | - | **new**: turn-by-turn from the route polyline (pure function, testable) |
-| Accessibility (lift only, stairs only) | the planner does not take a preference | **new**: a connector filter in the planner |
-| Route across buildings, to the outside | main / link doors are saved; the planner does not use them (teammate) | later |
-| Start = "My location" | - | **mock first**: pick on the map or an entrance; GPS later |
+| Steps "turn left / follow the corridor / arrived" | actual route polyline converted to `FMobileStep` | built in the real adapter |
+| Accessibility (lift only, stairs only) | `FNavigationRoutePreferences` filters connectors before pathfinding | built |
+| Route across buildings, to the outside | `FindCampusRoute` uses main/link doors and outdoor geometry; overview draws points with building offsets | built |
+| Start = "My location" | manual building/level choice, at an authored entrance or node | built; automatic positioning remains future work |
 | Photo, "Available" status | - | mock or leave out |
 | Saved places, Profile | - | the app's own state / out of scope for now |
 
@@ -170,7 +170,7 @@ What it shows follows the sheet (`UMobileAppWidget::RefreshMap`): the place's le
 of the step the person is at while walking (so it follows them up a lift and out of a building). The person's own choices last until the sheet moves on:
 the **level button** (opens a list of the building's levels, top one first, upward from the button; "Map" on the Overview), **Overview** (toggles the site view),
 **Locate** (back to My location's building and level) and **2D | 3D**. The dot is the step's position while walking, otherwise My location (the door of the
-building the person said they are in; the real source will give a position).
+building the person said they are in; the real source uses an authored entrance or navigation node and hides the dot if none is mapped). This is a manual location choice; there is no automatic indoor positioning.
 
 In the mock, rooms are drawn around the places' positions and the route is a path along the corridors (to the crossing, along to the room's door, in), with
 `FMobileStep::Position` the place where the instruction applies and `FMobileRoute::Points` the line to draw. Options for looking at it: `-MobileOverview`, `-Mobile3D`,

@@ -122,6 +122,7 @@ bool FMobileSavedFlowTest::RunTest(const FString& Parameters)
 {
 	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
 	UMobileAppWidget* Screen = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
+	if (Screen) Screen->SetSource(MakeShared<FMobileMockSource>(), TEXT("sit-punggol"));
 	if (!TestNotNull(TEXT("the screen is created"), Screen)) return false;
 	Screen->TakeWidget();
 	Screen->SetActiveTab(UMobileAppWidget::ETab::Directory);
@@ -191,6 +192,7 @@ bool FMobileSavedFlowTest::RunTest(const FString& Parameters)
 	Screen->GetSearchPage()->ChoosePlace(TEXT("E2-01-102"));
 	Click(Screen->GetPlacePage()->FindNamedWidget(TEXT("Btn_SavePlace")));
 	UMobileAppWidget* Next = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
+	if (Next) Next->SetSource(MakeShared<FMobileMockSource>(), TEXT("sit-punggol"));
 	Next->TakeWidget();
 	Next->UseSavedFile(Path);
 	TestTrue(TEXT("the next screen has the saved place"), Next->IsPlaceSaved(TEXT("E2-01-102")) && Next->GetSavedPage()->GetShownPlaces().Num() == 1);

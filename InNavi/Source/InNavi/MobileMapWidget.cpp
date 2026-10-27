@@ -12,6 +12,11 @@ using namespace MobileStyle;
 
 namespace
 {
+	FVector2D MobileCampusPosition(const FMobileRoutePoint& Point, const FMobileCampusMap& Campus)
+	{
+		const auto* Building = Campus.Buildings.FindByPredicate([&](const auto& B) { return B.BuildingId == Point.BuildingId; });
+		return Point.Position + (Building ? Building->Offset : FVector2D::ZeroVector);
+	}
 	// What the map's colours are: soft by kind of room, the way the prototype's plans are.
 	FLinearColor RoomColour(const FString& Category, bool bAvailable)
 	{
@@ -200,6 +205,7 @@ FBox2D UMobileMapWidget::PlanBounds() const
 	{
 		for (const FMobileCampusBuilding& Building : CampusMap.Buildings) Add(Building.Outline);
 		for (const FMobileCampusFeature& Feature : CampusMap.Features) Add(Feature.Outline);
+		if (Route.bFound) for (const auto& Point : Route.Points) Bounds += Project(MobileCampusPosition(Point, CampusMap));
 	}
 	else
 	{
@@ -351,7 +357,21 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 			OutlinePolygon(OutDrawElements, Layer + 3, AllottedGeometry, Top, MapColours.Edge, 2.f);
 			DrawLabel(OutDrawElements, Layer + 4, AllottedGeometry, Building.Name, Centre(Top), 15.f, Ink);
 		}
-		return Layer + 5;
+		if (Route.bFound && Route.Points.Num() >= 2)
+		{
+			TArray<FVector2D> CampusRouteLine;
+			for (const auto& Point : Route.Points) CampusRouteLine.Add(ToWidgetPolygon({MobileCampusPosition(Point, CampusMap)}, W, H, Lift)[0]);
+			FSlateDrawElement::MakeLines(OutDrawElements, Layer + 6, AllottedGeometry.ToPaintGeometry(), CampusRouteLine, ESlateDrawEffect::None, Blue, true, 4.f);
+			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(CampusRouteLine[0], 6.0), Blue);
+			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(CampusRouteLine.Last(), 7.0), Red);
+		}
+		if (bHasPosition)
+		{
+			const auto At = ToWidgetPolygon({MobileCampusPosition(Position, CampusMap)}, W, H, Lift)[0];
+			FillPolygon(OutDrawElements, Layer + 8, AllottedGeometry, Circle(At, 8.0), FLinearColor::White);
+			FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, Circle(At, 5.0), Blue);
+		}
+		return Layer + 10;
 	}
 	if (LevelMap.Outline.IsEmpty())
 	{
@@ -386,7 +406,7 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 	}
 
 	// The way in, on the ground level.
-	if (LevelMap.Level == 1)
+	if (LevelMap.Level == 1 && LevelMap.bHasEntrance)
 	{
 		const FVector2D Door = ToWidgetPolygon({ LevelMap.Entrance }, W, H, Lift)[0];
 		FSlateDrawElement::MakeLines(OutDrawElements, Layer + 4, AllottedGeometry.ToPaintGeometry(), TArray<FVector2D>{ Door - FVector2D(10.0, 0.0), Door + FVector2D(10.0, 0.0) }, ESlateDrawEffect::None, StartStyle::Rgb(34, 197, 94), true, 5.f);

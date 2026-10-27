@@ -3,6 +3,10 @@
 Every Android app must be signed. The phone checks the signature when it installs the app, and when an update is installed over an older version it only accepts it if both were signed
 with the **same key**. We use one key for the whole team, so a build made on any team computer installs over a build made on any other, with no uninstall in between.
 
+**Exception: `mobile-test-2` is a separately signed release**, as requested for the real-data APK. It does not use the original team key described below. Its certificate SHA-256 is `D6:B7:32:F0:9A:A2:72:AD:57:35:32:3F:4A:96:7B:31:30:64:07:FA:67:86:B7:4F:41:BD:A6:B3:A1:AA:2E:68`. Updating an installation of the original APK requires uninstalling it first if Android reports a signature conflict.
+
+The separate key is kept on the build computer under `%LOCALAPPDATA%/InNavSigning/mobile-test-2/`, with its password protected for that Windows user in `password.dpapi`. The ignored `Saved/Config/Android/Engine.ini` selects `innav-mobile-test-2.jks` / alias `innav-mobile-test-2`; the keystore copy under `Build/Android/` is also ignored. Neither the key nor passwords belong in Git or release assets. Future compatible updates of this separate APK must reuse this separate key.
+
 The key is **a secret**. It is never in the repository, and never pasted in chat, tickets or the wiki. Whoever has it can publish an "update" of InNav that phones will accept.
 
 ## What there is
@@ -54,13 +58,15 @@ and the signing set-up above. From a command prompt (it takes about 2 to 6 minut
   needs **Hardware** graphics (with software graphics it stops with "No Vulkan driver found").
 - A phone build is portrait only and starts the phone app by itself (`ANavPlayerController::BeginPlay` on Android); there is no desktop editor on Android.
 
+The `mobile-test-2` build computer keeps its SDK/JDK/NDK environment paths in `%LOCALAPPDATA%/InNavAndroidSetup/environment.json`. Its build uses SDK/build-tools 36, NDK 27.2.12479018 and Java 21. If Gradle fails at startup with `Unable to establish loopback connection`, create `C:/Temp/InNavJavaSockets` and set `JAVA_TOOL_OPTIONS=-Djdk.net.unixdomain.tmpdir=C:/Temp/InNavJavaSockets -Djava.io.tmpdir=C:/Temp/InNavJavaSockets -Djava.net.preferIPv4Stack=true` for the build process. The short temporary socket path was verified on this Windows build machine.
+
 ## Checking a build
 
 ```
 %LOCALAPPDATA%\Android\Sdk\build-tools\36.0.0\apksigner.bat verify --verbose --print-certs InNavi-arm64.apk
 ```
 
-It should say `Verifies` and show the SHA-256 above as the signer. A debug-signed build shows a certificate named "Android Debug".
+It should say `Verifies`. Original team-key builds show the original certificate above; the separate `mobile-test-2` APK must show `D6:B7:32:F0:9A:A2:72:AD:57:35:32:3F:4A:96:7B:31:30:64:07:FA:67:86:B7:4F:41:BD:A6:B3:A1:AA:2E:68`. A debug-signed build shows a certificate named "Android Debug".
 
 ## One file or two
 

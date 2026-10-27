@@ -166,6 +166,11 @@ void UMobileExplorePageWidget::Refresh()
 		return;
 	}
 	ShownSites = Source->ListSites();
+	if (ShownSites.IsEmpty())
+	{
+		auto* Empty = MakeText(WidgetTree, TEXT("Txt_NoProjects"), TEXT("No project data is available. Add a project to this app to see its buildings and places."), 13.f, Grey);
+		Empty->SetAutoWrapText(true); CardList->AddChildToVerticalBox(Empty);
+	}
 	for (const FMobileSite& Site : ShownSites)
 	{
 		AddCard(Site);
