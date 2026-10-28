@@ -12,7 +12,6 @@ build, reading project data and routes through a mobile data adapter).
 ## Repository layout
 
 - `README.md` — this file
-- `Readme.txt` — the readme that went into the Milestone 1 submission zip (kept as it was handed in)
 - `.gitignore` — UnrealEngine template, plus signing keys, packaging output and personal test files
 - `.github/workflows/` — CI: `build-windows.yml` (builds the editor from a clean checkout, runs the MSVC static analysis and every
   automation test, on a self-hosted Windows runner), `lint.yml` (JSON, secrets, configuration, headers and document links; GitHub-hosted), `release-windows.yml` (a pushed tag builds the Windows
@@ -32,16 +31,13 @@ build, reading project data and routes through a mobile data adapter).
   - `toolchain-decision.md` — stack/platform decisions and why
   - `deliverables.md` — ownership + M1/M2/M3 targets
   - `design/`
-    - `product-design.md` — product design document
     - `interior-editor-guide.md` — **how to use the editor** (both screens: controls, panels, doors, floor generator, 3D, navigation)
     - `ui-panels-guide.md` — how the dock panels work and how to add one
-    - `interior-editor-ui-spec.md` — the original C++ interface spec for the editor's UI (written for Padre)
     - `mobile-app-data-interface.md` — the phone app's screens and the data interface they use
-    - `ui-ux/` — wireframes, user flows, mockups
   - `mobile-real-data-guide.md` — **how to connect the phone app to real data** (read this before working on it)
   - `android-install.md` — installing the phone app's test build on an Android phone
   - `android-signing.md` — building and signing the APK
-  - `test-data/` — project files for trying doors and campus routes (three buildings, A and B next to each other, C far away)
+  - `test-data/` — a project file for trying doors and campus routes (three buildings, A and B next to each other, C far away; the tests use it too)
   - `planning/` — Feature Plan + Technical Deliverable Plan
 
 ## Prerequisites
@@ -66,7 +62,7 @@ cd Pathfinder-InNav
 3. Hit **Play** in the Editor. Sample data lives under `InNavi/Data/`: the campus/
    exterior layer loads from `map_extended.db` (SQL-backed), and interior building
    layouts save/load as JSON (e.g. `buildings.json`). For several buildings with doors
-   and generated floors, **File > Load** one of the files in `docs/test-data/`.
+   and generated floors, **File > Load** `docs/test-data/entrance-test-2-with-doors.json`.
 
 The editor has a full on-screen UI on both its screens (the campus and a building's
 interior) — a dockable layout of Toolbar / Floor / Properties / Layers / Navigation /
@@ -147,4 +143,4 @@ wiki and this repository say the same thing: `docs/` is the one source, and the 
 
 ## Team
 
-See `docs/design/product-design.md` for the team roster and roles.
+Who owns which component is in `docs/architecture.md` (section 8) and `docs/deliverables.md`.

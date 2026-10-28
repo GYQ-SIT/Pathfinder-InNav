@@ -16,8 +16,6 @@ the same places and routes on a phone.
 - [Deliverables](deliverables.md) - ownership and M1/M2/M3 targets
 - [Interior Editor Guide](design/interior-editor-guide.md) - how to use the editor (both screens)
 - [UI Panels Guide](design/ui-panels-guide.md) - how the dock panels work and how to add one
-- [Interior Editor UI Spec](design/interior-editor-ui-spec.md) - the original C++ interface spec for the editor's UI
-- [Product Design](design/product-design.md)
 
 Phone app:
 
