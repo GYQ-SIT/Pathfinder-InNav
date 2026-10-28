@@ -56,7 +56,7 @@ bool AInteriorBuildingPreviewPivot::Initialize(APolyBuilding* Building, AInterio
 {
 	if (!Building || !Interior || !Generator || !ModelStates.IsEmpty()) return false;
 	const TArray<int32> Levels = Interior->GetFloorLevels();
-	if (Levels.Num() < 2) return false;
+	if (Levels.IsEmpty()) return false;
 	LowestFloor = Levels[0];
 	FBox Bounds(ForceInit);
 	for (const FVector2D& Point : Building->GetFootprint())
@@ -65,7 +65,9 @@ bool AInteriorBuildingPreviewPivot::Initialize(APolyBuilding* Building, AInterio
 		Bounds += Building->GetActorTransform().TransformPosition(FVector(XY, (LowestFloor - 1) * Building->GetFloorHeight()));
 	}
 	if (!Bounds.IsValid) return false;
-	SetActorLocation(Bounds.GetCenter());
+	DefaultPivot = Bounds.GetCenter();
+	SetActorLocation(DefaultPivot);
+	OriginalBuildingWorld = Building->GetActorTransform();
 	ViewedBuilding = Building;
 	OriginalVisibleLevel = Building->GetVisibleInteriorLevel();
 	const float Height = (Building->GetFloorCount() - LowestFloor + 1) * Building->GetFloorHeight();
@@ -98,15 +100,8 @@ bool AInteriorBuildingPreviewPivot::Initialize(APolyBuilding* Building, AInterio
 	}
 	Building->SetInspectionBottomHidden(true);
 	ApplyIsolation();
-	// Foreground guide remains readable even when the viewed upper floor covers the bottom anchor.
-	const float GuideSize = FMath::Clamp(SweepRadius * 0.012f, 25.f, 100.f);
-	const FLinearColor Amber(1.f, 0.55f, 0.06f);
-	PivotGuide->DrawSphere(GetActorLocation(), GuideSize, 16, Amber, -1.f, SDPG_Foreground, 2.f);
-	for (const FVector& Axis : { FVector::ForwardVector, FVector::RightVector, FVector::UpVector })
-	{
-		PivotGuide->DrawLine(GetActorLocation() - Axis * GuideSize * 2.f, GetActorLocation() + Axis * GuideSize * 2.f,
-			Amber, SDPG_Foreground, 2.f, -1.f);
-	}
+	GuideSize = FMath::Clamp(SweepRadius * 0.012f, 25.f, 100.f);
+	DrawGuide();
 	if (UStaticMeshComponent* Marker = FindComponentByClass<UStaticMeshComponent>())
 	{
 		Marker->SetRelativeScale3D(FVector(FMath::Clamp(Bounds.GetExtent().Size() * 0.0004, 0.25, 1.0)));
@@ -118,6 +113,53 @@ bool AInteriorBuildingPreviewPivot::Initialize(APolyBuilding* Building, AInterio
 		}
 	}
 	return true;
+}
+
+void AInteriorBuildingPreviewPivot::DrawGuide()
+{
+	// Foreground guide remains readable even when the viewed floor covers the pivot.
+	PivotGuide->Flush();
+	const FLinearColor Amber(1.f, 0.55f, 0.06f);
+	PivotGuide->DrawSphere(GetActorLocation(), GuideSize, 16, Amber, -1.f, SDPG_Foreground, 2.f);
+	for (const FVector& Axis : { FVector::ForwardVector, FVector::RightVector, FVector::UpVector })
+	{
+		PivotGuide->DrawLine(GetActorLocation() - Axis * GuideSize * 2.f, GetActorLocation() + Axis * GuideSize * 2.f,
+			Amber, SDPG_Foreground, 2.f, -1.f);
+	}
+}
+
+void AInteriorBuildingPreviewPivot::DetachModel()
+{
+	for (const FModelState& State : ModelStates)
+	{
+		if (AActor* Actor = State.Actor.Get()) Actor->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+	}
+}
+
+void AInteriorBuildingPreviewPivot::AttachModel()
+{
+	for (const FModelState& State : ModelStates)
+	{
+		if (AActor* Actor = State.Actor.Get()) Actor->AttachToComponent(RootComponent, FAttachmentTransformRules::KeepWorldTransform);
+	}
+}
+
+void AInteriorBuildingPreviewPivot::TranslateBy(const FVector& Delta, float MaxDistance)
+{
+	if (ModelStates.IsEmpty()) return;
+	FVector Offset = GetActorLocation() + Delta - DefaultPivot;
+	if (Offset.Size() > MaxDistance) Offset = Offset.GetSafeNormal() * MaxDistance;
+	// The model hangs on this actor, so it goes with it.
+	SetActorLocation(DefaultPivot + Offset);
+	DrawGuide();
+}
+
+void AInteriorBuildingPreviewPivot::SetTiltRange(const FVector& Axis, float MinDegrees, float MaxDegrees)
+{
+	TiltAxis = Axis.GetSafeNormal();
+	TiltMin = MinDegrees;
+	TiltMax = MaxDegrees;
+	RotateBy(0.f, 0.f);
 }
 
 void AInteriorBuildingPreviewPivot::ApplyIsolation()
@@ -135,21 +177,37 @@ void AInteriorBuildingPreviewPivot::ApplyIsolation()
 void AInteriorBuildingPreviewPivot::RotateBy(float YawDegrees, float TiltDegrees)
 {
 	Yaw = FMath::UnwindDegrees(Yaw + YawDegrees);
-	Tilt = FMath::Clamp(Tilt + TiltDegrees, -80.f, 80.f);
-	SetActorRotation(FRotator(Tilt, Yaw, 0));
+	Tilt = FMath::Clamp(Tilt + TiltDegrees, TiltMin, TiltMax);
+	// Spin about the vertical axis first, then tip about the axis across the view: the tip is then always up and down on the screen, whatever
+	// the spin is.
+	SetActorRotation(FQuat(TiltAxis, FMath::DegreesToRadians(Tilt)) * FQuat(FVector::UpVector, FMath::DegreesToRadians(Yaw)));
 }
 
 void AInteriorBuildingPreviewPivot::ResetRotation()
 {
 	Yaw = Tilt = 0.f;
-	SetActorRotation(FRotator::ZeroRotator);
+	if (ModelStates.IsEmpty())
+	{
+		SetActorRotation(FRotator::ZeroRotator);
+		return;
+	}
+	// Back as entered: every actor where it was, the turning point at its start.
+	DetachModel();
+	for (const FModelState& State : ModelStates)
+	{
+		if (AActor* Actor = State.Actor.Get()) Actor->SetActorTransform(State.World, false, nullptr, ETeleportType::TeleportPhysics);
+	}
+	SetActorLocationAndRotation(DefaultPivot, FRotator::ZeroRotator);
+	AttachModel();
+	DrawGuide();
 }
 
 FTransform AInteriorBuildingPreviewPivot::GetDisplayTransform() const
 {
-	const FQuat Rotation = GetActorQuat();
-	const FVector Pivot = GetActorLocation();
-	return FTransform(Rotation, Pivot - Rotation.RotateVector(Pivot));
+	// From a place as the planner has it to where it is shown: the way the building has moved from where it was, whichever point it was
+	// turned about.
+	const APolyBuilding* Building = ViewedBuilding.Get();
+	return Building ? OriginalBuildingWorld.Inverse() * Building->GetActorTransform() : FTransform::Identity;
 }
 
 void AInteriorBuildingPreviewPivot::Restore()

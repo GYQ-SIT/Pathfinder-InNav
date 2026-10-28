@@ -430,23 +430,31 @@ floor. Switching buildings (via the building switcher) exits back to 2D first.
 
 ### Isolate & Rotate
 
-In **3D**, click **Isolate & Rotate** beside **Camera** in the top menu bar to inspect the model around an
-orange pivot at the **centre of the building's lowest floor slab**. The pivot stays
-fixed at that floor's base even though its storey is hidden. The shell, rooms,
-connectors and route graphics rotate together; only the active upper floor is shown.
-The surrounding ground and other buildings/layouts are hidden too.
+In **3D**, click **Isolate** in the group **Isolate | Orbit | Grab** (in the bar under the menus, between
+**Colours** and **View**) to look at the model on its own and move and turn it, the way the SIT Campus
+Wayfinder's map is handled. The big **bottom platform** the building stands on is hidden, and
+so are the surrounding ground and the other buildings. **Every floor is kept, the first one too**: the
+first floor stands on a floor slab of its own (a slab at its base, like the floors above it have), made
+while the mode is on, since the bottom platform is what it used to stand on. Only the floor being viewed
+is shown. The shell, rooms, connectors and route graphics turn together.
 
-- **Left-drag on the scene** rotates and tilts the model around its bottom pivot.
-- **Mouse wheel** zooms. **Camera > Reset** restores the model's initial orientation
-  and framing within this mode.
-- Choose another upper floor normally; the pivot and rotation stay fixed.
-- Click **Isolate & Rotate: ON** again, or press **Esc**, to restore the previous
+- **Left-drag** moves (pans) the model across the screen; it follows the cursor. It cannot be taken
+  further than a little way from where it started.
+- **Right-drag** turns the model about its own centre (an orange marker shows it; at first it is the centre
+  of the first floor): left and right spin it, up and down tip it. The tip is **limited**: the model can be
+  seen from above (tipped toward you by up to 60 degrees, away from you by up to 15), never from underneath
+  or upside down.
+- **Orbit | Grab** chooses how the turn follows the mouse, and one of them is always on. **Grab** (the
+  default) makes the model follow the mouse like something held in the hand: drag right and its near side
+  goes right. **Orbit** is the other way round, as if the camera were moved around the model. They can be
+  used once **Isolate** is on.
+- **Mouse wheel** zooms. **Camera > Reset** puts the model back as it was when the mode was entered (not
+  moved, not turned) and re-frames it.
+- Choose another floor normally; the position and the turn stay.
+- Click **Isolate** again, or press **Esc**, to restore the previous
   camera, floor and View/Edit state. Your previous scene filters are preserved.
 
-If Level 1 was selected, enabling the mode temporarily shows Level 2 and the hint
-above the scene explains the change. Level 1 is unavailable until the mode is off.
-For a one-storey building the button is disabled, because hiding its lowest storey
-leaves no floor to inspect.
+A building with a single floor can be looked at in this way too.
 
 Editing and navigation picking are disabled during inspection. Return to the normal
 view to edit. Floor data and saved coordinates are preserved; rotating the model
