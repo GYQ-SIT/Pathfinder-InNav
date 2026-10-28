@@ -14,8 +14,11 @@ build, reading project data and routes through a mobile data adapter).
 - `README.md` — this file
 - `Readme.txt` — the readme that went into the Milestone 1 submission zip (kept as it was handed in)
 - `.gitignore` — UnrealEngine template, plus signing keys, packaging output and personal test files
-- `.github/workflows/` — CI: `build-windows.yml` (compiles the editor on a self-hosted Windows runner),
+- `.github/workflows/` — CI: `build-windows.yml` (builds the editor from a clean checkout, runs the MSVC static analysis and every
+  automation test, on a self-hosted Windows runner), `lint.yml` (JSON, secrets, configuration, headers and document links; GitHub-hosted),
   `validate-json.yml` (every `InNavi/Data/*.json` parses), `deploy-wiki.yml` (publishes `docs/`)
+- `scripts/` — `lint.py` (the repository checks of `lint.yml`), `check-analysis.ps1` and `check-test-report.ps1` (turn the analysis log and
+  the test report into a pass or a fail), `install-layout-validator.mjs` (installs the plugin package)
 - `InNavi/` — the Unreal Engine project (open `InNavi/InNavi.uproject`)
   - `Source/InNavi/` — all the C++. The phone app is the files starting with `Mobile`
   - `Data/` — sample data, audio, default dock layouts
@@ -78,14 +81,24 @@ and the [M2 evidence](docs/design/layout-validator-m2-compliance.md) for the D1�
 
 ## Running the tests
 
-About 120 automation tests (`InNavi.*`). With the editor closed:
+About 165 automation tests (`InNavi.*`), including the measurements of `InNavi.Performance` (see
+[`docs/performance.md`](docs/performance.md) for the budgets and the numbers). With the editor closed:
 
 ```bash
 UnrealEditor-Cmd.exe InNavi/InNavi.uproject -ExecCmds="Automation RunTests InNavi; Quit" -unattended -nullrhi -nosplash
 ```
 
 (`UnrealEditor-Cmd.exe` is in `Engine/Binaries/Win64` of the Unreal install.) A part can be run on its own, e.g. `InNavi.Mobile` or
-`InNavi.Navigation`. Windows CI runs the layout validator, navigation, docking and UI guard tests.
+`InNavi.Navigation`. Windows CI runs **all** of them, and fails the pull request when one fails (the editor exits 0 either way, so
+`scripts/check-test-report.ps1` reads the report). Before a pull request, `python scripts/lint.py` runs the repository checks of `lint.yml`
+on your own machine. The report and the performance measurements of every CI run are kept with it as a downloadable artifact.
+
+## Performance budget
+
+Desktop 60 FPS or more, phone 30 FPS or more; the campus loads in under 3 s, an interior opens in under 0.5 s, a route between buildings
+takes under 1 s (p95). The measured numbers, the machine they were taken on, and the one place we are above the target (a route inside
+the largest, ten-floor building takes about 6 s) are in [`docs/performance.md`](docs/performance.md). The Debug panel (Window > Debug) shows
+the frame rate while you use the app: the average, the 1 % low and the slowest frame of the last ten seconds.
 
 ## The phone app
 

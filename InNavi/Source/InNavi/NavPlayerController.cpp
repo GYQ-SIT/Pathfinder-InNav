@@ -214,7 +214,7 @@ void ANavPlayerController::SelectOutdoorPointUnderCursor()
 	GetHitResultUnderCursor(ECC_Visibility, false, Hit);
 	const bool bOnBuilding = Hit.bBlockingHit && Cast<APolyBuilding>(Hit.GetActor()) != nullptr;
 
-	FVector Origin, Direction;
+	FVector Origin = FVector::ZeroVector, Direction = FVector::DownVector;
 	if (!bOnBuilding && !DeprojectMousePositionToWorld(Origin, Direction))
 	{
 		return;

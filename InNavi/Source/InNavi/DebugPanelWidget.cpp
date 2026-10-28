@@ -72,6 +72,7 @@ void UDebugPanelWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 	Super::NativeTick(MyGeometry, InDeltaTime);
 	// Smooth the frame time so the FPS figure does not flicker.
 	SmoothedDeltaTime = SmoothedDeltaTime <= 0.f ? InDeltaTime : FMath::Lerp(SmoothedDeltaTime, InDeltaTime, 0.1f);
+	Frames.AddFrame(InDeltaTime);
 	RefreshTexts();
 }
 
@@ -81,8 +82,8 @@ void UDebugPanelWidget::RefreshTexts()
 	{
 		const float FPS = SmoothedDeltaTime > 0.f ? 1.f / SmoothedDeltaTime : 0.f;
 		const FString Lines = InfoProvider ? InfoProvider() : FString();
-		InfoText->SetText(FText::FromString(FString::Printf(TEXT("%s%sFPS: %.1f\nFrame Time: %.2f ms"),
-			*Lines, Lines.IsEmpty() ? TEXT("") : TEXT("\n"), FPS, SmoothedDeltaTime * 1000.f)));
+		InfoText->SetText(FText::FromString(FString::Printf(TEXT("%s%sFPS: %.1f\nFrame Time: %.2f ms\n%s"),
+			*Lines, Lines.IsEmpty() ? TEXT("") : TEXT("\n"), FPS, SmoothedDeltaTime * 1000.f, *Frames.ToText())));
 	}
 	if (LastErrorText)
 	{
