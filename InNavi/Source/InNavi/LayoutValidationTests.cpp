@@ -181,7 +181,16 @@ namespace InNaviValidationTests
         auto* Export=Cast<UButton>(Panel->FindContentWidget(TEXT("Btn_ExportValidation")));
         if (!TestTrue(TEXT("controls exist"),Run&&Filter&&Export)) return false;
         Panel->RefreshDisplay(); TestFalse(TEXT("export disabled before first run"),Export->GetIsEnabled());
-        Run->OnClicked.Broadcast(); TestTrue(TEXT("button runs shared validation session"),PC->GetLayoutValidationSession()->HasReport());
+        Run->OnClicked.Broadcast(); auto* Session=PC->GetLayoutValidationSession();
+        TestTrue(TEXT("button starts the shared validation session"),Session->IsRunning());
+        Panel->RefreshDisplay(); TestFalse(TEXT("a run cannot be started twice"),Run->GetIsEnabled());
+        auto* Cancel=Cast<UButton>(Panel->FindContentWidget(TEXT("Btn_CancelValidation")));
+        TestTrue(TEXT("cancel is offered while running"),Cancel&&Cancel->GetVisibility()==ESlateVisibility::Visible);
+        TestFalse(TEXT("export waits for the report"),Export->GetIsEnabled());
+        while (!Session->StepValidate(0.0)) {}
+        Panel->RefreshDisplay(); TestTrue(TEXT("the session finishes with a report"),Session->HasReport());
+        TestTrue(TEXT("cancel is hidden again"),Cancel&&Cancel->GetVisibility()==ESlateVisibility::Collapsed);
+        TestTrue(TEXT("and validating is possible again"),Run->GetIsEnabled());
         TestTrue(TEXT("current report can be exported"),Export->GetIsEnabled());
         Fixture.Interior->GetRoomById(TEXT("R1"))->RoomName=TEXT("Edited"); Panel->RefreshDisplay();
         TestFalse(TEXT("stale report cannot be exported"),Export->GetIsEnabled());
@@ -197,7 +206,73 @@ namespace InNaviValidationTests
         return true;
     }
 
-    IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFileAndExport, "InNavi.LayoutValidation.FileAndExport", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+    // Validate in slices finds exactly what Validate all at once finds, can be cancelled, and survives the project closing under it.
+    IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSlicedRun, "InNavi.LayoutValidation.SlicedRun", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+    bool FSlicedRun::RunTest(const FString& Parameters)
+    {
+        auto Root=Project(); Room(Root,1)->SetArrayField(TEXT("openings"), {});
+        FFixture Fixture(Root); auto* Session=Fixture.Controller->GetLayoutValidationSession();
+        auto Summary=[](const FReport& Report)
+        {
+            TArray<FString> Lines;
+            for (const auto& I : Report.Issues) Lines.Add(FString::Printf(TEXT("%s|%s|%d|%s"),*I.Rule,*I.BuildingId,I.Floor,*I.ObjectId));
+            Lines.Sort(); return Lines;
+        };
+        Session->Validate();
+        const TArray<FString> AllAtOnce=Summary(Session->GetReport()); const int32 Checked=Session->GetReport().RoomsChecked;
+        TestTrue(TEXT("the sealed room is found"),AllAtOnce.Contains(TEXT("ROOM_UNREACHABLE|A|2|R2")));
+
+        Session->StartValidate();
+        TestTrue(TEXT("running"),Session->IsRunning()); TestFalse(TEXT("no report until it is done"),Session->HasReport());
+        int32 Steps=0; float Last=0.f;
+        while (!Session->StepValidate(0.0) && Steps<100000)
+        {
+            ++Steps; const float Now=Session->GetProgress();
+            TestTrue(TEXT("progress only goes forward, up to 1"),Now>=Last&&Now<=1.f); Last=Now;
+            TestFalse(TEXT("says what it is doing"),Session->GetProgressText().IsEmpty());
+        }
+        TestTrue(TEXT("it took more than one slice"),Steps>1);
+        TestFalse(TEXT("done"),Session->IsRunning()); TestTrue(TEXT("report"),Session->HasReport());
+        TestEqual(TEXT("the same findings as all at once"),Summary(Session->GetReport()),AllAtOnce);
+        TestEqual(TEXT("the same rooms checked"),Session->GetReport().RoomsChecked,Checked);
+
+        Session->StartValidate(); Session->StepValidate(0.0); Session->CancelValidate();
+        TestFalse(TEXT("cancelled run is over"),Session->IsRunning()); TestFalse(TEXT("and leaves no report"),Session->HasReport());
+
+        Session->StartValidate(); Session->StepValidate(0.0);
+        Fixture.Interior->ClearLoadedInterior(); Fixture.Generator->ClearAllBuildings();
+        while (!Session->StepValidate(0.0)) {}
+        TestTrue(TEXT("a project closed during the run is reported, not read"),Has(Session->GetReport(),TEXT("NAVIGATION_SKIPPED")));
+        return true;
+    }
+
+    // Opening a building from the list fills in what its file left out, which must not make the route checks run all over again.
+    IMPLEMENT_SIMPLE_AUTOMATION_TEST(FViewKeepsRouteResults, "InNavi.LayoutValidation.ViewKeepsRouteResults", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+    bool FViewKeepsRouteResults::RunTest(const FString& Parameters)
+    {
+        auto Root=Project(); Room(Root,1)->SetArrayField(TEXT("openings"), {});
+        FFixture Fixture(Root); auto* PC=Fixture.Controller; auto* Session=PC->GetLayoutValidationSession();
+        Fixture.Generator->SpawnBuildingFromData(TEXT("B"),TEXT("Building B"),{ {2000,0}, {3000,0}, {3000,1000}, {2000,1000} },2,300,FVector2D::ZeroVector);
+        Session->Validate();
+        const uint32 Runs=Session->GetRouteCheckRuns();
+        const int32 Unauthored=Session->GetReport().Issues.IndexOfByPredicate([](const FIssue& I){return I.Rule==TEXT("INTERIOR_UNAUTHORED")&&I.BuildingId==TEXT("B");});
+        const int32 Sealed=Session->GetReport().Issues.IndexOfByPredicate([](const FIssue& I){return I.Rule==TEXT("ROOM_UNREACHABLE");});
+        if (!TestTrue(TEXT("the unauthored building and the sealed room are reported"),Unauthored!=INDEX_NONE&&Sealed!=INDEX_NONE)) return false;
+        const FString Before=Fingerprint(ULayoutValidationSession::Capture(*Fixture.Generator,*Fixture.Interior));
+        TestTrue(TEXT("showing the unauthored building"),Session->ShowIssue(*PC,Unauthored));
+        TestEqual(TEXT("it is open"),PC->GetLoadedBuildingId(),FString(TEXT("B")));
+        TestNotEqual(TEXT("opening it changed how the layout is written"),Fingerprint(ULayoutValidationSession::Capture(*Fixture.Generator,*Fixture.Interior)),Before);
+        TestEqual(TEXT("without running the route checks again"),Session->GetRouteCheckRuns(),Runs);
+        TestFalse(TEXT("the report is still current"),Session->IsStale());
+        TestTrue(TEXT("the sealed room is still reported"),Has(Session->GetReport(),TEXT("ROOM_UNREACHABLE")));
+        const int32 Again=Session->GetReport().Issues.IndexOfByPredicate([](const FIssue& I){return I.Rule==TEXT("ROOM_UNREACHABLE");});
+        TestTrue(TEXT("a route issue can still be shown"),Session->ShowIssue(*PC,Again));
+        TestEqual(TEXT("in its building"),PC->GetLoadedBuildingId(),FString(TEXT("A")));
+        TestEqual(TEXT("still no second route check"),Session->GetRouteCheckRuns(),Runs);
+        return true;
+    }
+
+    IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFileAndExport,"InNavi.LayoutValidation.FileAndExport", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
     bool FFileAndExport::RunTest(const FString& Parameters)
     {
         const FString Dir=FPaths::ProjectSavedDir()/TEXT("AutomationTemp"); IFileManager::Get().MakeDirectory(*Dir,true);

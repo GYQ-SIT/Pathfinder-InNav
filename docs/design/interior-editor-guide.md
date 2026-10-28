@@ -131,6 +131,12 @@ Hidden or shown via Window > Map. Only appears once a database (`.db`) has been 
   POI farther than a padded radius from the loaded campus buildings' own extent.
   Checked by default.
 
+**The ground follows the filters.** The grey ground under the campus is not a fixed size: it is made as big as what the Map panel shows - the campus
+buildings that pass the building filters, the other buildings when Non-Campus is checked, the roads of the checked categories (and inside Campus
+Only's range) and the places - plus a margin (5 percent of the longer side, at least 10 m), and never smaller than 40 m each way. So a whole
+city loaded from a database all stands on ground, and filtering down to a few buildings or hiding the roads shrinks it to fit. It updates a
+moment after each change and after every load. If nothing is shown it stays as it was. It does not throw shadows.
+
 **Why some non-`university`-tagged buildings are still enterable:** loading a
 database doesn't just take the buildings tagged `university` - it also pulls in any
 building whose footprint physically touches (or nearly touches, within a small
@@ -321,32 +327,58 @@ toggling a category affects everything in it at once.
 
 ### Navigation panel
 
-Where Start and Destination are chosen and the route is found. The same panel is on the interior editor and on the exterior
-screen (Window > Navigation; it starts hidden on both). From the top: a **search box** (with a line saying how many places
-match), **Start**, **Destination**, **Click to Set Start** / **Click to Set Destination**, **Find Route**, **Clear Route**,
-**Hide Route** / **Show Route**, a status line and the directions.
+Where the route is set and gone through. The same panel is on the interior editor and on the exterior screen (Window >
+Navigation; it starts hidden on both). It has two views, the **Plan** and **Go** tabs at the top. **Plan** is where the route is
+set; **Go** is where it is gone through once it is found (it opens by itself when a route has just been found, and **Edit Route**
+goes back to Plan).
 
-**Inside a building.** The Start and Destination dropdowns list the open building's rooms across every floor, written as
-"Room name (Floor N)" (no id; the id can still be searched). Start lists them floor by floor, Destination by name. Picking a room
-marks its centre; or press **Click to Set Start/Destination** and click a point on the floor plan (or on the floor in the 3D view)
-instead. Either way the button (or the dropdown's frame) turns green for the Start and red for the Destination once it is set.
-The **one search box above Start filters both dropdowns** by room name, id, tag or room type (every word must match, ignoring
-case); a place you have already picked stays shown even when the search hides it.
+**One list of places.** A route is a list of places in the order they are visited. The **first is the Start**, the **last is the
+Destination**, any between are **stops**. A route needs only **two places**: a Start and one stop is a route to that stop, and no
+Destination has to be set. Each place is a row with a letter or number (A and B at the ends, 1, 2 ... between, in the colour of
+its leg on the map), a dropdown, and, on the ends, a **+** button to pick the place by clicking the map (green for the Start, red for
+the Destination while it waits for the click). Click a row's number to choose it, then **Up** / **Down** move it along the list
+(an empty end takes a place that moves onto it) and **Remove** empties an end or removes a stop. **+ Add stop** opens an empty
+row before the Destination: pick a place from its dropdown, or press its **+** and click places on the map, one after another
+(Esc or **Done** ends it). Up to 8 stops. **Reverse** turns the list round. **Clear Route** empties the list and the route.
 
-**Between buildings.** Start and Destination can be in different buildings: pick the Start, switch building with the building
-switcher, pick the Destination. The Start is kept, and the dropdown shows it as its first entry, "Building · Room (Floor N)".
-**Find Route** enables once both are set and finds the way over the link doors, or out of one building and into the other
-through their main doors (see **Doors in the outer wall**).
+**Inside a building.** The dropdowns list the open building's rooms across every floor, written as "Room name (Floor N)" (no id; the
+id can still be searched). Picking a room marks its centre; or press the **+** of the Start or Destination and click a point on
+the floor plan (or on the floor in the 3D view) instead. The **one search box above the list filters every dropdown** by room name,
+id, tag or room type (every word must match, ignoring case); a place you have already picked stays shown even when the search
+hides it.
+
+**Between buildings.** The places can be in different buildings: pick the Start, switch building with the building
+switcher, pick the next place. A place in another building is kept, and its dropdown shows it as its first entry, "Building · Room (Floor N)".
+**Find Route** enables once two places are set and finds the way over the link doors, or out of one building and into the other
+through their main doors (see **Doors in the outer wall**). On a large campus the search takes a while, so it runs a little each
+frame: a progress bar shows how far it is, the editor stays usable, and **Cancel Search** stops it. Changing a place, clearing, or editing the interior also stops it. A trip within one building is searched without the outside
+first (the rest of the campus is not needed for it), and the whole campus only when going out and in again could be shorter.
+
+**Step by step.** Once a route is found it is gone through in the Go view one step at a time, as on the phone: the panel shows "Step 3 of 13"
+and that step, with **Previous** and **Next Step** below it (the last step reads **Arrived**). Everything follows the step. Inside, the
+building and floor of the step are opened (another building too, as the building switcher opens it, and 3D stays on if it was on);
+on the exterior screen the camera goes to the spot on the campus. The screen follows the step too: a step outside is shown on the
+exterior screen (the campus), a step inside a building on the interior screen, so a route that goes from a room out to the campus
+and into another building changes screens as it goes. What was edited in a building stays when the screen changes (it is still
+unsaved), and the route and the step are kept. On the map and in 3D the stretch of the route the step covers is
+drawn in full, the rest of the route is faint, and a white ring marks where the person is. **Show All Steps** lists every step
+instead (nothing is singled out), and **Go Step by Step** goes back.
+
+**Stops.** A stop is any place of the list between the ends, picked like the others (from a dropdown, in any building, or a building's
+main door on the exterior screen; or by clicking indoors, the blue outside area on Floor 1, or the ground on the exterior screen).
+**Find Route** plans the journey leg by leg (from each place to the next): the legs are drawn in different colours on the map and
+in 3D, each stop is numbered, and the directions say where each stop is reached. If a leg cannot be planned, the message says
+which one. A place where the route already is (the one before it in the list) is refused. Changing the list ends a search that
+is running and clears the route.
 
 **Outside (the exterior screen).** No building is open, so the dropdowns list **each building's main door**, written
 "Building · Main door" (the point is a metre outside the door), and the search box narrows them by building name. To pick a spot
-instead, press **Click to Set Start/Destination** and click the **ground** next to a building (inside its outside area). A click
+instead (it shows as **Custom Point (External)**, or **Custom Point (Floor N)** indoors), press the **+** of a place and click the **ground** next to a building (inside its outside area). A click
 on a building, inside one, or too far from every building is refused, and the status line says why. The points and the route are
 **kept when you open or leave a building**, and the route is drawn on the exterior 3D map with Start and Destination markers.
 
 **Directions.** A found route is written as numbered steps, one per line - "Step 1: Start at ...", the doors, lifts or stairs to
-take (with building names, not ids), and "Step N: **Arrive at ...**" - the last step in green. Before a route is found the panel
-shows the Start and Destination chosen so far. **Clear Route** resets both endpoints and the route. **Hide Route** / **Show
+take (with building names, not ids), and "Step N: **Arrive at ...**" - the last step in green. In Go the route is shown as a line of its places above the directions. Before a route is found the places are in Plan. **Clear Route** resets the list and the route. **Hide Route** / **Show
 Route** hides or restores the route lines, direction arrows, markers and written steps without clearing the route.
 
 ### Audio panel

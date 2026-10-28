@@ -11,6 +11,7 @@
 #include "NavPlayerController.generated.h"
 
 class APolyBuilding;
+struct FNavigationRoutePoint;
 class ABuildingGenerator;
 class ULayoutValidationSession;
 class AInteriorGenerator;
@@ -141,6 +142,15 @@ public:
 	// ScreenOwner identifies the screen, so a screen being torn down never clears the one that replaced it.
 	void SetPointerOverUICallback(const UObject* ScreenOwner, TFunction<bool(const FVector2D&)> Callback);
 	void ClearPointerOverUICallback(const UObject* ScreenOwner);
+
+	// Step by step navigation can need the other screen: a step outside is shown on the exterior screen (the campus), a step inside a
+	// building on the interior screen. The screen that is up registers this; FollowNavigationStep asks it first, and it returns true
+	// when it has handed over to the other screen (which then follows the step itself when it comes up).
+	void SetNavigationStepScreenCallback(const UObject* ScreenOwner, TFunction<bool(const FNavigationRoutePoint&)> Callback);
+	void ClearNavigationStepScreenCallback(const UObject* ScreenOwner);
+	// Puts the open interior's edits that are not saved into the project data, as opening another building does, so that they stay
+	// when the interior is closed without a save (they are still counted as unsaved changes).
+	void SyncLoadedInterior();
 	bool IsPointerOverUI() const;
 
 	// Bind this once to catch every failed action (see FOnActionFailed above) instead of hunting
@@ -192,6 +202,12 @@ public:
 	// SetIn3DEditMode) - re-entering 3D preview always starts fresh in View mode.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void SetIn3DPreviewMode(bool bEnable);
+
+	// Step by step navigation (UNavigationPanelWidget::NextStep): takes the view to where the step being shown is. Inside, that is
+	// the step's building (opened if another one is) and floor, kept in 3D if 3D was on; on the exterior screen the camera goes to
+	// the spot on the campus. Bound to the panel's OnGuidedStepChanged.
+	UFUNCTION()
+	void FollowNavigationStep();
 
 	// Whether 3D preview is currently in its Edit sub-mode rather than plain View. Only meaningful
 	// while IsIn3DPreviewMode() is true - always false in 2D mode or outside interior editing.
@@ -1124,6 +1140,9 @@ private:
 	UNavigationPanelWidget* NavigationPanel = nullptr;
 
 	TWeakObjectPtr<const UObject> PointerOverUIOwner;
+	TWeakObjectPtr<const UObject> NavigationStepScreenOwner;
+	TFunction<bool(const FNavigationRoutePoint&)> NavigationStepScreenCallback;
+	bool bHandingOverStep = false;
 	TFunction<bool(const FVector2D&)> PointerOverUICallback;
 	UPROPERTY(VisibleAnywhere, Category = "Navigation")
 	class UNavigationRouteVisualization* RouteVisualization = nullptr;
@@ -1349,6 +1368,10 @@ private:
 	// Remembers the view it was at beforehand (only the first time, until RestoreExteriorCameraView
 	// is called) so that can be restored later. The actual positioning is PositionCameraForFloor.
 	void FocusCameraOnBuilding(APolyBuilding* Building);
+	// The exterior camera over a spot of the campus (a route point): looking down at it from a person-sized distance, kept far enough
+	// to take in the stretch of the route that goes on from there (Next, the point where the step ends; null for a step that is only a
+	// place). The distance does not depend on the size of the buildings, which on a real campus is large.
+	void FocusCameraOnCampusPoint(const FNavigationRoutePoint& Point, const FNavigationRoutePoint* Next);
 
 	// Moves the exterior camera so the whole building is in view, from an angle above and in front of it, for
 	// picking a building from the filter results list. Unlike FocusCameraOnBuilding (the top-down framing used

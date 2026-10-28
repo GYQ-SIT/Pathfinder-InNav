@@ -7,6 +7,7 @@
 #include "Components/Border.h"
 #include "Components/ComboBoxString.h"
 #include "Components/PanelWidget.h"
+#include "Components/ProgressBar.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
@@ -47,11 +48,16 @@ TSharedRef<SWidget> ULayoutValidationPanelWidget::RebuildWidget()
         AddText(Stack, TEXT("Checks applied layout edits. Issues are advisory; editing and saving remain available."), TEXT("Txt_ValidationHelp"));
         Scope = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_ValidationScope"));
         StartStyle::DarkCombo(Scope); Scope->OnGenerateWidgetEvent.BindDynamic(this, &ULayoutValidationPanelWidget::GenerateComboItem);
-        Scope->AddOption(TEXT("Whole campus")); Scope->AddOption(TEXT("Current building")); Scope->SetSelectedIndex(0);
+        Scope->AddOption(TEXT("All buildings")); Scope->AddOption(TEXT("Current building")); Scope->SetSelectedIndex(0);
         Stack->AddChildToVerticalBox(Scope)->SetPadding(FMargin(0, 6, 0, 6));
         Scope->OnSelectionChanged.AddUniqueDynamic(this, &ULayoutValidationPanelWidget::OnScopeChanged);
         ValidateButton = AddButton(Stack, TEXT("Btn_ValidateLayout"), TEXT("Validate layout"));
         ValidateButton->SetStyle(StartStyle::PrimaryButton()); ValidateButton->OnClicked.AddUniqueDynamic(this, &ULayoutValidationPanelWidget::OnValidateClicked);
+        Progress = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("Bar_ValidationProgress"));
+        Progress->SetFillColorAndOpacity(FLinearColor(.3f, .85f, .4f)); Progress->SetPercent(0.f); Progress->SetVisibility(ESlateVisibility::Collapsed);
+        Stack->AddChildToVerticalBox(Progress)->SetPadding(FMargin(0, 0, 0, 6));
+        CancelButton = AddButton(Stack, TEXT("Btn_CancelValidation"), TEXT("Cancel"));
+        CancelButton->SetVisibility(ESlateVisibility::Collapsed); CancelButton->OnClicked.AddUniqueDynamic(this, &ULayoutValidationPanelWidget::OnCancelClicked);
         Status = AddText(Stack, TEXT("Choose a scope, then validate."), TEXT("Txt_ValidationStatus"));
         Filter = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_ValidationSeverity"));
         StartStyle::DarkCombo(Filter); Filter->OnGenerateWidgetEvent.BindDynamic(this, &ULayoutValidationPanelWidget::GenerateComboItem);
@@ -89,21 +95,39 @@ void ULayoutValidationPanelWidget::NativeTick(const FGeometry& Geometry, float D
 {
     Super::NativeTick(Geometry, DeltaTime);
     PollElapsed += DeltaTime;
-    // No validation runs on tick. Fingerprinting is throttled and stops as soon as the report becomes stale.
-    if (PollElapsed >= 1.f) { PollElapsed = 0.f; RefreshDisplay(); }
+    // Validation is stepped by the session itself; this only shows how far it is. Fingerprinting is throttled and stops as soon as the report becomes stale.
+    const auto* State = Session();
+    const bool bBusy = State && State->IsRunning();
+    if (bBusy || bWasBusy || PollElapsed >= 1.f) { PollElapsed = 0.f; bWasBusy = bBusy; RefreshDisplay(); }
 }
 void ULayoutValidationPanelWidget::RefreshDisplay()
 {
     auto* State = Session();
-    if (ValidateButton) ValidateButton->SetIsEnabled(State && (!Scope || Scope->GetSelectedIndex() == 0 || !ScopeBuildingId().IsEmpty()));
+    const bool bBusy = State && State->IsRunning();
+    if (ValidateButton) ValidateButton->SetIsEnabled(State && !bBusy && (!Scope || Scope->GetSelectedIndex() == 0 || !ScopeBuildingId().IsEmpty()));
+    if (CancelButton) CancelButton->SetVisibility(bBusy ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    if (Progress)
+    {
+        Progress->SetVisibility(bBusy ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+        if (bBusy) Progress->SetPercent(State->GetProgress());
+    }
     if (!State || !Status || !Issues) return;
+    if (bBusy)
+    {
+        // The old issues belong to the old report; clear them while the new one is made.
+        if (DisplayedGeneration != State->GetGeneration()) { DisplayedGeneration = State->GetGeneration(); RebuildIssues(); }
+        if (ExportButton) ExportButton->SetIsEnabled(false);
+        Status->SetText(FText::FromString(FString::Printf(TEXT("Validating... %d%%\n%s"), FMath::RoundToInt(State->GetProgress() * 100.f), *State->GetProgressText())));
+        Status->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+        return;
+    }
     State->RefreshStaleness();
     const bool bStale = State->IsStale();
     if (ExportButton) ExportButton->SetIsEnabled(State->HasReport() && !bStale);
     if (State->HasReport())
     {
         const auto& Report = State->GetReport();
-        const FString ScopeName = Report.ScopeBuildingId.IsEmpty() ? TEXT("Whole campus") : Report.ScopeBuildingId;
+        const FString ScopeName = Report.ScopeBuildingId.IsEmpty() ? TEXT("All buildings") : Report.ScopeBuildingId;
         Status->SetText(FText::FromString(FString::Printf(TEXT("%s\n%d errors / %d warnings / %d information\n%d rooms checked, %d skipped\n%s"),
             *ScopeName, Report.Count(LayoutValidation::ESeverity::Error), Report.Count(LayoutValidation::ESeverity::Warning), Report.Count(LayoutValidation::ESeverity::Info),
             Report.RoomsChecked, Report.RoomsSkipped, bStale ? TEXT("Layout changed - validate again.") : Report.bNavigationChecked ? TEXT("Data and entrance reachability checked.") : TEXT("Data checked; navigation not checked."))));
@@ -142,7 +166,15 @@ void ULayoutValidationPanelWidget::OnValidateClicked()
 {
     auto* State = Session(); if (!State) return;
     if (Scope && Scope->GetSelectedIndex() == 1 && ScopeBuildingId().IsEmpty()) return;
-    State->Validate(ScopeBuildingId()); if (Feedback) Feedback->SetText(FText::GetEmpty()); RefreshDisplay();
+    State->StartValidate(ScopeBuildingId()); if (Feedback) Feedback->SetText(FText::GetEmpty()); RefreshDisplay();
+}
+void ULayoutValidationPanelWidget::OnCancelClicked()
+{
+    auto* State = Session(); if (!State) return;
+    State->CancelValidate();
+    if (Status) Status->SetText(FText::FromString(TEXT("Validation cancelled.")));
+    if (Feedback) Feedback->SetText(FText::GetEmpty());
+    RefreshDisplay();
 }
 void ULayoutValidationPanelWidget::OnFilterChanged(FString Value, ESelectInfo::Type Type) { RebuildIssues(); }
 void ULayoutValidationPanelWidget::OnScopeChanged(FString Value, ESelectInfo::Type Type) { RefreshDisplay(); }

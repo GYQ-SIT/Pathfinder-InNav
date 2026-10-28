@@ -1309,6 +1309,7 @@ void UInteriorScreenWidget::NativeConstruct()
 				return DockHost && DockHost->IsScreenPositionOverPanel(FName(GetDockPanelName(EDockPanelId::Navigation)), ScreenPosition);
 			});
 			Nav->OnStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavigationStateChanged);
+			Nav->OnGuidedStepChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleGuidedStepChanged);
 		}
 
 	}
@@ -1337,6 +1338,13 @@ void UInteriorScreenWidget::NativeConstruct()
 	RefreshPropertiesPanelVisibility();
 	// Arranges every dock panel for the first time: the user's saved layout, else the team default.
 	InitializeDockLayout();
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		// A step outside is the exterior screen's: from now on this screen hands over to it when the route comes to one. (It does not
+		// follow the step when it comes up: it may have been opened by the person for another building, and the step stays as it is
+		// until the next one.)
+		PC->SetNavigationStepScreenCallback(this, [this](const FNavigationRoutePoint& Point) { return HandOverToCampusForStep(Point); });
+	}
 }
 
 void UInteriorScreenWidget::InitializeDockLayout()
@@ -1472,6 +1480,8 @@ void UInteriorScreenWidget::NativeDestruct()
 		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
 		{
 			Nav->OnStateChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleNavigationStateChanged);
+			Nav->OnGuidedStepChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleGuidedStepChanged);
+			PC->ClearNavigationStepScreenCallback(this);
 			Nav->SetPointerOverPanelCallback(nullptr);
 		}
 	}
@@ -2857,6 +2867,35 @@ void UInteriorScreenWidget::OnRemoveFloorClicked()
 	RefreshLayersList();
 	RefreshNavigationPanelDisplay();
 	RefreshNavRoomDropdowns();
+}
+
+bool UInteriorScreenWidget::HandOverToCampusForStep(const FNavigationRoutePoint& Point)
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC || Point.Floor != UNavigationPanelWidget::OutdoorFloor)
+	{
+		return false;
+	}
+	// Going outside: the campus is the exterior screen. What was edited here stays (in the project data, still unsaved), as when
+	// another building is opened; the route and the step are the panel's, and stay.
+	PC->SyncLoadedInterior();
+	GoToEditScreen();
+	// The exterior screen is up: the campus is what the panel shows, and the camera goes to the step.
+	if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+	{
+		Nav->SetOutdoorMode(true);
+	}
+	PC->FollowNavigationStep();
+	return true;
+}
+
+void UInteriorScreenWidget::HandleGuidedStepChanged()
+{
+	// A step can be in another building or on another floor, and the plan may have been zoomed or moved for the last one.
+	if (FloorPlanWidget)
+	{
+		FloorPlanWidget->ResetView();
+	}
 }
 
 void UInteriorScreenWidget::HandleNavigationStateChanged()

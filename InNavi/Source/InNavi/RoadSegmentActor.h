@@ -51,6 +51,12 @@ public:
 	// BuildRoad's own comment) and GetActorLocation() would just be (0,0,0).
 	FVector2D GetMidpointPosition() const { return MidpointPosition; }
 
+	// Whether the filters (category and campus range) show this road, and the box of the ground it covers (world X, Y) - what the
+	// campus ground is sized from (see ABuildingGenerator::UpdateGroundToVisible). Not the same as being hidden in game, which other
+	// things can also cause.
+	bool IsShownByFilters() const { return bCategoryVisible && bWithinCampusRange; }
+	const FBox2D& GetBounds2D() const { return Bounds2D; }
+
 	// Two independent visibility inputs, combined by RefreshVisibility - lets the category filter
 	// (ABuildingGenerator::SetRoadCategoryVisible) and the campus-range filter
 	// (ABuildingGenerator::SetRoadsAndPOIsWithinCampusOnly) coexist without either one clobbering
@@ -67,6 +73,7 @@ private:
 
 	ERoadCategory Category = ERoadCategory::Other;
 	FVector2D MidpointPosition = FVector2D::ZeroVector;
+	FBox2D Bounds2D = FBox2D(ForceInit);
 	bool bCategoryVisible = true;
 	bool bWithinCampusRange = true;
 };

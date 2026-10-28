@@ -16,6 +16,7 @@ class UComboBoxString;
 class UEditableTextBox;
 class FJsonObject;
 class UImage;
+struct FNavigationRoutePoint;
 class UInteriorFloorPlanWidget;
 class ULayerRowWidget;
 class UAudioFileRowWidget;
@@ -56,6 +57,9 @@ public:
 	// screen created. For tests and tooling.
 	UWidget* FindScreenWidget(FName Name) const;
 	void ShowValidationPanel();
+	// Step by step navigation: a step outside is shown on the exterior screen (the campus). Returns true when this screen has handed over
+	// to it (what was edited here stays, unsaved). Registered with the controller (SetNavigationStepScreenCallback); public for tests.
+	bool HandOverToCampusForStep(const FNavigationRoutePoint& Point);
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -481,6 +485,9 @@ private:
 	// state's OnStateChanged) repaints it.
 	UFUNCTION()
 	void HandleNavigationStateChanged();
+	// The step being shown has changed (step by step navigation): the plan is shown whole, so the step is in view.
+	UFUNCTION()
+	void HandleGuidedStepChanged();
 
 	void RefreshNavigationPanelDisplay();
 

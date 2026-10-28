@@ -66,6 +66,12 @@ void ARoadSegmentActor::BuildRoad(const TArray<FVector2D>& Points, float Width, 
 		PointSum += Point;
 	}
 	MidpointPosition = PointSum / Points.Num();
+	Bounds2D = FBox2D(ForceInit);
+	for (const FVector2D& Point : Points)
+	{
+		Bounds2D += Point;
+	}
+	Bounds2D = FBox2D(Bounds2D.Min - FVector2D(Half, Half), Bounds2D.Max + FVector2D(Half, Half));
 
 	TArray<FVector> Normals;
 	TArray<FVector2D> UV0;

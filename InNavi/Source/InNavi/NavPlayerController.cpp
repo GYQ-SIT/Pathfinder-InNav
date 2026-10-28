@@ -86,6 +86,7 @@ void ANavPlayerController::BeginPlay()
 		// Keeps the 3D preview's route/start/destination markers live as the user picks points and
 		// finds/clears a route - see RefreshRoute3DVisualization's own comment.
 		NavigationPanel->OnStateChanged.AddUniqueDynamic(this, &ANavPlayerController::RefreshRoute3DVisualization);
+		NavigationPanel->OnGuidedStepChanged.AddUniqueDynamic(this, &ANavPlayerController::FollowNavigationStep);
 		OnInteriorContentChanged.AddUniqueDynamic(NavigationPanel, &UNavigationPanelWidget::NotifyInteriorChanged);
 	}
 
@@ -3063,6 +3064,7 @@ void ANavPlayerController::DrawPendingRoomPointMarker3D()
 void ANavPlayerController::RefreshRoute3DVisualization()
 {
 	RouteVisualization->ClearRoute();
+	const FNavigationRouteFocus Focus = NavigationPanel ? NavigationPanel->GetGuidedFocus() : FNavigationRouteFocus();
 
 	// The exterior screen draws the whole route on the campus.
 	if (NavigationPanel && NavigationPanel->IsOutdoorMode())
@@ -3071,7 +3073,7 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 			NavigationPanel->GetRoutePoints(),
 			NavigationPanel->HasStart() ? &NavigationPanel->GetStart() : nullptr,
 			NavigationPanel->HasDestination() ? &NavigationPanel->GetDestination() : nullptr,
-			NavigationPanel->IsRouteGuidanceVisible()));
+			NavigationPanel->IsRouteGuidanceVisible(), &NavigationPanel->GetStops(), &NavigationPanel->GetRouteLegs(), &Focus));
 		return;
 	}
 
@@ -3091,13 +3093,124 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 		NavigationPanel->HasStart() ? &NavigationPanel->GetStart() : nullptr,
 		NavigationPanel->HasDestination() ? &NavigationPanel->GetDestination() : nullptr,
 		Building->BuildingOffset, Generator->GetScale(), Building->GetFloorHeight(), InteriorGen->GetActiveFloor(),
-		NavigationPanel->IsRouteGuidanceVisible(), Building->BuildingId));
+		NavigationPanel->IsRouteGuidanceVisible(), Building->BuildingId, &NavigationPanel->GetStops(), &NavigationPanel->GetRouteLegs(), &Focus));
+}
+
+void ANavPlayerController::FollowNavigationStep()
+{
+	const FNavigationRoutePoint* Point = NavigationPanel ? NavigationPanel->GetGuidedPoint() : nullptr;
+	APolyBuilding* Building = Point && Generator ? Generator->FindBuildingById(Point->BuildingId) : nullptr;
+	if (!Point || !Building)
+	{
+		return;
+	}
+	// A step outside belongs to the exterior screen and one inside a building to the interior screen: if the one that is up is the
+	// wrong one it hands over (and the other screen follows the step when it comes up).
+	// (The other screen follows the step as it takes over, and is not asked again.)
+	if (!bHandingOverStep && NavigationStepScreenOwner.IsValid() && NavigationStepScreenCallback)
+	{
+		TGuardValue<bool> HandingOver(bHandingOverStep, true);
+		if (NavigationStepScreenCallback(*Point))
+		{
+			return;
+		}
+	}
+	// The exterior screen: no building is open, the camera goes to the spot.
+	if (NavigationPanel->IsOutdoorMode())
+	{
+		const FNavigationRouteFocus Focus = NavigationPanel->GetGuidedFocus();
+		const TArray<FNavigationRoutePoint>& Route = NavigationPanel->GetRoutePoints();
+		FocusCameraOnCampusPoint(*Point, Focus.LastPointIndex != Focus.FirstPointIndex && Route.IsValidIndex(Focus.LastPointIndex) ? &Route[Focus.LastPointIndex] : nullptr);
+		return;
+	}
+	if (!InteriorGen)
+	{
+		return;
+	}
+	// Inside: the building of the step, on its floor (an outdoor spot is shown on Floor 1, whose map has the outside area). Another
+	// building is opened the way the building switcher opens it, which keeps edits not yet saved. Opening one leaves 3D, so 3D is
+	// put back if it was on.
+	const bool bWas3D = bIsIn3DPreviewMode;
+	if (InteriorGen->GetLoadedBuildingId() != Point->BuildingId && LoadInteriorForBuilding(Point->BuildingId) < 0)
+	{
+		return;
+	}
+	const int32 Floor = FMath::Max(1, Point->Floor);
+	if (InteriorGen->GetActiveFloor() != Floor)
+	{
+		SetActiveFloor(Floor);
+	}
+	if (bWas3D && !bIsIn3DPreviewMode)
+	{
+		SetIn3DPreviewMode(true);
+	}
+	RefreshRoute3DVisualization();
+}
+
+void ANavPlayerController::FocusCameraOnCampusPoint(const FNavigationRoutePoint& Point, const FNavigationRoutePoint* Next)
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn || !Generator)
+	{
+		return;
+	}
+	auto WorldOf = [this](const FNavigationRoutePoint& Spot) -> FVector
+	{
+		if (Spot.bHasWorldPosition)
+		{
+			return Spot.WorldPosition;
+		}
+		const APolyBuilding* Owner = Generator->FindBuildingById(Spot.BuildingId);
+		return Owner ? FVector((Spot.Position.X + Owner->BuildingOffset.X) * Generator->GetScale(), (Spot.Position.Y + Owner->BuildingOffset.Y) * Generator->GetScale(),
+			FMath::Max(0, Spot.Floor - 1) * Owner->GetFloorHeight()) : FVector::ZeroVector;
+	};
+	// A view of a person's size, in world units (cm): near enough to see the spot and what is around it, far enough to take in the
+	// stretch of the route that goes on from it, and never so far that the spot is lost.
+	constexpr float MinDistance = 8000.f;
+	constexpr float MaxDistance = 15000.f;
+	constexpr float Pitch = -45.f;
+	const FVector Here = WorldOf(Point);
+	const FVector There = Next ? WorldOf(*Next) : Here;
+	float Distance = FMath::Max(MinDistance, FVector::Dist2D(Here, There) * 1.3f + 1500.f);
+	// Aimed between the spot and where the step ends when both fit; when the stretch is too long for that, at the spot.
+	FVector Target = (Here + There) * 0.5f;
+	if (Distance > MaxDistance)
+	{
+		Distance = MaxDistance;
+		Target = Here;
+	}
+	const FRotator Rotation(Pitch, GetControlRotation().Yaw, 0.f);
+	ControlledPawn->SetActorLocationAndRotation(Target - Rotation.Vector() * Distance, Rotation);
+	SetControlRotation(Rotation);
 }
 
 void ANavPlayerController::SetPointerOverUICallback(const UObject* ScreenOwner, TFunction<bool(const FVector2D&)> Callback)
 {
 	PointerOverUIOwner = ScreenOwner;
 	PointerOverUICallback = MoveTemp(Callback);
+}
+
+void ANavPlayerController::SetNavigationStepScreenCallback(const UObject* ScreenOwner, TFunction<bool(const FNavigationRoutePoint&)> Callback)
+{
+	NavigationStepScreenOwner = ScreenOwner;
+	NavigationStepScreenCallback = MoveTemp(Callback);
+}
+
+void ANavPlayerController::ClearNavigationStepScreenCallback(const UObject* ScreenOwner)
+{
+	if (NavigationStepScreenOwner.Get() == ScreenOwner)
+	{
+		NavigationStepScreenOwner = nullptr;
+		NavigationStepScreenCallback = nullptr;
+	}
+}
+
+void ANavPlayerController::SyncLoadedInterior()
+{
+	if (InteriorGen)
+	{
+		InteriorGen->SyncInteriorToBuildingGenerator();
+	}
 }
 
 void ANavPlayerController::ClearPointerOverUICallback(const UObject* ScreenOwner)

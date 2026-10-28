@@ -478,6 +478,7 @@ void UEditScreenWidget::NativeConstruct()
 				return DockHost && DockHost->IsScreenPositionOverPanel(ExteriorDock::Navigation, ScreenPosition);
 			});
 			Nav->OnStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::HandleNavigationStateChanged);
+			PC->SetNavigationStepScreenCallback(this, [this](const FNavigationRoutePoint& Point) { return HandOverToBuildingForStep(Point); });
 		}
 		if (MapPanelWidget)
 		{
@@ -521,6 +522,7 @@ void UEditScreenWidget::NativeDestruct()
 		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
 		{
 			Nav->OnStateChanged.RemoveDynamic(this, &UEditScreenWidget::HandleNavigationStateChanged);
+			PC->ClearNavigationStepScreenCallback(this);
 			Nav->SetPointerOverPanelCallback(nullptr);
 		}
 		PC->ClearPointerOverUICallback(this);
@@ -605,13 +607,40 @@ void UEditScreenWidget::HandleBuildingSelected(FString BuildingId)
 
 void UEditScreenWidget::OpenInteriorEditor(bool b3DView)
 {
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		OpenInteriorForBuilding(PC->GetSelectedBuildingId(), b3DView);
+	}
+}
+
+bool UEditScreenWidget::HandOverToBuildingForStep(const FNavigationRoutePoint& Point)
+{
+	if (Point.Floor == UNavigationPanelWidget::OutdoorFloor || Point.BuildingId.IsEmpty())
+	{
+		return false;
+	}
+	OpenInteriorForBuilding(Point.BuildingId, false);
+	// The interior screen is up: a building is open, and its floor and view are the step's.
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->SetOutdoorMode(false);
+		}
+		PC->FollowNavigationStep();
+	}
+	return true;
+}
+
+void UEditScreenWidget::OpenInteriorForBuilding(const FString& BuildingId, bool b3DView)
+{
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
 	if (!PC)
 	{
 		return;
 	}
 
-	PC->LoadInteriorForBuilding(PC->GetSelectedBuildingId());
+	PC->LoadInteriorForBuilding(BuildingId);
 
 	if (UInteriorScreenWidget* InteriorScreen = CreateWidget<UInteriorScreenWidget>(PC, UInteriorScreenWidget::StaticClass()))
 	{

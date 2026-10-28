@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "NavigationRoutePlanner.h"
+#include "Containers/Ticker.h"
 #include "NavigationPanelWidget.generated.h"
 
 class ABuildingGenerator;
@@ -16,7 +17,9 @@ enum class ENavigationSelectionMode : uint8
 {
 	None,
 	Start,
-	Destination
+	Destination,
+	// Clicking places adds them as stops, one after another, until the mode is ended.
+	Stop
 };
 
 enum class ENavigationMessageKind : uint8
@@ -83,6 +86,50 @@ public:
 	const FNavigationRoutePoint& GetStart() const { return Start.Point; }
 	const FNavigationRoutePoint& GetDestination() const { return Destination.Point; }
 	const TArray<FNavigationRoutePoint>& GetRoutePoints() const { return RoutePoints; }
+
+	// Stops: places the route has to pass, in order, between the Start and the Destination. A stop can be in any building, or a
+	// main door outside; the room dropdowns are where they are picked.
+	static constexpr int32 MaxRouteStops = 8;
+	const TArray<FNavigationStop>& GetStops() const { return Stops; }
+	// Once a route is found, the stretches of it between the Start, the stops and the Destination (one when there are no stops).
+	const TArray<FNavigationRouteLeg>& GetRouteLegs() const { return RouteLegs; }
+	// The stop as the lists show it: the building, then the place ("Beta · Lab 3 (Floor 2)"; a main door names its building itself).
+	FString GetStopLabel(int32 StopIndex) const;
+	// Adds the place the dropdown entry names (FNavigationRoomOption::GetDisplayLabel) as the last stop. False, with a message, when
+	// there is no such place, it cannot be used as a point, the limit is reached, or it is where the route already is (the Start or
+	// the stop before it, or the Destination).
+	bool AddStopToRoom(const FString& RoomOptionLabel);
+	bool RemoveStop(int32 StopIndex);
+	bool MoveStop(int32 FromIndex, int32 ToIndex);
+	void ClearStops();
+	// ---- The route as one list of places ----
+	// What the Navigation panel shows: the places in the order they are visited, from the Start to the Destination. The two ends are
+	// rows even before they are set; a stop is a row between them. The last place is the destination whatever it was called: a route
+	// of a Start and one stop is a route to that stop (when a route is looked for, an end that is not set is taken from the stop next
+	// to it).
+	int32 GetPlaceCount() const { return Stops.Num() + 2; }
+	// How many of the places are set; two are enough to look for a route.
+	int32 GetSetPlaceCount() const;
+	bool IsPlaceSet(int32 Row) const;
+	// "Start", "Stop 2", "Destination".
+	FString GetPlaceRole(int32 Row) const;
+	// What a row shows: the room as its list names it, with its building when the building is not the open one; a place picked on the
+	// map by where it is. Empty when the place is not set.
+	FString GetPlaceText(int32 Row) const;
+	// Sets a row from the list (the Start, the Destination, or replaces a stop).
+	bool SetPlaceToRoom(int32 Row, const FString& RoomOptionLabel);
+	// Empties an end, or removes a stop.
+	bool ClearPlace(int32 Row);
+	// Moves a place up (-1) or down (+1) the list; returns where it is now, INDEX_NONE if it cannot. A place that moves onto an end
+	// that is not set takes the end.
+	int32 MovePlace(int32 Row, int32 Offset);
+	// The same places the other way round.
+	void ReversePlaces();
+
+	// Click mode for stops: each click on the map (a place indoors, or the ground outside) adds a stop, and the mode stays on for the
+	// next one until it is toggled off, Escape is pressed or the limit is reached. Picking a Start or Destination ends it, and the
+	// other way round; adding a stop from the list does not disturb a click mode in progress.
+	void ToggleSelectStops();
 	// Presentation visibility is independent of the stored route and the navigation dock.
 	UFUNCTION(BlueprintPure, Category = "Navigation")
 	bool IsRouteGuidanceVisible() const { return bRouteGuidanceVisible; }
@@ -128,6 +175,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Navigation")
 	void RequestClearRoute();
 
+	// RequestFindRoute waits for the route. On a large campus that takes seconds, so the Find Route button calls this instead: the
+	// search runs a little each frame (the panel steps itself from the core ticker), shows how far it is, and can be cancelled.
+	// The result is applied exactly as RequestFindRoute applies it. Changing the start, the stops or the destination, clearing,
+	// editing the interior, or closing the project stops the search without a result. With stops, each leg is searched in turn.
+	void StartFindRoute();
+	// Works for about BudgetSeconds; true once there is no search running any more. The ticker calls this; tests may call it directly.
+	bool StepFindRoute(double BudgetSeconds);
+	// The person cancelled: stops the search and says so.
+	void CancelFindRoute();
+	bool IsFindingRoute() const { return RouteJob.IsValid(); }
+	// 0 to 1, and in words what the search is doing, while one is running.
+	float GetFindRouteProgress() const;
+	FString GetFindRouteProgressText() const;
+
 	// Presentation seam for Person A's combined planner. Its result may contain floor-zero outdoor
 	// points and indoor floor points; the floor-plan and directions render both from this one array.
 	// Kept as a C++ method because FNavigationRouteResult is intentionally not a reflected type.
@@ -149,8 +210,26 @@ public:
 	{
 		FString Text;
 		bool bFinal = false;
+		// The point of the route (RoutePoints) where the person is when the step applies; the step is shown there.
+		int32 PointIndex = INDEX_NONE;
 	};
 	TArray<FNavigationRouteStep> BuildRouteSteps() const;
+
+	// Step by step: the route is gone through a step at a time, as on the phone. When a route is found the first step is the one
+	// shown, NextStep and PreviousStep move along, and everything that shows the route shows that step: the building and floor
+	// (and the camera) it is in, the stretch of the route it covers (the rest is faint), and a marker where the person is.
+	// SetStepByStep(false) shows all the steps instead, with nothing singled out.
+	bool NextStep();
+	bool PreviousStep();
+	void SetStepByStep(bool bOn);
+	bool IsStepByStep() const;
+	int32 GetGuidedStepIndex() const;
+	// The route point of the step being shown (null unless going step by step), and the stretch of the route it covers.
+	const FNavigationRoutePoint* GetGuidedPoint() const;
+	FNavigationRouteFocus GetGuidedFocus() const;
+	// Broadcast whenever the step being shown changes, a route is found (the first step), or step by step is turned on or off.
+	UPROPERTY(BlueprintAssignable, Category = "Navigation")
+	FOnNavigationStateChanged OnGuidedStepChanged;
 	// The same as text: "Step 1: ..." per line when a route is found; before that, just the Start and Destination chosen so far.
 	FString BuildRouteDetails() const;
 	bool CanFindRoute() const;
@@ -240,8 +319,46 @@ public:
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
+	virtual void BeginDestroy() override;
 
 private:
+	// The checks both ways of finding a route start with; false (with the reason shown) when there is nothing to find.
+	bool CanStartFindRoute();
+	// The trip from the Start through the stops to the Destination, as the legs it is planned in. Both ways of finding a route plan
+	// one leg after another and end in ApplyJourney, or in FailJourney with the leg that could not be.
+	struct FJourney;
+	TSharedRef<FJourney> MakeJourney() const;
+	bool MoveGuidedStep(int32 Offset);
+	// Starts the step by step at the first step.
+	void StartGuidance();
+	int32 GuidedStep = 0;
+	bool bStepByStep = true;
+	// Adds a stop at the end of the others (the limit and a place the route is already at are refused, with a message).
+	bool AddStop(FNavigationStop Stop);
+	void ApplyJourney(const FJourney& Trip);
+	void FailJourney(const FJourney& Trip, const FNavigationRouteResult& LegResult);
+	TSharedPtr<FJourney> Journey;
+	// The route and its legs are always cleared together.
+	void ClearRouteResult() { RoutePoints.Reset(); RouteLegs.Reset(); }
+	// What every change of the stops does: the search and the route they were for no longer apply.
+	void StopsChanged(const FString& Message, ENavigationMessageKind Kind);
+	// A stop from a dropdown entry (what AddStopToRoom adds and a row set from the list is replaced by).
+	bool MakeStopFromLabel(const FString& RoomOptionLabel, FNavigationStop& OutStop);
+	// The ends that are not set are taken from the stops next to them, so that two places are a route.
+	void PromoteEnds();
+	// The point on the map a dropdown entry stands for, and the building it is in; false (with the reason, for the status line) when a
+	// person cannot be sent there.
+	bool MakeOptionPoint(const FNavigationRoomOption& Option, FNavigationRoutePoint& OutPoint, FString& OutBuildingId, FString& OutError) const;
+	// Gives a point its building and where it is in the world, as the planner needs them.
+	void StampPoint(FNavigationRoutePoint& Point, const FString& BuildingId) const;
+	// Stops a running search without a message; true if there was one.
+	bool StopRouteJob();
+	bool TickFindRoute(float DeltaTime);
+	TSharedPtr<FNavigationRouteJob> RouteJob;
+	FTSTicker::FDelegateHandle RouteTicker;
+	// The endpoints the running search is for; if they change, its result no longer applies.
+	FNavigationRoutePoint JobStart, JobDestination;
+
 	void RefreshRoomSearchIndex() const;
 	mutable TArray<FNavigationRoomOption> CachedRooms;
 	mutable TArray<int32> SortedDestinationIndices;
@@ -263,6 +380,15 @@ private:
 	};
 
 	FString OtherBuildingLabel(const FSelectedEndpoint& Endpoint) const;
+	// A stop as an endpoint, to be spoken of the way the Start and Destination are.
+	FSelectedEndpoint StopAsEndpoint(const FNavigationStop& Stop) const;
+	// The places as endpoints, Start first and Destination last, and the other way: the ends from the first and the last, the stops
+	// from those between (one that is not set cannot be between, and is left out). Tags, when given, are left out and padded the same way.
+	TArray<FSelectedEndpoint> PlacesAsRows() const;
+	void ApplyRows(TArray<FSelectedEndpoint> Rows, TArray<int32>* Tags = nullptr);
+	// How an endpoint is shown in the places list.
+	FString PlaceText(const FSelectedEndpoint& Endpoint) const;
+	bool ReplaceStop(int32 StopIndex, const FString& RoomOptionLabel);
 	// A building by its name (its id when it has none), and where an endpoint is, in words, for the directions.
 	FString BuildingDisplayName(const FString& BuildingId) const;
 	FString EndpointPhrase(const FSelectedEndpoint& Endpoint) const;
@@ -292,7 +418,9 @@ private:
 
 	FSelectedEndpoint Start;
 	FSelectedEndpoint Destination;
+	TArray<FNavigationStop> Stops;
 	TArray<FNavigationRoutePoint> RoutePoints;
+	TArray<FNavigationRouteLeg> RouteLegs;
 	FString StatusMessage;
 	ENavigationMessageKind StatusKind = ENavigationMessageKind::Instruction;
 	ENavigationSelectionMode SelectionMode = ENavigationSelectionMode::None;

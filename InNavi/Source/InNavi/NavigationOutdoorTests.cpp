@@ -2,7 +2,10 @@
 
 #include "UiTestFixture.h"
 #include "PolyBuilding.h"
+#include "GameFramework/DefaultPawn.h"
 #include "InteriorScreenWidget.h"
+#include "EditScreenWidget.h"
+#include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "NavigationRoutePlanner.h"
@@ -97,6 +100,7 @@ bool FNavigationOutdoorGroundClickTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("belonging to A"), Nav->GetStart().BuildingId, FString(TEXT("A")));
 	TestFalse(TEXT("not from the dropdown"), Nav->WasStartSetViaDropdown());
 	TestTrue(TEXT("the point has a world position"), Nav->GetStart().bHasWorldPosition);
+	TestEqual(TEXT("a spot picked on the map is a short custom point in the list"), Nav->GetPlaceText(0), FString(TEXT("Custom Point (External)")));
 
 	// Spots that are not allowed change nothing and say why.
 	Nav->ToggleSelectDestination();
@@ -206,9 +210,34 @@ bool FNavigationRouteStepsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("only the last step is final"), FinalCount == 1 && Steps.Last().bFinal);
 	TestTrue(TEXT("the text lists them as Step 1, Step 2, ..."), Nav->BuildRouteDetails().StartsWith(TEXT("Step 1: Start at ")) && Nav->BuildRouteDetails().Contains(FString::Printf(TEXT("Step %d: Arrive at"), Steps.Num())));
 
-	// On screen: one line per step, the last one green.
+	// On screen, going step by step (the default once a route is found): where the step is in the route, and the step.
 	UVerticalBox* Box = Cast<UVerticalBox>(Screen->FindScreenWidget(TEXT("Box_NavRouteSteps")));
-	if (!TestNotNull(TEXT("the steps are on screen"), Box)) return false;
+	UButton* NextButton = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_NavNextStep")));
+	UButton* PreviousButton = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_NavPreviousStep")));
+	if (!TestTrue(TEXT("the step list and the buttons are on screen"), Box && NextButton && PreviousButton)) return false;
+	TestTrue(TEXT("going step by step"), Nav->IsStepByStep() && Nav->GetGuidedStepIndex() == 0);
+	TestEqual(TEXT("two lines: where it is, and the step"), Box->GetChildrenCount(), 2);
+	TestEqual(TEXT("the first says which step of how many"), Cast<UTextBlock>(Box->GetChildAt(0))->GetText().ToString(), FString::Printf(TEXT("Step 1 of %d"), Steps.Num()));
+	TestEqual(TEXT("then the step"), Cast<UTextBlock>(Box->GetChildAt(1))->GetText().ToString(), Steps[0].Text);
+	TestTrue(TEXT("Next can be pressed, Previous cannot"), NextButton->GetIsEnabled() && !PreviousButton->GetIsEnabled());
+	NextButton->OnClicked.Broadcast();
+	TestEqual(TEXT("the button moves to the next step"), Nav->GetGuidedStepIndex(), 1);
+	TestEqual(TEXT("which is the one shown"), Cast<UTextBlock>(Box->GetChildAt(1))->GetText().ToString(), Steps[1].Text);
+	TestTrue(TEXT("Previous can be pressed now"), PreviousButton->GetIsEnabled());
+	for (int32 I = 2; I < Steps.Num(); ++I) NextButton->OnClicked.Broadcast();
+	TestTrue(TEXT("the last step is green"), Cast<UTextBlock>(Box->GetChildAt(1))->GetColorAndOpacity().GetSpecifiedColor().G > 0.8f
+		&& Cast<UTextBlock>(Box->GetChildAt(1))->GetColorAndOpacity().GetSpecifiedColor().R < 0.5f);
+	TestFalse(TEXT("there is no next after it"), NextButton->GetIsEnabled());
+	PreviousButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Previous goes back"), Nav->GetGuidedStepIndex(), Steps.Num() - 2);
+	UButton* ModeButton = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_NavStepMode")));
+	if (!TestNotNull(TEXT("the switch is there"), ModeButton)) return false;
+	ModeButton->OnClicked.Broadcast();
+	TestFalse(TEXT("the switch shows all the steps"), Nav->IsStepByStep());
+	TestEqual(TEXT("and the buttons for one at a time go away"), Cast<UWidget>(Screen->FindScreenWidget(TEXT("Row_NavStepButtonsSize")))->GetVisibility(), ESlateVisibility::Collapsed);
+
+	// On screen, all the steps: one line per step, the last one green.
+	Box = Cast<UVerticalBox>(Screen->FindScreenWidget(TEXT("Box_NavRouteSteps")));
 	TestEqual(TEXT("one line per step"), Box->GetChildrenCount(), Steps.Num());
 	TestEqual(TEXT("shown"), Box->GetVisibility(), ESlateVisibility::Visible);
 	const UTextBlock* First = Cast<UTextBlock>(Box->GetChildAt(0));
@@ -266,6 +295,202 @@ bool FNavigationOutdoorRouteViewTest::RunTest(const FString& Parameters)
 	const FNavigation3DView IndoorStart = UNavigationRouteVisualization::BuildCampusView(TArray<FNavigationRoutePoint>(), &Nav->GetStart(), nullptr);
 	TestTrue(TEXT("an indoor Start is marked"), IndoorStart.Start.IsSet());
 	TestTrue(TEXT("at its height (the second floor is above the ground)"), IndoorStart.Start.IsSet() && IndoorStart.Start->Z > 100.f);
+	return true;
+}
+
+// Stops outside, as the exterior screen picks them: A's door, then B's door, then C's door is one journey of two legs, all outside.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationOutdoorStopsTest, "InNavi.Navigation.Outdoor.Stops",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationOutdoorStopsTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationOutdoorTests;
+	FNavigationSearchFixture Fixture;
+	if (!TestTrue(TEXT("test project loads"), LoadTestProject(Fixture))) return false;
+	UNavigationPanelWidget* Nav = Fixture.Nav;
+	Nav->SetOutdoorMode(true);
+	const TArray<UNavigationPanelWidget::FNavigationRoomOption> Options = Nav->GetSelectableRooms();
+	if (!TestEqual(TEXT("a main door for each building"), Options.Num(), 3)) return false;
+
+	Nav->SetStartToRoom(Options[0].GetDisplayLabel());
+	Nav->SetDestinationToRoom(Options[2].GetDisplayLabel());
+	TestTrue(TEXT("B's door can be a stop"), Nav->AddStopToRoom(Options[1].GetDisplayLabel()));
+	TestEqual(TEXT("a main door names its building"), Nav->GetStopLabel(0), Options[1].GetDisplayLabel());
+	TestTrue(TEXT("the stop is outside, in B"), Nav->GetStops()[0].Point.Floor == UNavigationPanelWidget::OutdoorFloor && Nav->GetStops()[0].BuildingId == TEXT("B")
+		&& Nav->GetStops()[0].Point.bHasWorldPosition);
+
+	Nav->RequestFindRoute();
+	TestEqual(TEXT("two legs"), Nav->GetRouteLegs().Num(), 2);
+	TestTrue(TEXT("from A to C, outside at both ends"), RunsBetween(Nav->GetRoutePoints(), TEXT("A"), TEXT("C")));
+	if (Nav->GetRouteLegs().Num() == 2)
+	{
+		const FNavigationRoutePoint& AtStop = Nav->GetRoutePoints()[Nav->GetRouteLegs()[0].LastPointIndex];
+		TestTrue(TEXT("the legs meet at the stop"), AtStop.BuildingId == TEXT("B") && AtStop.Position.Equals(Nav->GetStops()[0].Point.Position, 0.5));
+	}
+	const FNavigationRoutePoint Start = Nav->GetStart(), Destination = Nav->GetDestination();
+	const FNavigation3DView View = UNavigationRouteVisualization::BuildCampusView(Nav->GetRoutePoints(), &Start, &Destination, true, &Nav->GetStops(), &Nav->GetRouteLegs());
+	TestEqual(TEXT("the campus view marks the stop"), View.Stops.Num(), 1);
+	TestTrue(TEXT("and draws each leg in its colour"), View.Segments.ContainsByPredicate([](const FNavigationDisplaySegment& S) { return S.RouteLegIndex == 0; })
+		&& View.Segments.ContainsByPredicate([](const FNavigationDisplaySegment& S) { return S.RouteLegIndex == 1; }));
+
+	// The same a little at a time.
+	const int32 Points = Nav->GetRoutePoints().Num();
+	Nav->StartFindRoute();
+	while (!Nav->StepFindRoute(0.0)) {}
+	TestTrue(TEXT("the same journey"), Nav->GetRoutePoints().Num() == Points && Nav->GetRouteLegs().Num() == 2);
+	return true;
+}
+
+// Stops picked by clicking the ground on the exterior screen.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationOutdoorClickStopsTest, "InNavi.Navigation.Outdoor.ClickStops",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationOutdoorClickStopsTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationOutdoorTests;
+	FNavigationSearchFixture Fixture;
+	if (!TestTrue(TEXT("test project loads"), LoadTestProject(Fixture))) return false;
+	UNavigationPanelWidget* Nav = Fixture.Nav;
+	Nav->SetOutdoorMode(true);
+	const TArray<UNavigationPanelWidget::FNavigationRoomOption> Options = Nav->GetSelectableRooms();
+	Nav->SetStartToRoom(Options[0].GetDisplayLabel());
+	Nav->SetDestinationToRoom(Options[1].GetDisplayLabel());
+
+	Nav->ToggleSelectStops();
+	Nav->SelectOutdoorGroundPoint(FVector2D(1100, 100), false);
+	TestEqual(TEXT("a spot next to C is a stop"), Nav->GetStops().Num(), 1);
+	TestEqual(TEXT("in C"), Nav->GetStops()[0].BuildingId, FString(TEXT("C")));
+	TestTrue(TEXT("outside, with a world position"), Nav->GetStops()[0].Point.Floor == UNavigationPanelWidget::OutdoorFloor && Nav->GetStops()[0].Point.bHasWorldPosition);
+	TestEqual(TEXT("the mode stays on"), Nav->GetSelectionMode(), ENavigationSelectionMode::Stop);
+	Nav->SelectOutdoorGroundPoint(FVector2D(150, 100), false);
+	TestEqual(TEXT("inside a building is refused, and nothing is added"), Nav->GetStops().Num(), 1);
+	Nav->SelectOutdoorGroundPoint(FVector2D(-10, 100), true);
+	TestEqual(TEXT("so is a click on a building"), Nav->GetStops().Num(), 1);
+	Nav->SelectOutdoorGroundPoint(FVector2D(-10, 150), false);
+	TestEqual(TEXT("another spot is the second stop"), Nav->GetStops().Num(), 2);
+	Nav->CancelSelection();
+
+	TestTrue(TEXT("a spot outside says where it is"), Nav->GetStopLabel(0).Contains(TEXT("outside")));
+	Nav->RequestFindRoute();
+	TestEqual(TEXT("three legs"), Nav->GetRouteLegs().Num(), 3);
+	TestTrue(TEXT("outside at both ends"), RunsBetween(Nav->GetRoutePoints(), TEXT("A"), TEXT("B")));
+	return true;
+}
+
+// Each screen hands over to the other when a step belongs there: the interior screen to the campus for a step outside, the exterior
+// screen to the building for a step inside.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationStepScreenSwitchTest, "InNavi.Navigation.Outdoor.StepScreens",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationStepScreenSwitchTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationOutdoorTests;
+	FNavigationSearchFixture Fixture;
+	if (!TestTrue(TEXT("test project loads"), LoadTestProject(Fixture))) return false;
+	ANavPlayerController* PC = Fixture.MakeController();
+	FNavigationRoutePoint Outside, Inside;
+	Outside.BuildingId = TEXT("A"); Outside.Floor = UNavigationPanelWidget::OutdoorFloor; Outside.Position = FVector2D(-10, 100);
+	Inside.BuildingId = TEXT("A"); Inside.Floor = 1; Inside.Position = FVector2D(50, 50);
+
+	// Inside: a step in the building stays on this screen, a step outside goes to the campus (the building is closed).
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("A"));
+	UInteriorScreenWidget* InteriorScreen = NewObject<UInteriorScreenWidget>();
+	InteriorScreen->Initialize(); InteriorScreen->TakeWidget(); InteriorScreen->SetOwningPlayer(PC);
+	TestFalse(TEXT("a step inside stays on the interior screen"), InteriorScreen->HandOverToCampusForStep(Inside));
+	TestEqual(TEXT("the building is still open"), PC->GetLoadedBuildingId(), FString(TEXT("A")));
+	TestTrue(TEXT("a step outside is for the campus"), InteriorScreen->HandOverToCampusForStep(Outside));
+	TestTrue(TEXT("the interior is closed"), PC->GetLoadedBuildingId().IsEmpty());
+
+	// Outside: a step outside stays on this screen, a step inside opens that building.
+	UEditScreenWidget* ExteriorScreen = NewObject<UEditScreenWidget>();
+	ExteriorScreen->Initialize(); ExteriorScreen->TakeWidget(); ExteriorScreen->SetOwningPlayer(PC);
+	TestFalse(TEXT("a step outside stays on the exterior screen"), ExteriorScreen->HandOverToBuildingForStep(Outside));
+	TestTrue(TEXT("nothing is open"), PC->GetLoadedBuildingId().IsEmpty());
+	TestTrue(TEXT("a step inside is for the building"), ExteriorScreen->HandOverToBuildingForStep(Inside));
+	TestEqual(TEXT("which is opened"), PC->GetLoadedBuildingId(), FString(TEXT("A")));
+	return true;
+}
+
+// A screen the person opens while a route is at a step that belongs to the other screen is just shown: it does not hand the step back
+// at once (which left the two screens on top of each other).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationStepScreenOpenedByHandTest, "InNavi.Navigation.Outdoor.StepScreensOpenedByHand",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationStepScreenOpenedByHandTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationOutdoorTests;
+	FNavigationSearchFixture Fixture;
+	if (!TestTrue(TEXT("test project loads"), LoadTestProject(Fixture))) return false;
+	ANavPlayerController* PC = Fixture.MakeController();
+	UNavigationPanelWidget* Nav = Fixture.Nav;
+
+	// A route between two spots outside Building A, and the interior of A open: the step is outside.
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("A"));
+	Nav->ToggleSelectStart(); Nav->SelectPoint(FVector2D(-10, 100), 1);
+	Nav->ToggleSelectDestination(); Nav->SelectPoint(FVector2D(-10, 150), 1);
+	Nav->RequestFindRoute();
+	if (!TestTrue(TEXT("the step is outside"), Nav->IsStepByStep() && Nav->GetGuidedPoint() && Nav->GetGuidedPoint()->Floor == UNavigationPanelWidget::OutdoorFloor)) return false;
+	const auto* Room = Nav->GetSelectableRooms().FindByPredicate([](const UNavigationPanelWidget::FNavigationRoomOption& O) { return O.Floor == 1; });
+	if (!TestNotNull(TEXT("a room in A"), Room)) return false;
+	const FString RoomLabel = Room->GetDisplayLabel();
+
+	// The interior screen comes up (the person opened it): it stays, with the building open.
+	UInteriorScreenWidget* InteriorScreen = NewObject<UInteriorScreenWidget>();
+	InteriorScreen->SetOwningPlayer(PC); InteriorScreen->Initialize(); InteriorScreen->TakeWidget();
+	TestEqual(TEXT("the interior screen does not hand the outside step back at once"), PC->GetLoadedBuildingId(), FString(TEXT("A")));
+	TestTrue(TEXT("the route and the step are as they were"), Nav->IsStepByStep() && Nav->GetGuidedStepIndex() == 0);
+
+	// The other way: a route at a step inside, and the exterior screen comes up with no building open.
+	Nav->ClearAll();
+	Nav->SetStartToRoom(RoomLabel);
+	Nav->ToggleSelectDestination(); Nav->SelectPoint(FVector2D(-10, 100), 1);
+	Nav->RequestFindRoute();
+	if (!TestTrue(TEXT("the step is inside"), Nav->IsStepByStep() && Nav->GetGuidedPoint() && Nav->GetGuidedPoint()->Floor == 1)) return false;
+	Fixture.Interior->ClearLoadedInterior();
+	UEditScreenWidget* ExteriorScreen = NewObject<UEditScreenWidget>();
+	ExteriorScreen->SetOwningPlayer(PC); ExteriorScreen->Initialize(); ExteriorScreen->TakeWidget();
+	TestTrue(TEXT("the exterior screen does not open the building for the inside step at once"), PC->GetLoadedBuildingId().IsEmpty());
+	return true;
+}
+
+// On the exterior screen the camera goes to the step.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationOutdoorStepCameraTest, "InNavi.Navigation.Outdoor.StepCamera",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationOutdoorStepCameraTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationOutdoorTests;
+	FNavigationSearchFixture Fixture;
+	if (!TestTrue(TEXT("test project loads"), LoadTestProject(Fixture))) return false;
+	UNavigationPanelWidget* Nav = Fixture.Nav;
+	ANavPlayerController* PC = Fixture.MakeController();
+	ADefaultPawn* Pawn = Fixture.World->SpawnActor<ADefaultPawn>();
+	PC->Possess(Pawn);
+	if (!TestTrue(TEXT("the camera is a pawn"), PC->GetPawn() == Pawn)) return false;
+	Nav->SetOutdoorMode(true);
+	const TArray<UNavigationPanelWidget::FNavigationRoomOption> Options = Nav->GetSelectableRooms();
+	Nav->SetStartToRoom(Options[0].GetDisplayLabel());
+	Nav->SetDestinationToRoom(Options[2].GetDisplayLabel());
+	Nav->RequestFindRoute();
+	if (!TestTrue(TEXT("a route"), Nav->IsStepByStep())) return false;
+	// (A test world has not begun play, where an actor is not told by the panel; see FNavigationStepByStepTest.)
+	PC->FollowNavigationStep();
+
+	// The first step is at A, and the camera is there: looking at it, from some way off.
+	const FVector AtA = Pawn->GetActorLocation();
+	const FNavigationRoutePoint* Here = Nav->GetGuidedPoint();
+	TestTrue(TEXT("the step is at A"), Here && Here->BuildingId == TEXT("A"));
+	// The camera is a person-sized distance from the spot (not the size of a building), looking down at it, with it in view.
+	const double ToStep = Here ? FVector::Dist(AtA, Here->WorldPosition) : 0.0;
+	TestTrue(TEXT("a view of a person's size, not further than the most"), ToStep >= 6000.0 && ToStep <= 16000.0);
+	TestTrue(TEXT("looking down"), Pawn->GetActorForwardVector().Z < -0.5);
+	TestTrue(TEXT("with the step in front of the camera"), Here && FVector::DotProduct(Pawn->GetActorForwardVector(), (Here->WorldPosition - AtA).GetSafeNormal()) > 0.8);
+	// The last is at C: the camera has moved over to it.
+	while (Nav->NextStep()) PC->FollowNavigationStep();
+	const FNavigationRoutePoint* There = Nav->GetGuidedPoint();
+	TestTrue(TEXT("the last step is at C"), There && There->BuildingId == TEXT("C"));
+	TestTrue(TEXT("and the camera has gone there"), FVector::Dist(Pawn->GetActorLocation(), AtA) > 500.0
+		&& There && FVector::Dist(Pawn->GetActorLocation(), There->WorldPosition) < FVector::Dist(AtA, There->WorldPosition));
+	// The last step is only a place: the camera looks straight at it, from the nearest distance.
+	TestTrue(TEXT("the last step is looked at from the nearest distance"), There
+		&& FMath::IsNearlyEqual(static_cast<float>(FVector::Dist(Pawn->GetActorLocation(), There->WorldPosition)), 8000.f, 5.f));
+	TestTrue(TEXT("and it is at the middle of the view"), There
+		&& FVector::Dist(Pawn->GetActorLocation() + Pawn->GetActorForwardVector() * 8000.f, There->WorldPosition) < 5.0);
 	return true;
 }
 

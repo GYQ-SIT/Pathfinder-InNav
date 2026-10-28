@@ -21,6 +21,7 @@ ULayoutValidationSession* ANavPlayerController::GetLayoutValidationSession()
 
 void ULayoutValidationSession::SetContext(ABuildingGenerator* InBuildings, AInteriorGenerator* InInterior, const FString& InSource)
 {
+    if (bRunning && (Buildings != InBuildings || Interior != InInterior)) CancelValidate();
     if (bHasReport && (Buildings != InBuildings || Interior != InInterior || Source != InSource)) bStale = true;
     Buildings = InBuildings; Interior = InInterior; Source = InSource;
 }
@@ -60,24 +61,97 @@ TSharedRef<FJsonObject> ULayoutValidationSession::Capture(const ABuildingGenerat
 
 void ULayoutValidationSession::Validate(const FString& ScopeBuildingId)
 {
+    BeginValidate(ScopeBuildingId);
+    while (!StepValidate(TNumericLimits<double>::Max())) {}
+}
+
+void ULayoutValidationSession::StartValidate(const FString& ScopeBuildingId)
+{
+    BeginValidate(ScopeBuildingId);
+    if (bRunning) TickHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateUObject(this, &ULayoutValidationSession::TickValidate));
+}
+
+void ULayoutValidationSession::BeginValidate(const FString& ScopeBuildingId)
+{
+    CancelValidate();
     ++Generation;
-    Report = {}; FocusedIssue = INDEX_NONE;
+    Report = {}; FocusedIssue = INDEX_NONE; bHasReport = false; bStale = false;
+    RunScope = ScopeBuildingId;
     if (!IsValid(Buildings) || !IsValid(Interior))
     {
         LayoutValidation::FIssue Issue; Issue.Rule = TEXT("CONTEXT_MISSING"); Issue.Message = TEXT("Open a project before validating its layout.");
-        Report.Issues.Add(MoveTemp(Issue)); bHasReport = true; bStale = false; return;
+        Report.Issues.Add(MoveTemp(Issue)); bHasReport = true; return;
     }
+    // The data checks are quick. Only the route checks, which grow with the square of the campus, are spread over frames.
     Report = LayoutValidation::ValidateProject(Capture(*Buildings, *Interior));
     Report.Source = Source;
-    if (!Report.HasErrors()) FNavigationRoutePlanner::ValidateLayoutConnectivity(*Buildings, *Interior, ScopeBuildingId, Report);
-    else
+    bDataHadErrors = Report.HasErrors();
+    DataIssueCount = Report.Issues.Num();
+    if (!bDataHadErrors)
+    {
+        ++RouteCheckRuns;
+        Check = MakeShared<FNavigationLayoutCheck>(*Buildings, *Interior, ScopeBuildingId);
+        bRunning = true;
+        return;
+    }
+    LayoutValidation::FIssue Issue; Issue.Rule = TEXT("NAVIGATION_SKIPPED"); Issue.Severity = LayoutValidation::ESeverity::Warning;
+    Issue.Message = TEXT("Navigation was not checked because the project contains data or geometry errors.");
+    Issue.Suggestion = TEXT("Resolve data errors and validate again. The All buildings scope shows errors in other buildings.");
+    Report.Issues.Add(MoveTemp(Issue));
+    FinishValidate();
+}
+
+bool ULayoutValidationSession::StepValidate(double BudgetSeconds)
+{
+    if (!bRunning) return true;
+    if (!IsValid(Buildings) || !IsValid(Interior))
     {
         LayoutValidation::FIssue Issue; Issue.Rule = TEXT("NAVIGATION_SKIPPED"); Issue.Severity = LayoutValidation::ESeverity::Warning;
-        Issue.Message = TEXT("Navigation was not checked because the project contains data or geometry errors.");
-        Issue.Suggestion = TEXT("Resolve data errors and validate again. Whole campus scope shows errors in other buildings.");
+        Issue.Message = TEXT("Navigation was not checked because the project was closed while validating.");
         Report.Issues.Add(MoveTemp(Issue));
     }
-    Report.FilterToBuilding(ScopeBuildingId); Report.Sort(); bHasReport = true; bStale = false;
+    else if (!Check->Step(BudgetSeconds, Report)) return false;
+    FinishValidate();
+    return true;
+}
+
+void ULayoutValidationSession::FinishValidate()
+{
+    StopTicker();
+    Check.Reset(); bRunning = false;
+    RouteIssues.Reset();
+    for (int32 I = DataIssueCount; I < Report.Issues.Num(); ++I) RouteIssues.Add(Report.Issues[I]);
+    Report.FilterToBuilding(RunScope); Report.Sort(); bHasReport = true; bStale = false;
+    ++Generation;
+}
+
+void ULayoutValidationSession::CancelValidate()
+{
+    StopTicker();
+    if (!bRunning) return;
+    Check.Reset(); bRunning = false;
+    Report = {}; bHasReport = false; ++Generation;
+}
+
+float ULayoutValidationSession::GetProgress() const { return bRunning && Check ? Check->GetProgress() : bHasReport ? 1.f : 0.f; }
+FString ULayoutValidationSession::GetProgressText() const { return bRunning && Check ? Check->GetPhase() : FString(); }
+
+void ULayoutValidationSession::StopTicker()
+{
+    if (TickHandle.IsValid()) FTSTicker::GetCoreTicker().RemoveTicker(TickHandle);
+    TickHandle.Reset();
+}
+
+bool ULayoutValidationSession::TickValidate(float DeltaTime)
+{
+    // About half a frame at 60 fps, so the editor keeps answering while this works.
+    return !StepValidate(0.008);
+}
+
+void ULayoutValidationSession::BeginDestroy()
+{
+    StopTicker();
+    Super::BeginDestroy();
 }
 
 void ULayoutValidationSession::RefreshStaleness()
@@ -90,7 +164,7 @@ void ULayoutValidationSession::RefreshStaleness()
 bool ULayoutValidationSession::ShowIssue(ANavPlayerController& Controller, int32 Index)
 {
     RefreshStaleness();
-    if (bStale || !Report.Issues.IsValidIndex(Index) || !IsValid(Buildings) || !IsValid(Interior)) return false;
+    if (bRunning || bStale || !Report.Issues.IsValidIndex(Index) || !IsValid(Buildings) || !IsValid(Interior)) return false;
     const auto Issue = Report.Issues[Index];
     if (Issue.BuildingId.IsEmpty() || !Buildings->FindBuildingById(Issue.BuildingId)) return false;
     // This explicit view action follows the controller's normal building-switch path, which preserves unsaved edits.
@@ -109,8 +183,7 @@ bool ULayoutValidationSession::ShowIssue(ANavPlayerController& Controller, int32
     // that explicit view action, rather than mislabelling a representation change as an author edit.
     if (LayoutValidation::Fingerprint(Capture(*Buildings, *Interior)) != Report.Fingerprint)
     {
-        const FString Scope = Report.ScopeBuildingId;
-        Validate(Scope);
+        RefreshAfterViewing();
         FocusedIssue = Report.Issues.IndexOfByPredicate([&](const LayoutValidation::FIssue& Current)
         {
             return Current.Rule == Issue.Rule && Current.BuildingId == Issue.BuildingId && Current.Floor == Issue.Floor
@@ -119,6 +192,35 @@ bool ULayoutValidationSession::ShowIssue(ANavPlayerController& Controller, int32
     }
     else FocusedIssue = Index;
     return true;
+}
+
+void ULayoutValidationSession::RefreshAfterViewing()
+{
+    // Opening a building can fill in what its file left out (empty floors, say). That changes how the layout is written, not how
+    // it routes, and the report was current just before the building was opened. So only the quick data checks are redone, and
+    // what the route checks found is kept: the whole check would take as long as the first run, with the editor waiting.
+    const FString Scope = Report.ScopeBuildingId;
+    LayoutValidation::FReport Fresh = LayoutValidation::ValidateProject(Capture(*Buildings, *Interior));
+    if (Fresh.HasErrors() != bDataHadErrors)
+    {
+        // The route checks would now be run, or left out, differently: do it all again.
+        Validate(Scope);
+        return;
+    }
+    Fresh.Source = Source;
+    Fresh.bNavigationChecked = Report.bNavigationChecked; Fresh.RoomsChecked = Report.RoomsChecked; Fresh.RoomsSkipped = Report.RoomsSkipped;
+    for (const auto& Issue : RouteIssues) Fresh.Issues.Add(Issue);
+    Fresh.FilterToBuilding(Scope); Fresh.Sort();
+    auto Describe = [](const LayoutValidation::FReport& Of)
+    {
+        TArray<FString> Lines;
+        for (const auto& I : Of.Issues) Lines.Add(FString::Printf(TEXT("%s|%s|%d|%d|%s|%s|%s"), *I.Rule, *I.BuildingId, I.Floor, static_cast<int32>(I.Kind), *I.ObjectId, *I.OwnerId, *I.Message));
+        return Lines;
+    };
+    // The list on the panel is rebuilt (and scrolls back to the top) only when what it lists has changed.
+    const bool bSameIssues = Describe(Fresh) == Describe(Report);
+    Report = MoveTemp(Fresh); bStale = false;
+    if (!bSameIssues) ++Generation;
 }
 
 const LayoutValidation::FIssue* ULayoutValidationSession::GetFocusedIssue() const
