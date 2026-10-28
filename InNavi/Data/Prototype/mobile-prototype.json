@@ -1,0 +1,445 @@
+{
+ "format": "innavi-mobile-prototype",
+ "version": 1,
+ "synthetic": true,
+ "dataNote": "Interactive design prototype · All maps, places and positioning are simulated.",
+ "about": "The design team's phone prototype as data. Every place, building and map here is made up; none of it is read from a real project. It is what -MobileMock shows and what the phone screens' tests run on (see docs/design/mobile-app-data-interface.md).",
+ "placeDescription": "Campus demonstration destination. Location and map are schematic.",
+ "plan": {
+  "entrance": [
+   50,
+   95
+  ],
+  "crossing": [
+   50,
+   50
+  ],
+  "connectors": {
+   "lift": [
+    44,
+    50
+   ],
+   "stairs": [
+    56,
+    50
+   ],
+   "escalator": [
+    50,
+    38
+   ]
+  },
+  "levelOutline": [
+   [
+    0,
+    0
+   ],
+   [
+    100,
+    0
+   ],
+   [
+    100,
+    100
+   ],
+   [
+    0,
+    100
+   ]
+  ],
+  "roomHalfSize": 15
+ },
+ "placeSets": {
+  "campus": [
+   {
+    "name": "Study lounge",
+    "number": 101,
+    "category": "Learning",
+    "roomType": "Study area",
+    "position": [
+     22,
+     25
+    ]
+   },
+   {
+    "name": "Classroom",
+    "number": 102,
+    "category": "Learning",
+    "roomType": "Classroom",
+    "position": [
+     78,
+     25
+    ]
+   },
+   {
+    "name": "Restrooms",
+    "number": 103,
+    "category": "Facilities",
+    "roomType": "Toilet",
+    "position": [
+     78,
+     75
+    ]
+   },
+   {
+    "name": "Lift lobby",
+    "number": 104,
+    "category": "Facilities",
+    "roomType": "Lift lobby",
+    "position": [
+     22,
+     75
+    ]
+   }
+  ],
+  "mall": [
+   {
+    "name": "Pepper Lunch",
+    "number": 101,
+    "category": "Dining",
+    "roomType": "Canteen",
+    "position": [
+     22,
+     25
+    ]
+   },
+   {
+    "name": "Café Terrace",
+    "number": 102,
+    "category": "Dining",
+    "roomType": "Canteen",
+    "position": [
+     78,
+     25
+    ],
+    "unavailableOnLevels": [
+     1
+    ]
+   },
+   {
+    "name": "Restrooms",
+    "number": 103,
+    "category": "Facilities",
+    "roomType": "Toilet",
+    "position": [
+     78,
+     75
+    ]
+   },
+   {
+    "name": "Information desk",
+    "number": 104,
+    "category": "Facilities",
+    "roomType": "Other",
+    "position": [
+     22,
+     75
+    ]
+   }
+  ]
+ },
+ "sites": [
+  {
+   "id": "paya-lebar",
+   "name": "Paya Lebar Mall",
+   "subtitle": "Paya Lebar · Singapore",
+   "distanceLabel": "2.4 km",
+   "hasEscalators": true,
+   "placeSet": "mall",
+   "codePattern": "#{level}-{number}",
+   "buildings": [
+    {
+     "id": "PLM",
+     "name": "Paya Lebar Mall",
+     "levels": [
+      {
+       "level": 1,
+       "label": "L1"
+      },
+      {
+       "level": 2,
+       "label": "L2"
+      },
+      {
+       "level": 3,
+       "label": "L3"
+      },
+      {
+       "level": 4,
+       "label": "L4"
+      },
+      {
+       "level": 5,
+       "label": "L5"
+      },
+      {
+       "level": 6,
+       "label": "L6"
+      },
+      {
+       "level": 7,
+       "label": "L7"
+      }
+     ]
+    }
+   ],
+   "campusMap": {
+    "buildings": [
+     {
+      "buildingId": "PLM",
+      "outline": [
+       [
+        20,
+        25
+       ],
+       [
+        80,
+        25
+       ],
+       [
+        80,
+        75
+       ],
+       [
+        20,
+        75
+       ]
+      ]
+     }
+    ],
+    "features": []
+   }
+  },
+  {
+   "id": "pathfinder-centre",
+   "name": "Pathfinder Centre",
+   "subtitle": "Learning & community spaces",
+   "distanceLabel": "3.1 km",
+   "hasEscalators": false,
+   "placeSet": "campus",
+   "codePattern": "{building}-{level}-{number}",
+   "buildings": [
+    {
+     "id": "PFC",
+     "name": "Pathfinder Centre",
+     "levels": [
+      {
+       "level": 1,
+       "label": "L1"
+      },
+      {
+       "level": 2,
+       "label": "L2"
+      },
+      {
+       "level": 3,
+       "label": "L3"
+      }
+     ]
+    }
+   ],
+   "campusMap": {
+    "buildings": [
+     {
+      "buildingId": "PFC",
+      "outline": [
+       [
+        20,
+        25
+       ],
+       [
+        80,
+        25
+       ],
+       [
+        80,
+        75
+       ],
+       [
+        20,
+        75
+       ]
+      ]
+     }
+    ],
+    "features": []
+   }
+  },
+  {
+   "id": "sit-punggol",
+   "name": "SIT Punggol Campus",
+   "shortName": "SIT Campus",
+   "subtitle": "Campus demo · Schematic maps",
+   "distanceLabel": "Demo",
+   "hasEscalators": false,
+   "placeSet": "campus",
+   "codePattern": "{building}-{level}-{number}",
+   "buildings": [
+    {
+     "id": "E2",
+     "name": "E2",
+     "levels": [
+      {
+       "level": 1,
+       "label": "L1"
+      },
+      {
+       "level": 2,
+       "label": "L2"
+      },
+      {
+       "level": 3,
+       "label": "L3"
+      }
+     ]
+    },
+    {
+     "id": "E6",
+     "name": "E6",
+     "levels": [
+      {
+       "level": 1,
+       "label": "L1"
+      },
+      {
+       "level": 2,
+       "label": "L2"
+      },
+      {
+       "level": 3,
+       "label": "L2M"
+      },
+      {
+       "level": 4,
+       "label": "L3"
+      }
+     ]
+    },
+    {
+     "id": "W2",
+     "name": "W2",
+     "levels": [
+      {
+       "level": 1,
+       "label": "L1"
+      },
+      {
+       "level": 2,
+       "label": "L2"
+      }
+     ]
+    }
+   ],
+   "campusMap": {
+    "buildings": [
+     {
+      "buildingId": "E2",
+      "outline": [
+       [
+        6,
+        8
+       ],
+       [
+        42,
+        8
+       ],
+       [
+        42,
+        38
+       ],
+       [
+        6,
+        38
+       ]
+      ]
+     },
+     {
+      "buildingId": "E6",
+      "outline": [
+       [
+        58,
+        8
+       ],
+       [
+        94,
+        8
+       ],
+       [
+        94,
+        38
+       ],
+       [
+        58,
+        38
+       ]
+      ]
+     },
+     {
+      "buildingId": "W2",
+      "outline": [
+       [
+        6,
+        58
+       ],
+       [
+        42,
+        58
+       ],
+       [
+        42,
+        88
+       ],
+       [
+        6,
+        88
+       ]
+      ]
+     }
+    ],
+    "features": [
+     {
+      "name": "Courtyard",
+      "outline": [
+       [
+        44,
+        12
+       ],
+       [
+        56,
+        12
+       ],
+       [
+        56,
+        40
+       ],
+       [
+        44,
+        40
+       ]
+      ]
+     },
+     {
+      "name": "Pond",
+      "outline": [
+       [
+        58,
+        58
+       ],
+       [
+        94,
+        58
+       ],
+       [
+        94,
+        88
+       ],
+       [
+        58,
+        88
+       ]
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

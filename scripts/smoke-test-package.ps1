@@ -16,7 +16,7 @@ try {
     $exe = Join-Path $work 'InNavi.exe'
     if (-not (Test-Path $exe)) { throw 'The package has no InNavi.exe at its top.' }
     # What the app reads from its folder must be in the package.
-    foreach ($needed in 'InNavi\Data\map_extended.db', 'InNavi\Data\Audio\click_button.wav', 'InNavi\Data\DefaultLayouts\DefaultExteriorLayout.json', 'BUILD-INFO.txt', 'SampleProjects') {
+    foreach ($needed in 'InNavi\Data\map_extended.db', 'InNavi\Data\Audio\click_button.wav', 'InNavi\Data\DefaultLayouts\DefaultExteriorLayout.json', 'InNavi\Data\Prototype\mobile-prototype.json', 'BUILD-INFO.txt', 'SampleProjects') {
         if (-not (Test-Path (Join-Path $work $needed))) { throw "The package is missing $needed." }
     }
     $log = Join-Path $work 'smoke.log'

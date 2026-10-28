@@ -16,7 +16,7 @@ CI**, and both are kept outside the repository.
 
 | Setting | Where it is set | Default | What it does |
 |---------|-----------------|---------|--------------|
-| Data folder | `InNavi/Data/` (next to the exe in a package) | - | The campus database `map_extended.db`, the click sounds in `Audio/`, the default dock layouts in `DefaultLayouts/` |
+| Data folder | `InNavi/Data/` (next to the exe in a package) | - | The campus database `map_extended.db`, the click sounds in `Audio/`, the default dock layouts in `DefaultLayouts/`, and the phone prototype's made-up data in `Prototype/mobile-prototype.json` (it says `"synthetic": true`) |
 | Project files | the project library lists the `.json` projects in `InNavi/Data/` (a deleted one is moved to `Data/Deleted/`); File > Load opens any file | - | The versioned JSON of a project (`version` field; see `BuildingGenerator`) |
 | Saved layouts and settings | `InNavi/Saved/` (never committed) | the files in `Data/DefaultLayouts/` | Where each screen's dock layout, the editor's settings and the phone app's local projects (`Saved/MobileProjects/`) are kept |
 | Dock panels added by a plugin | `[InNavi.ToolPanels]` in `InNavi/Config/DefaultGame.ini` | `Validation=/Script/InNavi.LayoutValidationPanelWidget` | Which widget class shows a tool's panel, found through the plugin's tool registry |
