@@ -139,6 +139,13 @@ struct FMobileRealSource::FProject
 
 FMobileRealSource::~FMobileRealSource() = default;
 
+bool FMobileRealSource::IsLeftTurnOnMap(const FVector2D& Incoming, const FVector2D& Outgoing)
+{
+	// The map draws footprint coordinates as they are, so y grows DOWN the screen. A positive cross product then turns clockwise on
+	// the screen (east, then south): that is a right turn, and a left turn is a negative one.
+	return FVector2D::CrossProduct(Incoming, Outgoing) < 0;
+}
+
 FMobileRealSource::FMobileRealSource(const FString& ProjectPath, const FString& OverridesDirectory)
 {
 	if (IFileManager::Get().DirectoryExists(*ProjectPath))
@@ -445,7 +452,7 @@ FMobileRoute FMobileRealSource::FindRoute(const FMobileRouteRequest& Request)
 				if (Before.Floor == A.Floor && !Incoming.IsNearlyZero() && !Outgoing.IsNearlyZero()
 					&& FVector2D::DotProduct(Incoming, Outgoing) < 0.90)
 				{
-					const bool bLeft = FVector2D::CrossProduct(Incoming, Outgoing) > 0;
+					const bool bLeft = IsLeftTurnOnMap(Incoming, Outgoing);
 					Step.Kind = bLeft ? EMobileStepKind::TurnLeft : EMobileStepKind::TurnRight;
 					Step.Text = bLeft ? TEXT("Turn left and continue") : TEXT("Turn right and continue");
 				}

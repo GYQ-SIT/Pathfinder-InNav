@@ -17,6 +17,8 @@ public:
 	FMobileRealSource(ABuildingGenerator* Generator, AInteriorGenerator* Interior, const FString& ProjectFile = FString());
 	virtual ~FMobileRealSource() override;
 	static TSharedRef<IMobileNavSource> FromWorld(UWorld* World);
+	// Whether going on from Incoming to Outgoing (directions in footprint units) is a left turn as the person sees it on the map.
+	static bool IsLeftTurnOnMap(const FVector2D& Incoming, const FVector2D& Outgoing);
 
 	virtual TArray<FMobileSite> ListSites() override;
 	virtual TArray<FMobileBuilding> ListBuildings(const FString& SiteId) override;
