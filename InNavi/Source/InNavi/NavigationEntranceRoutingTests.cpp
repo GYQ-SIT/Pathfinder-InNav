@@ -317,4 +317,61 @@ bool FNavigationSlicedRouteTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// A trip within one building is first searched without the outside (which is most of the work on a large campus). That answer is
+// kept only when nothing that goes out and in again could be shorter, so the route is the one the whole search would find.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationIndoorOnlyRouteTest, "InNavi.Navigation.IndoorOnlyRoute",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationIndoorOnlyRouteTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationEntranceRoutingTests;
+	FNavigationSearchFixture Fixture;
+	Prepare(Fixture, { Door(TEXT("A-Main"), EInteriorEntranceKind::Main, 3) }, {}, true);
+	const double Never = TNumericLimits<double>::Max();
+	auto SamePoints = [](const FNavigationRouteResult& A, const FNavigationRouteResult& B)
+	{
+		if (A.Points.Num() != B.Points.Num()) return false;
+		for (int32 I = 0; I < A.Points.Num(); ++I)
+			if (A.Points[I].Floor != B.Points[I].Floor || A.Points[I].ConnectorId != B.Points[I].ConnectorId || !A.Points[I].Position.Equals(B.Points[I].Position)) return false;
+		return true;
+	};
+
+	// Between floors by the lift: no reason to go outside, and the outside is left out of the search.
+	FNavigationRouteJob Lift(*Fixture.Generator, *Fixture.Interior, Point(TEXT("A"), 1, FVector2D(80,80)), Point(TEXT("A"), 2, FVector2D(90,90)));
+	Lift.Step(Never);
+	TestTrue(TEXT("the lift trip is found"), Lift.Succeeded());
+	TestTrue(TEXT("without the outside"), Lift.WasIndoorOnly());
+	FNavigationRouteResult WithOutside;
+	TestTrue(TEXT("the search that has the outside finds it too"), FNavigationRoutePlanner::FindRoute(*Fixture.Generator->FindBuildingById(TEXT("A")), *Fixture.Interior,
+		Fixture.Generator->GetScale(), 1, FVector2D(80,80), 2, FVector2D(90,90), WithOutside));
+	TestTrue(TEXT("and it is the same route"), SamePoints(Lift.GetResult(), WithOutside));
+
+	// A room whose only door leads outside, with the main door on the other side of the building: the way from it to the rest
+	// of the building is out and round, so the search without the outside must give way to the whole one.
+	auto Data = InteriorData({ Door(TEXT("A-Main"), EInteriorEntranceKind::Main, 3) }, true);
+	auto Room = MakeShared<FJsonObject>();
+	Room->SetStringField(TEXT("id"), TEXT("Sealed")); Room->SetStringField(TEXT("name"), TEXT("Sealed"));
+	TArray<TSharedPtr<FJsonValue>> Footprint;
+	for (const FVector2D& P : TArray<FVector2D>{ {70,20}, {100,20}, {100,80}, {70,80} })
+		Footprint.Add(MakeShared<FJsonValueArray>(TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueNumber>(P.X), MakeShared<FJsonValueNumber>(P.Y) }));
+	Room->SetArrayField(TEXT("footprint"), Footprint);
+	auto Opening = MakeShared<FJsonObject>();
+	Opening->SetStringField(TEXT("id"), TEXT("Exit")); Opening->SetStringField(TEXT("type"), TEXT("door"));
+	Opening->SetStringField(TEXT("connectsTo"), TEXT("outside")); Opening->SetNumberField(TEXT("edgeIndex"), 1);
+	Opening->SetNumberField(TEXT("offset"), 180); Opening->SetNumberField(TEXT("width"), 240);
+	Room->SetArrayField(TEXT("openings"), { MakeShared<FJsonValueObject>(Opening) });
+	Data->GetArrayField(TEXT("floors"))[0]->AsObject()->SetArrayField(TEXT("rooms"), { MakeShared<FJsonValueObject>(Room) });
+	Fixture.Generator->SetInteriorDataForBuilding(TEXT("A"), Data);
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("A"));
+
+	FNavigationRouteJob Round(*Fixture.Generator, *Fixture.Interior, Point(TEXT("A"), 1, FVector2D(85,50)), Point(TEXT("A"), 1, FVector2D(30,50)));
+	Round.Step(Never);
+	TestTrue(TEXT("the way out and round is found"), Round.Succeeded());
+	TestFalse(TEXT("so the outside was not left out"), Round.WasIndoorOnly());
+	TestTrue(TEXT("the route goes outside"), Round.GetResult().Points.ContainsByPredicate([](const auto& P) { return P.Floor == 0; }));
+	FNavigationRouteResult Whole;
+	TestTrue(TEXT("the same as the whole search"), FNavigationRoutePlanner::FindCampusRoute(*Fixture.Generator, *Fixture.Interior,
+		Point(TEXT("A"), 1, FVector2D(85,50)), Point(TEXT("A"), 1, FVector2D(30,50)), Whole) && SamePoints(Round.GetResult(), Whole));
+	return true;
+}
+
 #endif

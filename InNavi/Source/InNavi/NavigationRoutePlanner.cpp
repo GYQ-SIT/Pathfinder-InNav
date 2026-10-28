@@ -1058,6 +1058,8 @@ namespace
 			return true;
 		}
 		float GetProgress() const { return Graph.Vertices.Num() > 0 ? FMath::Min(1.f, static_cast<float>(Steps) / Graph.Vertices.Num()) : 1.f; }
+		// The length of the shortest route to the destination once the search is over; the largest float when there is none.
+		float GetCost() const { return Distances.Num() > 1 ? Distances[1] : TNumericLimits<float>::Max(); }
 		// The route when there is one; otherwise false, with the reason in Result.Error.
 		bool Finish(FNavigationRouteResult& Result) const
 		{
@@ -1438,10 +1440,44 @@ struct FNavigationRouteJob::FImpl
 	FNavigationRouteResult Result;
 	bool bFound = false;
 
+	// A trip within one building is first searched with only that building and nothing outside it: the outside is where
+	// nearly all the work of a large campus goes. That answer is kept only if it is shorter than anything that goes out
+	// and in again could be (OutsideBound); otherwise the search is made again with everything, as before.
+	TArray<FRouteBuilding> IndoorModels;
+	bool bIndoorOnly = false;
+	double OutsideBound = TNumericLimits<double>::Max();
+	mutable float ShownProgress = 0.f;
+
 	bool IsStillThere() const
 	{
 		for (const auto& Building : Buildings) if (!Building.IsValid()) return false;
 		return LiveGenerator.IsValid() && LiveInterior.IsValid();
+	}
+
+	// Sets up the search without the outside when the trip is within one building and nothing but its own main doors leads out.
+	void PrepareIndoorOnly()
+	{
+		if (Start.Floor == UNavigationPanelWidget::OutdoorFloor || Destination.Floor == UNavigationPanelWidget::OutdoorFloor
+			|| Start.BuildingId != Destination.BuildingId) return;
+		const FRouteBuilding* Own = Models.FindByPredicate([&](const FRouteBuilding& M) { return M.Building->BuildingId == Start.BuildingId; });
+		// A link to another building is another way out (and in), which the bound below does not cover.
+		if (!Own || Own->Entrances.ContainsByPredicate([](const FInteriorEntrance& Door) { return Door.Kind == EInteriorEntranceKind::Link; })) return;
+		// Going out and coming back costs at least the straight distances from the start to a door and from a door to the
+		// destination, the two steps between the floor and the ground (5 each), and the lift or stairs between the ground
+		// floor (where the doors are) and each of the start and the destination that is on another floor.
+		double FromStart = TNumericLimits<double>::Max(), ToDestination = TNumericLimits<double>::Max();
+		for (const auto& Floor : Own->Floors) for (const auto& Exit : Floor.Value.ExteriorExits)
+		{
+			FromStart = FMath::Min(FromStart, FVector2D::Distance(Start.Position, Exit.Position));
+			ToDestination = FMath::Min(ToDestination, FVector2D::Distance(Exit.Position, Destination.Position));
+		}
+		auto ToGroundFloor = [&](int32 Floor) { return Floor == 1 ? 0.0 : 20.0 + (Floor - 1) * Own->Building->GetFloorHeight() / Scale; };
+		OutsideBound = FromStart < TNumericLimits<double>::Max()
+			? 10.0 + FromStart + ToDestination + ToGroundFloor(Start.Floor) + ToGroundFloor(Destination.Floor) : TNumericLimits<double>::Max();
+		IndoorModels.Reset();
+		IndoorModels.Add(*Own);
+		for (auto& Floor : IndoorModels[0].Floors) Floor.Value.ExteriorExits.Reset();
+		bIndoorOnly = true;
 	}
 };
 
@@ -1477,11 +1513,12 @@ bool FNavigationRouteJob::Step(double BudgetSeconds)
 			State.Models = ReadCampusModels(*State.LiveGenerator.Get(), *State.LiveInterior.Get(), State.Start.BuildingId, State.Destination.BuildingId, false);
 			for (auto& Model : State.Models) Model.Nodes.RemoveAll([&](const FInteriorNavNode& Node) { return !State.Preferences.Allows(Node.Type); });
 			for (const auto& Model : State.Models) State.Buildings.Add(Model.Building);
+			State.PrepareIndoorOnly();
 			State.Phase = ERoutePhase::Vertices;
 			break;
 		}
 		case ERoutePhase::Vertices:
-			State.Builder = MakeUnique<FCampusGraphBuilder>(State.Models, State.Scale);
+			State.Builder = MakeUnique<FCampusGraphBuilder>(State.bIndoorOnly ? State.IndoorModels : State.Models, State.Scale);
 			State.Phase = State.Builder->Begin({ State.Start, State.Destination }, State.Result.Error) ? ERoutePhase::Joining : ERoutePhase::Done;
 			break;
 		case ERoutePhase::Joining:
@@ -1494,10 +1531,21 @@ bool FNavigationRouteJob::Step(double BudgetSeconds)
 			else State.Phase = ERoutePhase::Done;
 			break;
 		case ERoutePhase::Solving:
+		{
 			if (!State.Solver->Step(Deadline)) break;
+			const bool bReached = State.Solver->GetCost() < TNumericLimits<float>::Max();
+			const bool bOutsideMayDoBetter = bReached ? State.Solver->GetCost() > State.OutsideBound : State.OutsideBound < TNumericLimits<double>::Max();
+			if (State.bIndoorOnly && bOutsideMayDoBetter)
+			{
+				// Search again with the whole campus.
+				State.bIndoorOnly = false; State.IndoorModels.Reset(); State.Builder.Reset(); State.Solver.Reset();
+				State.Phase = ERoutePhase::Vertices;
+				break;
+			}
 			State.bFound = State.Solver->Finish(State.Result);
 			State.Phase = ERoutePhase::Done;
 			break;
+		}
 		default: break;
 		}
 		if (FPlatformTime::Seconds() >= Deadline) break;
@@ -1510,15 +1558,21 @@ const FNavigationRouteResult& FNavigationRouteJob::GetResult() const { return Im
 
 float FNavigationRouteJob::GetProgress() const
 {
+	float Now = 1.f;
 	switch (Impl->Phase)
 	{
-	case ERoutePhase::Read: return 0.f;
-	case ERoutePhase::Vertices: return 0.05f;
-	case ERoutePhase::Joining: return 0.1f + 0.8f * Impl->Builder->GetProgress();
-	case ERoutePhase::Solving: return 0.9f + 0.1f * Impl->Solver->GetProgress();
-	default: return 1.f;
+	case ERoutePhase::Read: Now = 0.f; break;
+	case ERoutePhase::Vertices: Now = 0.05f; break;
+	case ERoutePhase::Joining: Now = 0.1f + 0.8f * Impl->Builder->GetProgress(); break;
+	case ERoutePhase::Solving: Now = 0.9f + 0.1f * Impl->Solver->GetProgress(); break;
+	default: break;
 	}
+	// A search made again with the whole campus does not take the bar back.
+	Impl->ShownProgress = FMath::Max(Impl->ShownProgress, Now);
+	return Impl->ShownProgress;
 }
+
+bool FNavigationRouteJob::WasIndoorOnly() const { return Impl->bIndoorOnly; }
 
 FString FNavigationRouteJob::GetPhase() const
 {

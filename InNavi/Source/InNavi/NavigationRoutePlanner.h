@@ -75,6 +75,9 @@ public:
 	// 0 to 1, and in words what the search is doing now.
 	float GetProgress() const;
 	FString GetPhase() const;
+	// True when the route was found without the outside: a trip within one building that nothing outside could have shortened.
+	// Such a search skips the work of the outdoor graph, which is most of the work on a large campus.
+	bool WasIndoorOnly() const;
 
 private:
 	struct FImpl;

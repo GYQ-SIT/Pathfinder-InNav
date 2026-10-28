@@ -344,7 +344,8 @@ switcher, pick the Destination. The Start is kept, and the dropdown shows it as 
 **Find Route** enables once both are set and finds the way over the link doors, or out of one building and into the other
 through their main doors (see **Doors in the outer wall**). On a large campus the search takes a while, so it runs a little each
 frame: a progress bar shows how far it is, the editor stays usable, and **Cancel Search** stops it. Changing the start or
-destination, clearing, or editing the interior also stops it.
+destination, clearing, or editing the interior also stops it. A trip within one building is searched without the outside
+first (the rest of the campus is not needed for it), and the whole campus only when going out and in again could be shorter.
 
 **Outside (the exterior screen).** No building is open, so the dropdowns list **each building's main door**, written
 "Building · Main door" (the point is a metre outside the door), and the search box narrows them by building name. To pick a spot
