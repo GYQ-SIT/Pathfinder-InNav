@@ -142,6 +142,15 @@ public:
 	// ScreenOwner identifies the screen, so a screen being torn down never clears the one that replaced it.
 	void SetPointerOverUICallback(const UObject* ScreenOwner, TFunction<bool(const FVector2D&)> Callback);
 	void ClearPointerOverUICallback(const UObject* ScreenOwner);
+
+	// Step by step navigation can need the other screen: a step outside is shown on the exterior screen (the campus), a step inside a
+	// building on the interior screen. The screen that is up registers this; FollowNavigationStep asks it first, and it returns true
+	// when it has handed over to the other screen (which then follows the step itself when it comes up).
+	void SetNavigationStepScreenCallback(const UObject* ScreenOwner, TFunction<bool(const FNavigationRoutePoint&)> Callback);
+	void ClearNavigationStepScreenCallback(const UObject* ScreenOwner);
+	// Puts the open interior's edits that are not saved into the project data, as opening another building does, so that they stay
+	// when the interior is closed without a save (they are still counted as unsaved changes).
+	void SyncLoadedInterior();
 	bool IsPointerOverUI() const;
 
 	// Bind this once to catch every failed action (see FOnActionFailed above) instead of hunting
@@ -1131,6 +1140,8 @@ private:
 	UNavigationPanelWidget* NavigationPanel = nullptr;
 
 	TWeakObjectPtr<const UObject> PointerOverUIOwner;
+	TWeakObjectPtr<const UObject> NavigationStepScreenOwner;
+	TFunction<bool(const FNavigationRoutePoint&)> NavigationStepScreenCallback;
 	TFunction<bool(const FVector2D&)> PointerOverUICallback;
 	UPROPERTY(VisibleAnywhere, Category = "Navigation")
 	class UNavigationRouteVisualization* RouteVisualization = nullptr;

@@ -435,6 +435,21 @@ bool FNavigationStepByStepTest::RunTest(const FString& Parameters)
 	Nav->SetStepByStep(true);
 	TestTrue(TEXT("and it can be turned back on"), Nav->IsStepByStep());
 
+	// The screen that is up is asked first, and when it hands over to the other screen the step is left to that one.
+	int32 Asked = 0;
+	PC->SetNavigationStepScreenCallback(PC, [&Asked](const FNavigationRoutePoint& Point) { ++Asked; return true; });
+	const FString Showing = PC->GetLoadedBuildingId();
+	Nav->NextStep(); Follow();
+	TestEqual(TEXT("the screen was asked"), Asked, 1);
+	TestEqual(TEXT("and handing over leaves the view as it is"), PC->GetLoadedBuildingId(), Showing);
+	PC->SetNavigationStepScreenCallback(PC, [&Asked](const FNavigationRoutePoint& Point) { ++Asked; return false; });
+	Nav->NextStep(); Follow();
+	TestEqual(TEXT("asked again"), Asked, 2);
+	TestEqual(TEXT("and when it keeps the step the view follows it, into B"), PC->GetLoadedBuildingId(), FString(TEXT("B")));
+	PC->ClearNavigationStepScreenCallback(PC);
+	Follow();
+	TestEqual(TEXT("a screen that has gone is not asked"), Asked, 2);
+
 	// A route that is cleared takes the steps with it.
 	Nav->RequestClearRoute();
 	TestTrue(TEXT("cleared"), !Nav->IsStepByStep() && Nav->BuildRouteSteps().IsEmpty());

@@ -350,7 +350,10 @@ first (the rest of the campus is not needed for it), and the whole campus only w
 **Step by step.** Once a route is found it is gone through one step at a time, as on the phone: the panel shows "Step 3 of 13"
 and that step, with **Previous** and **Next Step** below it (the last step reads **Arrived**). Everything follows the step. Inside, the
 building and floor of the step are opened (another building too, as the building switcher opens it, and 3D stays on if it was on);
-on the exterior screen the camera goes to the spot on the campus. On the map and in 3D the stretch of the route the step covers is
+on the exterior screen the camera goes to the spot on the campus. The screen follows the step too: a step outside is shown on the
+exterior screen (the campus), a step inside a building on the interior screen, so a route that goes from a room out to the campus
+and into another building changes screens as it goes. What was edited in a building stays when the screen changes (it is still
+unsaved), and the route and the step are kept. On the map and in 3D the stretch of the route the step covers is
 drawn in full, the rest of the route is faint, and a white ring marks where the person is. **Show All Steps** lists every step
 instead (nothing is singled out), and **Go Step by Step** goes back.
 

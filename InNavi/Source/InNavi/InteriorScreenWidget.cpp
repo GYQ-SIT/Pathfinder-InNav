@@ -1338,6 +1338,15 @@ void UInteriorScreenWidget::NativeConstruct()
 	RefreshPropertiesPanelVisibility();
 	// Arranges every dock panel for the first time: the user's saved layout, else the team default.
 	InitializeDockLayout();
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		// A route is being gone through step by step: this screen opens on the step (the building and floor it is in).
+		PC->SetNavigationStepScreenCallback(this, [this](const FNavigationRoutePoint& Point) { return HandOverToCampusForStep(Point); });
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel(); Nav && Nav->IsStepByStep())
+		{
+			PC->FollowNavigationStep();
+		}
+	}
 }
 
 void UInteriorScreenWidget::InitializeDockLayout()
@@ -1474,6 +1483,7 @@ void UInteriorScreenWidget::NativeDestruct()
 		{
 			Nav->OnStateChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleNavigationStateChanged);
 			Nav->OnGuidedStepChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleGuidedStepChanged);
+			PC->ClearNavigationStepScreenCallback(this);
 			Nav->SetPointerOverPanelCallback(nullptr);
 		}
 	}
@@ -2859,6 +2869,20 @@ void UInteriorScreenWidget::OnRemoveFloorClicked()
 	RefreshLayersList();
 	RefreshNavigationPanelDisplay();
 	RefreshNavRoomDropdowns();
+}
+
+bool UInteriorScreenWidget::HandOverToCampusForStep(const FNavigationRoutePoint& Point)
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC || Point.Floor != UNavigationPanelWidget::OutdoorFloor)
+	{
+		return false;
+	}
+	// Going outside: the campus is the exterior screen. What was edited here stays (in the project data, still unsaved), as when
+	// another building is opened; the route and the step are the panel's, and stay.
+	PC->SyncLoadedInterior();
+	GoToEditScreen();
+	return true;
 }
 
 void UInteriorScreenWidget::HandleGuidedStepChanged()

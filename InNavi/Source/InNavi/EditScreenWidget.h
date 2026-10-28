@@ -7,6 +7,7 @@
 #include "InteriorTypes.h"
 #include "EditScreenWidget.generated.h"
 
+struct FNavigationRoutePoint;
 class UBorder;
 class UButton;
 class UAudioPanelWidget;
@@ -61,6 +62,9 @@ public:
 	ULayoutValidationPanelWidget* GetValidationPanelForTests() const { return ValidationPanelWidget; }
 	UMapPanelWidget* GetMapPanelForTests() const { return MapPanelWidget; }
 	UBuildingInfoPanelWidget* GetBuildingInfoPanelForTests() const { return BuildingInfoPanelWidget; }
+	// Step by step navigation: a step inside a building is shown on the interior screen. Returns true when this screen has handed over
+	// to it. Registered with the controller (SetNavigationStepScreenCallback); public for tests.
+	bool HandOverToBuildingForStep(const FNavigationRoutePoint& Point);
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -75,6 +79,8 @@ private:
 
 	// Opens the selected building in the interior editor: the 2D floor editor, or (b3DView) straight into its 3D view.
 	void OpenInteriorEditor(bool b3DView);
+	// Opens a building's interior screen, as OpenInteriorEditor does for the selected building.
+	void OpenInteriorForBuilding(const FString& BuildingId, bool b3DView);
 
 	// Calls PC->Increase/DecreaseCameraSpeedExterior() - the exterior free-fly camera's default speed
 	// auto-scales to the loaded campus's span (see FocusCameraOnAllBuildings), but these let the user

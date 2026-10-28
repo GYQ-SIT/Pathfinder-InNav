@@ -478,6 +478,7 @@ void UEditScreenWidget::NativeConstruct()
 				return DockHost && DockHost->IsScreenPositionOverPanel(ExteriorDock::Navigation, ScreenPosition);
 			});
 			Nav->OnStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::HandleNavigationStateChanged);
+			PC->SetNavigationStepScreenCallback(this, [this](const FNavigationRoutePoint& Point) { return HandOverToBuildingForStep(Point); });
 		}
 		if (MapPanelWidget)
 		{
@@ -503,6 +504,14 @@ void UEditScreenWidget::NativeConstruct()
 	RefreshCameraSpeedDisplay();
 	// Arranges every dock panel for the first time: the user's saved layout, else the team default.
 	InitializeDockLayout();
+	// A route is being gone through step by step: this screen opens on the step (the camera goes to it).
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel(); Nav && Nav->IsStepByStep())
+		{
+			PC->FollowNavigationStep();
+		}
+	}
 }
 
 void UEditScreenWidget::PlayButtonClickSound()
@@ -521,6 +530,7 @@ void UEditScreenWidget::NativeDestruct()
 		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
 		{
 			Nav->OnStateChanged.RemoveDynamic(this, &UEditScreenWidget::HandleNavigationStateChanged);
+			PC->ClearNavigationStepScreenCallback(this);
 			Nav->SetPointerOverPanelCallback(nullptr);
 		}
 		PC->ClearPointerOverUICallback(this);
@@ -605,13 +615,31 @@ void UEditScreenWidget::HandleBuildingSelected(FString BuildingId)
 
 void UEditScreenWidget::OpenInteriorEditor(bool b3DView)
 {
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		OpenInteriorForBuilding(PC->GetSelectedBuildingId(), b3DView);
+	}
+}
+
+bool UEditScreenWidget::HandOverToBuildingForStep(const FNavigationRoutePoint& Point)
+{
+	if (Point.Floor == UNavigationPanelWidget::OutdoorFloor || Point.BuildingId.IsEmpty())
+	{
+		return false;
+	}
+	OpenInteriorForBuilding(Point.BuildingId, false);
+	return true;
+}
+
+void UEditScreenWidget::OpenInteriorForBuilding(const FString& BuildingId, bool b3DView)
+{
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
 	if (!PC)
 	{
 		return;
 	}
 
-	PC->LoadInteriorForBuilding(PC->GetSelectedBuildingId());
+	PC->LoadInteriorForBuilding(BuildingId);
 
 	if (UInteriorScreenWidget* InteriorScreen = CreateWidget<UInteriorScreenWidget>(PC, UInteriorScreenWidget::StaticClass()))
 	{

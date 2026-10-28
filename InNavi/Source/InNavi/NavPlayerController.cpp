@@ -3104,6 +3104,12 @@ void ANavPlayerController::FollowNavigationStep()
 	{
 		return;
 	}
+	// A step outside belongs to the exterior screen and one inside a building to the interior screen: if the one that is up is the
+	// wrong one it hands over (and the other screen follows the step when it comes up).
+	if (NavigationStepScreenOwner.IsValid() && NavigationStepScreenCallback && NavigationStepScreenCallback(*Point))
+	{
+		return;
+	}
 	// The exterior screen: no building is open, the camera goes to the spot.
 	if (NavigationPanel->IsOutdoorMode())
 	{
@@ -3160,6 +3166,29 @@ void ANavPlayerController::SetPointerOverUICallback(const UObject* ScreenOwner, 
 {
 	PointerOverUIOwner = ScreenOwner;
 	PointerOverUICallback = MoveTemp(Callback);
+}
+
+void ANavPlayerController::SetNavigationStepScreenCallback(const UObject* ScreenOwner, TFunction<bool(const FNavigationRoutePoint&)> Callback)
+{
+	NavigationStepScreenOwner = ScreenOwner;
+	NavigationStepScreenCallback = MoveTemp(Callback);
+}
+
+void ANavPlayerController::ClearNavigationStepScreenCallback(const UObject* ScreenOwner)
+{
+	if (NavigationStepScreenOwner.Get() == ScreenOwner)
+	{
+		NavigationStepScreenOwner = nullptr;
+		NavigationStepScreenCallback = nullptr;
+	}
+}
+
+void ANavPlayerController::SyncLoadedInterior()
+{
+	if (InteriorGen)
+	{
+		InteriorGen->SyncInteriorToBuildingGenerator();
+	}
 }
 
 void ANavPlayerController::ClearPointerOverUICallback(const UObject* ScreenOwner)

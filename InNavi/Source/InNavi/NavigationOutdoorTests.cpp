@@ -4,6 +4,7 @@
 #include "PolyBuilding.h"
 #include "GameFramework/DefaultPawn.h"
 #include "InteriorScreenWidget.h"
+#include "EditScreenWidget.h"
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -370,6 +371,39 @@ bool FNavigationOutdoorClickStopsTest::RunTest(const FString& Parameters)
 	Nav->RequestFindRoute();
 	TestEqual(TEXT("three legs"), Nav->GetRouteLegs().Num(), 3);
 	TestTrue(TEXT("outside at both ends"), RunsBetween(Nav->GetRoutePoints(), TEXT("A"), TEXT("B")));
+	return true;
+}
+
+// Each screen hands over to the other when a step belongs there: the interior screen to the campus for a step outside, the exterior
+// screen to the building for a step inside.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationStepScreenSwitchTest, "InNavi.Navigation.Outdoor.StepScreens",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationStepScreenSwitchTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationOutdoorTests;
+	FNavigationSearchFixture Fixture;
+	if (!TestTrue(TEXT("test project loads"), LoadTestProject(Fixture))) return false;
+	ANavPlayerController* PC = Fixture.MakeController();
+	FNavigationRoutePoint Outside, Inside;
+	Outside.BuildingId = TEXT("A"); Outside.Floor = UNavigationPanelWidget::OutdoorFloor; Outside.Position = FVector2D(-10, 100);
+	Inside.BuildingId = TEXT("A"); Inside.Floor = 1; Inside.Position = FVector2D(50, 50);
+
+	// Inside: a step in the building stays on this screen, a step outside goes to the campus (the building is closed).
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("A"));
+	UInteriorScreenWidget* InteriorScreen = NewObject<UInteriorScreenWidget>();
+	InteriorScreen->Initialize(); InteriorScreen->TakeWidget(); InteriorScreen->SetOwningPlayer(PC);
+	TestFalse(TEXT("a step inside stays on the interior screen"), InteriorScreen->HandOverToCampusForStep(Inside));
+	TestEqual(TEXT("the building is still open"), PC->GetLoadedBuildingId(), FString(TEXT("A")));
+	TestTrue(TEXT("a step outside is for the campus"), InteriorScreen->HandOverToCampusForStep(Outside));
+	TestTrue(TEXT("the interior is closed"), PC->GetLoadedBuildingId().IsEmpty());
+
+	// Outside: a step outside stays on this screen, a step inside opens that building.
+	UEditScreenWidget* ExteriorScreen = NewObject<UEditScreenWidget>();
+	ExteriorScreen->Initialize(); ExteriorScreen->TakeWidget(); ExteriorScreen->SetOwningPlayer(PC);
+	TestFalse(TEXT("a step outside stays on the exterior screen"), ExteriorScreen->HandOverToBuildingForStep(Outside));
+	TestTrue(TEXT("nothing is open"), PC->GetLoadedBuildingId().IsEmpty());
+	TestTrue(TEXT("a step inside is for the building"), ExteriorScreen->HandOverToBuildingForStep(Inside));
+	TestEqual(TEXT("which is opened"), PC->GetLoadedBuildingId(), FString(TEXT("A")));
 	return true;
 }
 
