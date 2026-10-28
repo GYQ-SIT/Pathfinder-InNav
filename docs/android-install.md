@@ -13,7 +13,7 @@ This is for teammates who want to **try the phone app** on their own phone. You 
 
 **Mobile test build 2 (version 1.1, Android version code 2)** reads packaged project files and uses the real campus route planner. Its sites, buildings, room names and maps follow the authored data. Positioning is still a manual building/level choice; there is no automatic indoor tracking. See [the real-data guide](mobile-real-data-guide.md) for the available data and test cases.
 
-This is a **separately signed release**, with a different key from `mobile-test-1`. If Android reports a signature conflict, uninstall the old app first, then install this APK. Uninstalling removes the old app's saved places and preferences. The old release remains available separately.
+This is a **one-off, separately signed release**, with a different key from `mobile-test-1`. If Android reports a signature conflict, uninstall the old app first, then install this APK. Uninstalling removes the old app's saved places and preferences. The old release remains available separately. **Builds after this one are signed with the team key again, so if you installed `mobile-test-2` you will have to uninstall it once more** before installing the next one; after that, updates install over each other.
 
 ## Install
 
@@ -48,7 +48,7 @@ You should see **Explore** with sites from the packaged project library (`buildi
 
 ## Updating and removing
 
-- Builds signed with the same key can update each other and keep saved data. This separately signed `mobile-test-2` APK cannot update the original team-key APK; uninstall that older app first if there is a signature conflict.
+- Builds signed with the same key can update each other and keep saved data. `mobile-test-2` is the one exception (a one-off, separately signed APK): it cannot update the team-key `mobile-test-1`, and later team-key builds cannot update it. Uninstall the other one first if Android reports a signature conflict.
 - To **remove** the app: press and hold its icon -> App info -> Uninstall. This also deletes the saved places and settings.
 
 ## Reporting a problem

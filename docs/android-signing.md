@@ -3,9 +3,13 @@
 Every Android app must be signed. The phone checks the signature when it installs the app, and when an update is installed over an older version it only accepts it if both were signed
 with the **same key**. We use one key for the whole team, so a build made on any team computer installs over a build made on any other, with no uninstall in between.
 
-**Exception: `mobile-test-2` is a separately signed release**, as requested for the real-data APK. It does not use the original team key described below. Its certificate SHA-256 is `D6:B7:32:F0:9A:A2:72:AD:57:35:32:3F:4A:96:7B:31:30:64:07:FA:67:86:B7:4F:41:BD:A6:B3:A1:AA:2E:68`. Updating an installation of the original APK requires uninstalling it first if Android reports a signature conflict.
+**One-off exception: `mobile-test-2` was signed with a separate key**, not the team key described below. Its certificate SHA-256 is `D6:B7:32:F0:9A:A2:72:AD:57:35:32:3F:4A:96:7B:31:30:64:07:FA:67:86:B7:4F:41:BD:A6:B3:A1:AA:2E:68`. It was built on one computer, with its own keystore, so it cannot update, and cannot be updated by, a build signed with the team key.
 
-The separate key is kept on the build computer under `%LOCALAPPDATA%/InNavSigning/mobile-test-2/`, with its password protected for that Windows user in `password.dpapi`. The ignored `Saved/Config/Android/Engine.ini` selects `innav-mobile-test-2.jks` / alias `innav-mobile-test-2`; the keystore copy under `Build/Android/` is also ignored. Neither the key nor passwords belong in Git or release assets. Future compatible updates of this separate APK must reuse this separate key.
+**Every build after `mobile-test-2` is signed with the team key.** Anyone who installed `mobile-test-2` has to **uninstall it once** (Android reports a signature conflict otherwise; uninstalling also removes the saved places and preferences). From then on updates install over each other as usual. The separate key is therefore **not needed** for later builds, and building from `main` or any branch never needs it: which key signs a build is decided only by the builder's own ignored `Saved/Config/Android/Engine.ini` (see "Getting set up" below), not by anything in Git. Only publishing an update *of `mobile-test-2` itself* would need the separate key; we do not plan to.
+
+Where the separate key is kept: on the computer that built `mobile-test-2`, under `%LOCALAPPDATA%/InNavSigning/mobile-test-2/`, with its password protected for that Windows user in `password.dpapi`. It is not backed up in the team password manager, because nothing depends on it. Neither that key nor its passwords belong in Git or release assets.
+
+Give each build you hand out a higher **Android version code** than the one before it (`StoreVersion` in `Config/DefaultEngine.ini`; `mobile-test-2` is 2, so the next one is 3 or more).
 
 The key is **a secret**. It is never in the repository, and never pasted in chat, tickets or the wiki. Whoever has it can publish an "update" of InNav that phones will accept.
 
@@ -66,7 +70,7 @@ The `mobile-test-2` build computer keeps its SDK/JDK/NDK environment paths in `%
 %LOCALAPPDATA%\Android\Sdk\build-tools\36.0.0\apksigner.bat verify --verbose --print-certs InNavi-arm64.apk
 ```
 
-It should say `Verifies`. Original team-key builds show the original certificate above; the separate `mobile-test-2` APK must show `D6:B7:32:F0:9A:A2:72:AD:57:35:32:3F:4A:96:7B:31:30:64:07:FA:67:86:B7:4F:41:BD:A6:B3:A1:AA:2E:68`. A debug-signed build shows a certificate named "Android Debug".
+It should say `Verifies` and show the team certificate above, for `mobile-test-1` and every build after `mobile-test-2`. Only the one-off `mobile-test-2` APK shows `D6:B7:32:F0:9A:A2:72:AD:57:35:32:3F:4A:96:7B:31:30:64:07:FA:67:86:B7:4F:41:BD:A6:B3:A1:AA:2E:68`. A debug-signed build shows a certificate named "Android Debug".
 
 ## One file or two
 
