@@ -831,9 +831,12 @@ namespace
 	{
 		Out = {};
 		if (!FMath::IsFinite(Scale) || Scale <= KINDA_SMALL_NUMBER) { Error = TEXT("The project scale is invalid."); return false; }
+		TMap<FString, const FRouteBuilding*> ModelsById;
+		for (const auto& M : Models) ModelsById.FindOrAdd(M.Building->BuildingId, &M);
 		auto ModelFor = [&](const FString& Id) -> const FRouteBuilding*
 		{
-			return Models.FindByPredicate([&](const auto& M) { return M.Building->BuildingId == Id; });
+			const FRouteBuilding* const* Found = ModelsById.Find(Id);
+			return Found ? *Found : nullptr;
 		};
 		auto Stamp = [&](FNavigationRoutePoint& Point, const APolyBuilding& Building)
 		{
@@ -912,57 +915,82 @@ namespace
 		}
 		TArray<TArray<FRouteGraphEdge>>& Graph = Out.Edges;
 		Graph.SetNum(Vertices.Num());
-		for (int32 I = 0; I < Vertices.Num(); ++I) for (int32 J = I + 1; J < Vertices.Num(); ++J)
+		// Only some pairs can ever be joined: two outdoor points, two points of one building (any floors), or the two
+		// halves of one building link. Testing every pair of the campus costs time with the square of its size.
+		TMap<FString, TArray<int32>> ByBuilding, ByLink;
+		TArray<int32> Outdoor;
+		for (int32 I = 0; I < Vertices.Num(); ++I)
 		{
-			const FVertex& A = Vertices[I]; const FVertex& B = Vertices[J];
-			const auto* M = ModelFor(A.Point.BuildingId);
-			float Cost = 0;
-			if (A.Point.Floor == 0 && B.Point.Floor == 0)
+			const FNavigationRoutePoint& Point = Vertices[I].Point;
+			ByBuilding.FindOrAdd(Point.BuildingId).Add(I);
+			if (Point.Floor == 0) Outdoor.Add(I);
+			if (Point.ConnectorId.StartsWith(TEXT("BuildingLink:"))) ByLink.FindOrAdd(Point.ConnectorId).Add(I);
+		}
+		TArray<int32> Candidates;
+		for (int32 I = 0; I < Vertices.Num(); ++I)
+		{
+			Candidates.Reset();
+			auto Gather = [&](const TArray<int32>& Group) { for (const int32 J : Group) if (J > I) Candidates.Add(J); };
+			Gather(ByBuilding.FindChecked(Vertices[I].Point.BuildingId));
+			if (Vertices[I].Point.Floor == 0) Gather(Outdoor);
+			if (const TArray<int32>* Link = ByLink.Find(Vertices[I].Point.ConnectorId)) Gather(*Link);
+			// Met in increasing order and once each, as the loop over every pair would, so the graph comes out the same.
+			Candidates.Sort();
+			int32 Last = INDEX_NONE;
+			for (const int32 J : Candidates)
 			{
-				bool bClear = true;
-				for (const auto& Other : Models)
+				if (J == Last) continue;
+				Last = J;
+				const FVertex& A = Vertices[I]; const FVertex& B = Vertices[J];
+				const auto* M = ModelFor(A.Point.BuildingId);
+				float Cost = 0;
+				if (A.Point.Floor == 0 && B.Point.Floor == 0)
 				{
-					const FVector2D PA = FVector2D(A.Point.WorldPosition) / Scale - Other.Building->BuildingOffset;
-					const FVector2D PB = FVector2D(B.Point.WorldPosition) / Scale - Other.Building->BuildingOffset;
-					if (!CanTravelOutside(PA, PB, Other.Building->GetFootprint(),
-						IsExteriorExitVertex(A.Point) && A.Point.BuildingId == Other.Building->BuildingId,
-						IsExteriorExitVertex(B.Point) && B.Point.BuildingId == Other.Building->BuildingId)
-						|| InsideOrOnBoundary((PA + PB) * 0.5, Other.Building->GetFootprint())) { bClear = false; break; }
+					bool bClear = true;
+					for (const auto& Other : Models)
+					{
+						const FVector2D PA = FVector2D(A.Point.WorldPosition) / Scale - Other.Building->BuildingOffset;
+						const FVector2D PB = FVector2D(B.Point.WorldPosition) / Scale - Other.Building->BuildingOffset;
+						if (!CanTravelOutside(PA, PB, Other.Building->GetFootprint(),
+							IsExteriorExitVertex(A.Point) && A.Point.BuildingId == Other.Building->BuildingId,
+							IsExteriorExitVertex(B.Point) && B.Point.BuildingId == Other.Building->BuildingId)
+							|| InsideOrOnBoundary((PA + PB) * 0.5, Other.Building->GetFootprint())) { bClear = false; break; }
+					}
+					if (!bClear) continue;
+					Cost = FVector::Distance(A.Point.WorldPosition, B.Point.WorldPosition) / Scale;
 				}
-				if (!bClear) continue;
-				Cost = FVector::Distance(A.Point.WorldPosition, B.Point.WorldPosition) / Scale;
-			}
-			else if (A.Point.BuildingId != B.Point.BuildingId)
-			{
-				// Mirrored links represent one physical doorway. A floor number alone cannot
-				// connect buildings of different heights, and a missing/dangling link cannot teleport.
-				if (!A.Point.ConnectorId.StartsWith(TEXT("BuildingLink:")) || A.Point.ConnectorId != B.Point.ConnectorId
-					|| A.Point.Floor != B.Point.Floor || FMath::Abs(A.Point.WorldPosition.Z - B.Point.WorldPosition.Z) > 1.f
-					|| FVector::Distance(A.Point.WorldPosition, B.Point.WorldPosition) > 250.f) continue;
-				Cost = FMath::Max(0.01f, static_cast<float>(FVector::Distance(A.Point.WorldPosition, B.Point.WorldPosition) / Scale));
-			}
-			else if (A.Point.Floor == B.Point.Floor)
-			{
-				const auto* Floor = M->Floors.Find(A.Point.Floor);
-				if (!Floor) continue;
-				TArray<int32> Allowed;
-				bool bValid = true;
-				for (const auto* P : { &A.Point, &B.Point }) if (BoundaryPortal(*P))
+				else if (A.Point.BuildingId != B.Point.BuildingId)
 				{
-					double Distance;
-					const int32 Edge = FindNearestBoundaryEdge(P->Position, M->Building->GetFootprint(), Distance);
-					if (Edge == INDEX_NONE || Distance > Floor->WallClearance * 1.5) { bValid = false; break; }
-					Allowed.AddUnique(Edge);
+					// Mirrored links represent one physical doorway. A floor number alone cannot
+					// connect buildings of different heights, and a missing/dangling link cannot teleport.
+					if (!A.Point.ConnectorId.StartsWith(TEXT("BuildingLink:")) || A.Point.ConnectorId != B.Point.ConnectorId
+						|| A.Point.Floor != B.Point.Floor || FMath::Abs(A.Point.WorldPosition.Z - B.Point.WorldPosition.Z) > 1.f
+						|| FVector::Distance(A.Point.WorldPosition, B.Point.WorldPosition) > 250.f) continue;
+					Cost = FMath::Max(0.01f, static_cast<float>(FVector::Distance(A.Point.WorldPosition, B.Point.WorldPosition) / Scale));
 				}
-				if (!bValid || !CanTravel(A.Point.Position, B.Point.Position, M->Building->GetFootprint(), *Floor, Allowed)) continue;
-				Cost = IndoorTravelCost(A.Point.Position, B.Point.Position, M->Building->GetFootprint(), *Floor);
+				else if (A.Point.Floor == B.Point.Floor)
+				{
+					const auto* Floor = M->Floors.Find(A.Point.Floor);
+					if (!Floor) continue;
+					TArray<int32> Allowed;
+					bool bValid = true;
+					for (const auto* P : { &A.Point, &B.Point }) if (BoundaryPortal(*P))
+					{
+						double Distance;
+						const int32 Edge = FindNearestBoundaryEdge(P->Position, M->Building->GetFootprint(), Distance);
+						if (Edge == INDEX_NONE || Distance > Floor->WallClearance * 1.5) { bValid = false; break; }
+						Allowed.AddUnique(Edge);
+					}
+					if (!bValid || !CanTravel(A.Point.Position, B.Point.Position, M->Building->GetFootprint(), *Floor, Allowed)) continue;
+					Cost = IndoorTravelCost(A.Point.Position, B.Point.Position, M->Building->GetFootprint(), *Floor);
+				}
+				else
+				{
+					if (!CanUseConnectorBetween(A, B)) continue;
+					Cost = A.Point.Floor == 0 || B.Point.Floor == 0 ? 5.f : 20.f + FMath::Abs(A.Point.Floor - B.Point.Floor) * M->Building->GetFloorHeight() / Scale;
+				}
+				Graph[I].Add({ J, Cost }); Graph[J].Add({ I, Cost });
 			}
-			else
-			{
-				if (!CanUseConnectorBetween(A, B)) continue;
-				Cost = A.Point.Floor == 0 || B.Point.Floor == 0 ? 5.f : 20.f + FMath::Abs(A.Point.Floor - B.Point.Floor) * M->Building->GetFloorHeight() / Scale;
-			}
-			Graph[I].Add({ J, Cost }); Graph[J].Add({ I, Cost });
 		}
 		return true;
 	}
@@ -1134,6 +1162,21 @@ void FNavigationRoutePlanner::ValidateLayoutConnectivity(const ABuildingGenerato
 			}
 		}
 	}
+	auto NoEntryPoints = [&]()
+	{
+		FIssue Issue; Issue.Rule = TEXT("NO_ENTRY_POINTS"); Issue.Severity = ESeverity::Warning;
+		Issue.Message = TEXT("Entrance-based reachability was not checked: the campus has no usable exterior entry points.");
+		Issue.Suggestion = TEXT("Add a main entrance or a supported ground-floor outside door, then validate again.");
+		Report.Issues.Add(MoveTemp(Issue)); Report.RoomsSkipped += Probes.Num();
+	};
+	// With no way in from outside and no building link, the graph could not change the answer, and building it is the slow part.
+	bool bAnyWayIn = false;
+	for (const auto& Model : Models)
+	{
+		for (const auto& Floor : Model.Floors) bAnyWayIn |= !Floor.Value.ExteriorExits.IsEmpty();
+		for (const auto& Door : Model.Entrances) bAnyWayIn |= Door.Kind == EInteriorEntranceKind::Link;
+	}
+	if (!bAnyWayIn && FMath::IsFinite(Scale) && Scale > KINDA_SMALL_NUMBER) { NoEntryPoints(); return; }
 	FCampusGraph Graph; FString Error;
 	if (!BuildCampusGraph(Models, Scale, Seeds, Graph, Error))
 	{
@@ -1167,13 +1210,7 @@ void FNavigationRoutePlanner::ValidateLayoutConnectivity(const ABuildingGenerato
 				TEXT("Check target floors, floor elevations, wall proximity and whether the mirrored opening fits."), Position);
 		}
 	}
-	if (Queue.IsEmpty())
-	{
-		FIssue Issue; Issue.Rule = TEXT("NO_ENTRY_POINTS"); Issue.Severity = ESeverity::Warning;
-		Issue.Message = TEXT("Entrance-based reachability was not checked: the campus has no usable exterior entry points.");
-		Issue.Suggestion = TEXT("Add a main entrance or a supported ground-floor outside door, then validate again.");
-		Report.Issues.Add(MoveTemp(Issue)); Report.RoomsSkipped += Probes.Num(); return;
-	}
+	if (Queue.IsEmpty()) { NoEntryPoints(); return; }
 	for (int32 Head = 0; Head < Queue.Num(); ++Head) for (const auto& Edge : Graph.Edges[Queue[Head]])
 	{
 		if (!Reachable[Edge.To]) { Reachable[Edge.To] = true; Queue.Add(Edge.To); }
