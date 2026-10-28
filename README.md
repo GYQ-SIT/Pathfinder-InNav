@@ -14,8 +14,13 @@ build, reading project data and routes through a mobile data adapter).
 - `README.md` — this file
 - `Readme.txt` — the readme that went into the Milestone 1 submission zip (kept as it was handed in)
 - `.gitignore` — UnrealEngine template, plus signing keys, packaging output and personal test files
-- `.github/workflows/` — CI: `build-windows.yml` (compiles the editor on a self-hosted Windows runner),
+- `.github/workflows/` — CI: `build-windows.yml` (builds the editor from a clean checkout, runs the MSVC static analysis and every
+  automation test, on a self-hosted Windows runner), `lint.yml` (JSON, secrets, configuration, headers and document links; GitHub-hosted), `release-windows.yml` (a pushed tag builds the Windows
+  package and publishes it as a release),
   `validate-json.yml` (every `InNavi/Data/*.json` parses), `deploy-wiki.yml` (publishes `docs/`)
+- `scripts/` — `lint.py` (the repository checks of `lint.yml`), `check-analysis.ps1` and `check-test-report.ps1` (turn the analysis log and
+  the test report into a pass or a fail), `package-windows.ps1`, `smoke-test-package.ps1` and `publish-release.ps1` (the release build,
+  see Releases below), `install-layout-validator.mjs` (installs the plugin package)
 - `InNavi/` — the Unreal Engine project (open `InNavi/InNavi.uproject`)
   - `Source/InNavi/` — all the C++. The phone app is the files starting with `Mobile`
   - `Data/` — sample data, audio, default dock layouts
@@ -78,14 +83,41 @@ and the [M2 evidence](docs/design/layout-validator-m2-compliance.md) for the D1�
 
 ## Running the tests
 
-About 120 automation tests (`InNavi.*`). With the editor closed:
+About 165 automation tests (`InNavi.*`), including the measurements of `InNavi.Performance` (see
+[`docs/performance.md`](docs/performance.md) for the budgets and the numbers). With the editor closed:
 
 ```bash
 UnrealEditor-Cmd.exe InNavi/InNavi.uproject -ExecCmds="Automation RunTests InNavi; Quit" -unattended -nullrhi -nosplash
 ```
 
 (`UnrealEditor-Cmd.exe` is in `Engine/Binaries/Win64` of the Unreal install.) A part can be run on its own, e.g. `InNavi.Mobile` or
-`InNavi.Navigation`. Windows CI runs the layout validator, navigation, docking and UI guard tests.
+`InNavi.Navigation`. Windows CI runs **all** of them, and fails the pull request when one fails (the editor exits 0 either way, so
+`scripts/check-test-report.ps1` reads the report). Before a pull request, `python scripts/lint.py` runs the repository checks of `lint.yml`
+on your own machine. The report and the performance measurements of every CI run are kept with it as a downloadable artifact.
+
+## Releases
+
+A Windows build is published from a tag, not by hand. Tag a commit of `main` that passed CI and push the tag:
+
+```bash
+git tag m2-build-1
+git push origin m2-build-1
+```
+
+`release-windows.yml` then packages the build on the Windows runner (`scripts/package-windows.ps1`: cook, stage, pak, clean, zip), starts
+the package once without a window to see that it opens and closes (`scripts/smoke-test-package.ps1`), and attaches
+`InNavi-<tag>.zip` to a GitHub release marked as a test build (`scripts/publish-release.ps1`). Tags look like `m<milestone>-build-<n>`.
+The zip holds `InNavi.exe`, the campus database, the default layouts, `SampleProjects/` to try File > Load with, and `BUILD-INFO.txt`
+(tag, commit, date). The same package can be made on your own machine with
+`powershell -File scripts\package-windows.ps1 -Name InNavi-test -OutputDir C:\Temp\release` (editor closed). The Android phone app is
+built and signed separately (`docs/android-signing.md`).
+
+## Performance budget
+
+Desktop 60 FPS or more, phone 30 FPS or more; the campus loads in under 3 s, an interior opens in under 0.5 s, a route between buildings
+takes under 1 s (p95). The measured numbers, the machine they were taken on, and the one place we are above the target (a route inside
+the largest, ten-floor building takes about 6 s) are in [`docs/performance.md`](docs/performance.md). The Debug panel (Window > Debug) shows
+the frame rate while you use the app: the average, the 1 % low and the slowest frame of the last ten seconds.
 
 ## The phone app
 

@@ -1,8 +1,10 @@
-name: Build UE5 Windows Editor
+name: Build, analyse and test (Windows)
 
-# Runs on the team's own self-hosted Windows runner (has UE5.8 + Visual Studio
-# already installed) - the team12 Ubuntu VM can't do this (wrong OS/underpowered),
-# see validate-json.yml's own runner for that one.
+# Runs on the team's own self-hosted Windows runner (has UE5.8 + Visual Studio already installed) - the team12 Ubuntu VM can't do this
+# (wrong OS/underpowered). The checks that need no Unreal Engine are in lint.yml, on a GitHub-hosted runner.
+#
+# A pull request is merged only when this passes: the editor builds from a clean checkout (all the code in one unity build, which is where
+# a name used twice in two files shows up), the product code has no finding of the MSVC static analyser, and every automation test passes.
 on:
   push:
     branches: [main]
@@ -14,9 +16,14 @@ permissions:
   contents: read
   packages: read
 
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: [self-hosted, windows]
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
@@ -40,9 +47,30 @@ jobs:
       - name: Build InNaviEditor (Win64, Development)
         shell: cmd
         run: |
-          "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" InNaviEditor Win64 Development -Project="%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -WaitMutex
+          "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" InNaviEditor Win64 Development -Project="%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -WaitMutex -DisableAdaptiveUnity
 
-      - name: Test mobile data, layout validation, navigation and dock integration
+      - name: Static analysis of the C++ (MSVC /analyze)
         shell: cmd
         run: |
-          "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -unattended -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests InNavi.Mobile+InNavi.LayoutValidation+InNavi.Navigation+InNavi.UI.Guard+InNavi.Dock,Automation Quit" -ReportExportPath="%GITHUB_WORKSPACE%\InNavi\Saved\ValidationTests"
+          "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" InNaviEditor Win64 Development -Project="%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -WaitMutex -DisableAdaptiveUnity -StaticAnalyzer=Default -StaticAnalyzerOutputType=Text > "%RUNNER_TEMP%\analysis.log" 2>&1
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check-analysis.ps1 -Log "%RUNNER_TEMP%\analysis.log"
+
+      - name: Automation tests (all of InNavi.*)
+        shell: cmd
+        run: |
+          "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -unattended -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests InNavi; Quit" -ReportExportPath="%GITHUB_WORKSPACE%\InNavi\Saved\AutomationReport"
+
+      - name: Check the test report (the editor exits 0 even when a test fails)
+        shell: cmd
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check-test-report.ps1 -Report "%GITHUB_WORKSPACE%\InNavi\Saved\AutomationReport" -MinimumTests 150
+
+      - name: Keep the test report and the performance measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-and-performance
+          path: |
+            InNavi/Saved/AutomationReport
+            InNavi/Saved/Performance
+          if-no-files-found: warn
+          retention-days: 30

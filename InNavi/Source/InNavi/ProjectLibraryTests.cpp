@@ -22,7 +22,7 @@ namespace ProjectLibraryTests
 		return FPaths::ProjectSavedDir() / TEXT("AutomationTemp") / (TEXT("Library_") + FGuid::NewGuid().ToString());
 	}
 
-	void Write(const FString& Path, const FString& Text, FDateTime Modified)
+	void WriteLibraryFile(const FString& Path, const FString& Text, FDateTime Modified)
 	{
 		FFileHelper::SaveStringToFile(Text, *Path);
 		IFileManager::Get().SetTimeStamp(*Path, Modified);
@@ -42,13 +42,13 @@ bool FProjectLibraryScanTest::RunTest(const FString& Parameters)
 	IFileManager::Get().MakeDirectory(*Folder, true);
 	const FDateTime Now = FDateTime(2026, 10, 20, 12, 0, 0);
 
-	Write(Folder / TEXT("plain.json"), TEXT("{\"buildings\":[]}"), Now - FTimespan::FromDays(3));
-	Write(Folder / TEXT("named.json"), TEXT("{\"projectName\":\"Campus North\",\"description\":\"Two blocks\",\"buildings\":[{},{}]}"), Now - FTimespan::FromDays(1));
-	Write(Folder / TEXT("buildings.json"), TEXT("{\"buildings\":[{}]}"), Now - FTimespan::FromDays(2));
-	Write(Folder / TEXT("layout.json"), TEXT("{\"layoutVersion\":3}"), Now);
-	Write(Folder / TEXT("broken.json"), TEXT("{ not json"), Now);
-	Write(Folder / TEXT("notes.txt"), TEXT("hello"), Now);
-	Write(Folder / TEXT("junk.db"), TEXT("this is not a database"), Now);
+	WriteLibraryFile(Folder / TEXT("plain.json"), TEXT("{\"buildings\":[]}"), Now - FTimespan::FromDays(3));
+	WriteLibraryFile(Folder / TEXT("named.json"), TEXT("{\"projectName\":\"Campus North\",\"description\":\"Two blocks\",\"buildings\":[{},{}]}"), Now - FTimespan::FromDays(1));
+	WriteLibraryFile(Folder / TEXT("buildings.json"), TEXT("{\"buildings\":[{}]}"), Now - FTimespan::FromDays(2));
+	WriteLibraryFile(Folder / TEXT("layout.json"), TEXT("{\"layoutVersion\":3}"), Now);
+	WriteLibraryFile(Folder / TEXT("broken.json"), TEXT("{ not json"), Now);
+	WriteLibraryFile(Folder / TEXT("notes.txt"), TEXT("hello"), Now);
+	WriteLibraryFile(Folder / TEXT("junk.db"), TEXT("this is not a database"), Now);
 
 	// A real database with 3 buildings, 2 of them campus ones.
 	{
@@ -109,9 +109,9 @@ bool FProjectLibraryEditTest::RunTest(const FString& Parameters)
 	const FString Folder = MakeFolder();
 	IFileManager::Get().MakeDirectory(*Folder, true);
 	const FDateTime Now = FDateTime(2026, 10, 20, 12, 0, 0);
-	Write(Folder / TEXT("a.json"), TEXT("{\"projectName\":\"Alpha\",\"description\":\"First\",\"scale\":10,\"buildings\":[{\"id\":\"X\"}]}"), Now);
-	Write(Folder / TEXT("b.json"), TEXT("{\"projectName\":\"Beta\",\"buildings\":[]}"), Now);
-	Write(Folder / TEXT("buildings.json"), TEXT("{\"buildings\":[{}]}"), Now);
+	WriteLibraryFile(Folder / TEXT("a.json"), TEXT("{\"projectName\":\"Alpha\",\"description\":\"First\",\"scale\":10,\"buildings\":[{\"id\":\"X\"}]}"), Now);
+	WriteLibraryFile(Folder / TEXT("b.json"), TEXT("{\"projectName\":\"Beta\",\"buildings\":[]}"), Now);
+	WriteLibraryFile(Folder / TEXT("buildings.json"), TEXT("{\"buildings\":[{}]}"), Now);
 
 	auto Load = [&Folder](const TCHAR* FileName) { return *ProjectLibraryTests::Find(ProjectLibrary::Scan(Folder), FileName); };
 	FString NewPath, Error;
@@ -159,8 +159,8 @@ bool FProjectLibraryDeleteTest::RunTest(const FString& Parameters)
 	const FString Folder = MakeFolder();
 	IFileManager::Get().MakeDirectory(*Folder, true);
 	const FDateTime Now = FDateTime(2026, 10, 20, 12, 0, 0);
-	Write(Folder / TEXT("a.json"), TEXT("{\"projectName\":\"Alpha\",\"buildings\":[{}]}"), Now);
-	Write(Folder / TEXT("buildings.json"), TEXT("{\"buildings\":[{}]}"), Now);
+	WriteLibraryFile(Folder / TEXT("a.json"), TEXT("{\"projectName\":\"Alpha\",\"buildings\":[{}]}"), Now);
+	WriteLibraryFile(Folder / TEXT("buildings.json"), TEXT("{\"buildings\":[{}]}"), Now);
 
 	auto Load = [&Folder](const TCHAR* FileName) { return *ProjectLibraryTests::Find(ProjectLibrary::Scan(Folder), FileName); };
 	FString DeletedPath, Error;
@@ -171,7 +171,7 @@ bool FProjectLibraryDeleteTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("the library no longer lists it (and does not list the Deleted folder's files)"), ProjectLibrary::Scan(Folder).Num(), 1);
 
 	// A project with the same file name deleted later does not replace the first one.
-	Write(Folder / TEXT("a.json"), TEXT("{\"projectName\":\"Alpha again\",\"buildings\":[]}"), Now);
+	WriteLibraryFile(Folder / TEXT("a.json"), TEXT("{\"projectName\":\"Alpha again\",\"buildings\":[]}"), Now);
 	TestTrue(TEXT("a second project with that file name can be deleted too"), ProjectLibrary::SoftDelete(Load(TEXT("a.json")), Folder, DeletedPath, Error));
 	TArray<FString> Kept;
 	IFileManager::Get().FindFiles(Kept, *(Folder / TEXT("Deleted") / TEXT("*.json")), true, false);
@@ -200,9 +200,9 @@ bool FProjectLibraryWidgetTest::RunTest(const FString& Parameters)
 	IFileManager::Get().MakeDirectory(*Folder, true);
 	Controller->SetProjectsDirectoryOverrideForTests(Folder);
 	const FDateTime Now = FDateTime(2026, 10, 20, 12, 0, 0);
-	Write(Folder / TEXT("alpha.json"), TEXT("{\"projectName\":\"Alpha Campus\",\"description\":\"Two blocks\",\"buildings\":[{},{}]}"), Now);
-	Write(Folder / TEXT("empty.json"), TEXT("{\"projectName\":\"Blank\",\"buildings\":[]}"), Now - FTimespan::FromDays(1));
-	Write(Folder / TEXT("buildings.json"), TEXT("{\"buildings\":[{}]}"), Now - FTimespan::FromDays(2));
+	WriteLibraryFile(Folder / TEXT("alpha.json"), TEXT("{\"projectName\":\"Alpha Campus\",\"description\":\"Two blocks\",\"buildings\":[{},{}]}"), Now);
+	WriteLibraryFile(Folder / TEXT("empty.json"), TEXT("{\"projectName\":\"Blank\",\"buildings\":[]}"), Now - FTimespan::FromDays(1));
+	WriteLibraryFile(Folder / TEXT("buildings.json"), TEXT("{\"buildings\":[{}]}"), Now - FTimespan::FromDays(2));
 
 	UProjectLibraryWidget* Library = NewObject<UProjectLibraryWidget>();
 	Library->Initialize();

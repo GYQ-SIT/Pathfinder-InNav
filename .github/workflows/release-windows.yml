@@ -1,0 +1,73 @@
+name: Release build (Windows)
+
+# Pushing a tag such as m2-build-1 builds the Windows package and publishes it as a GitHub release (marked as a test build), so the demo
+# build is one that CI made from a known commit, not one made by hand on somebody's PC.
+#
+#   git tag m2-build-1 && git push origin m2-build-1
+#
+# The package is made by scripts/package-windows.ps1 (the same recipe as the Milestone 1 build), on the team's self-hosted Windows runner.
+# Run it again for the same tag and the release keeps its place; the zip of the same name is replaced.
+on:
+  push:
+    tags: ['m[0-9]-build-*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'An existing tag to build and publish (for example m2-build-1)'
+        required: true
+
+permissions:
+  contents: write
+  packages: read
+
+concurrency:
+  group: release-windows
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  release:
+    runs-on: [self-hosted, windows]
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://npm.pkg.github.com
+          scope: '@gyq-sit'
+
+      - name: Install the exact released Unreal plugin source
+        shell: cmd
+        run: |
+          call npm ci --ignore-scripts
+          if errorlevel 1 exit /b 1
+          node scripts/install-layout-validator.mjs --check
+          if errorlevel 1 exit /b 1
+          node scripts/install-layout-validator.mjs
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Package the build (cook, stage, pak, zip)
+        shell: cmd
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package-windows.ps1 -Name "InNavi-%RELEASE_TAG%" -OutputDir "%RUNNER_TEMP%\release" -Version "%RELEASE_TAG%"
+
+      - name: Start the packaged build once, without a window
+        shell: cmd
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke-test-package.ps1 -Zip "%RUNNER_TEMP%\release\InNavi-%RELEASE_TAG%.zip"
+
+      - name: Publish the release
+        shell: cmd
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\publish-release.ps1 -Tag "%RELEASE_TAG%" -Zip "%RUNNER_TEMP%\release\InNavi-%RELEASE_TAG%.zip" -Repo "%GITHUB_REPOSITORY%" -Token "%GITHUB_TOKEN%"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clean up
+        if: always()
+        shell: cmd
+        run: if exist "%RUNNER_TEMP%\release" rmdir /s /q "%RUNNER_TEMP%\release"

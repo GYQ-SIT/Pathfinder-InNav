@@ -391,7 +391,7 @@ void UNavigationPanelWidget::RefreshRoomSearchIndex() const
 	IndexedFloorCount = FloorCount;
 	CachedRooms.Reset();
 	SortedDestinationIndices.Reset();
-	if (!IsValid(Building))
+	if (!IsValid(Building) || !Interior)
 	{
 		return;
 	}

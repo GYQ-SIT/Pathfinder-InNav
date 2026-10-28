@@ -22,7 +22,7 @@ jobs:
           status=0
           for f in InNavi/Data/*.json; do
             echo "Checking $f"
-            if ! python3 -c "import json,sys; json.load(open(sys.argv[1]))" "$f"; then
+            if ! python3 -c "import json,sys; json.load(open(sys.argv[1], encoding='utf-8-sig'))" "$f"; then
               echo "::error file=$f::Invalid JSON"
               status=1
             fi
