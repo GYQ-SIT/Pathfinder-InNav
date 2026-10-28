@@ -342,7 +342,9 @@ case); a place you have already picked stays shown even when the search hides it
 **Between buildings.** Start and Destination can be in different buildings: pick the Start, switch building with the building
 switcher, pick the Destination. The Start is kept, and the dropdown shows it as its first entry, "Building · Room (Floor N)".
 **Find Route** enables once both are set and finds the way over the link doors, or out of one building and into the other
-through their main doors (see **Doors in the outer wall**).
+through their main doors (see **Doors in the outer wall**). On a large campus the search takes a while, so it runs a little each
+frame: a progress bar shows how far it is, the editor stays usable, and **Cancel Search** stops it. Changing the start or
+destination, clearing, or editing the interior also stops it.
 
 **Outside (the exterior screen).** No building is open, so the dropdowns list **each building's main door**, written
 "Building · Main door" (the point is a metre outside the door), and the search box narrows them by building name. To pick a spot

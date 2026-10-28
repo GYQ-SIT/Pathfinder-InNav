@@ -7,6 +7,7 @@
 #include "InteriorEntrance.h"
 #include "LayoutValidation.h"
 #include "PolygonGeometryUtils.h"
+#include "HAL/PlatformTime.h"
 
 namespace
 {
@@ -826,18 +827,45 @@ namespace
 		TArray<int32> SeedVertices;
 	};
 
-	bool BuildCampusGraph(const TArray<FRouteBuilding>& Models, float Scale,
-		const TArray<FNavigationRoutePoint>& Seeds, FCampusGraph& Out, FString& Error)
+	// The campus graph, built in two parts so that a long build can be spread over several frames: Begin makes the
+	// vertices, and Step joins them, as far as its time allows.
+	class FCampusGraphBuilder
 	{
-		Out = {};
-		if (!FMath::IsFinite(Scale) || Scale <= KINDA_SMALL_NUMBER) { Error = TEXT("The project scale is invalid."); return false; }
-		TMap<FString, const FRouteBuilding*> ModelsById;
-		for (const auto& M : Models) ModelsById.FindOrAdd(M.Building->BuildingId, &M);
-		auto ModelFor = [&](const FString& Id) -> const FRouteBuilding*
+	public:
+		FCampusGraphBuilder(const TArray<FRouteBuilding>& InModels, float InScale) : Models(InModels), Scale(InScale)
+		{
+			for (const auto& M : Models) ModelsById.FindOrAdd(M.Building->BuildingId, &M);
+		}
+		bool Begin(const TArray<FNavigationRoutePoint>& Seeds, FString& Error);
+		// Joins vertices until FPlatformTime::Seconds() reaches Deadline; true once every vertex is joined.
+		bool Step(double Deadline);
+		// 0 to 1. Earlier vertices have more later ones to be joined with, so they take longer.
+		float GetProgress() const
+		{
+			const double Count = Out.Vertices.Num();
+			const double Left = Count > 0 ? (Count - NextVertex) / Count : 0.0;
+			return static_cast<float>(1.0 - Left * Left);
+		}
+		FCampusGraph Out;
+
+	private:
+		const FRouteBuilding* ModelFor(const FString& Id) const
 		{
 			const FRouteBuilding* const* Found = ModelsById.Find(Id);
 			return Found ? *Found : nullptr;
-		};
+		}
+		const TArray<FRouteBuilding>& Models;
+		const float Scale;
+		TMap<FString, const FRouteBuilding*> ModelsById;
+		TMap<FString, TArray<int32>> ByBuilding, ByLink;
+		TArray<int32> Outdoor, Candidates;
+		int32 NextVertex = 0;
+	};
+
+	bool FCampusGraphBuilder::Begin(const TArray<FNavigationRoutePoint>& Seeds, FString& Error)
+	{
+		Out = {};
+		if (!FMath::IsFinite(Scale) || Scale <= KINDA_SMALL_NUMBER) { Error = TEXT("The project scale is invalid."); return false; }
 		auto Stamp = [&](FNavigationRoutePoint& Point, const APolyBuilding& Building)
 		{
 			Point.BuildingId = Building.BuildingId;
@@ -917,8 +945,6 @@ namespace
 		Graph.SetNum(Vertices.Num());
 		// Only some pairs can ever be joined: two outdoor points, two points of one building (any floors), or the two
 		// halves of one building link. Testing every pair of the campus costs time with the square of its size.
-		TMap<FString, TArray<int32>> ByBuilding, ByLink;
-		TArray<int32> Outdoor;
 		for (int32 I = 0; I < Vertices.Num(); ++I)
 		{
 			const FNavigationRoutePoint& Point = Vertices[I].Point;
@@ -926,9 +952,17 @@ namespace
 			if (Point.Floor == 0) Outdoor.Add(I);
 			if (Point.ConnectorId.StartsWith(TEXT("BuildingLink:"))) ByLink.FindOrAdd(Point.ConnectorId).Add(I);
 		}
-		TArray<int32> Candidates;
-		for (int32 I = 0; I < Vertices.Num(); ++I)
+		return true;
+	}
+
+	bool FCampusGraphBuilder::Step(double Deadline)
+	{
+		const TArray<FVertex>& Vertices = Out.Vertices;
+		TArray<TArray<FRouteGraphEdge>>& Graph = Out.Edges;
+		for (bool bFirst = true; NextVertex < Vertices.Num(); ++NextVertex, bFirst = false)
 		{
+			if (!bFirst && FPlatformTime::Seconds() >= Deadline) return false;
+			const int32 I = NextVertex;
 			Candidates.Reset();
 			auto Gather = [&](const TArray<int32>& Group) { for (const int32 J : Group) if (J > I) Candidates.Add(J); };
 			Gather(ByBuilding.FindChecked(Vertices[I].Point.BuildingId));
@@ -995,36 +1029,73 @@ namespace
 		return true;
 	}
 
+	// The shortest way from the first vertex (the start) to the second (the destination), found by Dijkstra's method. Like the
+	// graph builder it can stop and go on later, so that a long search can be spread over several frames.
+	class FRouteSolver
+	{
+	public:
+		explicit FRouteSolver(const FCampusGraph& InGraph) : Graph(InGraph)
+		{
+			const int32 Count = Graph.Vertices.Num();
+			Distances.Init(TNumericLimits<float>::Max(), Count); Previous.Init(INDEX_NONE, Count); Visited.Init(false, Count);
+			if (Count > 0) Distances[0] = 0;
+		}
+		// Works until FPlatformTime::Seconds() reaches Deadline; true once the search is over.
+		bool Step(double Deadline)
+		{
+			const TArray<FVertex>& Vertices = Graph.Vertices;
+			for (bool bFirst = true; !bDone; bFirst = false)
+			{
+				if (!bFirst && FPlatformTime::Seconds() >= Deadline) return false;
+				int32 Current = INDEX_NONE;
+				for (int32 I = 0; I < Vertices.Num(); ++I) if (!Visited[I] && (Current == INDEX_NONE || Distances[I] < Distances[Current])) Current = I;
+				if (Steps >= Vertices.Num() || Current == INDEX_NONE || Distances[Current] == TNumericLimits<float>::Max() || Current == 1) { bDone = true; break; }
+				Visited[Current] = true;
+				for (const auto& Edge : Graph.Edges[Current]) if (!Visited[Edge.To] && Distances[Current] + Edge.Cost < Distances[Edge.To])
+				{ Distances[Edge.To] = Distances[Current] + Edge.Cost; Previous[Edge.To] = Current; }
+				++Steps;
+			}
+			return true;
+		}
+		float GetProgress() const { return Graph.Vertices.Num() > 0 ? FMath::Min(1.f, static_cast<float>(Steps) / Graph.Vertices.Num()) : 1.f; }
+		// The route when there is one; otherwise false, with the reason in Result.Error.
+		bool Finish(FNavigationRouteResult& Result) const
+		{
+			if (Distances[1] == TNumericLimits<float>::Max()) { Result.Error = TEXT("No route found. Check main/link entrances, room doors, and floor connectors."); return false; }
+			TArray<int32> Reverse;
+			for (int32 I = 1; I != INDEX_NONE; I = Previous[I]) Reverse.Add(I);
+			for (int32 I = Reverse.Num() - 1; I >= 0; --I) Result.Points.Add(Graph.Vertices[Reverse[I]].Point);
+			return true;
+		}
+
+	private:
+		const FCampusGraph& Graph;
+		TArray<float> Distances;
+		TArray<int32> Previous;
+		TArray<bool> Visited;
+		int32 Steps = 0;
+		bool bDone = false;
+	};
+
+	// The start and the destination are the graph's first two vertices, unless one of them is not a usable point.
+	bool BothEndsFound(const FCampusGraph& Graph, FNavigationRouteResult& Result)
+	{
+		if (Graph.SeedVertices[0] != INDEX_NONE && Graph.SeedVertices[1] != INDEX_NONE) return true;
+		Result.Error = TEXT("A selected point is no longer reachable. Check its building, floor, and wall clearance, then select it again.");
+		return false;
+	}
+
 	bool SolveCampus(const TArray<FRouteBuilding>& Models, float Scale, FNavigationRoutePoint Start,
 		FNavigationRoutePoint Destination, FNavigationRouteResult& Result)
 	{
 		Result = {};
-		FCampusGraph Built;
-		if (!BuildCampusGraph(Models, Scale, { Start, Destination }, Built, Result.Error)) return false;
-		if (Built.SeedVertices[0] == INDEX_NONE || Built.SeedVertices[1] == INDEX_NONE)
-		{
-			Result.Error = TEXT("A selected point is no longer reachable. Check its building, floor, and wall clearance, then select it again.");
-			return false;
-		}
-		const auto& Vertices = Built.Vertices;
-		const auto& Graph = Built.Edges;
-		TArray<float> Distances; TArray<int32> Previous; TArray<bool> Visited;
-		Distances.Init(TNumericLimits<float>::Max(), Vertices.Num()); Previous.Init(INDEX_NONE, Vertices.Num()); Visited.Init(false, Vertices.Num());
-		Distances[0] = 0;
-		for (int32 Step = 0; Step < Vertices.Num(); ++Step)
-		{
-			int32 Current = INDEX_NONE;
-			for (int32 I = 0; I < Vertices.Num(); ++I) if (!Visited[I] && (Current == INDEX_NONE || Distances[I] < Distances[Current])) Current = I;
-			if (Current == INDEX_NONE || Distances[Current] == TNumericLimits<float>::Max() || Current == 1) break;
-			Visited[Current] = true;
-			for (const auto& Edge : Graph[Current]) if (!Visited[Edge.To] && Distances[Current] + Edge.Cost < Distances[Edge.To])
-			{ Distances[Edge.To] = Distances[Current] + Edge.Cost; Previous[Edge.To] = Current; }
-		}
-		if (Distances[1] == TNumericLimits<float>::Max()) { Result.Error = TEXT("No route found. Check main/link entrances, room doors, and floor connectors."); return false; }
-		TArray<int32> Reverse;
-		for (int32 I = 1; I != INDEX_NONE; I = Previous[I]) Reverse.Add(I);
-		for (int32 I = Reverse.Num() - 1; I >= 0; --I) Result.Points.Add(Vertices[Reverse[I]].Point);
-		return true;
+		FCampusGraphBuilder Builder(Models, Scale);
+		if (!Builder.Begin({ Start, Destination }, Result.Error)) return false;
+		Builder.Step(TNumericLimits<double>::Max());
+		if (!BothEndsFound(Builder.Out, Result)) return false;
+		FRouteSolver Solver(Builder.Out);
+		Solver.Step(TNumericLimits<double>::Max());
+		return Solver.Finish(Result);
 	}
 }
 
@@ -1073,11 +1144,10 @@ bool FNavigationRoutePlanner::FindCampusRoute(const ABuildingGenerator& Generato
 	const FNavigationRoutePoint& Start, const FNavigationRoutePoint& Destination, FNavigationRouteResult& OutResult,
 	const FNavigationRoutePreferences& Preferences)
 {
-	const float Scale = Generator.GetScale();
-	if (Scale <= KINDA_SMALL_NUMBER) { OutResult = {}; OutResult.Error = TEXT("The project scale is invalid."); return false; }
-	auto Models = ReadCampusModels(Generator, Interior, Start.BuildingId, Destination.BuildingId, false);
-	for (auto& Model : Models) Model.Nodes.RemoveAll([&](const FInteriorNavNode& Node) { return !Preferences.Allows(Node.Type); });
-	return SolveCampus(Models, Scale, Start, Destination, OutResult);
+	FNavigationRouteJob Job(Generator, Interior, Start, Destination, Preferences);
+	Job.Step(TNumericLimits<double>::Max());
+	OutResult = Job.GetResult();
+	return Job.Succeeded();
 }
 
 bool FNavigationRoutePlanner::FindRoomDestination(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
@@ -1104,19 +1174,69 @@ bool FNavigationRoutePlanner::FindRoomDestination(const ABuildingGenerator& Gene
 	return BestArea >= 0;
 }
 
-void FNavigationRoutePlanner::ValidateLayoutConnectivity(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
-	const FString& ScopeBuildingId, LayoutValidation::FReport& Report)
+namespace
 {
-	using namespace LayoutValidation;
-	auto Models = ReadCampusModels(Generator, Interior, FString(), FString(), true);
-	const float Scale = Generator.GetScale();
-	auto AddIssue = [&](const TCHAR* Rule, ESeverity Severity, const FString& Building, int32 Floor, EObjectKind Kind,
-		const FString& Id, const FString& Message, const FString& Suggestion, FVector2D Position)
+	enum class ECheckPhase : uint8 { Read, Vertices, Joining, Finish, Done };
+}
+
+// What the check keeps between slices. Only the Read part looks at live editor data; the rest works on the copies in Models.
+struct FNavigationLayoutCheck::FImpl
+{
+	struct FRoomProbe { FString Building, Room; int32 Floor, Seed; FVector2D Position; };
+
+	TWeakObjectPtr<const ABuildingGenerator> LiveGenerator;
+	TWeakObjectPtr<const AInteriorGenerator> LiveInterior;
+	FString ScopeBuildingId;
+	float Scale = 1.f;
+	ECheckPhase Phase = ECheckPhase::Read;
+	TArray<FRouteBuilding> Models;
+	TArray<TWeakObjectPtr<const APolyBuilding>> Buildings;
+	TArray<FRoomProbe> Probes;
+	TArray<FNavigationRoutePoint> Seeds;
+	TUniquePtr<FCampusGraphBuilder> Builder;
+
+	static void AddIssue(LayoutValidation::FReport& Report, const TCHAR* Rule, LayoutValidation::ESeverity Severity, const FString& Building, int32 Floor,
+		LayoutValidation::EObjectKind Kind, const FString& Id, const FString& Message, const FString& Suggestion, FVector2D Position)
 	{
-		FIssue Issue; Issue.Rule = Rule; Issue.Severity = Severity; Issue.BuildingId = Building; Issue.Floor = Floor;
+		LayoutValidation::FIssue Issue; Issue.Rule = Rule; Issue.Severity = Severity; Issue.BuildingId = Building; Issue.Floor = Floor;
 		Issue.Kind = Kind; Issue.ObjectId = Id; Issue.Message = Message; Issue.Suggestion = Suggestion;
 		Issue.Position = Position; Issue.bHasPosition = true; Report.Issues.Add(MoveTemp(Issue));
-	};
+	}
+
+	void NoEntryPoints(LayoutValidation::FReport& Report) const
+	{
+		LayoutValidation::FIssue Issue; Issue.Rule = TEXT("NO_ENTRY_POINTS"); Issue.Severity = LayoutValidation::ESeverity::Warning;
+		Issue.Message = TEXT("Entrance-based reachability was not checked: the campus has no usable exterior entry points.");
+		Issue.Suggestion = TEXT("Add a main entrance or a supported ground-floor outside door, then validate again.");
+		Report.Issues.Add(MoveTemp(Issue)); Report.RoomsSkipped += Probes.Num();
+	}
+
+	bool IsStillThere() const
+	{
+		for (const auto& Building : Buildings) if (!Building.IsValid()) return false;
+		return LiveGenerator.IsValid() && LiveInterior.IsValid();
+	}
+
+	void Read(LayoutValidation::FReport& Report);
+	void MakeVertices(LayoutValidation::FReport& Report);
+	void Finish(LayoutValidation::FReport& Report);
+};
+
+FNavigationLayoutCheck::FNavigationLayoutCheck(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior, const FString& ScopeBuildingId)
+	: Impl(MakeUnique<FImpl>())
+{
+	Impl->LiveGenerator = &Generator; Impl->LiveInterior = &Interior; Impl->ScopeBuildingId = ScopeBuildingId; Impl->Scale = Generator.GetScale();
+}
+
+FNavigationLayoutCheck::~FNavigationLayoutCheck() = default;
+
+void FNavigationLayoutCheck::FImpl::Read(LayoutValidation::FReport& Report)
+{
+	using namespace LayoutValidation;
+	const ABuildingGenerator& Generator = *LiveGenerator.Get();
+	const AInteriorGenerator& Interior = *LiveInterior.Get();
+	Models = ReadCampusModels(Generator, Interior, FString(), FString(), true);
+	for (const auto& Model : Models) Buildings.Add(Model.Building);
 	// Shell-only floors must not become invented walkable interiors during validation.
 	for (auto& Model : Models)
 	{
@@ -1131,9 +1251,6 @@ void FNavigationRoutePlanner::ValidateLayoutConnectivity(const ABuildingGenerato
 		}
 		for (auto It = Model.Floors.CreateIterator(); It; ++It) if (!Authored.Contains(It.Key())) It.RemoveCurrent();
 	}
-	struct FRoomProbe { FString Building, Room; int32 Floor, Seed; FVector2D Position; };
-	TArray<FRoomProbe> Probes;
-	TArray<FNavigationRoutePoint> Seeds;
 	for (const auto& Model : Models)
 	{
 		if (!ScopeBuildingId.IsEmpty() && Model.Building->BuildingId != ScopeBuildingId) continue;
@@ -1155,20 +1272,13 @@ void FNavigationRoutePlanner::ValidateLayoutConnectivity(const ABuildingGenerato
 				if (!bFound)
 				{
 					++Report.RoomsSkipped;
-					AddIssue(TEXT("ROOM_PROBE_UNAVAILABLE"), ESeverity::Warning, Model.Building->BuildingId, Pair.Key, EObjectKind::Room, Room.RoomId,
+					AddIssue(Report, TEXT("ROOM_PROBE_UNAVAILABLE"), ESeverity::Warning, Model.Building->BuildingId, Pair.Key, EObjectKind::Room, Room.RoomId,
 						TEXT("No destination point with the planner's wall clearance could be established in this room."),
 						TEXT("Review room size, internal walls and clearance. Reachability for this room was not checked."), Room.Footprint[0]);
 				}
 			}
 		}
 	}
-	auto NoEntryPoints = [&]()
-	{
-		FIssue Issue; Issue.Rule = TEXT("NO_ENTRY_POINTS"); Issue.Severity = ESeverity::Warning;
-		Issue.Message = TEXT("Entrance-based reachability was not checked: the campus has no usable exterior entry points.");
-		Issue.Suggestion = TEXT("Add a main entrance or a supported ground-floor outside door, then validate again.");
-		Report.Issues.Add(MoveTemp(Issue)); Report.RoomsSkipped += Probes.Num();
-	};
 	// With no way in from outside and no building link, the graph could not change the answer, and building it is the slow part.
 	bool bAnyWayIn = false;
 	for (const auto& Model : Models)
@@ -1176,13 +1286,25 @@ void FNavigationRoutePlanner::ValidateLayoutConnectivity(const ABuildingGenerato
 		for (const auto& Floor : Model.Floors) bAnyWayIn |= !Floor.Value.ExteriorExits.IsEmpty();
 		for (const auto& Door : Model.Entrances) bAnyWayIn |= Door.Kind == EInteriorEntranceKind::Link;
 	}
-	if (!bAnyWayIn && FMath::IsFinite(Scale) && Scale > KINDA_SMALL_NUMBER) { NoEntryPoints(); return; }
-	FCampusGraph Graph; FString Error;
-	if (!BuildCampusGraph(Models, Scale, Seeds, Graph, Error))
-	{
-		FIssue Issue; Issue.Rule = TEXT("NAVIGATION_SKIPPED"); Issue.Severity = ESeverity::Warning; Issue.Message = Error;
-		Report.Issues.Add(MoveTemp(Issue)); Report.RoomsSkipped += Probes.Num(); return;
-	}
+	if (!bAnyWayIn && FMath::IsFinite(Scale) && Scale > KINDA_SMALL_NUMBER) { NoEntryPoints(Report); Phase = ECheckPhase::Done; return; }
+	Phase = ECheckPhase::Vertices;
+}
+
+void FNavigationLayoutCheck::FImpl::MakeVertices(LayoutValidation::FReport& Report)
+{
+	Builder = MakeUnique<FCampusGraphBuilder>(Models, Scale);
+	FString Error;
+	if (Builder->Begin(Seeds, Error)) { Phase = ECheckPhase::Joining; return; }
+	LayoutValidation::FIssue Issue; Issue.Rule = TEXT("NAVIGATION_SKIPPED"); Issue.Severity = LayoutValidation::ESeverity::Warning; Issue.Message = Error;
+	Report.Issues.Add(MoveTemp(Issue)); Report.RoomsSkipped += Probes.Num();
+	Phase = ECheckPhase::Done;
+}
+
+void FNavigationLayoutCheck::FImpl::Finish(LayoutValidation::FReport& Report)
+{
+	using namespace LayoutValidation;
+	Phase = ECheckPhase::Done;
+	const FCampusGraph& Graph = Builder->Out;
 	TArray<bool> Reachable; Reachable.Init(false, Graph.Vertices.Num());
 	TArray<int32> Queue;
 	for (int32 I = 0; I < Graph.Vertices.Num(); ++I)
@@ -1205,12 +1327,12 @@ void FNavigationRoutePlanner::ValidateLayoutConnectivity(const ABuildingGenerato
 		if (!bConnected)
 		{
 			FVector2D Position = FVector2D::ZeroVector; EntrancePosition(Model, Door, Scale, Position);
-			AddIssue(TEXT("LINK_UNUSABLE"), ESeverity::Error, Model.Building->BuildingId, Door.Level, EObjectKind::Entrance, Door.Id,
+			AddIssue(Report, TEXT("LINK_UNUSABLE"), ESeverity::Error, Model.Building->BuildingId, Door.Level, EObjectKind::Entrance, Door.Id,
 				TEXT("The route planner cannot join this link entrance to the target building."),
 				TEXT("Check target floors, floor elevations, wall proximity and whether the mirrored opening fits."), Position);
 		}
 	}
-	if (Queue.IsEmpty()) { NoEntryPoints(); return; }
+	if (Queue.IsEmpty()) { NoEntryPoints(Report); return; }
 	for (int32 Head = 0; Head < Queue.Num(); ++Head) for (const auto& Edge : Graph.Edges[Queue[Head]])
 	{
 		if (!Reachable[Edge.To]) { Reachable[Edge.To] = true; Queue.Add(Edge.To); }
@@ -1221,7 +1343,7 @@ void FNavigationRoutePlanner::ValidateLayoutConnectivity(const ABuildingGenerato
 		const int32 Vertex = Graph.SeedVertices[Probe.Seed];
 		if (Vertex == INDEX_NONE) { ++Report.RoomsSkipped; continue; }
 		++Report.RoomsChecked;
-		if (!Reachable[Vertex]) AddIssue(TEXT("ROOM_UNREACHABLE"), ESeverity::Error, Probe.Building, Probe.Floor, EObjectKind::Room, Probe.Room,
+		if (!Reachable[Vertex]) AddIssue(Report, TEXT("ROOM_UNREACHABLE"), ESeverity::Error, Probe.Building, Probe.Floor, EObjectKind::Room, Probe.Room,
 			TEXT("No route reaches this room's tested destination from any campus entrance."),
 			TEXT("Check room openings, corridor walls, floor connectors and main/link entrances."), Probe.Position);
 	}
@@ -1230,8 +1352,182 @@ void FNavigationRoutePlanner::ValidateLayoutConnectivity(const ABuildingGenerato
 		if (!ScopeBuildingId.IsEmpty() && Model.Building->BuildingId != ScopeBuildingId) continue;
 		const auto* Geometry = Model.Floors.Find(Node.Level);
 		if (!Geometry || !IsPointClearOfWalls(Node.Position, Model.Building->GetFootprint(), *Geometry))
-			AddIssue(TEXT("CONNECTOR_CLEARANCE"), ESeverity::Error, Model.Building->BuildingId, Node.Level, EObjectKind::Connector,
+			AddIssue(Report, TEXT("CONNECTOR_CLEARANCE"), ESeverity::Error, Model.Building->BuildingId, Node.Level, EObjectKind::Connector,
 				Node.ConnectorGroupId.IsEmpty() ? Node.Id : Node.ConnectorGroupId, TEXT("Navigation node is not clear of the floor's walls."),
 				TEXT("Move the node away from walls using the existing connector tools."), Node.Position);
+	}
+}
+
+bool FNavigationLayoutCheck::Step(double BudgetSeconds, LayoutValidation::FReport& Report)
+{
+	FImpl& State = *Impl;
+	const double Deadline = FPlatformTime::Seconds() + BudgetSeconds;
+	while (State.Phase != ECheckPhase::Done)
+	{
+		// The copies in Models point at buildings; if the project changed under the check, stop rather than read what is gone.
+		if (!State.IsStillThere())
+		{
+			LayoutValidation::FIssue Issue; Issue.Rule = TEXT("NAVIGATION_SKIPPED"); Issue.Severity = LayoutValidation::ESeverity::Warning;
+			Issue.Message = TEXT("Navigation was not checked because the project was changed or closed while validating.");
+			Issue.Suggestion = TEXT("Validate again.");
+			Report.Issues.Add(MoveTemp(Issue)); State.Phase = ECheckPhase::Done;
+			break;
+		}
+		switch (State.Phase)
+		{
+		case ECheckPhase::Read: State.Read(Report); break;
+		case ECheckPhase::Vertices: State.MakeVertices(Report); break;
+		case ECheckPhase::Joining: if (State.Builder->Step(Deadline)) State.Phase = ECheckPhase::Finish; break;
+		case ECheckPhase::Finish: State.Finish(Report); break;
+		default: break;
+		}
+		if (FPlatformTime::Seconds() >= Deadline) break;
+	}
+	return State.Phase == ECheckPhase::Done;
+}
+
+float FNavigationLayoutCheck::GetProgress() const
+{
+	switch (Impl->Phase)
+	{
+	case ECheckPhase::Read: return 0.f;
+	case ECheckPhase::Vertices: return 0.05f;
+	case ECheckPhase::Joining: return 0.1f + 0.85f * Impl->Builder->GetProgress();
+	case ECheckPhase::Finish: return 0.95f;
+	default: return 1.f;
+	}
+}
+
+FString FNavigationLayoutCheck::GetPhase() const
+{
+	switch (Impl->Phase)
+	{
+	case ECheckPhase::Read: return TEXT("Reading the buildings");
+	case ECheckPhase::Vertices: return TEXT("Preparing the routes");
+	case ECheckPhase::Joining: return TEXT("Checking the routes");
+	case ECheckPhase::Finish: return TEXT("Checking which rooms can be reached");
+	default: return TEXT("Done");
+	}
+}
+
+void FNavigationRoutePlanner::ValidateLayoutConnectivity(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
+	const FString& ScopeBuildingId, LayoutValidation::FReport& Report)
+{
+	FNavigationLayoutCheck Check(Generator, Interior, ScopeBuildingId);
+	Check.Step(TNumericLimits<double>::Max(), Report);
+}
+
+namespace
+{
+	enum class ERoutePhase : uint8 { Read, Vertices, Joining, Solving, Done };
+}
+
+// What the route search keeps between slices. As with the layout check, only the Read part looks at live editor data.
+struct FNavigationRouteJob::FImpl
+{
+	TWeakObjectPtr<const ABuildingGenerator> LiveGenerator;
+	TWeakObjectPtr<const AInteriorGenerator> LiveInterior;
+	FNavigationRoutePoint Start, Destination;
+	FNavigationRoutePreferences Preferences;
+	float Scale = 1.f;
+	ERoutePhase Phase = ERoutePhase::Read;
+	TArray<FRouteBuilding> Models;
+	TArray<TWeakObjectPtr<const APolyBuilding>> Buildings;
+	TUniquePtr<FCampusGraphBuilder> Builder;
+	TUniquePtr<FRouteSolver> Solver;
+	FNavigationRouteResult Result;
+	bool bFound = false;
+
+	bool IsStillThere() const
+	{
+		for (const auto& Building : Buildings) if (!Building.IsValid()) return false;
+		return LiveGenerator.IsValid() && LiveInterior.IsValid();
+	}
+};
+
+FNavigationRouteJob::FNavigationRouteJob(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
+	const FNavigationRoutePoint& Start, const FNavigationRoutePoint& Destination, const FNavigationRoutePreferences& Preferences)
+	: Impl(MakeUnique<FImpl>())
+{
+	Impl->LiveGenerator = &Generator; Impl->LiveInterior = &Interior; Impl->Start = Start; Impl->Destination = Destination;
+	Impl->Preferences = Preferences; Impl->Scale = Generator.GetScale();
+}
+
+FNavigationRouteJob::~FNavigationRouteJob() = default;
+
+bool FNavigationRouteJob::Step(double BudgetSeconds)
+{
+	FImpl& State = *Impl;
+	const double Deadline = FPlatformTime::Seconds() + BudgetSeconds;
+	while (State.Phase != ERoutePhase::Done)
+	{
+		// The copies in Models point at buildings; if the project changed under the search, stop rather than read what is gone.
+		if (!State.IsStillThere())
+		{
+			State.Result = {};
+			State.Result.Error = TEXT("The route could not be found because the project was changed or closed meanwhile. Find the route again.");
+			State.bFound = false; State.Phase = ERoutePhase::Done;
+			break;
+		}
+		switch (State.Phase)
+		{
+		case ERoutePhase::Read:
+		{
+			if (State.Scale <= KINDA_SMALL_NUMBER) { State.Result.Error = TEXT("The project scale is invalid."); State.Phase = ERoutePhase::Done; break; }
+			State.Models = ReadCampusModels(*State.LiveGenerator.Get(), *State.LiveInterior.Get(), State.Start.BuildingId, State.Destination.BuildingId, false);
+			for (auto& Model : State.Models) Model.Nodes.RemoveAll([&](const FInteriorNavNode& Node) { return !State.Preferences.Allows(Node.Type); });
+			for (const auto& Model : State.Models) State.Buildings.Add(Model.Building);
+			State.Phase = ERoutePhase::Vertices;
+			break;
+		}
+		case ERoutePhase::Vertices:
+			State.Builder = MakeUnique<FCampusGraphBuilder>(State.Models, State.Scale);
+			State.Phase = State.Builder->Begin({ State.Start, State.Destination }, State.Result.Error) ? ERoutePhase::Joining : ERoutePhase::Done;
+			break;
+		case ERoutePhase::Joining:
+			if (!State.Builder->Step(Deadline)) break;
+			if (BothEndsFound(State.Builder->Out, State.Result))
+			{
+				State.Solver = MakeUnique<FRouteSolver>(State.Builder->Out);
+				State.Phase = ERoutePhase::Solving;
+			}
+			else State.Phase = ERoutePhase::Done;
+			break;
+		case ERoutePhase::Solving:
+			if (!State.Solver->Step(Deadline)) break;
+			State.bFound = State.Solver->Finish(State.Result);
+			State.Phase = ERoutePhase::Done;
+			break;
+		default: break;
+		}
+		if (FPlatformTime::Seconds() >= Deadline) break;
+	}
+	return State.Phase == ERoutePhase::Done;
+}
+
+bool FNavigationRouteJob::Succeeded() const { return Impl->bFound; }
+const FNavigationRouteResult& FNavigationRouteJob::GetResult() const { return Impl->Result; }
+
+float FNavigationRouteJob::GetProgress() const
+{
+	switch (Impl->Phase)
+	{
+	case ERoutePhase::Read: return 0.f;
+	case ERoutePhase::Vertices: return 0.05f;
+	case ERoutePhase::Joining: return 0.1f + 0.8f * Impl->Builder->GetProgress();
+	case ERoutePhase::Solving: return 0.9f + 0.1f * Impl->Solver->GetProgress();
+	default: return 1.f;
+	}
+}
+
+FString FNavigationRouteJob::GetPhase() const
+{
+	switch (Impl->Phase)
+	{
+	case ERoutePhase::Read: return TEXT("Reading the buildings");
+	case ERoutePhase::Vertices: return TEXT("Preparing the routes");
+	case ERoutePhase::Joining: return TEXT("Looking for ways between places");
+	case ERoutePhase::Solving: return TEXT("Choosing the shortest route");
+	default: return TEXT("Done");
 	}
 }

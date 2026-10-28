@@ -7,6 +7,7 @@
 #include "LayoutValidationPanelWidget.generated.h"
 
 class UComboBoxString;
+class UProgressBar;
 class UScrollBox;
 class USizeBox;
 class UTextBlock;
@@ -46,6 +47,7 @@ protected:
     virtual void NativeTick(const FGeometry& Geometry, float DeltaTime) override;
 private:
     UFUNCTION() void OnValidateClicked();
+    UFUNCTION() void OnCancelClicked();
     UFUNCTION() void OnExportClicked();
     UFUNCTION() void OnFilterChanged(FString Value, ESelectInfo::Type Type);
     UFUNCTION() void OnScopeChanged(FString Value, ESelectInfo::Type Type);
@@ -61,11 +63,14 @@ private:
     UPROPERTY() UTextBlock* Feedback = nullptr;
     UPROPERTY() UScrollBox* Issues = nullptr;
     UPROPERTY() UButton* ValidateButton = nullptr;
+    UPROPERTY() UButton* CancelButton = nullptr;
+    UPROPERTY() UProgressBar* Progress = nullptr;
     UPROPERTY() UButton* ExportButton = nullptr;
     UPROPERTY() USizeBox* BodySize = nullptr;
     float ContentWidth = 260.f;
     float PollElapsed = 0.f;
     bool bExterior = false;
     bool bDisplayedStale = false;
+    bool bWasBusy = false;
     uint64 DisplayedGeneration = MAX_uint64;
 };

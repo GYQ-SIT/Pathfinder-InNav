@@ -247,4 +247,74 @@ bool FNavigationEntrancePersistenceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// Finding a route in slices gives the route found all at once, and the panel's search can be stopped in the ways a person can.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationSlicedRouteTest, "InNavi.Navigation.SlicedRoute",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationSlicedRouteTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationEntranceRoutingTests;
+	FNavigationSearchFixture Fixture;
+	Prepare(Fixture, { Door(TEXT("A-Link"), EInteriorEntranceKind::Link, 1, 1, TEXT("B")) }, {});
+	ANavPlayerController* PC = Fixture.MakeController();
+	PC->OnInteriorContentChanged.AddUniqueDynamic(Fixture.Nav, &UNavigationPanelWidget::NotifyInteriorChanged);
+	UNavigationPanelWidget* Nav = Fixture.Nav;
+	Nav->ToggleSelectStart(); Nav->SelectPoint(FVector2D(50,50), 1);
+	PC->LoadInteriorForBuilding(TEXT("B"));
+	Nav->ToggleSelectDestination(); Nav->SelectPoint(FVector2D(50,50), 1);
+	if (!TestTrue(TEXT("both ends are set"), Nav->CanFindRoute())) return false;
+
+	FNavigationRouteResult AllAtOnce;
+	const bool bFound = FNavigationRoutePlanner::FindCampusRoute(*Fixture.Generator, *Fixture.Interior, Nav->GetStart(), Nav->GetDestination(), AllAtOnce);
+	TestTrue(TEXT("the route exists"), bFound);
+
+	FNavigationRouteJob Job(*Fixture.Generator, *Fixture.Interior, Nav->GetStart(), Nav->GetDestination());
+	int32 Steps = 0; float Last = 0.f;
+	while (!Job.Step(0.0) && Steps < 100000)
+	{
+		++Steps; const float Now = Job.GetProgress();
+		TestTrue(TEXT("progress only goes forward, up to 1"), Now >= Last && Now <= 1.f); Last = Now;
+		TestFalse(TEXT("says what it is doing"), Job.GetPhase().IsEmpty());
+	}
+	TestTrue(TEXT("it took more than one slice"), Steps > 1);
+	TestEqual(TEXT("the same outcome as all at once"), Job.Succeeded(), bFound);
+	TestEqual(TEXT("the same number of points"), Job.GetResult().Points.Num(), AllAtOnce.Points.Num());
+	bool bSamePoints = Job.GetResult().Points.Num() == AllAtOnce.Points.Num();
+	for (int32 I = 0; bSamePoints && I < AllAtOnce.Points.Num(); ++I)
+	{
+		const auto& A = Job.GetResult().Points[I]; const auto& B = AllAtOnce.Points[I];
+		bSamePoints = A.BuildingId == B.BuildingId && A.Floor == B.Floor && A.ConnectorId == B.ConnectorId && A.Position.Equals(B.Position);
+	}
+	TestTrue(TEXT("the same points"), bSamePoints);
+
+	// The panel's search ends with the route applied as RequestFindRoute applies it.
+	Nav->StartFindRoute();
+	TestTrue(TEXT("the search is running"), Nav->IsFindingRoute());
+	TestTrue(TEXT("and says so"), Nav->GetDisplayStatusMessage().Contains(TEXT("Finding route")));
+	while (!Nav->StepFindRoute(0.0)) {}
+	TestFalse(TEXT("finished"), Nav->IsFindingRoute());
+	TestEqual(TEXT("the route is shown"), Nav->GetRoutePoints().Num(), AllAtOnce.Points.Num());
+	TestFalse(TEXT("not marked as failed"), Nav->DidLastFindRouteFail());
+
+	// An edit of the interior stops it, and the old route goes as it does after any edit.
+	Nav->StartFindRoute(); Nav->StepFindRoute(0.0);
+	Nav->NotifyInteriorChanged();
+	TestFalse(TEXT("an interior edit stops the search"), Nav->IsFindingRoute());
+	TestTrue(TEXT("the route of before the edit is gone"), Nav->GetRoutePoints().IsEmpty());
+
+	// Cancel stops it with a message and no route.
+	Nav->StartFindRoute(); Nav->StepFindRoute(0.0);
+	Nav->CancelFindRoute();
+	TestFalse(TEXT("cancelled"), Nav->IsFindingRoute());
+	TestTrue(TEXT("says so"), Nav->GetDisplayStatusMessage().Contains(TEXT("cancelled")));
+	TestTrue(TEXT("and shows no route"), Nav->GetRoutePoints().IsEmpty());
+	TestTrue(TEXT("stepping a stopped search is harmless"), Nav->StepFindRoute(0.0));
+
+	// Clearing stops it too.
+	Nav->StartFindRoute(); Nav->StepFindRoute(0.0);
+	Nav->RequestClearRoute();
+	TestFalse(TEXT("clearing stops the search"), Nav->IsFindingRoute());
+	TestTrue(TEXT("and nothing is shown"), Nav->GetRoutePoints().IsEmpty() && !Nav->HasStart());
+	return true;
+}
+
 #endif

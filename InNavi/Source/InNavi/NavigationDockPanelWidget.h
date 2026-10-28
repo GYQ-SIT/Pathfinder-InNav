@@ -9,6 +9,7 @@ class UBorder;
 class UButton;
 class UComboBoxString;
 class UEditableTextBox;
+class UProgressBar;
 class UTextBlock;
 class UVerticalBox;
 
@@ -38,8 +39,12 @@ public:
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
+	// While a route is being searched for, keeps the progress bar and the status text up to date.
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 private:
+	UFUNCTION()
+	void OnCancelFindRouteClicked();
 	UFUNCTION()
 	void OnSetStartClicked();
 	UFUNCTION()
@@ -92,6 +97,11 @@ private:
 	UTextBlock* SetDestinationButtonLabel = nullptr;
 	UPROPERTY()
 	UButton* FindRouteButton = nullptr;
+	// Shown only while a route is being searched for.
+	UPROPERTY()
+	UProgressBar* FindRouteProgress = nullptr;
+	UPROPERTY()
+	UButton* CancelFindRouteButton = nullptr;
 	UPROPERTY()
 	UButton* ClearRouteButton = nullptr;
 	UPROPERTY()

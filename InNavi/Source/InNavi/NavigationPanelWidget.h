@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "NavigationRoutePlanner.h"
+#include "Containers/Ticker.h"
 #include "NavigationPanelWidget.generated.h"
 
 class ABuildingGenerator;
@@ -128,6 +129,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Navigation")
 	void RequestClearRoute();
 
+	// RequestFindRoute waits for the route. On a large campus that takes seconds, so the Find Route button calls this instead: the
+	// search runs a little each frame (the panel steps itself from the core ticker), shows how far it is, and can be cancelled.
+	// The result is applied exactly as RequestFindRoute applies it. Changing the start or destination, clearing, or closing the
+	// project stops the search without a result.
+	void StartFindRoute();
+	// Works for about BudgetSeconds; true once there is no search running any more. The ticker calls this; tests may call it directly.
+	bool StepFindRoute(double BudgetSeconds);
+	// The person cancelled: stops the search and says so.
+	void CancelFindRoute();
+	bool IsFindingRoute() const { return RouteJob.IsValid(); }
+	// 0 to 1, and in words what the search is doing, while one is running.
+	float GetFindRouteProgress() const;
+	FString GetFindRouteProgressText() const;
+
 	// Presentation seam for Person A's combined planner. Its result may contain floor-zero outdoor
 	// points and indoor floor points; the floor-plan and directions render both from this one array.
 	// Kept as a C++ method because FNavigationRouteResult is intentionally not a reflected type.
@@ -240,8 +255,21 @@ public:
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
+	virtual void BeginDestroy() override;
 
 private:
+	// The checks both ways of finding a route start with; false (with the reason shown) when there is nothing to find.
+	bool CanStartFindRoute();
+	// What both ways do with what the search found.
+	void FinishFindRoute(bool bFound, const FNavigationRouteResult& Result);
+	// Stops a running search without a message; true if there was one.
+	bool StopRouteJob();
+	bool TickFindRoute(float DeltaTime);
+	TSharedPtr<FNavigationRouteJob> RouteJob;
+	FTSTicker::FDelegateHandle RouteTicker;
+	// The endpoints the running search is for; if they change, its result no longer applies.
+	FNavigationRoutePoint JobStart, JobDestination;
+
 	void RefreshRoomSearchIndex() const;
 	mutable TArray<FNavigationRoomOption> CachedRooms;
 	mutable TArray<int32> SortedDestinationIndices;

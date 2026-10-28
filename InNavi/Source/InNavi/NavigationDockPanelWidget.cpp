@@ -8,6 +8,7 @@
 #include "Components/Button.h"
 #include "Components/ComboBoxString.h"
 #include "Components/EditableTextBox.h"
+#include "Components/ProgressBar.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -145,6 +146,20 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 		SetDestinationButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnSetDestinationClicked);
 		FindRouteButton = AddButton(TEXT("Btn_NavFindRoute"), TEXT("Find Route"), UnusedFindRouteLabel);
 		FindRouteButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnFindRouteClicked);
+		// Only while a route is being searched for: how far it is, and a way to stop it.
+		FindRouteProgress = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("Bar_NavFindRouteProgress"));
+		FindRouteProgress->SetFillColorAndOpacity(FLinearColor(0.3f, 0.85f, 0.4f, 1.f));
+		FindRouteProgress->SetPercent(0.f);
+		USizeBox* ProgressSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Bar_NavFindRouteProgressSize"));
+		ProgressSize->SetWidthOverride(ContentWidth);
+		ProgressSize->SetHeightOverride(10.f);
+		ProgressSize->SetContent(FindRouteProgress);
+		ProgressSize->SetVisibility(ESlateVisibility::Collapsed);
+		Stack->AddChildToVerticalBox(ProgressSize)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
+		UTextBlock* UnusedCancelLabel = nullptr;
+		CancelFindRouteButton = AddButton(TEXT("Btn_NavCancelFindRoute"), TEXT("Cancel Search"), UnusedCancelLabel);
+		CancelFindRouteButton->SetVisibility(ESlateVisibility::Collapsed);
+		CancelFindRouteButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnCancelFindRouteClicked);
 		ClearRouteButton = AddButton(TEXT("Btn_NavClearRoute"), TEXT("Clear Route"), UnusedClearRouteLabel);
 		ClearRouteButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnClearRouteClicked);
 		ToggleRouteButton = AddButton(TEXT("Btn_NavToggleRoute"), TEXT("Hide Route"), ToggleRouteButtonLabel);
@@ -180,6 +195,8 @@ void UNavigationDockPanelWidget::SetContentWidth(float Width)
 	SetButtonWidth(SetStartButton, Width);
 	SetButtonWidth(SetDestinationButton, Width);
 	SetButtonWidth(FindRouteButton, Width);
+	SetButtonWidth(CancelFindRouteButton, Width);
+	SetParentSizeBoxWidth(FindRouteProgress, Width);
 	SetButtonWidth(ClearRouteButton, Width);
 	SetButtonWidth(ToggleRouteButton, Width);
 	SetParentSizeBoxWidth(DestinationSearchBox, Width);
@@ -215,7 +232,36 @@ void UNavigationDockPanelWidget::OnFindRouteClicked()
 	{
 		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
 		{
-			Nav->RequestFindRoute();
+			Nav->StartFindRoute();
+		}
+	}
+}
+
+void UNavigationDockPanelWidget::OnCancelFindRouteClicked()
+{
+	if (ANavPlayerController* PC = GetController())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->CancelFindRoute();
+		}
+	}
+}
+
+void UNavigationDockPanelWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	ANavPlayerController* PC = GetController();
+	UNavigationPanelWidget* Nav = PC ? PC->GetNavigationPanel() : nullptr;
+	if (Nav && Nav->IsFindingRoute())
+	{
+		if (FindRouteProgress)
+		{
+			FindRouteProgress->SetPercent(Nav->GetFindRouteProgress());
+		}
+		if (StatusText)
+		{
+			StatusText->SetText(FText::FromString(Nav->GetDisplayStatusMessage()));
 		}
 	}
 }
@@ -349,7 +395,7 @@ void UNavigationDockPanelWidget::RefreshDisplay()
 	}
 	if (FindRouteButton)
 	{
-		FindRouteButton->SetIsEnabled(Nav->CanFindRoute());
+		FindRouteButton->SetIsEnabled(Nav->CanFindRoute() && !Nav->IsFindingRoute());
 		// Green once a route's actually been found, red if the last attempt came back empty-handed, gray otherwise
 		// (never tried, or cleared since).
 		FLinearColor FindRouteColor = InactiveButtonColor;
@@ -366,6 +412,20 @@ void UNavigationDockPanelWidget::RefreshDisplay()
 	if (ClearRouteButton)
 	{
 		ClearRouteButton->SetIsEnabled(Nav->CanClearRoute());
+	}
+	const bool bFindingRoute = Nav->IsFindingRoute();
+	if (CancelFindRouteButton)
+	{
+		CancelFindRouteButton->SetVisibility(bFindingRoute ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (FindRouteProgress)
+	{
+		// The bar sits in a size box, which is what is shown or hidden.
+		if (UWidget* Holder = FindRouteProgress->GetParent())
+		{
+			Holder->SetVisibility(bFindingRoute ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		}
+		FindRouteProgress->SetPercent(Nav->GetFindRouteProgress());
 	}
 	if (ToggleRouteButton)
 	{

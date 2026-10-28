@@ -225,6 +225,10 @@ void UNavigationPanelWidget::ToggleRouteGuidance()
 
 void UNavigationPanelWidget::SetNavigationContext(ABuildingGenerator* InGenerator, AInteriorGenerator* InInterior)
 {
+	if (Generator != InGenerator || Interior != InInterior)
+	{
+		StopRouteJob();
+	}
 	Generator = InGenerator;
 	Interior = InInterior;
 	IndexedRoomSearchRevision = MAX_uint64;
@@ -490,23 +494,26 @@ bool UNavigationPanelWidget::SetEndpointToRoom(const FString& RoomOptionLabel, b
 	return true;
 }
 
-void UNavigationPanelWidget::RequestFindRoute()
+bool UNavigationPanelWidget::CanStartFindRoute()
 {
 	if (!CanFindRoute())
 	{
 		SetStatusMessage(TEXT("Set a start and destination in the project."),
 			ENavigationMessageKind::Error);
-		return;
+		return false;
 	}
 	APolyBuilding* Building = Generator->FindBuildingById(Start.BuildingId);
 	if (!Building)
 	{
 		SetStatusMessage(TEXT("The selected building is unavailable."), ENavigationMessageKind::Error);
-		return;
+		return false;
 	}
+	return true;
+}
 
-	FNavigationRouteResult Result;
-	if (!FNavigationRoutePlanner::FindCampusRoute(*Generator, *Interior, Start.Point, Destination.Point, Result))
+void UNavigationPanelWidget::FinishFindRoute(bool bFound, const FNavigationRouteResult& Result)
+{
+	if (!bFound)
 	{
 		RoutePoints.Reset();
 		bLastFindRouteFailed = true;
@@ -520,6 +527,103 @@ void UNavigationPanelWidget::RequestFindRoute()
 	}
 
 	ApplyRouteResult(Result);
+}
+
+void UNavigationPanelWidget::RequestFindRoute()
+{
+	if (!CanStartFindRoute())
+	{
+		return;
+	}
+	StopRouteJob();
+	FNavigationRouteResult Result;
+	const bool bFound = FNavigationRoutePlanner::FindCampusRoute(*Generator, *Interior, Start.Point, Destination.Point, Result);
+	FinishFindRoute(bFound, Result);
+}
+
+void UNavigationPanelWidget::StartFindRoute()
+{
+	if (!CanStartFindRoute())
+	{
+		return;
+	}
+	StopRouteJob();
+	JobStart = Start.Point;
+	JobDestination = Destination.Point;
+	bLastFindRouteFailed = false;
+	RouteJob = MakeShared<FNavigationRouteJob>(*Generator, *Interior, JobStart, JobDestination);
+	RouteTicker = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateUObject(this, &UNavigationPanelWidget::TickFindRoute));
+	BroadcastStateChanged();
+}
+
+bool UNavigationPanelWidget::StepFindRoute(double BudgetSeconds)
+{
+	if (!RouteJob)
+	{
+		return true;
+	}
+	// The result belongs to the points the search was started for; if either has been changed or cleared, it is no use.
+	auto SameEndpoint = [](const FSelectedEndpoint& Endpoint, const FNavigationRoutePoint& Point)
+	{
+		return Endpoint.bValid && Endpoint.Point.BuildingId == Point.BuildingId && Endpoint.Point.Floor == Point.Floor
+			&& Endpoint.Point.Position.Equals(Point.Position);
+	};
+	if (!Generator || !Interior || !SameEndpoint(Start, JobStart) || !SameEndpoint(Destination, JobDestination))
+	{
+		StopRouteJob();
+		BroadcastStateChanged();
+		return true;
+	}
+	if (!RouteJob->Step(BudgetSeconds))
+	{
+		return false;
+	}
+	const TSharedPtr<FNavigationRouteJob> Finished = RouteJob;
+	StopRouteJob();
+	FinishFindRoute(Finished->Succeeded(), Finished->GetResult());
+	return true;
+}
+
+void UNavigationPanelWidget::CancelFindRoute()
+{
+	if (StopRouteJob())
+	{
+		SetStatusMessage(TEXT("Route search cancelled."), ENavigationMessageKind::Warning);
+	}
+}
+
+bool UNavigationPanelWidget::StopRouteJob()
+{
+	if (RouteTicker.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(RouteTicker);
+		RouteTicker.Reset();
+	}
+	const bool bWasRunning = RouteJob.IsValid();
+	RouteJob.Reset();
+	return bWasRunning;
+}
+
+bool UNavigationPanelWidget::TickFindRoute(float DeltaTime)
+{
+	// About half a frame at 60 fps, so the editor keeps answering while this works.
+	return !StepFindRoute(0.008);
+}
+
+float UNavigationPanelWidget::GetFindRouteProgress() const
+{
+	return RouteJob ? RouteJob->GetProgress() : 0.f;
+}
+
+FString UNavigationPanelWidget::GetFindRouteProgressText() const
+{
+	return RouteJob ? RouteJob->GetPhase() : FString();
+}
+
+void UNavigationPanelWidget::BeginDestroy()
+{
+	StopRouteJob();
+	Super::BeginDestroy();
 }
 
 void UNavigationPanelWidget::ApplyRouteResult(const FNavigationRouteResult& Result)
@@ -589,6 +693,7 @@ bool UNavigationPanelWidget::ApplyWorldRouteResult(const FString& BuildingId,
 
 void UNavigationPanelWidget::ClearAll()
 {
+	StopRouteJob();
 	bRouteGuidanceVisible = true;
 	SelectionMode = ENavigationSelectionMode::None;
 	Start = FSelectedEndpoint();
@@ -869,7 +974,16 @@ void UNavigationPanelWidget::NotifyViewedBuildingChanged()
 
 void UNavigationPanelWidget::NotifyInteriorChanged()
 {
-	if (RoutePoints.IsEmpty()) return;
+	// A search works on a copy of the layout taken when it started; after an edit its answer would be for the old one.
+	const bool bWasSearching = StopRouteJob();
+	if (RoutePoints.IsEmpty())
+	{
+		if (bWasSearching)
+		{
+			SetStatusMessage(TEXT("Interior changed. Press Find Route to search again."), ENavigationMessageKind::Warning);
+		}
+		return;
+	}
 	RoutePoints.Reset();
 	bLastFindRouteFailed = false;
 	SetStatusMessage(TEXT("Interior changed. Press Find Route to update the route."), ENavigationMessageKind::Warning);
@@ -882,6 +996,10 @@ bool UNavigationPanelWidget::CanClearRoute() const
 
 FString UNavigationPanelWidget::GetDisplayStatusMessage() const
 {
+	if (RouteJob)
+	{
+		return FString::Printf(TEXT("Finding route... %d%%\n%s"), FMath::RoundToInt(RouteJob->GetProgress() * 100.f), *RouteJob->GetPhase());
+	}
 	if (!StatusMessage.IsEmpty())
 	{
 		return StatusMessage;
@@ -1010,7 +1128,7 @@ FString UNavigationPanelWidget::BuildRouteDetails() const
 
 FLinearColor UNavigationPanelWidget::GetStatusColor() const
 {
-	if (StatusMessage.IsEmpty())
+	if (StatusMessage.IsEmpty() || RouteJob)
 	{
 		return FLinearColor(0.55f, 0.82f, 1.f, 1.f);
 	}

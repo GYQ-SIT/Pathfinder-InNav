@@ -5,7 +5,7 @@ The **InNavi Layout Validator** plugin checks project data and navigation withou
 ## Using the panel
 
 1. Open a project and choose **Window > Validation**, on either the exterior or interior screen. The panel starts hidden and uses the usual docking, resizing, floating and saved-layout controls.
-2. Choose **Whole campus** or **Current building**, then **Validate layout**. On the exterior screen, Current building means the selected building; inside, it means the open building. Apply pending Properties fields before validating.
+2. Choose **All buildings** or **Current building**, then **Validate layout**. On the exterior screen, Current building means the selected building; inside, it means the open building. Apply pending Properties fields before validating. A large campus takes a while, so the route checks run a little each frame: the editor stays usable, a progress bar shows how far it is, and **Cancel** stops the run. The report appears when it finishes (the same findings as a run all at once). If the project is changed or closed while it runs, the route part is reported as skipped; validate again.
 3. Review the counts and use the severity filter. Issues are sorted by severity, building and floor. Selecting **Show on plan** opens the relevant building/floor and selects the affected room, opening, entrance or connector. Navigation issues also display a yellow location ring.
 4. Correct issues with the existing editing tools and validate again. Changes to geometry, names, doors, floors or connectors (including undo/redo) mark the report stale. Stale reports cannot navigate to old objects or be exported.
 5. **Export report** writes a uniquely named JSON report under `InNavi/Saved/Validation/`. The report includes rule codes, object locations, suggestions, the checked snapshot fingerprint and navigation coverage.
@@ -23,7 +23,7 @@ If opening a building materialises defaults from an older file, Show on plan ref
 - Main entrance placement and link references. Link entrances are stored once; their mirrors are derived. Navigation diagnostics check the same cross-building doorway edges as normal routing, including distance and floor elevation.
 - Room reachability from at least one campus exterior entry, using one valid representative destination per closed room. Candidate points come from triangulation and must meet the planner's wall clearance. A room with no suitable candidate is **skipped with a warning**, rather than labelled unreachable.
 
-Data checks run before navigation checks. Data/geometry errors skip navigation for that run, preventing misleading cascades. Whole campus scope reveals errors in dependencies outside the selected building. Unauthored interiors are informational. With no usable exterior entry points, entrance reachability is explicitly not checked.
+Data checks run before navigation checks. Data/geometry errors skip navigation for that run, preventing misleading cascades. The All buildings scope reveals errors in dependencies outside the selected building. Unauthored interiors are informational. With no usable exterior entry points, entrance reachability is explicitly not checked.
 
 The panel checks the **current loaded layout**. To diagnose malformed or duplicate raw file entries before loading can skip them, use the file commandlet below. Validation is a model consistency check, not physical accessibility or fire-safety certification. A reachable representative point does not prove every point of a room is reachable.
 

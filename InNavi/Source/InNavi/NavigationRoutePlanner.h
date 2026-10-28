@@ -41,12 +41,52 @@ struct FNavigationRoutePreferences
 	}
 };
 
+// The route part of layout validation (can a person get from outside to every room?), done in slices so a large campus does not
+// freeze the editor: call Step each frame with a little time until it returns true. Findings go to the report as they are made.
+class INNAVI_API FNavigationLayoutCheck
+{
+public:
+	FNavigationLayoutCheck(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior, const FString& ScopeBuildingId);
+	~FNavigationLayoutCheck();
+	// Works for about BudgetSeconds (at least one small step); true once the check is over. The result does not depend on how it was sliced.
+	bool Step(double BudgetSeconds, LayoutValidation::FReport& Report);
+	// 0 to 1, and in words what the check is doing now.
+	float GetProgress() const;
+	FString GetPhase() const;
+
+private:
+	struct FImpl;
+	TUniquePtr<FImpl> Impl;
+};
+
+// Finding one route between two points (FNavigationRoutePlanner::FindCampusRoute) in slices, for the same reason: on a large
+// campus it takes seconds. Step it each frame with a little time until it returns true, then read the result.
+class INNAVI_API FNavigationRouteJob
+{
+public:
+	FNavigationRouteJob(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior, const FNavigationRoutePoint& Start,
+		const FNavigationRoutePoint& Destination, const FNavigationRoutePreferences& Preferences = FNavigationRoutePreferences());
+	~FNavigationRouteJob();
+	// Works for about BudgetSeconds (at least one small step); true once the search is over. The result does not depend on how it was sliced.
+	bool Step(double BudgetSeconds);
+	// Whether a route was found; the route, or why not (Error), is in GetResult.
+	bool Succeeded() const;
+	const FNavigationRouteResult& GetResult() const;
+	// 0 to 1, and in words what the search is doing now.
+	float GetProgress() const;
+	FString GetPhase() const;
+
+private:
+	struct FImpl;
+	TUniquePtr<FImpl> Impl;
+};
+
 // Routes through the authored floor geometry. It leaves Jiahao's graph storage untouched;
 // a future navigation service can replace this planner while keeping the UI contract.
 class INNAVI_API FNavigationRoutePlanner
 {
 public:
-	// Uses the same visibility graph as routing, without switching buildings or changing layout data.
+	// Uses the same visibility graph as routing, without switching buildings or changing layout data. All at once; see FNavigationLayoutCheck.
 	static void ValidateLayoutConnectivity(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
 		const FString& ScopeBuildingId, LayoutValidation::FReport& Report);
 	static bool FindCampusRoute(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
