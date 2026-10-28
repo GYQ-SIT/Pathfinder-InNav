@@ -1600,18 +1600,13 @@ void ABuildingGenerator::MarkGroundDirty()
 	GetWorld()->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]() { UpdateGroundToVisible(); }));
 }
 
-void ABuildingGenerator::UpdateGroundToVisible()
+AStaticMeshActor* ABuildingGenerator::FindGroundActor()
 {
-	bGroundUpdateQueued = false;
-	if (!GetWorld())
-	{
-		return;
-	}
 	if (!GroundActor.IsValid())
 	{
 		if (bGroundSearched)
 		{
-			return;
+			return nullptr;
 		}
 		bGroundSearched = true;
 		for (TActorIterator<AStaticMeshActor> It(GetWorld()); It; ++It)
@@ -1627,14 +1622,19 @@ void ABuildingGenerator::UpdateGroundToVisible()
 		}
 		if (!GroundActor.IsValid())
 		{
-			return;
+			return nullptr;
 		}
-		// It is moved and sized while the game runs, and it never needs to throw a shadow (a very large plane that does is what
-		// overloads the virtual shadow maps).
-		UStaticMeshComponent* Component = GroundActor->GetStaticMeshComponent();
-		Component->SetMobility(EComponentMobility::Movable);
-		Component->SetCastShadow(false);
 	}
+	return GroundActor.Get();
+}
+
+void ABuildingGenerator::UpdateGroundToVisible()
+{
+	bGroundUpdateQueued = false;
+	if (bGroundFitSuspended || !GetWorld() || !FindGroundActor()) return;
+	UStaticMeshComponent* GroundComponent = GroundActor->GetStaticMeshComponent();
+	GroundComponent->SetMobility(EComponentMobility::Movable);
+	GroundComponent->SetCastShadow(false);
 
 	FBox2D Extent, Rect;
 	if (!GetVisibleExtent(Extent) || !GroundFit::Fit({ Extent }, GroundMinSize, GroundMarginFraction, GroundMinMargin, Rect))

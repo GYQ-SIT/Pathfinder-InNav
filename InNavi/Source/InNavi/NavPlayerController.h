@@ -11,6 +11,7 @@
 #include "NavPlayerController.generated.h"
 
 class APolyBuilding;
+class AInteriorBuildingPreviewPivot;
 struct FNavigationRoutePoint;
 class ABuildingGenerator;
 class ULayoutValidationSession;
@@ -202,6 +203,19 @@ public:
 	// SetIn3DEditMode) - re-entering 3D preview always starts fresh in View mode.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void SetIn3DPreviewMode(bool bEnable);
+
+	// Whole-model inspection around a fixed pivot at the lowest floor's base.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void SetInteriorInspectionEnabled(bool bEnable);
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool IsInteriorInspectionEnabled() const { return bInteriorInspectionEnabled; }
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool CanInspectBuilding() const;
+	int32 GetInspectionLowestFloor() const;
+	AInteriorBuildingPreviewPivot* GetInspectionPivot() const { return InspectionPivot; }
+	void RotateInspectionBy(float YawDegrees, float TiltDegrees);
+	UPROPERTY(BlueprintAssignable, Category = "Feedback")
+	FOn3DPreviewModeChanged OnInspectionModeChanged;
 
 	// Step by step navigation (UNavigationPanelWidget::NextStep): takes the view to where the step being shown is. Inside, that is
 	// the step's building (opened if another one is) and floor, kept in 3D if 3D was on; on the exterior screen the camera goes to
@@ -1129,6 +1143,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void SetupInputComponent() override;
 	virtual void Tick(float DeltaSeconds) override;
 
@@ -1532,6 +1547,22 @@ private:
 	FVector2D DragStart3DFootprintPosition = FVector2D::ZeroVector;
 
 	bool bIsIn3DPreviewMode = false;
+	UPROPERTY(Transient)
+	AInteriorBuildingPreviewPivot* InspectionPivot = nullptr;
+	bool bInteriorInspectionEnabled = false;
+	bool bInspectionDragging = false;
+	bool bInspectionSavedEdit = false;
+	int32 InspectionSavedFloor = 0;
+	FString InspectionBuildingId;
+	FVector2D InspectionLastPointer = FVector2D::ZeroVector;
+	FTransform InspectionSavedCamera = FTransform::Identity;
+	FRotator InspectionSavedControlRotation = FRotator::ZeroRotator;
+	TWeakObjectPtr<APawn> InspectionPawn;
+	float InspectionCameraDistance = 0.f;
+	float InspectionDefaultDistance = 0.f;
+	void FrameInspectionCamera(float ZoomFactor = 1.f);
+	void TickInteriorInspection();
+	void BeginInspectionDrag();
 	bool bIsIn3DEditMode = false;
 	float ThreeDPreviewCameraDistance = 0.f;
 	float ThreeDPreviewYaw = -45.f;

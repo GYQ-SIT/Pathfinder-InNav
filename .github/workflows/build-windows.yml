@@ -42,7 +42,7 @@ jobs:
         run: |
           "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" InNaviEditor Win64 Development -Project="%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -WaitMutex
 
-      - name: Test mobile data, layout validation, navigation and dock integration
+      - name: Test mobile data, layout validation, navigation, inspection and dock integration
         shell: cmd
         run: |
-          "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -unattended -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests InNavi.Mobile+InNavi.LayoutValidation+InNavi.Navigation+InNavi.UI.Guard+InNavi.Dock,Automation Quit" -ReportExportPath="%GITHUB_WORKSPACE%\InNavi\Saved\ValidationTests"
+          "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -unattended -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests InNavi.Mobile+InNavi.LayoutValidation+InNavi.Navigation+InNavi.UI.Guard+InNavi.Dock+InNavi.Interior.Inspection,Automation Quit" -ReportExportPath="%GITHUB_WORKSPACE%\InNavi\Saved\ValidationTests"

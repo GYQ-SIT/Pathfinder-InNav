@@ -266,6 +266,23 @@ void UNavigationRouteVisualization::ClearRoute()
 	RouteLabels.Reset();
 }
 
+FNavigation3DView UNavigationRouteVisualization::TransformView(const FNavigation3DView& View, const FTransform& Transform)
+{
+	FNavigation3DView Result = View;
+	Result.DisplayRotation = Transform.GetRotation() * View.DisplayRotation;
+	for (FNavigationDisplaySegment& Segment : Result.Segments)
+	{
+		Segment.From = Transform.TransformPosition(Segment.From);
+		Segment.To = Transform.TransformPosition(Segment.To);
+	}
+	for (FNavigationDisplayLabel& Label : Result.Labels) Label.Position = Transform.TransformPosition(Label.Position);
+	for (FNavigationDisplayStop& Stop : Result.Stops) Stop.Position = Transform.TransformPosition(Stop.Position);
+	if (Result.Start.IsSet()) Result.Start = Transform.TransformPosition(Result.Start.GetValue());
+	if (Result.Destination.IsSet()) Result.Destination = Transform.TransformPosition(Result.Destination.GetValue());
+	if (Result.Here.IsSet()) Result.Here = Transform.TransformPosition(Result.Here.GetValue());
+	return Result;
+}
+
 void UNavigationRouteVisualization::ShowView(const FNavigation3DView& View)
 {
 	ClearRoute();
@@ -288,8 +305,8 @@ void UNavigationRouteVisualization::ShowView(const FNavigation3DView& View)
 			const FVector Center = FMath::Lerp(Segment.From, Segment.To, (I + 0.5f) / Arrows);
 			const float HalfLength = FMath::Min(30.f, Length / (Arrows * 4.f));
 			const FVector Tip = Center + Direction * HalfLength;
-			FVector Side = FVector::CrossProduct(Direction, FVector::UpVector).GetSafeNormal();
-			if (Side.IsNearlyZero()) Side = FVector::RightVector;
+			FVector Side = FVector::CrossProduct(Direction, View.DisplayRotation.RotateVector(FVector::UpVector)).GetSafeNormal();
+			if (Side.IsNearlyZero()) Side = View.DisplayRotation.RotateVector(FVector::RightVector);
 			const float HeadSize = FMath::Min(20.f, HalfLength);
 			DrawLine(Center - Direction * HalfLength, Tip, Color, 0, 4.f, -1.f);
 			DrawLine(Tip, Tip - Direction * HeadSize + Side * HeadSize * 0.5f, Color, 0, 4.f, -1.f);

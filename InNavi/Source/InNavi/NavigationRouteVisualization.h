@@ -42,6 +42,7 @@ struct FNavigation3DView
 	TOptional<FVector> Destination;
 	// Where the person is, at the step being shown.
 	TOptional<FVector> Here;
+	FQuat DisplayRotation = FQuat::Identity;
 };
 
 // Arrow geometry in local map pixels, so zooming does not make direction cues unreadable.
@@ -77,6 +78,7 @@ public:
 	static FLinearColor LegColor2D(int32 LegIndex);
 	static TArray<FNavigationDirectionArrow2D> BuildDirectionArrows2D(FVector2D From, FVector2D To);
 	void ShowView(const FNavigation3DView& View);
+	static FNavigation3DView TransformView(const FNavigation3DView& View, const FTransform& Transform);
 	void ClearRoute();
 
 protected:

@@ -22,6 +22,7 @@
 #include "NavigationPanelWidget.h"
 #include "NavigationDockPanelWidget.h"
 #include "NavPlayerController.h"
+#include "InteriorBuildingPreviewPivot.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "Blueprint/WidgetTree.h"
@@ -874,6 +875,42 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		Edit3DModeToggleButton->SetContent(Edit3DPad);
 		Edit3DModeToggleButton->SetVisibility(ESlateVisibility::Collapsed);
 		AddCentered(SwitcherRow, Edit3DModeToggleButton, FMargin(8.f * DesignToUi, 0.f, 0.f, 0.f));
+		InspectionToggleButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_InspectionToggle"));
+		InspectionToggleButton->SetBackgroundColor(FLinearColor::White);
+		InspectionToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnInspectionToggleClicked);
+		InspectionToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+		InspectionToggleText = Text(WidgetTree, TEXT("Txt_InspectionToggle"), TEXT("Isolate & Rotate"), 13.f, FLinearColor::White, true);
+		UBorder* InspectionPad = WidgetTree->ConstructWidget<UBorder>();
+		InspectionPad->SetBrushColor(FLinearColor::Transparent);
+		InspectionPad->SetPadding(FMargin(16.f * DesignToUi, 9.f * DesignToUi));
+		InspectionPad->SetContent(InspectionToggleText);
+		InspectionToggleButton->SetContent(InspectionPad);
+		InspectionToggleButton->SetVisibility(ESlateVisibility::Collapsed);
+		// The switcher row is already full in smaller desktop windows. Keep this beside Camera.
+		if (UHorizontalBoxSlot* InspectionSlot = Cast<UHorizontalBoxSlot>(MenuBarRow->InsertChildAt(4, InspectionToggleButton)))
+		{
+			InspectionSlot->SetVerticalAlignment(VAlign_Center);
+			InspectionSlot->SetPadding(FMargin(6.f, 0.f));
+		}
+		InspectionHint = Text(WidgetTree, TEXT("Txt_InspectionHint"), TEXT(""), 12.f, StartStyle::Rgb(255, 200, 100), true);
+		InspectionHint->SetVisibility(ESlateVisibility::Collapsed);
+		InspectionHint->SetAutoWrapText(true);
+		InspectionHint->SetWrapTextAt(460.f);
+		InspectionHint->SetJustification(ETextJustify::Center);
+		UCanvasPanelSlot* HintSlot = Canvas->AddChildToCanvas(InspectionHint);
+		HintSlot->SetAnchors(FAnchors(0.5f, 0.f));
+		HintSlot->SetAlignment(FVector2D(0.5f, 0.f));
+		HintSlot->SetAutoSize(true);
+		HintSlot->SetPosition(FVector2D(0.f, MenuBarHeight + BuildingSwitcherBarHeight + 12.f));
+		HintSlot->SetZOrder(4);
+		// Screen-space ring: readable through the active upper floor, fixed to the real bottom anchor.
+		InspectionPivotOverlay = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("Img_InspectionPivot"));
+		InspectionPivotOverlay->SetBrush(Rounded(Rgb(16,32,50,130), Rgb(255,190,70), 11.f, 2.f));
+		InspectionPivotOverlay->SetVisibility(ESlateVisibility::Collapsed);
+		UCanvasPanelSlot* PivotSlot = Canvas->AddChildToCanvas(InspectionPivotOverlay);
+		PivotSlot->SetAlignment(FVector2D(0.5f,0.5f));
+		PivotSlot->SetSize(FVector2D(22.f * DesignToUi));
+		PivotSlot->SetZOrder(4);
 		}
 
 		// Thin separator lines at the seam between the menu bar and the switcher bar, and again below
@@ -1297,6 +1334,8 @@ void UInteriorScreenWidget::NativeConstruct()
 		PC->OnPreviewModeChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandlePreviewModeChanged);
 		HandlePreviewModeChanged(PC->IsIn3DPreviewMode());
 		PC->OnEdit3DModeChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleEdit3DModeChanged);
+		PC->OnInspectionModeChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleInspectionModeChanged);
+		HandleInspectionModeChanged(PC->IsInteriorInspectionEnabled());
 		HandleEdit3DModeChanged(PC->IsIn3DEditMode());
 		// Snapping can also be toggled by the N key, not just SnapToggleButton (defensive symmetry,
 		// matching every other PC-state delegate above).
@@ -1483,6 +1522,8 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnInteriorContentChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleInteriorContentChanged);
 		PC->OnPreviewModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandlePreviewModeChanged);
 		PC->OnEdit3DModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleEdit3DModeChanged);
+		PC->SetInteriorInspectionEnabled(false);
+		PC->OnInspectionModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleInspectionModeChanged);
 		PC->OnSnapEnabledChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSnapEnabledChanged);
 		PC->OnRoomColoursChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleRoomColoursChanged);
 		PC->ClearPointerOverUICallback(this);
@@ -1518,6 +1559,19 @@ void UInteriorScreenWidget::RefreshSaveIndicator()
 
 void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
+	if (InspectionPivotOverlay)
+	{
+		ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+		AInteriorBuildingPreviewPivot* Pivot = PC ? PC->GetInspectionPivot() : nullptr;
+		FVector2D Position = FVector2D::ZeroVector;
+		const bool bShowPivot = PC && PC->IsInteriorInspectionEnabled() && IsValid(Pivot) &&
+			UWidgetLayoutLibrary::ProjectWorldLocationToWidgetPosition(PC, Pivot->GetActorLocation(), Position, false);
+		InspectionPivotOverlay->SetVisibility(bShowPivot ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		if (bShowPivot)
+		{
+			if (UCanvasPanelSlot* PivotCanvasSlot = Cast<UCanvasPanelSlot>(InspectionPivotOverlay->Slot)) PivotCanvasSlot->SetPosition(Position);
+		}
+	}
 	RefreshSaveIndicator();
 	if (RoomFieldsBox && RoomFieldsBox->GetVisibility() == ESlateVisibility::Visible)
 	{
@@ -1838,6 +1892,7 @@ void UInteriorScreenWidget::HandleProjectSaved()
 
 void UInteriorScreenWidget::HandleActiveFloorChanged()
 {
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) HandleInspectionModeChanged(PC->IsInteriorInspectionEnabled());
 	RefreshFloorList();
 	RefreshLayersList();
 	RefreshNavigationPanelDisplay();
@@ -1845,6 +1900,7 @@ void UInteriorScreenWidget::HandleActiveFloorChanged()
 
 void UInteriorScreenWidget::HandleInteriorContentChanged()
 {
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) HandleInspectionModeChanged(PC->IsInteriorInspectionEnabled());
 	RefreshLayersList();
 	RefreshNavRoomDropdowns();
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
@@ -1856,6 +1912,7 @@ void UInteriorScreenWidget::HandleInteriorContentChanged()
 
 void UInteriorScreenWidget::HandlePreviewModeChanged(bool bIsActive)
 {
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) HandleInspectionModeChanged(PC->IsInteriorInspectionEnabled());
 	if (Background)
 	{
 		Background->SetVisibility(bIsActive ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
@@ -1905,6 +1962,52 @@ void UInteriorScreenWidget::HandlePreviewModeChanged(bool bIsActive)
 	{
 		HandleEdit3DModeChanged(false);
 	}
+}
+
+void UInteriorScreenWidget::OnInspectionToggleClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) PC->SetInteriorInspectionEnabled(!PC->IsInteriorInspectionEnabled());
+}
+
+void UInteriorScreenWidget::HandleInspectionModeChanged(bool bEnabled)
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC) return;
+	if (InspectionToggleButton)
+	{
+		InspectionToggleButton->SetVisibility(PC->IsIn3DPreviewMode() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		InspectionToggleButton->SetIsEnabled(bEnabled || PC->CanInspectBuilding());
+		InspectionToggleButton->SetStyle(Button_Style_Edit3D(bEnabled));
+		InspectionToggleButton->SetToolTipText(FText::FromString(PC->CanInspectBuilding()
+			? TEXT("Hide the lowest storey and surroundings. Drag the model to rotate it about its bottom pivot; scroll to zoom. Turn off to restore the view.")
+			: TEXT("This building needs at least two interior floors to hide its lowest storey.")));
+	}
+	if (InspectionToggleText) InspectionToggleText->SetText(FText::FromString(bEnabled ? TEXT("Isolate & Rotate: ON") : TEXT("Isolate & Rotate")));
+	if (InspectionHint)
+	{
+		InspectionHint->SetVisibility(bEnabled ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		InspectionHint->SetText(FText::FromString(FString::Printf(TEXT("Level %d hidden; showing Level %d. Drag to rotate, scroll to zoom. Esc to restore."), PC->GetInspectionLowestFloor(), PC->GetActiveFloor())));
+	}
+	if (!bEnabled && InspectionPivotOverlay) InspectionPivotOverlay->SetVisibility(ESlateVisibility::Collapsed);
+	if (bEnabled && InspectionUiStates.IsEmpty())
+	{
+		auto Disable = [this](UWidget* Widget)
+		{
+			if (Widget) { InspectionUiStates.Add({ Widget, Widget->GetIsEnabled() }); Widget->SetIsEnabled(false); }
+		};
+		for (EDockPanelId Id : { EDockPanelId::Toolbar, EDockPanelId::Properties, EDockPanelId::Layers, EDockPanelId::Navigation, EDockPanelId::Map, EDockPanelId::Validation })
+		{
+			if (DockPanelBorders.IsValidIndex((int32)Id)) Disable(DockPanelBorders[(int32)Id]);
+		}
+		for (UWidget* Widget : TArray<UWidget*>{ AddFloorButton, RemoveFloorButton, UndoButton, RedoButton, Edit3DModeToggleButton,
+			EditBuildingNameButton, CameraSpeedTextBox, IncreaseSpeedButton, DecreaseSpeedButton }) Disable(Widget);
+	}
+	else if (!bEnabled)
+	{
+		for (const auto& State : InspectionUiStates) if (UWidget* Widget = State.Key.Get()) Widget->SetIsEnabled(State.Value);
+		InspectionUiStates.Reset();
+	}
+	RefreshFloorList();
 }
 
 void UInteriorScreenWidget::HandleEdit3DModeChanged(bool bIsEditMode)
@@ -2532,6 +2635,9 @@ void UInteriorScreenWidget::RefreshFloorList()
 			continue;
 		}
 		Entry->SetFloorNumber(FloorNumber, FloorNumber == ActiveFloor, (FloorNumber - 1) * FloorHeightCm / 100.f);
+		const bool bHiddenLowest = PC->IsInteriorInspectionEnabled() && FloorNumber <= PC->GetInspectionLowestFloor();
+		Entry->SetIsEnabled(!bHiddenLowest);
+		if (bHiddenLowest) Entry->SetToolTipText(FText::FromString(TEXT("The lowest storey is hidden during Isolate & Rotate.")));
 		Entry->SetWidth(ComputePanelButtonWidth(EDockPanelId::Floor));
 		Entry->OnEntryClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleFloorEntryClicked);
 

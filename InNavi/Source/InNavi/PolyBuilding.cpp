@@ -125,8 +125,9 @@ void APolyBuilding::RebuildMesh()
 		GroundVertices, GroundTriangles, GroundUV0, GroundNormals, GroundTangents);
 
 	TArray<FColor> GroundVertexColors;
-	MeshComp->CreateMeshSection(0, GroundVertices, GroundTriangles, GroundNormals, GroundUV0, GroundVertexColors, GroundTangents, true);
+	MeshComp->CreateMeshSection(0, GroundVertices, GroundTriangles, GroundNormals, GroundUV0, GroundVertexColors, GroundTangents, !bInspectionBottomHidden);
 	MeshComp->SetMaterial(0, DynMaterial);
+	MeshComp->SetMeshSectionVisible(0, !bInspectionBottomHidden);
 
 	// Sections 1..FloorCount (roof + inter-floor slabs) and FloorCount+1..2*FloorCount (one wall ring
 	// per floor, see GetWallSectionIndex) are all built by ApplySlabVisibility, which also decides
@@ -297,6 +298,13 @@ void APolyBuilding::SetVisibleInteriorLevel(int32 Level)
 {
 	VisibleInteriorLevel = Level;
 	ApplySlabVisibility();
+}
+
+void APolyBuilding::SetInspectionBottomHidden(bool bNewHidden)
+{
+	if (bInspectionBottomHidden == bNewHidden) return;
+	bInspectionBottomHidden = bNewHidden;
+	RebuildMesh();
 }
 
 void APolyBuilding::ApplySlabVisibility()
