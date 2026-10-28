@@ -56,6 +56,7 @@ public:
 	// registered with DockHost and are not parented in the widget tree - so this also looks at everything the
 	// screen created. For tests and tooling.
 	UWidget* FindScreenWidget(FName Name) const;
+	UMapPanelWidget* GetMapPanelForTests() const { return MapPanelWidget; }
 	void ShowValidationPanel();
 	// Step by step navigation: a step outside is shown on the exterior screen (the campus). Returns true when this screen has handed over
 	// to it (what was edited here stays, unsaved). Registered with the controller (SetNavigationStepScreenCallback); public for tests.
@@ -234,6 +235,10 @@ private:
 	// should trigger a switch.
 	UFUNCTION()
 	void HandleBuildingSwitcherChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+	// Opens another building's interior (asking what to do with unsaved changes first). What the switcher and the Map panel do.
+	void SwitchToBuilding(const FString& NewBuildingId);
+	// What shows the open building, after another one has been opened.
+	void RefreshAfterBuildingSwitch();
 
 	UFUNCTION()
 	void OnEditBuildingNameClicked();

@@ -119,7 +119,7 @@ Hidden or shown via Window > Map. Only appears once a database (`.db`) has been 
 - **ROADS** (collapsed) - the road filters below.
 - A note that buildings outside the campus are context only.
 
-**Road filters** (the whole panel in the interior editor, which has no outside buildings):
+**Road filters**:
 
 - **Hide All** - hides every road at once, and visually unchecks the six category
   boxes below to match. Unchecking it again shows everything (categories reset to
@@ -399,10 +399,12 @@ audio still playing.
 Hidden by default here (Window > Map shows it; it comes back above the Toolbar). The roads are
 hidden by default too while you edit a building: opening the interior editor turns them off, and the
 panel's check boxes start that way (Hide All checked). Going back to the exterior screen turns them
-on again - there they start shown. Same road filters as the exterior screen's own Map panel (Hide All,
-the six road categories, Campus Only) - see its description under **Exterior edit screen** above. No
-site overview or building filters here - campus/non-campus building visibility isn't something you'd
-toggle from inside a building's own interior.
+on again - there they start shown. It is the same panel as on the exterior screen (see its description under **Exterior edit
+screen** above): **Choose a building** (search and the list), the filters (floor count, Campus / Non-campus, Reset) and the road
+filters. The list and the filters are shared with the exterior screen, so what is set on one is there on the other, and a screen
+opened from the other does not reset them. Here the chosen building in the list is the one that is open, and **clicking a building
+opens its interior** (asking what to do with unsaved changes first, like the building switcher at the top). Buildings the filters
+hide are not in the list.
 
 ## 3D preview mode
 

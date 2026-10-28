@@ -6,6 +6,7 @@
 #include "PolyBuilding.h"
 #include "DebugPanelWidget.h"
 #include "MapPanelWidget.h"
+#include "MapBuildingRowWidget.h"
 #include "EditScreenWidget.h"
 #include "InteriorScreenWidget.h"
 #include "UiTestFixture.h"
@@ -152,13 +153,33 @@ bool FUiMapPanelTest::RunTest(const FString& Parameters)
 	CheckRoadSection(TEXT("interior"), Interior, false);
 	CheckRoadSection(TEXT("exterior"), Exterior, true);
 
-	// Only the exterior screen has outside buildings to filter.
-	TestNull(TEXT("interior: no building search"), Interior->FindScreenWidget(TEXT("Txt_BuildingSearch")));
-	TestNull(TEXT("interior: no campus building switch"), Interior->FindScreenWidget(TEXT("Chk_BuildingCampus")));
+	// Both screens have the building list and the filters: the same panel.
+	TestNotNull(TEXT("interior: building search"), Interior->FindScreenWidget(TEXT("Txt_BuildingSearch")));
+	TestNotNull(TEXT("interior: campus building switch"), Interior->FindScreenWidget(TEXT("Chk_BuildingCampus")));
 	TestNotNull(TEXT("exterior: building search"), Exterior->FindScreenWidget(TEXT("Txt_BuildingSearch")));
 	TestNotNull(TEXT("exterior: campus building switch"), Exterior->FindScreenWidget(TEXT("Chk_BuildingCampus")));
 	TestNotNull(TEXT("exterior: non-campus building switch"), Exterior->FindScreenWidget(TEXT("Chk_BuildingNonCampus")));
 	TestNotNull(TEXT("exterior: reset button"), Exterior->FindScreenWidget(TEXT("Btn_ResetBuildingFilters")));
+
+	// On the interior screen a click on a building of the list opens its interior.
+	UMapPanelWidget* InteriorMap = Interior->GetMapPanelForTests();
+	if (TestNotNull(TEXT("interior: the map panel"), InteriorMap))
+	{
+		InteriorMap->Refresh();
+		TestTrue(TEXT("interior: the building list is filled"), InteriorMap->GetBuildingRowCountForTests() > 1);
+		const FString Open = Fixture.Interior->GetLoadedBuildingId();
+		UMapBuildingRowWidget* Other = nullptr;
+		for (UMapBuildingRowWidget* Row : InteriorMap->GetBuildingRowsForTests())
+		{
+			if (Row->GetBuildingId() != Open && Fixture.Generator->FindBuildingById(Row->GetBuildingId())) { Other = Row; break; }
+		}
+		if (TestNotNull(TEXT("interior: a building other than the open one is listed"), Other))
+		{
+			const FString OtherId = Other->GetBuildingId();
+			Other->ClickForTests();
+			TestEqual(TEXT("interior: clicking it opens that building"), Fixture.Interior->GetLoadedBuildingId(), OtherId);
+		}
+	}
 
 	// The site overview: a list of buildings, and the filters and roads in sections that start closed.
 	UMapPanelWidget* Map = Exterior->GetMapPanelForTests();

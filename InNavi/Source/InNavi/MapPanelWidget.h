@@ -19,7 +19,8 @@ class UVerticalBox;
 // turns on the site overview (SetShowBuildingFilters), in the style of the design team's page: "Choose a building" with a
 // search box and the list of buildings (the selected one highlighted), then two collapsible sections, Filters (floor count,
 // campus / non-campus, reset) and Roads, and a note. The interior editor has no outside buildings, so it keeps the road
-// check boxes only.
+// check boxes only. The interior editor can turn the overview on too (the same panel and the same filters, which belong to the
+// controller and are shared by both screens), and then decides what a click on a building does (SetBuildingClickHandler): open it.
 UCLASS()
 class INNAVI_API UMapPanelWidget : public UDockPanelContentWidget
 {
@@ -33,6 +34,15 @@ public:
 	// the check boxes start and what ApplyDefaultsToController makes the controller do. Has to be called before the panel is
 	// first shown.
 	void SetRoadsVisibleByDefault(bool bVisible) { bRoadsVisibleByDefault = bVisible; }
+
+	// What a click on a building of the list does, when it is not selecting it on the campus (the exterior screen); and which building
+	// the list shows as the chosen one (the controller's selected building when not set).
+	void SetBuildingClickHandler(TFunction<void(const FString&)> Handler) { BuildingClickHandler = MoveTemp(Handler); }
+	void SetSelectedBuildingProvider(TFunction<FString()> Provider) { SelectedBuildingProvider = MoveTemp(Provider); }
+
+	// Whether ApplyDefaultsToController also puts the building filters in their starting state (buildings outside the campus hidden).
+	// A screen that carries on from another one keeps what the filters hold, and turns this off.
+	void SetBuildingVisibilityDefaults(bool bApply) { bApplyBuildingDefaults = bApply; }
 
 	// The width the controls are sized to (the dock group's width minus the panel padding).
 	void SetContentWidth(float Width);
@@ -104,6 +114,7 @@ private:
 	UFUNCTION()
 	void OnRoadsHeaderClicked();
 
+	FString SelectedBuildingId() const;
 	void SelectFloorOption(int32 Minimum, int32 Maximum);
 	void RefreshFloorChips();
 	void ApplyBuildingFilters();
@@ -163,6 +174,9 @@ private:
 	UPROPERTY()
 	UVerticalBox* RoadsBody = nullptr;
 
+	TFunction<void(const FString&)> BuildingClickHandler;
+	TFunction<FString()> SelectedBuildingProvider;
+	bool bApplyBuildingDefaults = true;
 	bool bShowBuildingFilters = false;
 	bool bRoadsVisibleByDefault = true;
 	// True while the controls are being set from the controller, so their change events do not write back.
