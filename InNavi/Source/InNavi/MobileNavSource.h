@@ -45,7 +45,8 @@ struct FMobilePlace
 {
 	FString Id;
 	FString Name;
-	// What is printed on the door: "E2-01-101", "#01-102".
+	// What is printed on the door: "E2-01-101", "#01-102". Empty when the data has no door number (a room's internal id is not one): the
+	// screens then show the place without it. It is still searched when it is not empty.
 	FString Code;
 	FString SiteId;
 	FString BuildingId;
@@ -66,6 +67,9 @@ struct FMobilePlace
 
 	// "E2 . L1": what the list groups places by.
 	FString GroupLabel() const;
+
+	// "<code> . <rest>", or just "<rest>" when the place has no code.
+	FString WithCode(const FString& Rest) const { return Code.IsEmpty() ? Rest : Code + TEXT(" · ") + Rest; }
 };
 
 struct FMobilePlaceFilter

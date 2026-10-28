@@ -56,7 +56,7 @@ void UMobileArrivedPageWidget::Refresh()
 	{
 		return;
 	}
-	PlaceText->SetText(FText::FromString(Place.Name.IsEmpty() ? FString() : FString::Printf(TEXT("%s · %s · Level %d"), *Place.Name, *Place.Code, Place.Level)));
+	PlaceText->SetText(FText::FromString(Place.Name.IsEmpty() ? FString() : Place.Name + TEXT(" · ") + Place.WithCode(FString::Printf(TEXT("Level %d"), Place.Level))));
 	SaveLabel->SetText(FText::FromString(bSaved ? TEXT("Saved") : TEXT("Save this place")));
 	const FLinearColor Fill = bSaved ? Blue : White;
 	SaveButton->SetStyle(StartStyle::Button(Fill, Fill * 0.94f, Fill * 0.86f, Line, 12.f / StartStyle::DesignToUi));

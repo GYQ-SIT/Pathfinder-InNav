@@ -65,7 +65,7 @@ route -> navigating -> arrived) is a state machine of its own; the widgets only 
 | Building id, name, floor count | `APolyBuilding`, `AInteriorGenerator` floors | real |
 | Level label "L1", "L2M" | real floors use `L<number>` | custom floor labels remain future schema work |
 | Place id, name, tags, type, floor, centre | `AInteriorRoom` / `FNavigationRoomOption` (`RoomId`, `RoomName`, `Tags`, `RoomType`, `Floor`, `Centroid`) | real |
-| Place code "E2-01-101" | room ids of the example data look like it; generated rooms are named "Classroom 3-04" | partly: show the id as is, or derive |
+| Place code "E2-01-101" | a room's id is an internal one, not a door number | **none**: the code is empty for real data and the screens leave it out (the id is still searched); the mock data keeps the prototype's codes |
 | Category (Learning, Facilities) | `FMobileRealSource` maps the 12 room types to categories | built |
 | Search | `NavigationSearch::MatchesWords` over the cached mobile place index | built across the project's buildings |
 | Places across every building of a campus | `FMobileRealSource` indexes stored room JSON without opening editor interiors | built |
@@ -161,6 +161,8 @@ has five real pages, one for each state of the flow. `-MobileState=Navigating|Ar
 `UMobileMapWidget` fills the screen behind the sheet and draws what the source gives it: `GetLevelMap` (one level of a building: its outline, its rooms -
 each a place or not - and its lifts, stairs and escalators) or `GetCampusMap` (the Overview: the buildings, and features such as the pond). Rooms are coloured
 by what they are (Learning blue, Facilities green, Dining yellow, closed ones darker) and named; an L-shaped room is fine (the polygons are ear-clipped).
+
+**Names on the map are not all drawn** (`MobileMapLabels.h`). The labels are looked at in order of importance - the chosen place, a building the route goes through, then the biggest rooms or buildings - and one that would cover a label already drawn, or a lift's or stair's letter, is left out. A room whose longest side is under 14 design pixels gets no name until the map is zoomed in, and a name off the screen is not drawn. Labels keep their size, so zooming in spreads them apart and more of them appear. Names have a soft outline in the page's colour so they stay readable over a room's colour or edge. This keeps a long, thin building with many rooms, or an overview of 29 buildings, readable.
 It also draws, on the level it shows: the route (a line, a white-ringed blue dot at the start, a red dot at the destination), the chosen place (blue outline), and
 the person (a blue dot with a halo). 3D is the same plan tilted (turned a quarter, squashed, standing on a slab). The plan is fitted into the part of the screen
 the top bar and the sheet (at its half height, so it does not jump while the sheet is dragged) do not cover. A tap on a room opens its place (while searching or
@@ -235,7 +237,7 @@ fingers pinch-zoom (about their middle, which also moves the view) only when **M
 about the pointer when Move is on. A tap that does not move still picks a room or a building. The plan cannot be pushed out of sight: 80 pixels of it (or all of it, if smaller) stay in the
 uncovered part. The view starts again at the fit for another level or building, the overview, the 2D / 3D switch, **Locate**, and opening a site; a refresh of the same level keeps it. Hit
 testing uses the same transform as drawing, so a room taps where it is drawn at any zoom. Only the pointer that pressed on the map is followed: an Android emulator reports a click as a
-touch and, with it, the mouse cursor's moves, which are ignored (the same rule as for the sheet's handle). Labels on the map keep their size when zoomed.
+touch and, with it, the mouse cursor's moves, which are ignored (the same rule as for the sheet's handle). Labels on the map keep their size when zoomed (and more of them appear, see above).
 
 ## Layout as the prototype (measured at 390 x 844)
 

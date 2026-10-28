@@ -261,7 +261,7 @@ void FMobileRealSource::IndexProject(FProject& Project)
 				if (Type != TEXT("Corridor") && Type != TEXT("Storage"))
 				{
 					MapRoom.PlaceId = PlaceId;
-					FMobilePlace Place; Place.Id = PlaceId; Place.Code = RoomId; Place.Name = MapRoom.Name;
+					FMobilePlace Place; Place.Id = PlaceId; Place.Name = MapRoom.Name; // The room id is an internal one, not a door number: no code (it is still searched, below).
 					Place.SiteId = Project.Site.Id; Place.BuildingId = BuildingId; Place.BuildingName = Building.Name;
 					Place.Level = Level; Place.LevelLabel = Label.Label; Place.RoomType = Type; Place.Category = MapRoom.Category;
 					Place.Position = InteriorPoint(Shape); Place.Description = String(Room, TEXT("description"));

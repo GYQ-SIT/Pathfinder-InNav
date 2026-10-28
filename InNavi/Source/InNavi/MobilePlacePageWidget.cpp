@@ -118,7 +118,7 @@ void UMobilePlacePageWidget::Refresh()
 		return;
 	}
 	TitleText->SetText(FText::FromString(Place.Name));
-	SubtitleText->SetText(FText::FromString(Place.Code.IsEmpty() ? FString() : Place.Code + TEXT(" · ") + Place.GroupLabel()));
+	SubtitleText->SetText(FText::FromString(Place.WithCode(Place.GroupLabel())));
 	DescriptionText->SetText(FText::FromString(Place.Description));
 	DescriptionText->SetVisibility(Place.Description.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
 	PhotoText->SetText(FText::FromString(Place.PhotoPath.IsEmpty() ? TEXT("No photo") : TEXT("Photo")));

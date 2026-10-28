@@ -30,8 +30,8 @@ $data = (Resolve-Path 'docs/test-data/entrance-test-2-with-doors.json').Path
 
 This fixture has buildings A, B and C, rooms, connectors and main/link doors. It is a test layout, not a measured campus survey. Without `-MobileProject`, the app reads the shipped library. Add `-MobileMock` for the original prototype.
 
-1. Open a site. Check its buildings, levels, room names/codes and floor plans. The initial level is the first with places, or the first building/level when there are none.
-2. Search by name, code, building, type or tag. Every query word must match. Try categories and building/level choices.
+1. Open a site. Check its buildings, levels, room names (the room id is not shown; it can still be searched) and floor plans. The initial level is the first with places, or the first building/level when there are none.
+2. Search by name, room id, building, type or tag. Every query word must match. Try categories and building/level choices.
 3. Select a room, choose **Use as starting point**, then another room and **Get directions**. Test one floor, different floors and different buildings.
 4. Disable lifts, stairs or escalators. The planner must use permitted connectors or explain that no route exists. **Use lift only** cannot use stairs.
 5. Advance navigation. Outdoor steps switch to the campus overview; entering a building returns to its plan. Check the destination and arrival text.

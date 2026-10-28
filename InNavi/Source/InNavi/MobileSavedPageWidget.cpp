@@ -90,7 +90,7 @@ void UMobileSavedPageWidget::AddRow(const FMobilePlace& Place)
 
 	UVerticalBox* Texts = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
 	Texts->AddChildToVerticalBox(MakeText(WidgetTree, FString(), Place.Name, 15.f, Ink, true));
-	Texts->AddChildToVerticalBox(MakeText(WidgetTree, FString(), Place.Code + TEXT(" · ") + Place.GroupLabel(), 11.f, Grey))->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
+	Texts->AddChildToVerticalBox(MakeText(WidgetTree, FString(), Place.WithCode(Place.GroupLabel()), 11.f, Grey))->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
 	UHorizontalBox* Info = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
 	Info->AddChildToHorizontalBox(IconSize)->SetVerticalAlignment(VAlign_Center);
 	UHorizontalBoxSlot* TextSlot = Info->AddChildToHorizontalBox(Texts);

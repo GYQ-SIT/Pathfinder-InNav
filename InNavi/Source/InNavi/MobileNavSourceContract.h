@@ -48,7 +48,7 @@ namespace MobileNavSourceTests
 				{
 					Test.TestTrue(TEXT("and its level is one of that building's"), Building->Levels.ContainsByPredicate([&Place](const FMobileLevel& L) { return L.Level == Place.Level && L.Label == Place.LevelLabel; }));
 				}
-				Test.TestTrue(TEXT("a place has a name, a code and a category the filters know"), !Place.Name.IsEmpty() && !Place.Code.IsEmpty() && Categories.Contains(Place.Category));
+				Test.TestTrue(TEXT("a place has a name and a category the filters know (its code may be empty)"), !Place.Name.IsEmpty() && Categories.Contains(Place.Category));
 				FMobilePlace Found;
 				Test.TestTrue(TEXT("a place is found by its id"), Source.FindPlace(Place.Id, Found) && Found.Id == Place.Id && Found.Name == Place.Name);
 			}
