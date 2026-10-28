@@ -3,7 +3,7 @@
 The mobile app (portrait only, built first as screens on mock data, wired to the real planner afterwards) follows the design team's
 prototype: <https://innavappprototype.onrender.com/>. Every screen talks to **one data interface** (`IMobileNavSource`), never to
 `AInteriorGenerator`, `NavigationPanelWidget` or the route planner directly. `FMobileMockSource` answers it with the prototype's fake
-data; `FMobileRealSource` (later) answers it from the real code. Swapping one for the other must not touch a screen.
+data when `-MobileMock` is specified. `FMobileRealSource` is the default and reads cached project snapshots and the campus planner. Pages use the same interface for either source. See [the real-data guide](../mobile-real-data-guide.md) for data selection, packaging and verification.
 
 ## The prototype's screens
 
@@ -63,19 +63,19 @@ route -> navigating -> arrived) is a state machine of its own; the widgets only 
 | Building count | buildings in the project file | real |
 | Distance label ("2.4 km") | - | mock / drop |
 | Building id, name, floor count | `APolyBuilding`, `AInteriorGenerator` floors | real |
-| Level label "L1", "L2M" | floors are integers only | **new**: a floor display name in the project file (default "L" + number) |
+| Level label "L1", "L2M" | real floors use `L<number>` | custom floor labels remain future schema work |
 | Place id, name, tags, type, floor, centre | `AInteriorRoom` / `FNavigationRoomOption` (`RoomId`, `RoomName`, `Tags`, `RoomType`, `Floor`, `Centroid`) | real |
-| Place code "E2-01-101" | room ids of the example data look like it; generated rooms are named "Classroom 3-04" | partly: show the id as is, or derive |
-| Category (Learning, Facilities) | Room type (12 fixed values) | **new**: a mapping table Room type -> category |
-| Search | `NavigationSearch::Matches`, `SearchDestinations` | real, **but only for the one building that is loaded** |
-| Places across every building of a campus | the interior of one building is loaded at a time (it spawns the room actors) | **new**: a light index read from the project file without spawning actors |
-| Route, distance | `FNavigationRoutePlanner::FindRoute` (points with floor and connector); metres = length x scale | real |
-| Minutes | - | **new**: metres / walking speed (about 1.2 m/s) |
+| Place code "E2-01-101" | a room's id is an internal one, not a door number | **none**: the code is empty for real data and the screens leave it out (the id is still searched); the mock data keeps the prototype's codes |
+| Category (Learning, Facilities) | `FMobileRealSource` maps the 12 room types to categories | built |
+| Search | `NavigationSearch::MatchesWords` over the cached mobile place index | built across the project's buildings |
+| Places across every building of a campus | `FMobileRealSource` indexes stored room JSON without opening editor interiors | built |
+| Route, distance | `FNavigationRoutePlanner::FindCampusRoute`; world-space polyline centimetres / 100 | real |
+| Minutes | `MobileNav::MinutesForMetres` at 1.2 m/s | built |
 | Steps with floor changes | `BuildRouteDetails` ("Take Elevator from Floor 1 to Floor 2") | real, text only |
-| Steps "turn left / follow the corridor / arrived" | - | **new**: turn-by-turn from the route polyline (pure function, testable) |
-| Accessibility (lift only, stairs only) | the planner does not take a preference | **new**: a connector filter in the planner |
-| Route across buildings, to the outside | main / link doors are saved; the planner does not use them (teammate) | later |
-| Start = "My location" | - | **mock first**: pick on the map or an entrance; GPS later |
+| Steps "turn left / follow the corridor / arrived" | actual route polyline converted to `FMobileStep` | built in the real adapter |
+| Accessibility (lift only, stairs only) | `FNavigationRoutePreferences` filters connectors before pathfinding | built |
+| Route across buildings, to the outside | `FindCampusRoute` uses main/link doors and outdoor geometry; overview draws points with building offsets | built |
+| Start = "My location" | manual building/level choice, at an authored entrance or node | built; automatic positioning remains future work |
 | Photo, "Available" status | - | mock or leave out |
 | Saved places, Profile | - | the app's own state / out of scope for now |
 
@@ -161,6 +161,8 @@ has five real pages, one for each state of the flow. `-MobileState=Navigating|Ar
 `UMobileMapWidget` fills the screen behind the sheet and draws what the source gives it: `GetLevelMap` (one level of a building: its outline, its rooms -
 each a place or not - and its lifts, stairs and escalators) or `GetCampusMap` (the Overview: the buildings, and features such as the pond). Rooms are coloured
 by what they are (Learning blue, Facilities green, Dining yellow, closed ones darker) and named; an L-shaped room is fine (the polygons are ear-clipped).
+
+**Names on the map are not all drawn** (`MobileMapLabels.h`). The labels are looked at in order of importance - the chosen place, a building the route goes through, then the biggest rooms or buildings - and one that would cover a label already drawn, or a lift's or stair's letter, is left out. A room whose longest side is under 14 design pixels gets no name until the map is zoomed in, and a name off the screen is not drawn. Labels keep their size, so zooming in spreads them apart and more of them appear. Names have a soft outline in the page's colour so they stay readable over a room's colour or edge. This keeps a long, thin building with many rooms, or an overview of 29 buildings, readable.
 It also draws, on the level it shows: the route (a line, a white-ringed blue dot at the start, a red dot at the destination), the chosen place (blue outline), and
 the person (a blue dot with a halo). 3D is the same plan tilted (turned a quarter, squashed, standing on a slab). The plan is fitted into the part of the screen
 the top bar and the sheet (at its half height, so it does not jump while the sheet is dragged) do not cover. A tap on a room opens its place (while searching or
@@ -170,7 +172,7 @@ What it shows follows the sheet (`UMobileAppWidget::RefreshMap`): the place's le
 of the step the person is at while walking (so it follows them up a lift and out of a building). The person's own choices last until the sheet moves on:
 the **level button** (opens a list of the building's levels, top one first, upward from the button; "Map" on the Overview), **Overview** (toggles the site view),
 **Locate** (back to My location's building and level) and **2D | 3D**. The dot is the step's position while walking, otherwise My location (the door of the
-building the person said they are in; the real source will give a position).
+building the person said they are in; the real source uses an authored entrance or navigation node and hides the dot if none is mapped). This is a manual location choice; there is no automatic indoor positioning.
 
 In the mock, rooms are drawn around the places' positions and the route is a path along the corridors (to the crossing, along to the room's door, in), with
 `FMobileStep::Position` the place where the instruction applies and `FMobileRoute::Points` the line to draw. Options for looking at it: `-MobileOverview`, `-Mobile3D`,
@@ -230,12 +232,12 @@ process-wide variables, so a test that changes them puts them back (`FAppearance
 ## Map zoom and pan
 
 The map has a view, as in the prototype: zoom from **0.7 to 2** (1 = the plan fits the uncovered part of the screen), and a pan. The **More** button above the sheet opens the map's tools:
-**Move: Off / On** and **-** / **+** (a step of 0.2 about the middle of the uncovered part; each button turns off at its end of the range). Dragging with one pointer moves the view and two
+**Move: On / Off** (it **starts On**: the prototype starts it Off, but a drag should move the map at once) and **-** / **+** (a step of 0.2 about the middle of the uncovered part; each button turns off at its end of the range). Dragging with one pointer moves the view and two
 fingers pinch-zoom (about their middle, which also moves the view) only when **Move** is on, as in the prototype; with it off a drag does nothing and is not a tap. The mouse wheel zooms
 about the pointer when Move is on. A tap that does not move still picks a room or a building. The plan cannot be pushed out of sight: 80 pixels of it (or all of it, if smaller) stay in the
 uncovered part. The view starts again at the fit for another level or building, the overview, the 2D / 3D switch, **Locate**, and opening a site; a refresh of the same level keeps it. Hit
 testing uses the same transform as drawing, so a room taps where it is drawn at any zoom. Only the pointer that pressed on the map is followed: an Android emulator reports a click as a
-touch and, with it, the mouse cursor's moves, which are ignored (the same rule as for the sheet's handle). Labels on the map keep their size when zoomed.
+touch and, with it, the mouse cursor's moves, which are ignored (the same rule as for the sheet's handle). Labels on the map keep their size when zoomed (and more of them appear, see above).
 
 ## Layout as the prototype (measured at 390 x 844)
 
@@ -249,6 +251,6 @@ The phone screen follows the prototype's layout, in design pixels (375 wide):
 - **Top row** (8 below the header, 54 tall): the title as plain text (14 bold; the building and level, "E2 . L1", or the site's name on the overview), **Overview** (44 tall; only for a campus; says
   "Current" while the overview is shown), and the 2D / 3D switch (buttons 44 tall, 12 bold, in a bordered box with 8 px radius).
 - **Toolbar** (right 12, 12 above the sheet): one bar, 5 px padding, 4 px gaps, with the level (68 x 44, "L1"), locate (44 x 44, a drawn target) and more (44 x 44, three dots). The levels open
-  upward from the level button; the tools (Move: Off, -, +, 44 tall, 8 px gaps) open upward from the bar, right-aligned. Icons are drawn from shapes until the design team's icons are in.
+  upward from the level button; the tools (Move: On, -, +, 44 tall, 8 px gaps) open upward from the bar, right-aligned. Icons are drawn from shapes until the design team's icons are in.
 
 `UMobileAppWidget::ControlsHeight` is the toolbar's 54; the pop-ups are not counted. Test: `InNavi.Mobile.LayoutLikePrototype`.

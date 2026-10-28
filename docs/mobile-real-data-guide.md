@@ -1,133 +1,84 @@
-# Connecting the phone app to real data
+# The phone app's real project data
 
-For teammates who will make the phone app (the one in the Android test build) show the **real** buildings, rooms and routes instead of the made-up ones.
-Read this first; the design notes behind it are in [`design/mobile-app-data-interface.md`](design/mobile-app-data-interface.md).
+The Android app and desktop `-MobileApp` preview use **`FMobileRealSource` by default**. Buildings, rooms, maps and routes come from project data through `IMobileNavSource`. The prototype remains available with `-MobileMock`. Existing APK release assets need rebuilding to include this change.
 
-## In one minute
+See [the design notes](design/mobile-app-data-interface.md) for the screen contract.
 
-- The phone app's screens never touch the editor's classes. They ask **one interface**, `IMobileNavSource`, for everything.
-- Today the answers come from `FMobileMockSource` (the design prototype's data).
-- To use real data you write a **second class**, `FMobileRealSource`, that implements the same interface from the real project data and the real route planner,
-  then swap it in at **one line**. **No screen needs to change.**
-- A ready-made test (`CheckContract`) tells you whether your source keeps the promises the screens rely on.
+## Data selection
 
-## Where everything is
+- Normally the source scans `InNavi/Data/`: each JSON project or SQLite map database is an Explore site. JSON projects precede footprint-only databases.
+- `Saved/MobileProjects/` supplies local projects. A file with the same name replaces a shipped project, preserving place IDs. Restart after changing files: the source caches a detached snapshot.
+- When opened from an editor session with a known project file, the phone view uses that project's current applied data, including unsaved edits. It does not switch editor buildings.
+- `-MobileProject="<project.json>"` selects one file explicitly and takes precedence over the editor session.
+- Missing data does not select the mock. An empty catalogue displays an explanatory message.
 
-All of the phone app is in `InNavi/Source/InNavi/`, in files whose names start with `Mobile`.
+`Data/buildings.json` contains the authored exterior and room data. `Data/map_extended.db` supplies campus footprints through the existing database loader; it has no authored rooms. Empty interiors remain empty. The adapter does not generate rooms, doors or routes to fill gaps in a project.
 
-| What | File | You will |
-|---|---|---|
-| **The interface** and the data types (`FMobilePlace`, `FMobileRoute`, ...) | `MobileNavSource.h` | read it; add a field only after talking to whoever owns the screens |
-| The fake data source | `MobileMockSource.h/.cpp` | read it as an example of every answer; do not edit |
-| **Where the source is chosen** | `MobileAppWidget.cpp`, the line `Source = MakeShared<FMobileMockSource>();` (about line 300) | change this one line |
-| The check every source must pass | `MobileNavSourceTests.cpp`, `CheckContract` | call it from a test for your source |
-| The screens | `MobileAppWidget`, `MobileSearchPageWidget`, `MobilePlacePageWidget`, `MobileRoutePageWidget`, `MobileNavigatePageWidget`, `MobileArrivedPageWidget`, `MobileExplorePageWidget`, `MobileMapWidget`, ... | do not touch |
-| Saved places and preferences | `MobileSavedPlaces`, `MobilePreferences` | do not touch: they are the app's own state, not site data |
+The shipped room with code `E2-01-02` has no openings. Expect it to be unreachable; this is a finding about the authored data, not a reason to substitute a simulated route.
 
-Put your new class in two new files, `MobileRealSource.h/.cpp`, next to the mock.
+## Desktop test
 
-## The interface, method by method
+Close Unreal before building. From the repository root:
 
-The screens call these eight methods. For each: what they do with the answer, and what the real data must give.
+```powershell
+$engine = 'C:/Program Files/Epic Games/UE_5.8/Engine'
+$project = (Resolve-Path 'InNavi/InNavi.uproject').Path
+$data = (Resolve-Path 'docs/test-data/entrance-test-2-with-doors.json').Path
+& "$engine/Build/BatchFiles/Build.bat" InNaviEditor Win64 Development "-Project=$project" -WaitMutex
+& "$engine/Binaries/Win64/UnrealEditor.exe" $project -game -windowed -ResX=375 -ResY=812 -MobileApp "-MobileProject=$data"
+```
 
-| Method | The screens use it for | What to return |
-|---|---|---|
-| `GetDataNote()` | a small "this is simulated" line on Explore and Profile | leave it empty (the default): real data shows no note |
-| `ListSites()` | the cards on the Explore tab | one `FMobileSite` per project (see "Where the real data is") |
-| `ListBuildings(SiteId)` | the level picker, the Overview, which building the person is in | the site's buildings, each with its levels (`Level` = floor number, `Label` = "L1", "L2") |
-| `ListCategories(SiteId)` | the filter chips | the categories the site's places have |
-| `SearchPlaces(SiteId, Query, Filter)` | the "Where to?" list | places matching **every word** of the query and the filter, in building, then level, then list order; an empty query is all of them |
-| `FindPlace(PlaceId, Out)` | the place page, Saved tab, route page | `false` for an id it does not know |
-| `FindRoute(Request)` | the route page and the walk | an `FMobileRoute`; `bFound = false` with a human `Error` if there is none |
-| `GetLevelMap(BuildingId, Level, Out)` | the floor plan | outline, rooms, lifts and stairs of that level; `false` if there is no such level |
-| `GetCampusMap(SiteId)` | the Overview | every building's outline, seen from above |
+This fixture has buildings A, B and C, rooms, connectors and main/link doors. It is a test layout, not a measured campus survey. Without `-MobileProject`, the app reads the shipped library. Add `-MobileMock` for the original prototype.
 
-### Rules the screens rely on (the contract test checks all of these)
+1. Open a site. Check its buildings, levels, room names (the room id is not shown; it can still be searched) and floor plans. The initial level is the first with places, or the first building/level when there are none.
+2. Search by name, room id, building, type or tag. Every query word must match. Try categories and building/level choices.
+3. Select a room, choose **Use as starting point**, then another room and **Get directions**. Test one floor, different floors and different buildings.
+4. Disable lifts, stairs or escalators. The planner must use permitted connectors or explain that no route exists. **Use lift only** cannot use stairs.
+5. Advance navigation. Outdoor steps switch to the campus overview; entering a building returns to its plan. Check the destination and arrival text.
+6. Try a sealed room or missing door: no invented route should appear. Invalid layout data must be corrected in the layout editor.
+7. Save a place and restart. Appearance changes should preserve the real source, chosen site and route.
 
-- **Ids are unique**: site ids, building ids within a site, place ids within a site, level numbers within a building.
-- A **place** has a name, a code and a category that is in `ListCategories`; its building and level exist in `ListBuildings`; `FindPlace` finds it again by its id.
-- A **search** returns only the site's places; searching a place's own name finds it; a nonsense word returns nothing.
-- Every level has a **plan** with an outline of at least 3 points, and **every place of that level is a room on that plan** (`FMobileMapRoom::PlaceId`). A room on the plan may have no place (a corridor, a store room).
-- **Polygons are counter-clockwise** and in **the building's own footprint units** (the same numbers as the project file). The campus map is in the site's own units (a building's footprint **plus its `BuildingOffset`**).
-- A **route** between two places of a site is found, has steps and at least 2 points, **its last step is `Arrive` and its text contains the destination's name**, and `Minutes == MobileNav::MinutesForMetres(Metres)`.
-- A route to an id that does not exist is **not found and says why**.
-- `FMobileRouteRequest::FromPlaceId` empty means **"My location"**: the person is in `MyLocationBuildingId` on `MyLocationLevel` (empty / `INDEX_NONE` = the door of the destination's building, level 1).
-- `FMobileRoutePreferences` says which ways between levels the person accepts (lift, stairs, escalator); "Use lift only" is the lift alone.
+## Implementation
 
-## Where the real data is
+All files are in `InNavi/Source/InNavi/`.
 
-You can read the project **without opening any building in the editor**. Do that: opening a building spawns its room actors and only one can be open at a time.
+| Concern | File |
+| --- | --- |
+| Source selection/injection | `MobileAppWidget.cpp`; `SetSource` accepts a provider before the widget is built |
+| Catalogue, cached index, maps and route adaptation | `MobileRealSource.h/.cpp` |
+| Data interface | `MobileNavSource.h` |
+| Pathfinding and connector filtering | `NavigationRoutePlanner.h/.cpp` |
+| Shared source contract | `MobileNavSourceContract.h`; used by mock and real tests |
+| Real source/integration tests | `MobileRealSourceTests.cpp` |
 
-| You need | Take it from |
-|---|---|
-| The projects (sites) | `ProjectLibrary::Scan(Directory)` (`ProjectLibrary.h`): a list of `FProjectLibraryEntry` with `DisplayName`, `Description`, `BuildingCount`, `FilePath`. Or the one project the generator has loaded |
-| Buildings, floors, footprint, offset, scale | `ABuildingGenerator` (`BuildingGenerator.h`): `GetAllBuildings()`, `FindBuildingById()`, `GetBuildingSummary()`, `GetScale()`, `APolyBuilding::GetFootprint()`, `BuildingOffset`, `GetFloorCount()` |
-| **Rooms, doors, lifts and stairs of every building, without loading it** | `ABuildingGenerator::GetInteriorDataForBuilding(BuildingId)`: the building's `"interior"` JSON (`floors[]` with `rooms[]` and `navNodes[]`). This is what the project file holds; see `docs/test-data/*.json` for a complete example |
-| Room name, type, tags, centre | the same JSON (`name`, `roomType`, `tags`, `footprint`); `RoomTypes.h` lists the 12 types; `FNavigationRoomOption` shows how the editor builds a room's label and centre |
-| Doors in the outer wall (main / link) | `ABuildingGenerator::GetStoredEntrances(BuildingId)` (`InteriorEntrance.h`) |
-| **A route, also between buildings and through the outside** | `FNavigationRoutePlanner::FindCampusRoute(Generator, Interior, Start, Destination, Result)` (`NavigationRoutePlanner.h`). It does **not** change which building is open. Points carry building, floor, connector and world position |
-| Text for a route's steps | `UNavigationPanelWidget::BuildRouteSteps()` (the editor's numbered directions) is a good model for the wording |
+Site identity uses the project filename. Building IDs include the site; place IDs also include building, floor and raw room ID. This prevents collisions in Saved and routing. The displayed code remains the raw room ID. Content updates and modification times do not change IDs; renaming a project file creates a new site identity.
 
-The scale: a footprint unit is `GetScale()` world units; metres = world units / 100. A route's length in metres is the polyline's length in footprint units x `GetScale()` / 100.
+Closed rooms are drawn; corridors/storage remain geometry without searchable places. Other rooms become places, with blank names falling back to their IDs. Search and map calls use cached values and never open editor interiors or spawn room actors.
 
-Where do `Generator` and `Interior` come from on the phone? The player controller already finds them in the level (`ANavPlayerController`, `Generator` and `InteriorGen`). Pass them to your source's constructor.
+Categories: Classroom/Lecture hall/Lab/Study area -> Learning; Office/Meeting room -> Workspaces; Canteen -> Dining; Toilet/Lift lobby/Corridor/Storage -> Facilities; Other -> Other. Floors default to `L<number>`. Photos and distance-from-user labels remain empty; availability defaults to true because there is no live occupancy data.
 
-## What does not exist yet (new work, with a suggestion for how)
+Level polygons are counter-clockwise in footprint units. Campus polygons and route points add `BuildingOffset`. Room destination candidates are triangulated and checked against actual planner wall clearance, including in concave rooms.
 
-| Needed by the screens | Status | Suggestion |
-|---|---|---|
-| Level label "L1", "L2M" | floors are plain numbers | default to `"L" + number`; a display name in the project file can come later |
-| Category (Learning, Facilities, Dining...) | rooms have a **type** (12 fixed values) | a table `Room type -> category`, in one place |
-| Place code (`E2-01-101`) | rooms have an id and a name | show the room id as it is |
-| **Search across all buildings of a site** | the editor's search covers the open building only | build a small list of places once from `GetInteriorDataForBuilding` for every building, and search that |
-| **Turn-by-turn steps** ("Follow the corridor", "Turn left", with metres) | the planner gives points, the editor gives floor changes only | a pure function from the route's points to `FMobileStep` (`Straight`, `TurnLeft`, `TurnRight`, `TakeLift`, `EnterBuilding`, `ExitBuilding`, `Arrive`); easy to unit-test |
-| Preferences (lift only, no stairs) | the planner has no such option | a filter on which connectors the planner may use |
-| Minutes | - | `MobileNav::MinutesForMetres(metres)` (walking speed 1.2 m/s) |
-| "My location" | no positioning | first version: the person picks a building and level on the route page (already built); a position can come later |
-| Photo, "Available" | not in the project data | leave empty / `true` |
-| Distance label ("2.4 km") | - | leave empty |
+## Routes and location
 
-## How to do it, in this order
+`FindCampusRoute` supplies paths through authored doors, main/link entrances, outdoor geometry and floor connectors. Preferences remove prohibited connectors before pathfinding. Routes use disposable worlds built from the indexed snapshot: no editor selection, undo state or project file is changed. Data validation rejects invalid layouts before routing actors are created.
 
-1. **New files** `MobileRealSource.h/.cpp`: `class FMobileRealSource : public IMobileNavSource`. Take `ABuildingGenerator*` and `AInteriorGenerator*` in the constructor.
-2. **`ListSites`, `ListBuildings`, `ListCategories`** first. Run the app: Explore shows real sites, the level picker shows real levels.
-3. **`SearchPlaces`, `FindPlace`**: the "Where to?" list and the place page work.
-4. **`GetLevelMap`, `GetCampusMap`**: the floor plan and Overview show real buildings.
-5. **`FindRoute`**: first a route inside one building, then across buildings (`FindCampusRoute`), then the turn-by-turn steps and the preferences.
-6. After each step, add to a test file (copy the pattern of `MobileMockContractTest` in `MobileNavSourceTests.cpp`):
+Steps describe corridor travel, turns, the actual lift/stairs/escalator, exits/entries and arrival. Metres are the world-space polyline length in centimetres divided by 100, including vertical travel and building offsets. Graph search penalties are not displayed as distance. Step distances sum to the route distance; minutes use `MobileNav::MinutesForMetres` at 1.2 m/s.
 
-   ```cpp
-   IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRealContractTest, "InNavi.Mobile.Source.RealContract", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-   bool FMobileRealContractTest::RunTest(const FString& Parameters)
-   {
-       FNavigationSearchFixture Fixture;   // see UiTestFixture.h: a headless world with a project loaded
-       // load docs/test-data/entrance-test-2-with-doors.json into Fixture.Generator, then:
-       FMobileRealSource Source(Fixture.Generator, Fixture.Interior);
-       MobileNavSourceTests::CheckContract(*this, Source);
-       return true;
-   }
-   ```
+**My location is still a manual building/level choice**, not GPS or indoor tracking. Its start is an authored main entrance inset into the building or a mapped navigation node. Without either, the app asks for a starting room and hides the location dot. Walking still advances with **Next instruction**.
 
-   `CheckContract` lives in `namespace MobileNavSourceTests` inside `MobileNavSourceTests.cpp` and is not visible from other files; move it into a small header (`MobileNavSourceContract.h`) when you need it from a second file, or put your test in the same file.
-7. **Swap it in**: in `MobileAppWidget.cpp` replace `Source = MakeShared<FMobileMockSource>();` with your source (keep the mock available, for example behind a launch option `-MobileMock`, so the screens can still be tried without a project).
+## Android packaging and verification
 
-## Trying it
+`Config/Android/AndroidGame.ini` stages `Data/` as UFS data inside the APK/pak, replacing Android's loose-file entry. JSON/audio use Unreal file APIs; SQLiteCore also supplies an Unreal VFS. No absolute desktop data path is compiled into the adapter. Local overrides use the writable Saved directory.
 
-- **Desktop, phone-sized window** (the quickest): `UnrealEditor.exe InNavi.uproject -game -windowed -ResX=375 -ResY=812 -MobileApp`. Useful extras: `-MobileTab=Directory`, `-MobileState=Route`. All options are in `design/mobile-app-data-interface.md`.
-- **Tests**: `UnrealEditor-Cmd.exe InNavi.uproject -ExecCmds="Automation RunTests InNavi.Mobile; Quit" -unattended -nullrhi`. Close the editor first; Unreal cannot build while it is open.
-- **Test project with several buildings, doors and generated floors**: `docs/test-data/entrance-test-2-with-doors.json` (buildings A and B 1 m apart with link doors, C far away, a main door each).
-- **On a phone**: [`android-install.md`](android-install.md) to install a build, [`android-signing.md`](android-signing.md) to build one.
+Build a fresh APK using [android-signing.md](android-signing.md) and install it using [android-install.md](android-install.md). Older APK assets retain their older code and mock data. On a device, verify the packaged Explore sites, room search and a known connected route while offline. Packaging, launch and pathfinding performance need verification on the rebuilt device APK.
 
-## Things that will bite
+Run automation with the editor closed:
 
-- **Not tried on a phone: how the project file gets there.** `DefaultGame.ini` stages `Data/` as non-UFS files, and the phone build today uses mock data only. Check that your source can open its project on Android before building much on it; if it cannot, the file may have to be packaged differently.
-- **Do not store your own state in the source**: saved places and the look (night theme, larger text) are the app's, kept in `Saved/MobileSavedPlaces.json` and `Saved/MobilePreferences.json`.
-- **Names in the Mobile files leak between files** (the project builds in "unity" mode). Give anything file-level in a test or a helper a distinctive name (`MobileStyle`'s names especially) or the build breaks in another file.
-- **Positions are in footprint units**, not metres and not pixels. The map scales them itself.
-- **Keep answers fast.** The screens call `SearchPlaces` as the person types and `GetLevelMap` when the level changes. Build any list once and cache it; do not load interiors on each call.
-- **Do not use the editor's UI classes** (`UNavigationPanelWidget` is fine as a model of what the planner returns, but the phone screens must not depend on it).
+```powershell
+& "$engine/Binaries/Win64/UnrealEditor-Cmd.exe" $project -unattended -nullrhi -nosplash -nosound '-ExecCmds=Automation RunTests InNavi.Mobile+InNavi.Navigation+InNavi.LayoutValidation,Automation Quit' "-ReportExportPath=$PWD/InNavi/Saved/MobileRealTests"
+```
 
-## Who to ask
+`InNavi.Mobile.Source.Real*` covers the shared contract, scoped/stable IDs, search/maps, snapshot isolation, preferences, failed routes, campus paths, screen flow, source persistence and Android staging configuration. Prototype screen tests explicitly inject their mock fixtures. Windows CI also runs the mobile suite.
 
-- The interface and the screens: Yongqi.
-- The route planner, entrances and campus routing: WS.
+Local verification on 2026-10-27: Win64 Editor and standalone game builds passed; all 137 InNavi automation tests passed (70 without warnings, 67 with warnings, zero failures). A Windows `.pak` probe loaded and routed a two-room project that had no loose JSON file, confirming packaged-file reads. After installing the Android engine components and toolchain, the Android ARM64 Development build, ASTC cook, signed packaging and archive also passed. The APK's version 1.1/code 2, ARM64 libraries, separate signing certificate and embedded project data were verified for `mobile-test-2`. Physical-device verification is still outstanding.

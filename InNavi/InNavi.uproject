@@ -11,6 +11,11 @@
 			"AdditionalDependencies": [
 				"Engine"
 			]
+		},
+		{
+			"Name": "InNaviValidationTools",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
@@ -23,6 +28,10 @@
 		},
 		{
 			"Name": "SQLiteCore",
+			"Enabled": true
+		},
+		{
+			"Name": "InNaviLayoutValidator",
 			"Enabled": true
 		}
 	]

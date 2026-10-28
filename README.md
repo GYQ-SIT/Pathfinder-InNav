@@ -7,7 +7,7 @@ school's 3D model: select a building (the campus itself loads from a SQL-backed
 database), enter or import interior data (JSON), generate a schematic interior
 in 3D, and navigate â€” inside a building, across floors, between buildings and
 across the open ground between them. It also has an Android phone app (a test
-build, on made-up data for now).
+build, reading project data and routes through a mobile data adapter).
 
 ## Repository layout
 
@@ -68,6 +68,14 @@ own View/Edit sub-mode, and a Navigation panel that picks Start and Destination 
 building's main door, or a click on the floor plan or the ground) and finds the route.
 See `docs/design/interior-editor-guide.md` for the full control list and workflow.
 
+**Window > Validation** opens the read-only layout validator on either screen. It checks
+data, geometry, doors, connectors and room reachability, with clickable findings and JSON
+report export. Findings never block editing or saving. See
+[`docs/design/layout-validator.md`](docs/design/layout-validator.md) for usage and headless file validation.
+The reusable plugin is versioned as `1.0.0` and distributed through GitHub Packages. See its
+[package README](InNavi/Plugins/InNaviLayoutValidator/README.md) for exact-version installation,
+and the [M2 evidence](docs/design/layout-validator-m2-compliance.md) for the D1–D5 mapping.
+
 ## Running the tests
 
 About 120 automation tests (`InNavi.*`). With the editor closed:
@@ -77,12 +85,12 @@ UnrealEditor-Cmd.exe InNavi/InNavi.uproject -ExecCmds="Automation RunTests InNav
 ```
 
 (`UnrealEditor-Cmd.exe` is in `Engine/Binaries/Win64` of the Unreal install.) A part can be run on its own, e.g. `InNavi.Mobile` or
-`InNavi.Navigation`. They do not run in CI yet.
+`InNavi.Navigation`. Windows CI runs the layout validator, navigation, docking and UI guard tests.
 
 ## The phone app
 
 An Android app (portrait) with Explore, Directory (map, search, route, walking, arrival), Saved and Profile tabs, built to the design
-team's prototype. It runs on **made-up data** behind one interface; connecting the real data is described in
+team's prototype. New builds use **real project data and routes** through `IMobileNavSource`; `-MobileMock` keeps the prototype available. Data selection, Android packaging and testing are described in
 `docs/mobile-real-data-guide.md`. To try it on the desktop, in a phone-sized window:
 
 ```bash

@@ -130,12 +130,18 @@ int32 ABuildingGenerator::LoadBuildingsFromFile(const FString& FilePath)
 		return 0;
 	}
 
+	return LoadBuildingsFromJson(RootObject);
+}
+
+int32 ABuildingGenerator::LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& RootObject)
+{
+	if (!RootObject.IsValid()) return 0;
 	// No "version" means a file from before versions existed (read as 0, the same format as 1). A newer file is read as well as it can be.
 	LoadedFileVersion = 0;
 	RootObject->TryGetNumberField(TEXT("version"), LoadedFileVersion);
 	if (LoadedFileVersion > ProjectFileVersion)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("%s is project file version %d, newer than this build reads (%d); loading what it can"), *FilePath, LoadedFileVersion, ProjectFileVersion);
+		UE_LOG(LogTemp, Warning, TEXT("Project file version %d is newer than this build reads (%d); loading what it can"), LoadedFileVersion, ProjectFileVersion);
 	}
 
 	Scale = 1.f;

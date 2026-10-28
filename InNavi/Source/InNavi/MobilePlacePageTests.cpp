@@ -74,6 +74,7 @@ bool FMobilePlaceFlowTest::RunTest(const FString& Parameters)
 {
 	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
 	UMobileAppWidget* Screen = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
+	if (Screen) Screen->SetSource(MakeShared<FMobileMockSource>(), TEXT("sit-punggol"));
 	if (!TestNotNull(TEXT("the screen is created"), Screen)) return false;
 	Screen->TakeWidget();
 	Screen->SetActiveTab(UMobileAppWidget::ETab::Directory);

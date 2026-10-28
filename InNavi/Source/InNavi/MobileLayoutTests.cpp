@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "MobileAppWidget.h"
+#include "MobileMockSource.h"
 #include "MobileMapWidget.h"
 #include "MobileSheetFlow.h"
 
@@ -18,6 +19,7 @@ bool FMobileLayoutPrototypeTest::RunTest(const FString& Parameters)
 {
 	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
 	UMobileAppWidget* Screen = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
+	if (Screen) Screen->SetSource(MakeShared<FMobileMockSource>(), TEXT("sit-punggol"));
 	if (!TestNotNull(TEXT("the screen is created"), Screen)) return false;
 	Screen->TakeWidget();
 	Screen->ApplyViewportSize(375.0, 812.0);

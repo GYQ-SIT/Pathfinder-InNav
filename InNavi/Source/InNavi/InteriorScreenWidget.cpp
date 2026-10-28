@@ -11,6 +11,8 @@
 #include "StartScreenStyle.h"
 #include "MapPanelWidget.h"
 #include "DebugPanelWidget.h"
+#include "LayoutValidationPanelWidget.h"
+#include "PluginToolHost.h"
 #include "ConfirmDialogWidget.h"
 #include "EditScreenWidget.h"
 #include "FloorListEntryWidget.h"
@@ -661,6 +663,11 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		WindowDebugCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowDebug"), TEXT("Debug"));
 		WindowDebugCheckbox->SetIsChecked(false);
 		WindowDebugCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowDebugCheckChanged);
+		PluginToolHost = NewObject<UPluginToolHost>(this);
+		PluginToolHost->AddMenu(LayoutTools::EScreen::Interior, [&AddDropdownCheckRow, WindowDropdownStack](const FString& Name, const FString& Label)
+		{
+			return AddDropdownCheckRow(WindowDropdownStack, *Name, *Label);
+		});
 		UButton* WindowResetLayoutButton = AddDropdownButtonRow(WindowDropdownStack, TEXT("Btn_WindowResetLayout"), TEXT("Reset Layout"));
 		WindowResetLayoutButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowResetLayoutClicked);
 
@@ -1192,6 +1199,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		DebugPanelWidget->SetOwnerScreen(this);
 		DebugPanelWidget->SetInfoProvider([this]() { return BuildDebugInfo(); });
 		DockHost->RegisterPanel(FName(GetDockPanelName(EDockPanelId::Debug)), FText::FromString(GetDockPanelName(EDockPanelId::Debug)), DebugPanelWidget);
+		PluginToolHost->CreatePanels(this, DockHost, LayoutTools::EScreen::Interior, [this]() { ShowValidationPanel(); });
+		ValidationPanelWidget = Cast<ULayoutValidationPanelWidget>(PluginToolHost->FindPanel(TEXT("Validation")));
 
 		// The dock frames' tabs already show each panel's name, so the static title text at the top of a
 		// panel's content would just repeat it. Properties keeps its own - that one changes with the
@@ -1404,6 +1413,7 @@ void UInteriorScreenWidget::RefreshWindowMenuChecks()
 	Sync(WindowAudioCheckbox, EDockPanelId::Audio);
 	Sync(WindowMapCheckbox, EDockPanelId::Map);
 	Sync(WindowDebugCheckbox, EDockPanelId::Debug);
+	if (PluginToolHost) PluginToolHost->Sync();
 }
 
 void UInteriorScreenWidget::ResetDockLayout()
@@ -1496,6 +1506,7 @@ void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 	Super::NativeTick(MyGeometry, InDeltaTime);
 	// Panel content sizes itself from its panel's width, which the user can change at any time.
 	SyncDockPanelWidths();
+	if (PluginToolHost) PluginToolHost->Sync();
 }
 
 FString UInteriorScreenWidget::BuildDebugInfo() const
@@ -1669,6 +1680,10 @@ UWidget* UInteriorScreenWidget::FindScreenWidget(FName Name) const
 			return Found;
 		}
 	}
+	if (PluginToolHost)
+	{
+		if (UWidget* Found = PluginToolHost->FindControl(Name)) return Found;
+	}
 	if (DebugPanelWidget)
 	{
 		if (UWidget* Found = DebugPanelWidget->FindContentWidget(Name))
@@ -1722,6 +1737,7 @@ const TCHAR* UInteriorScreenWidget::GetDockPanelName(EDockPanelId Id)
 	case EDockPanelId::Audio:      return TEXT("Audio");
 	case EDockPanelId::Map:        return TEXT("Map");
 	case EDockPanelId::Debug:      return TEXT("Debug");
+	case EDockPanelId::Validation: return TEXT("Validation");
 	default:                       return TEXT("");
 	}
 }
@@ -2020,6 +2036,8 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 	{
 		NavigationPanelWidget->SetContentWidth(ComputePanelButtonWidth(EDockPanelId::Navigation));
 	}
+
+	if (PluginToolHost) PluginToolHost->Sync();
 
 	// Audio: the shared panel sizes its own controls from the width it is given.
 	if (AudioPanelWidget)
@@ -3571,6 +3589,14 @@ void UInteriorScreenWidget::OnWindowDebugCheckChanged(bool bIsChecked)
 {
 	SetDockPanelUserHidden(EDockPanelId::Debug, !bIsChecked);
 }
+
+void UInteriorScreenWidget::ShowValidationPanel()
+{
+	SetDockPanelUserHidden(EDockPanelId::Validation, false);
+	SetDockPanelUserHidden(EDockPanelId::Properties, false);
+	if (FloorPlanWidget) FloorPlanWidget->ResetView();
+}
+
 void UInteriorScreenWidget::SetDockPanelUserHidden(EDockPanelId Id, bool bHidden)
 {
 	if (!DockHost)

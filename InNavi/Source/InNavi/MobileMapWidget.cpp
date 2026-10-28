@@ -1,5 +1,6 @@
 #include "MobileMapWidget.h"
 
+#include "MobileMapLabels.h"
 #include "MobileStyle.h"
 #include "PolygonGeometryUtils.h"
 
@@ -12,6 +13,11 @@ using namespace MobileStyle;
 
 namespace
 {
+	FVector2D MobileCampusPosition(const FMobileRoutePoint& Point, const FMobileCampusMap& Campus)
+	{
+		const auto* Building = Campus.Buildings.FindByPredicate([&](const auto& B) { return B.BuildingId == Point.BuildingId; });
+		return Point.Position + (Building ? Building->Offset : FVector2D::ZeroVector);
+	}
 	// What the map's colours are: soft by kind of room, the way the prototype's plans are.
 	FLinearColor RoomColour(const FString& Category, bool bAvailable)
 	{
@@ -93,7 +99,7 @@ namespace
 		return Points;
 	}
 
-	void DrawLabel(FSlateWindowElementList& Out, int32 Layer, const FGeometry& Geometry, const FString& Text, const FVector2D& CentreAt, float PixelSize, const FLinearColor& Colour)
+	FVector2D LabelSize(const FString& Text, float PixelSize)
 	{
 		const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", FMath::RoundToInt(PixelSize * StartStyle::PixelsToFont));
 		FVector2D Size(Text.Len() * PixelSize * 0.55, PixelSize);
@@ -101,9 +107,69 @@ namespace
 		{
 			Size = FVector2D(FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(Text, Font));
 		}
+		return Size;
+	}
+
+	// Text with a soft outline in the colour of the page, so a label stays readable over a room's colour or its edge.
+	void DrawLabel(FSlateWindowElementList& Out, int32 Layer, const FGeometry& Geometry, const FString& Text, const FVector2D& CentreAt, float PixelSize, const FLinearColor& Colour, bool bHalo = true)
+	{
+		FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", FMath::RoundToInt(PixelSize * StartStyle::PixelsToFont));
+		const FVector2D Size = LabelSize(Text, PixelSize);
+		if (bHalo)
+		{
+			Font.OutlineSettings.OutlineSize = 2;
+			Font.OutlineSettings.OutlineColor = White.CopyWithNewOpacity(0.9f);
+		}
 		const FVector2D TopLeft = CentreAt - Size * 0.5;
 		FSlateDrawElement::MakeText(Out, Layer, Geometry.ToPaintGeometry(FVector2f(Size), FSlateLayoutTransform(FVector2f(TopLeft))), Text, Font, ESlateDrawEffect::None, Colour);
 	}
+
+	// A label waiting to be placed: the text, where it is centred, and how important it is (see MobileMapLabels).
+	struct FMapLabel
+	{
+		FString Text;
+		FVector2D At = FVector2D::ZeroVector;
+		float PixelSize = 10.f;
+		FLinearColor Colour = FLinearColor::Black;
+		double Priority = 0.0;
+		int32 Layer = 0;
+	};
+
+	// Draws the labels that fit: the important ones first, none over another or over an obstacle.
+	void DrawChosenLabels(FSlateWindowElementList& Out, const FGeometry& Geometry, const TArray<FMapLabel>& Labels, const TArray<FBox2D>& Obstacles, double WidgetWidth, double WidgetHeight)
+	{
+		TArray<MobileMapLabels::FCandidate> Candidates;
+		for (const FMapLabel& Label : Labels)
+		{
+			const FVector2D Size = LabelSize(Label.Text, Label.PixelSize);
+			MobileMapLabels::FCandidate Candidate;
+			Candidate.Box = FBox2D(Label.At - Size * 0.5, Label.At + Size * 0.5);
+			Candidate.Priority = Label.Priority;
+			Candidates.Add(Candidate);
+		}
+		const TArray<bool> Chosen = MobileMapLabels::Choose(Candidates, Obstacles, FBox2D(FVector2D::ZeroVector, FVector2D(WidgetWidth, WidgetHeight)));
+		for (int32 Index = 0; Index < Labels.Num(); ++Index)
+		{
+			if (Chosen[Index])
+			{
+				DrawLabel(Out, Labels[Index].Layer, Geometry, Labels[Index].Text, Labels[Index].At, Labels[Index].PixelSize, Labels[Index].Colour);
+			}
+		}
+	}
+
+	// How big a polygon looks on the screen.
+	FBox2D BoundsOf(const TArray<FVector2D>& Poly)
+	{
+		FBox2D Box(ForceInit);
+		for (const FVector2D& P : Poly)
+		{
+			Box += P;
+		}
+		return Box;
+	}
+
+	// A room whose longest side is shorter than this (in design pixels) gets no name until the map is zoomed in.
+	constexpr double MinRoomSizeForLabel = 14.0;
 
 	// How tall the tilted view stands the plan, in design pixels.
 	constexpr double SlabHeight = 7.0;
@@ -200,6 +266,7 @@ FBox2D UMobileMapWidget::PlanBounds() const
 	{
 		for (const FMobileCampusBuilding& Building : CampusMap.Buildings) Add(Building.Outline);
 		for (const FMobileCampusFeature& Feature : CampusMap.Features) Add(Feature.Outline);
+		if (Route.bFound) for (const auto& Point : Route.Points) Bounds += Project(MobileCampusPosition(Point, CampusMap));
 	}
 	else
 	{
@@ -333,12 +400,19 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 
 	if (bOverview)
 	{
+		// Names are placed after everything is drawn (see DrawChosenLabels): the ones on the route first, then the biggest buildings.
+		TArray<FMapLabel> Labels;
+		TSet<FString> RouteBuildings;
+		if (Route.bFound)
+		{
+			for (const FMobileRoutePoint& Point : Route.Points) RouteBuildings.Add(Point.BuildingId);
+		}
 		for (const FMobileCampusFeature& Feature : CampusMap.Features)
 		{
 			const TArray<FVector2D> Shape = ToWidgetPolygon(Feature.Outline, W, H, 0.0);
 			const bool bWater = Feature.Name == TEXT("Pond");
 			FillPolygon(OutDrawElements, Layer, AllottedGeometry, Shape, bWater ? MapColours.Water : MapColours.Grass);
-			DrawLabel(OutDrawElements, Layer + 1, AllottedGeometry, Feature.Name, Centre(Shape), 11.f, Grey);
+			Labels.Add({ Feature.Name, Centre(Shape), 11.f, Grey, -1.0, Layer + 1 });
 		}
 		for (const FMobileCampusBuilding& Building : CampusMap.Buildings)
 		{
@@ -349,9 +423,25 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 			const TArray<FVector2D> Top = ToWidgetPolygon(Building.Outline, W, H, Lift);
 			FillPolygon(OutDrawElements, Layer + 2, AllottedGeometry, Top, MapColours.BuildingTop);
 			OutlinePolygon(OutDrawElements, Layer + 3, AllottedGeometry, Top, MapColours.Edge, 2.f);
-			DrawLabel(OutDrawElements, Layer + 4, AllottedGeometry, Building.Name, Centre(Top), 15.f, Ink);
+			const FBox2D Extent = BoundsOf(Top);
+			Labels.Add({ Building.Name, Centre(Top), 15.f, Ink, RouteBuildings.Contains(Building.BuildingId) ? 1.0e9 : Extent.GetSize().X * Extent.GetSize().Y, Layer + 4 });
 		}
-		return Layer + 5;
+		DrawChosenLabels(OutDrawElements, AllottedGeometry, Labels, TArray<FBox2D>(), W, H);
+		if (Route.bFound && Route.Points.Num() >= 2)
+		{
+			TArray<FVector2D> CampusRouteLine;
+			for (const auto& Point : Route.Points) CampusRouteLine.Add(ToWidgetPolygon({MobileCampusPosition(Point, CampusMap)}, W, H, Lift)[0]);
+			FSlateDrawElement::MakeLines(OutDrawElements, Layer + 6, AllottedGeometry.ToPaintGeometry(), CampusRouteLine, ESlateDrawEffect::None, Blue, true, 4.f);
+			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(CampusRouteLine[0], 6.0), Blue);
+			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(CampusRouteLine.Last(), 7.0), Red);
+		}
+		if (bHasPosition)
+		{
+			const auto At = ToWidgetPolygon({MobileCampusPosition(Position, CampusMap)}, W, H, Lift)[0];
+			FillPolygon(OutDrawElements, Layer + 8, AllottedGeometry, Circle(At, 8.0), FLinearColor::White);
+			FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, Circle(At, 5.0), Blue);
+		}
+		return Layer + 10;
 	}
 	if (LevelMap.Outline.IsEmpty())
 	{
@@ -367,26 +457,36 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 	FillPolygon(OutDrawElements, Layer + 1, AllottedGeometry, Floor, MapColours.Floor);
 	OutlinePolygon(OutDrawElements, Layer + 3, AllottedGeometry, Floor, MapColours.Edge, 2.5f);
 
-	// The rooms.
+	// The rooms. Their names are placed after everything is drawn (see DrawChosenLabels): the chosen place first, then the biggest rooms; a
+	// room too small to read a name in (until the map is zoomed in) gets none.
+	TArray<FMapLabel> RoomLabels;
 	for (const FMobileMapRoom& Room : LevelMap.Rooms)
 	{
 		const TArray<FVector2D> Shape = ToWidgetPolygon(Room.Polygon, W, H, Lift);
 		const bool bHighlight = !Room.PlaceId.IsEmpty() && Room.PlaceId == HighlightPlaceId;
 		FillPolygon(OutDrawElements, Layer + 2, AllottedGeometry, Shape, bHighlight ? MapColours.Highlight : RoomColour(Room.Category, Room.bAvailable));
 		OutlinePolygon(OutDrawElements, Layer + 3, AllottedGeometry, Shape, bHighlight ? Blue : MapColours.RoomEdge, bHighlight ? 3.f : 1.2f);
-		DrawLabel(OutDrawElements, Layer + 4, AllottedGeometry, Room.Name, Centre(Shape), 10.f, Ink);
+		const FBox2D Extent = BoundsOf(Shape);
+		if (bHighlight || FMath::Max(Extent.GetSize().X, Extent.GetSize().Y) >= MinRoomSizeForLabel)
+		{
+			RoomLabels.Add({ Room.Name, Centre(Shape), 10.f, Ink, bHighlight ? 1.0e9 : Extent.GetSize().X * Extent.GetSize().Y, Layer + 4 });
+		}
 	}
 
-	// The lifts and stairs.
+	// The lifts and stairs. Their circles are kept clear of the room names.
+	TArray<FBox2D> Obstacles;
 	for (const FMobileMapConnector& Connector : LevelMap.Connectors)
 	{
 		const FVector2D At = ToWidgetPolygon({ Connector.Position }, W, H, Lift)[0];
+		Obstacles.Add(FBox2D(At - FVector2D(9.0, 9.0), At + FVector2D(9.0, 9.0)));
 		FillPolygon(OutDrawElements, Layer + 4, AllottedGeometry, Circle(At, 8.0), Connector.Kind == EMobileConnectorKind::Lift ? StartStyle::Rgb(30, 100, 240) : (Connector.Kind == EMobileConnectorKind::Stairs ? StartStyle::Rgb(100, 116, 139) : StartStyle::Rgb(13, 148, 136)));
-		DrawLabel(OutDrawElements, Layer + 5, AllottedGeometry, Connector.Kind == EMobileConnectorKind::Lift ? TEXT("L") : (Connector.Kind == EMobileConnectorKind::Stairs ? TEXT("S") : TEXT("E")), At, 9.f, FLinearColor::White);
+		DrawLabel(OutDrawElements, Layer + 5, AllottedGeometry, Connector.Kind == EMobileConnectorKind::Lift ? TEXT("L") : (Connector.Kind == EMobileConnectorKind::Stairs ? TEXT("S") : TEXT("E")), At, 9.f, FLinearColor::White, false);
 	}
 
+	DrawChosenLabels(OutDrawElements, AllottedGeometry, RoomLabels, Obstacles, W, H);
+
 	// The way in, on the ground level.
-	if (LevelMap.Level == 1)
+	if (LevelMap.Level == 1 && LevelMap.bHasEntrance)
 	{
 		const FVector2D Door = ToWidgetPolygon({ LevelMap.Entrance }, W, H, Lift)[0];
 		FSlateDrawElement::MakeLines(OutDrawElements, Layer + 4, AllottedGeometry.ToPaintGeometry(), TArray<FVector2D>{ Door - FVector2D(10.0, 0.0), Door + FVector2D(10.0, 0.0) }, ESlateDrawEffect::None, StartStyle::Rgb(34, 197, 94), true, 5.f);

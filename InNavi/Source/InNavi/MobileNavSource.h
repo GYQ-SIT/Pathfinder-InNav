@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 
 // What the phone app's screens may ask for. A screen never reaches into AInteriorGenerator, the route planner or the project files: it asks an
-// IMobileNavSource. FMobileMockSource answers with the design team's prototype data; a real source answers from the real code later, and no
+// IMobileNavSource. FMobileMockSource answers with the design team's prototype data; FMobileRealSource reads project data, and no
 // screen changes when it does. See docs/design/mobile-app-data-interface.md.
 
 namespace MobileNav
@@ -45,7 +45,8 @@ struct FMobilePlace
 {
 	FString Id;
 	FString Name;
-	// What is printed on the door: "E2-01-101", "#01-102".
+	// What is printed on the door: "E2-01-101", "#01-102". Empty when the data has no door number (a room's internal id is not one): the
+	// screens then show the place without it. It is still searched when it is not empty.
 	FString Code;
 	FString SiteId;
 	FString BuildingId;
@@ -66,6 +67,9 @@ struct FMobilePlace
 
 	// "E2 . L1": what the list groups places by.
 	FString GroupLabel() const;
+
+	// "<code> . <rest>", or just "<rest>" when the place has no code.
+	FString WithCode(const FString& Rest) const { return Code.IsEmpty() ? Rest : Code + TEXT(" · ") + Rest; }
 };
 
 struct FMobilePlaceFilter
@@ -175,6 +179,8 @@ struct FMobileLevelMap
 	TArray<FMobileMapConnector> Connectors;
 	// Where people come in, on the ground level.
 	FVector2D Entrance = FVector2D::ZeroVector;
+	// False when the project has no mapped starting point on this level. No positioning is inferred.
+	bool bHasEntrance = true;
 };
 
 // The site seen from above: its buildings (and the things between them), in the site's own units.
@@ -183,6 +189,8 @@ struct FMobileCampusBuilding
 	FString BuildingId;
 	FString Name;
 	TArray<FVector2D> Outline;
+	// Converts this building's local map/route coordinates to the campus coordinate frame.
+	FVector2D Offset = FVector2D::ZeroVector;
 };
 
 struct FMobileCampusFeature

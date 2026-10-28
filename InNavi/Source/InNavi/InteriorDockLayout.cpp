@@ -1,5 +1,6 @@
 #include "InteriorDockLayout.h"
 
+#include "PluginToolHost.h"
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -16,10 +17,13 @@ namespace InteriorDock
 	const FName Audio(TEXT("Audio"));
 	const FName Map(TEXT("Map"));
 	const FName Debug(TEXT("Debug"));
+	const FName Validation(TEXT("Validation"));
 
 	const TArray<FName>& AllPanels()
 	{
-		static const TArray<FName> Panels = { Toolbar, Floor, Properties, Layers, Navigation, Audio, Map, Debug };
+		static TArray<FName> Panels;
+		Panels = { Toolbar, Floor, Properties, Layers, Navigation, Audio, Map, Debug };
+		PluginTools::AppendPanels(Panels, LayoutTools::EScreen::Interior);
 		return Panels;
 	}
 
@@ -35,6 +39,8 @@ namespace InteriorDock
 
 	EDockSide DefaultSideFor(FName Panel)
 	{
+		for (const auto& Tool : LayoutTools::FRegistry::Get().Tools(LayoutTools::EScreen::Interior))
+			if (Tool.Id == Panel) return PluginTools::DockSide(Tool.DefaultSide);
 		if (Panel == Toolbar || Panel == Map)
 		{
 			return EDockSide::Left;
@@ -50,7 +56,7 @@ namespace InteriorDock
 	{
 		bool IsHiddenByDefault(FName Panel)
 		{
-			return Panel == Navigation || Panel == Audio || Panel == Debug || Panel == Map;
+			return PluginTools::HiddenByDefault(Panel, LayoutTools::EScreen::Interior) || Panel == Navigation || Panel == Audio || Panel == Debug || Panel == Map;
 		}
 
 		void SetRatios(const TSharedPtr<FDockNode>& Root, const TArray<float>& Ratios)
@@ -91,6 +97,7 @@ namespace InteriorDock
 		L.SetAreaExtent(EDockSide::Bottom, 220.f);
 		L.HidePanel(Debug);
 		L.HidePanel(Audio);
+		PluginTools::PlaceDefaults(L, LayoutTools::EScreen::Interior);
 	}
 
 	void PlaceMissingPanels(FDockLayout& L, const TArray<FName>& Missing)

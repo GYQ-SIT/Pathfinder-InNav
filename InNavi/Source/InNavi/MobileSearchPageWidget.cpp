@@ -266,7 +266,7 @@ void UMobileSearchPageWidget::AddPlaceRow(const FMobilePlace& Place)
 	UVerticalBox* Text = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
 	Text->AddChildToVerticalBox(MakeText(WidgetTree, FString(), Place.Name, 15.f, Ink, true));
 	UHorizontalBox* Detail = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-	Detail->AddChildToHorizontalBox(MakeText(WidgetTree, FString(), Place.Code + TEXT(" · ") + Place.Category, 11.f, Grey))->SetVerticalAlignment(VAlign_Center);
+	Detail->AddChildToHorizontalBox(MakeText(WidgetTree, FString(), Place.WithCode(Place.Category), 11.f, Grey))->SetVerticalAlignment(VAlign_Center);
 	if (!Place.bAvailable)
 	{
 		UBorder* Pill = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());

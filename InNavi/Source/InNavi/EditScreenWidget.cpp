@@ -3,6 +3,8 @@
 #include "AudioFileRowWidget.h"
 #include "AudioPanelWidget.h"
 #include "DebugPanelWidget.h"
+#include "LayoutValidationPanelWidget.h"
+#include "PluginToolHost.h"
 #include "BuildingInfoPanelWidget.h"
 #include "MapPanelWidget.h"
 #include "NavigationDockPanelWidget.h"
@@ -310,6 +312,11 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		WindowDebugCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowDebug"), TEXT("Debug"));
 		WindowDebugCheckbox->SetIsChecked(false);
 		WindowDebugCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowDebugCheckChanged);
+		PluginToolHost = NewObject<UPluginToolHost>(this);
+		PluginToolHost->AddMenu(LayoutTools::EScreen::Exterior, [&AddDropdownCheckRow, WindowDropdownStack](const FString& Name, const FString& Label)
+		{
+			return AddDropdownCheckRow(WindowDropdownStack, *Name, *Label);
+		});
 
 		// Starts unchecked - the Navigation panel starts hidden, like the interior editor's own.
 		WindowNavigationCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowNavigation"), TEXT("Navigation"));
@@ -427,6 +434,17 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			return FString::Printf(TEXT("Selected Building: %s\nCamera Speed: %s\nUnsaved Changes: %s"), *SelectedBuilding, *CameraSpeed, *UnsavedChanges);
 		});
 		DockHost->RegisterPanel(ExteriorDock::Debug, FText::FromName(ExteriorDock::Debug), DebugPanelWidget);
+		PluginToolHost->CreatePanels(this, DockHost, LayoutTools::EScreen::Exterior, [this]()
+		{
+			if (auto* PC = GetOwningPlayer<ANavPlayerController>())
+			{
+				if (auto* Screen = CreateWidget<UInteriorScreenWidget>(PC, UInteriorScreenWidget::StaticClass()))
+				{
+					Screen->AddToViewport(); Screen->ShowValidationPanel(); RemoveFromParent();
+				}
+			}
+		});
+		ValidationPanelWidget = Cast<ULayoutValidationPanelWidget>(PluginToolHost->FindPanel(TEXT("Validation")));
 
 		// --- Navigation panel (Window > Navigation): the shared one (NavigationDockPanelWidget.h), also used by the interior
 		// editor. Here its dropdowns list each building's main door and a click on the ground sets a point. Starts hidden.
@@ -552,6 +570,7 @@ void UEditScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 	SyncMapPanelWidth();
 	SyncNavigationPanelWidth();
 	SyncBuildingPanelWidth();
+	if (PluginToolHost) PluginToolHost->Sync();
 	if (BuildingInfoPanelWidget)
 	{
 		BuildingInfoPanelWidget->RefreshIfChanged();
@@ -946,6 +965,10 @@ UWidget* UEditScreenWidget::FindScreenWidget(FName Name) const
 			return Found;
 		}
 	}
+	if (PluginToolHost)
+	{
+		if (UWidget* Found = PluginToolHost->FindControl(Name)) return Found;
+	}
 	if (DebugPanelWidget)
 	{
 		if (UWidget* Found = DebugPanelWidget->FindContentWidget(Name))
@@ -1073,6 +1096,7 @@ void UEditScreenWidget::RefreshWindowMenuChecks()
 	Sync(WindowRoadsCheckbox, ExteriorDock::Map);
 	Sync(WindowBuildingCheckbox, ExteriorDock::Building);
 	Sync(WindowDebugCheckbox, ExteriorDock::Debug);
+	if (PluginToolHost) PluginToolHost->Sync();
 	Sync(WindowNavigationCheckbox, ExteriorDock::Navigation);
 }
 
@@ -1172,6 +1196,7 @@ void UEditScreenWidget::OnWindowDebugCheckChanged(bool bIsChecked)
 {
 	SetDockPanelHidden(ExteriorDock::Debug, !bIsChecked);
 }
+
 
 void UEditScreenWidget::OnWindowNavigationCheckChanged(bool bIsChecked)
 {

@@ -14,6 +14,7 @@ namespace InteriorDock
 	INNAVI_API extern const FName Audio;
 	INNAVI_API extern const FName Map;
 	INNAVI_API extern const FName Debug;
+	INNAVI_API extern const FName Validation;
 
 	INNAVI_API const TArray<FName>& AllPanels();
 	INNAVI_API TSet<FName> KnownPanels();

@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "MobileAppWidget.h"
+#include "MobileMockSource.h"
 #include "MobileMapWidget.h"
 #include "MobileNavigatePageWidget.h"
 #include "MobilePlacePageWidget.h"
@@ -119,6 +120,7 @@ bool FMobileProfileFlowTest::RunTest(const FString& Parameters)
 	FAppearanceGuard Guard;
 	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
 	UMobileAppWidget* Screen = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
+	if (Screen) Screen->SetSource(MakeShared<FMobileMockSource>(), TEXT("sit-punggol"));
 	if (!TestNotNull(TEXT("the screen is created"), Screen)) return false;
 	Screen->TakeWidget();
 	UMobileProfilePageWidget* Profile = Screen->GetProfilePage();
@@ -137,6 +139,7 @@ bool FMobileProfileFlowTest::RunTest(const FString& Parameters)
 
 	// They are kept: a new screen using the file shows them.
 	UMobileAppWidget* Next = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
+	if (Next) Next->SetSource(MakeShared<FMobileMockSource>(), TEXT("sit-punggol"));
 	Next->TakeWidget();
 	Next->UsePreferencesFile(Path);
 	TestTrue(TEXT("the next screen has them"), Next->GetPreferences().GetTheme() == EMobileTheme::Night && Next->GetProfilePage()->GetShownTheme() == EMobileTheme::Night && Next->GetProfilePage()->IsLargerTextShown());
@@ -171,6 +174,7 @@ bool FMobileAppearanceTest::RunTest(const FString& Parameters)
 	const FLinearColor LightSurface = MobileStyle::White;
 	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
 	UMobileAppWidget* Screen = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
+	if (Screen) Screen->SetSource(MakeShared<FMobileMockSource>(), TEXT("sit-punggol"));
 	if (!TestNotNull(TEXT("the screen is created"), Screen)) return false;
 	Screen->TakeWidget();
 	auto Click = [](UWidget* Widget) { Cast<UButton>(Widget)->OnClicked.Broadcast(); };

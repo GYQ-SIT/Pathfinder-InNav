@@ -12,6 +12,8 @@
 #include "MobileSelectWidget.h"
 #include "MobileSearchPageWidget.h"
 #include "MobileStyle.h"
+#include "MobileRealSource.h"
+#include "MobileMockSource.h"
 #include "StartScreenStyle.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -35,6 +37,8 @@
 #include "Components/WidgetSwitcher.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GenericPlatform/GenericApplication.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 
 using namespace MobileStyle;
 
@@ -185,7 +189,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 			Box->SetContent(Content);
 			return Box;
 		};
-		MapMoveButton = MakeButton(Tree, TEXT("Btn_MapMove"), TEXT("Move: Off"), White, Ink, 8.f, 44.f, &MapMoveLabel, 10.f);
+		MapMoveButton = MakeButton(Tree, TEXT("Btn_MapMove"), TEXT("Move: On"), White, Ink, 8.f, 44.f, &MapMoveLabel, 10.f);
 		ApplyFont(MapMoveLabel, 13.f, true);
 		MapMoveButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnMapMoveClicked);
 		ToolsRow->AddChildToHorizontalBox(Sized(MapMoveButton, 73.f, 44.f));
@@ -296,8 +300,15 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		{
 			if (Index == 0)
 			{
-				// The first page is the real search page, on the prototype's data.
-				Source = MakeShared<FMobileMockSource>();
+				// Screens consume the same interface in production and in prototype tests.
+				if (!Source)
+				{
+					if (FParse::Param(FCommandLine::Get(), TEXT("MobileMock"))) { Source = MakeShared<FMobileMockSource>(); SiteId = TEXT("sit-punggol"); }
+					else Source = FMobileRealSource::FromWorld(GetWorld());
+				}
+				const auto Sites = Source->ListSites();
+				if (!Sites.ContainsByPredicate([&](const auto& Site) { return Site.Id == SiteId; }))
+					SiteId = Sites.IsEmpty() ? FString() : Sites[0].Id;
 				SearchPage = CreateWidget<UMobileSearchPageWidget>(this, UMobileSearchPageWidget::StaticClass());
 				FString ContextBuilding;
 				int32 ContextLevel = 1;
@@ -307,6 +318,8 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 					ContextBuilding = Buildings[0].Id;
 					ContextLevel = Buildings[0].Levels[0].Level;
 				}
+				const auto Places = Source->SearchPlaces(SiteId, FString(), FMobilePlaceFilter());
+				if (!Places.IsEmpty()) { ContextBuilding = Places[0].BuildingId; ContextLevel = Places[0].Level; }
 				SearchPage->SetSource(Source.Get(), SiteId, ContextBuilding, ContextLevel);
 				TWeakObjectPtr<UMobileAppWidget> WeakSearchOwner(this);
 				SearchPage->SetOnClearStart([WeakSearchOwner]()
@@ -994,6 +1007,12 @@ UWidget* UMobileAppWidget::FindNamedWidget(const FName& Name) const
 	return WidgetTree ? WidgetTree->FindWidget(Name) : nullptr;
 }
 
+void UMobileAppWidget::SetSource(TSharedPtr<IMobileNavSource> InSource, const FString& InitialSite)
+{
+	check(!WidgetTree || !WidgetTree->RootWidget);
+	Source = MoveTemp(InSource); SiteId = InitialSite;
+}
+
 // ---- Sheet dragging ----
 
 bool UMobileAppWidget::BeginSheetDrag(const FVector2D& DesignPosition)
@@ -1204,6 +1223,7 @@ void UMobileAppWidget::RefreshMap()
 		{
 			MapBuildingId = BuildingId;
 			MapLevel = Level;
+			bMapOverview = Level == 0;
 		}
 	};
 	if (State == EMobileSheetState::Place || State == EMobileSheetState::Arrived)
@@ -1295,11 +1315,12 @@ void UMobileAppWidget::ApplyMap()
 		FMobileRoutePoint Here;
 		Here.BuildingId = MyLocationBuildingId;
 		Here.Level = MyLocationLevel;
-		if (Source->GetLevelMap(MyLocationBuildingId, MyLocationLevel, Mine))
+		if (Source->GetLevelMap(MyLocationBuildingId, MyLocationLevel, Mine) && Mine.bHasEntrance)
 		{
 			Here.Position = Mine.Entrance;
+			MapView->SetPosition(Here);
 		}
-		MapView->SetPosition(Here);
+		else MapView->ClearPosition();
 	}
 	else
 	{
@@ -1538,15 +1559,17 @@ void UMobileAppWidget::OpenSite(const FString& NewSiteId)
 	NavStepIndex = 0;
 	bMapOverview = false;
 	bLevelPopupOpen = false;
-	const FMobileBuilding& First = Buildings[0];
-	const int32 FirstLevel = First.Levels.IsEmpty() ? 1 : First.Levels[0].Level;
-	MyLocationBuildingId = First.Id;
+	FString FirstBuilding = Buildings[0].Id;
+	int32 FirstLevel = Buildings[0].Levels.IsEmpty() ? 1 : Buildings[0].Levels[0].Level;
+	const auto Places = Source->SearchPlaces(SiteId, FString(), FMobilePlaceFilter());
+	if (!Places.IsEmpty()) { FirstBuilding = Places[0].BuildingId; FirstLevel = Places[0].Level; }
+	MyLocationBuildingId = FirstBuilding;
 	MyLocationLevel = FirstLevel;
-	MapBuildingId = First.Id;
+	MapBuildingId = FirstBuilding;
 	MapLevel = FirstLevel;
 	if (SearchPage)
 	{
-		SearchPage->SetSource(Source.Get(), SiteId, First.Id, FirstLevel);
+		SearchPage->SetSource(Source.Get(), SiteId, FirstBuilding, FirstLevel);
 	}
 	RefreshSearchStart();
 	if (RoutePage)
