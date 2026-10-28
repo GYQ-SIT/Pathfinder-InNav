@@ -1186,10 +1186,19 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		AudioPanelWidget->SetOwnerScreen(this);
 		DockHost->RegisterPanel(FName(GetDockPanelName(EDockPanelId::Audio)), FText::FromString(GetDockPanelName(EDockPanelId::Audio)), AudioPanelWidget);
 
-		// -- Map panel: the shared one (MapPanelWidget.h), Roads section only - this screen has no outside buildings
-		// to filter. Starts shown.
+		// -- Map panel: the shared one (MapPanelWidget.h), the same as on the exterior screen: the list of buildings (a click opens
+		// one), the filters and the roads. Starts shown.
 		MapPanelWidget = CreateWidget<UMapPanelWidget>(this, UMapPanelWidget::StaticClass());
 		MapPanelWidget->SetOwnerScreen(this);
+		MapPanelWidget->SetShowBuildingFilters(true);
+		// The filters are the controller's, and what they hold carries over from the exterior screen: they are not reset here.
+		MapPanelWidget->SetBuildingVisibilityDefaults(false);
+		MapPanelWidget->SetBuildingClickHandler([this](const FString& BuildingId) { SwitchToBuilding(BuildingId); });
+		MapPanelWidget->SetSelectedBuildingProvider([this]()
+		{
+			const ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+			return PC ? PC->GetLoadedBuildingId() : FString();
+		});
 		// The interior editor does not want roads in the way; the exterior screen turns them back on.
 		MapPanelWidget->SetRoadsVisibleByDefault(false);
 		DockHost->RegisterPanel(FName(GetDockPanelName(EDockPanelId::Map)), FText::FromString(GetDockPanelName(EDockPanelId::Map)), MapPanelWidget);
@@ -1329,8 +1338,9 @@ void UInteriorScreenWidget::NativeConstruct()
 	}
 	if (MapPanelWidget)
 	{
-		// Roads off while editing a building; the check boxes in the (hidden) Map panel agree.
+		// Roads off while editing a building; the check boxes in the Map panel agree, and so do its building filters.
 		MapPanelWidget->ApplyDefaultsToController();
+		MapPanelWidget->Refresh();
 	}
 	RefreshModeButtonHighlights();
 	// Syncs Properties' placeholder title/visibility against PC's actual current selection state
@@ -1514,6 +1524,10 @@ void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 		RefreshRoomBoundsFields();
 	}
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	if (MapPanelWidget)
+	{
+		MapPanelWidget->RefreshBuildingFilterDisplayIfChanged();
+	}
 	// Panel content sizes itself from its panel's width, which the user can change at any time.
 	SyncDockPanelWidths();
 	if (PluginToolHost) PluginToolHost->Sync();
@@ -2053,6 +2067,10 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 	if (AudioPanelWidget)
 	{
 		AudioPanelWidget->SetContentWidth(ComputePanelButtonWidth(EDockPanelId::Audio));
+	}
+	if (MapPanelWidget)
+	{
+		MapPanelWidget->SetContentWidth(ComputePanelButtonWidth(EDockPanelId::Map));
 	}
 }
 
@@ -2958,8 +2976,26 @@ void UInteriorScreenWidget::HandleBuildingSwitcherChanged(FString SelectedItem, 
 		return;
 	}
 
-	const FString NewBuildingId = PC->FindBuildingIdByName(SelectedItem);
-	if (NewBuildingId.IsEmpty() || NewBuildingId == PC->GetLoadedBuildingId())
+	SwitchToBuilding(PC->FindBuildingIdByName(SelectedItem));
+}
+
+void UInteriorScreenWidget::RefreshAfterBuildingSwitch()
+{
+	RefreshBuildingSwitcher();
+	RefreshFloorList();
+	RefreshLayersList();
+	RefreshNavigationPanelDisplay();
+	RefreshNavRoomDropdowns();
+	if (MapPanelWidget)
+	{
+		MapPanelWidget->RefreshBuildingFilterDisplay();
+	}
+}
+
+void UInteriorScreenWidget::SwitchToBuilding(const FString& NewBuildingId)
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC || NewBuildingId.IsEmpty() || NewBuildingId == PC->GetLoadedBuildingId())
 	{
 		return;
 	}
@@ -2970,11 +3006,7 @@ void UInteriorScreenWidget::HandleBuildingSwitcherChanged(FString SelectedItem, 
 		// data, so it's saved regardless of whether there was any actual building content to save.
 		SaveDockLayoutToDisk();
 		PC->LoadInteriorForBuilding(NewBuildingId);
-		RefreshBuildingSwitcher();
-		RefreshFloorList();
-		RefreshLayersList();
-		RefreshNavigationPanelDisplay();
-		RefreshNavRoomDropdowns();
+		RefreshAfterBuildingSwitch();
 		return;
 	}
 
@@ -2998,11 +3030,7 @@ void UInteriorScreenWidget::HandleSwitchBuildingSave()
 		PC->SaveCurrentProject();
 		PC->LoadInteriorForBuilding(PendingBuildingId);
 	}
-	RefreshBuildingSwitcher();
-	RefreshFloorList();
-	RefreshLayersList();
-	RefreshNavigationPanelDisplay();
-	RefreshNavRoomDropdowns();
+	RefreshAfterBuildingSwitch();
 }
 
 void UInteriorScreenWidget::HandleSwitchBuildingDiscard()
@@ -3015,11 +3043,7 @@ void UInteriorScreenWidget::HandleSwitchBuildingDiscard()
 		PC->DiscardUnsavedChanges();
 		PC->LoadInteriorForBuilding(PendingBuildingId);
 	}
-	RefreshBuildingSwitcher();
-	RefreshFloorList();
-	RefreshLayersList();
-	RefreshNavigationPanelDisplay();
-	RefreshNavRoomDropdowns();
+	RefreshAfterBuildingSwitch();
 }
 
 void UInteriorScreenWidget::HandleSwitchBuildingCancel()

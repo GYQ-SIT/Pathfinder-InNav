@@ -276,7 +276,7 @@ void UMapPanelWidget::ApplyDefaultsToController()
 		// By the time the screen is constructed any roads and POIs to filter have already been loaded.
 		PC->SetAllRoadsVisible(bRoadsVisibleByDefault);
 		PC->SetRoadsAndPOIsWithinCampusOnly(true);
-		if (bShowBuildingFilters)
+		if (bShowBuildingFilters && bApplyBuildingDefaults)
 		{
 			PC->SetNonCampusBuildingsVisible(false);
 		}
@@ -476,7 +476,7 @@ void UMapPanelWidget::ApplyBuildingFilters()
 void UMapPanelWidget::RefreshBuildingFilterDisplayIfChanged()
 {
 	ANavPlayerController* PC = GetController();
-	if (PC && BuildingList && (DisplayedBuildingResultsRevision != PC->GetBuildingResultsRevision() || DisplayedSelectedBuildingId != PC->GetSelectedBuildingId()))
+	if (PC && BuildingList && (DisplayedBuildingResultsRevision != PC->GetBuildingResultsRevision() || DisplayedSelectedBuildingId != SelectedBuildingId()))
 	{
 		RefreshBuildingFilterDisplay();
 	}
@@ -499,7 +499,7 @@ void UMapPanelWidget::RefreshBuildingFilterDisplay()
 	{
 		return;
 	}
-	const FString Selected = PC->GetSelectedBuildingId();
+	const FString Selected = SelectedBuildingId();
 	BuildingList->ClearChildren();
 	BuildingRows.Reset();
 	for (const ANavPlayerController::FBuildingListItem& Item : PC->GetFilteredBuildingList())
@@ -526,8 +526,24 @@ void UMapPanelWidget::RefreshBuildingFilterDisplay()
 	DisplayedSelectedBuildingId = Selected;
 }
 
+FString UMapPanelWidget::SelectedBuildingId() const
+{
+	if (SelectedBuildingProvider)
+	{
+		return SelectedBuildingProvider();
+	}
+	const ANavPlayerController* PC = GetController();
+	return PC ? PC->GetSelectedBuildingId() : FString();
+}
+
 void UMapPanelWidget::HandleBuildingRowClicked(const FString& BuildingId)
 {
+	if (BuildingClickHandler)
+	{
+		BuildingClickHandler(BuildingId);
+		RefreshBuildingFilterDisplay();
+		return;
+	}
 	if (ANavPlayerController* PC = GetController())
 	{
 		PC->SelectBuildingById(BuildingId);

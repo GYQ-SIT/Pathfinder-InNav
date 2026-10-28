@@ -279,17 +279,17 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 			PickSize->SetContent(PickText);
 			Pick->SetContent(PickSize);
 
-			UHorizontalBox* Line = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), FName(TEXT("Row_NavPlace") + Suffix));
-			UHorizontalBoxSlot* BadgeSlot = Line->AddChildToHorizontalBox(Badge);
+			UHorizontalBox* PlaceLine = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), FName(TEXT("Row_NavPlace") + Suffix));
+			UHorizontalBoxSlot* BadgeSlot = PlaceLine->AddChildToHorizontalBox(Badge);
 			BadgeSlot->SetVerticalAlignment(VAlign_Bottom);
 			BadgeSlot->SetPadding(FMargin(0.f, 0.f, RowGap, 3.f));
-			Line->AddChildToHorizontalBox(Middle)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-			UHorizontalBoxSlot* PickSlot = Line->AddChildToHorizontalBox(Pick);
+			PlaceLine->AddChildToHorizontalBox(Middle)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			UHorizontalBoxSlot* PickSlot = PlaceLine->AddChildToHorizontalBox(Pick);
 			PickSlot->SetVerticalAlignment(VAlign_Bottom);
 			PickSlot->SetPadding(FMargin(RowGap, 0.f, 0.f, 3.f));
 			USizeBox* LineSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(TEXT("Row_NavPlaceSize") + Suffix));
 			LineSize->SetWidthOverride(ContentWidth);
-			LineSize->SetContent(Line);
+			LineSize->SetContent(PlaceLine);
 			// The two ends are always there; the other rows are shown as stops are added.
 			LineSize->SetVisibility(SlotIndex < 2 ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
 			AddToStack(Places, LineSize, 2.f);
