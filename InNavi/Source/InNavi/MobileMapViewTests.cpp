@@ -6,6 +6,7 @@
 #include "MobileSheetFlow.h"
 
 #include "Components/Button.h"
+#include "Components/TextBlock.h"
 #include "Engine/World.h"
 #include "Input/Events.h"
 #include "Layout/Geometry.h"
@@ -238,9 +239,12 @@ bool FMobileMapToolsTest::RunTest(const FString& Parameters)
 	Click(TEXT("Btn_MapMore"));
 	TestTrue(TEXT("More opens them"), Screen->IsMapToolsOpen());
 	TestEqual(TEXT("and shows them"), Screen->FindNamedWidget(TEXT("MapTools"))->GetVisibility(), ESlateVisibility::Visible);
-	TestFalse(TEXT("Move is off"), Screen->AreMapGesturesOn() || Map->AreGesturesEnabled());
+	TestTrue(TEXT("Move is on at first, so a drag moves the map"), Screen->AreMapGesturesOn() && Map->AreGesturesEnabled());
+	TestEqual(TEXT("and the button says so"), Cast<UTextBlock>(Screen->FindNamedWidget(TEXT("Btn_MapMove_Label"))) ? Cast<UTextBlock>(Screen->FindNamedWidget(TEXT("Btn_MapMove_Label")))->GetText().ToString() : FString(), FString(TEXT("Move: On")));
 	Click(TEXT("Btn_MapMove"));
-	TestTrue(TEXT("Move turns the gestures on"), Screen->AreMapGesturesOn() && Map->AreGesturesEnabled());
+	TestFalse(TEXT("pressing it turns the gestures off"), Screen->AreMapGesturesOn() || Map->AreGesturesEnabled());
+	Click(TEXT("Btn_MapMove"));
+	TestTrue(TEXT("and pressing it again turns them back on"), Screen->AreMapGesturesOn() && Map->AreGesturesEnabled());
 	Click(TEXT("Btn_ZoomIn"));
 	TestTrue(TEXT("zoom in is a step"), FMath::IsNearlyEqual(Map->GetZoom(), 1.2));
 	Click(TEXT("Btn_ZoomOut"));

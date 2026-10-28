@@ -189,7 +189,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 			Box->SetContent(Content);
 			return Box;
 		};
-		MapMoveButton = MakeButton(Tree, TEXT("Btn_MapMove"), TEXT("Move: Off"), White, Ink, 8.f, 44.f, &MapMoveLabel, 10.f);
+		MapMoveButton = MakeButton(Tree, TEXT("Btn_MapMove"), TEXT("Move: On"), White, Ink, 8.f, 44.f, &MapMoveLabel, 10.f);
 		ApplyFont(MapMoveLabel, 13.f, true);
 		MapMoveButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnMapMoveClicked);
 		ToolsRow->AddChildToHorizontalBox(Sized(MapMoveButton, 73.f, 44.f));

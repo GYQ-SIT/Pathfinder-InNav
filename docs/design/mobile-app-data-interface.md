@@ -230,7 +230,7 @@ process-wide variables, so a test that changes them puts them back (`FAppearance
 ## Map zoom and pan
 
 The map has a view, as in the prototype: zoom from **0.7 to 2** (1 = the plan fits the uncovered part of the screen), and a pan. The **More** button above the sheet opens the map's tools:
-**Move: Off / On** and **-** / **+** (a step of 0.2 about the middle of the uncovered part; each button turns off at its end of the range). Dragging with one pointer moves the view and two
+**Move: On / Off** (it **starts On**: the prototype starts it Off, but a drag should move the map at once) and **-** / **+** (a step of 0.2 about the middle of the uncovered part; each button turns off at its end of the range). Dragging with one pointer moves the view and two
 fingers pinch-zoom (about their middle, which also moves the view) only when **Move** is on, as in the prototype; with it off a drag does nothing and is not a tap. The mouse wheel zooms
 about the pointer when Move is on. A tap that does not move still picks a room or a building. The plan cannot be pushed out of sight: 80 pixels of it (or all of it, if smaller) stay in the
 uncovered part. The view starts again at the fit for another level or building, the overview, the 2D / 3D switch, **Locate**, and opening a site; a refresh of the same level keeps it. Hit
@@ -249,6 +249,6 @@ The phone screen follows the prototype's layout, in design pixels (375 wide):
 - **Top row** (8 below the header, 54 tall): the title as plain text (14 bold; the building and level, "E2 . L1", or the site's name on the overview), **Overview** (44 tall; only for a campus; says
   "Current" while the overview is shown), and the 2D / 3D switch (buttons 44 tall, 12 bold, in a bordered box with 8 px radius).
 - **Toolbar** (right 12, 12 above the sheet): one bar, 5 px padding, 4 px gaps, with the level (68 x 44, "L1"), locate (44 x 44, a drawn target) and more (44 x 44, three dots). The levels open
-  upward from the level button; the tools (Move: Off, -, +, 44 tall, 8 px gaps) open upward from the bar, right-aligned. Icons are drawn from shapes until the design team's icons are in.
+  upward from the level button; the tools (Move: On, -, +, 44 tall, 8 px gaps) open upward from the bar, right-aligned. Icons are drawn from shapes until the design team's icons are in.
 
 `UMobileAppWidget::ControlsHeight` is the toolbar's 54; the pop-ups are not counted. Test: `InNavi.Mobile.LayoutLikePrototype`.

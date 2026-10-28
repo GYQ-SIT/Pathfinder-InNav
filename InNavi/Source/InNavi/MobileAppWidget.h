@@ -337,7 +337,7 @@ private:
 	UPROPERTY()
 	UTextBlock* ZoomOutLabel = nullptr;
 	bool bMapToolsOpen = false;
-	bool bMapGestures = false;
+	bool bMapGestures = true;
 	UPROPERTY()
 	UMobileArrivedPageWidget* ArrivedPage = nullptr;
 	// Which step of the route the person is on while walking (0-based).
