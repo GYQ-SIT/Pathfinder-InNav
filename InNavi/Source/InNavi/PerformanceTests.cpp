@@ -168,8 +168,10 @@ bool FPerformanceInteriorTest::RunTest(const FString& Parameters)
 	if (!TestTrue(TEXT("the building has rooms to route between"), Rooms.Num() >= 20)) return false;
 	const APolyBuilding* Building = Fixture.Generator->FindBuildingById(Id);
 
-	// Pairs spread over the floors, always the same ones.
-	FSamples Routes;
+	// Pairs spread over the floors, always the same ones. The first route builds the graph of the building; the next ones find it kept.
+	FNavigationRoutePlanner::ClearGraphCache();
+	FSamples Routes, Warm;
+	double FirstRoute = 0.0;
 	int32 Found = 0, CrossFloor = 0, Pairs = 0;
 	const int32 Count = Rooms.Num();
 	for (int32 Index = 0; Index < Count && Pairs < 12; ++Index)
@@ -181,15 +183,19 @@ bool FPerformanceInteriorTest::RunTest(const FString& Parameters)
 		FNavigationRouteResult Route;
 		const double Start = FPlatformTime::Seconds();
 		const bool bFound = FNavigationRoutePlanner::FindRoute(*Building, *Fixture.Interior, Fixture.Generator->GetScale(), From.Floor, From.Centroid, To.Floor, To.Centroid, Route);
-		Routes.Add(FPlatformTime::Seconds() - Start);
+		const double Took = FPlatformTime::Seconds() - Start;
+		Routes.Add(Took);
+		if (Pairs == 1) FirstRoute = Took; else Warm.Add(Took);
 		Found += bFound ? 1 : 0;
 		CrossFloor += (bFound && From.Floor != To.Floor) ? 1 : 0;
 	}
-	AddInfo(FString::Printf(TEXT("Interior of 10 floors, %d usable rooms: generating the ten floors %.0f ms; opening it, 5 runs: p50 %.0f ms, p95 %.0f ms. Route inside it, %d pairs (%d found, %d across floors): p50 %.0f ms, p95 %.0f ms, max %.0f ms"),
-		Count, Generating * 1000.0, Opening.Percentile(0.5), Opening.Percentile(0.95), Pairs, Found, CrossFloor, Routes.Percentile(0.5), Routes.Percentile(0.95), Routes.Max()));
+	AddInfo(FString::Printf(TEXT("Interior of 10 floors, %d usable rooms: generating the ten floors %.0f ms; opening it, 5 runs: p50 %.0f ms, p95 %.0f ms. Route inside it, %d pairs (%d found, %d across floors): the first, which builds the graph, %.0f ms; the next %d (graph kept, %d found in the cache): p50 %.0f ms, p95 %.0f ms, max %.0f ms"),
+		Count, Generating * 1000.0, Opening.Percentile(0.5), Opening.Percentile(0.95), Pairs, Found, CrossFloor, FirstRoute * 1000.0, Warm.Milliseconds.Num(), FNavigationRoutePlanner::GetGraphCacheHits(), Warm.Percentile(0.5), Warm.Percentile(0.95), Warm.Max()));
 	TestTrue(TEXT("most of the pairs have a route"), Found * 10 >= Pairs * 8);
 	TestTrue(TEXT("opening an interior takes under 5 s"), Opening.Percentile(0.95) < 5000.0);
-	TestTrue(TEXT("a route inside the largest building has a p95 under 15 s"), Routes.Percentile(0.95) < 15000.0);
+	TestTrue(TEXT("the first route in the largest building, which builds the graph, takes under 15 s"), FirstRoute < 15.0);
+	TestEqual(TEXT("the other routes found the graph kept"), FNavigationRoutePlanner::GetGraphCacheHits(), Warm.Milliseconds.Num());
+	TestTrue(TEXT("and have a p95 under 1.5 s"), Warm.Percentile(0.95) < 1500.0);
 	auto Data = MakeShared<FJsonObject>();
 	Data->SetNumberField(TEXT("usable_rooms"), Count);
 	Data->SetNumberField(TEXT("generate_ten_floors_ms"), Generating * 1000.0);
@@ -198,6 +204,8 @@ bool FPerformanceInteriorTest::RunTest(const FString& Parameters)
 	Data->SetNumberField(TEXT("across_floors"), CrossFloor);
 	Data->SetObjectField(TEXT("open_interior"), Describe(Opening));
 	Data->SetObjectField(TEXT("route"), Describe(Routes));
+	Data->SetNumberField(TEXT("first_route_ms"), FirstRoute * 1000.0);
+	Data->SetObjectField(TEXT("route_graph_kept"), Describe(Warm));
 	SaveMeasurement(TEXT("interior-routes"), Data);
 	return true;
 }

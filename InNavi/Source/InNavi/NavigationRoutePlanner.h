@@ -134,4 +134,12 @@ public:
 	static bool FindRoute(const APolyBuilding& Building, const AInteriorGenerator& Interior,
 		float Scale, int32 StartFloor, FVector2D Start, int32 DestinationFloor,
 		FVector2D Destination, FNavigationRouteResult& OutResult);
+
+	// The part of the route graph that does not depend on where a route starts and ends (the places of the buildings and which of them can
+	// see each other) is nearly all the work of a route in a big building, so it is kept between routes, keyed by everything it is made from
+	// (the geometry, doors, connectors and entrances read for the route, and the scale), and made again when any of that changes. These say
+	// how often it was found and how often it had to be built; Clear forgets it (and the counts).
+	static int32 GetGraphCacheHits();
+	static int32 GetGraphCacheMisses();
+	static void ClearGraphCache();
 };

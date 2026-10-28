@@ -824,8 +824,90 @@ namespace
 	{
 		TArray<FVertex> Vertices;
 		TArray<TArray<FRouteGraphEdge>> Edges;
+		// The points a search is about (the start and the destination, or the rooms a check asks about): vertices after the StaticCount of
+		// the buildings, or INDEX_NONE for a point that cannot be used.
 		TArray<int32> SeedVertices;
+		int32 StaticCount = 0;
 	};
+
+	// The part of a campus graph that does not depend on the seeds: the vertices of the buildings and which of them can see each other.
+	// Joining them in pairs is nearly all the work of a route in a big building (thousands of vertices); a seed is only joined to what is
+	// already there. So it is kept, keyed by everything it is made from, and found again by the next route.
+	struct FStaticGraph
+	{
+		TArray<FVertex> Vertices;
+		TArray<TArray<FRouteGraphEdge>> Edges;
+	};
+
+	struct FGraphCache
+	{
+		FCriticalSection Lock;
+		TArray<TPair<uint64, TSharedRef<const FStaticGraph>>> Entries;
+		int32 Hits = 0;
+		int32 Misses = 0;
+		// A few: the whole campus, a building on its own, and the same with other preferences for lifts and stairs.
+		static constexpr int32 MaxEntries = 4;
+	};
+
+	FGraphCache& GraphCache()
+	{
+		static FGraphCache Cache;
+		return Cache;
+	}
+
+	struct FInputHasher
+	{
+		uint64 State = 1469598103934665603ull;
+		void Bytes(const void* Data, SIZE_T Length)
+		{
+			const uint8* Bytes = static_cast<const uint8*>(Data);
+			for (SIZE_T I = 0; I < Length; ++I) { State ^= Bytes[I]; State *= 1099511628211ull; }
+		}
+		template <typename T> void Pod(const T& Value) { Bytes(&Value, sizeof(T)); }
+		void Text(const FString& Value) { const int32 Length = Value.Len(); Pod(Length); Bytes(*Value, Length * sizeof(TCHAR)); }
+		void Points(const TArray<FVector2D>& Values) { Pod(Values.Num()); for (const FVector2D& Value : Values) { Pod(Value.X); Pod(Value.Y); } }
+	};
+
+	// Everything the static graph is made from: if none of it changed, the graph is the same.
+	uint64 HashGraphInputs(const TArray<FRouteBuilding>& Models, float Scale, bool bNeedsOutdoor)
+	{
+		FInputHasher Hash;
+		Hash.Pod(Scale); Hash.Pod(bNeedsOutdoor); Hash.Pod(Models.Num());
+		for (const FRouteBuilding& Model : Models)
+		{
+			Hash.Text(Model.Building->BuildingId);
+			Hash.Pod(Model.Building->BuildingOffset.X); Hash.Pod(Model.Building->BuildingOffset.Y);
+			Hash.Pod(Model.Building->GetFloorCount()); Hash.Pod(Model.Building->GetFloorHeight());
+			Hash.Points(Model.Building->GetFootprint());
+			TArray<int32> Levels;
+			Model.Floors.GetKeys(Levels);
+			Levels.Sort();
+			for (const int32 Level : Levels)
+			{
+				const FFloorGeometry& Floor = Model.Floors.FindChecked(Level);
+				Hash.Pod(Level); Hash.Pod(Floor.WallClearance); Hash.Pod(Floor.PreferredWallClearance);
+				Hash.Pod(Floor.Walls.Num());
+				for (const FSegment& Wall : Floor.Walls) { Hash.Pod(Wall.A.X); Hash.Pod(Wall.A.Y); Hash.Pod(Wall.B.X); Hash.Pod(Wall.B.Y); }
+				Hash.Points(Floor.DoorPoints); Hash.Points(Floor.TurnPoints);
+				Hash.Pod(Floor.ExteriorExits.Num());
+				for (const FExteriorExit& Exit : Floor.ExteriorExits) { Hash.Text(Exit.Id); Hash.Pod(Exit.Position.X); Hash.Pod(Exit.Position.Y); }
+			}
+			Hash.Pod(Model.Nodes.Num());
+			for (const FInteriorNavNode& Node : Model.Nodes)
+			{
+				Hash.Text(Node.Id); Hash.Pod(static_cast<uint8>(Node.Type)); Hash.Pod(Node.Level); Hash.Pod(Node.Position.X); Hash.Pod(Node.Position.Y);
+				Hash.Text(Node.ConnectorGroupId); Hash.Pod(Node.ConnectsFloors.Num());
+				for (const int32 Connected : Node.ConnectsFloors) Hash.Pod(Connected);
+			}
+			Hash.Pod(Model.Entrances.Num());
+			for (const FInteriorEntrance& Door : Model.Entrances)
+			{
+				Hash.Text(Door.Id); Hash.Pod(static_cast<uint8>(Door.Kind)); Hash.Pod(Door.Level); Hash.Pod(Door.EdgeIndex);
+				Hash.Pod(Door.Offset); Hash.Pod(Door.Width); Hash.Text(Door.ConnectsTo); Hash.Pod(Door.bMirrored); Hash.Text(Door.SourceBuildingId);
+			}
+		}
+		return Hash.State;
+	}
 
 	// The campus graph, built in two parts so that a long build can be spread over several frames: Begin makes the
 	// vertices, and Step joins them, as far as its time allows.
@@ -854,12 +936,29 @@ namespace
 			const FRouteBuilding* const* Found = ModelsById.Find(Id);
 			return Found ? *Found : nullptr;
 		}
+		// Keeps the joined vertices of the buildings (not the seeds) for the next route, once they are all joined.
+		void StoreStatic()
+		{
+			bStaticStored = true;
+			TSharedRef<FStaticGraph> Kept = MakeShared<FStaticGraph>();
+			Kept->Vertices.Append(Out.Vertices.GetData(), StaticCount);
+			Kept->Edges.Append(Out.Edges.GetData(), StaticCount);
+			FGraphCache& Cache = GraphCache();
+			FScopeLock Guard(&Cache.Lock);
+			Cache.Entries.RemoveAll([this](const TPair<uint64, TSharedRef<const FStaticGraph>>& Entry) { return Entry.Key == Key; });
+			Cache.Entries.Emplace(Key, Kept);
+			if (Cache.Entries.Num() > FGraphCache::MaxEntries) Cache.Entries.RemoveAt(0);
+		}
+
 		const TArray<FRouteBuilding>& Models;
 		const float Scale;
 		TMap<FString, const FRouteBuilding*> ModelsById;
 		TMap<FString, TArray<int32>> ByBuilding, ByLink;
 		TArray<int32> Outdoor, Candidates;
 		int32 NextVertex = 0;
+		uint64 Key = 0;
+		int32 StaticCount = 0;
+		bool bStaticStored = false;
 	};
 
 	bool FCampusGraphBuilder::Begin(const TArray<FNavigationRoutePoint>& Seeds, FString& Error)
@@ -893,11 +992,7 @@ namespace
 		};
 		TArray<FVertex>& Vertices = Out.Vertices;
 		bool bNeedsOutdoor = false;
-		for (auto Seed : Seeds)
-		{
-			Out.SeedVertices.Add(Validate(Seed) ? Vertices.Add({ Seed, {} }) : INDEX_NONE);
-			bNeedsOutdoor |= Seed.Floor == 0;
-		}
+		for (const FNavigationRoutePoint& Seed : Seeds) bNeedsOutdoor |= Seed.Floor == 0;
 		for (const auto& M : Models) for (const auto& Floor : M.Floors)
 			bNeedsOutdoor |= !Floor.Value.ExteriorExits.IsEmpty();
 		auto Add = [&](const FRouteBuilding& M, FVector2D P, int32 Floor, const FString& Id = FString(),
@@ -941,7 +1036,27 @@ namespace
 				if (bFree) Add(M, P, 0);
 			}
 		}
+		// The seeds come after the vertices of the buildings, so that those can be kept for the next route (FStaticGraph).
+		StaticCount = Vertices.Num();
+		Out.StaticCount = StaticCount;
+		Key = HashGraphInputs(Models, Scale, bNeedsOutdoor);
+		for (auto Seed : Seeds) Out.SeedVertices.Add(Validate(Seed) ? Vertices.Add({ Seed, {} }) : INDEX_NONE);
 		TArray<TArray<FRouteGraphEdge>>& Graph = Out.Edges;
+		TSharedPtr<const FStaticGraph> Found;
+		{
+			FGraphCache& Cache = GraphCache();
+			FScopeLock Guard(&Cache.Lock);
+			for (const TPair<uint64, TSharedRef<const FStaticGraph>>& Entry : Cache.Entries) if (Entry.Key == Key) { Found = Entry.Value; break; }
+			if (Found.IsValid() && Found->Vertices.Num() == StaticCount && Found->Edges.Num() == StaticCount) ++Cache.Hits;
+			else { Found.Reset(); ++Cache.Misses; }
+		}
+		if (Found.IsValid())
+		{
+			// Already joined: only the seeds are left.
+			Graph = Found->Edges;
+			NextVertex = StaticCount;
+			bStaticStored = true;
+		}
 		Graph.SetNum(Vertices.Num());
 		// Only some pairs can ever be joined: two outdoor points, two points of one building (any floors), or the two
 		// halves of one building link. Testing every pair of the campus costs time with the square of its size.
@@ -962,9 +1077,14 @@ namespace
 		for (bool bFirst = true; NextVertex < Vertices.Num(); ++NextVertex, bFirst = false)
 		{
 			if (!bFirst && FPlatformTime::Seconds() >= Deadline) return false;
+			// The vertices of the buildings are all joined: keep them, before the first seed is.
+			if (NextVertex == StaticCount && !bStaticStored) StoreStatic();
 			const int32 I = NextVertex;
+			const bool bSeed = I >= StaticCount;
 			Candidates.Reset();
-			auto Gather = [&](const TArray<int32>& Group) { for (const int32 J : Group) if (J > I) Candidates.Add(J); };
+			// A vertex of a building is joined to the later ones of the buildings; a seed to every vertex before it, the buildings and the seeds
+			// before it, so each pair is met once.
+			auto Gather = [&](const TArray<int32>& Group) { for (const int32 J : Group) if (bSeed ? J < I : (J > I && J < StaticCount)) Candidates.Add(J); };
 			Gather(ByBuilding.FindChecked(Vertices[I].Point.BuildingId));
 			if (Vertices[I].Point.Floor == 0) Gather(Outdoor);
 			if (const TArray<int32>* Link = ByLink.Find(Vertices[I].Point.ConnectorId)) Gather(*Link);
@@ -1026,6 +1146,7 @@ namespace
 				Graph[I].Add({ J, Cost }); Graph[J].Add({ I, Cost });
 			}
 		}
+		if (!bStaticStored && NextVertex >= StaticCount) StoreStatic();
 		return true;
 	}
 
@@ -1038,7 +1159,9 @@ namespace
 		{
 			const int32 Count = Graph.Vertices.Num();
 			Distances.Init(TNumericLimits<float>::Max(), Count); Previous.Init(INDEX_NONE, Count); Visited.Init(false, Count);
-			if (Count > 0) Distances[0] = 0;
+			Start = Graph.SeedVertices.IsValidIndex(0) ? Graph.SeedVertices[0] : INDEX_NONE;
+			Destination = Graph.SeedVertices.IsValidIndex(1) ? Graph.SeedVertices[1] : INDEX_NONE;
+			if (Start != INDEX_NONE) Distances[Start] = 0;
 		}
 		// Works until FPlatformTime::Seconds() reaches Deadline; true once the search is over.
 		bool Step(double Deadline)
@@ -1049,7 +1172,7 @@ namespace
 				if (!bFirst && FPlatformTime::Seconds() >= Deadline) return false;
 				int32 Current = INDEX_NONE;
 				for (int32 I = 0; I < Vertices.Num(); ++I) if (!Visited[I] && (Current == INDEX_NONE || Distances[I] < Distances[Current])) Current = I;
-				if (Steps >= Vertices.Num() || Current == INDEX_NONE || Distances[Current] == TNumericLimits<float>::Max() || Current == 1) { bDone = true; break; }
+				if (Steps >= Vertices.Num() || Current == INDEX_NONE || Distances[Current] == TNumericLimits<float>::Max() || Current == Destination) { bDone = true; break; }
 				Visited[Current] = true;
 				for (const auto& Edge : Graph.Edges[Current]) if (!Visited[Edge.To] && Distances[Current] + Edge.Cost < Distances[Edge.To])
 				{ Distances[Edge.To] = Distances[Current] + Edge.Cost; Previous[Edge.To] = Current; }
@@ -1059,13 +1182,13 @@ namespace
 		}
 		float GetProgress() const { return Graph.Vertices.Num() > 0 ? FMath::Min(1.f, static_cast<float>(Steps) / Graph.Vertices.Num()) : 1.f; }
 		// The length of the shortest route to the destination once the search is over; the largest float when there is none.
-		float GetCost() const { return Distances.Num() > 1 ? Distances[1] : TNumericLimits<float>::Max(); }
+		float GetCost() const { return Destination != INDEX_NONE ? Distances[Destination] : TNumericLimits<float>::Max(); }
 		// The route when there is one; otherwise false, with the reason in Result.Error.
 		bool Finish(FNavigationRouteResult& Result) const
 		{
-			if (Distances[1] == TNumericLimits<float>::Max()) { Result.Error = TEXT("No route found. Check main/link entrances, room doors, and floor connectors."); return false; }
+			if (Destination == INDEX_NONE || Distances[Destination] == TNumericLimits<float>::Max()) { Result.Error = TEXT("No route found. Check main/link entrances, room doors, and floor connectors."); return false; }
 			TArray<int32> Reverse;
-			for (int32 I = 1; I != INDEX_NONE; I = Previous[I]) Reverse.Add(I);
+			for (int32 I = Destination; I != INDEX_NONE; I = Previous[I]) Reverse.Add(I);
 			for (int32 I = Reverse.Num() - 1; I >= 0; --I) Result.Points.Add(Graph.Vertices[Reverse[I]].Point);
 			return true;
 		}
@@ -1077,9 +1200,12 @@ namespace
 		TArray<bool> Visited;
 		int32 Steps = 0;
 		bool bDone = false;
+		// The start and the destination: the seeds of the graph, not necessarily its first vertices.
+		int32 Start = INDEX_NONE;
+		int32 Destination = INDEX_NONE;
 	};
 
-	// The start and the destination are the graph's first two vertices, unless one of them is not a usable point.
+	// The start and the destination are the graph's first two seeds, unless one of them is not a usable point.
 	bool BothEndsFound(const FCampusGraph& Graph, FNavigationRouteResult& Result)
 	{
 		if (Graph.SeedVertices[0] != INDEX_NONE && Graph.SeedVertices[1] != INDEX_NONE) return true;
@@ -1099,6 +1225,29 @@ namespace
 		Solver.Step(TNumericLimits<double>::Max());
 		return Solver.Finish(Result);
 	}
+}
+
+int32 FNavigationRoutePlanner::GetGraphCacheHits()
+{
+	FGraphCache& Cache = GraphCache();
+	FScopeLock Guard(&Cache.Lock);
+	return Cache.Hits;
+}
+
+int32 FNavigationRoutePlanner::GetGraphCacheMisses()
+{
+	FGraphCache& Cache = GraphCache();
+	FScopeLock Guard(&Cache.Lock);
+	return Cache.Misses;
+}
+
+void FNavigationRoutePlanner::ClearGraphCache()
+{
+	FGraphCache& Cache = GraphCache();
+	FScopeLock Guard(&Cache.Lock);
+	Cache.Entries.Reset();
+	Cache.Hits = 0;
+	Cache.Misses = 0;
 }
 
 bool FNavigationRoutePlanner::FindRoute(const APolyBuilding& Building, const AInteriorGenerator& Interior,
