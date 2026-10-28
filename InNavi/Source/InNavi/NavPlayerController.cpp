@@ -3106,9 +3106,14 @@ void ANavPlayerController::FollowNavigationStep()
 	}
 	// A step outside belongs to the exterior screen and one inside a building to the interior screen: if the one that is up is the
 	// wrong one it hands over (and the other screen follows the step when it comes up).
-	if (NavigationStepScreenOwner.IsValid() && NavigationStepScreenCallback && NavigationStepScreenCallback(*Point))
+	// (The other screen follows the step as it takes over, and is not asked again.)
+	if (!bHandingOverStep && NavigationStepScreenOwner.IsValid() && NavigationStepScreenCallback)
 	{
-		return;
+		TGuardValue<bool> HandingOver(bHandingOverStep, true);
+		if (NavigationStepScreenCallback(*Point))
+		{
+			return;
+		}
 	}
 	// The exterior screen: no building is open, the camera goes to the spot.
 	if (NavigationPanel->IsOutdoorMode())

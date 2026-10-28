@@ -504,14 +504,6 @@ void UEditScreenWidget::NativeConstruct()
 	RefreshCameraSpeedDisplay();
 	// Arranges every dock panel for the first time: the user's saved layout, else the team default.
 	InitializeDockLayout();
-	// A route is being gone through step by step: this screen opens on the step (the camera goes to it).
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel(); Nav && Nav->IsStepByStep())
-		{
-			PC->FollowNavigationStep();
-		}
-	}
 }
 
 void UEditScreenWidget::PlayButtonClickSound()
@@ -628,6 +620,15 @@ bool UEditScreenWidget::HandOverToBuildingForStep(const FNavigationRoutePoint& P
 		return false;
 	}
 	OpenInteriorForBuilding(Point.BuildingId, false);
+	// The interior screen is up: a building is open, and its floor and view are the step's.
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->SetOutdoorMode(false);
+		}
+		PC->FollowNavigationStep();
+	}
 	return true;
 }
 

@@ -407,6 +407,47 @@ bool FNavigationStepScreenSwitchTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// A screen the person opens while a route is at a step that belongs to the other screen is just shown: it does not hand the step back
+// at once (which left the two screens on top of each other).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationStepScreenOpenedByHandTest, "InNavi.Navigation.Outdoor.StepScreensOpenedByHand",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationStepScreenOpenedByHandTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationOutdoorTests;
+	FNavigationSearchFixture Fixture;
+	if (!TestTrue(TEXT("test project loads"), LoadTestProject(Fixture))) return false;
+	ANavPlayerController* PC = Fixture.MakeController();
+	UNavigationPanelWidget* Nav = Fixture.Nav;
+
+	// A route between two spots outside Building A, and the interior of A open: the step is outside.
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("A"));
+	Nav->ToggleSelectStart(); Nav->SelectPoint(FVector2D(-10, 100), 1);
+	Nav->ToggleSelectDestination(); Nav->SelectPoint(FVector2D(-10, 150), 1);
+	Nav->RequestFindRoute();
+	if (!TestTrue(TEXT("the step is outside"), Nav->IsStepByStep() && Nav->GetGuidedPoint() && Nav->GetGuidedPoint()->Floor == UNavigationPanelWidget::OutdoorFloor)) return false;
+	const auto* Room = Nav->GetSelectableRooms().FindByPredicate([](const UNavigationPanelWidget::FNavigationRoomOption& O) { return O.Floor == 1; });
+	if (!TestNotNull(TEXT("a room in A"), Room)) return false;
+	const FString RoomLabel = Room->GetDisplayLabel();
+
+	// The interior screen comes up (the person opened it): it stays, with the building open.
+	UInteriorScreenWidget* InteriorScreen = NewObject<UInteriorScreenWidget>();
+	InteriorScreen->SetOwningPlayer(PC); InteriorScreen->Initialize(); InteriorScreen->TakeWidget();
+	TestEqual(TEXT("the interior screen does not hand the outside step back at once"), PC->GetLoadedBuildingId(), FString(TEXT("A")));
+	TestTrue(TEXT("the route and the step are as they were"), Nav->IsStepByStep() && Nav->GetGuidedStepIndex() == 0);
+
+	// The other way: a route at a step inside, and the exterior screen comes up with no building open.
+	Nav->ClearAll();
+	Nav->SetStartToRoom(RoomLabel);
+	Nav->ToggleSelectDestination(); Nav->SelectPoint(FVector2D(-10, 100), 1);
+	Nav->RequestFindRoute();
+	if (!TestTrue(TEXT("the step is inside"), Nav->IsStepByStep() && Nav->GetGuidedPoint() && Nav->GetGuidedPoint()->Floor == 1)) return false;
+	Fixture.Interior->ClearLoadedInterior();
+	UEditScreenWidget* ExteriorScreen = NewObject<UEditScreenWidget>();
+	ExteriorScreen->SetOwningPlayer(PC); ExteriorScreen->Initialize(); ExteriorScreen->TakeWidget();
+	TestTrue(TEXT("the exterior screen does not open the building for the inside step at once"), PC->GetLoadedBuildingId().IsEmpty());
+	return true;
+}
+
 // On the exterior screen the camera goes to the step.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationOutdoorStepCameraTest, "InNavi.Navigation.Outdoor.StepCamera",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

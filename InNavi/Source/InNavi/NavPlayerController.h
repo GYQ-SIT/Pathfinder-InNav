@@ -1142,6 +1142,7 @@ private:
 	TWeakObjectPtr<const UObject> PointerOverUIOwner;
 	TWeakObjectPtr<const UObject> NavigationStepScreenOwner;
 	TFunction<bool(const FNavigationRoutePoint&)> NavigationStepScreenCallback;
+	bool bHandingOverStep = false;
 	TFunction<bool(const FVector2D&)> PointerOverUICallback;
 	UPROPERTY(VisibleAnywhere, Category = "Navigation")
 	class UNavigationRouteVisualization* RouteVisualization = nullptr;

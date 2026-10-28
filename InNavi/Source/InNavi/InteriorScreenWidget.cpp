@@ -1340,12 +1340,10 @@ void UInteriorScreenWidget::NativeConstruct()
 	InitializeDockLayout();
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		// A route is being gone through step by step: this screen opens on the step (the building and floor it is in).
+		// A step outside is the exterior screen's: from now on this screen hands over to it when the route comes to one. (It does not
+		// follow the step when it comes up: it may have been opened by the person for another building, and the step stays as it is
+		// until the next one.)
 		PC->SetNavigationStepScreenCallback(this, [this](const FNavigationRoutePoint& Point) { return HandOverToCampusForStep(Point); });
-		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel(); Nav && Nav->IsStepByStep())
-		{
-			PC->FollowNavigationStep();
-		}
 	}
 }
 
@@ -2882,6 +2880,12 @@ bool UInteriorScreenWidget::HandOverToCampusForStep(const FNavigationRoutePoint&
 	// another building is opened; the route and the step are the panel's, and stay.
 	PC->SyncLoadedInterior();
 	GoToEditScreen();
+	// The exterior screen is up: the campus is what the panel shows, and the camera goes to the step.
+	if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+	{
+		Nav->SetOutdoorMode(true);
+	}
+	PC->FollowNavigationStep();
 	return true;
 }
 
