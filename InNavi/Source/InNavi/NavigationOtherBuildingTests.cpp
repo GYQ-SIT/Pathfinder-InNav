@@ -25,8 +25,8 @@ bool FNavigationOtherBuildingDropdownTest::RunTest(const FString& Parameters)
 	Repaint.BindUFunction(Screen, TEXT("HandleNavigationStateChanged"));
 	Fixture.Nav->OnStateChanged.AddUnique(Repaint);
 	Controller->OnInteriorContentChanged.Broadcast();
-	UComboBoxString* Starts = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_NavStartRoom")));
-	UComboBoxString* Destinations = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_NavDestinationRoom")));
+	UComboBoxString* Starts = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_NavPlace0")));
+	UComboBoxString* Destinations = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_NavPlace1")));
 	UComboBoxString* Switcher = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_BuildingSwitcher")));
 	if (!TestNotNull(TEXT("Start dropdown exists"), Starts) || !TestNotNull(TEXT("Destination dropdown exists"), Destinations)
 		|| !TestNotNull(TEXT("Building switcher exists"), Switcher)) return false;

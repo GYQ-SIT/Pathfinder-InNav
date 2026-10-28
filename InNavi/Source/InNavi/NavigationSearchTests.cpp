@@ -207,8 +207,8 @@ bool FNavigationSearchControlsTest::RunTest(const FString& Parameters)
 	UEditableTextBox* TagsBox = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_RoomTags")));
 	UButton* ApplyTags = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_ApplyRoom"))); // Save changes: the name and the tags
 	UEditableTextBox* Search = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_DestinationSearch")));
-	UComboBoxString* Destinations = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_NavDestinationRoom")));
-	UComboBoxString* Starts = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_NavStartRoom")));
+	UComboBoxString* Destinations = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_NavPlace1")));
+	UComboBoxString* Starts = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_NavPlace0")));
 	if (!TestNotNull(TEXT("Tags field exists"), TagsBox) || !TestNotNull(TEXT("Apply tags exists"), ApplyTags)
 		|| !TestNotNull(TEXT("Destination search exists"), Search) || !TestNotNull(TEXT("Destination results exist"), Destinations)
 		|| !TestNotNull(TEXT("Start dropdown exists"), Starts)) return false;

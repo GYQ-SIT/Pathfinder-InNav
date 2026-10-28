@@ -2,24 +2,64 @@
 
 #include "CoreMinimal.h"
 #include "DockPanelContent.h"
+#include "Components/Button.h"
+#include "Components/ComboBoxString.h"
 #include "Types/SlateEnums.h"
 #include "NavigationDockPanelWidget.generated.h"
 
 class UBorder;
-class UButton;
-class UComboBoxString;
 class UEditableTextBox;
+class UHorizontalBox;
 class UProgressBar;
 class USizeBox;
 class UTextBlock;
 class UVerticalBox;
+class UNavigationDockPanelWidget;
 
-// The Navigation dock panel, shared by the interior editor and the exterior screen: where Start and Destination are chosen
-// (from a room dropdown, or by clicking the map), Find Route / Clear Route, and the route's status and directions.
+// A button of a row of the places list: the number that selects the row, or the crosshair that picks the place on the map. It tells
+// the panel which slot it is in; what the slot shows is the panel's business.
+UCLASS()
+class INNAVI_API UNavigationPlaceButton : public UButton
+{
+	GENERATED_BODY()
+
+public:
+	void Setup(UNavigationDockPanelWidget* InPanel, int32 InSlot, bool bInPick);
+
+private:
+	UFUNCTION()
+	void HandleClicked();
+
+	TWeakObjectPtr<UNavigationDockPanelWidget> Panel;
+	int32 SlotIndex = INDEX_NONE;
+	bool bPick = false;
+};
+
+// The dropdown of a row of the places list.
+UCLASS()
+class INNAVI_API UNavigationPlaceCombo : public UComboBoxString
+{
+	GENERATED_BODY()
+
+public:
+	void Setup(UNavigationDockPanelWidget* InPanel, int32 InSlot);
+
+private:
+	UFUNCTION()
+	void HandleChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+	TWeakObjectPtr<UNavigationDockPanelWidget> Panel;
+	int32 SlotIndex = INDEX_NONE;
+};
+
+// The Navigation dock panel, shared by the interior editor and the exterior screen. It has two views. Plan is where the route is
+// set: one list of places in the order they are visited (the first is the start, the last the destination, any between are stops),
+// each picked from a list or by clicking the map, and moved, removed or reversed; then Find Route. Go is where it is gone through,
+// one step at a time, with the route in a line above, once there is one.
 //
-// It holds no navigation state of its own. That lives in UNavigationPanelWidget (ANavPlayerController::GetNavigationPanel);
-// this panel only shows it and forwards what the user does. The screen that owns the panel calls RefreshDisplay whenever the
-// navigation state changes and RefreshRoomDropdowns whenever the lists of places could have changed.
+// It holds no navigation state of its own. That lives in UNavigationPanelWidget (ANavPlayerController::GetNavigationPanel); this panel
+// only shows it and forwards what the user does. The screen that owns the panel calls RefreshDisplay whenever the navigation state
+// changes and RefreshRoomDropdowns whenever the lists of places could have changed.
 UCLASS()
 class INNAVI_API UNavigationDockPanelWidget : public UDockPanelContentWidget
 {
@@ -29,14 +69,21 @@ public:
 	// The width the dock gives the panel's controls.
 	void SetContentWidth(float Width);
 
-	// Repaints the buttons, the dropdowns' frames and texts, and the status and directions from the navigation state.
+	// Repaints the places, the buttons, the status and the steps from the navigation state.
 	void RefreshDisplay();
 
-	// Refills the Start and Destination dropdowns (and the destination search result line).
+	// Refills the dropdowns of the places (and the search result line).
 	void RefreshRoomDropdowns();
 
 	// The content root, which the pointer-over-panel test of the navigation state can ask about.
 	UBorder* GetRootBorder() const { return RootBorder; }
+
+	// What the buttons and dropdowns of the rows tell the panel (see UNavigationPlaceButton, UNavigationPlaceCombo).
+	void HandleSlotButton(int32 SlotIndex, bool bPick);
+	void HandleSlotChosen(int32 SlotIndex, const FString& Item, ESelectInfo::Type SelectionType);
+
+	// How many rows the list can show: the start, the most stops, a row to add a stop in, and the destination.
+	static constexpr int32 MaxSlots = 11;
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -45,7 +92,29 @@ protected:
 
 private:
 	UFUNCTION()
+	void OnPlanTabClicked();
+	UFUNCTION()
+	void OnGoTabClicked();
+	UFUNCTION()
+	void OnEditRouteClicked();
+	UFUNCTION()
+	void OnMoveUpClicked();
+	UFUNCTION()
+	void OnMoveDownClicked();
+	UFUNCTION()
+	void OnRemoveClicked();
+	UFUNCTION()
+	void OnAddStopClicked();
+	UFUNCTION()
+	void OnReverseClicked();
+	UFUNCTION()
+	void OnFindRouteClicked();
+	UFUNCTION()
 	void OnCancelFindRouteClicked();
+	UFUNCTION()
+	void OnClearRouteClicked();
+	UFUNCTION()
+	void OnToggleRouteClicked();
 	UFUNCTION()
 	void OnNextStepClicked();
 	UFUNCTION()
@@ -53,129 +122,102 @@ private:
 	UFUNCTION()
 	void OnStepModeClicked();
 	UFUNCTION()
-	void OnAddStopClicked();
-	UFUNCTION()
-	void OnClickAddStopsClicked();
-	UFUNCTION()
-	void OnMoveStopUpClicked();
-	UFUNCTION()
-	void OnMoveStopDownClicked();
-	UFUNCTION()
-	void OnRemoveStopClicked();
-	UFUNCTION()
-	void HandleStopRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
-	UFUNCTION()
-	void HandleStopSelected(FString SelectedItem, ESelectInfo::Type SelectionType);
-
-	// The list of stops and the buttons that act on the one chosen in it.
-	void RefreshStops();
-	void UpdateStopControls();
-	// Moves the chosen stop up (-1) or down (+1) the list, and keeps it chosen.
-	void MoveSelectedStop(int32 Offset);
-	UFUNCTION()
-	void OnSetStartClicked();
-	UFUNCTION()
-	void OnSetDestinationClicked();
-	UFUNCTION()
-	void OnFindRouteClicked();
-	UFUNCTION()
-	void OnClearRouteClicked();
-	UFUNCTION()
-	void OnToggleRouteClicked();
-	UFUNCTION()
-	void HandleStartRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
-	UFUNCTION()
-	void HandleDestinationRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
-	UFUNCTION()
 	void HandleSearchChanged(const FText& Text);
 	UFUNCTION()
 	UWidget* HandleGenerateComboBoxItem(FString Item);
 
+	// Which place each row of the list shows: a row of the route, PendingRow for the row a stop is being added in, or INDEX_NONE for a
+	// row not in use. The rows are widgets made once; what they show is set here.
+	static constexpr int32 PendingRow = -2;
+	void AssignSlots(const class UNavigationPanelWidget& Nav);
+	void UpdateView();
 
 	UPROPERTY()
 	UBorder* RootBorder = nullptr;
 	UPROPERTY()
+	UButton* PlanTabButton = nullptr;
+	UPROPERTY()
+	UButton* GoTabButton = nullptr;
+	UPROPERTY()
+	UVerticalBox* PlanBox = nullptr;
+	UPROPERTY()
+	UVerticalBox* GoBox = nullptr;
+	UPROPERTY()
+	USizeBox* TabsSize = nullptr;
+
+	// ---- Plan ----
+	UPROPERTY()
 	UTextBlock* ContextText = nullptr;
-	UPROPERTY()
-	UTextBlock* StartLabelText = nullptr;
-	UPROPERTY()
-	UTextBlock* DestinationLabelText = nullptr;
-	UPROPERTY()
-	UComboBoxString* StartRoomComboBox = nullptr;
-	// Frame around the Start dropdown, green only when Start was set by picking from it (as opposed to clicking the map).
-	UPROPERTY()
-	UBorder* StartRoomBorder = nullptr;
-	UPROPERTY()
-	UComboBoxString* DestinationRoomComboBox = nullptr;
 	UPROPERTY()
 	UEditableTextBox* DestinationSearchBox = nullptr;
 	UPROPERTY()
 	UTextBlock* DestinationSearchResultsText = nullptr;
-	// Same as StartRoomBorder, red for Destination.
 	UPROPERTY()
-	UBorder* DestinationRoomBorder = nullptr;
+	TArray<TObjectPtr<USizeBox>> SlotSizes;
 	UPROPERTY()
-	UButton* SetStartButton = nullptr;
+	TArray<TObjectPtr<UNavigationPlaceButton>> BadgeButtons;
 	UPROPERTY()
-	UTextBlock* SetStartButtonLabel = nullptr;
+	TArray<TObjectPtr<UTextBlock>> BadgeTexts;
 	UPROPERTY()
-	UButton* SetDestinationButton = nullptr;
+	TArray<TObjectPtr<UTextBlock>> RoleTexts;
 	UPROPERTY()
-	UTextBlock* SetDestinationButtonLabel = nullptr;
+	TArray<TObjectPtr<UBorder>> FieldBorders;
 	UPROPERTY()
-	UButton* FindRouteButton = nullptr;
-	// The stops: the dropdown a place to add is picked from, the button that adds it, and the stops so far in order with what can
-	// be done to the one chosen. All of it is what UNavigationPanelWidget holds; nothing of it is kept here.
+	TArray<TObjectPtr<USizeBox>> ComboSizes;
 	UPROPERTY()
-	UComboBoxString* StopRoomComboBox = nullptr;
+	TArray<TObjectPtr<UNavigationPlaceCombo>> PlaceCombos;
 	UPROPERTY()
-	UBorder* StopRoomBorder = nullptr;
+	TArray<TObjectPtr<UNavigationPlaceButton>> PickButtons;
+	UPROPERTY()
+	USizeBox* ActionsSize = nullptr;
+	UPROPERTY()
+	UButton* MoveUpButton = nullptr;
+	UPROPERTY()
+	UButton* MoveDownButton = nullptr;
+	UPROPERTY()
+	UButton* RemoveButton = nullptr;
 	UPROPERTY()
 	UButton* AddStopButton = nullptr;
 	UPROPERTY()
 	UTextBlock* AddStopButtonLabel = nullptr;
 	UPROPERTY()
-	UButton* ClickAddStopsButton = nullptr;
+	UButton* ReverseButton = nullptr;
 	UPROPERTY()
-	UTextBlock* ClickAddStopsButtonLabel = nullptr;
+	USizeBox* AddRowSize = nullptr;
 	UPROPERTY()
-	UTextBlock* StopsLabelText = nullptr;
-	UPROPERTY()
-	UComboBoxString* StopsComboBox = nullptr;
-	UPROPERTY()
-	UBorder* StopsBorder = nullptr;
-	UPROPERTY()
-	USizeBox* StopActionsSize = nullptr;
-	UPROPERTY()
-	UButton* MoveStopUpButton = nullptr;
-	UPROPERTY()
-	UButton* MoveStopDownButton = nullptr;
-	UPROPERTY()
-	UButton* RemoveStopButton = nullptr;
-	// The stops as last listed, so the list is rebuilt (and its chosen entry kept) only when they change.
-	FString ShownStops;
-
+	UButton* FindRouteButton = nullptr;
 	// Shown only while a route is being searched for.
 	UPROPERTY()
 	UProgressBar* FindRouteProgress = nullptr;
 	UPROPERTY()
 	UButton* CancelFindRouteButton = nullptr;
 	UPROPERTY()
+	UTextBlock* HintText = nullptr;
+	UPROPERTY()
+	UTextBlock* StatusText = nullptr;
+	UPROPERTY()
+	UTextBlock* RouteDetailsText = nullptr;
+	UPROPERTY()
 	UButton* ClearRouteButton = nullptr;
 	UPROPERTY()
 	UButton* ToggleRouteButton = nullptr;
 	UPROPERTY()
 	UTextBlock* ToggleRouteButtonLabel = nullptr;
+
+	// ---- Go ----
+	// The route in a line: a number for each place, in the colour it has on the map.
 	UPROPERTY()
-	UTextBlock* StatusText = nullptr;
+	TArray<TObjectPtr<UBorder>> OverviewBadges;
 	UPROPERTY()
-	UTextBlock* RouteDetailsText = nullptr;
-	// The route found, one text block per step ("Step 1: ..."), the last one in green. Rebuilt only when the steps change.
+	TArray<TObjectPtr<UTextBlock>> OverviewTexts;
+	UPROPERTY()
+	UTextBlock* OverviewInfoText = nullptr;
+	UPROPERTY()
+	UProgressBar* StepProgress = nullptr;
+	// The steps, one per line (all of them) or the one being gone through and where it is in the route.
 	UPROPERTY()
 	UVerticalBox* RouteStepsBox = nullptr;
 	FString ShownRouteSteps;
-	// Step by step: Previous / Next move along the route a step at a time (as on the phone), and the last button switches between
-	// that and the whole list of steps. Shown once there is a route.
 	UPROPERTY()
 	USizeBox* StepButtonsSize = nullptr;
 	UPROPERTY()
@@ -188,11 +230,17 @@ private:
 	UButton* StepModeButton = nullptr;
 	UPROPERTY()
 	UTextBlock* StepModeButtonLabel = nullptr;
+	UPROPERTY()
+	UButton* EditRouteButton = nullptr;
 
-	// The extra entry each dropdown currently carries for a Start / Destination picked in another building
-	// (UNavigationPanelWidget::GetStartOtherBuildingLabel), empty if none - so the lists are rebuilt only when it changes.
-	FString ShownOtherBuildingStart;
-	FString ShownOtherBuildingDestination;
+	// What the panel itself keeps (nothing of the route): the view shown, the row chosen for moving or removing, whether a row to add a
+	// stop in is open, and what the rows showed last so the dropdowns are refilled only when that changes.
+	bool bGoView = false;
+	bool bHadRoute = false;
+	bool bAddingStop = false;
+	int32 SelectedRow = INDEX_NONE;
+	TArray<int32> SlotRow;
+	FString ShownPlaces;
 
 	// Dropdown rows are kept alive while a dropdown can still show them.
 	UPROPERTY()

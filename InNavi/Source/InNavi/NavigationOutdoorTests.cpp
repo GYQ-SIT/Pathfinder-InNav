@@ -100,6 +100,7 @@ bool FNavigationOutdoorGroundClickTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("belonging to A"), Nav->GetStart().BuildingId, FString(TEXT("A")));
 	TestFalse(TEXT("not from the dropdown"), Nav->WasStartSetViaDropdown());
 	TestTrue(TEXT("the point has a world position"), Nav->GetStart().bHasWorldPosition);
+	TestEqual(TEXT("a spot picked on the map is a short custom point in the list"), Nav->GetPlaceText(0), FString(TEXT("Custom Point (External)")));
 
 	// Spots that are not allowed change nothing and say why.
 	Nav->ToggleSelectDestination();

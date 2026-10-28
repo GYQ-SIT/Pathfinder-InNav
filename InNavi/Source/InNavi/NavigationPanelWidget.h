@@ -102,6 +102,30 @@ public:
 	bool RemoveStop(int32 StopIndex);
 	bool MoveStop(int32 FromIndex, int32 ToIndex);
 	void ClearStops();
+	// ---- The route as one list of places ----
+	// What the Navigation panel shows: the places in the order they are visited, from the Start to the Destination. The two ends are
+	// rows even before they are set; a stop is a row between them. The last place is the destination whatever it was called: a route
+	// of a Start and one stop is a route to that stop (when a route is looked for, an end that is not set is taken from the stop next
+	// to it).
+	int32 GetPlaceCount() const { return Stops.Num() + 2; }
+	// How many of the places are set; two are enough to look for a route.
+	int32 GetSetPlaceCount() const;
+	bool IsPlaceSet(int32 Row) const;
+	// "Start", "Stop 2", "Destination".
+	FString GetPlaceRole(int32 Row) const;
+	// What a row shows: the room as its list names it, with its building when the building is not the open one; a place picked on the
+	// map by where it is. Empty when the place is not set.
+	FString GetPlaceText(int32 Row) const;
+	// Sets a row from the list (the Start, the Destination, or replaces a stop).
+	bool SetPlaceToRoom(int32 Row, const FString& RoomOptionLabel);
+	// Empties an end, or removes a stop.
+	bool ClearPlace(int32 Row);
+	// Moves a place up (-1) or down (+1) the list; returns where it is now, INDEX_NONE if it cannot. A place that moves onto an end
+	// that is not set takes the end.
+	int32 MovePlace(int32 Row, int32 Offset);
+	// The same places the other way round.
+	void ReversePlaces();
+
 	// Click mode for stops: each click on the map (a place indoors, or the ground outside) adds a stop, and the mode stays on for the
 	// next one until it is toggled off, Escape is pressed or the limit is reached. Picking a Start or Destination ends it, and the
 	// other way round; adding a stop from the list does not disturb a click mode in progress.
@@ -318,6 +342,10 @@ private:
 	void ClearRouteResult() { RoutePoints.Reset(); RouteLegs.Reset(); }
 	// What every change of the stops does: the search and the route they were for no longer apply.
 	void StopsChanged(const FString& Message, ENavigationMessageKind Kind);
+	// A stop from a dropdown entry (what AddStopToRoom adds and a row set from the list is replaced by).
+	bool MakeStopFromLabel(const FString& RoomOptionLabel, FNavigationStop& OutStop);
+	// The ends that are not set are taken from the stops next to them, so that two places are a route.
+	void PromoteEnds();
 	// The point on the map a dropdown entry stands for, and the building it is in; false (with the reason, for the status line) when a
 	// person cannot be sent there.
 	bool MakeOptionPoint(const FNavigationRoomOption& Option, FNavigationRoutePoint& OutPoint, FString& OutBuildingId, FString& OutError) const;
@@ -354,6 +382,13 @@ private:
 	FString OtherBuildingLabel(const FSelectedEndpoint& Endpoint) const;
 	// A stop as an endpoint, to be spoken of the way the Start and Destination are.
 	FSelectedEndpoint StopAsEndpoint(const FNavigationStop& Stop) const;
+	// The places as endpoints, Start first and Destination last, and the other way: the ends from the first and the last, the stops
+	// from those between (one that is not set cannot be between, and is left out). Tags, when given, are left out and padded the same way.
+	TArray<FSelectedEndpoint> PlacesAsRows() const;
+	void ApplyRows(TArray<FSelectedEndpoint> Rows, TArray<int32>* Tags = nullptr);
+	// How an endpoint is shown in the places list.
+	FString PlaceText(const FSelectedEndpoint& Endpoint) const;
+	bool ReplaceStop(int32 StopIndex, const FString& RoomOptionLabel);
 	// A building by its name (its id when it has none), and where an endpoint is, in words, for the directions.
 	FString BuildingDisplayName(const FString& BuildingId) const;
 	FString EndpointPhrase(const FSelectedEndpoint& Endpoint) const;
