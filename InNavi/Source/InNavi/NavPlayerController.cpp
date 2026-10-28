@@ -3118,7 +3118,9 @@ void ANavPlayerController::FollowNavigationStep()
 	// The exterior screen: no building is open, the camera goes to the spot.
 	if (NavigationPanel->IsOutdoorMode())
 	{
-		FocusCameraOnCampusPoint(*Point, Building);
+		const FNavigationRouteFocus Focus = NavigationPanel->GetGuidedFocus();
+		const TArray<FNavigationRoutePoint>& Route = NavigationPanel->GetRoutePoints();
+		FocusCameraOnCampusPoint(*Point, Focus.LastPointIndex != Focus.FirstPointIndex && Route.IsValidIndex(Focus.LastPointIndex) ? &Route[Focus.LastPointIndex] : nullptr);
 		return;
 	}
 	if (!InteriorGen)
@@ -3145,24 +3147,39 @@ void ANavPlayerController::FollowNavigationStep()
 	RefreshRoute3DVisualization();
 }
 
-void ANavPlayerController::FocusCameraOnCampusPoint(const FNavigationRoutePoint& Point, APolyBuilding* Building)
+void ANavPlayerController::FocusCameraOnCampusPoint(const FNavigationRoutePoint& Point, const FNavigationRoutePoint* Next)
 {
 	APawn* ControlledPawn = GetPawn();
-	if (!Building || !ControlledPawn)
+	if (!ControlledPawn || !Generator)
 	{
 		return;
 	}
-	FVector2D Center;
-	float Span;
-	GetBuildingFootprintBounds(Building, Center, Span);
-	const float Scale = Generator ? Generator->GetScale() : 1.f;
-	const FVector Target = Point.bHasWorldPosition ? Point.WorldPosition
-		: FVector((Point.Position.X + Building->BuildingOffset.X) * Scale, (Point.Position.Y + Building->BuildingOffset.Y) * Scale,
-			FMath::Max(0, Point.Floor - 1) * Building->GetFloorHeight());
-	// As FocusCameraOnBuildingFromExterior frames a building (the heading is kept, the pitch is set), but aimed at the spot.
-	const float BuildingHeight = Building->GetFloorCount() * Building->GetFloorHeight();
-	const FRotator Rotation(-35.f, GetControlRotation().Yaw, 0.f);
-	const float Distance = FMath::Max(Span, BuildingHeight) * 1.2f + 500.f;
+	auto WorldOf = [this](const FNavigationRoutePoint& Spot) -> FVector
+	{
+		if (Spot.bHasWorldPosition)
+		{
+			return Spot.WorldPosition;
+		}
+		const APolyBuilding* Owner = Generator->FindBuildingById(Spot.BuildingId);
+		return Owner ? FVector((Spot.Position.X + Owner->BuildingOffset.X) * Generator->GetScale(), (Spot.Position.Y + Owner->BuildingOffset.Y) * Generator->GetScale(),
+			FMath::Max(0, Spot.Floor - 1) * Owner->GetFloorHeight()) : FVector::ZeroVector;
+	};
+	// A view of a person's size, in world units (cm): near enough to see the spot and what is around it, far enough to take in the
+	// stretch of the route that goes on from it, and never so far that the spot is lost.
+	constexpr float MinDistance = 2500.f;
+	constexpr float MaxDistance = 15000.f;
+	constexpr float Pitch = -45.f;
+	const FVector Here = WorldOf(Point);
+	const FVector There = Next ? WorldOf(*Next) : Here;
+	float Distance = FMath::Max(MinDistance, FVector::Dist2D(Here, There) * 1.3f + 1500.f);
+	// Aimed between the spot and where the step ends when both fit; when the stretch is too long for that, at the spot.
+	FVector Target = (Here + There) * 0.5f;
+	if (Distance > MaxDistance)
+	{
+		Distance = MaxDistance;
+		Target = Here;
+	}
+	const FRotator Rotation(Pitch, GetControlRotation().Yaw, 0.f);
 	ControlledPawn->SetActorLocationAndRotation(Target - Rotation.Vector() * Distance, Rotation);
 	SetControlRotation(Rotation);
 }

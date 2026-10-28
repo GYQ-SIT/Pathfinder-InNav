@@ -1368,8 +1368,10 @@ private:
 	// Remembers the view it was at beforehand (only the first time, until RestoreExteriorCameraView
 	// is called) so that can be restored later. The actual positioning is PositionCameraForFloor.
 	void FocusCameraOnBuilding(APolyBuilding* Building);
-	// The exterior camera over a spot of the campus (a route point), framed for the building it belongs to.
-	void FocusCameraOnCampusPoint(const FNavigationRoutePoint& Point, APolyBuilding* Building);
+	// The exterior camera over a spot of the campus (a route point): looking down at it from a person-sized distance, kept far enough
+	// to take in the stretch of the route that goes on from there (Next, the point where the step ends; null for a step that is only a
+	// place). The distance does not depend on the size of the buildings, which on a real campus is large.
+	void FocusCameraOnCampusPoint(const FNavigationRoutePoint& Point, const FNavigationRoutePoint* Next);
 
 	// Moves the exterior camera so the whole building is in view, from an angle above and in front of it, for
 	// picking a building from the filter results list. Unlike FocusCameraOnBuilding (the top-down framing used
