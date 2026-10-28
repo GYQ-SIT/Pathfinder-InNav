@@ -31,6 +31,8 @@ public:
     // 0 to 1, and what is being done now, while running.
     float GetProgress() const;
     FString GetProgressText() const;
+    // How many times the route checks have been started: they are the slow part, and viewing an issue must not start them again.
+    uint32 GetRouteCheckRuns() const { return RouteCheckRuns; }
     void RefreshStaleness();
     bool HasReport() const { return bHasReport; }
     bool IsStale() const { return bStale; }
@@ -44,6 +46,13 @@ public:
 private:
     void BeginValidate(const FString& ScopeBuildingId);
     void FinishValidate();
+    // After an issue has been viewed: the layout is now written a little differently (see the definition); brings the report up to date.
+    void RefreshAfterViewing();
+    // What the route checks found in the last run, and whether the data checks had found errors then.
+    TArray<LayoutValidation::FIssue> RouteIssues;
+    bool bDataHadErrors = false;
+    uint32 RouteCheckRuns = 0;
+    int32 DataIssueCount = 0;
     void StopTicker();
     bool TickValidate(float DeltaTime);
     TSharedPtr<FNavigationLayoutCheck> Check;

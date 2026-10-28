@@ -85,8 +85,11 @@ void ULayoutValidationSession::BeginValidate(const FString& ScopeBuildingId)
     // The data checks are quick. Only the route checks, which grow with the square of the campus, are spread over frames.
     Report = LayoutValidation::ValidateProject(Capture(*Buildings, *Interior));
     Report.Source = Source;
-    if (!Report.HasErrors())
+    bDataHadErrors = Report.HasErrors();
+    DataIssueCount = Report.Issues.Num();
+    if (!bDataHadErrors)
     {
+        ++RouteCheckRuns;
         Check = MakeShared<FNavigationLayoutCheck>(*Buildings, *Interior, ScopeBuildingId);
         bRunning = true;
         return;
@@ -116,6 +119,8 @@ void ULayoutValidationSession::FinishValidate()
 {
     StopTicker();
     Check.Reset(); bRunning = false;
+    RouteIssues.Reset();
+    for (int32 I = DataIssueCount; I < Report.Issues.Num(); ++I) RouteIssues.Add(Report.Issues[I]);
     Report.FilterToBuilding(RunScope); Report.Sort(); bHasReport = true; bStale = false;
     ++Generation;
 }
@@ -178,8 +183,7 @@ bool ULayoutValidationSession::ShowIssue(ANavPlayerController& Controller, int32
     // that explicit view action, rather than mislabelling a representation change as an author edit.
     if (LayoutValidation::Fingerprint(Capture(*Buildings, *Interior)) != Report.Fingerprint)
     {
-        const FString Scope = Report.ScopeBuildingId;
-        Validate(Scope);
+        RefreshAfterViewing();
         FocusedIssue = Report.Issues.IndexOfByPredicate([&](const LayoutValidation::FIssue& Current)
         {
             return Current.Rule == Issue.Rule && Current.BuildingId == Issue.BuildingId && Current.Floor == Issue.Floor
@@ -188,6 +192,35 @@ bool ULayoutValidationSession::ShowIssue(ANavPlayerController& Controller, int32
     }
     else FocusedIssue = Index;
     return true;
+}
+
+void ULayoutValidationSession::RefreshAfterViewing()
+{
+    // Opening a building can fill in what its file left out (empty floors, say). That changes how the layout is written, not how
+    // it routes, and the report was current just before the building was opened. So only the quick data checks are redone, and
+    // what the route checks found is kept: the whole check would take as long as the first run, with the editor waiting.
+    const FString Scope = Report.ScopeBuildingId;
+    LayoutValidation::FReport Fresh = LayoutValidation::ValidateProject(Capture(*Buildings, *Interior));
+    if (Fresh.HasErrors() != bDataHadErrors)
+    {
+        // The route checks would now be run, or left out, differently: do it all again.
+        Validate(Scope);
+        return;
+    }
+    Fresh.Source = Source;
+    Fresh.bNavigationChecked = Report.bNavigationChecked; Fresh.RoomsChecked = Report.RoomsChecked; Fresh.RoomsSkipped = Report.RoomsSkipped;
+    for (const auto& Issue : RouteIssues) Fresh.Issues.Add(Issue);
+    Fresh.FilterToBuilding(Scope); Fresh.Sort();
+    auto Describe = [](const LayoutValidation::FReport& Of)
+    {
+        TArray<FString> Lines;
+        for (const auto& I : Of.Issues) Lines.Add(FString::Printf(TEXT("%s|%s|%d|%d|%s|%s|%s"), *I.Rule, *I.BuildingId, I.Floor, static_cast<int32>(I.Kind), *I.ObjectId, *I.OwnerId, *I.Message));
+        return Lines;
+    };
+    // The list on the panel is rebuilt (and scrolls back to the top) only when what it lists has changed.
+    const bool bSameIssues = Describe(Fresh) == Describe(Report);
+    Report = MoveTemp(Fresh); bStale = false;
+    if (!bSameIssues) ++Generation;
 }
 
 const LayoutValidation::FIssue* ULayoutValidationSession::GetFocusedIssue() const

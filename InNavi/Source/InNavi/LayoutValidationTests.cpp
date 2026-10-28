@@ -246,6 +246,32 @@ namespace InNaviValidationTests
         return true;
     }
 
+    // Opening a building from the list fills in what its file left out, which must not make the route checks run all over again.
+    IMPLEMENT_SIMPLE_AUTOMATION_TEST(FViewKeepsRouteResults, "InNavi.LayoutValidation.ViewKeepsRouteResults", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+    bool FViewKeepsRouteResults::RunTest(const FString& Parameters)
+    {
+        auto Root=Project(); Room(Root,1)->SetArrayField(TEXT("openings"), {});
+        FFixture Fixture(Root); auto* PC=Fixture.Controller; auto* Session=PC->GetLayoutValidationSession();
+        Fixture.Generator->SpawnBuildingFromData(TEXT("B"),TEXT("Building B"),{ {2000,0}, {3000,0}, {3000,1000}, {2000,1000} },2,300,FVector2D::ZeroVector);
+        Session->Validate();
+        const uint32 Runs=Session->GetRouteCheckRuns();
+        const int32 Unauthored=Session->GetReport().Issues.IndexOfByPredicate([](const FIssue& I){return I.Rule==TEXT("INTERIOR_UNAUTHORED")&&I.BuildingId==TEXT("B");});
+        const int32 Sealed=Session->GetReport().Issues.IndexOfByPredicate([](const FIssue& I){return I.Rule==TEXT("ROOM_UNREACHABLE");});
+        if (!TestTrue(TEXT("the unauthored building and the sealed room are reported"),Unauthored!=INDEX_NONE&&Sealed!=INDEX_NONE)) return false;
+        const FString Before=Fingerprint(ULayoutValidationSession::Capture(*Fixture.Generator,*Fixture.Interior));
+        TestTrue(TEXT("showing the unauthored building"),Session->ShowIssue(*PC,Unauthored));
+        TestEqual(TEXT("it is open"),PC->GetLoadedBuildingId(),FString(TEXT("B")));
+        TestNotEqual(TEXT("opening it changed how the layout is written"),Fingerprint(ULayoutValidationSession::Capture(*Fixture.Generator,*Fixture.Interior)),Before);
+        TestEqual(TEXT("without running the route checks again"),Session->GetRouteCheckRuns(),Runs);
+        TestFalse(TEXT("the report is still current"),Session->IsStale());
+        TestTrue(TEXT("the sealed room is still reported"),Has(Session->GetReport(),TEXT("ROOM_UNREACHABLE")));
+        const int32 Again=Session->GetReport().Issues.IndexOfByPredicate([](const FIssue& I){return I.Rule==TEXT("ROOM_UNREACHABLE");});
+        TestTrue(TEXT("a route issue can still be shown"),Session->ShowIssue(*PC,Again));
+        TestEqual(TEXT("in its building"),PC->GetLoadedBuildingId(),FString(TEXT("A")));
+        TestEqual(TEXT("still no second route check"),Session->GetRouteCheckRuns(),Runs);
+        return true;
+    }
+
     IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFileAndExport,"InNavi.LayoutValidation.FileAndExport", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
     bool FFileAndExport::RunTest(const FString& Parameters)
     {
