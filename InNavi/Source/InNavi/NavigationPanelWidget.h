@@ -186,8 +186,26 @@ public:
 	{
 		FString Text;
 		bool bFinal = false;
+		// The point of the route (RoutePoints) where the person is when the step applies; the step is shown there.
+		int32 PointIndex = INDEX_NONE;
 	};
 	TArray<FNavigationRouteStep> BuildRouteSteps() const;
+
+	// Step by step: the route is gone through a step at a time, as on the phone. When a route is found the first step is the one
+	// shown, NextStep and PreviousStep move along, and everything that shows the route shows that step: the building and floor
+	// (and the camera) it is in, the stretch of the route it covers (the rest is faint), and a marker where the person is.
+	// SetStepByStep(false) shows all the steps instead, with nothing singled out.
+	bool NextStep();
+	bool PreviousStep();
+	void SetStepByStep(bool bOn);
+	bool IsStepByStep() const;
+	int32 GetGuidedStepIndex() const;
+	// The route point of the step being shown (null unless going step by step), and the stretch of the route it covers.
+	const FNavigationRoutePoint* GetGuidedPoint() const;
+	FNavigationRouteFocus GetGuidedFocus() const;
+	// Broadcast whenever the step being shown changes, a route is found (the first step), or step by step is turned on or off.
+	UPROPERTY(BlueprintAssignable, Category = "Navigation")
+	FOnNavigationStateChanged OnGuidedStepChanged;
 	// The same as text: "Step 1: ..." per line when a route is found; before that, just the Start and Destination chosen so far.
 	FString BuildRouteDetails() const;
 	bool CanFindRoute() const;
@@ -286,6 +304,11 @@ private:
 	// one leg after another and end in ApplyJourney, or in FailJourney with the leg that could not be.
 	struct FJourney;
 	TSharedRef<FJourney> MakeJourney() const;
+	bool MoveGuidedStep(int32 Offset);
+	// Starts the step by step at the first step.
+	void StartGuidance();
+	int32 GuidedStep = 0;
+	bool bStepByStep = true;
 	// Adds a stop at the end of the others (the limit and a place the route is already at are refused, with a message).
 	bool AddStop(FNavigationStop Stop);
 	void ApplyJourney(const FJourney& Trip);

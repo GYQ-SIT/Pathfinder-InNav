@@ -39,6 +39,15 @@ struct FNavigationStop
 	FString RoomId;
 };
 
+// The stretch of a route that is being shown when it is gone through a step at a time: the route points from FirstPointIndex to
+// LastPointIndex (the same point when the step is only a place). The rest of the route is drawn faint.
+struct FNavigationRouteFocus
+{
+	int32 FirstPointIndex = INDEX_NONE;
+	int32 LastPointIndex = INDEX_NONE;
+	bool IsSet() const { return FirstPointIndex != INDEX_NONE; }
+};
+
 // One section of a journey through stops: the stretch from one waypoint (the Start or a stop) to the next (a stop or the
 // Destination). The ranges refer to the one combined list of route points, so the map and the 3D view can draw a single route
 // and still tell the sections apart; a leg begins at the point where the one before it ended.

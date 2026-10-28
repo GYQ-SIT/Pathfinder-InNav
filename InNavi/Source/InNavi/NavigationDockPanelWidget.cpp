@@ -229,6 +229,44 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 		RouteStepsBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Box_NavRouteSteps"));
 		RouteStepsBox->SetVisibility(ESlateVisibility::Collapsed);
 		Stack->AddChildToVerticalBox(RouteStepsBox);
+
+		// Below the steps: Previous and Next, and the switch between one step at a time and all of them.
+		UHorizontalBox* StepButtons = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("Row_NavStepButtons"));
+		auto AddStepButton = [this, StepButtons](const TCHAR* Name, const TCHAR* Label, bool bPrimary, UTextBlock*& OutLabel) -> UButton*
+		{
+			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+			Button->SetStyle(bPrimary ? StartStyle::PrimaryButton() : StartStyle::SecondaryButton());
+			Button->SetBackgroundColor(FLinearColor::White);
+			Button->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::PlayButtonClickSound);
+			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
+			Text->SetText(FText::FromString(FString(Label)));
+			Text->SetJustification(ETextJustify::Center);
+			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			WrapText(Text);
+			ApplyStandardFont(Text);
+			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+			SizeBox->SetMinDesiredHeight(NavButtonHeight);
+			SizeBox->SetContent(Text);
+			Button->SetContent(SizeBox);
+			UHorizontalBoxSlot* Slot = StepButtons->AddChildToHorizontalBox(Button);
+			Slot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			Slot->SetPadding(FMargin(2.f, 0.f));
+			OutLabel = Text;
+			return Button;
+		};
+		UTextBlock* UnusedPreviousLabel = nullptr;
+		PreviousStepButton = AddStepButton(TEXT("Btn_NavPreviousStep"), TEXT("Previous"), false, UnusedPreviousLabel);
+		PreviousStepButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnPreviousStepClicked);
+		NextStepButton = AddStepButton(TEXT("Btn_NavNextStep"), TEXT("Next Step"), true, NextStepButtonLabel);
+		NextStepButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnNextStepClicked);
+		StepButtonsSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Row_NavStepButtonsSize"));
+		StepButtonsSize->SetWidthOverride(ContentWidth);
+		StepButtonsSize->SetContent(StepButtons);
+		StepButtonsSize->SetVisibility(ESlateVisibility::Collapsed);
+		Stack->AddChildToVerticalBox(StepButtonsSize)->SetPadding(FMargin(0.f, 4.f, 0.f, 6.f));
+		StepModeButton = AddButton(TEXT("Btn_NavStepMode"), TEXT("Show All Steps"), StepModeButtonLabel);
+		StepModeButton->SetVisibility(ESlateVisibility::Collapsed);
+		StepModeButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnStepModeClicked);
 	}
 	return Super::RebuildWidget();
 }
@@ -244,6 +282,11 @@ void UNavigationDockPanelWidget::SetContentWidth(float Width)
 	SetButtonWidth(SetDestinationButton, Width);
 	SetButtonWidth(FindRouteButton, Width);
 	SetButtonWidth(AddStopButton, Width);
+	SetButtonWidth(StepModeButton, Width);
+	if (StepButtonsSize)
+	{
+		StepButtonsSize->SetWidthOverride(Width);
+	}
 	SetButtonWidth(ClickAddStopsButton, Width);
 	SetParentSizeBoxWidth(StopRoomComboBox, Width);
 	SetParentSizeBoxWidth(StopsComboBox, Width);
@@ -320,6 +363,39 @@ void UNavigationDockPanelWidget::OnAddStopClicked()
 		// The stop just added is the one chosen in the list.
 		StopsComboBox->SetSelectedIndex(Nav->GetStops().Num() - 1);
 		UpdateStopControls();
+	}
+}
+
+void UNavigationDockPanelWidget::OnNextStepClicked()
+{
+	if (ANavPlayerController* PC = GetController())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->NextStep();
+		}
+	}
+}
+
+void UNavigationDockPanelWidget::OnPreviousStepClicked()
+{
+	if (ANavPlayerController* PC = GetController())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->PreviousStep();
+		}
+	}
+}
+
+void UNavigationDockPanelWidget::OnStepModeClicked()
+{
+	if (ANavPlayerController* PC = GetController())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->SetStepByStep(!Nav->IsStepByStep());
+		}
 	}
 }
 
@@ -678,9 +754,12 @@ void UNavigationDockPanelWidget::RefreshDisplay()
 	// what has been chosen so far.
 	const bool bGuidanceVisible = Nav->IsRouteGuidanceVisible();
 	const TArray<UNavigationPanelWidget::FNavigationRouteStep> Steps = Nav->BuildRouteSteps();
+	// Going step by step shows the one step (and where it is in the route); otherwise all of them.
+	const bool bStepByStep = Nav->IsStepByStep() && !Steps.IsEmpty();
+	const int32 CurrentStep = FMath::Clamp(Nav->GetGuidedStepIndex(), 0, FMath::Max(0, Steps.Num() - 1));
 	if (RouteStepsBox)
 	{
-		FString Signature;
+		FString Signature = bStepByStep ? FString::Printf(TEXT("#%d\x1f"), CurrentStep) : FString(TEXT("*\x1f"));
 		for (const UNavigationPanelWidget::FNavigationRouteStep& Step : Steps)
 		{
 			Signature += Step.Text + (Step.bFinal ? TEXT("\x1f1\n") : TEXT("\x1f0\n"));
@@ -691,17 +770,55 @@ void UNavigationDockPanelWidget::RefreshDisplay()
 			RouteStepsBox->ClearChildren();
 			static const FLinearColor StepColor(0.45f, 0.92f, 1.f, 1.f);
 			static const FLinearColor FinalStepColor(0.35f, 0.95f, 0.45f, 1.f);
-			for (int32 Index = 0; Index < Steps.Num(); ++Index)
+			auto AddStepText = [&](const FString& Text, const FLinearColor& Color)
 			{
 				UTextBlock* StepText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-				StepText->SetText(FText::FromString(FString::Printf(TEXT("Step %d: %s"), Index + 1, *Steps[Index].Text)));
-				StepText->SetColorAndOpacity(FSlateColor(Steps[Index].bFinal ? FinalStepColor : StepColor));
+				StepText->SetText(FText::FromString(Text));
+				StepText->SetColorAndOpacity(FSlateColor(Color));
 				WrapText(StepText);
 				ApplyStandardFont(StepText);
 				RouteStepsBox->AddChildToVerticalBox(StepText)->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+			};
+			if (bStepByStep)
+			{
+				AddStepText(FString::Printf(TEXT("Step %d of %d"), CurrentStep + 1, Steps.Num()), FLinearColor(0.7f, 0.78f, 0.88f, 1.f));
+				AddStepText(Steps[CurrentStep].Text, Steps[CurrentStep].bFinal ? FinalStepColor : StepColor);
+			}
+			else
+			{
+				for (int32 Index = 0; Index < Steps.Num(); ++Index)
+				{
+					AddStepText(FString::Printf(TEXT("Step %d: %s"), Index + 1, *Steps[Index].Text), Steps[Index].bFinal ? FinalStepColor : StepColor);
+				}
 			}
 		}
 		RouteStepsBox->SetVisibility(bGuidanceVisible && !Steps.IsEmpty() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	// Previous / Next only when going step by step; the switch is there whenever there is a route.
+	const bool bHasSteps = bGuidanceVisible && !Steps.IsEmpty();
+	if (StepButtonsSize)
+	{
+		StepButtonsSize->SetVisibility(bHasSteps && bStepByStep ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (PreviousStepButton)
+	{
+		PreviousStepButton->SetIsEnabled(CurrentStep > 0);
+	}
+	if (NextStepButton)
+	{
+		NextStepButton->SetIsEnabled(CurrentStep + 1 < Steps.Num());
+	}
+	if (NextStepButtonLabel)
+	{
+		NextStepButtonLabel->SetText(FText::FromString(CurrentStep + 1 < Steps.Num() ? TEXT("Next Step") : TEXT("Arrived")));
+	}
+	if (StepModeButton)
+	{
+		StepModeButton->SetVisibility(bHasSteps ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (StepModeButtonLabel)
+	{
+		StepModeButtonLabel->SetText(FText::FromString(bStepByStep ? TEXT("Show All Steps") : TEXT("Go Step by Step")));
 	}
 	if (RouteDetailsText)
 	{

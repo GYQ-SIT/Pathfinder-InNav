@@ -374,4 +374,89 @@ bool FNavigationIndoorOnlyRouteTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// Step by step: the route is gone through a step at a time, and the view follows into the next building.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationStepByStepTest, "InNavi.Navigation.StepByStep",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationStepByStepTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationEntranceRoutingTests;
+	FNavigationSearchFixture Fixture;
+	Prepare(Fixture, { Door(TEXT("A-Link"), EInteriorEntranceKind::Link, 1, 1, TEXT("B")) }, {});
+	ANavPlayerController* PC = Fixture.MakeController();
+	UNavigationPanelWidget* Nav = Fixture.Nav;
+	// In the game the panel tells the controller (OnGuidedStepChanged); a test world has not begun play, where an actor is not told, so
+	// the test tells it itself after each step.
+	auto Follow = [PC]() { PC->FollowNavigationStep(); };
+
+	// From A through the link door to B, found while B is the building that is open.
+	Nav->ToggleSelectStart(); Nav->SelectPoint(FVector2D(50,50), 1);
+	PC->LoadInteriorForBuilding(TEXT("B"));
+	Nav->ToggleSelectDestination(); Nav->SelectPoint(FVector2D(50,50), 1);
+	TestFalse(TEXT("no step by step without a route"), Nav->IsStepByStep());
+	TestTrue(TEXT("nothing to step to"), !Nav->NextStep() && Nav->GetGuidedPoint() == nullptr && !Nav->GetGuidedFocus().IsSet());
+	Nav->RequestFindRoute();
+	Follow();
+	const TArray<UNavigationPanelWidget::FNavigationRouteStep> Steps = Nav->BuildRouteSteps();
+	if (!TestTrue(TEXT("a route with steps"), Steps.Num() >= 3)) return false;
+	for (const auto& Step : Steps) TestTrue(TEXT("each step is at a point of the route"), Nav->GetRoutePoints().IsValidIndex(Step.PointIndex));
+
+	// Finding the route starts at the first step, and the view goes there: A is the Start, so A is opened.
+	TestTrue(TEXT("step by step is on, at the first step"), Nav->IsStepByStep() && Nav->GetGuidedStepIndex() == 0);
+	TestEqual(TEXT("the step is in A"), Nav->GetGuidedPoint()->BuildingId, FString(TEXT("A")));
+	TestEqual(TEXT("so A is the building shown"), PC->GetLoadedBuildingId(), FString(TEXT("A")));
+	const FNavigationRouteFocus First = Nav->GetGuidedFocus();
+	TestTrue(TEXT("the stretch of the first step starts at the Start and ends where the next step is"),
+		First.IsSet() && First.FirstPointIndex == Steps[0].PointIndex && First.LastPointIndex == Steps[1].PointIndex);
+	TestFalse(TEXT("nothing before the first step"), Nav->PreviousStep());
+
+	// Next, until the step is in B: the building shown changes with it.
+	int32 Moves = 0;
+	while (Nav->GetGuidedPoint() && Nav->GetGuidedPoint()->BuildingId == TEXT("A") && Nav->NextStep()) { ++Moves; Follow(); }
+	TestTrue(TEXT("the steps lead to B"), Nav->GetGuidedPoint() && Nav->GetGuidedPoint()->BuildingId == TEXT("B"));
+	TestEqual(TEXT("and B is the building shown"), PC->GetLoadedBuildingId(), FString(TEXT("B")));
+	while (Nav->NextStep()) { ++Moves; Follow(); }
+	TestEqual(TEXT("the last step is reached"), Nav->GetGuidedStepIndex(), Steps.Num() - 1);
+	TestFalse(TEXT("and there is no step after it"), Nav->NextStep());
+	const FNavigationRouteFocus Last = Nav->GetGuidedFocus();
+	TestTrue(TEXT("the last step is a place, not a stretch"), Last.IsSet() && Last.FirstPointIndex == Last.LastPointIndex && Last.FirstPointIndex == Nav->GetRoutePoints().Num() - 1);
+
+	// Back to A, and a view of the route with only the step singled out.
+	while (Nav->PreviousStep()) Follow();
+	TestEqual(TEXT("back at the first step"), Nav->GetGuidedStepIndex(), 0);
+	TestEqual(TEXT("back in A"), PC->GetLoadedBuildingId(), FString(TEXT("A")));
+	const FNavigation3DView View = UNavigationRouteVisualization::BuildView(Nav->GetRoutePoints(), nullptr, nullptr, FVector2D::ZeroVector, 10.f, 300.f, 1,
+		true, TEXT("A"), nullptr, nullptr, &First);
+	TestTrue(TEXT("the first stretch is drawn in full"), View.Segments.ContainsByPredicate([](const FNavigationDisplaySegment& S) { return !S.bDimmed; }));
+	TestTrue(TEXT("and a marker shows where the person is"), View.Here.IsSet());
+
+	// All the steps: nothing is singled out, and going on does nothing.
+	Nav->SetStepByStep(false);
+	TestTrue(TEXT("no step is singled out"), !Nav->IsStepByStep() && Nav->GetGuidedPoint() == nullptr && !Nav->GetGuidedFocus().IsSet() && !Nav->NextStep());
+	Nav->SetStepByStep(true);
+	TestTrue(TEXT("and it can be turned back on"), Nav->IsStepByStep());
+
+	// A route that is cleared takes the steps with it.
+	Nav->RequestClearRoute();
+	TestTrue(TEXT("cleared"), !Nav->IsStepByStep() && Nav->BuildRouteSteps().IsEmpty());
+
+	// How a view is drawn with a step singled out: the rest is faint.
+	TArray<FNavigationRoutePoint> Route;
+	for (int32 I = 0; I < 4; ++I)
+	{
+		FNavigationRoutePoint Point;
+		Point.Floor = 1; Point.Position = FVector2D(10.0 * I, 0); Point.BuildingId = TEXT("A");
+		Route.Add(Point);
+	}
+	const FNavigationRouteFocus Middle{ 1, 2 };
+	const FNavigation3DView Faint = UNavigationRouteVisualization::BuildView(Route, nullptr, nullptr, FVector2D::ZeroVector, 1.f, 300.f, 1, true, TEXT("A"), nullptr, nullptr, &Middle);
+	if (TestEqual(TEXT("three stretches"), Faint.Segments.Num(), 3))
+	{
+		TestTrue(TEXT("only the middle one is in full"), Faint.Segments[0].bDimmed && !Faint.Segments[1].bDimmed && Faint.Segments[2].bDimmed);
+	}
+	TestTrue(TEXT("the person is where the step begins"), Faint.Here.IsSet() && Faint.Here.GetValue().Equals(FVector(10, 0, 15), 1.0));
+	const FNavigation3DView Whole = UNavigationRouteVisualization::BuildView(Route, nullptr, nullptr, FVector2D::ZeroVector, 1.f, 300.f, 1, true, TEXT("A"));
+	TestTrue(TEXT("without a step nothing is faint, and there is no marker"), !Whole.Here.IsSet() && !Whole.Segments.ContainsByPredicate([](const FNavigationDisplaySegment& S) { return S.bDimmed; }));
+	return true;
+}
+
 #endif

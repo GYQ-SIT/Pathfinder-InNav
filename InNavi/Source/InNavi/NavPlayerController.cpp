@@ -86,6 +86,7 @@ void ANavPlayerController::BeginPlay()
 		// Keeps the 3D preview's route/start/destination markers live as the user picks points and
 		// finds/clears a route - see RefreshRoute3DVisualization's own comment.
 		NavigationPanel->OnStateChanged.AddUniqueDynamic(this, &ANavPlayerController::RefreshRoute3DVisualization);
+		NavigationPanel->OnGuidedStepChanged.AddUniqueDynamic(this, &ANavPlayerController::FollowNavigationStep);
 		OnInteriorContentChanged.AddUniqueDynamic(NavigationPanel, &UNavigationPanelWidget::NotifyInteriorChanged);
 	}
 
@@ -3063,6 +3064,7 @@ void ANavPlayerController::DrawPendingRoomPointMarker3D()
 void ANavPlayerController::RefreshRoute3DVisualization()
 {
 	RouteVisualization->ClearRoute();
+	const FNavigationRouteFocus Focus = NavigationPanel ? NavigationPanel->GetGuidedFocus() : FNavigationRouteFocus();
 
 	// The exterior screen draws the whole route on the campus.
 	if (NavigationPanel && NavigationPanel->IsOutdoorMode())
@@ -3071,7 +3073,7 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 			NavigationPanel->GetRoutePoints(),
 			NavigationPanel->HasStart() ? &NavigationPanel->GetStart() : nullptr,
 			NavigationPanel->HasDestination() ? &NavigationPanel->GetDestination() : nullptr,
-			NavigationPanel->IsRouteGuidanceVisible(), &NavigationPanel->GetStops(), &NavigationPanel->GetRouteLegs()));
+			NavigationPanel->IsRouteGuidanceVisible(), &NavigationPanel->GetStops(), &NavigationPanel->GetRouteLegs(), &Focus));
 		return;
 	}
 
@@ -3091,7 +3093,67 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 		NavigationPanel->HasStart() ? &NavigationPanel->GetStart() : nullptr,
 		NavigationPanel->HasDestination() ? &NavigationPanel->GetDestination() : nullptr,
 		Building->BuildingOffset, Generator->GetScale(), Building->GetFloorHeight(), InteriorGen->GetActiveFloor(),
-		NavigationPanel->IsRouteGuidanceVisible(), Building->BuildingId, &NavigationPanel->GetStops(), &NavigationPanel->GetRouteLegs()));
+		NavigationPanel->IsRouteGuidanceVisible(), Building->BuildingId, &NavigationPanel->GetStops(), &NavigationPanel->GetRouteLegs(), &Focus));
+}
+
+void ANavPlayerController::FollowNavigationStep()
+{
+	const FNavigationRoutePoint* Point = NavigationPanel ? NavigationPanel->GetGuidedPoint() : nullptr;
+	APolyBuilding* Building = Point && Generator ? Generator->FindBuildingById(Point->BuildingId) : nullptr;
+	if (!Point || !Building)
+	{
+		return;
+	}
+	// The exterior screen: no building is open, the camera goes to the spot.
+	if (NavigationPanel->IsOutdoorMode())
+	{
+		FocusCameraOnCampusPoint(*Point, Building);
+		return;
+	}
+	if (!InteriorGen)
+	{
+		return;
+	}
+	// Inside: the building of the step, on its floor (an outdoor spot is shown on Floor 1, whose map has the outside area). Another
+	// building is opened the way the building switcher opens it, which keeps edits not yet saved. Opening one leaves 3D, so 3D is
+	// put back if it was on.
+	const bool bWas3D = bIsIn3DPreviewMode;
+	if (InteriorGen->GetLoadedBuildingId() != Point->BuildingId && LoadInteriorForBuilding(Point->BuildingId) < 0)
+	{
+		return;
+	}
+	const int32 Floor = FMath::Max(1, Point->Floor);
+	if (InteriorGen->GetActiveFloor() != Floor)
+	{
+		SetActiveFloor(Floor);
+	}
+	if (bWas3D && !bIsIn3DPreviewMode)
+	{
+		SetIn3DPreviewMode(true);
+	}
+	RefreshRoute3DVisualization();
+}
+
+void ANavPlayerController::FocusCameraOnCampusPoint(const FNavigationRoutePoint& Point, APolyBuilding* Building)
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!Building || !ControlledPawn)
+	{
+		return;
+	}
+	FVector2D Center;
+	float Span;
+	GetBuildingFootprintBounds(Building, Center, Span);
+	const float Scale = Generator ? Generator->GetScale() : 1.f;
+	const FVector Target = Point.bHasWorldPosition ? Point.WorldPosition
+		: FVector((Point.Position.X + Building->BuildingOffset.X) * Scale, (Point.Position.Y + Building->BuildingOffset.Y) * Scale,
+			FMath::Max(0, Point.Floor - 1) * Building->GetFloorHeight());
+	// As FocusCameraOnBuildingFromExterior frames a building (the heading is kept, the pitch is set), but aimed at the spot.
+	const float BuildingHeight = Building->GetFloorCount() * Building->GetFloorHeight();
+	const FRotator Rotation(-35.f, GetControlRotation().Yaw, 0.f);
+	const float Distance = FMath::Max(Span, BuildingHeight) * 1.2f + 500.f;
+	ControlledPawn->SetActorLocationAndRotation(Target - Rotation.Vector() * Distance, Rotation);
+	SetControlRotation(Rotation);
 }
 
 void ANavPlayerController::SetPointerOverUICallback(const UObject* ScreenOwner, TFunction<bool(const FVector2D&)> Callback)

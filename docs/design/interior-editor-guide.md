@@ -347,6 +347,13 @@ frame: a progress bar shows how far it is, the editor stays usable, and **Cancel
 destination, clearing, or editing the interior also stops it. A trip within one building is searched without the outside
 first (the rest of the campus is not needed for it), and the whole campus only when going out and in again could be shorter.
 
+**Step by step.** Once a route is found it is gone through one step at a time, as on the phone: the panel shows "Step 3 of 13"
+and that step, with **Previous** and **Next Step** below it (the last step reads **Arrived**). Everything follows the step. Inside, the
+building and floor of the step are opened (another building too, as the building switcher opens it, and 3D stays on if it was on);
+on the exterior screen the camera goes to the spot on the campus. On the map and in 3D the stretch of the route the step covers is
+drawn in full, the rest of the route is faint, and a white ring marks where the person is. **Show All Steps** lists every step
+instead (nothing is singled out), and **Go Step by Step** goes back.
+
 **Stops.** A route can pass through places on the way, picked the same two ways as the Start and the Destination. From the
 list: choose one in **Stop from the List (optional)** (the same list as the Destination, in any building, or a building's main
 door on the exterior screen) and press **Add Stop**. By clicking: press **Click to Add Stops**, then click places on the map (indoors,

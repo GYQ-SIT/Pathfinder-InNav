@@ -481,6 +481,9 @@ private:
 	// state's OnStateChanged) repaints it.
 	UFUNCTION()
 	void HandleNavigationStateChanged();
+	// The step being shown has changed (step by step navigation): the plan is shown whole, so the step is in view.
+	UFUNCTION()
+	void HandleGuidedStepChanged();
 
 	void RefreshNavigationPanelDisplay();
 

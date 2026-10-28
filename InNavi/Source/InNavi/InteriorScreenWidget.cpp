@@ -1309,6 +1309,7 @@ void UInteriorScreenWidget::NativeConstruct()
 				return DockHost && DockHost->IsScreenPositionOverPanel(FName(GetDockPanelName(EDockPanelId::Navigation)), ScreenPosition);
 			});
 			Nav->OnStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleNavigationStateChanged);
+			Nav->OnGuidedStepChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleGuidedStepChanged);
 		}
 
 	}
@@ -1472,6 +1473,7 @@ void UInteriorScreenWidget::NativeDestruct()
 		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
 		{
 			Nav->OnStateChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleNavigationStateChanged);
+			Nav->OnGuidedStepChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleGuidedStepChanged);
 			Nav->SetPointerOverPanelCallback(nullptr);
 		}
 	}
@@ -2857,6 +2859,15 @@ void UInteriorScreenWidget::OnRemoveFloorClicked()
 	RefreshLayersList();
 	RefreshNavigationPanelDisplay();
 	RefreshNavRoomDropdowns();
+}
+
+void UInteriorScreenWidget::HandleGuidedStepChanged()
+{
+	// A step can be in another building or on another floor, and the plan may have been zoomed or moved for the last one.
+	if (FloorPlanWidget)
+	{
+		FloorPlanWidget->ResetView();
+	}
 }
 
 void UInteriorScreenWidget::HandleNavigationStateChanged()

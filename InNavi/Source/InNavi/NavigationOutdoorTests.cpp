@@ -2,7 +2,9 @@
 
 #include "UiTestFixture.h"
 #include "PolyBuilding.h"
+#include "GameFramework/DefaultPawn.h"
 #include "InteriorScreenWidget.h"
+#include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "NavigationRoutePlanner.h"
@@ -206,9 +208,34 @@ bool FNavigationRouteStepsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("only the last step is final"), FinalCount == 1 && Steps.Last().bFinal);
 	TestTrue(TEXT("the text lists them as Step 1, Step 2, ..."), Nav->BuildRouteDetails().StartsWith(TEXT("Step 1: Start at ")) && Nav->BuildRouteDetails().Contains(FString::Printf(TEXT("Step %d: Arrive at"), Steps.Num())));
 
-	// On screen: one line per step, the last one green.
+	// On screen, going step by step (the default once a route is found): where the step is in the route, and the step.
 	UVerticalBox* Box = Cast<UVerticalBox>(Screen->FindScreenWidget(TEXT("Box_NavRouteSteps")));
-	if (!TestNotNull(TEXT("the steps are on screen"), Box)) return false;
+	UButton* NextButton = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_NavNextStep")));
+	UButton* PreviousButton = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_NavPreviousStep")));
+	if (!TestTrue(TEXT("the step list and the buttons are on screen"), Box && NextButton && PreviousButton)) return false;
+	TestTrue(TEXT("going step by step"), Nav->IsStepByStep() && Nav->GetGuidedStepIndex() == 0);
+	TestEqual(TEXT("two lines: where it is, and the step"), Box->GetChildrenCount(), 2);
+	TestEqual(TEXT("the first says which step of how many"), Cast<UTextBlock>(Box->GetChildAt(0))->GetText().ToString(), FString::Printf(TEXT("Step 1 of %d"), Steps.Num()));
+	TestEqual(TEXT("then the step"), Cast<UTextBlock>(Box->GetChildAt(1))->GetText().ToString(), Steps[0].Text);
+	TestTrue(TEXT("Next can be pressed, Previous cannot"), NextButton->GetIsEnabled() && !PreviousButton->GetIsEnabled());
+	NextButton->OnClicked.Broadcast();
+	TestEqual(TEXT("the button moves to the next step"), Nav->GetGuidedStepIndex(), 1);
+	TestEqual(TEXT("which is the one shown"), Cast<UTextBlock>(Box->GetChildAt(1))->GetText().ToString(), Steps[1].Text);
+	TestTrue(TEXT("Previous can be pressed now"), PreviousButton->GetIsEnabled());
+	for (int32 I = 2; I < Steps.Num(); ++I) NextButton->OnClicked.Broadcast();
+	TestTrue(TEXT("the last step is green"), Cast<UTextBlock>(Box->GetChildAt(1))->GetColorAndOpacity().GetSpecifiedColor().G > 0.8f
+		&& Cast<UTextBlock>(Box->GetChildAt(1))->GetColorAndOpacity().GetSpecifiedColor().R < 0.5f);
+	TestFalse(TEXT("there is no next after it"), NextButton->GetIsEnabled());
+	PreviousButton->OnClicked.Broadcast();
+	TestEqual(TEXT("Previous goes back"), Nav->GetGuidedStepIndex(), Steps.Num() - 2);
+	UButton* ModeButton = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_NavStepMode")));
+	if (!TestNotNull(TEXT("the switch is there"), ModeButton)) return false;
+	ModeButton->OnClicked.Broadcast();
+	TestFalse(TEXT("the switch shows all the steps"), Nav->IsStepByStep());
+	TestEqual(TEXT("and the buttons for one at a time go away"), Cast<UWidget>(Screen->FindScreenWidget(TEXT("Row_NavStepButtonsSize")))->GetVisibility(), ESlateVisibility::Collapsed);
+
+	// On screen, all the steps: one line per step, the last one green.
+	Box = Cast<UVerticalBox>(Screen->FindScreenWidget(TEXT("Box_NavRouteSteps")));
 	TestEqual(TEXT("one line per step"), Box->GetChildrenCount(), Steps.Num());
 	TestEqual(TEXT("shown"), Box->GetVisibility(), ESlateVisibility::Visible);
 	const UTextBlock* First = Cast<UTextBlock>(Box->GetChildAt(0));
@@ -343,6 +370,42 @@ bool FNavigationOutdoorClickStopsTest::RunTest(const FString& Parameters)
 	Nav->RequestFindRoute();
 	TestEqual(TEXT("three legs"), Nav->GetRouteLegs().Num(), 3);
 	TestTrue(TEXT("outside at both ends"), RunsBetween(Nav->GetRoutePoints(), TEXT("A"), TEXT("B")));
+	return true;
+}
+
+// On the exterior screen the camera goes to the step.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationOutdoorStepCameraTest, "InNavi.Navigation.Outdoor.StepCamera",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationOutdoorStepCameraTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationOutdoorTests;
+	FNavigationSearchFixture Fixture;
+	if (!TestTrue(TEXT("test project loads"), LoadTestProject(Fixture))) return false;
+	UNavigationPanelWidget* Nav = Fixture.Nav;
+	ANavPlayerController* PC = Fixture.MakeController();
+	ADefaultPawn* Pawn = Fixture.World->SpawnActor<ADefaultPawn>();
+	PC->Possess(Pawn);
+	if (!TestTrue(TEXT("the camera is a pawn"), PC->GetPawn() == Pawn)) return false;
+	Nav->SetOutdoorMode(true);
+	const TArray<UNavigationPanelWidget::FNavigationRoomOption> Options = Nav->GetSelectableRooms();
+	Nav->SetStartToRoom(Options[0].GetDisplayLabel());
+	Nav->SetDestinationToRoom(Options[2].GetDisplayLabel());
+	Nav->RequestFindRoute();
+	if (!TestTrue(TEXT("a route"), Nav->IsStepByStep())) return false;
+	// (A test world has not begun play, where an actor is not told by the panel; see FNavigationStepByStepTest.)
+	PC->FollowNavigationStep();
+
+	// The first step is at A, and the camera is there: looking at it, from some way off.
+	const FVector AtA = Pawn->GetActorLocation();
+	const FNavigationRoutePoint* Here = Nav->GetGuidedPoint();
+	TestTrue(TEXT("the camera looks at the step"), Here && FVector::Dist(AtA + Pawn->GetActorForwardVector() * FVector::Dist(AtA, Here->WorldPosition), Here->WorldPosition) < 50.0);
+	TestTrue(TEXT("the step is at A"), Here && Here->BuildingId == TEXT("A"));
+	// The last is at C: the camera has moved over to it.
+	while (Nav->NextStep()) PC->FollowNavigationStep();
+	const FNavigationRoutePoint* There = Nav->GetGuidedPoint();
+	TestTrue(TEXT("the last step is at C"), There && There->BuildingId == TEXT("C"));
+	TestTrue(TEXT("and the camera has gone there"), FVector::Dist(Pawn->GetActorLocation(), AtA) > 500.0
+		&& There && FVector::Dist(Pawn->GetActorLocation(), There->WorldPosition) < FVector::Dist(AtA, There->WorldPosition));
 	return true;
 }
 

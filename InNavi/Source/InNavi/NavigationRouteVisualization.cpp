@@ -57,7 +57,7 @@ UNavigationRouteVisualization::UNavigationRouteVisualization()
 FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigationRoutePoint>& Route,
 	const FNavigationRoutePoint* Start, const FNavigationRoutePoint* Destination,
 	FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible, const FString& ActiveBuildingId,
-	const TArray<FNavigationStop>* Stops, const TArray<FNavigationRouteLeg>* RouteLegs)
+	const TArray<FNavigationStop>* Stops, const TArray<FNavigationRouteLeg>* RouteLegs, const FNavigationRouteFocus* Focus)
 {
 	FNavigation3DView View;
 	if (!bGuidanceVisible) return View;
@@ -76,6 +76,11 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 			if (SegmentEndPointIndex > Leg.FirstPointIndex && SegmentEndPointIndex <= Leg.LastPointIndex) return LegIndex;
 		}
 		return INDEX_NONE;
+	};
+	// When a step is being shown, the rest of the route is faint.
+	auto Dimmed = [Focus](int32 SegmentEndPointIndex)
+	{
+		return Focus && Focus->IsSet() && !(SegmentEndPointIndex > Focus->FirstPointIndex && SegmentEndPointIndex <= Focus->LastPointIndex);
 	};
 	for (int32 I = 1; I < Route.Num(); ++I)
 	{
@@ -97,7 +102,7 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 			if (Visible(From) && Visible(To)
 				&& !WorldPoint(From).Equals(WorldPoint(To), KINDA_SMALL_NUMBER))
 			{
-				View.Segments.Add({ WorldPoint(From), WorldPoint(To), false, LegOf(I) });
+				View.Segments.Add({ WorldPoint(From), WorldPoint(To), false, LegOf(I), Dimmed(I) });
 			}
 			continue;
 		}
@@ -131,10 +136,14 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 					: FString::Printf(TEXT("Arrive via %s from %s"), *Connector, *NavigationFloorLabel(Other.Floor));
 				const FVector Upper = Position + FVector(0, 0, 70.f);
 				const bool bUpward = To.Floor > From.Floor;
-				View.Segments.Add({ bUpward ? Position : Upper, bUpward ? Upper : Position, true, LegOf(I) });
+				View.Segments.Add({ bUpward ? Position : Upper, bUpward ? Upper : Position, true, LegOf(I), Dimmed(I) });
 			}
 			View.Labels.Add({ Position + FVector(0, 0, 95.f), Text, NavigationTransitionColor });
 		}
+	}
+	if (Focus && Focus->IsSet() && Route.IsValidIndex(Focus->FirstPointIndex) && Visible(Route[Focus->FirstPointIndex]))
+	{
+		View.Here = WorldPoint(Route[Focus->FirstPointIndex]);
 	}
 	if (Start && Visible(*Start))
 	{
@@ -176,11 +185,11 @@ FLinearColor UNavigationRouteVisualization::LegColor2D(int32 LegIndex)
 
 FNavigation3DView UNavigationRouteVisualization::BuildCampusView(const TArray<FNavigationRoutePoint>& Route,
 	const FNavigationRoutePoint* Start, const FNavigationRoutePoint* Destination, bool bGuidanceVisible,
-	const TArray<FNavigationStop>* Stops, const TArray<FNavigationRouteLeg>* RouteLegs)
+	const TArray<FNavigationStop>* Stops, const TArray<FNavigationRouteLeg>* RouteLegs, const FNavigationRouteFocus* Focus)
 {
 	// Floor 0 is "outside": the outdoor stretches and the entering/leaving labels are what shows. No building is open, so no
 	// building is active and the offset, scale and floor height are not used (points carry their world positions).
-	FNavigation3DView View = BuildView(Route, Start, Destination, FVector2D::ZeroVector, 1.f, 1.f, 0, bGuidanceVisible, FString(), Stops, RouteLegs);
+	FNavigation3DView View = BuildView(Route, Start, Destination, FVector2D::ZeroVector, 1.f, 1.f, 0, bGuidanceVisible, FString(), Stops, RouteLegs, Focus);
 	if (!bGuidanceVisible)
 	{
 		return View;
@@ -194,6 +203,11 @@ FNavigation3DView UNavigationRouteVisualization::BuildCampusView(const TArray<FN
 			View.Labels.Add({ OutMarker.GetValue() + FVector(0, 0, 55), Text, Color });
 		}
 	};
+	// The person is inside a building at this step: mark where, as for the Start.
+	if (Focus && Focus->IsSet() && Route.IsValidIndex(Focus->FirstPointIndex) && Route[Focus->FirstPointIndex].Floor != 0 && Route[Focus->FirstPointIndex].bHasWorldPosition)
+	{
+		View.Here = Route[Focus->FirstPointIndex].WorldPosition + FVector(0, 0, RouteDisplayLift);
+	}
 	MarkIndoor(Start, View.Start, TEXT("Start"), FColor::Green);
 	MarkIndoor(Destination, View.Destination, TEXT("Destination"), FColor::Red);
 	// Likewise a stop inside a building, at the point where the route reaches it.
@@ -257,8 +271,14 @@ void UNavigationRouteVisualization::ShowView(const FNavigation3DView& View)
 	ClearRoute();
 	for (const FNavigationDisplaySegment& Segment : View.Segments)
 	{
-		const FLinearColor Color(Segment.bTransition ? NavigationTransitionColor
+		FLinearColor Color(Segment.bTransition ? NavigationTransitionColor
 			: (Segment.RouteLegIndex == INDEX_NONE ? NavigationRouteColor : LegColor(Segment.RouteLegIndex)));
+		if (Segment.bDimmed)
+		{
+			// Not the step being shown: a thin, dark line, without arrows.
+			DrawLine(Segment.From, Segment.To, Color * 0.25f, 0, 2.f, -1.f);
+			continue;
+		}
 		DrawLine(Segment.From, Segment.To, Color, 0, 6.f, -1.f);
 		const float Length = FVector::Distance(Segment.From, Segment.To);
 		const FVector Direction = (Segment.To - Segment.From).GetSafeNormal();
@@ -278,6 +298,7 @@ void UNavigationRouteVisualization::ShowView(const FNavigation3DView& View)
 	}
 	if (View.Start.IsSet()) DrawSphere(View.Start.GetValue(), 25.f, 12, FLinearColor::Green, -1.f, 0, 3.f);
 	if (View.Destination.IsSet()) DrawSphere(View.Destination.GetValue(), 25.f, 12, FLinearColor::Red, -1.f, 0, 3.f);
+	if (View.Here.IsSet()) DrawSphere(View.Here.GetValue(), 40.f, 12, FLinearColor::White, -1.f, 0, 4.f);
 	for (const FNavigationDisplayStop& Stop : View.Stops) DrawSphere(Stop.Position, 20.f, 12, FLinearColor(Stop.Color), -1.f, 0, 3.f);
 	if (!GetOwner()) return;
 	for (const FNavigationDisplayLabel& Input : View.Labels)

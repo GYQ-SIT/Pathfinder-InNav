@@ -607,6 +607,7 @@ void UNavigationPanelWidget::ApplyJourney(const FJourney& Trip)
 		? FString::Printf(TEXT("Route found: %d points."), RoutePoints.Num())
 		: FString::Printf(TEXT("Route found through %d stop%s (%d points)."), Stops.Num(), Stops.Num() == 1 ? TEXT("") : TEXT("s"), RoutePoints.Num()),
 		ENavigationMessageKind::Success);
+	StartGuidance();
 }
 
 void UNavigationPanelWidget::FailJourney(const FJourney& Trip, const FNavigationRouteResult& LegResult)
@@ -957,6 +958,7 @@ void UNavigationPanelWidget::ApplyRouteResult(const FNavigationRouteResult& Resu
 	bLastFindRouteFailed = false;
 	SetStatusMessage(FString::Printf(TEXT("Route found: %d points."), RoutePoints.Num()),
 		ENavigationMessageKind::Success);
+	StartGuidance();
 }
 
 bool UNavigationPanelWidget::ApplyWorldRouteResult(const FString& BuildingId,
@@ -1396,9 +1398,17 @@ TArray<UNavigationPanelWidget::FNavigationRouteStep> UNavigationPanelWidget::Bui
 	{
 		return Steps;
 	}
+	// Each step is at a point of the route (PointIndex): where the person is when it applies.
+	auto AddStep = [&Steps](const FString& Text, int32 PointIndex)
+	{
+		FNavigationRouteStep Step;
+		Step.Text = Text;
+		Step.PointIndex = PointIndex;
+		Steps.Add(MoveTemp(Step));
+	};
 	if (Start.bValid)
 	{
-		Steps.Add({ FString::Printf(TEXT("Start at %s."), *EndpointPhrase(Start)) });
+		AddStep(FString::Printf(TEXT("Start at %s."), *EndpointPhrase(Start)), 0);
 	}
 	// Leg by leg: what happens between the points of a leg, and at its end (a stop) that the stop is reached. A route that was not
 	// planned in legs is taken as one.
@@ -1413,8 +1423,8 @@ TArray<UNavigationPanelWidget::FNavigationRouteStep> UNavigationPanelWidget::Bui
 			const FNavigationRoutePoint& To = RoutePoints[I];
 			if (From.BuildingId != To.BuildingId && From.Floor != OutdoorFloor && To.Floor != OutdoorFloor)
 			{
-				Steps.Add({ FString::Printf(TEXT("Use the link door from %s to %s on Floor %d."),
-					*BuildingDisplayName(From.BuildingId), *BuildingDisplayName(To.BuildingId), To.Floor) });
+				AddStep(FString::Printf(TEXT("Use the link door from %s to %s on Floor %d."),
+					*BuildingDisplayName(From.BuildingId), *BuildingDisplayName(To.BuildingId), To.Floor), I - 1);
 				continue;
 			}
 			if (From.Floor == To.Floor)
@@ -1423,34 +1433,121 @@ TArray<UNavigationPanelWidget::FNavigationRouteStep> UNavigationPanelWidget::Bui
 			}
 			if (From.Floor == OutdoorFloor)
 			{
-				Steps.Add({ To.BuildingId.IsEmpty() ? FString(TEXT("Enter the building and continue on Floor 1."))
-					: FString::Printf(TEXT("Enter the building %s and continue on Floor 1."), *BuildingDisplayName(To.BuildingId)) });
+				// Where the person goes in: the building being entered is the one to show.
+				AddStep(To.BuildingId.IsEmpty() ? FString(TEXT("Enter the building and continue on Floor 1."))
+					: FString::Printf(TEXT("Enter the building %s and continue on Floor 1."), *BuildingDisplayName(To.BuildingId)), I);
 			}
 			else if (To.Floor == OutdoorFloor)
 			{
-				Steps.Add({ From.BuildingId.IsEmpty() ? FString(TEXT("Exit the building and continue outside."))
-					: FString::Printf(TEXT("Exit the building %s and continue outside."), *BuildingDisplayName(From.BuildingId)) });
+				AddStep(From.BuildingId.IsEmpty() ? FString(TEXT("Exit the building and continue outside."))
+					: FString::Printf(TEXT("Exit the building %s and continue outside."), *BuildingDisplayName(From.BuildingId)), I - 1);
 			}
 			else
 			{
 				const FString Where = From.BuildingId.IsEmpty() ? FString() : FString::Printf(TEXT(" in %s"), *BuildingDisplayName(From.BuildingId));
-				Steps.Add({ FString::Printf(TEXT("Take the %s%s from Floor %d to Floor %d."), *ConnectorTypeName(To.ConnectorType), *Where, From.Floor, To.Floor) });
+				AddStep(FString::Printf(TEXT("Take the %s%s from Floor %d to Floor %d."), *ConnectorTypeName(To.ConnectorType), *Where, From.Floor, To.Floor), I - 1);
 			}
 		}
 		if (Leg + 1 < LegCount && !RouteLegs.IsEmpty())
 		{
-			Steps.Add({ FString::Printf(TEXT("Stop %d: %s."), Leg + 1, *RouteLegs[Leg].ToLabel) });
+			AddStep(FString::Printf(TEXT("Stop %d: %s."), Leg + 1, *RouteLegs[Leg].ToLabel), LastPoint);
 		}
 	}
 	if (Destination.bValid)
 	{
-		Steps.Add({ FString::Printf(TEXT("Arrive at %s."), *EndpointPhrase(Destination)) });
+		AddStep(FString::Printf(TEXT("Arrive at %s."), *EndpointPhrase(Destination)), RoutePoints.Num() - 1);
 	}
 	if (!Steps.IsEmpty())
 	{
 		Steps.Last().bFinal = true;
 	}
 	return Steps;
+}
+
+void UNavigationPanelWidget::StartGuidance()
+{
+	GuidedStep = 0;
+	bStepByStep = true;
+	OnGuidedStepChanged.Broadcast();
+	BroadcastStateChanged();
+}
+
+void UNavigationPanelWidget::SetStepByStep(bool bOn)
+{
+	if (bStepByStep == bOn)
+	{
+		return;
+	}
+	bStepByStep = bOn;
+	OnGuidedStepChanged.Broadcast();
+	BroadcastStateChanged();
+}
+
+bool UNavigationPanelWidget::MoveGuidedStep(int32 Offset)
+{
+	const int32 Count = BuildRouteSteps().Num();
+	const int32 NewStep = GuidedStep + Offset;
+	if (!bStepByStep || NewStep < 0 || NewStep >= Count)
+	{
+		return false;
+	}
+	GuidedStep = NewStep;
+	OnGuidedStepChanged.Broadcast();
+	BroadcastStateChanged();
+	return true;
+}
+
+bool UNavigationPanelWidget::NextStep()
+{
+	return MoveGuidedStep(1);
+}
+
+bool UNavigationPanelWidget::PreviousStep()
+{
+	return MoveGuidedStep(-1);
+}
+
+bool UNavigationPanelWidget::IsStepByStep() const
+{
+	return bStepByStep && !RoutePoints.IsEmpty();
+}
+
+int32 UNavigationPanelWidget::GetGuidedStepIndex() const
+{
+	return FMath::Max(0, GuidedStep);
+}
+
+const FNavigationRoutePoint* UNavigationPanelWidget::GetGuidedPoint() const
+{
+	if (!IsStepByStep())
+	{
+		return nullptr;
+	}
+	const TArray<FNavigationRouteStep> Steps = BuildRouteSteps();
+	if (!Steps.IsValidIndex(GuidedStep) || !RoutePoints.IsValidIndex(Steps[GuidedStep].PointIndex))
+	{
+		return nullptr;
+	}
+	return &RoutePoints[Steps[GuidedStep].PointIndex];
+}
+
+FNavigationRouteFocus UNavigationPanelWidget::GetGuidedFocus() const
+{
+	FNavigationRouteFocus Focus;
+	if (!IsStepByStep())
+	{
+		return Focus;
+	}
+	// The stretch of the route from where this step is to where the next one is (the last step is just a place).
+	const TArray<FNavigationRouteStep> Steps = BuildRouteSteps();
+	if (!Steps.IsValidIndex(GuidedStep) || !RoutePoints.IsValidIndex(Steps[GuidedStep].PointIndex))
+	{
+		return Focus;
+	}
+	Focus.FirstPointIndex = Steps[GuidedStep].PointIndex;
+	Focus.LastPointIndex = Steps.IsValidIndex(GuidedStep + 1) && RoutePoints.IsValidIndex(Steps[GuidedStep + 1].PointIndex)
+		? FMath::Max(Focus.FirstPointIndex, Steps[GuidedStep + 1].PointIndex) : Focus.FirstPointIndex;
+	return Focus;
 }
 
 FString UNavigationPanelWidget::BuildRouteDetails() const

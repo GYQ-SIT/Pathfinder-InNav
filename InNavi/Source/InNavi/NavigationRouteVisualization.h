@@ -14,6 +14,8 @@ struct FNavigationDisplaySegment
 	bool bTransition = false;
 	// The leg of the journey this belongs to (see FNavigationRouteLeg), INDEX_NONE when the route has no stops.
 	int32 RouteLegIndex = INDEX_NONE;
+	// Not the step being shown (see FNavigationRouteFocus): drawn faint.
+	bool bDimmed = false;
 };
 
 struct FNavigationDisplayLabel
@@ -38,6 +40,8 @@ struct FNavigation3DView
 	TArray<FNavigationDisplayStop> Stops;
 	TOptional<FVector> Start;
 	TOptional<FVector> Destination;
+	// Where the person is, at the step being shown.
+	TOptional<FVector> Here;
 };
 
 // Arrow geometry in local map pixels, so zooming does not make direction cues unreadable.
@@ -59,13 +63,14 @@ public:
 		const FNavigationRoutePoint* Start, const FNavigationRoutePoint* Destination,
 		FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible = true,
 		const FString& ActiveBuildingId = FString(), const TArray<FNavigationStop>* Stops = nullptr,
-		const TArray<FNavigationRouteLeg>* RouteLegs = nullptr);
+		const TArray<FNavigationRouteLeg>* RouteLegs = nullptr, const FNavigationRouteFocus* Focus = nullptr);
 	static bool IsPointVisible(const FNavigationRoutePoint& Point, const FString& ActiveBuildingId, int32 ActiveFloor);
 	// The route as the exterior screen draws it: the parts outside, a label where it enters or leaves a building, and the Start and
 	// Destination markers (also when they are indoors, then at their spot inside the building). Points carry their world positions.
 	static FNavigation3DView BuildCampusView(const TArray<FNavigationRoutePoint>& Route,
 		const FNavigationRoutePoint* Start, const FNavigationRoutePoint* Destination, bool bGuidanceVisible = true,
-		const TArray<FNavigationStop>* Stops = nullptr, const TArray<FNavigationRouteLeg>* RouteLegs = nullptr);
+		const TArray<FNavigationStop>* Stops = nullptr, const TArray<FNavigationRouteLeg>* RouteLegs = nullptr,
+		const FNavigationRouteFocus* Focus = nullptr);
 	// What colour the legs of a journey are drawn in, one after the other (they begin again after the last colour). The 3D view
 	// takes the first, the map the second: the same colours, as each of them wants them.
 	static FColor LegColor(int32 LegIndex);

@@ -47,6 +47,12 @@ private:
 	UFUNCTION()
 	void OnCancelFindRouteClicked();
 	UFUNCTION()
+	void OnNextStepClicked();
+	UFUNCTION()
+	void OnPreviousStepClicked();
+	UFUNCTION()
+	void OnStepModeClicked();
+	UFUNCTION()
 	void OnAddStopClicked();
 	UFUNCTION()
 	void OnClickAddStopsClicked();
@@ -168,6 +174,20 @@ private:
 	UPROPERTY()
 	UVerticalBox* RouteStepsBox = nullptr;
 	FString ShownRouteSteps;
+	// Step by step: Previous / Next move along the route a step at a time (as on the phone), and the last button switches between
+	// that and the whole list of steps. Shown once there is a route.
+	UPROPERTY()
+	USizeBox* StepButtonsSize = nullptr;
+	UPROPERTY()
+	UButton* PreviousStepButton = nullptr;
+	UPROPERTY()
+	UButton* NextStepButton = nullptr;
+	UPROPERTY()
+	UTextBlock* NextStepButtonLabel = nullptr;
+	UPROPERTY()
+	UButton* StepModeButton = nullptr;
+	UPROPERTY()
+	UTextBlock* StepModeButtonLabel = nullptr;
 
 	// The extra entry each dropdown currently carries for a Start / Destination picked in another building
 	// (UNavigationPanelWidget::GetStartOtherBuildingLabel), empty if none - so the lists are rebuilt only when it changes.

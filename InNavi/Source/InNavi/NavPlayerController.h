@@ -11,6 +11,7 @@
 #include "NavPlayerController.generated.h"
 
 class APolyBuilding;
+struct FNavigationRoutePoint;
 class ABuildingGenerator;
 class ULayoutValidationSession;
 class AInteriorGenerator;
@@ -192,6 +193,12 @@ public:
 	// SetIn3DEditMode) - re-entering 3D preview always starts fresh in View mode.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void SetIn3DPreviewMode(bool bEnable);
+
+	// Step by step navigation (UNavigationPanelWidget::NextStep): takes the view to where the step being shown is. Inside, that is
+	// the step's building (opened if another one is) and floor, kept in 3D if 3D was on; on the exterior screen the camera goes to
+	// the spot on the campus. Bound to the panel's OnGuidedStepChanged.
+	UFUNCTION()
+	void FollowNavigationStep();
 
 	// Whether 3D preview is currently in its Edit sub-mode rather than plain View. Only meaningful
 	// while IsIn3DPreviewMode() is true - always false in 2D mode or outside interior editing.
@@ -1349,6 +1356,8 @@ private:
 	// Remembers the view it was at beforehand (only the first time, until RestoreExteriorCameraView
 	// is called) so that can be restored later. The actual positioning is PositionCameraForFloor.
 	void FocusCameraOnBuilding(APolyBuilding* Building);
+	// The exterior camera over a spot of the campus (a route point), framed for the building it belongs to.
+	void FocusCameraOnCampusPoint(const FNavigationRoutePoint& Point, APolyBuilding* Building);
 
 	// Moves the exterior camera so the whole building is in view, from an angle above and in front of it, for
 	// picking a building from the filter results list. Unlike FocusCameraOnBuilding (the top-down framing used
