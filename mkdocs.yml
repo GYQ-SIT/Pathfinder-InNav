@@ -18,6 +18,7 @@ nav:
   - Configuration: configuration.md
   - Design:
       - Interior Editor Guide: design/interior-editor-guide.md
+      - Project File Format: design/project-file-format.md
       - UI Panels Guide: design/ui-panels-guide.md
       - Layout Validator: design/layout-validator.md
       - Layout Validator M2 Evidence: design/layout-validator-m2-compliance.md

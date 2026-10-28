@@ -31,6 +31,7 @@ build, reading project data and routes through a mobile data adapter).
   - `toolchain-decision.md` — stack/platform decisions and why
   - `deliverables.md` — ownership + M1/M2/M3 targets
   - `design/`
+    - `project-file-format.md` — the project file: every field, units, versions, what happens to wrong input (and `docs/schemas/`, its JSON Schemas)
     - `interior-editor-guide.md` — **how to use the editor** (both screens: controls, panels, doors, floor generator, 3D, navigation)
     - `ui-panels-guide.md` — how the dock panels work and how to add one
     - `mobile-app-data-interface.md` — the phone app's screens and the data interface they use

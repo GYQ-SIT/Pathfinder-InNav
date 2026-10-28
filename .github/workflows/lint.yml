@@ -29,6 +29,13 @@ jobs:
       - name: Repository checks (JSON, secrets, configuration, headers, links)
         run: python scripts/lint.py
 
+      - name: JSON Schemas - the validator, the schemas' own tests, and every data file against its schema
+        run: |
+          python scripts/validate_schema.py --self-test
+          python scripts/test_schemas.py
+          python scripts/validate_schema.py docs/schemas/project.schema.json docs/test-data/*.json InNavi/Data/buildings.json
+          python scripts/validate_schema.py docs/schemas/mobile-prototype.schema.json InNavi/Data/Prototype/mobile-prototype.json
+
       - name: The installer script parses
         uses: actions/setup-node@v4
         with:

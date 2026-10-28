@@ -15,7 +15,7 @@ runtime, inside the packaged application — not in the UE editor:
 
 1. The user loads the campus model and selects a building.
 2. The user enters interior data (rooms, floors, connectors, doors in the outer wall) through an in-app editor, or has a floor generated.
-3. The data is saved/loaded as **JSON** (a project file that carries its format version).
+3. The data is saved/loaded as **JSON** (a project file that carries its format version; every field is in `design/project-file-format.md` and in the JSON Schema `schemas/project.schema.json`, which CI and the tests check).
 4. The interior is **procedurally generated at runtime** from that JSON.
 5. The user navigates: inside the building, across floors, between buildings (over link doors, or out through main doors and back in)
    and across the open ground between them, through any number of stops, one step at a time.

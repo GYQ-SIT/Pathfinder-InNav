@@ -1,0 +1,143 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/GYQ-SIT/Pathfinder-InNav/docs/schemas/project.schema.json",
+  "title": "InNavi project file",
+  "description": "A project: one or more buildings with their footprints and, for each, the interior (floors, rooms, doors, connectors) and the doors in its outer wall. Written by ABuildingGenerator::SaveBuildingsToFile, read by LoadBuildingsFromJson; described in docs/design/project-file-format.md.",
+  "type": "object",
+  "required": ["buildings"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "description": "The format version that wrote the file (1 now). A file without it was made before versions and reads as 1; a newer one is read as well as it can be.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "scale": {
+      "description": "Centimetres in one unit of the footprints and positions of the file (10 means a footprint unit is 10 cm).",
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "floorHeight": {
+      "description": "The height of one floor in centimetres, for the buildings that do not say their own.",
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "projectName": { "type": "string" },
+    "description": { "type": "string" },
+    "buildings": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/building" }
+    }
+  },
+  "definitions": {
+    "point": {
+      "description": "[x, y] in footprint units.",
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "type": "number" }
+    },
+    "building": {
+      "type": "object",
+      "required": ["id", "name", "footprint"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "description": "Unique in the file; what the rest of the file and the phone app call the building.", "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "offset": { "description": "Where the building stands among the others, in footprint units.", "$ref": "#/definitions/point" },
+        "floorCount": { "type": "integer", "minimum": 1 },
+        "floorHeight": { "description": "In centimetres; the file's floorHeight when absent.", "type": "number", "exclusiveMinimum": 0 },
+        "footprint": {
+          "description": "The outline, in order; edge i runs from point i to point i + 1 (the last to the first).",
+          "type": "array",
+          "minItems": 3,
+          "items": { "$ref": "#/definitions/point" }
+        },
+        "interior": { "$ref": "#/definitions/interior" }
+      }
+    },
+    "interior": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "floors": { "type": "array", "items": { "$ref": "#/definitions/floor" } },
+        "entrances": { "type": "array", "items": { "$ref": "#/definitions/entrance" } }
+      }
+    },
+    "floor": {
+      "type": "object",
+      "required": ["level"],
+      "additionalProperties": false,
+      "properties": {
+        "level": { "description": "1 is the ground floor.", "type": "integer", "minimum": 1 },
+        "wallHeight": { "description": "Centimetres.", "type": "number", "exclusiveMinimum": 0 },
+        "wallThickness": { "description": "Centimetres.", "type": "number", "exclusiveMinimum": 0 },
+        "rooms": { "type": "array", "items": { "$ref": "#/definitions/room" } },
+        "navNodes": { "type": "array", "items": { "$ref": "#/definitions/navNode" } }
+      }
+    },
+    "room": {
+      "type": "object",
+      "required": ["id", "footprint"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "description": "Unique in the building.", "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "roomType": { "description": "One of the types of the editor (RoomTypes.h), as written there.", "type": "string" },
+        "access": { "type": "string", "enum": ["public", "private"] },
+        "requireKey": { "type": "boolean" },
+        "closed": { "description": "False for a wall that does not close into a room.", "type": "boolean" },
+        "footprint": { "type": "array", "minItems": 2, "items": { "$ref": "#/definitions/point" } },
+        "openings": { "type": "array", "items": { "$ref": "#/definitions/opening" } }
+      }
+    },
+    "opening": {
+      "description": "A door, window or void in a room's wall.",
+      "type": "object",
+      "required": ["id", "type", "edgeIndex", "offset", "width"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "enum": ["door", "window", "void"] },
+        "edgeIndex": { "description": "Which edge of the room's footprint.", "type": "integer", "minimum": 0 },
+        "offset": { "description": "Distance along the edge to the start of the opening, in world units (centimetres).", "type": "number", "minimum": 0 },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "description": "Windows.", "type": "number", "exclusiveMinimum": 0 },
+        "sillHeight": { "description": "Windows.", "type": "number", "minimum": 0 },
+        "inputId": { "description": "Doors: the id of what the door opens from.", "type": "string" },
+        "connectsTo": { "description": "Doors: the id of what it opens to (a room, or \"corridor\").", "type": "string" }
+      }
+    },
+    "navNode": {
+      "description": "A lift, stairs, escalator or path point; the instances of one connector on its floors share a connectorGroupId.",
+      "type": "object",
+      "required": ["id", "type", "position"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "enum": ["elevator", "stairs", "escalator", "pathNode"] },
+        "position": { "$ref": "#/definitions/point" },
+        "connectsFloors": { "type": "array", "items": { "type": "integer", "minimum": 1 } },
+        "connectorGroupId": { "type": "string" },
+        "rotationDegrees": { "type": "number" },
+        "sizeScale": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "entrance": {
+      "description": "A door in the building's outer wall: a main door to the outside, or a link door to the building next door.",
+      "type": "object",
+      "required": ["id", "kind", "level", "edge", "offset", "width"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "enum": ["main", "link"] },
+        "level": { "type": "integer", "minimum": 1 },
+        "edge": { "description": "Which edge of the building's footprint.", "type": "integer", "minimum": 0 },
+        "offset": { "type": "number", "minimum": 0 },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "connectsTo": { "description": "Link doors: the other building's id.", "type": "string" }
+      }
+    }
+  }
+}
