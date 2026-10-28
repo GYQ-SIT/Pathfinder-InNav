@@ -15,10 +15,12 @@ build, reading project data and routes through a mobile data adapter).
 - `Readme.txt` — the readme that went into the Milestone 1 submission zip (kept as it was handed in)
 - `.gitignore` — UnrealEngine template, plus signing keys, packaging output and personal test files
 - `.github/workflows/` — CI: `build-windows.yml` (builds the editor from a clean checkout, runs the MSVC static analysis and every
-  automation test, on a self-hosted Windows runner), `lint.yml` (JSON, secrets, configuration, headers and document links; GitHub-hosted),
+  automation test, on a self-hosted Windows runner), `lint.yml` (JSON, secrets, configuration, headers and document links; GitHub-hosted), `release-windows.yml` (a pushed tag builds the Windows
+  package and publishes it as a release),
   `validate-json.yml` (every `InNavi/Data/*.json` parses), `deploy-wiki.yml` (publishes `docs/`)
 - `scripts/` — `lint.py` (the repository checks of `lint.yml`), `check-analysis.ps1` and `check-test-report.ps1` (turn the analysis log and
-  the test report into a pass or a fail), `install-layout-validator.mjs` (installs the plugin package)
+  the test report into a pass or a fail), `package-windows.ps1`, `smoke-test-package.ps1` and `publish-release.ps1` (the release build,
+  see Releases below), `install-layout-validator.mjs` (installs the plugin package)
 - `InNavi/` — the Unreal Engine project (open `InNavi/InNavi.uproject`)
   - `Source/InNavi/` — all the C++. The phone app is the files starting with `Mobile`
   - `Data/` — sample data, audio, default dock layouts
@@ -92,6 +94,23 @@ UnrealEditor-Cmd.exe InNavi/InNavi.uproject -ExecCmds="Automation RunTests InNav
 `InNavi.Navigation`. Windows CI runs **all** of them, and fails the pull request when one fails (the editor exits 0 either way, so
 `scripts/check-test-report.ps1` reads the report). Before a pull request, `python scripts/lint.py` runs the repository checks of `lint.yml`
 on your own machine. The report and the performance measurements of every CI run are kept with it as a downloadable artifact.
+
+## Releases
+
+A Windows build is published from a tag, not by hand. Tag a commit of `main` that passed CI and push the tag:
+
+```bash
+git tag m2-build-1
+git push origin m2-build-1
+```
+
+`release-windows.yml` then packages the build on the Windows runner (`scripts/package-windows.ps1`: cook, stage, pak, clean, zip), starts
+the package once without a window to see that it opens and closes (`scripts/smoke-test-package.ps1`), and attaches
+`InNavi-<tag>.zip` to a GitHub release marked as a test build (`scripts/publish-release.ps1`). Tags look like `m<milestone>-build-<n>`.
+The zip holds `InNavi.exe`, the campus database, the default layouts, `SampleProjects/` to try File > Load with, and `BUILD-INFO.txt`
+(tag, commit, date). The same package can be made on your own machine with
+`powershell -File scripts\package-windows.ps1 -Name InNavi-test -OutputDir C:\Temp\release` (editor closed). The Android phone app is
+built and signed separately (`docs/android-signing.md`).
 
 ## Performance budget
 
