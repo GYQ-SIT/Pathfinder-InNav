@@ -3166,7 +3166,7 @@ void ANavPlayerController::FocusCameraOnCampusPoint(const FNavigationRoutePoint&
 	};
 	// A view of a person's size, in world units (cm): near enough to see the spot and what is around it, far enough to take in the
 	// stretch of the route that goes on from it, and never so far that the spot is lost.
-	constexpr float MinDistance = 2500.f;
+	constexpr float MinDistance = 8000.f;
 	constexpr float MaxDistance = 15000.f;
 	constexpr float Pitch = -45.f;
 	const FVector Here = WorldOf(Point);

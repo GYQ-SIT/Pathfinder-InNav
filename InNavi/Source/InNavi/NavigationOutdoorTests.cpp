@@ -476,7 +476,7 @@ bool FNavigationOutdoorStepCameraTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("the step is at A"), Here && Here->BuildingId == TEXT("A"));
 	// The camera is a person-sized distance from the spot (not the size of a building), looking down at it, with it in view.
 	const double ToStep = Here ? FVector::Dist(AtA, Here->WorldPosition) : 0.0;
-	TestTrue(TEXT("a view of a person's size, not further than the most"), ToStep >= 2000.0 && ToStep <= 16000.0);
+	TestTrue(TEXT("a view of a person's size, not further than the most"), ToStep >= 6000.0 && ToStep <= 16000.0);
 	TestTrue(TEXT("looking down"), Pawn->GetActorForwardVector().Z < -0.5);
 	TestTrue(TEXT("with the step in front of the camera"), Here && FVector::DotProduct(Pawn->GetActorForwardVector(), (Here->WorldPosition - AtA).GetSafeNormal()) > 0.8);
 	// The last is at C: the camera has moved over to it.
@@ -487,9 +487,9 @@ bool FNavigationOutdoorStepCameraTest::RunTest(const FString& Parameters)
 		&& There && FVector::Dist(Pawn->GetActorLocation(), There->WorldPosition) < FVector::Dist(AtA, There->WorldPosition));
 	// The last step is only a place: the camera looks straight at it, from the nearest distance.
 	TestTrue(TEXT("the last step is looked at from the nearest distance"), There
-		&& FMath::IsNearlyEqual(static_cast<float>(FVector::Dist(Pawn->GetActorLocation(), There->WorldPosition)), 2500.f, 5.f));
+		&& FMath::IsNearlyEqual(static_cast<float>(FVector::Dist(Pawn->GetActorLocation(), There->WorldPosition)), 8000.f, 5.f));
 	TestTrue(TEXT("and it is at the middle of the view"), There
-		&& FVector::Dist(Pawn->GetActorLocation() + Pawn->GetActorForwardVector() * 2500.f, There->WorldPosition) < 5.0);
+		&& FVector::Dist(Pawn->GetActorLocation() + Pawn->GetActorForwardVector() * 8000.f, There->WorldPosition) < 5.0);
 	return true;
 }
 
