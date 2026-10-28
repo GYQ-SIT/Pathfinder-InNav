@@ -318,18 +318,12 @@ void UNavigationPanelWidget::SetEndpoint(FSelectedEndpoint& Endpoint, const FNav
 	const bool bRouteWasVisible = !RoutePoints.IsEmpty();
 	Endpoint.bValid = true;
 	Endpoint.Point = Point;
-	Endpoint.Point.BuildingId = BuildingId;
-	if (const APolyBuilding* Building = Generator ? Generator->FindBuildingById(BuildingId) : nullptr)
-	{
-		const FVector2D XY = (Point.Position + Building->BuildingOffset) * Generator->GetScale();
-		Endpoint.Point.WorldPosition = FVector(XY.X, XY.Y, FMath::Max(0, Point.Floor - 1) * Building->GetFloorHeight());
-		Endpoint.Point.bHasWorldPosition = true;
-	}
+	StampPoint(Endpoint.Point, BuildingId);
 	Endpoint.BuildingId = BuildingId;
 	Endpoint.bSetViaDropdown = bSetViaDropdown;
 	Endpoint.RoomOptionLabel = RoomOptionLabel;
 	Endpoint.RoomId = RoomId;
-	RoutePoints.Reset();
+	ClearRouteResult();
 	bRouteGuidanceVisible = true;
 	bLastFindRouteFailed = false;
 	const FString Message = bRouteWasVisible
@@ -469,13 +463,11 @@ bool UNavigationPanelWidget::SetEndpointToRoom(const FString& RoomOptionLabel, b
 		return SetEndpointToOutdoorOption(*Found, bIsStart);
 	}
 
-	APolyBuilding* Building = Generator ? Generator->FindBuildingById(Interior->GetLoadedBuildingId()) : nullptr;
-	FString Error;
-	if (!Building || !FNavigationRoutePlanner::IsValidPoint(*Building, *Interior, Generator->GetScale(),
-		Found->Floor, Found->Centroid, Error))
+	FNavigationRoutePoint SelectedPoint;
+	FString BuildingId, Error;
+	if (!MakeOptionPoint(*Found, SelectedPoint, BuildingId, Error))
 	{
-		SetStatusMessage(FString::Printf(TEXT("'%s''s center isn't reachable (%s) - try clicking a point inside it instead."),
-			*Found->RoomName, *Error), ENavigationMessageKind::Error);
+		SetStatusMessage(Error, ENavigationMessageKind::Error);
 		return false;
 	}
 
@@ -484,14 +476,120 @@ bool UNavigationPanelWidget::SetEndpointToRoom(const FString& RoomOptionLabel, b
 	SelectionMode = ENavigationSelectionMode::None;
 
 	FSelectedEndpoint& Endpoint = bIsStart ? Start : Destination;
-	FNavigationRoutePoint SelectedPoint;
-	SelectedPoint.Position = Found->Centroid;
-	SelectedPoint.Floor = Found->Floor;
-	SetEndpoint(Endpoint, SelectedPoint, Building->BuildingId,
+	SetEndpoint(Endpoint, SelectedPoint, BuildingId,
 		bIsStart ? TEXT("Start") : TEXT("Destination"),
 		FString::Printf(TEXT("to '%s' indoors on Floor %d"), *Found->RoomName, Found->Floor),
 		true, RoomOptionLabel, Found->RoomId);
 	return true;
+}
+
+namespace
+{
+	bool SamePlace(const FNavigationRoutePoint& A, const FNavigationRoutePoint& B)
+	{
+		return A.BuildingId == B.BuildingId && A.Floor == B.Floor && A.Position.Equals(B.Position, 0.01);
+	}
+}
+
+// The legs of a trip from the Start through the stops to the Destination, planned one after another.
+struct UNavigationPanelWidget::FJourney
+{
+	struct FWaypoint
+	{
+		FNavigationRoutePoint Point;
+		FString Label;
+	};
+
+	TArray<FWaypoint> Waypoints;
+	// The leg being planned, and what the legs before it found.
+	int32 NextLeg = 0;
+	TArray<FNavigationRoutePoint> Points;
+	TArray<FNavigationRouteLeg> Legs;
+
+	int32 LegCount() const { return Waypoints.Num() - 1; }
+	bool Done() const { return NextLeg >= LegCount(); }
+	const FWaypoint& From() const { return Waypoints[NextLeg]; }
+	const FWaypoint& To() const { return Waypoints[NextLeg + 1]; }
+
+	// Adds the route found for the leg being planned; it begins where the leg before it ended.
+	void AddLeg(const FNavigationRouteResult& Result)
+	{
+		const int32 Shared = !Points.IsEmpty() && !Result.Points.IsEmpty() && SamePlace(Points.Last(), Result.Points[0]) ? 1 : 0;
+		FNavigationRouteLeg Leg;
+		Leg.FromLabel = From().Label;
+		Leg.ToLabel = To().Label;
+		Leg.FirstPointIndex = Points.Num() - Shared;
+		for (int32 I = Shared; I < Result.Points.Num(); ++I)
+		{
+			Points.Add(Result.Points[I]);
+		}
+		Leg.LastPointIndex = Points.Num() - 1;
+		Legs.Add(MoveTemp(Leg));
+		++NextLeg;
+	}
+};
+
+auto UNavigationPanelWidget::MakeJourney() const -> TSharedRef<FJourney>
+{
+	TSharedRef<FJourney> Trip = MakeShared<FJourney>();
+	TArray<FJourney::FWaypoint> All;
+	All.Add({ Start.Point, EndpointPhrase(Start) });
+	for (const FNavigationStop& Stop : Stops)
+	{
+		All.Add({ Stop.Point, EndpointPhrase(StopAsEndpoint(Stop)) });
+	}
+	All.Add({ Destination.Point, EndpointPhrase(Destination) });
+	// Two waypoints at the same place would make a leg of no length: the later one is left out, and the Destination keeps its
+	// label. (Without stops the route is the planner's own, whatever the two points are.)
+	Trip->Waypoints.Add(All[0]);
+	for (int32 I = 1; I < All.Num(); ++I)
+	{
+		if (All.Num() > 2 && SamePlace(All[I].Point, Trip->Waypoints.Last().Point))
+		{
+			if (I == All.Num() - 1)
+			{
+				Trip->Waypoints.Last().Label = All[I].Label;
+			}
+			continue;
+		}
+		Trip->Waypoints.Add(All[I]);
+	}
+	if (Trip->Waypoints.Num() < 2)
+	{
+		Trip->Waypoints = { All[0], All.Last() };
+	}
+	return Trip;
+}
+
+void UNavigationPanelWidget::ApplyJourney(const FJourney& Trip)
+{
+	if (Trip.Points.IsEmpty())
+	{
+		ClearRouteResult();
+		bLastFindRouteFailed = true;
+		SetStatusMessage(TEXT("No route was returned."), ENavigationMessageKind::Warning);
+		return;
+	}
+	RoutePoints = Trip.Points;
+	RouteLegs = Trip.Legs;
+	bRouteGuidanceVisible = true;
+	bLastFindRouteFailed = false;
+	SetStatusMessage(Stops.IsEmpty()
+		? FString::Printf(TEXT("Route found: %d points."), RoutePoints.Num())
+		: FString::Printf(TEXT("Route found through %d stop%s (%d points)."), Stops.Num(), Stops.Num() == 1 ? TEXT("") : TEXT("s"), RoutePoints.Num()),
+		ENavigationMessageKind::Success);
+}
+
+void UNavigationPanelWidget::FailJourney(const FJourney& Trip, const FNavigationRouteResult& LegResult)
+{
+	ClearRouteResult();
+	bLastFindRouteFailed = true;
+	const FString Reason = !LegResult.Error.IsEmpty() ? LegResult.Error
+		: FString(TEXT("No route found. Check main/link entrances and floor connectors."));
+	SetStatusMessage(Trip.LegCount() <= 1 ? Reason
+		: FString::Printf(TEXT("Unable to find a route for leg %d of %d (%s -> %s): %s"),
+			Trip.NextLeg + 1, Trip.LegCount(), *Trip.From().Label, *Trip.To().Label, *Reason),
+		ENavigationMessageKind::Warning);
 }
 
 bool UNavigationPanelWidget::CanStartFindRoute()
@@ -511,24 +609,6 @@ bool UNavigationPanelWidget::CanStartFindRoute()
 	return true;
 }
 
-void UNavigationPanelWidget::FinishFindRoute(bool bFound, const FNavigationRouteResult& Result)
-{
-	if (!bFound)
-	{
-		RoutePoints.Reset();
-		bLastFindRouteFailed = true;
-
-		const FString FailureMessage = !Result.Error.IsEmpty()
-			? Result.Error
-			: TEXT("No route found. Check main/link entrances and floor connectors.");
-
-		SetStatusMessage(FailureMessage, ENavigationMessageKind::Warning);
-		return;
-	}
-
-	ApplyRouteResult(Result);
-}
-
 void UNavigationPanelWidget::RequestFindRoute()
 {
 	if (!CanStartFindRoute())
@@ -536,9 +616,18 @@ void UNavigationPanelWidget::RequestFindRoute()
 		return;
 	}
 	StopRouteJob();
-	FNavigationRouteResult Result;
-	const bool bFound = FNavigationRoutePlanner::FindCampusRoute(*Generator, *Interior, Start.Point, Destination.Point, Result);
-	FinishFindRoute(bFound, Result);
+	const TSharedRef<FJourney> Trip = MakeJourney();
+	while (!Trip->Done())
+	{
+		FNavigationRouteResult LegResult;
+		if (!FNavigationRoutePlanner::FindCampusRoute(*Generator, *Interior, Trip->From().Point, Trip->To().Point, LegResult))
+		{
+			FailJourney(*Trip, LegResult);
+			return;
+		}
+		Trip->AddLeg(LegResult);
+	}
+	ApplyJourney(*Trip);
 }
 
 void UNavigationPanelWidget::StartFindRoute()
@@ -551,18 +640,20 @@ void UNavigationPanelWidget::StartFindRoute()
 	JobStart = Start.Point;
 	JobDestination = Destination.Point;
 	bLastFindRouteFailed = false;
-	RouteJob = MakeShared<FNavigationRouteJob>(*Generator, *Interior, JobStart, JobDestination);
+	Journey = MakeJourney();
+	RouteJob = MakeShared<FNavigationRouteJob>(*Generator, *Interior, Journey->From().Point, Journey->To().Point);
 	RouteTicker = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateUObject(this, &UNavigationPanelWidget::TickFindRoute));
 	BroadcastStateChanged();
 }
 
 bool UNavigationPanelWidget::StepFindRoute(double BudgetSeconds)
 {
-	if (!RouteJob)
+	if (!RouteJob || !Journey)
 	{
 		return true;
 	}
-	// The result belongs to the points the search was started for; if either has been changed or cleared, it is no use.
+	// The result belongs to the points the search was started for; if either has been changed or cleared, it is no use. (The
+	// stops, and edits of the interior, stop the search where they are made.)
 	auto SameEndpoint = [](const FSelectedEndpoint& Endpoint, const FNavigationRoutePoint& Point)
 	{
 		return Endpoint.bValid && Endpoint.Point.BuildingId == Point.BuildingId && Endpoint.Point.Floor == Point.Floor
@@ -579,8 +670,21 @@ bool UNavigationPanelWidget::StepFindRoute(double BudgetSeconds)
 		return false;
 	}
 	const TSharedPtr<FNavigationRouteJob> Finished = RouteJob;
+	const TSharedPtr<FJourney> Trip = Journey;
+	if (!Finished->Succeeded())
+	{
+		StopRouteJob();
+		FailJourney(*Trip, Finished->GetResult());
+		return true;
+	}
+	Trip->AddLeg(Finished->GetResult());
+	if (!Trip->Done())
+	{
+		RouteJob = MakeShared<FNavigationRouteJob>(*Generator, *Interior, Trip->From().Point, Trip->To().Point);
+		return false;
+	}
 	StopRouteJob();
-	FinishFindRoute(Finished->Succeeded(), Finished->GetResult());
+	ApplyJourney(*Trip);
 	return true;
 }
 
@@ -601,6 +705,7 @@ bool UNavigationPanelWidget::StopRouteJob()
 	}
 	const bool bWasRunning = RouteJob.IsValid();
 	RouteJob.Reset();
+	Journey.Reset();
 	return bWasRunning;
 }
 
@@ -612,12 +717,22 @@ bool UNavigationPanelWidget::TickFindRoute(float DeltaTime)
 
 float UNavigationPanelWidget::GetFindRouteProgress() const
 {
-	return RouteJob ? RouteJob->GetProgress() : 0.f;
+	if (!RouteJob || !Journey)
+	{
+		return 0.f;
+	}
+	return (Journey->NextLeg + RouteJob->GetProgress()) / FMath::Max(1, Journey->LegCount());
 }
 
 FString UNavigationPanelWidget::GetFindRouteProgressText() const
 {
-	return RouteJob ? RouteJob->GetPhase() : FString();
+	if (!RouteJob || !Journey)
+	{
+		return FString();
+	}
+	return Journey->LegCount() > 1
+		? FString::Printf(TEXT("Leg %d of %d: %s"), Journey->NextLeg + 1, Journey->LegCount(), *RouteJob->GetPhase())
+		: RouteJob->GetPhase();
 }
 
 void UNavigationPanelWidget::BeginDestroy()
@@ -626,11 +741,150 @@ void UNavigationPanelWidget::BeginDestroy()
 	Super::BeginDestroy();
 }
 
+void UNavigationPanelWidget::StopsChanged(const FString& Message, ENavigationMessageKind Kind)
+{
+	// A search and a route are for the stops they were made with.
+	StopRouteJob();
+	ClearRouteResult();
+	bLastFindRouteFailed = false;
+	SetStatusMessage(Message, Kind);
+}
+
+FString UNavigationPanelWidget::GetStopLabel(int32 StopIndex) const
+{
+	if (!Stops.IsValidIndex(StopIndex))
+	{
+		return FString();
+	}
+	const FNavigationStop& Stop = Stops[StopIndex];
+	// A main door picked from the list already names its building ("T1 · Main door").
+	return Stop.Point.Floor == OutdoorFloor ? Stop.RoomOptionLabel : BuildingDisplayName(Stop.BuildingId) + TEXT(" · ") + Stop.RoomOptionLabel;
+}
+
+bool UNavigationPanelWidget::AddStopToRoom(const FString& RoomOptionLabel)
+{
+	if (Stops.Num() >= MaxRouteStops)
+	{
+		SetStatusMessage(FString::Printf(TEXT("A route can have up to %d stops."), MaxRouteStops), ENavigationMessageKind::Warning);
+		return false;
+	}
+	const TArray<FNavigationRoomOption>& Options = GetSelectableRooms();
+	const FNavigationRoomOption* Found = Options.FindByPredicate([&RoomOptionLabel](const FNavigationRoomOption& Option)
+	{
+		return Option.GetDisplayLabel() == RoomOptionLabel;
+	});
+	if (!Found)
+	{
+		SetStatusMessage(TEXT("Could not find that place to add as a stop."), ENavigationMessageKind::Error);
+		return false;
+	}
+	FNavigationStop Stop;
+	FString Error;
+	if (!MakeOptionPoint(*Found, Stop.Point, Stop.BuildingId, Error))
+	{
+		SetStatusMessage(Error, ENavigationMessageKind::Error);
+		return false;
+	}
+	StampPoint(Stop.Point, Stop.BuildingId);
+	Stop.RoomOptionLabel = RoomOptionLabel;
+	Stop.RoomId = Found->RoomId;
+	// A stop where the route already is would be a leg of no length.
+	const FNavigationRoutePoint* Before = !Stops.IsEmpty() ? &Stops.Last().Point : (Start.bValid ? &Start.Point : nullptr);
+	if ((Before && SamePlace(*Before, Stop.Point)) || (Destination.bValid && SamePlace(Destination.Point, Stop.Point)))
+	{
+		SetStatusMessage(TEXT("The route is already there: choose another place for the stop."), ENavigationMessageKind::Warning);
+		return false;
+	}
+	SelectionMode = ENavigationSelectionMode::None;
+	Stops.Add(MoveTemp(Stop));
+	StopsChanged(FString::Printf(TEXT("Added stop %d of %d: %s."), Stops.Num(), MaxRouteStops, *GetStopLabel(Stops.Num() - 1)),
+		ENavigationMessageKind::Success);
+	return true;
+}
+
+bool UNavigationPanelWidget::RemoveStop(int32 StopIndex)
+{
+	if (!Stops.IsValidIndex(StopIndex))
+	{
+		return false;
+	}
+	const FString Removed = GetStopLabel(StopIndex);
+	Stops.RemoveAt(StopIndex);
+	StopsChanged(FString::Printf(TEXT("Removed stop: %s. Press Find Route to search again."), *Removed), ENavigationMessageKind::Warning);
+	return true;
+}
+
+bool UNavigationPanelWidget::MoveStop(int32 FromIndex, int32 ToIndex)
+{
+	if (!Stops.IsValidIndex(FromIndex) || !Stops.IsValidIndex(ToIndex) || FromIndex == ToIndex)
+	{
+		return false;
+	}
+	FNavigationStop Moved = MoveTemp(Stops[FromIndex]);
+	Stops.RemoveAt(FromIndex);
+	Stops.Insert(MoveTemp(Moved), ToIndex);
+	StopsChanged(TEXT("Stop order changed. Press Find Route to search again."), ENavigationMessageKind::Warning);
+	return true;
+}
+
+void UNavigationPanelWidget::ClearStops()
+{
+	if (Stops.IsEmpty())
+	{
+		return;
+	}
+	Stops.Reset();
+	StopsChanged(TEXT("Stops cleared. Press Find Route to search again."), ENavigationMessageKind::Warning);
+}
+
+bool UNavigationPanelWidget::MakeOptionPoint(const FNavigationRoomOption& Option, FNavigationRoutePoint& OutPoint, FString& OutBuildingId, FString& OutError) const
+{
+	const bool bOutdoor = Option.Floor == OutdoorFloor;
+	const APolyBuilding* Building = !Generator || !Interior ? nullptr
+		: Generator->FindBuildingById(bOutdoor ? Option.BuildingId : Interior->GetLoadedBuildingId());
+	FString Reason;
+	if (!Building || !FNavigationRoutePlanner::IsValidPoint(*Building, *Interior, Generator->GetScale(), Option.Floor, Option.Centroid, Reason))
+	{
+		OutError = bOutdoor
+			? FString::Printf(TEXT("'%s' cannot be used as a point (%s)."), *Option.DisplayLabel, *Reason)
+			: FString::Printf(TEXT("'%s''s center isn't reachable (%s) - try clicking a point inside it instead."), *Option.RoomName, *Reason);
+		return false;
+	}
+	OutPoint = FNavigationRoutePoint();
+	OutPoint.Position = Option.Centroid;
+	OutPoint.Floor = Option.Floor;
+	OutBuildingId = Building->BuildingId;
+	return true;
+}
+
+void UNavigationPanelWidget::StampPoint(FNavigationRoutePoint& Point, const FString& BuildingId) const
+{
+	Point.BuildingId = BuildingId;
+	if (const APolyBuilding* Building = Generator ? Generator->FindBuildingById(BuildingId) : nullptr)
+	{
+		const FVector2D XY = (Point.Position + Building->BuildingOffset) * Generator->GetScale();
+		Point.WorldPosition = FVector(XY.X, XY.Y, FMath::Max(0, Point.Floor - 1) * Building->GetFloorHeight());
+		Point.bHasWorldPosition = true;
+	}
+}
+
+UNavigationPanelWidget::FSelectedEndpoint UNavigationPanelWidget::StopAsEndpoint(const FNavigationStop& Stop) const
+{
+	FSelectedEndpoint Endpoint;
+	Endpoint.bValid = true;
+	Endpoint.Point = Stop.Point;
+	Endpoint.BuildingId = Stop.BuildingId;
+	Endpoint.bSetViaDropdown = true;
+	Endpoint.RoomOptionLabel = Stop.RoomOptionLabel;
+	Endpoint.RoomId = Stop.RoomId;
+	return Endpoint;
+}
+
 void UNavigationPanelWidget::ApplyRouteResult(const FNavigationRouteResult& Result)
 {
 	if (Result.Points.IsEmpty())
 	{
-		RoutePoints.Reset();
+		ClearRouteResult();
 		bLastFindRouteFailed = true;
 		SetStatusMessage(Result.Error.IsEmpty() ? TEXT("No route was returned.") : Result.Error,
 			ENavigationMessageKind::Warning);
@@ -638,6 +892,13 @@ void UNavigationPanelWidget::ApplyRouteResult(const FNavigationRouteResult& Resu
 	}
 
 	RoutePoints = Result.Points;
+	// A route that was not planned through stops is one leg from the Start to the Destination.
+	FNavigationRouteLeg Leg;
+	Leg.FirstPointIndex = 0;
+	Leg.LastPointIndex = RoutePoints.Num() - 1;
+	Leg.FromLabel = Start.bValid ? EndpointPhrase(Start) : FString(TEXT("Start"));
+	Leg.ToLabel = Destination.bValid ? EndpointPhrase(Destination) : FString(TEXT("Destination"));
+	RouteLegs = { MoveTemp(Leg) };
 	bRouteGuidanceVisible = true;
 	bLastFindRouteFailed = false;
 	SetStatusMessage(FString::Printf(TEXT("Route found: %d points."), RoutePoints.Num()),
@@ -686,6 +947,8 @@ bool UNavigationPanelWidget::ApplyWorldRouteResult(const FString& BuildingId,
 	Destination.bValid = true;
 	Destination.BuildingId = Result.Points.Last().BuildingId;
 	Destination.Point = Result.Points.Last();
+	// An imported route is the whole journey; stops from before are not on it.
+	Stops.Reset();
 	SelectionMode = ENavigationSelectionMode::None;
 	ApplyRouteResult(Result);
 	return true;
@@ -698,7 +961,8 @@ void UNavigationPanelWidget::ClearAll()
 	SelectionMode = ENavigationSelectionMode::None;
 	Start = FSelectedEndpoint();
 	Destination = FSelectedEndpoint();
-	RoutePoints.Reset();
+	Stops.Reset();
+	ClearRouteResult();
 	bLastFindRouteFailed = false;
 	StatusMessage.Empty();
 	StatusKind = ENavigationMessageKind::Instruction;
@@ -718,11 +982,20 @@ void UNavigationPanelWidget::NotifyRoomDeleted(const FString& RoomId)
 		Destination = FSelectedEndpoint();
 		bChanged = true;
 	}
+	for (int32 StopIndex = Stops.Num() - 1; StopIndex >= 0; --StopIndex)
+	{
+		if (Stops[StopIndex].RoomId == RoomId && Interior && Stops[StopIndex].BuildingId == Interior->GetLoadedBuildingId() && Stops[StopIndex].Point.Floor != OutdoorFloor)
+		{
+			Stops.RemoveAt(StopIndex);
+			bChanged = true;
+		}
+	}
 	if (bChanged)
 	{
-		RoutePoints.Reset();
+		StopRouteJob();
+		ClearRouteResult();
 		bLastFindRouteFailed = false;
-		SetStatusMessage(TEXT("Start/Destination cleared - the room it was set to no longer exists."), ENavigationMessageKind::Warning);
+		SetStatusMessage(TEXT("Start, Destination or a stop was cleared - the room it was set to no longer exists."), ENavigationMessageKind::Warning);
 	}
 }
 
@@ -948,19 +1221,16 @@ void UNavigationPanelWidget::BuildOutdoorOptions() const
 
 bool UNavigationPanelWidget::SetEndpointToOutdoorOption(const FNavigationRoomOption& Option, bool bIsStart)
 {
-	const APolyBuilding* Building = Generator ? Generator->FindBuildingById(Option.BuildingId) : nullptr;
-	FString Error;
-	if (!Building || !FNavigationRoutePlanner::IsValidPoint(*Building, *Interior, Generator->GetScale(), OutdoorFloor, Option.Centroid, Error))
+	FNavigationRoutePoint Point;
+	FString BuildingId, Error;
+	if (!MakeOptionPoint(Option, Point, BuildingId, Error))
 	{
-		SetStatusMessage(FString::Printf(TEXT("'%s' cannot be used as a point (%s)."), *Option.DisplayLabel, *Error), ENavigationMessageKind::Error);
+		SetStatusMessage(Error, ENavigationMessageKind::Error);
 		return false;
 	}
 	SelectionMode = ENavigationSelectionMode::None;
 	FSelectedEndpoint& Endpoint = bIsStart ? Start : Destination;
-	FNavigationRoutePoint Point;
-	Point.Position = Option.Centroid;
-	Point.Floor = OutdoorFloor;
-	SetEndpoint(Endpoint, Point, Building->BuildingId, bIsStart ? TEXT("Start") : TEXT("Destination"),
+	SetEndpoint(Endpoint, Point, BuildingId, bIsStart ? TEXT("Start") : TEXT("Destination"),
 		FString::Printf(TEXT("to '%s'"), *Option.DisplayLabel), true, Option.DisplayLabel, Option.RoomId);
 	return true;
 }
@@ -984,21 +1254,21 @@ void UNavigationPanelWidget::NotifyInteriorChanged()
 		}
 		return;
 	}
-	RoutePoints.Reset();
+	ClearRouteResult();
 	bLastFindRouteFailed = false;
 	SetStatusMessage(TEXT("Interior changed. Press Find Route to update the route."), ENavigationMessageKind::Warning);
 }
 
 bool UNavigationPanelWidget::CanClearRoute() const
 {
-	return IsSelectingPoint() || Start.bValid || Destination.bValid || !RoutePoints.IsEmpty();
+	return IsSelectingPoint() || Start.bValid || Destination.bValid || !Stops.IsEmpty() || !RoutePoints.IsEmpty();
 }
 
 FString UNavigationPanelWidget::GetDisplayStatusMessage() const
 {
 	if (RouteJob)
 	{
-		return FString::Printf(TEXT("Finding route... %d%%\n%s"), FMath::RoundToInt(RouteJob->GetProgress() * 100.f), *RouteJob->GetPhase());
+		return FString::Printf(TEXT("Finding route... %d%%\n%s"), FMath::RoundToInt(GetFindRouteProgress() * 100.f), *GetFindRouteProgressText());
 	}
 	if (!StatusMessage.IsEmpty())
 	{
@@ -1061,34 +1331,46 @@ TArray<UNavigationPanelWidget::FNavigationRouteStep> UNavigationPanelWidget::Bui
 	{
 		Steps.Add({ FString::Printf(TEXT("Start at %s."), *EndpointPhrase(Start)) });
 	}
-	for (int32 I = 1; I < RoutePoints.Num(); ++I)
+	// Leg by leg: what happens between the points of a leg, and at its end (a stop) that the stop is reached. A route that was not
+	// planned in legs is taken as one.
+	const int32 LegCount = RouteLegs.IsEmpty() ? 1 : RouteLegs.Num();
+	for (int32 Leg = 0; Leg < LegCount; ++Leg)
 	{
-		const FNavigationRoutePoint& From = RoutePoints[I - 1];
-		const FNavigationRoutePoint& To = RoutePoints[I];
-		if (From.BuildingId != To.BuildingId && From.Floor != OutdoorFloor && To.Floor != OutdoorFloor)
+		const int32 FirstPoint = RouteLegs.IsEmpty() ? 0 : RouteLegs[Leg].FirstPointIndex;
+		const int32 LastPoint = FMath::Min(RouteLegs.IsEmpty() ? RoutePoints.Num() - 1 : RouteLegs[Leg].LastPointIndex, RoutePoints.Num() - 1);
+		for (int32 I = FMath::Max(FirstPoint + 1, 1); I <= LastPoint; ++I)
 		{
-			Steps.Add({ FString::Printf(TEXT("Use the link door from %s to %s on Floor %d."),
-				*BuildingDisplayName(From.BuildingId), *BuildingDisplayName(To.BuildingId), To.Floor) });
-			continue;
+			const FNavigationRoutePoint& From = RoutePoints[I - 1];
+			const FNavigationRoutePoint& To = RoutePoints[I];
+			if (From.BuildingId != To.BuildingId && From.Floor != OutdoorFloor && To.Floor != OutdoorFloor)
+			{
+				Steps.Add({ FString::Printf(TEXT("Use the link door from %s to %s on Floor %d."),
+					*BuildingDisplayName(From.BuildingId), *BuildingDisplayName(To.BuildingId), To.Floor) });
+				continue;
+			}
+			if (From.Floor == To.Floor)
+			{
+				continue;
+			}
+			if (From.Floor == OutdoorFloor)
+			{
+				Steps.Add({ To.BuildingId.IsEmpty() ? FString(TEXT("Enter the building and continue on Floor 1."))
+					: FString::Printf(TEXT("Enter the building %s and continue on Floor 1."), *BuildingDisplayName(To.BuildingId)) });
+			}
+			else if (To.Floor == OutdoorFloor)
+			{
+				Steps.Add({ From.BuildingId.IsEmpty() ? FString(TEXT("Exit the building and continue outside."))
+					: FString::Printf(TEXT("Exit the building %s and continue outside."), *BuildingDisplayName(From.BuildingId)) });
+			}
+			else
+			{
+				const FString Where = From.BuildingId.IsEmpty() ? FString() : FString::Printf(TEXT(" in %s"), *BuildingDisplayName(From.BuildingId));
+				Steps.Add({ FString::Printf(TEXT("Take the %s%s from Floor %d to Floor %d."), *ConnectorTypeName(To.ConnectorType), *Where, From.Floor, To.Floor) });
+			}
 		}
-		if (From.Floor == To.Floor)
+		if (Leg + 1 < LegCount && !RouteLegs.IsEmpty())
 		{
-			continue;
-		}
-		if (From.Floor == OutdoorFloor)
-		{
-			Steps.Add({ To.BuildingId.IsEmpty() ? FString(TEXT("Enter the building and continue on Floor 1."))
-				: FString::Printf(TEXT("Enter the building %s and continue on Floor 1."), *BuildingDisplayName(To.BuildingId)) });
-		}
-		else if (To.Floor == OutdoorFloor)
-		{
-			Steps.Add({ From.BuildingId.IsEmpty() ? FString(TEXT("Exit the building and continue outside."))
-				: FString::Printf(TEXT("Exit the building %s and continue outside."), *BuildingDisplayName(From.BuildingId)) });
-		}
-		else
-		{
-			const FString Where = From.BuildingId.IsEmpty() ? FString() : FString::Printf(TEXT(" in %s"), *BuildingDisplayName(From.BuildingId));
-			Steps.Add({ FString::Printf(TEXT("Take the %s%s from Floor %d to Floor %d."), *ConnectorTypeName(To.ConnectorType), *Where, From.Floor, To.Floor) });
+			Steps.Add({ FString::Printf(TEXT("Stop %d: %s."), Leg + 1, *RouteLegs[Leg].ToLabel) });
 		}
 	}
 	if (Destination.bValid)
@@ -1112,6 +1394,10 @@ FString UNavigationPanelWidget::BuildRouteDetails() const
 		if (Start.bValid)
 		{
 			Details += FString::Printf(TEXT("Start: %s\n"), *EndpointPhrase(Start));
+		}
+		for (int32 StopIndex = 0; StopIndex < Stops.Num(); ++StopIndex)
+		{
+			Details += FString::Printf(TEXT("Stop %d: %s\n"), StopIndex + 1, *EndpointPhrase(StopAsEndpoint(Stops[StopIndex])));
 		}
 		if (Destination.bValid)
 		{

@@ -10,6 +10,7 @@ class UButton;
 class UComboBoxString;
 class UEditableTextBox;
 class UProgressBar;
+class USizeBox;
 class UTextBlock;
 class UVerticalBox;
 
@@ -45,6 +46,24 @@ protected:
 private:
 	UFUNCTION()
 	void OnCancelFindRouteClicked();
+	UFUNCTION()
+	void OnAddStopClicked();
+	UFUNCTION()
+	void OnMoveStopUpClicked();
+	UFUNCTION()
+	void OnMoveStopDownClicked();
+	UFUNCTION()
+	void OnRemoveStopClicked();
+	UFUNCTION()
+	void HandleStopRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+	UFUNCTION()
+	void HandleStopSelected(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+	// The list of stops and the buttons that act on the one chosen in it.
+	void RefreshStops();
+	void UpdateStopControls();
+	// Moves the chosen stop up (-1) or down (+1) the list, and keeps it chosen.
+	void MoveSelectedStop(int32 Offset);
 	UFUNCTION()
 	void OnSetStartClicked();
 	UFUNCTION()
@@ -97,6 +116,33 @@ private:
 	UTextBlock* SetDestinationButtonLabel = nullptr;
 	UPROPERTY()
 	UButton* FindRouteButton = nullptr;
+	// The stops: the dropdown a place to add is picked from, the button that adds it, and the stops so far in order with what can
+	// be done to the one chosen. All of it is what UNavigationPanelWidget holds; nothing of it is kept here.
+	UPROPERTY()
+	UComboBoxString* StopRoomComboBox = nullptr;
+	UPROPERTY()
+	UBorder* StopRoomBorder = nullptr;
+	UPROPERTY()
+	UButton* AddStopButton = nullptr;
+	UPROPERTY()
+	UTextBlock* AddStopButtonLabel = nullptr;
+	UPROPERTY()
+	UTextBlock* StopsLabelText = nullptr;
+	UPROPERTY()
+	UComboBoxString* StopsComboBox = nullptr;
+	UPROPERTY()
+	UBorder* StopsBorder = nullptr;
+	UPROPERTY()
+	USizeBox* StopActionsSize = nullptr;
+	UPROPERTY()
+	UButton* MoveStopUpButton = nullptr;
+	UPROPERTY()
+	UButton* MoveStopDownButton = nullptr;
+	UPROPERTY()
+	UButton* RemoveStopButton = nullptr;
+	// The stops as last listed, so the list is rebuilt (and its chosen entry kept) only when they change.
+	FString ShownStops;
+
 	// Shown only while a route is being searched for.
 	UPROPERTY()
 	UProgressBar* FindRouteProgress = nullptr;

@@ -8,6 +8,8 @@
 #include "Components/Button.h"
 #include "Components/ComboBoxString.h"
 #include "Components/EditableTextBox.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "Components/ProgressBar.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
@@ -116,6 +118,11 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 		DestinationRoomComboBox = AddRoomDropdown(TEXT("Cbx_NavDestinationRoom"), TEXT("Destination Room"), DestinationRoomBorder, DestinationLabelText);
 		DestinationRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UNavigationDockPanelWidget::HandleDestinationRoomChanged);
 
+		// Stops: places to pass on the way. The list is the same as the Destination's (and the one search narrows it).
+		UTextBlock* UnusedStopLabel = nullptr;
+		StopRoomComboBox = AddRoomDropdown(TEXT("Cbx_NavStopRoom"), TEXT("Stop to Add (optional)"), StopRoomBorder, UnusedStopLabel);
+		StopRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UNavigationDockPanelWidget::HandleStopRoomChanged);
+
 		auto AddButton = [this, Stack](const TCHAR* Name, const TCHAR* Label, UTextBlock*& OutLabel) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
@@ -144,6 +151,45 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 		SetStartButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnSetStartClicked);
 		SetDestinationButton = AddButton(TEXT("Btn_NavSetDestination"), TEXT("Click to Set Destination"), SetDestinationButtonLabel);
 		SetDestinationButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnSetDestinationClicked);
+		AddStopButton = AddButton(TEXT("Btn_NavAddStop"), TEXT("Add Stop"), AddStopButtonLabel);
+		AddStopButton->SetIsEnabled(false);
+		AddStopButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnAddStopClicked);
+		StopsComboBox = AddRoomDropdown(TEXT("Cbx_NavStops"), TEXT("Stops in Order"), StopsBorder, StopsLabelText);
+		StopsComboBox->SetIsEnabled(false);
+		StopsComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UNavigationDockPanelWidget::HandleStopSelected);
+		UHorizontalBox* StopActions = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("Row_NavStopActions"));
+		auto AddStopAction = [this, StopActions](const TCHAR* Name, const TCHAR* Label) -> UButton*
+		{
+			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+			Button->SetStyle(StartStyle::SecondaryButton());
+			Button->SetBackgroundColor(FLinearColor::White);
+			Button->SetIsEnabled(false);
+			Button->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::PlayButtonClickSound);
+			UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(FString(Name) + TEXT("Label")));
+			Text->SetText(FText::FromString(FString(Label)));
+			Text->SetJustification(ETextJustify::Center);
+			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+			WrapText(Text);
+			ApplyStandardFont(Text);
+			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+			SizeBox->SetMinDesiredHeight(NavButtonHeight);
+			SizeBox->SetContent(Text);
+			Button->SetContent(SizeBox);
+			UHorizontalBoxSlot* Slot = StopActions->AddChildToHorizontalBox(Button);
+			Slot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			Slot->SetPadding(FMargin(2.f, 0.f));
+			return Button;
+		};
+		MoveStopUpButton = AddStopAction(TEXT("Btn_NavMoveStopUp"), TEXT("Up"));
+		MoveStopUpButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnMoveStopUpClicked);
+		MoveStopDownButton = AddStopAction(TEXT("Btn_NavMoveStopDown"), TEXT("Down"));
+		MoveStopDownButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnMoveStopDownClicked);
+		RemoveStopButton = AddStopAction(TEXT("Btn_NavRemoveStop"), TEXT("Remove"));
+		RemoveStopButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnRemoveStopClicked);
+		StopActionsSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Row_NavStopActionsSize"));
+		StopActionsSize->SetWidthOverride(ContentWidth);
+		StopActionsSize->SetContent(StopActions);
+		Stack->AddChildToVerticalBox(StopActionsSize)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f));
 		FindRouteButton = AddButton(TEXT("Btn_NavFindRoute"), TEXT("Find Route"), UnusedFindRouteLabel);
 		FindRouteButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnFindRouteClicked);
 		// Only while a route is being searched for: how far it is, and a way to stop it.
@@ -195,6 +241,13 @@ void UNavigationDockPanelWidget::SetContentWidth(float Width)
 	SetButtonWidth(SetStartButton, Width);
 	SetButtonWidth(SetDestinationButton, Width);
 	SetButtonWidth(FindRouteButton, Width);
+	SetButtonWidth(AddStopButton, Width);
+	SetParentSizeBoxWidth(StopRoomComboBox, Width);
+	SetParentSizeBoxWidth(StopsComboBox, Width);
+	if (StopActionsSize)
+	{
+		StopActionsSize->SetWidthOverride(Width);
+	}
 	SetButtonWidth(CancelFindRouteButton, Width);
 	SetParentSizeBoxWidth(FindRouteProgress, Width);
 	SetButtonWidth(ClearRouteButton, Width);
@@ -245,6 +298,140 @@ void UNavigationDockPanelWidget::OnCancelFindRouteClicked()
 		{
 			Nav->CancelFindRoute();
 		}
+	}
+}
+
+void UNavigationDockPanelWidget::OnAddStopClicked()
+{
+	ANavPlayerController* PC = GetController();
+	UNavigationPanelWidget* Nav = PC ? PC->GetNavigationPanel() : nullptr;
+	if (!Nav || !StopRoomComboBox || StopRoomComboBox->GetSelectedOption().IsEmpty())
+	{
+		return;
+	}
+	if (Nav->AddStopToRoom(StopRoomComboBox->GetSelectedOption()))
+	{
+		// A ComboBoxString only reports a changed pick: clearing it lets the same place be added again.
+		StopRoomComboBox->ClearSelection();
+		RefreshStops();
+		// The stop just added is the one chosen in the list.
+		StopsComboBox->SetSelectedIndex(Nav->GetStops().Num() - 1);
+		UpdateStopControls();
+	}
+}
+
+void UNavigationDockPanelWidget::OnMoveStopUpClicked()
+{
+	MoveSelectedStop(-1);
+}
+
+void UNavigationDockPanelWidget::OnMoveStopDownClicked()
+{
+	MoveSelectedStop(1);
+}
+
+void UNavigationDockPanelWidget::MoveSelectedStop(int32 Offset)
+{
+	ANavPlayerController* PC = GetController();
+	UNavigationPanelWidget* Nav = PC ? PC->GetNavigationPanel() : nullptr;
+	const int32 Index = StopsComboBox ? StopsComboBox->GetSelectedIndex() : INDEX_NONE;
+	if (Nav && Index != INDEX_NONE && Nav->MoveStop(Index, Index + Offset))
+	{
+		RefreshStops();
+		StopsComboBox->SetSelectedIndex(Index + Offset);
+		UpdateStopControls();
+	}
+}
+
+void UNavigationDockPanelWidget::OnRemoveStopClicked()
+{
+	ANavPlayerController* PC = GetController();
+	UNavigationPanelWidget* Nav = PC ? PC->GetNavigationPanel() : nullptr;
+	const int32 Index = StopsComboBox ? StopsComboBox->GetSelectedIndex() : INDEX_NONE;
+	if (Nav && Index != INDEX_NONE && Nav->RemoveStop(Index))
+	{
+		// The list is rebuilt with the entry that took its place (or the last) chosen.
+		RefreshStops();
+	}
+}
+
+void UNavigationDockPanelWidget::HandleStopRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
+{
+	if (SelectionType != ESelectInfo::Direct)
+	{
+		UpdateStopControls();
+	}
+}
+
+void UNavigationDockPanelWidget::HandleStopSelected(FString SelectedItem, ESelectInfo::Type SelectionType)
+{
+	if (SelectionType != ESelectInfo::Direct)
+	{
+		UpdateStopControls();
+	}
+}
+
+void UNavigationDockPanelWidget::RefreshStops()
+{
+	ANavPlayerController* PC = GetController();
+	UNavigationPanelWidget* Nav = PC ? PC->GetNavigationPanel() : nullptr;
+	if (!Nav || !StopsComboBox)
+	{
+		return;
+	}
+	const TArray<FNavigationStop>& Stops = Nav->GetStops();
+	if (StopsLabelText)
+	{
+		StopsLabelText->SetText(FText::FromString(FString::Printf(TEXT("Stops in Order (%d/%d)"), Stops.Num(), UNavigationPanelWidget::MaxRouteStops)));
+	}
+	FString Signature;
+	for (int32 Index = 0; Index < Stops.Num(); ++Index)
+	{
+		Signature += Nav->GetStopLabel(Index) + TEXT("\n");
+	}
+	if (Signature != ShownStops)
+	{
+		const int32 Previous = StopsComboBox->GetSelectedIndex();
+		ShownStops = Signature;
+		StopsComboBox->ClearOptions();
+		for (int32 Index = 0; Index < Stops.Num(); ++Index)
+		{
+			StopsComboBox->AddOption(FString::Printf(TEXT("%d. %s"), Index + 1, *Nav->GetStopLabel(Index)));
+		}
+		if (!Stops.IsEmpty())
+		{
+			StopsComboBox->SetSelectedIndex(FMath::Clamp(Previous, 0, Stops.Num() - 1));
+		}
+	}
+	StopsComboBox->SetIsEnabled(!Stops.IsEmpty());
+	UpdateStopControls();
+}
+
+void UNavigationDockPanelWidget::UpdateStopControls()
+{
+	ANavPlayerController* PC = GetController();
+	UNavigationPanelWidget* Nav = PC ? PC->GetNavigationPanel() : nullptr;
+	const int32 Count = Nav ? Nav->GetStops().Num() : 0;
+	const int32 Chosen = StopsComboBox ? StopsComboBox->GetSelectedIndex() : INDEX_NONE;
+	if (AddStopButton)
+	{
+		AddStopButton->SetIsEnabled(StopRoomComboBox && !StopRoomComboBox->GetSelectedOption().IsEmpty() && Count < UNavigationPanelWidget::MaxRouteStops);
+	}
+	if (AddStopButtonLabel)
+	{
+		AddStopButtonLabel->SetText(FText::FromString(FString::Printf(TEXT("Add Stop (%d/%d)"), Count, UNavigationPanelWidget::MaxRouteStops)));
+	}
+	if (MoveStopUpButton)
+	{
+		MoveStopUpButton->SetIsEnabled(Chosen > 0);
+	}
+	if (MoveStopDownButton)
+	{
+		MoveStopDownButton->SetIsEnabled(Chosen >= 0 && Chosen + 1 < Count);
+	}
+	if (RemoveStopButton)
+	{
+		RemoveStopButton->SetIsEnabled(Chosen >= 0 && Chosen < Count);
 	}
 }
 
@@ -413,6 +600,7 @@ void UNavigationDockPanelWidget::RefreshDisplay()
 	{
 		ClearRouteButton->SetIsEnabled(Nav->CanClearRoute());
 	}
+	RefreshStops();
 	const bool bFindingRoute = Nav->IsFindingRoute();
 	if (CancelFindRouteButton)
 	{
@@ -558,6 +746,21 @@ void UNavigationDockPanelWidget::RefreshRoomDropdowns()
 
 	StartRoomComboBox->SetIsEnabled(!StartMatches.IsEmpty());
 	DestinationRoomComboBox->SetIsEnabled(!DestinationMatches.IsEmpty());
+	if (StopRoomComboBox)
+	{
+		const FString PreviousStop = StopRoomComboBox->GetSelectedOption();
+		StopRoomComboBox->ClearOptions();
+		for (const FRoomOption& Option : DestinationMatches)
+		{
+			StopRoomComboBox->AddOption(Option.GetDisplayLabel());
+		}
+		if (StopRoomComboBox->FindOptionIndex(PreviousStop) != INDEX_NONE)
+		{
+			StopRoomComboBox->SetSelectedOption(PreviousStop);
+		}
+		StopRoomComboBox->SetIsEnabled(!DestinationMatches.IsEmpty());
+		UpdateStopControls();
+	}
 	if (DestinationSearchResultsText)
 	{
 		DestinationSearchResultsText->SetText(FText::FromString(DestinationMatches.IsEmpty()

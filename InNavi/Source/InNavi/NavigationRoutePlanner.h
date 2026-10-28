@@ -29,6 +29,27 @@ struct FNavigationRouteResult
 	FString Error;
 };
 
+// A place the route has to pass on the way from the Start to the Destination, in any building or outside. Its Point carries the
+// building and the world position, as the Start and Destination do.
+struct FNavigationStop
+{
+	FNavigationRoutePoint Point;
+	FString BuildingId;
+	FString RoomOptionLabel;
+	FString RoomId;
+};
+
+// One section of a journey through stops: the stretch from one waypoint (the Start or a stop) to the next (a stop or the
+// Destination). The ranges refer to the one combined list of route points, so the map and the 3D view can draw a single route
+// and still tell the sections apart; a leg begins at the point where the one before it ended.
+struct FNavigationRouteLeg
+{
+	int32 FirstPointIndex = INDEX_NONE;
+	int32 LastPointIndex = INDEX_NONE;
+	FString FromLabel;
+	FString ToLabel;
+};
+
 struct FNavigationRoutePreferences
 {
 	bool bAllowLift = true;

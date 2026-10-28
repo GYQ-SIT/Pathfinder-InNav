@@ -84,6 +84,22 @@ public:
 	const FNavigationRoutePoint& GetStart() const { return Start.Point; }
 	const FNavigationRoutePoint& GetDestination() const { return Destination.Point; }
 	const TArray<FNavigationRoutePoint>& GetRoutePoints() const { return RoutePoints; }
+
+	// Stops: places the route has to pass, in order, between the Start and the Destination. A stop can be in any building, or a
+	// main door outside; the room dropdowns are where they are picked.
+	static constexpr int32 MaxRouteStops = 8;
+	const TArray<FNavigationStop>& GetStops() const { return Stops; }
+	// Once a route is found, the stretches of it between the Start, the stops and the Destination (one when there are no stops).
+	const TArray<FNavigationRouteLeg>& GetRouteLegs() const { return RouteLegs; }
+	// The stop as the lists show it: the building, then the place ("Beta · Lab 3 (Floor 2)"; a main door names its building itself).
+	FString GetStopLabel(int32 StopIndex) const;
+	// Adds the place the dropdown entry names (FNavigationRoomOption::GetDisplayLabel) as the last stop. False, with a message, when
+	// there is no such place, it cannot be used as a point, the limit is reached, or it is where the route already is (the Start or
+	// the stop before it, or the Destination).
+	bool AddStopToRoom(const FString& RoomOptionLabel);
+	bool RemoveStop(int32 StopIndex);
+	bool MoveStop(int32 FromIndex, int32 ToIndex);
+	void ClearStops();
 	// Presentation visibility is independent of the stored route and the navigation dock.
 	UFUNCTION(BlueprintPure, Category = "Navigation")
 	bool IsRouteGuidanceVisible() const { return bRouteGuidanceVisible; }
@@ -131,8 +147,8 @@ public:
 
 	// RequestFindRoute waits for the route. On a large campus that takes seconds, so the Find Route button calls this instead: the
 	// search runs a little each frame (the panel steps itself from the core ticker), shows how far it is, and can be cancelled.
-	// The result is applied exactly as RequestFindRoute applies it. Changing the start or destination, clearing, or closing the
-	// project stops the search without a result.
+	// The result is applied exactly as RequestFindRoute applies it. Changing the start, the stops or the destination, clearing,
+	// editing the interior, or closing the project stops the search without a result. With stops, each leg is searched in turn.
 	void StartFindRoute();
 	// Works for about BudgetSeconds; true once there is no search running any more. The ticker calls this; tests may call it directly.
 	bool StepFindRoute(double BudgetSeconds);
@@ -260,8 +276,22 @@ protected:
 private:
 	// The checks both ways of finding a route start with; false (with the reason shown) when there is nothing to find.
 	bool CanStartFindRoute();
-	// What both ways do with what the search found.
-	void FinishFindRoute(bool bFound, const FNavigationRouteResult& Result);
+	// The trip from the Start through the stops to the Destination, as the legs it is planned in. Both ways of finding a route plan
+	// one leg after another and end in ApplyJourney, or in FailJourney with the leg that could not be.
+	struct FJourney;
+	TSharedRef<FJourney> MakeJourney() const;
+	void ApplyJourney(const FJourney& Trip);
+	void FailJourney(const FJourney& Trip, const FNavigationRouteResult& LegResult);
+	TSharedPtr<FJourney> Journey;
+	// The route and its legs are always cleared together.
+	void ClearRouteResult() { RoutePoints.Reset(); RouteLegs.Reset(); }
+	// What every change of the stops does: the search and the route they were for no longer apply.
+	void StopsChanged(const FString& Message, ENavigationMessageKind Kind);
+	// The point on the map a dropdown entry stands for, and the building it is in; false (with the reason, for the status line) when a
+	// person cannot be sent there.
+	bool MakeOptionPoint(const FNavigationRoomOption& Option, FNavigationRoutePoint& OutPoint, FString& OutBuildingId, FString& OutError) const;
+	// Gives a point its building and where it is in the world, as the planner needs them.
+	void StampPoint(FNavigationRoutePoint& Point, const FString& BuildingId) const;
 	// Stops a running search without a message; true if there was one.
 	bool StopRouteJob();
 	bool TickFindRoute(float DeltaTime);
@@ -291,6 +321,8 @@ private:
 	};
 
 	FString OtherBuildingLabel(const FSelectedEndpoint& Endpoint) const;
+	// A stop as an endpoint, to be spoken of the way the Start and Destination are.
+	FSelectedEndpoint StopAsEndpoint(const FNavigationStop& Stop) const;
 	// A building by its name (its id when it has none), and where an endpoint is, in words, for the directions.
 	FString BuildingDisplayName(const FString& BuildingId) const;
 	FString EndpointPhrase(const FSelectedEndpoint& Endpoint) const;
@@ -320,7 +352,9 @@ private:
 
 	FSelectedEndpoint Start;
 	FSelectedEndpoint Destination;
+	TArray<FNavigationStop> Stops;
 	TArray<FNavigationRoutePoint> RoutePoints;
+	TArray<FNavigationRouteLeg> RouteLegs;
 	FString StatusMessage;
 	ENavigationMessageKind StatusKind = ENavigationMessageKind::Instruction;
 	ENavigationSelectionMode SelectionMode = ENavigationSelectionMode::None;

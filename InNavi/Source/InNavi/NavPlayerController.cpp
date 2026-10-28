@@ -3071,7 +3071,7 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 			NavigationPanel->GetRoutePoints(),
 			NavigationPanel->HasStart() ? &NavigationPanel->GetStart() : nullptr,
 			NavigationPanel->HasDestination() ? &NavigationPanel->GetDestination() : nullptr,
-			NavigationPanel->IsRouteGuidanceVisible()));
+			NavigationPanel->IsRouteGuidanceVisible(), &NavigationPanel->GetStops(), &NavigationPanel->GetRouteLegs()));
 		return;
 	}
 
@@ -3091,7 +3091,7 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 		NavigationPanel->HasStart() ? &NavigationPanel->GetStart() : nullptr,
 		NavigationPanel->HasDestination() ? &NavigationPanel->GetDestination() : nullptr,
 		Building->BuildingOffset, Generator->GetScale(), Building->GetFloorHeight(), InteriorGen->GetActiveFloor(),
-		NavigationPanel->IsRouteGuidanceVisible(), Building->BuildingId));
+		NavigationPanel->IsRouteGuidanceVisible(), Building->BuildingId, &NavigationPanel->GetStops(), &NavigationPanel->GetRouteLegs()));
 }
 
 void ANavPlayerController::SetPointerOverUICallback(const UObject* ScreenOwner, TFunction<bool(const FVector2D&)> Callback)

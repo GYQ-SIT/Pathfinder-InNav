@@ -269,4 +269,46 @@ bool FNavigationOutdoorRouteViewTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// Stops outside, as the exterior screen picks them: A's door, then B's door, then C's door is one journey of two legs, all outside.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationOutdoorStopsTest, "InNavi.Navigation.Outdoor.Stops",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationOutdoorStopsTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationOutdoorTests;
+	FNavigationSearchFixture Fixture;
+	if (!TestTrue(TEXT("test project loads"), LoadTestProject(Fixture))) return false;
+	UNavigationPanelWidget* Nav = Fixture.Nav;
+	Nav->SetOutdoorMode(true);
+	const TArray<UNavigationPanelWidget::FNavigationRoomOption> Options = Nav->GetSelectableRooms();
+	if (!TestEqual(TEXT("a main door for each building"), Options.Num(), 3)) return false;
+
+	Nav->SetStartToRoom(Options[0].GetDisplayLabel());
+	Nav->SetDestinationToRoom(Options[2].GetDisplayLabel());
+	TestTrue(TEXT("B's door can be a stop"), Nav->AddStopToRoom(Options[1].GetDisplayLabel()));
+	TestEqual(TEXT("a main door names its building"), Nav->GetStopLabel(0), Options[1].GetDisplayLabel());
+	TestTrue(TEXT("the stop is outside, in B"), Nav->GetStops()[0].Point.Floor == UNavigationPanelWidget::OutdoorFloor && Nav->GetStops()[0].BuildingId == TEXT("B")
+		&& Nav->GetStops()[0].Point.bHasWorldPosition);
+
+	Nav->RequestFindRoute();
+	TestEqual(TEXT("two legs"), Nav->GetRouteLegs().Num(), 2);
+	TestTrue(TEXT("from A to C, outside at both ends"), RunsBetween(Nav->GetRoutePoints(), TEXT("A"), TEXT("C")));
+	if (Nav->GetRouteLegs().Num() == 2)
+	{
+		const FNavigationRoutePoint& AtStop = Nav->GetRoutePoints()[Nav->GetRouteLegs()[0].LastPointIndex];
+		TestTrue(TEXT("the legs meet at the stop"), AtStop.BuildingId == TEXT("B") && AtStop.Position.Equals(Nav->GetStops()[0].Point.Position, 0.5));
+	}
+	const FNavigationRoutePoint Start = Nav->GetStart(), Destination = Nav->GetDestination();
+	const FNavigation3DView View = UNavigationRouteVisualization::BuildCampusView(Nav->GetRoutePoints(), &Start, &Destination, true, &Nav->GetStops(), &Nav->GetRouteLegs());
+	TestEqual(TEXT("the campus view marks the stop"), View.Stops.Num(), 1);
+	TestTrue(TEXT("and draws each leg in its colour"), View.Segments.ContainsByPredicate([](const FNavigationDisplaySegment& S) { return S.RouteLegIndex == 0; })
+		&& View.Segments.ContainsByPredicate([](const FNavigationDisplaySegment& S) { return S.RouteLegIndex == 1; }));
+
+	// The same a little at a time.
+	const int32 Points = Nav->GetRoutePoints().Num();
+	Nav->StartFindRoute();
+	while (!Nav->StepFindRoute(0.0)) {}
+	TestTrue(TEXT("the same journey"), Nav->GetRoutePoints().Num() == Points && Nav->GetRouteLegs().Num() == 2);
+	return true;
+}
+
 #endif
