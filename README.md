@@ -111,11 +111,21 @@ The zip holds `InNavi.exe`, the campus database, the default layouts, `SamplePro
 `powershell -File scripts\package-windows.ps1 -Name InNavi-test -OutputDir C:\Temp\release` (editor closed). The Android phone app is
 built and signed separately (`docs/android-signing.md`).
 
+## Working agreement
+
+The backlog is the Jira project **PAT** (<https://digipen-team-pathfinder.atlassian.net/jira/software/projects/PAT/list>): every piece of work is a story under an
+epic with an owner, and the epics of the four technical deliverables are named in `docs/deliverables.md`. So that anyone can follow who did what:
+
+- **Branch** from `main`, named for what it is (`YQ_nav_panel`), and open a **pull request**; CI (build, analysis, tests, lint) has to be green before it is merged.
+- **Name the Jira issue** in the pull request (the template asks for it) and start each commit message with its key when there is one: `PAT-123 Short summary`.
+- **One owner per story**; a pull request that closes a story says so, and the story is moved to Done when it is merged.
+- Do not commit personal files (your own `buildings.json` edits, saved layouts); `lint.py` also fails on keys and addresses in the source.
+
 ## Performance budget
 
 Desktop 60 FPS or more, phone 30 FPS or more; the campus loads in under 3 s, an interior opens in under 0.5 s, a route between buildings
-takes under 1 s (p95). The measured numbers, the machine they were taken on, and the one place we are above the target (a route inside
-the largest, ten-floor building takes about 6 s) are in [`docs/performance.md`](docs/performance.md). The Debug panel (Window > Debug) shows
+takes under 1 s (p95). The measured numbers, the machine they were taken on, and the one place that is still slow (the first route in
+the largest, ten-floor building takes about 6 s while it builds the graph of the building; the next ones take about 20 ms) are in [`docs/performance.md`](docs/performance.md). The Debug panel (Window > Debug) shows
 the frame rate while you use the app: the average, the 1 % low and the slowest frame of the last ten seconds.
 
 ## The phone app

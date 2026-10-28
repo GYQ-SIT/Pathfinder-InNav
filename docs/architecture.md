@@ -181,7 +181,7 @@ The numbers are measured, on the data of the repository, in `performance.md` (re
 | School model import into UE | If the model does not import cleanly, nothing downstream works | **Resolved**: the SIT Punggol campus loads (footprints from `buildings.json`, the real map from the SQLite database): 29 campus buildings, 407 others, 1,824 roads and points of interest in **1.8 s** |
 | Runtime dynamic NavMesh | Interior is generated at runtime, so the NavMesh must rebuild at runtime (not editor-baked) | **Avoided**: routing does not use a NavMesh; the planner reads the generated geometry directly each time |
 | Cross-floor routing via NavLinks | Vertical connections are the hard part of the navigation | **Resolved**: connectors (`ConnectorGroupId`) join floors in the planner's graph; between buildings too (link doors) |
-| Route-finding speed | Many walls and floors make the visibility graph slow | **Measured**: a route between three buildings takes **42 ms**, on the phone interface **53 ms** (p95). **Open**: in the largest building the editor makes (175 x 64 m, ten floors, 225 rooms) a route takes **6.3 s**, because the graph of the building is built again for each route; it runs a little each frame with a progress bar and a Cancel button, so the editor keeps its frame rate. Planned: keep the graph until the building changes |
+| Route-finding speed | Many walls and floors make the visibility graph slow | **Measured**: a route between three buildings takes **42 ms**, on the phone interface **53 ms** (p95). **Reduced**: in the largest building the editor makes (175 x 64 m, ten floors, 225 rooms) the **first** route takes **6.0 s**, because the graph of the building (4,391 vertices joined in pairs) has to be built; the graph is then kept until the building changes, so the next routes take **20 ms** and validating again 0.16 s (`NavigationRoutePlanner.cpp`, `InNavi.Navigation.GraphCache.*`). The first runs a little each frame with a progress bar and a Cancel button, so the editor keeps its frame rate |
 | Mobile performance | Runtime generation + pathfinding may be heavy on mobile | **Checked** for the phone app on a Samsung Galaxy S24+ (steady 60 fps) and on emulators; those measurements used mock data; performance with real project routing still needs a rebuilt-device check |
 | Real data on the phone | The project file has to reach the phone and the planner has to run there | **Implemented** (`FMobileRealSource`, tested through the same contract as the mock source; the desktop data interface is measured in `performance.md`); a check of the installed build on the phone is still to do (see `mobile-real-data-guide.md`) |
 
@@ -207,7 +207,8 @@ Ownership is tracked per deliverable in `deliverables.md`. As of 2026-10-28:
 
 | Component | Layer | Owner |
 |-----------|-------|-------|
-| Model import and building selection (T01), data editor and JSON (T02: the data model and the dialogs), procedural interior generator (T03) | 1, 2, 3, 4 | Yongqi |
+| Model import and building selection (T01), data editor and JSON (T02: the data model and the dialogs) | 1, 2, 3, 4 | Yongqi |
+| Procedural interior generator (T03) | 3 | Afiq (owner of the epic in Jira) |
 | The editor's on-screen toolbar (T02, UI layer) | 1 | Padre |
 | User input to JSON conversion (T02) | 4 | Afiq |
 | Dock system, the shared panels, the interior and exterior screens | 1, 2 | Yongqi |
