@@ -1,6 +1,6 @@
 # Interior Editor — How to Use It
 
-> Current state as of 2026-10-23, `main`. The editor now has a real UMG UI
+> Current state as of 2026-10-28. The editor now has a real UMG UI
 > (menu bar, dockable panels, buttons) - every action below also still has a keyboard
 > shortcut, and both do the same thing under the hood.
 
@@ -427,6 +427,31 @@ Camera controls:
 
 Switching floors while in 3D re-frames the camera to the default view of the new
 floor. Switching buildings (via the building switcher) exits back to 2D first.
+
+### Isolate & Rotate
+
+In **3D**, click **Isolate & Rotate** beside **Camera** in the top menu bar to inspect the model around an
+orange pivot at the **centre of the building's lowest floor slab**. The pivot stays
+fixed at that floor's base even though its storey is hidden. The shell, rooms,
+connectors and route graphics rotate together; only the active upper floor is shown.
+The surrounding ground and other buildings/layouts are hidden too.
+
+- **Left-drag on the scene** rotates and tilts the model around its bottom pivot.
+- **Mouse wheel** zooms. **Camera > Reset** restores the model's initial orientation
+  and framing within this mode.
+- Choose another upper floor normally; the pivot and rotation stay fixed.
+- Click **Isolate & Rotate: ON** again, or press **Esc**, to restore the previous
+  camera, floor and View/Edit state. Your previous scene filters are preserved.
+
+If Level 1 was selected, enabling the mode temporarily shows Level 2 and the hint
+above the scene explains the change. Level 1 is unavailable until the mode is off.
+For a one-storey building the button is disabled, because hiding its lowest storey
+leaves no floor to inspect.
+
+Editing and navigation picking are disabled during inspection. Return to the normal
+view to edit. Floor data and saved coordinates are preserved; rotating the model
+does not count as a project change. Switching to 2D, changing buildings or leaving
+the editor also ends inspection and restores the model.
 
 ### View / Edit
 

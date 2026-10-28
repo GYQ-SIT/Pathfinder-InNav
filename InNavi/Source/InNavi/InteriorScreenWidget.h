@@ -175,6 +175,10 @@ private:
 	// ("View"/"Edit") and color (yellow/green).
 	UFUNCTION()
 	void HandleEdit3DModeChanged(bool bIsEditMode);
+	UFUNCTION()
+	void HandleInspectionModeChanged(bool bEnabled);
+	UFUNCTION()
+	void OnInspectionToggleClicked();
 
 	// Bound to ANavPlayerController::OnSnapEnabledChanged - swaps SnapToggleIcon between
 	// Icon_SnappingOn/Icon_SnappingOff so it stays correct even when toggled via the N key.
@@ -883,6 +887,15 @@ private:
 
 	UPROPERTY()
 	UTextBlock* Edit3DModeToggleButtonText = nullptr;
+	UPROPERTY()
+	UButton* InspectionToggleButton = nullptr;
+	UPROPERTY()
+	UTextBlock* InspectionToggleText = nullptr;
+	UPROPERTY()
+	UTextBlock* InspectionHint = nullptr;
+	UPROPERTY()
+	UImage* InspectionPivotOverlay = nullptr;
+	TArray<TPair<TWeakObjectPtr<UWidget>, bool>> InspectionUiStates;
 
 	bool bIsEditingBuildingName = false;
 

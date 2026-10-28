@@ -606,6 +606,14 @@ void AInteriorGenerator::ClearLoadedInterior()
 	ActiveFloor = 1;
 }
 
+TArray<int32> AInteriorGenerator::GetFloorLevels() const
+{
+	TArray<int32> Levels;
+	FloorInfoByLevel.GetKeys(Levels);
+	Levels.Sort();
+	return Levels;
+}
+
 void AInteriorGenerator::SetActiveFloor(int32 Level)
 {
 	if (FloorInfoByLevel.Num() == 0)

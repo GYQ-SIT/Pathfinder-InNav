@@ -1,6 +1,6 @@
 # UI Panels — How They Work and How to Add One
 
-> State as of 2026-10-23, `main`. Applies to both editor screens: the
+> State as of 2026-10-28. Applies to both editor screens: the
 > interior editor (`UInteriorScreenWidget`) and the exterior building-selection screen
 > (`UEditScreenWidget`).
 
@@ -28,6 +28,8 @@ besides the dock host allowed on a root canvas:
 | `Background`, `FloorPlanWidget` | the 2D plan and the backdrop behind it (the central canvas) |
 | `Pnl_MenuBar`, `Pnl_BuildingSwitcherBar` | the fixed bars along the top |
 | `Pnl_FileDropdown`, `Pnl_WindowDropdown`, `Pnl_CameraDropdown`, `MenuClickCatcher` | the menus that open from those bars, and the layer that closes them on a click elsewhere |
+| `Txt_InspectionHint` | temporary instructions and the hidden/active floor status for Isolate & Rotate; stays with the central viewport while tool panels move |
+| `Img_InspectionPivot` | projects the building's bottom anchor into the viewport so it remains visible through the active upper floor; follows the model instead of a dock panel |
 | `Chrome_*` | decoration, such as divider lines |
 | `DockHost` | the dock system itself |
 

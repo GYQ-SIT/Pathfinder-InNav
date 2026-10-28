@@ -155,6 +155,10 @@ public:
 	// margin, so everything seen stands on ground, and a smaller area when less is shown. It follows every change of a filter and every
 	// load or clear, a moment later (once per frame at most). With nothing shown, or no such floor in the level, it is left as it is.
 	void UpdateGroundToVisible();
+	// Same explicit template-floor lookup as ground fitting, without moving it.
+	AStaticMeshActor* FindGroundActor();
+	void SetGroundFitSuspended(bool bSuspended) { bGroundFitSuspended = bSuspended; }
+	bool IsGroundFitSuspended() const { return bGroundFitSuspended; }
 
 	// The area of the world (X, Y) that what the filters show covers; false when nothing is shown.
 	bool GetVisibleExtent(FBox2D& OutExtent) const;
@@ -347,6 +351,7 @@ private:
 	TWeakObjectPtr<AStaticMeshActor> GroundActor;
 	FTransform GroundOriginalTransform;
 	bool bGroundSearched = false;
+	bool bGroundFitSuspended = false;
 	bool bGroundUpdateQueued = false;
 	void MarkGroundDirty();
 };

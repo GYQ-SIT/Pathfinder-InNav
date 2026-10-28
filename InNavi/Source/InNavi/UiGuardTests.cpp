@@ -21,6 +21,8 @@
 //   Background / FloorPlanWidget   the 2D plan itself and the backdrop behind it (the "central canvas")
 //   Pnl_MenuBar, Pnl_BuildingSwitcherBar   the fixed bars along the top
 //   Pnl_*Dropdown, MenuClickCatcher        the menus that open from those bars, and the click-away layer that closes them
+//   Txt_InspectionHint                     transient viewport-mode instructions; fixed beside the model, not a movable tool panel
+//   Img_InspectionPivot                    projects the bottom anchor into the viewport; must follow the model, not a dock panel
 //   Chrome_*                               decoration such as divider lines
 //   DockHost                               the dock system itself
 //
@@ -33,7 +35,7 @@ namespace
 	{
 		static const TCHAR* const AllowedNames[] = {
 			TEXT("Background"), TEXT("FloorPlanWidget"), TEXT("DockHost"), TEXT("MenuClickCatcher"),
-			TEXT("Pnl_MenuBar"), TEXT("Pnl_BuildingSwitcherBar"),
+			TEXT("Pnl_MenuBar"), TEXT("Pnl_BuildingSwitcherBar"), TEXT("Txt_InspectionHint"), TEXT("Img_InspectionPivot"),
 			TEXT("Pnl_FileDropdown"), TEXT("Pnl_WindowDropdown"), TEXT("Pnl_CameraDropdown") };
 		const FString Name = Child->GetName();
 		for (const TCHAR* Allowed : AllowedNames)

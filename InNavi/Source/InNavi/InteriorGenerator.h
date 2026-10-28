@@ -91,6 +91,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	int32 GetActiveFloor() const { return ActiveFloor; }
 
+	TArray<int32> GetFloorLevels() const;
+
 	// Wall thickness is stored per floor in world units. Navigation uses this to build an accurate
 	// clearance boundary around the authored wall centre lines instead of assuming every floor has
 	// the default thickness.
