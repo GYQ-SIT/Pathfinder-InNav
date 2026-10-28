@@ -50,10 +50,14 @@ average, the 1 % low and the slowest frame over the last ten seconds ("Last 10 s
 
 | Frame rate to read off at the demo | Budget | Measured |
 |------------------------------------|--------|----------|
-| Exterior screen, the whole campus loaded (29 + 407 buildings) | 60 FPS | to be read off the Debug panel on the demo machine |
-| Interior editor, 2D plan | 60 FPS | to be read off the Debug panel |
-| Interior editor, 3D preview of a ten-floor building | 60 FPS | to be read off the Debug panel |
+| Exterior screen, the whole campus loaded (29 + 407 buildings) | 60 FPS | **average 115.9, 1 % low 86.5, minimum 84.6 FPS**. Met. Read after 5 s, not the full 10 s |
+| Interior editor, 2D plan | 60 FPS | **average 126.3, 1 % low 76.1, minimum 37.0 FPS**. Average met. The low minimum is a short hitch while the rooms were generated with the one-click generator (noted by the person who took the reading, not measured separately) |
+| Interior editor, 3D preview (a five-floor building) | 60 FPS | **average 126.6, 1 % low 53.1, minimum 17.1 FPS**. Average met. The 1 % low and the minimum (17.1 FPS, 58 ms) come from a short hitch while the rooms were generated with the one-click generator (noted by the person who took the reading, not measured separately) |
+| Interior editor, 3D preview of a 15-floor building (floor 10 shown) | 60 FPS | **average 131.2, 1 % low 103.5, minimum 84.1 FPS**. Met, with nothing being generated |
 | Phone app, on a Samsung Galaxy S24+ | 30 FPS | steady 60 FPS with the made-up data (2026-10-23); to be repeated with real project data |
+
+The desktop readings are from the Debug panel on 2026-10-28, on the machine above with an RTX 4060, with the interior open and the mouse
+moving. The budget is met on the average in every screen. The dips in the first two interior readings are one-off hitches of the generator; the reading of the 15-floor building, taken without generating anything, shows the steady figure.
 
 ## Where we are under the target
 
