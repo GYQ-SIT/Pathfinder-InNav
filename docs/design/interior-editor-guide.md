@@ -131,6 +131,12 @@ Hidden or shown via Window > Map. Only appears once a database (`.db`) has been 
   POI farther than a padded radius from the loaded campus buildings' own extent.
   Checked by default.
 
+**The ground follows the filters.** The grey ground under the campus is not a fixed size: it is made as big as what the Map panel shows - the campus
+buildings that pass the building filters, the other buildings when Non-Campus is checked, the roads of the checked categories (and inside Campus
+Only's range) and the places - plus a margin (5 percent of the longer side, at least 10 m), and never smaller than 40 m each way. So a whole
+city loaded from a database all stands on ground, and filtering down to a few buildings or hiding the roads shrinks it to fit. It updates a
+moment after each change and after every load. If nothing is shown it stays as it was. It does not throw shadows.
+
 **Why some non-`university`-tagged buildings are still enterable:** loading a
 database doesn't just take the buildings tagged `university` - it also pulls in any
 building whose footprint physically touches (or nearly touches, within a small
