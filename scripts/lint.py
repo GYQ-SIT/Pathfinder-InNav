@@ -7,6 +7,8 @@ What it checks, and why (each rule exists because of something that went wrong o
   secrets    no keys, tokens or passwords in tracked files; signing keys and .env files are not tracked (guidelines B5, E5)
   config     no URLs or IP addresses in the C++ source: where the product reads from comes from files and settings (guideline B5)
   headers    every C++ header starts with #pragma once
+  encoding   every text file is valid UTF-8: one stray Windows-1252 byte (a pasted dash or quote) makes GitHub show every other accent and
+             dash of the file as garbage ("a-circumflex, euro, ...")
   unity      no file-scope "using namespace" in a test .cpp: the build joins .cpp files into one, and it leaks into the others (it broke the build once)
   links      every relative link of the Markdown documents points at a file that exists (guideline G2: one source of truth)
 
@@ -71,6 +73,13 @@ def main():
             problem("secrets", relative, 0, "a key or .env file must not be committed")
         if suffix not in TEXT_SUFFIXES or any(p in SKIP_DIRS for p in parts[:-1]):
             continue
+        with open(os.path.join(root, relative), "rb") as handle:
+            raw = handle.read()
+        try:
+            raw.decode("utf-8")
+        except UnicodeDecodeError as error:
+            line_number = raw[:error.start].count(10) + 1
+            problem("encoding", relative, line_number, f"not valid UTF-8 (byte 0x{raw[error.start]:02x}); save the file as UTF-8")
         text = read(root, relative)
         lines = text.splitlines()
 
