@@ -49,6 +49,8 @@ private:
 	UFUNCTION()
 	void OnAddStopClicked();
 	UFUNCTION()
+	void OnClickAddStopsClicked();
+	UFUNCTION()
 	void OnMoveStopUpClicked();
 	UFUNCTION()
 	void OnMoveStopDownClicked();
@@ -126,6 +128,10 @@ private:
 	UButton* AddStopButton = nullptr;
 	UPROPERTY()
 	UTextBlock* AddStopButtonLabel = nullptr;
+	UPROPERTY()
+	UButton* ClickAddStopsButton = nullptr;
+	UPROPERTY()
+	UTextBlock* ClickAddStopsButtonLabel = nullptr;
 	UPROPERTY()
 	UTextBlock* StopsLabelText = nullptr;
 	UPROPERTY()

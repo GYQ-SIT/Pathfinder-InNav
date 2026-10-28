@@ -118,11 +118,6 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 		DestinationRoomComboBox = AddRoomDropdown(TEXT("Cbx_NavDestinationRoom"), TEXT("Destination Room"), DestinationRoomBorder, DestinationLabelText);
 		DestinationRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UNavigationDockPanelWidget::HandleDestinationRoomChanged);
 
-		// Stops: places to pass on the way. The list is the same as the Destination's (and the one search narrows it).
-		UTextBlock* UnusedStopLabel = nullptr;
-		StopRoomComboBox = AddRoomDropdown(TEXT("Cbx_NavStopRoom"), TEXT("Stop to Add (optional)"), StopRoomBorder, UnusedStopLabel);
-		StopRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UNavigationDockPanelWidget::HandleStopRoomChanged);
-
 		auto AddButton = [this, Stack](const TCHAR* Name, const TCHAR* Label, UTextBlock*& OutLabel) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
@@ -151,9 +146,16 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 		SetStartButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnSetStartClicked);
 		SetDestinationButton = AddButton(TEXT("Btn_NavSetDestination"), TEXT("Click to Set Destination"), SetDestinationButtonLabel);
 		SetDestinationButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnSetDestinationClicked);
+		// Stops (optional): places to pass on the way, between the Start and the Destination. Like those two they are picked either
+		// from a list (the same list as the Destination's, narrowed by the same search) or by clicking the map.
+		UTextBlock* UnusedStopLabel = nullptr;
+		StopRoomComboBox = AddRoomDropdown(TEXT("Cbx_NavStopRoom"), TEXT("Stop from the List (optional)"), StopRoomBorder, UnusedStopLabel);
+		StopRoomComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UNavigationDockPanelWidget::HandleStopRoomChanged);
 		AddStopButton = AddButton(TEXT("Btn_NavAddStop"), TEXT("Add Stop"), AddStopButtonLabel);
 		AddStopButton->SetIsEnabled(false);
 		AddStopButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnAddStopClicked);
+		ClickAddStopsButton = AddButton(TEXT("Btn_NavClickAddStops"), TEXT("Click to Add Stops"), ClickAddStopsButtonLabel);
+		ClickAddStopsButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnClickAddStopsClicked);
 		StopsComboBox = AddRoomDropdown(TEXT("Cbx_NavStops"), TEXT("Stops in Order"), StopsBorder, StopsLabelText);
 		StopsComboBox->SetIsEnabled(false);
 		StopsComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UNavigationDockPanelWidget::HandleStopSelected);
@@ -242,6 +244,7 @@ void UNavigationDockPanelWidget::SetContentWidth(float Width)
 	SetButtonWidth(SetDestinationButton, Width);
 	SetButtonWidth(FindRouteButton, Width);
 	SetButtonWidth(AddStopButton, Width);
+	SetButtonWidth(ClickAddStopsButton, Width);
 	SetParentSizeBoxWidth(StopRoomComboBox, Width);
 	SetParentSizeBoxWidth(StopsComboBox, Width);
 	if (StopActionsSize)
@@ -317,6 +320,17 @@ void UNavigationDockPanelWidget::OnAddStopClicked()
 		// The stop just added is the one chosen in the list.
 		StopsComboBox->SetSelectedIndex(Nav->GetStops().Num() - 1);
 		UpdateStopControls();
+	}
+}
+
+void UNavigationDockPanelWidget::OnClickAddStopsClicked()
+{
+	if (ANavPlayerController* PC = GetController())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->ToggleSelectStops();
+		}
 	}
 }
 
@@ -500,6 +514,7 @@ void UNavigationDockPanelWidget::RefreshDisplay()
 	static const FLinearColor InactiveButtonColor = StartStyle::Rgb(27, 41, 63);
 	static const FLinearColor ActiveStartColor = StartStyle::Rgb(26, 138, 84);
 	static const FLinearColor ActiveDestinationColor = StartStyle::Rgb(180, 52, 62);
+	static const FLinearColor ActiveStopColor = StartStyle::Rgb(24, 118, 190);
 	// The buttons keep their outlined shape and take the state's colour as their fill.
 	auto PaintButton = [](UButton* Button, const FLinearColor& Color)
 	{
@@ -599,6 +614,18 @@ void UNavigationDockPanelWidget::RefreshDisplay()
 	if (ClearRouteButton)
 	{
 		ClearRouteButton->SetIsEnabled(Nav->CanClearRoute());
+	}
+	// The click mode for stops is on while places are being clicked; the button says so and how to stop.
+	const bool bPickingStops = Mode == ENavigationSelectionMode::Stop;
+	if (ClickAddStopsButton)
+	{
+		PaintButton(ClickAddStopsButton, bPickingStops ? ActiveStopColor : InactiveButtonColor);
+		ClickAddStopsButton->SetIsEnabled(bPickingStops || Nav->GetStops().Num() < UNavigationPanelWidget::MaxRouteStops);
+	}
+	if (ClickAddStopsButtonLabel)
+	{
+		ClickAddStopsButtonLabel->SetText(FText::FromString(bPickingStops
+			? TEXT("Click Places to Add Stops (Done)") : TEXT("Click to Add Stops")));
 	}
 	RefreshStops();
 	const bool bFindingRoute = Nav->IsFindingRoute();

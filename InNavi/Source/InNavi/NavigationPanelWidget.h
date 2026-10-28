@@ -17,7 +17,9 @@ enum class ENavigationSelectionMode : uint8
 {
 	None,
 	Start,
-	Destination
+	Destination,
+	// Clicking places adds them as stops, one after another, until the mode is ended.
+	Stop
 };
 
 enum class ENavigationMessageKind : uint8
@@ -100,6 +102,10 @@ public:
 	bool RemoveStop(int32 StopIndex);
 	bool MoveStop(int32 FromIndex, int32 ToIndex);
 	void ClearStops();
+	// Click mode for stops: each click on the map (a place indoors, or the ground outside) adds a stop, and the mode stays on for the
+	// next one until it is toggled off, Escape is pressed or the limit is reached. Picking a Start or Destination ends it, and the
+	// other way round; adding a stop from the list does not disturb a click mode in progress.
+	void ToggleSelectStops();
 	// Presentation visibility is independent of the stored route and the navigation dock.
 	UFUNCTION(BlueprintPure, Category = "Navigation")
 	bool IsRouteGuidanceVisible() const { return bRouteGuidanceVisible; }
@@ -280,6 +286,8 @@ private:
 	// one leg after another and end in ApplyJourney, or in FailJourney with the leg that could not be.
 	struct FJourney;
 	TSharedRef<FJourney> MakeJourney() const;
+	// Adds a stop at the end of the others (the limit and a place the route is already at are refused, with a message).
+	bool AddStop(FNavigationStop Stop);
 	void ApplyJourney(const FJourney& Trip);
 	void FailJourney(const FJourney& Trip, const FNavigationRouteResult& LegResult);
 	TSharedPtr<FJourney> Journey;

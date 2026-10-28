@@ -200,6 +200,23 @@ void UNavigationPanelWidget::ToggleSelectDestination()
 	}
 }
 
+void UNavigationPanelWidget::ToggleSelectStops()
+{
+	if (SelectionMode == ENavigationSelectionMode::Stop)
+	{
+		SelectionMode = ENavigationSelectionMode::None;
+		SetStatusMessage(FString::Printf(TEXT("Stops: %d. Press Find Route to search."), Stops.Num()), ENavigationMessageKind::Success);
+	}
+	else if (Stops.Num() >= MaxRouteStops)
+	{
+		SetStatusMessage(FString::Printf(TEXT("A route can have up to %d stops."), MaxRouteStops), ENavigationMessageKind::Warning);
+	}
+	else
+	{
+		SetSelectionMode(ENavigationSelectionMode::Stop);
+	}
+}
+
 void UNavigationPanelWidget::RequestClearRoute()
 {
 	ClearAll();
@@ -293,6 +310,18 @@ void UNavigationPanelWidget::SelectPoint(FVector2D FootprintPosition, int32 Floo
 			: TEXT("Invalid area. Outdoor points can only be selected from the Floor 1 map.");
 		UE_LOG(LogTemp, Warning, TEXT("[Navigation] Point rejected: %s"), *Message);
 		SetStatusMessage(Message, ENavigationMessageKind::Error);
+		return;
+	}
+
+	if (SelectionMode == ENavigationSelectionMode::Stop)
+	{
+		// The mode stays on, for the next stop.
+		FNavigationStop Stop;
+		Stop.Point.Position = FootprintPosition;
+		Stop.Point.Floor = SelectedFloor;
+		Stop.BuildingId = Building->BuildingId;
+		StampPoint(Stop.Point, Stop.BuildingId);
+		AddStop(MoveTemp(Stop));
 		return;
 	}
 
@@ -757,6 +786,11 @@ FString UNavigationPanelWidget::GetStopLabel(int32 StopIndex) const
 		return FString();
 	}
 	const FNavigationStop& Stop = Stops[StopIndex];
+	// A place picked on the map has no name: say where it is.
+	if (Stop.RoomOptionLabel.IsEmpty())
+	{
+		return EndpointPhrase(StopAsEndpoint(Stop));
+	}
 	// A main door picked from the list already names its building ("T1 · Main door").
 	return Stop.Point.Floor == OutdoorFloor ? Stop.RoomOptionLabel : BuildingDisplayName(Stop.BuildingId) + TEXT(" · ") + Stop.RoomOptionLabel;
 }
@@ -788,6 +822,21 @@ bool UNavigationPanelWidget::AddStopToRoom(const FString& RoomOptionLabel)
 	StampPoint(Stop.Point, Stop.BuildingId);
 	Stop.RoomOptionLabel = RoomOptionLabel;
 	Stop.RoomId = Found->RoomId;
+	return AddStop(MoveTemp(Stop));
+}
+
+bool UNavigationPanelWidget::AddStop(FNavigationStop Stop)
+{
+	if (Stops.Num() >= MaxRouteStops)
+	{
+		// Nothing more can be added, so a click mode for stops has nothing left to do.
+		if (SelectionMode == ENavigationSelectionMode::Stop)
+		{
+			SelectionMode = ENavigationSelectionMode::None;
+		}
+		SetStatusMessage(FString::Printf(TEXT("A route can have up to %d stops."), MaxRouteStops), ENavigationMessageKind::Warning);
+		return false;
+	}
 	// A stop where the route already is would be a leg of no length.
 	const FNavigationRoutePoint* Before = !Stops.IsEmpty() ? &Stops.Last().Point : (Start.bValid ? &Start.Point : nullptr);
 	if ((Before && SamePlace(*Before, Stop.Point)) || (Destination.bValid && SamePlace(Destination.Point, Stop.Point)))
@@ -795,9 +844,14 @@ bool UNavigationPanelWidget::AddStopToRoom(const FString& RoomOptionLabel)
 		SetStatusMessage(TEXT("The route is already there: choose another place for the stop."), ENavigationMessageKind::Warning);
 		return false;
 	}
-	SelectionMode = ENavigationSelectionMode::None;
 	Stops.Add(MoveTemp(Stop));
-	StopsChanged(FString::Printf(TEXT("Added stop %d of %d: %s."), Stops.Num(), MaxRouteStops, *GetStopLabel(Stops.Num() - 1)),
+	// While places are being clicked, say what to do next (and the mode ends by itself at the limit).
+	if (SelectionMode == ENavigationSelectionMode::Stop && Stops.Num() >= MaxRouteStops)
+	{
+		SelectionMode = ENavigationSelectionMode::None;
+	}
+	StopsChanged(FString::Printf(TEXT("Added stop %d of %d: %s.%s"), Stops.Num(), MaxRouteStops, *GetStopLabel(Stops.Num() - 1),
+		SelectionMode == ENavigationSelectionMode::Stop ? TEXT(" Click the next one, or press Esc when done.") : TEXT("")),
 		ENavigationMessageKind::Success);
 	return true;
 }
@@ -874,7 +928,7 @@ UNavigationPanelWidget::FSelectedEndpoint UNavigationPanelWidget::StopAsEndpoint
 	Endpoint.bValid = true;
 	Endpoint.Point = Stop.Point;
 	Endpoint.BuildingId = Stop.BuildingId;
-	Endpoint.bSetViaDropdown = true;
+	Endpoint.bSetViaDropdown = !Stop.RoomOptionLabel.IsEmpty();
 	Endpoint.RoomOptionLabel = Stop.RoomOptionLabel;
 	Endpoint.RoomId = Stop.RoomId;
 	return Endpoint;
@@ -1003,8 +1057,11 @@ void UNavigationPanelWidget::CancelSelection()
 {
 	if (SelectionMode != ENavigationSelectionMode::None)
 	{
+		// Ending the clicks for stops is finishing them, not undoing them.
+		const bool bWasAddingStops = SelectionMode == ENavigationSelectionMode::Stop;
 		SelectionMode = ENavigationSelectionMode::None;
-		SetStatusMessage(TEXT("Selection cancelled."), ENavigationMessageKind::Warning);
+		SetStatusMessage(bWasAddingStops ? FString::Printf(TEXT("Stops: %d. Press Find Route to search."), Stops.Num()) : FString(TEXT("Selection cancelled.")),
+			bWasAddingStops ? ENavigationMessageKind::Success : ENavigationMessageKind::Warning);
 	}
 }
 
@@ -1152,6 +1209,15 @@ void UNavigationPanelWidget::SelectOutdoorGroundPoint(FVector2D CampusPosition, 
 	FNavigationRoutePoint Point;
 	Point.Position = CampusPosition - Owner->BuildingOffset;
 	Point.Floor = OutdoorFloor;
+	if (SelectionMode == ENavigationSelectionMode::Stop)
+	{
+		FNavigationStop Stop;
+		Stop.Point = Point;
+		Stop.BuildingId = Owner->BuildingId;
+		StampPoint(Stop.Point, Stop.BuildingId);
+		AddStop(MoveTemp(Stop));
+		return;
+	}
 	FSelectedEndpoint& Endpoint = SelectionMode == ENavigationSelectionMode::Start ? Start : Destination;
 	const FString EndpointName = SelectionMode == ENavigationSelectionMode::Start ? TEXT("Start") : TEXT("Destination");
 	SelectionMode = ENavigationSelectionMode::None;
@@ -1282,6 +1348,9 @@ FString UNavigationPanelWidget::GetDisplayStatusMessage() const
 	case ENavigationSelectionMode::Destination:
 		return bOutdoorMode ? TEXT("Click the ground next to a building to set the destination.")
 			: TEXT("Select a destination indoors, or in the blue outside area on Floor 1.");
+	case ENavigationSelectionMode::Stop:
+		return bOutdoorMode ? TEXT("Click the ground next to a building to add a stop. Click more places for more stops; press Esc when done.")
+			: TEXT("Click places indoors, or in the blue outside area on Floor 1, to add stops. Press Esc when done.");
 	default:
 		return TEXT("Choose Set Start or Set Destination.");
 	}

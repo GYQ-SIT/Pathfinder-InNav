@@ -273,4 +273,103 @@ bool FNavigationJourneyTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// Stops picked by clicking the map: the mode stays on for as many as are wanted, and it does not fight the other ways of picking.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationClickStopsTest,
+	"InNavi.Navigation.MultiStop.ClickStops",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationClickStopsTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	ABuildingGenerator* Generator = World->SpawnActor<ABuildingGenerator>();
+	AInteriorGenerator* Interior = World->SpawnActor<AInteriorGenerator>();
+	Interior->DispatchBeginPlay();
+	Generator->LoadBuildingsFromFile(FPaths::ProjectDir() / TEXT("Data") / TEXT("buildings.json"));
+	Interior->LoadInteriorForBuilding(TEXT("E2"));
+	UNavigationPanelWidget* Panel = NewObject<UNavigationPanelWidget>();
+	Panel->SetNavigationContext(Generator, Interior);
+	auto Option = [Panel](const TCHAR* RoomId) -> UNavigationPanelWidget::FNavigationRoomOption
+	{
+		const auto* Found = Panel->GetSelectableRooms().FindByPredicate([RoomId](const UNavigationPanelWidget::FNavigationRoomOption& Candidate) { return Candidate.RoomId == RoomId; });
+		return Found ? *Found : UNavigationPanelWidget::FNavigationRoomOption();
+	};
+	const auto Lab = Option(TEXT("E2-01-01")), Vestibule = Option(TEXT("E2-01-OUTSIDE-ENTRY")), Upstairs = Option(TEXT("E2-02-01")), Cut = Option(TEXT("E2-01-02"));
+	if (!TestTrue(TEXT("the rooms are there"), !Lab.RoomId.IsEmpty() && !Vestibule.RoomId.IsEmpty() && !Upstairs.RoomId.IsEmpty() && !Cut.RoomId.IsEmpty()))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	// Clicks do nothing until the mode is on; then each adds a stop and the mode stays on.
+	Panel->SelectPoint(Vestibule.Centroid, 1);
+	TestTrue(TEXT("no stop without the mode"), Panel->GetStops().IsEmpty());
+	Panel->ToggleSelectStops();
+	TestEqual(TEXT("the mode is on"), Panel->GetSelectionMode(), ENavigationSelectionMode::Stop);
+	TestTrue(TEXT("and says what to do"), Panel->GetDisplayStatusMessage().Contains(TEXT("add stops")));
+	Panel->SelectPoint(Vestibule.Centroid, 1);
+	Panel->SelectPoint(Upstairs.Centroid, 2);
+	TestEqual(TEXT("two clicks, two stops"), Panel->GetStops().Num(), 2);
+	TestEqual(TEXT("the mode stays on for the next"), Panel->GetSelectionMode(), ENavigationSelectionMode::Stop);
+	TestTrue(TEXT("a stop picked on the map has no name from the list, so it says where it is"),
+		Panel->GetStops()[0].RoomOptionLabel.IsEmpty() && Panel->GetStopLabel(0).Contains(TEXT("spot")) && Panel->GetStopLabel(1).Contains(TEXT("Floor 2")));
+	TestTrue(TEXT("the stop has a building and a world position"), Panel->GetStops()[1].Point.bHasWorldPosition && Panel->GetStops()[1].Point.BuildingId == TEXT("E2"));
+	Panel->SelectPoint(Upstairs.Centroid, 2);
+	TestEqual(TEXT("the same place again is refused"), Panel->GetStops().Num(), 2);
+
+	// A stop added from the list does not end the clicking, and the other way round.
+	TestTrue(TEXT("a stop from the list"), Panel->AddStopToRoom(Lab.GetDisplayLabel()));
+	TestEqual(TEXT("three stops"), Panel->GetStops().Num(), 3);
+	TestEqual(TEXT("the click mode is still on"), Panel->GetSelectionMode(), ENavigationSelectionMode::Stop);
+	TestTrue(TEXT("and the list one has its own name"), Panel->GetStops()[2].RoomOptionLabel == Lab.GetDisplayLabel());
+
+	// Escape, or the button again, ends it, and says how many stops there are.
+	Panel->CancelSelection();
+	TestEqual(TEXT("ended"), Panel->GetSelectionMode(), ENavigationSelectionMode::None);
+	TestTrue(TEXT("with the count"), Panel->GetDisplayStatusMessage().Contains(TEXT("Stops: 3")));
+	Panel->ToggleSelectStops(); Panel->ToggleSelectStops();
+	TestEqual(TEXT("the button turns it on and off"), Panel->GetSelectionMode(), ENavigationSelectionMode::None);
+	TestEqual(TEXT("without changing the stops"), Panel->GetStops().Num(), 3);
+
+	// Picking a Start or Destination ends it, and it ends them: each mode is the only one on.
+	Panel->ToggleSelectStops();
+	Panel->ToggleSelectStart();
+	TestEqual(TEXT("picking the Start replaces it"), Panel->GetSelectionMode(), ENavigationSelectionMode::Start);
+	Panel->SelectPoint(Lab.Centroid, 1);
+	TestTrue(TEXT("the click set the Start, not a stop"), Panel->HasStart() && Panel->GetStops().Num() == 3);
+	Panel->ToggleSelectDestination();
+	Panel->ToggleSelectStops();
+	TestEqual(TEXT("and picking stops replaces picking the Destination"), Panel->GetSelectionMode(), ENavigationSelectionMode::Stop);
+	TestFalse(TEXT("which has not been set"), Panel->HasDestination());
+	Panel->CancelSelection();
+
+	// A journey of the stops that were clicked: the Start through them back to the Start.
+	Panel->ClearAll();
+	Panel->SetStartToRoom(Lab.GetDisplayLabel());
+	Panel->SetDestinationToRoom(Lab.GetDisplayLabel());
+	Panel->ToggleSelectStops();
+	Panel->SelectPoint(Vestibule.Centroid, 1);
+	Panel->SelectPoint(Upstairs.Centroid, 2);
+	Panel->CancelSelection();
+	Panel->RequestFindRoute();
+	TestFalse(TEXT("found"), Panel->DidLastFindRouteFail());
+	TestEqual(TEXT("three legs"), Panel->GetRouteLegs().Num(), 3);
+	const auto Steps = Panel->BuildRouteSteps();
+	TestTrue(TEXT("the directions reach both stops"), Steps.ContainsByPredicate([](const UNavigationPanelWidget::FNavigationRouteStep& Step) { return Step.Text.StartsWith(TEXT("Stop 1:")); })
+		&& Steps.ContainsByPredicate([](const UNavigationPanelWidget::FNavigationRouteStep& Step) { return Step.Text.StartsWith(TEXT("Stop 2:")); }));
+
+	// At the limit the mode ends by itself, and cannot be turned on.
+	Panel->ClearAll();
+	for (int32 I = 0; I < UNavigationPanelWidget::MaxRouteStops - 1; ++I) Panel->AddStopToRoom((I % 2 == 0 ? Lab : Vestibule).GetDisplayLabel());
+	Panel->ToggleSelectStops();
+	TestEqual(TEXT("one more fits"), Panel->GetSelectionMode(), ENavigationSelectionMode::Stop);
+	Panel->SelectPoint(Cut.Centroid, 1);
+	TestEqual(TEXT("the last one is added"), Panel->GetStops().Num(), UNavigationPanelWidget::MaxRouteStops);
+	TestEqual(TEXT("and the mode ends"), Panel->GetSelectionMode(), ENavigationSelectionMode::None);
+	Panel->ToggleSelectStops();
+	TestEqual(TEXT("it cannot be turned on again"), Panel->GetSelectionMode(), ENavigationSelectionMode::None);
+	TestTrue(TEXT("and says why"), Panel->GetDisplayStatusMessage().Contains(TEXT("up to")));
+
+	World->DestroyWorld(false);
+	return true;
+}
+
 #endif

@@ -347,9 +347,13 @@ frame: a progress bar shows how far it is, the editor stays usable, and **Cancel
 destination, clearing, or editing the interior also stops it. A trip within one building is searched without the outside
 first (the rest of the campus is not needed for it), and the whole campus only when going out and in again could be shorter.
 
-**Stops.** A route can pass through places on the way: pick one in **Stop to Add (optional)** (the same list as the
-Destination, in any building, or a building's main door on the exterior screen) and press **Add Stop**. Up to 8 stops are kept
-in order under **Stops in Order**, where the chosen one can be moved **Up** or **Down** or **Removed**. **Find Route** then plans
+**Stops.** A route can pass through places on the way, picked the same two ways as the Start and the Destination. From the
+list: choose one in **Stop from the List (optional)** (the same list as the Destination, in any building, or a building's main
+door on the exterior screen) and press **Add Stop**. By clicking: press **Click to Add Stops**, then click places on the map (indoors,
+the blue outside area on Floor 1, or the ground on the exterior screen); the mode stays on so several can be clicked one after
+another, until the button is pressed again, Esc is pressed, or the limit is reached. Only one way of clicking is on at a time:
+picking a Start or Destination ends it, and adding a stop from the list does not. Up to 8 stops are kept in order under
+**Stops in Order**, where the chosen one can be moved **Up** or **Down** or **Removed**. **Find Route** then plans
 the journey leg by leg (Start to the first stop, and so on to the Destination): the legs are drawn in different colours on the
 map and in 3D, each stop is numbered, and the directions say where each stop is reached. If a leg cannot be planned, the message
 says which one. A stop where the route already is (the Start, the stop before it, the Destination) is refused. Changing the stops

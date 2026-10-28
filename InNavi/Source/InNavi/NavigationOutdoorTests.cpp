@@ -311,4 +311,39 @@ bool FNavigationOutdoorStopsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// Stops picked by clicking the ground on the exterior screen.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationOutdoorClickStopsTest, "InNavi.Navigation.Outdoor.ClickStops",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationOutdoorClickStopsTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationOutdoorTests;
+	FNavigationSearchFixture Fixture;
+	if (!TestTrue(TEXT("test project loads"), LoadTestProject(Fixture))) return false;
+	UNavigationPanelWidget* Nav = Fixture.Nav;
+	Nav->SetOutdoorMode(true);
+	const TArray<UNavigationPanelWidget::FNavigationRoomOption> Options = Nav->GetSelectableRooms();
+	Nav->SetStartToRoom(Options[0].GetDisplayLabel());
+	Nav->SetDestinationToRoom(Options[1].GetDisplayLabel());
+
+	Nav->ToggleSelectStops();
+	Nav->SelectOutdoorGroundPoint(FVector2D(1100, 100), false);
+	TestEqual(TEXT("a spot next to C is a stop"), Nav->GetStops().Num(), 1);
+	TestEqual(TEXT("in C"), Nav->GetStops()[0].BuildingId, FString(TEXT("C")));
+	TestTrue(TEXT("outside, with a world position"), Nav->GetStops()[0].Point.Floor == UNavigationPanelWidget::OutdoorFloor && Nav->GetStops()[0].Point.bHasWorldPosition);
+	TestEqual(TEXT("the mode stays on"), Nav->GetSelectionMode(), ENavigationSelectionMode::Stop);
+	Nav->SelectOutdoorGroundPoint(FVector2D(150, 100), false);
+	TestEqual(TEXT("inside a building is refused, and nothing is added"), Nav->GetStops().Num(), 1);
+	Nav->SelectOutdoorGroundPoint(FVector2D(-10, 100), true);
+	TestEqual(TEXT("so is a click on a building"), Nav->GetStops().Num(), 1);
+	Nav->SelectOutdoorGroundPoint(FVector2D(-10, 150), false);
+	TestEqual(TEXT("another spot is the second stop"), Nav->GetStops().Num(), 2);
+	Nav->CancelSelection();
+
+	TestTrue(TEXT("a spot outside says where it is"), Nav->GetStopLabel(0).Contains(TEXT("outside")));
+	Nav->RequestFindRoute();
+	TestEqual(TEXT("three legs"), Nav->GetRouteLegs().Num(), 3);
+	TestTrue(TEXT("outside at both ends"), RunsBetween(Nav->GetRoutePoints(), TEXT("A"), TEXT("B")));
+	return true;
+}
+
 #endif
