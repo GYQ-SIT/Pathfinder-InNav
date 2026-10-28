@@ -26,7 +26,9 @@ build, reading project data and routes through a mobile data adapter).
   - `Data/` — sample data, audio, default dock layouts
 - `docs/`
   - `proposal.md` — project proposal
-  - `architecture.md` — system architecture + tech stack
+  - `architecture.md` — system architecture v1.0: the layers, the boundaries, the tech stack, the delivery pipeline, who owns what
+  - `configuration.md` — every setting (files, flags, CI), where it is set, and where the secrets are kept
+  - `performance.md` — the performance budgets and the measured numbers
   - `toolchain-decision.md` — stack/platform decisions and why
   - `deliverables.md` — ownership + M1/M2/M3 targets
   - `design/`
@@ -136,6 +138,12 @@ To try it on a phone, install the test build from the repository's **Releases** 
 The editor and the desktop app: **Windows 11 only**, in practice — this is a UE5 project built and packaged on
 Windows; the team's Linux VM has no Windows toolchain to compile it (see the CI/CD note in `docs/deliverables.md`), and macOS has
 not been set up or tested. The phone app: **Android 8 or newer, 64-bit ARM** (and an x86_64 build for PC emulators); there is no iPhone version.
+
+## Documentation (the team wiki)
+
+The documents of `docs/` are published as the team wiki, a MkDocs site rebuilt by `deploy-wiki.yml` on every push to `main` that changes
+them: **http://51.79.240.111:5000/** (the team12 VM of the course). The
+wiki and this repository say the same thing: `docs/` is the one source, and the wiki is only how it is read. Start with `architecture.md`.
 
 ## Team
 

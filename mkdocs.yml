@@ -5,6 +5,9 @@ docs_dir: docs
 theme:
   name: readthedocs
 
+extra_css:
+  - stylesheets/extra.css
+
 nav:
   - Home: index.md
   - Proposal: proposal.md
@@ -12,6 +15,7 @@ nav:
   - Toolchain Decision: toolchain-decision.md
   - Deliverables: deliverables.md
   - Performance: performance.md
+  - Configuration: configuration.md
   - Design:
       - Product Design: design/product-design.md
       - Interior Editor Guide: design/interior-editor-guide.md
