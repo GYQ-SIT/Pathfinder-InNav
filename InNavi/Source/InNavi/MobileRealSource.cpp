@@ -427,7 +427,7 @@ FMobileRoute FMobileRealSource::FindRoute(const FMobileRouteRequest& Request)
 	{
 		const auto& Point = Planned.Points[Instruction.PointIndex];
 		FMobileStep Step; Step.Text = Instruction.Text; Step.Metres = Instruction.Metres;
-		Step.BuildingId = MobileId(Point.BuildingId); Step.Level = Point.Floor; Step.Position = Point.Position;
+		Step.BuildingId = MobileId(Point.BuildingId); Step.BuildingName = BuildingName(Point.BuildingId); Step.Level = Point.Floor; Step.Position = Point.Position;
 		Step.LevelLabel = Point.Floor == 0 ? TEXT("Outside") : FString::Printf(TEXT("L%d"), Point.Floor);
 		switch (Instruction.Kind)
 		{
@@ -446,6 +446,6 @@ FMobileRoute FMobileRealSource::FindRoute(const FMobileRouteRequest& Request)
 		Result.Metres += Step.Metres; Result.Steps.Add(MoveTemp(Step));
 	}
 	FMobileStep Arrival; Arrival.Kind = EMobileStepKind::Arrive; Arrival.Text = TEXT("You have arrived: ") + Destination.Name;
-	Arrival.BuildingId = Destination.BuildingId; Arrival.Level = Destination.Level; Arrival.LevelLabel = Destination.LevelLabel; Arrival.Position = To.Position;
+	Arrival.BuildingId = Destination.BuildingId; Arrival.BuildingName = Destination.BuildingName; Arrival.Level = Destination.Level; Arrival.LevelLabel = Destination.LevelLabel; Arrival.Position = To.Position;
 	Result.Steps.Add(MoveTemp(Arrival)); Result.Minutes = MobileNav::MinutesForMetres(Result.Metres); return Result;
 }

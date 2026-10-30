@@ -132,10 +132,15 @@ struct FMobileStep
 	// "Follow the corridor", "Take the lift to L2", "You have arrived: Study lounge".
 	FString Text;
 	FString BuildingId;
+	// The building's name, for the label of the step; BuildingId is the app's own id and not for people to read.
+	FString BuildingName;
 	int32 Level = 1;
 	FString LevelLabel;
 	double Metres = 0.0;
 	FVector2D Position = FVector2D::ZeroVector;
+
+	// Where the step is, as a label: "Building A · L2" (the id only when the source gave no name).
+	FString WhereText() const { return (BuildingName.IsEmpty() ? BuildingId : BuildingName) + TEXT(" · ") + LevelLabel; }
 };
 
 // One point of the route, for drawing it on the map.

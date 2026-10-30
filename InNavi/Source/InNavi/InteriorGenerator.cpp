@@ -785,6 +785,44 @@ bool AInteriorGenerator::RemoveFloor(int32 Level)
 		}
 	}
 
+	// Connectors and doors in the outer wall go with their floor: those on the removed floor are removed, those above it come down one
+	// level (a connector's marker is placed again at its new height), and the floors every connector reaches are renumbered the same way.
+	for (int32 Index = NavNodes.Num() - 1; Index >= 0; --Index)
+	{
+		FInteriorNavNode& Node = NavNodes[Index];
+		if (Node.Level == Level)
+		{
+			if (Node.MarkerActor)
+			{
+				Node.MarkerActor->Destroy();
+			}
+			NavNodes.RemoveAt(Index);
+			continue;
+		}
+		Node.ConnectsFloors.Remove(Level);
+		for (int32& ConnectedLevel : Node.ConnectsFloors)
+		{
+			if (ConnectedLevel > Level)
+			{
+				--ConnectedLevel;
+			}
+		}
+		if (Node.Level > Level)
+		{
+			--Node.Level;
+			RebuildConnectorMarker(Node, Building);
+		}
+	}
+	Entrances.RemoveAll([Level](const FInteriorEntrance& Entrance) { return Entrance.Level == Level; });
+	for (FInteriorEntrance& Entrance : Entrances)
+	{
+		if (Entrance.Level > Level)
+		{
+			--Entrance.Level;
+		}
+	}
+	RefreshMirroredEntrances();
+
 	const int32 NewFloorCount = MaxLevel - 1;
 
 	// New floor count is the source of truth for how tall the exterior shell is.

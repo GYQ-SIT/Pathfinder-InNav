@@ -3187,7 +3187,12 @@ void UInteriorScreenWidget::HandleSwitchBuildingSave()
 	SaveDockLayoutToDisk();
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		PC->SaveCurrentProject();
+		if (!PC->SaveCurrentProject())
+		{
+			// Not saved (cancelled or failed): stay in this building, as Cancel does.
+			HandleSwitchBuildingCancel();
+			return;
+		}
 		PC->LoadInteriorForBuilding(PendingBuildingId);
 	}
 	RefreshAfterBuildingSwitch();
@@ -3201,7 +3206,7 @@ void UInteriorScreenWidget::HandleSwitchBuildingDiscard()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->DiscardUnsavedChanges();
-		PC->LoadInteriorForBuilding(PendingBuildingId);
+		PC->LoadInteriorForBuildingAfterDiscard(PendingBuildingId);
 	}
 	RefreshAfterBuildingSwitch();
 }
@@ -3668,7 +3673,10 @@ void UInteriorScreenWidget::HandleFileNewSave()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		PC->SaveCurrentProject();
+		if (!PC->SaveCurrentProject())
+		{
+			return;
+		}
 		PC->RestoreExteriorCameraView();
 		PC->StartNewProject();
 	}
@@ -3741,7 +3749,10 @@ void UInteriorScreenWidget::HandleFileLoadSave()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		PC->SaveCurrentProject();
+		if (!PC->SaveCurrentProject())
+		{
+			return;
+		}
 		PC->RestoreExteriorCameraView();
 		PC->LoadBuildingDataFromPathOrDatabase(PendingLoadFilePath);
 	}
@@ -3875,7 +3886,11 @@ void UInteriorScreenWidget::HandleSaveAndLeave()
 	// GoToEditScreen (below) already saves the dock layout unconditionally on every exit.
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		PC->SaveCurrentProject();
+		// A cancelled "Save as" or a failed write (which says why) keeps the project open.
+		if (!PC->SaveCurrentProject())
+		{
+			return;
+		}
 	}
 	GoToEditScreen();
 }

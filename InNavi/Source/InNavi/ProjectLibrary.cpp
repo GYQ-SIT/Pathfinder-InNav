@@ -60,18 +60,24 @@ namespace
 		return static_cast<int32>(Count);
 	}
 
+	// The longest name a project file gets; a longer name is cut (see ProjectLibrary::FilePathForName).
+	constexpr int32 MaxFileNameLength = 80;
+
+	// A name for a copy that no file has yet, or an empty string when there is none. The name is cut to fit a file name, so it is the
+	// base that gives way to the suffix: cut after the suffix, every copy of a long name would end up with the same file name.
 	FString UnusedCopyName(const FString& Directory, const FString& BaseName)
 	{
 		for (int32 Attempt = 1; Attempt < 1000; ++Attempt)
 		{
-			const FString Candidate = Attempt == 1 ? BaseName + TEXT(" copy") : FString::Printf(TEXT("%s copy %d"), *BaseName, Attempt);
+			const FString Suffix = Attempt == 1 ? FString(TEXT(" copy")) : FString::Printf(TEXT(" copy %d"), Attempt);
+			const FString Candidate = BaseName.Left(FMath::Max(1, MaxFileNameLength - Suffix.Len())).TrimEnd() + Suffix;
 			const FString Path = ProjectLibrary::FilePathForName(Directory, Candidate);
 			if (Path.IsEmpty() || !IFileManager::Get().FileExists(*Path))
 			{
 				return Candidate;
 			}
 		}
-		return BaseName + TEXT(" copy");
+		return FString();
 	}
 }
 
@@ -88,7 +94,6 @@ FString ProjectLibrary::FilePathForName(const FString& Directory, const FString&
 	{
 		return FString();
 	}
-	constexpr int32 MaxFileNameLength = 80;
 	if (FileName.Len() > MaxFileNameLength)
 	{
 		FileName.LeftInline(MaxFileNameLength);
@@ -167,6 +172,11 @@ bool ProjectLibrary::Duplicate(const FProjectLibraryEntry& Entry, const FString&
 		return false;
 	}
 	const FString CopyName = UnusedCopyName(Directory, Entry.DisplayName);
+	if (CopyName.IsEmpty())
+	{
+		OutError = TEXT("A name for the copy could not be made.");
+		return false;
+	}
 	const FString CopyPath = FilePathForName(Directory, CopyName);
 	if (CopyPath.IsEmpty())
 	{

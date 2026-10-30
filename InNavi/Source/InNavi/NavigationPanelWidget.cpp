@@ -385,6 +385,7 @@ void UNavigationPanelWidget::RefreshRoomSearchIndex() const
 	APolyBuilding* Building = Generator && Interior
 		? Generator->FindBuildingById(Interior->GetLoadedBuildingId()) : nullptr;
 	const uint64 Revision = Interior ? Interior->GetRoomSearchRevision() : 0;
+	// The null test is written out as well as IsValid: the analyzer does not see through IsValid.
 	const int32 FloorCount = Building && IsValid(Building) ? Building->GetFloorCount() : 0;
 	if (!bIndexedOutdoor && IndexedRoomSearchRevision == Revision && IndexedBuilding.Get() == Building && IndexedFloorCount == FloorCount)
 	{
