@@ -11,6 +11,8 @@ What it checks, and why (each rule exists because of something that went wrong o
              dash of the file as garbage ("a-circumflex, euro, ...")
   unity      no file-scope "using namespace" in a test .cpp: the build joins .cpp files into one, and it leaks into the others (it broke the build once)
   links      every relative link of the Markdown documents points at a file that exists (guideline G2: one source of truth)
+  workflow   in a workflow, a batch file (.bat, .cmd) started without "call" with more lines after it: a batch file does not give control
+             back, so those lines never run (the check of the static analysis did not, for a while)
 
 Usage: python3 scripts/lint.py [--root DIR]    Exit status 1 when anything is found.
 """
@@ -34,6 +36,7 @@ SECRET_PATTERNS = [
 URL_IN_SOURCE = re.compile(r"https?://|\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")
 USING_NAMESPACE = re.compile(r"^\s*using namespace\b")
 STRING_OR_CHAR = re.compile(r'"(?:\\.|[^"\\])*"|' + r"'(?:\\.|[^'\\])*'")
+BATCH_COMMAND = (".bat", ".cmd")
 MARKDOWN_LINK = re.compile(r"(?<!\!)\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
 
 
@@ -106,6 +109,19 @@ def main():
 
         if in_source and suffix == ".h" and not any(l.strip() == "#pragma once" for l in lines[:12]):
             problem("headers", relative, 1, "missing #pragma once")
+
+        if relative.startswith(".github/workflows/") and suffix in (".yml", ".yaml"):
+            for number, line in enumerate(lines, 1):
+                command = line.strip()
+                if not command or command.startswith("#") or command.lower().startswith("call "):
+                    continue
+                first = command[1:].split('"')[0] if command.startswith('"') else command.split()[0]
+                if not first.lower().endswith(BATCH_COMMAND):
+                    continue
+                indent = len(line) - len(line.lstrip())
+                following = next((l for l in lines[number:] if l.strip()), "")
+                if following.strip() and len(following) - len(following.lstrip()) >= indent and not following.lstrip().startswith("-"):
+                    problem("workflow", relative, number, "a batch file started without call does not give control back: the lines after it never run")
 
         if suffix == ".md":
             directory = os.path.dirname(relative)

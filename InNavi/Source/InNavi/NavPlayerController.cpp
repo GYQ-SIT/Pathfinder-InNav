@@ -2241,6 +2241,13 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 		OnActionFailed.Broadcast(TEXT("No file selected - click Browse first."), EActionFailureSeverity::Warning);
 		return 0;
 	}
+	// A file that cannot be loaded is found out here, before anything is cleared: what is open stays open.
+	FString Problem;
+	if (!ABuildingGenerator::IsLoadableProjectFile(FilePath, Problem))
+	{
+		OnActionFailed.Broadcast(Problem, EActionFailureSeverity::Critical);
+		return 0;
+	}
 	if (NavigationPanel)
 	{
 		NavigationPanel->ClearAll();
@@ -2293,6 +2300,13 @@ int32 ANavPlayerController::LoadBuildingDataFromDatabase(const FString& Database
 		OnActionFailed.Broadcast(TEXT("No database file selected."), EActionFailureSeverity::Warning);
 		return 0;
 	}
+	// Same as for a project file: a database that cannot be loaded leaves what is open as it is.
+	FString Problem;
+	if (!ABuildingGenerator::IsLoadableDatabase(DatabasePath, Problem))
+	{
+		OnActionFailed.Broadcast(Problem, EActionFailureSeverity::Critical);
+		return 0;
+	}
 	if (NavigationPanel)
 	{
 		NavigationPanel->ClearAll();
@@ -2316,12 +2330,15 @@ int32 ANavPlayerController::LoadBuildingDataFromDatabase(const FString& Database
 	{
 		// Deliberately NOT setting CurrentProjectFilePath to DatabasePath - Ctrl+S writes JSON via
 		// SaveBuildingsToFile, and pointing that at the .db file would overwrite it with JSON text.
+		// It is emptied, too: left as it was it would still be the JSON file opened before, and Ctrl+S would write the
+		// campus of this database into it.
 		// A database-loaded project has no "file to save back to" yet; the existing Save-As flow
 		// (whatever prompts for a path when CurrentProjectFilePath is empty) is what should kick in if
 		// the user wants to persist it - interiors drawn afterward still save fine once they do, since
 		// SaveBuildingsToFile serializes whatever APolyBuilding actors currently exist regardless of
 		// how they were spawned.
 		bHasUnsavedChanges = false;
+		CurrentProjectFilePath.Empty();
 		// Best-effort, first-look visualization (see LoadRoadsAndPOIsFromDatabase's own comment on
 		// scope) - a failure here shouldn't block the buildings that DID load from showing up.
 		Generator->LoadRoadsAndPOIsFromDatabase(DatabasePath);
@@ -4220,6 +4237,16 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 
 int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 {
+	return LoadInteriorInternal(BuildingId, /*bKeepEditsOfCurrent=*/true);
+}
+
+int32 ANavPlayerController::LoadInteriorForBuildingAfterDiscard(const FString& BuildingId)
+{
+	return LoadInteriorInternal(BuildingId, /*bKeepEditsOfCurrent=*/false);
+}
+
+int32 ANavPlayerController::LoadInteriorInternal(const FString& BuildingId, bool bKeepEditsOfCurrent)
+{
 	if (!InteriorGen)
 	{
 		UE_LOG(LogTemp, Error, TEXT("LoadInteriorForBuilding: no InteriorGenerator placed in the level"));
@@ -4255,7 +4282,9 @@ int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 		Generator->CaptureBuildingBaseline(BuildingId);
 	}
 
-	if (!InteriorGen->GetLoadedBuildingId().IsEmpty() && InteriorGen->GetLoadedBuildingId() != BuildingId)
+	// The building being left is stored first so its edits are not lost - except after Discard, which has just put its stored data
+	// back: writing the live copy over it would bring the discarded edits back.
+	if (bKeepEditsOfCurrent && !InteriorGen->GetLoadedBuildingId().IsEmpty() && InteriorGen->GetLoadedBuildingId() != BuildingId)
 	{
 		InteriorGen->SyncInteriorToBuildingGenerator();
 	}
