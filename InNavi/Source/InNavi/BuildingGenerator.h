@@ -9,6 +9,7 @@
 #include "RoadSegmentActor.h"
 #include "BuildingGenerator.generated.h"
 
+class AContextBuildingActor;
 class APolyBuilding;
 class AStaticMeshActor;
 class FJsonObject;
@@ -133,6 +134,18 @@ public:
 	// LoadContextBuildingsFromDatabase), so no collision toggle is needed.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void SetNonCampusBuildingsVisible(bool bVisible);
+
+	// What kind of building a campus building is (one value from BuildingTypes::All()). False when there is no such building. A change
+	// counts as a change of the results, so the lists and the Building panel follow it, and the building is shown or hidden as the type
+	// filter says.
+	bool SetBuildingType(const FString& BuildingId, const FString& Type);
+	FString GetBuildingType(const FString& BuildingId) const;
+
+	// Shows/hides the buildings of one type, campus and non-campus alike - the Map panel's type check boxes. Not saved in the project.
+	void SetBuildingTypeVisible(const FString& Type, bool bVisible);
+	bool IsBuildingTypeVisible(const FString& Type) const;
+	// Shows every type again.
+	void ResetBuildingTypeFilter();
 
 	// Shows/hides every currently-spawned road actor in Category at once - what a road-visibility
 	// filter panel's checkboxes call. Takes effect immediately (no reload/re-query needed) since
@@ -296,6 +309,9 @@ private:
 	UFUNCTION()
 	void HandleBuildingDestroyed(AActor* Building);
 	void RefreshBuildingFilterFor(APolyBuilding& Building) const;
+	// A non-campus building is shown when the Non-Campus filter and the filter of its type both allow it.
+	bool ShouldShowContextBuilding(const AContextBuildingActor& Building) const;
+	void RefreshContextBuildingVisibility();
 
 	uint64 NavigationRevision = 0;
 	void NotifyNavigationLayoutChanged();
@@ -358,6 +374,9 @@ private:
 
 	// Whether the filter panel shows the other (non-campus) buildings: SetNonCampusBuildingsVisible.
 	bool bNonCampusBuildingsVisible = true;
+
+	// The types the filter panel hides: SetBuildingTypeVisible. Empty when every type is shown.
+	TSet<FString> HiddenBuildingTypes;
 
 	// The level's floor and how it was, found the first time the ground is updated (see UpdateGroundToVisible).
 	TWeakObjectPtr<AStaticMeshActor> GroundActor;

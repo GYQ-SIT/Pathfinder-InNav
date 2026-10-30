@@ -14,8 +14,10 @@ AContextBuildingActor::AContextBuildingActor()
 	RootComponent = MeshComp;
 }
 
-void AContextBuildingActor::BuildFromFootprint(const TArray<FVector2D>& Footprint, float HeightWorldUnits, const FLinearColor& Color)
+void AContextBuildingActor::BuildFromFootprint(const TArray<FVector2D>& Footprint, float HeightWorldUnits, const FString& InBuildingType)
 {
+	BuildingType = BuildingTypes::Normalize(InBuildingType);
+	CurrentBodyColor = BuildingTypes::Color(BuildingType);
 	if (Footprint.Num() < 3)
 	{
 		return;
@@ -88,8 +90,17 @@ void AContextBuildingActor::BuildFromFootprint(const TArray<FVector2D>& Footprin
 		nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 	if (BaseMat)
 	{
-		UMaterialInstanceDynamic* DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
-		DynMaterial->SetVectorParameterValue(TEXT("Color"), Color);
+		DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
 		MeshComp->SetMaterial(0, DynMaterial);
+		ApplyBodyColor();
+	}
+}
+
+void AContextBuildingActor::ApplyBodyColor()
+{
+	CurrentBodyColor = BuildingTypes::Color(BuildingType);
+	if (DynMaterial)
+	{
+		DynMaterial->SetVectorParameterValue(TEXT("Color"), CurrentBodyColor);
 	}
 }

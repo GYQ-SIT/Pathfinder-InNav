@@ -1,5 +1,6 @@
 #include "MapPanelWidget.h"
 
+#include "BuildingTypes.h"
 #include "MapBuildingRowWidget.h"
 #include "NavPlayerController.h"
 #include "RoadSegmentActor.h"
@@ -88,6 +89,21 @@ void UMapPanelWidget::AddRoadRows(UVerticalBox* Stack)
 	RoadCampusOnlyCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UMapPanelWidget::OnRoadCampusOnlyCheckChanged);
 }
 
+void UMapPanelWidget::AddBuildingTypeRows(UVerticalBox* Stack)
+{
+	using namespace StartStyle;
+	Stack->AddChildToVerticalBox(Text(WidgetTree, TEXT("Txt_TypeLabel"), TEXT("Type"), 11.f, Rgb(165, 182, 204), true, 30))
+		->SetPadding(FMargin(0.f, 8.f * DesignToUi, 0.f, 6.f * DesignToUi));
+	BuildingTypeCheckboxes.Reset();
+	for (const FString& Type : BuildingTypes::All())
+	{
+		const FString Name = FString::Printf(TEXT("Chk_BuildingType_%s"), *Type);
+		UCheckBox* Checkbox = AddCheckRow(Stack, *Name, *Type, true, MapRowBottomPadding, BuildingTypes::Color(Type));
+		Checkbox->OnCheckStateChanged.AddUniqueDynamic(this, &UMapPanelWidget::OnBuildingTypeCheckChanged);
+		BuildingTypeCheckboxes.Add(Checkbox);
+	}
+}
+
 TSharedRef<SWidget> UMapPanelWidget::RebuildWidget()
 {
 	if (WidgetTree && !WidgetTree->RootWidget)
@@ -174,6 +190,7 @@ TSharedRef<SWidget> UMapPanelWidget::RebuildWidget()
 		// Starts unchecked: buildings outside the campus are hidden by default.
 		BuildingNonCampusCheckbox = AddCheckRow(FiltersBody, TEXT("Chk_BuildingNonCampus"), TEXT("Non-Campus"), false, MapRowBottomPadding);
 		BuildingNonCampusCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UMapPanelWidget::OnBuildingNonCampusCheckChanged);
+		AddBuildingTypeRows(FiltersBody);
 
 		// A wrapping label in a button whose width follows the panel, so the text wraps inside the button instead of
 		// running out of it.
@@ -261,6 +278,7 @@ void UMapPanelWidget::Refresh()
 		{
 			BuildingCampusCheckbox->SetIsChecked(PC->AreCampusBuildingsVisible());
 		}
+		RefreshBuildingTypeChecks();
 		FloorMinimum = PC->GetBuildingFilterMinimumFloors();
 		FloorMaximum = PC->GetBuildingFilterMaximumFloors();
 		RefreshFloorChips();
@@ -412,6 +430,47 @@ void UMapPanelWidget::OnBuildingNonCampusCheckChanged(bool bIsChecked)
 	if (ANavPlayerController* PC = GetController())
 	{
 		PC->SetNonCampusBuildingsVisible(bIsChecked);
+	}
+}
+
+void UMapPanelWidget::OnBuildingTypeCheckChanged(bool)
+{
+	ANavPlayerController* PC = GetController();
+	if (!PC || bUpdatingBuildingFilters)
+	{
+		return;
+	}
+	const TArray<FString>& Types = BuildingTypes::All();
+	for (int32 Index = 0; Index < BuildingTypeCheckboxes.Num() && Index < Types.Num(); ++Index)
+	{
+		PC->SetBuildingTypeVisible(Types[Index], BuildingTypeCheckboxes[Index]->IsChecked());
+	}
+	RefreshBuildingFilterDisplay();
+}
+
+void UMapPanelWidget::RefreshBuildingTypeChecks()
+{
+	const ANavPlayerController* PC = GetController();
+	const TArray<FString>& Types = BuildingTypes::All();
+	for (int32 Index = 0; Index < BuildingTypeCheckboxes.Num() && Index < Types.Num(); ++Index)
+	{
+		BuildingTypeCheckboxes[Index]->SetIsChecked(!PC || PC->IsBuildingTypeVisible(Types[Index]));
+	}
+}
+
+bool UMapPanelWidget::IsBuildingTypeCheckedForTests(const FString& Type) const
+{
+	const int32 Index = BuildingTypes::All().IndexOfByKey(Type);
+	return BuildingTypeCheckboxes.IsValidIndex(Index) && BuildingTypeCheckboxes[Index]->IsChecked();
+}
+
+void UMapPanelWidget::SetBuildingTypeCheckedForTests(const FString& Type, bool bChecked)
+{
+	const int32 Index = BuildingTypes::All().IndexOfByKey(Type);
+	if (BuildingTypeCheckboxes.IsValidIndex(Index))
+	{
+		BuildingTypeCheckboxes[Index]->SetIsChecked(bChecked);
+		OnBuildingTypeCheckChanged(bChecked);
 	}
 }
 
@@ -568,7 +627,9 @@ void UMapPanelWidget::OnResetBuildingFiltersClicked()
 	if (ANavPlayerController* PC = GetController())
 	{
 		PC->SetCampusBuildingsVisible(true);
+		PC->ResetBuildingTypeFilter();
 	}
+	RefreshBuildingTypeChecks();
 	bUpdatingBuildingFilters = false;
 	ApplyBuildingFilters();
 }

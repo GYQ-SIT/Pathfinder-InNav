@@ -73,6 +73,7 @@ A complete file to open and read is `docs/test-data/entrance-test-2-with-doors.j
 | `name` | string | **Required.** Shown to people | - |
 | `footprint` | array of `[x, y]`, at least 3 | **Required.** The outline, in footprint units. Edge *i* runs from point *i* to point *i* + 1 (the last to the first) | the building is skipped (a warning in the log) |
 | `offset` | `[x, y]` | Where the building stands among the others, in footprint units | `[0, 0]` |
+| `buildingType` | string | One of the types of the editor (`BuildingTypes.h`: University, School, Residential, Commercial, Public, Transport, Utility, Other); the colour and the filter of the building on the map. A value that is not on the list reads as Other | Other |
 | `floorCount` | integer >= 1 | How many floors | 10 |
 | `floorHeight` | number > 0 | In cm | the file's |
 | `interior` | object | The floors and doors of the building (below) | an empty building |
