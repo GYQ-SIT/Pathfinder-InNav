@@ -89,5 +89,16 @@ UnrealEditor-Cmd.exe InNavi/InNavi.uproject -ExecCmds="Automation RunTests InNav
 ```
 
 The measurements are in `InNavi/Saved/Performance/*.json`. The tests fail when a loose guard limit is broken (campus load 10 s, interior
-5 s, a route in the largest building 15 s, a route between buildings 5 s, validation 30 s), so a large slowdown is caught on the pull
-request that causes it.
+5 s, the first route in the largest building 45 s, a route between buildings 5 s, validating a building 45 s and a project 30 s), so a
+large slowdown is caught on the pull request that causes it. The limits are not the budgets above: they are set for the slowest machine the
+tests run on (see the next section).
+
+## The machine that runs the CI is slower
+
+The same tests on the laptop that runs the CI (the build workflow, 2026-10-30) gave: the whole campus loaded 3.8 s (p95), generating the ten
+floors 9.9 s, opening the interior 0.21 s, **the first route in the largest building 21.8 s** (the next ones 37 ms, p95 55 ms), validating
+the largest building 22.2 s the first time and 0.45 s after. Everything is two to three and a half times slower than on the desktop of the
+table above, and the part that builds the graph of a building the most. The first route is therefore **above the 15 s budget on that
+machine**: it is shown as progress and spread over frames (see "Where we are under the target"), so the editor stays responsive, but the
+user waits about twenty seconds once for the largest building there. The campus load, opening an interior and the next routes meet their budgets
+on both machines (the frame rates were only read on the desktop).
