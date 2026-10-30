@@ -64,7 +64,10 @@ jobs:
         run: |
           "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -unattended -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests InNavi; Quit" -ReportExportPath="%GITHUB_WORKSPACE%\InNavi\Saved\AutomationReport"
 
-      - name: Check the test report (the editor exits 0 even when a test fails)
+      # The editor exits with a failure code when a test fails, so this step has to run then too: it is the one that lists which tests failed
+      # and why (the log of the editor itself is not in the log of the job).
+      - name: Check the test report (lists the tests that failed)
+        if: ${{ !cancelled() }}
         shell: cmd
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check-test-report.ps1 -Report "%GITHUB_WORKSPACE%\InNavi\Saved\AutomationReport" -MinimumTests 150
 

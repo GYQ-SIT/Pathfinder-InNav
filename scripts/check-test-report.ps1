@@ -1,5 +1,5 @@
 # Reads the report Unreal's automation system writes (-ReportExportPath) and fails when a test failed or none ran.
-# UnrealEditor-Cmd exits with 0 even when tests fail, so the build has to look at the report itself.
+# The editor exits with a failure code when a test fails, but its own log is not in the log of the job: this lists the failed tests and their errors there.
 # Usage: powershell -File scripts/check-test-report.ps1 -Report <folder with index.json> [-MinimumTests 100]
 param(
     [Parameter(Mandatory = $true)][string]$Report,
