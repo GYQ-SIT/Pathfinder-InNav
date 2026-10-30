@@ -2689,9 +2689,6 @@ void UInteriorScreenWidget::RefreshFloorList()
 			continue;
 		}
 		Entry->SetFloorNumber(FloorNumber, FloorNumber == ActiveFloor, (FloorNumber - 1) * FloorHeightCm / 100.f);
-		const bool bHiddenLowest = PC->IsInteriorInspectionEnabled() && FloorNumber <= PC->GetInspectionLowestFloor();
-		Entry->SetIsEnabled(!bHiddenLowest);
-		if (bHiddenLowest) Entry->SetToolTipText(FText::FromString(TEXT("The lowest storey is hidden during Isolate & Rotate.")));
 		Entry->SetWidth(ComputePanelButtonWidth(EDockPanelId::Floor));
 		Entry->OnEntryClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleFloorEntryClicked);
 

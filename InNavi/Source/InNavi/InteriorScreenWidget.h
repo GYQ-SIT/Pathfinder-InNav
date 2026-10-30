@@ -902,6 +902,7 @@ private:
 	UButton* InspectionOrbitButton = nullptr;
 	UPROPERTY()
 	UButton* InspectionGrabButton = nullptr;
+	UPROPERTY()
 	UTextBlock* InspectionToggleText = nullptr;
 	UPROPERTY()
 	UTextBlock* InspectionHint = nullptr;

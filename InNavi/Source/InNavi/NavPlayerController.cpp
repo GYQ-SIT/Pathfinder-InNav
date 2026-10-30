@@ -4313,7 +4313,6 @@ int32 ANavPlayerController::LoadInteriorInternal(const FString& BuildingId, bool
 
 void ANavPlayerController::SetActiveFloor(int32 Level)
 {
-	if (bInteriorInspectionEnabled && Level <= GetInspectionLowestFloor()) return;
 	if (!InteriorGen)
 	{
 		OnActionFailed.Broadcast(TEXT("No InteriorGenerator placed in the level."), EActionFailureSeverity::Warning);
