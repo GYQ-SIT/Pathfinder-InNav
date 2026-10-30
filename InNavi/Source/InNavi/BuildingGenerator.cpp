@@ -1355,6 +1355,69 @@ bool ABuildingGenerator::IsEmptyProjectFile(const FString& FilePath)
 	return RootObject->TryGetArrayField(TEXT("buildings"), BuildingsArray) && BuildingsArray && BuildingsArray->IsEmpty();
 }
 
+bool ABuildingGenerator::IsLoadableProjectFile(const FString& FilePath, FString& OutProblem)
+{
+	OutProblem.Reset();
+	FString JsonString;
+	if (!FFileHelper::LoadFileToString(JsonString, *FilePath))
+	{
+		OutProblem = TEXT("That file could not be read.");
+		return false;
+	}
+	TSharedPtr<FJsonObject> RootObject;
+	if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(JsonString), RootObject) || !RootObject.IsValid())
+	{
+		OutProblem = TEXT("That file is not valid JSON.");
+		return false;
+	}
+	const TArray<TSharedPtr<FJsonValue>>* BuildingsArray = nullptr;
+	if (!RootObject->TryGetArrayField(TEXT("buildings"), BuildingsArray) || !BuildingsArray)
+	{
+		OutProblem = TEXT("No buildings were loaded from that file - check that it matches the expected JSON format.");
+		return false;
+	}
+	if (BuildingsArray->IsEmpty())
+	{
+		return true;
+	}
+	for (const TSharedPtr<FJsonValue>& Value : *BuildingsArray)
+	{
+		const TSharedPtr<FJsonObject> Building = Value.IsValid() ? Value->AsObject() : nullptr;
+		const TArray<TSharedPtr<FJsonValue>>* Footprint = nullptr;
+		if (Building.IsValid() && Building->TryGetArrayField(TEXT("footprint"), Footprint) && Footprint && Footprint->Num() >= 3)
+		{
+			return true;
+		}
+	}
+	OutProblem = TEXT("No buildings were loaded from that file - none of its buildings has an outline.");
+	return false;
+}
+
+bool ABuildingGenerator::IsLoadableDatabase(const FString& DatabasePath, FString& OutProblem)
+{
+	OutProblem = TEXT("No buildings were loaded from that database - check that it has 'buildings'/'building_nodes' tables.");
+	FSQLiteDatabase Database;
+	if (!Database.Open(*DatabasePath, ESQLiteDatabaseOpenMode::ReadOnly))
+	{
+		return false;
+	}
+	int64 CampusCount = 0;
+	bool bGotRow = false;
+	Database.Execute(TEXT("SELECT COUNT(*) AS n FROM buildings WHERE building_type = 'university'"),
+		[&CampusCount, &bGotRow](const FSQLitePreparedStatement& Statement) -> ESQLitePreparedStatementExecuteRowResult
+		{
+			bGotRow = Statement.GetColumnValueByName(TEXT("n"), CampusCount);
+			return ESQLitePreparedStatementExecuteRowResult::Continue;
+		});
+	Database.Close();
+	if (!bGotRow || CampusCount <= 0)
+	{
+		return false;
+	}
+	OutProblem.Reset();
+	return true;
+}
+
 void ABuildingGenerator::ClearAllBuildings()
 {
 	for (const auto& Pair : BuildingsById)

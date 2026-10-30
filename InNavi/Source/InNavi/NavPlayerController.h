@@ -904,6 +904,10 @@ public:
 	// above: Padre's UI should never need a separate InteriorGenerator reference, just this one.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	int32 LoadInteriorForBuilding(const FString& BuildingId);
+	// Same, for after DiscardUnsavedChanges: the building being left is not stored first, since Discard has just put its stored data back.
+	int32 LoadInteriorForBuildingAfterDiscard(const FString& BuildingId);
+	// What the two above do; bKeepEditsOfCurrent says whether the building being left is stored first.
+	int32 LoadInteriorInternal(const FString& BuildingId, bool bKeepEditsOfCurrent);
 
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void SetActiveFloor(int32 Level);

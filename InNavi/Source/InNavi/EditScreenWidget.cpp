@@ -748,7 +748,11 @@ void UEditScreenWidget::HandleSaveAndLeave()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		PC->SaveCurrentProject();
+		// A cancelled "Save as" or a failed write (which says why) keeps the project open.
+		if (!PC->SaveCurrentProject())
+		{
+			return;
+		}
 	}
 	GoToStartScreen();
 }
@@ -885,7 +889,10 @@ void UEditScreenWidget::HandleFileNewSave()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		PC->SaveCurrentProject();
+		if (!PC->SaveCurrentProject())
+		{
+			return;
+		}
 		PC->StartNewProject();
 	}
 	HandleBuildingSelected(FString());
@@ -941,7 +948,10 @@ void UEditScreenWidget::HandleFileLoadSave()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		PC->SaveCurrentProject();
+		if (!PC->SaveCurrentProject())
+		{
+			return;
+		}
 		PC->LoadBuildingDataFromPathOrDatabase(PendingLoadFilePath);
 	}
 	HandleBuildingSelected(FString());

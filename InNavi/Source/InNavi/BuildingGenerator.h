@@ -226,6 +226,11 @@ public:
 	// True if the file is a valid project that just has no buildings yet - what "New project" writes. Loading
 	// such a file spawns nothing, so a spawned count of 0 alone cannot tell it from a broken file.
 	static bool IsEmptyProjectFile(const FString& FilePath);
+	// Whether LoadBuildingsFromFile can make buildings of this file: it reads, is JSON, has a "buildings" list, and that list is
+	// empty (a new project) or has a building with an outline. When not, OutProblem says why. Checked before the scene is cleared.
+	static bool IsLoadableProjectFile(const FString& FilePath, FString& OutProblem);
+	// Whether LoadBuildingsFromDatabase can make the campus of this map database (it opens and has campus buildings).
+	static bool IsLoadableDatabase(const FString& DatabasePath, FString& OutProblem);
 
 	// The raw "interior" JSON sub-object associated with a building id, as loaded from (or to be
 	// written into) the combined project file - not interpreted here, that's InteriorGenerator's
