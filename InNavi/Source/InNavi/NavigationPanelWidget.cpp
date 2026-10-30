@@ -1,4 +1,5 @@
-﻿#include "NavigationPanelWidget.h"
+#include "NavigationPanelWidget.h"
+#include "NavigationInstructions.h"
 
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
@@ -245,10 +246,14 @@ void UNavigationPanelWidget::SetNavigationContext(ABuildingGenerator* InGenerato
 {
 	if (Generator != InGenerator || Interior != InInterior)
 	{
-		StopRouteJob();
+		ClearAll();
 	}
+	if (Generator) Generator->OnNavigationLayoutChanged.RemoveAll(this);
+	if (Interior) Interior->OnNavigationLayoutChanged.RemoveAll(this);
 	Generator = InGenerator;
 	Interior = InInterior;
+	if (Generator) Generator->OnNavigationLayoutChanged.AddUObject(this, &UNavigationPanelWidget::HandleLayoutChanged);
+	if (Interior) Interior->OnNavigationLayoutChanged.AddUObject(this, &UNavigationPanelWidget::HandleLayoutChanged);
 	IndexedRoomSearchRevision = MAX_uint64;
 	UE_LOG(LogTemp, Warning, TEXT("[Navigation] Context set: Generator=%s Interior=%s BuildingId=%s Floor=%d"),
 		Generator ? TEXT("valid") : TEXT("NULL"),
@@ -380,7 +385,7 @@ void UNavigationPanelWidget::RefreshRoomSearchIndex() const
 	APolyBuilding* Building = Generator && Interior
 		? Generator->FindBuildingById(Interior->GetLoadedBuildingId()) : nullptr;
 	const uint64 Revision = Interior ? Interior->GetRoomSearchRevision() : 0;
-	const int32 FloorCount = IsValid(Building) ? Building->GetFloorCount() : 0;
+	const int32 FloorCount = Building && IsValid(Building) ? Building->GetFloorCount() : 0;
 	if (!bIndexedOutdoor && IndexedRoomSearchRevision == Revision && IndexedBuilding.Get() == Building && IndexedFloorCount == FloorCount)
 	{
 		return;
@@ -391,7 +396,7 @@ void UNavigationPanelWidget::RefreshRoomSearchIndex() const
 	IndexedFloorCount = FloorCount;
 	CachedRooms.Reset();
 	SortedDestinationIndices.Reset();
-	if (!IsValid(Building) || !Interior)
+	if (!Building || !IsValid(Building) || !Interior)
 	{
 		return;
 	}
@@ -625,6 +630,7 @@ void UNavigationPanelWidget::FailJourney(const FJourney& Trip, const FNavigation
 
 bool UNavigationPanelWidget::CanStartFindRoute()
 {
+	RefreshSelectedPlaces();
 	if (!CanFindRoute())
 	{
 		SetStatusMessage(TEXT("Set at least two places for the route."), ENavigationMessageKind::Error);
@@ -768,6 +774,8 @@ FString UNavigationPanelWidget::GetFindRouteProgressText() const
 
 void UNavigationPanelWidget::BeginDestroy()
 {
+	if (Generator) Generator->OnNavigationLayoutChanged.RemoveAll(this);
+	if (Interior) Interior->OnNavigationLayoutChanged.RemoveAll(this);
 	StopRouteJob();
 	Super::BeginDestroy();
 }
@@ -1195,6 +1203,7 @@ bool UNavigationPanelWidget::ApplyWorldRouteResult(const FString& BuildingId,
 
 void UNavigationPanelWidget::ClearAll()
 {
+	bEndpointsNeedRefresh = false;
 	StopRouteJob();
 	bRouteGuidanceVisible = true;
 	SelectionMode = ENavigationSelectionMode::None;
@@ -1528,21 +1537,100 @@ void UNavigationPanelWidget::NotifyViewedBuildingChanged()
 	BroadcastStateChanged();
 }
 
+void UNavigationPanelWidget::HandleLayoutChanged()
+{
+	// Interior view loads suppress their own notifications. A real exterior floor-count
+	// change still invalidates geometry, including when it corrects an inconsistent imported shell.
+	NotifyInteriorChanged();
+}
+
 void UNavigationPanelWidget::NotifyInteriorChanged()
 {
-	// A search works on a copy of the layout taken when it started; after an edit its answer would be for the old one.
+	IndexedRoomSearchRevision = MAX_uint64;
+	bEndpointsNeedRefresh = true;
 	const bool bWasSearching = StopRouteJob();
-	if (RoutePoints.IsEmpty())
-	{
-		if (bWasSearching)
-		{
-			SetStatusMessage(TEXT("Interior changed. Press Find Route to search again."), ENavigationMessageKind::Warning);
-		}
-		return;
-	}
+	const bool bHadRoute = !RoutePoints.IsEmpty();
 	ClearRouteResult();
+	GuidedStep = 0;
 	bLastFindRouteFailed = false;
-	SetStatusMessage(TEXT("Interior changed. Press Find Route to update the route."), ENavigationMessageKind::Warning);
+	if (bHadRoute || bWasSearching)
+	{
+		SetStatusMessage(TEXT("Layout changed. Press Find Route to update the route."), ENavigationMessageKind::Warning);
+		OnGuidedStepChanged.Broadcast();
+	}
+}
+
+void UNavigationPanelWidget::RefreshSelectedPlaces()
+{
+	if (!bEndpointsNeedRefresh) return;
+	bEndpointsNeedRefresh = false;
+	auto Refresh = [this](FSelectedEndpoint& Endpoint)
+	{
+		if (!Endpoint.bValid) return;
+		const auto* Building = Generator ? Generator->FindBuildingById(Endpoint.BuildingId) : nullptr;
+		if (!Building) { Endpoint = {}; return; }
+		if (Endpoint.bSetViaDropdown && Endpoint.Point.Floor != OutdoorFloor)
+		{
+			bool bFound = false;
+			if (Interior && Interior->GetLoadedBuildingId() == Endpoint.BuildingId)
+			{
+				if (const auto* Room = Interior->GetRoomById(Endpoint.RoomId); Room && Room->IsClosedLoop())
+				{
+					Endpoint.Point.Position = ComputePolygonCentroid(Room->GetFootprint()); Endpoint.Point.Floor = Room->FloorLevel;
+					Endpoint.RoomOptionLabel = FString::Printf(TEXT("%s (Floor %d)"), *Room->RoomName, Room->FloorLevel); bFound = true;
+				}
+			}
+			else if (const auto Data = Generator->GetInteriorDataForBuilding(Endpoint.BuildingId))
+			{
+				const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
+				if (Data->TryGetArrayField(TEXT("floors"), Floors)) for (const auto& Value : *Floors)
+				{
+					const auto Floor = Value->AsObject(); if (!Floor) continue;
+					int32 Level = 1; Floor->TryGetNumberField(TEXT("level"), Level);
+					const TArray<TSharedPtr<FJsonValue>>* Rooms = nullptr;
+					if (Floor->TryGetArrayField(TEXT("rooms"), Rooms)) for (const auto& RoomValue : *Rooms)
+					{
+						const auto Room = RoomValue->AsObject(); FString Id, Name; bool bClosed = true;
+						if (!Room || !Room->TryGetStringField(TEXT("id"), Id) || Id != Endpoint.RoomId) continue;
+						Room->TryGetBoolField(TEXT("closed"), bClosed); if (!bClosed) continue;
+						const TArray<TSharedPtr<FJsonValue>>* Points = nullptr; TArray<FVector2D> Polygon;
+						if (Room->TryGetArrayField(TEXT("footprint"), Points)) for (const auto& P : *Points)
+						{
+							const TArray<TSharedPtr<FJsonValue>>* XY = nullptr;
+							if (P->TryGetArray(XY) && XY->Num() >= 2) Polygon.Add({ (*XY)[0]->AsNumber(), (*XY)[1]->AsNumber() });
+						}
+						if (Polygon.Num() < 3) continue;
+						Endpoint.Point.Position = ComputePolygonCentroid(Polygon); Endpoint.Point.Floor = Level;
+						Room->TryGetStringField(TEXT("name"), Name); if (Name.IsEmpty()) Name = Id;
+						Endpoint.RoomOptionLabel = FString::Printf(TEXT("%s (Floor %d)"), *Name, Level); bFound = true; break;
+					}
+					if (bFound) break;
+				}
+			}
+			if (!bFound) { Endpoint = {}; return; }
+		}
+		else if (Endpoint.bSetViaDropdown)
+		{
+			const auto Doors = Interior && Interior->GetLoadedBuildingId() == Endpoint.BuildingId
+				? Interior->GetEntrances() : Generator->GetStoredEntrances(Endpoint.BuildingId);
+			const auto* Door = Doors.FindByPredicate([&](const FInteriorEntrance& D) { return D.Id == Endpoint.RoomId && D.Kind == EInteriorEntranceKind::Main; });
+			const auto& Outline = Building->GetFootprint();
+			if (!Door || !Outline.IsValidIndex(Door->EdgeIndex) || Generator->GetScale() <= KINDA_SMALL_NUMBER) { Endpoint = {}; return; }
+			const auto A = Outline[Door->EdgeIndex], B = Outline[(Door->EdgeIndex + 1) % Outline.Num()];
+			const auto Direction = (B - A).GetSafeNormal(); const FVector2D Normal(Direction.Y, -Direction.X);
+			const auto Middle = A + Direction * ((Door->Offset + Door->Width * 0.5) / Generator->GetScale());
+			Endpoint.Point.Position = Middle + Normal * (100.0 / Generator->GetScale());
+			if (IsInsideOrOnFootprint(Endpoint.Point.Position, Outline)) Endpoint.Point.Position = Middle - Normal * (100.0 / Generator->GetScale());
+		}
+		StampPoint(Endpoint.Point, Endpoint.BuildingId);
+	};
+	Refresh(Start); Refresh(Destination);
+	for (int32 I = Stops.Num() - 1; I >= 0; --I)
+	{
+		auto Endpoint = StopAsEndpoint(Stops[I]); Refresh(Endpoint);
+		if (!Endpoint.bValid) Stops.RemoveAt(I);
+		else { Stops[I].Point = Endpoint.Point; Stops[I].RoomOptionLabel = Endpoint.RoomOptionLabel; }
+	}
 }
 
 bool UNavigationPanelWidget::CanClearRoute() const
@@ -1635,36 +1723,22 @@ TArray<UNavigationPanelWidget::FNavigationRouteStep> UNavigationPanelWidget::Bui
 	{
 		const int32 FirstPoint = RouteLegs.IsEmpty() ? 0 : RouteLegs[Leg].FirstPointIndex;
 		const int32 LastPoint = FMath::Min(RouteLegs.IsEmpty() ? RoutePoints.Num() - 1 : RouteLegs[Leg].LastPointIndex, RoutePoints.Num() - 1);
-		for (int32 I = FMath::Max(FirstPoint + 1, 1); I <= LastPoint; ++I)
+		const auto Instructions = NavigationInstructions::Build(RoutePoints,
+			[this](const FNavigationRoutePoint& Point)
+			{
+				if (Point.bHasWorldPosition) return Point.WorldPosition;
+				auto Stamped = Point; StampPoint(Stamped, Point.BuildingId.IsEmpty() && Interior ? Interior->GetLoadedBuildingId() : Point.BuildingId);
+				return Stamped.bHasWorldPosition ? Stamped.WorldPosition : FVector(Point.Position, 0);
+			},
+			[this](const FString& Id) { return BuildingDisplayName(Id.IsEmpty() && Interior ? Interior->GetLoadedBuildingId() : Id); }, FirstPoint, LastPoint);
+		for (int32 I = 0; I < Instructions.Num(); ++I)
 		{
-			const FNavigationRoutePoint& From = RoutePoints[I - 1];
-			const FNavigationRoutePoint& To = RoutePoints[I];
-			if (From.BuildingId != To.BuildingId && From.Floor != OutdoorFloor && To.Floor != OutdoorFloor)
-			{
-				AddStep(FString::Printf(TEXT("Use the link door from %s to %s on Floor %d."),
-					*BuildingDisplayName(From.BuildingId), *BuildingDisplayName(To.BuildingId), To.Floor), I - 1);
-				continue;
-			}
-			if (From.Floor == To.Floor)
-			{
-				continue;
-			}
-			if (From.Floor == OutdoorFloor)
-			{
-				// Where the person goes in: the building being entered is the one to show.
-				AddStep(To.BuildingId.IsEmpty() ? FString(TEXT("Enter the building and continue on Floor 1."))
-					: FString::Printf(TEXT("Enter the building %s and continue on Floor 1."), *BuildingDisplayName(To.BuildingId)), I);
-			}
-			else if (To.Floor == OutdoorFloor)
-			{
-				AddStep(From.BuildingId.IsEmpty() ? FString(TEXT("Exit the building and continue outside."))
-					: FString::Printf(TEXT("Exit the building %s and continue outside."), *BuildingDisplayName(From.BuildingId)), I - 1);
-			}
-			else
-			{
-				const FString Where = From.BuildingId.IsEmpty() ? FString() : FString::Printf(TEXT(" in %s"), *BuildingDisplayName(From.BuildingId));
-				AddStep(FString::Printf(TEXT("Take the %s%s from Floor %d to Floor %d."), *ConnectorTypeName(To.ConnectorType), *Where, From.Floor, To.Floor), I - 1);
-			}
+			const auto& Instruction = Instructions[I];
+			// The start already occupies this point. Include the initial walk there rather than adding
+			// a second instruction at the same position with an empty highlighted stretch.
+			if (Leg == 0 && I == 0 && Start.bValid && Instruction.Kind == ENavigationInstructionKind::Straight && Instruction.PointIndex == 0)
+				Steps[0].Text += TEXT(" ") + Instruction.Text;
+			else AddStep(Instruction.Text, Instruction.PointIndex);
 		}
 		if (Leg + 1 < LegCount && !RouteLegs.IsEmpty())
 		{
@@ -1763,8 +1837,12 @@ FNavigationRouteFocus UNavigationPanelWidget::GetGuidedFocus() const
 		return Focus;
 	}
 	Focus.FirstPointIndex = Steps[GuidedStep].PointIndex;
-	Focus.LastPointIndex = Steps.IsValidIndex(GuidedStep + 1) && RoutePoints.IsValidIndex(Steps[GuidedStep + 1].PointIndex)
-		? FMath::Max(Focus.FirstPointIndex, Steps[GuidedStep + 1].PointIndex) : Focus.FirstPointIndex;
+	int32 Next = GuidedStep + 1;
+	// An entry or door announcement can share a point with the walking instruction after it.
+	// Highlight the next actual stretch rather than making every segment faint at that location.
+	while (Steps.IsValidIndex(Next) && Steps[Next].PointIndex <= Focus.FirstPointIndex) ++Next;
+	Focus.LastPointIndex = Steps.IsValidIndex(Next) && RoutePoints.IsValidIndex(Steps[Next].PointIndex)
+		? Steps[Next].PointIndex : Focus.FirstPointIndex;
 	return Focus;
 }
 

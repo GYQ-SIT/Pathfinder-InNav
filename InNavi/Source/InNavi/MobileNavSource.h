@@ -121,6 +121,9 @@ enum class EMobileStepKind : uint8
 	ExitBuilding,
 	EnterBuilding,
 	Arrive,
+	TurnAround,
+	PassDoor,
+	ChangeFloor,
 };
 
 struct FMobileStep

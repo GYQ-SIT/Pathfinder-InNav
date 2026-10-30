@@ -41,6 +41,8 @@ namespace
 	{
 		TArray<FSegment> Walls;
 		TArray<FVector2D> DoorPoints;
+		TArray<FVector2D> RoomDoors;
+		TArray<FSegment> DoorSegments;
 		TArray<FVector2D> TurnPoints;
 		TArray<FExteriorExit> ExteriorExits;
 		double WallClearance = 0.0;
@@ -391,6 +393,11 @@ namespace
 						Gaps.Add(TPair<double, double>(Begin, End));
 						const FVector2D DoorPosition = A + Direction * ((Begin + End) * 0.5);
 						Geometry.DoorPoints.Add(DoorPosition);
+						if (Opening.Type == EInteriorOpeningType::Door)
+						{
+							Geometry.RoomDoors.Add(DoorPosition);
+							Geometry.DoorSegments.Add({ A + Direction * Begin, A + Direction * End });
+						}
 						// Leaving a doorway sideways can intersect the clearance capsules of its jambs.
 						// Supply a point on each side where the route can turn after crossing normally.
 						const FVector2D Normal(-Direction.Y, Direction.X);
@@ -820,8 +827,16 @@ namespace
 		return IsExteriorExitVertex(Point) || Point.ConnectorId.StartsWith(TEXT("BuildingLink:"));
 	}
 
+	struct FRouteDoorway
+	{
+		FString BuildingId;
+		int32 Floor;
+		FSegment Opening;
+	};
+
 	struct FCampusGraph
 	{
+		TArray<FRouteDoorway> Doorways;
 		TArray<FVertex> Vertices;
 		TArray<TArray<FRouteGraphEdge>> Edges;
 		// The points a search is about (the start and the destination, or the rooms a check asks about): vertices after the StaticCount of
@@ -888,7 +903,7 @@ namespace
 				Hash.Pod(Level); Hash.Pod(Floor.WallClearance); Hash.Pod(Floor.PreferredWallClearance);
 				Hash.Pod(Floor.Walls.Num());
 				for (const FSegment& Wall : Floor.Walls) { Hash.Pod(Wall.A.X); Hash.Pod(Wall.A.Y); Hash.Pod(Wall.B.X); Hash.Pod(Wall.B.Y); }
-				Hash.Points(Floor.DoorPoints); Hash.Points(Floor.TurnPoints);
+				Hash.Points(Floor.DoorPoints); Hash.Points(Floor.RoomDoors); Hash.Points(Floor.TurnPoints);
 				Hash.Pod(Floor.ExteriorExits.Num());
 				for (const FExteriorExit& Exit : Floor.ExteriorExits) { Hash.Text(Exit.Id); Hash.Pod(Exit.Position.X); Hash.Pod(Exit.Position.Y); }
 			}
@@ -1007,7 +1022,12 @@ namespace
 		{
 			for (const auto& Pair : M.Floors)
 			{
-				for (const auto& Door : Pair.Value.DoorPoints) Add(M, Door, Pair.Key);
+				for (const auto& Door : Pair.Value.DoorSegments) Out.Doorways.Add({ M.Building->BuildingId, Pair.Key, Door });
+				for (const auto& Door : Pair.Value.DoorPoints)
+				{
+					Add(M, Door, Pair.Key);
+					Vertices.Last().Point.bIsDoorway = Pair.Value.RoomDoors.Contains(Door);
+				}
 				for (const auto& Turn : Pair.Value.TurnPoints) Add(M, Turn, Pair.Key);
 				for (const auto& Exit : Pair.Value.ExteriorExits)
 				{
@@ -1190,6 +1210,43 @@ namespace
 			TArray<int32> Reverse;
 			for (int32 I = Destination; I != INDEX_NONE; I = Previous[I]) Reverse.Add(I);
 			for (int32 I = Reverse.Num() - 1; I >= 0; --I) Result.Points.Add(Graph.Vertices[Reverse[I]].Point);
+			// A visibility edge may cross a door without using its centre as a graph vertex. Keep that
+			// landmark for guidance by inserting a collinear point; the walkable path remains identical.
+			TArray<FNavigationRoutePoint> WithDoors;
+			if (!Result.Points.IsEmpty()) WithDoors.Add(Result.Points[0]);
+			for (int32 I = 1; I < Result.Points.Num(); ++I)
+			{
+				const auto& A = Result.Points[I - 1]; auto B = Result.Points[I];
+				TArray<double> Crossings;
+				if (A.Floor > 0 && A.Floor == B.Floor && A.BuildingId == B.BuildingId)
+				{
+					const FVector2D Direction = B.Position - A.Position;
+					for (const auto& Door : Graph.Doorways)
+					{
+						if (Door.Floor != A.Floor || Door.BuildingId != A.BuildingId) continue;
+						const FVector2D Along = Door.Opening.B - Door.Opening.A, Offset = Door.Opening.A - A.Position;
+						const double Denominator = FVector2D::CrossProduct(Direction, Along);
+						if (FMath::Abs(Denominator) <= GeometryEpsilon) continue;
+						const double T = FVector2D::CrossProduct(Offset, Along) / Denominator;
+						const double U = FVector2D::CrossProduct(Offset, Direction) / Denominator;
+						if (T < -GeometryEpsilon || T > 1 + GeometryEpsilon || U < 0 || U > 1) continue;
+						if (T <= GeometryEpsilon) WithDoors.Last().bIsDoorway = true;
+						else if (T >= 1 - GeometryEpsilon) B.bIsDoorway = true;
+						else Crossings.Add(T);
+					}
+				}
+				Crossings.Sort(); double PreviousT = -1;
+				for (const double T : Crossings)
+				{
+					if (FMath::IsNearlyEqual(T, PreviousT, GeometryEpsilon)) continue;
+					PreviousT = T; auto P = A;
+					P.Position = FMath::Lerp(A.Position, B.Position, T); P.WorldPosition = FMath::Lerp(A.WorldPosition, B.WorldPosition, T);
+					P.ConnectorId.Reset(); P.ConnectorType = EInteriorNavNodeType::PathNode; P.bIsDoorway = true;
+					WithDoors.Add(MoveTemp(P));
+				}
+				WithDoors.Add(MoveTemp(B));
+			}
+			Result.Points = MoveTemp(WithDoors);
 			return true;
 		}
 
@@ -1580,6 +1637,7 @@ struct FNavigationRouteJob::FImpl
 	TWeakObjectPtr<const AInteriorGenerator> LiveInterior;
 	FNavigationRoutePoint Start, Destination;
 	FNavigationRoutePreferences Preferences;
+	uint64 BuildingRevision = 0, InteriorRevision = 0;
 	float Scale = 1.f;
 	ERoutePhase Phase = ERoutePhase::Read;
 	TArray<FRouteBuilding> Models;
@@ -1636,6 +1694,7 @@ FNavigationRouteJob::FNavigationRouteJob(const ABuildingGenerator& Generator, co
 {
 	Impl->LiveGenerator = &Generator; Impl->LiveInterior = &Interior; Impl->Start = Start; Impl->Destination = Destination;
 	Impl->Preferences = Preferences; Impl->Scale = Generator.GetScale();
+	Impl->BuildingRevision = Generator.GetNavigationRevision(); Impl->InteriorRevision = Interior.GetNavigationRevision();
 }
 
 FNavigationRouteJob::~FNavigationRouteJob() = default;
@@ -1647,7 +1706,8 @@ bool FNavigationRouteJob::Step(double BudgetSeconds)
 	while (State.Phase != ERoutePhase::Done)
 	{
 		// The copies in Models point at buildings; if the project changed under the search, stop rather than read what is gone.
-		if (!State.IsStillThere())
+		if (!State.IsStillThere() || State.LiveGenerator->GetNavigationRevision() != State.BuildingRevision
+			|| State.LiveInterior->GetNavigationRevision() != State.InteriorRevision)
 		{
 			State.Result = {};
 			State.Result.Error = TEXT("The route could not be found because the project was changed or closed meanwhile. Find the route again.");

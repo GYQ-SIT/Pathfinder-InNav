@@ -322,6 +322,7 @@ static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClos
 
 int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 {
+	TGuardValue<bool> LoadingGuard(bLoadingInterior, true);
 	if (!Generator)
 	{
 		UE_LOG(LogTemp, Error, TEXT("LoadInteriorForBuilding: no BuildingGenerator found in the level"));
@@ -1478,6 +1479,7 @@ bool AInteriorGenerator::RotateConnectorGroup(const FString& GroupId, float Delt
 		Node->RotationDegrees = NewRotation;
 		RebuildConnectorMarker(*Node, Building);
 	}
+	NotifyNavigationLayoutChanged();
 	return true;
 }
 
@@ -1684,7 +1686,7 @@ bool AInteriorGenerator::RotateRoom(const FString& RoomId, float DeltaDegrees)
 			}
 
 			Room->ResizeFootprint(NewFootprint);
-			++RoomSearchRevision;
+			NotifyNavigationLayoutChanged();
 			return true;
 		}
 	}
@@ -1710,7 +1712,7 @@ bool AInteriorGenerator::CommitRoomRotation(const FString& RoomId, const TArray<
 			if (DoesFootprintBlockConnector(Room->GetFootprint(), Room->IsClosedLoop(), Pair.Key))
 			{
 				Room->ResizeFootprint(FallbackFootprint);
-				++RoomSearchRevision;
+				NotifyNavigationLayoutChanged();
 				UE_LOG(LogTemp, Warning, TEXT("CommitRoomRotation: '%s' would wall in an elevator/stairs/escalator - reverted to its position before the rotation"), *RoomId);
 				return false;
 			}
@@ -1745,7 +1747,7 @@ bool AInteriorGenerator::MoveRoom(const FString& RoomId, const TArray<FVector2D>
 			}
 
 			Room->ResizeFootprint(NewFootprint);
-			++RoomSearchRevision;
+			NotifyNavigationLayoutChanged();
 			return true;
 		}
 	}
@@ -1778,7 +1780,7 @@ bool AInteriorGenerator::CommitRoomMove(const FString& RoomId, const TArray<FVec
 				if (DoFootprintsOverlap(Room->GetFootprint(), Room->IsClosedLoop(), Other->GetFootprint(), Other->IsClosedLoop(), OverlapToleranceWorldUnits / (Generator ? Generator->GetScale() : 1.f)))
 				{
 					Room->ResizeFootprint(FallbackFootprint);
-					++RoomSearchRevision;
+					NotifyNavigationLayoutChanged();
 					UE_LOG(LogTemp, Warning, TEXT("CommitRoomMove: '%s' would overlap '%s' - reverted to its position before the drag"), *RoomId, *Other->RoomId);
 					return false;
 				}
@@ -1789,7 +1791,7 @@ bool AInteriorGenerator::CommitRoomMove(const FString& RoomId, const TArray<FVec
 			if (DoesFootprintBlockConnector(Room->GetFootprint(), Room->IsClosedLoop(), Pair.Key))
 			{
 				Room->ResizeFootprint(FallbackFootprint);
-				++RoomSearchRevision;
+				NotifyNavigationLayoutChanged();
 				UE_LOG(LogTemp, Warning, TEXT("CommitRoomMove: '%s' would wall in an elevator/stairs/escalator - reverted to its position before the drag"), *RoomId);
 				return false;
 			}
@@ -1979,7 +1981,9 @@ bool AInteriorGenerator::MoveDoor(const FString& RoomId, const FString& DoorId, 
 			{
 				if (Opening.Id == DoorId)
 				{
+					if (FMath::IsNearlyEqual(Opening.Offset, NewOffsetWorldUnits)) return true;
 					Room->MoveOpening(DoorId, NewOffsetWorldUnits);
+					NotifyNavigationLayoutChanged();
 					return true;
 				}
 			}
@@ -2927,14 +2931,25 @@ void AInteriorGenerator::SyncInteriorToBuildingGenerator()
 		return;
 	}
 
-	Generator->SetInteriorDataForBuilding(LoadedBuildingId, SerializeCurrentInterior());
+	Generator->SetInteriorDataForBuilding(LoadedBuildingId, SerializeCurrentInterior(), false);
 }
+void AInteriorGenerator::NotifyNavigationLayoutChanged()
+{
+	++RoomSearchRevision;
+	if (!bLoadingInterior && !bBulkEditing && !bIsRestoringHistory)
+	{
+		++NavigationRevision;
+		OnNavigationLayoutChanged.Broadcast();
+	}
+}
+
 void AInteriorGenerator::RecordHistorySnapshot()
 {
-	// All committed interior edits pass here. Invalidation is cheap and rebuilding stays lazy.
-	++RoomSearchRevision;
+	// Only a new snapshot is an edit: selecting a door can also finish a gesture and record
+	// the same state. Live previews notify separately, before their eventual commit.
 	if (bIsRestoringHistory || bBulkEditing || LoadedBuildingId.IsEmpty())
 	{
+		++RoomSearchRevision;
 		return;
 	}
 
@@ -2971,6 +2986,7 @@ void AInteriorGenerator::RecordHistorySnapshot()
 
 	InteriorHistory.Add(Snapshot);
 	HistoryIndex = InteriorHistory.Num() - 1;
+	NotifyNavigationLayoutChanged();
 
 	UE_LOG(LogTemp, Log,
 		TEXT("History snapshot recorded. Index=%d Total=%d"),
@@ -3042,6 +3058,7 @@ bool AInteriorGenerator::Undo()
 	}
 
 	bIsRestoringHistory = false;
+	NotifyNavigationLayoutChanged();
 
 	UE_LOG(LogTemp, Log,
 		TEXT("Undo complete. Index=%d"),
@@ -3112,6 +3129,7 @@ bool AInteriorGenerator::Redo()
 	}
 
 	bIsRestoringHistory = false;
+	NotifyNavigationLayoutChanged();
 
 	UE_LOG(LogTemp, Log,
 		TEXT("Redo complete. Index=%d"),

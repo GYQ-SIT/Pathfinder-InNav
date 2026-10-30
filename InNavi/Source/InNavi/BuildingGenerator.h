@@ -13,6 +13,8 @@ class APolyBuilding;
 class AStaticMeshActor;
 class FJsonObject;
 
+DECLARE_MULTICAST_DELEGATE(FOnBuildingNavigationLayoutChanged);
+
 UCLASS()
 class INNAVI_API ABuildingGenerator : public AActor
 {
@@ -20,6 +22,8 @@ class INNAVI_API ABuildingGenerator : public AActor
 
 public:
 	ABuildingGenerator();
+	FOnBuildingNavigationLayoutChanged OnNavigationLayoutChanged;
+	uint64 GetNavigationRevision() const { return NavigationRevision; }
 
 	// Spawns one building directly from already-parsed data. Used both by JSON loading
 	// (LoadBuildingsFromFile) and by runtime building creation (e.g. NavPlayerController's build mode).
@@ -237,7 +241,8 @@ public:
 
 	// Stashes the interior data for a building id, overwriting whatever was there before (e.g.
 	// InteriorGenerator syncing its current in-memory state before a project save).
-	void SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData);
+	// A live-to-stored sync passes false: model edits already notified navigation, while saving/viewing is not an edit.
+	void SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData, bool bNotifyNavigation = true);
 
 	// --- Doors in the outer wall (see InteriorEntrance.h) ---
 	// Those saved with a building's interior.
@@ -287,6 +292,8 @@ private:
 	void HandleBuildingDestroyed(AActor* Building);
 	void RefreshBuildingFilterFor(APolyBuilding& Building) const;
 
+	uint64 NavigationRevision = 0;
+	void NotifyNavigationLayoutChanged();
 	float Scale = 1.f;
 	TSet<FString> UsedBuildingIds;
 
