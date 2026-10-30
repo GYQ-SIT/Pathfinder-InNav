@@ -1,6 +1,6 @@
 # UI Panels — How They Work and How to Add One
 
-> State as of 2026-10-20, branch `YQ_ws_merge`. Applies to both editor screens: the
+> State as of 2026-10-28. Applies to both editor screens: the
 > interior editor (`UInteriorScreenWidget`) and the exterior building-selection screen
 > (`UEditScreenWidget`).
 
@@ -28,6 +28,8 @@ besides the dock host allowed on a root canvas:
 | `Background`, `FloorPlanWidget` | the 2D plan and the backdrop behind it (the central canvas) |
 | `Pnl_MenuBar`, `Pnl_BuildingSwitcherBar` | the fixed bars along the top |
 | `Pnl_FileDropdown`, `Pnl_WindowDropdown`, `Pnl_CameraDropdown`, `MenuClickCatcher` | the menus that open from those bars, and the layer that closes them on a click elsewhere |
+| `Txt_InspectionHint` | temporary instructions and the floor being viewed for Isolate & Rotate; stays with the central viewport while tool panels move |
+| `Img_InspectionPivot` | projects the model's centre (what it turns about) into the viewport so it remains visible through the floor being viewed; follows the model instead of a dock panel |
 | `Chrome_*` | decoration, such as divider lines |
 | `DockHost` | the dock system itself |
 
@@ -61,7 +63,7 @@ canvas size — extents are stored as fractions of the real size.
 
 ## Shared panels
 
-Audio, Map and Debug exist on both screens. Each is written once, as a subclass of
+Audio, Map, Debug and Navigation exist on both screens. Each is written once, as a subclass of
 `UDockPanelContentWidget` ([DockPanelContent.h](../../InNavi/Source/InNavi/DockPanelContent.h)):
 
 | Panel | Class | Screen-specific part |
@@ -69,6 +71,7 @@ Audio, Map and Debug exist on both screens. Each is written once, as a subclass 
 | Audio | `UAudioPanelWidget` | none; the screen passes the width with `SetContentWidth` |
 | Map | `UMapPanelWidget` | `SetShowBuildingFilters(true)` on the exterior screen turns the Buildings section on |
 | Debug | `UDebugPanelWidget` | `SetInfoProvider(lambda)` supplies the screen's own lines; the panel adds FPS and the last failed action |
+| Navigation | `UNavigationDockPanelWidget` | holds no state (that is `UNavigationPanelWidget`, `ANavPlayerController::GetNavigationPanel()`); the screen calls `RefreshDisplay()` on every `OnStateChanged` and `RefreshRoomDropdowns()` when the places could have changed, passes the width with `SetContentWidth`, and tells the state whether it is outdoors with `SetOutdoorMode` (exterior screen: true) |
 
 If a panel will appear on only one screen, it can still be written the same way — a
 `UDockPanelContentWidget` subclass — and that is the recommended form for new panels.
@@ -120,6 +123,10 @@ does not mention at its default spot.
 - A file-scope `using namespace` in a `.cpp` leaks into other files in a unity build; wrap
   test code in its own namespace.
 - Rebuilds fail with "Unable to build while Live Coding is active" while the editor is open.
+- Saving a dock layout from a screen that was never laid out (a headless test) writes it against a made-up canvas size, which
+  once turned a floating window into one 50 times the screen. Each screen's `SaveDockLayoutToDisk` therefore saves only against a
+  real (or last known) canvas size, and loading caps a window at the canvas size. Check that `Saved/*DockLayout.json` is
+  unchanged after running the tests.
 - A Debug-style panel that reads the controller must tolerate running before the screen has a
   controller (the base class `GetController()` falls back to the owning screen's player).
 

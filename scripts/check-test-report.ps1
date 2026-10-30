@@ -1,0 +1,29 @@
+# Reads the report Unreal's automation system writes (-ReportExportPath) and fails when a test failed or none ran.
+# UnrealEditor-Cmd exits with 0 even when tests fail, so the build has to look at the report itself.
+# Usage: powershell -File scripts/check-test-report.ps1 -Report <folder with index.json> [-MinimumTests 100]
+param(
+    [Parameter(Mandatory = $true)][string]$Report,
+    [int]$MinimumTests = 1
+)
+$ErrorActionPreference = 'Stop'
+$index = Join-Path $Report 'index.json'
+if (-not (Test-Path $index)) {
+    Write-Error "No test report at $index - the tests did not run."
+    exit 1
+}
+$data = Get-Content -Raw -Encoding UTF8 $index | ConvertFrom-Json
+$passed = [int]$data.succeeded + [int]$data.succeededWithWarnings
+$failed = [int]$data.failed
+Write-Host "Tests: $passed passed ($($data.succeededWithWarnings) with warnings), $failed failed, $($data.notRun) not run."
+if ($failed -gt 0) {
+    foreach ($test in $data.tests | Where-Object { $_.state -eq 'Fail' }) {
+        Write-Host "FAILED: $($test.fullTestPath)"
+        foreach ($entry in $test.entries | Where-Object { $_.event.type -eq 'Error' }) { Write-Host "    $($entry.event.message)" }
+    }
+    exit 1
+}
+if ($passed -lt $MinimumTests) {
+    Write-Error "Only $passed tests ran; at least $MinimumTests are expected."
+    exit 1
+}
+exit 0

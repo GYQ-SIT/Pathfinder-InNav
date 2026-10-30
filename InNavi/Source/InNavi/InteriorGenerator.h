@@ -72,6 +72,8 @@ public:
 	// otherwise in-progress interior edits aren't reflected in the save. No-op if nothing is loaded.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void SyncInteriorToBuildingGenerator();
+	// Detached live state for read-only tools; does not sync, save, or record history.
+	TSharedRef<FJsonObject> CaptureInteriorSnapshot() const { return SerializeCurrentInterior(); }
 	TSharedPtr<FJsonObject> CreateTranslatedInteriorCopy(const TSharedPtr<FJsonObject>& SourceInterior,const FVector2D& MoveOffset) const;
 	// Destroys every currently-spawned room and forgets all floor/nav-node state, without loading
 	// anything new - back to the state right after BeginPlay. Call this before starting a New
@@ -88,6 +90,8 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	int32 GetActiveFloor() const { return ActiveFloor; }
+
+	TArray<int32> GetFloorLevels() const;
 
 	// Wall thickness is stored per floor in world units. Navigation uses this to build an accurate
 	// clearance boundary around the authored wall centre lines instead of assuming every floor has

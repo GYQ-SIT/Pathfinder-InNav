@@ -41,7 +41,7 @@ bool FRoomDoorTargetsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Loading an older project turns a room door that led outside into one that leads to the corridor; the way out is a main door now.
+// New projects use main entrances, while existing files retain their authored room-door exits.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRoomDoorLegacyOutsideTest, "InNavi.Interior.RoomDoor.LegacyOutside", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FRoomDoorLegacyOutsideTest::RunTest(const FString& Parameters)
 {
@@ -49,7 +49,7 @@ bool FRoomDoorLegacyOutsideTest::RunTest(const FString& Parameters)
 	// The example project's E2 vestibule has a door whose file says "outside".
 	FInteriorOpening Opening;
 	TestTrue(TEXT("the vestibule door exists"), Fixture.Interior->GetDoorOpening(TEXT("E2-01-OUTSIDE-ENTRY"), TEXT("E2-01-OUTSIDE-ENTRY-D02"), Opening));
-	TestEqual(TEXT("and loaded as leading to the corridor, not outside"), Opening.ConnectsTo, FString(TEXT("corridor")));
+	TestEqual(TEXT("and retains its legacy outside destination for routing"), Opening.ConnectsTo, FString(TEXT("outside")));
 	return true;
 }
 

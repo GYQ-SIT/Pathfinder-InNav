@@ -3,8 +3,12 @@
 #include "AudioFileRowWidget.h"
 #include "AudioPanelWidget.h"
 #include "DebugPanelWidget.h"
+#include "LayoutValidationPanelWidget.h"
+#include "PluginToolHost.h"
 #include "BuildingInfoPanelWidget.h"
 #include "MapPanelWidget.h"
+#include "NavigationDockPanelWidget.h"
+#include "NavigationPanelWidget.h"
 #include "ConfirmDialogWidget.h"
 #include "DockHostUMG.h"
 #include "ExteriorDockLayout.h"
@@ -308,6 +312,16 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		WindowDebugCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowDebug"), TEXT("Debug"));
 		WindowDebugCheckbox->SetIsChecked(false);
 		WindowDebugCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowDebugCheckChanged);
+		PluginToolHost = NewObject<UPluginToolHost>(this);
+		PluginToolHost->AddMenu(LayoutTools::EScreen::Exterior, [&AddDropdownCheckRow, WindowDropdownStack](const FString& Name, const FString& Label)
+		{
+			return AddDropdownCheckRow(WindowDropdownStack, *Name, *Label);
+		});
+
+		// Starts unchecked - the Navigation panel starts hidden, like the interior editor's own.
+		WindowNavigationCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowNavigation"), TEXT("Navigation"));
+		WindowNavigationCheckbox->SetIsChecked(false);
+		WindowNavigationCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowNavigationCheckChanged);
 
 		UButton* WindowResetLayoutButton = AddDropdownButtonRow(WindowDropdownStack, TEXT("Btn_WindowResetLayout"), TEXT("Reset Layout"));
 		WindowResetLayoutButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowResetLayoutClicked);
@@ -420,6 +434,23 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			return FString::Printf(TEXT("Selected Building: %s\nCamera Speed: %s\nUnsaved Changes: %s"), *SelectedBuilding, *CameraSpeed, *UnsavedChanges);
 		});
 		DockHost->RegisterPanel(ExteriorDock::Debug, FText::FromName(ExteriorDock::Debug), DebugPanelWidget);
+		PluginToolHost->CreatePanels(this, DockHost, LayoutTools::EScreen::Exterior, [this]()
+		{
+			if (auto* PC = GetOwningPlayer<ANavPlayerController>())
+			{
+				if (auto* Screen = CreateWidget<UInteriorScreenWidget>(PC, UInteriorScreenWidget::StaticClass()))
+				{
+					Screen->AddToViewport(); Screen->ShowValidationPanel(); RemoveFromParent();
+				}
+			}
+		});
+		ValidationPanelWidget = Cast<ULayoutValidationPanelWidget>(PluginToolHost->FindPanel(TEXT("Validation")));
+
+		// --- Navigation panel (Window > Navigation): the shared one (NavigationDockPanelWidget.h), also used by the interior
+		// editor. Here its dropdowns list each building's main door and a click on the ground sets a point. Starts hidden.
+		NavigationPanelWidget = CreateWidget<UNavigationDockPanelWidget>(this, UNavigationDockPanelWidget::StaticClass());
+		NavigationPanelWidget->SetOwnerScreen(this);
+		DockHost->RegisterPanel(ExteriorDock::Navigation, FText::FromName(ExteriorDock::Navigation), NavigationPanelWidget);
 	}
 
 	return Super::RebuildWidget();
@@ -436,6 +467,19 @@ void UEditScreenWidget::NativeConstruct()
 		{
 			DebugPanelWidget->BindToController();
 		}
+		// Navigation: the shared panel shows UNavigationPanelWidget's state; repaint it on every change, and let the state ask
+		// whether the pointer is over the panel (a click on it must not also pick a point on the ground).
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			// No building is open here: the dropdowns list main doors and a click picks a spot on the ground.
+			Nav->SetOutdoorMode(true);
+			Nav->SetPointerOverPanelCallback([this](const FVector2D& ScreenPosition)
+			{
+				return DockHost && DockHost->IsScreenPositionOverPanel(ExteriorDock::Navigation, ScreenPosition);
+			});
+			Nav->OnStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::HandleNavigationStateChanged);
+			PC->SetNavigationStepScreenCallback(this, [this](const FNavigationRoutePoint& Point) { return HandOverToBuildingForStep(Point); });
+		}
 		if (MapPanelWidget)
 		{
 			MapPanelWidget->Refresh();
@@ -447,6 +491,11 @@ void UEditScreenWidget::NativeConstruct()
 	if (AudioPanelWidget)
 	{
 		AudioPanelWidget->Refresh();
+	}
+	if (NavigationPanelWidget)
+	{
+		NavigationPanelWidget->RefreshRoomDropdowns();
+		NavigationPanelWidget->RefreshDisplay();
 	}
 	if (BuildingInfoPanelWidget)
 	{
@@ -470,6 +519,12 @@ void UEditScreenWidget::NativeDestruct()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->OnBuildingSelected.RemoveDynamic(this, &UEditScreenWidget::HandleBuildingSelected);
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->OnStateChanged.RemoveDynamic(this, &UEditScreenWidget::HandleNavigationStateChanged);
+			PC->ClearNavigationStepScreenCallback(this);
+			Nav->SetPointerOverPanelCallback(nullptr);
+		}
 		PC->ClearPointerOverUICallback(this);
 	}
 
@@ -515,7 +570,9 @@ void UEditScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 	// The Audio and Map panels' controls size themselves from their panel's width, which the user can change at any time.
 	SyncAudioPanelWidth();
 	SyncMapPanelWidth();
+	SyncNavigationPanelWidth();
 	SyncBuildingPanelWidth();
+	if (PluginToolHost) PluginToolHost->Sync();
 	if (BuildingInfoPanelWidget)
 	{
 		BuildingInfoPanelWidget->RefreshIfChanged();
@@ -550,13 +607,40 @@ void UEditScreenWidget::HandleBuildingSelected(FString BuildingId)
 
 void UEditScreenWidget::OpenInteriorEditor(bool b3DView)
 {
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		OpenInteriorForBuilding(PC->GetSelectedBuildingId(), b3DView);
+	}
+}
+
+bool UEditScreenWidget::HandOverToBuildingForStep(const FNavigationRoutePoint& Point)
+{
+	if (Point.Floor == UNavigationPanelWidget::OutdoorFloor || Point.BuildingId.IsEmpty())
+	{
+		return false;
+	}
+	OpenInteriorForBuilding(Point.BuildingId, false);
+	// The interior screen is up: a building is open, and its floor and view are the step's.
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (UNavigationPanelWidget* Nav = PC->GetNavigationPanel())
+		{
+			Nav->SetOutdoorMode(false);
+		}
+		PC->FollowNavigationStep();
+	}
+	return true;
+}
+
+void UEditScreenWidget::OpenInteriorForBuilding(const FString& BuildingId, bool b3DView)
+{
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
 	if (!PC)
 	{
 		return;
 	}
 
-	PC->LoadInteriorForBuilding(PC->GetSelectedBuildingId());
+	PC->LoadInteriorForBuilding(BuildingId);
 
 	if (UInteriorScreenWidget* InteriorScreen = CreateWidget<UInteriorScreenWidget>(PC, UInteriorScreenWidget::StaticClass()))
 	{
@@ -910,9 +994,20 @@ UWidget* UEditScreenWidget::FindScreenWidget(FName Name) const
 			return Found;
 		}
 	}
+	if (PluginToolHost)
+	{
+		if (UWidget* Found = PluginToolHost->FindControl(Name)) return Found;
+	}
 	if (DebugPanelWidget)
 	{
 		if (UWidget* Found = DebugPanelWidget->FindContentWidget(Name))
+		{
+			return Found;
+		}
+	}
+	if (NavigationPanelWidget)
+	{
+		if (UWidget* Found = NavigationPanelWidget->FindContentWidget(Name))
 		{
 			return Found;
 		}
@@ -1030,6 +1125,8 @@ void UEditScreenWidget::RefreshWindowMenuChecks()
 	Sync(WindowRoadsCheckbox, ExteriorDock::Map);
 	Sync(WindowBuildingCheckbox, ExteriorDock::Building);
 	Sync(WindowDebugCheckbox, ExteriorDock::Debug);
+	if (PluginToolHost) PluginToolHost->Sync();
+	Sync(WindowNavigationCheckbox, ExteriorDock::Navigation);
 }
 
 void UEditScreenWidget::ResetDockLayout()
@@ -1127,6 +1224,35 @@ void UEditScreenWidget::OnWindowBuildingCheckChanged(bool bIsChecked)
 void UEditScreenWidget::OnWindowDebugCheckChanged(bool bIsChecked)
 {
 	SetDockPanelHidden(ExteriorDock::Debug, !bIsChecked);
+}
+
+
+void UEditScreenWidget::OnWindowNavigationCheckChanged(bool bIsChecked)
+{
+	SetDockPanelHidden(ExteriorDock::Navigation, !bIsChecked);
+}
+
+void UEditScreenWidget::HandleNavigationStateChanged()
+{
+	if (NavigationPanelWidget)
+	{
+		NavigationPanelWidget->RefreshDisplay();
+	}
+}
+
+void UEditScreenWidget::SyncNavigationPanelWidth()
+{
+	if (!DockHost || !NavigationPanelWidget)
+	{
+		return;
+	}
+	const float PanelWidth = DockHost->GetPanelWidth(ExteriorDock::Navigation);
+	if (PanelWidth <= 0.f)
+	{
+		return; // hidden, or not laid out yet
+	}
+	// Minus the panel's 14px padding on each side and room for the scroll bar.
+	NavigationPanelWidget->SetContentWidth(FMath::Max(80.f, PanelWidth - 48.f));
 }
 
 void UEditScreenWidget::OnWindowResetLayoutClicked()

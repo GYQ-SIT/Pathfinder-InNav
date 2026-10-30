@@ -1,0 +1,11 @@
+# Changelog
+
+Versions follow Semantic Versioning. Changes to exported report types or tool interface methods require a major version when incompatible.
+
+## 1.0.0 — 2026-10-27
+
+- Initial versioned Unreal Runtime plugin release with read-only layout validation, stable issue codes, snapshot fingerprints and JSON report export.
+- Public `LayoutValidation` API independent of InNavi game actors and UnrealEd.
+- `LayoutTools::IProvider` / `FRegistry` extension contract and `ILayoutToolPanel` optional UI adapter contract; module lifecycle registration and duplicate-ID rejection.
+- Standalone Unreal consumer example with valid and invalid data.
+- GitHub Packages source distribution and exact-version consumer installation.

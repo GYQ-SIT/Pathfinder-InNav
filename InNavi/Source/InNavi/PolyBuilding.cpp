@@ -139,8 +139,9 @@ void APolyBuilding::RebuildMesh()
 		GroundVertices, GroundTriangles, GroundUV0, GroundNormals, GroundTangents);
 
 	TArray<FColor> GroundVertexColors;
-	MeshComp->CreateMeshSection(0, GroundVertices, GroundTriangles, GroundNormals, GroundUV0, GroundVertexColors, GroundTangents, true);
+	MeshComp->CreateMeshSection(0, GroundVertices, GroundTriangles, GroundNormals, GroundUV0, GroundVertexColors, GroundTangents, !bInspectionBottomHidden);
 	MeshComp->SetMaterial(0, DynMaterial);
+	MeshComp->SetMeshSectionVisible(0, !bInspectionBottomHidden);
 
 	// Sections 1..FloorCount (roof + inter-floor slabs) and FloorCount+1..2*FloorCount (one wall ring
 	// per floor, see GetWallSectionIndex) are all built by ApplySlabVisibility, which also decides
@@ -313,6 +314,13 @@ void APolyBuilding::SetVisibleInteriorLevel(int32 Level)
 	ApplySlabVisibility();
 }
 
+void APolyBuilding::SetInspectionBottomHidden(bool bNewHidden)
+{
+	if (bInspectionBottomHidden == bNewHidden) return;
+	bInspectionBottomHidden = bNewHidden;
+	RebuildMesh();
+}
+
 void APolyBuilding::ApplySlabVisibility()
 {
 	if (!MeshComp || CachedPoly2D.Num() == 0)
@@ -353,6 +361,15 @@ void APolyBuilding::ApplySlabVisibility()
 		const bool bHideWall = (VisibleInteriorLevel > 0 && L != VisibleInteriorLevel);
 		BuildWallSection(CachedPoly2D, (L - 1) * FloorHeight, L * FloorHeight, WallSectionIndex, /*bCreateCollision=*/!bHideWall, L);
 		MeshComp->SetMeshSectionVisible(WallSectionIndex, !bHideWall);
+	}
+
+	// With the bottom platform gone the first floor needs a floor of its own, like every floor above it has (the slab at its base).
+	if (bInspectionBottomHidden)
+	{
+		const int32 FloorSection = GetInspectionFloorSectionIndex();
+		const bool bShow = VisibleInteriorLevel <= 1;
+		BuildCapSection(CachedPoly2D, CachedCapTris, 0.f, FloorSection, /*bCreateCollision=*/bShow);
+		MeshComp->SetMeshSectionVisible(FloorSection, bShow);
 	}
 }
 

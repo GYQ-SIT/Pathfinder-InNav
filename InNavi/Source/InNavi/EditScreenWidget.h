@@ -7,10 +7,14 @@
 #include "InteriorTypes.h"
 #include "EditScreenWidget.generated.h"
 
+struct FNavigationRoutePoint;
 class UBorder;
 class UButton;
 class UAudioPanelWidget;
 class UDebugPanelWidget;
+class ULayoutValidationPanelWidget;
+class UPluginToolHost;
+class UNavigationDockPanelWidget;
 class UMapPanelWidget;
 class UBuildingInfoPanelWidget;
 class UCheckBox;
@@ -55,8 +59,12 @@ public:
 	UWidget* FindScreenWidget(FName Name) const;
 	UAudioPanelWidget* GetAudioPanelForTests() const { return AudioPanelWidget; }
 	UDebugPanelWidget* GetDebugPanelForTests() const { return DebugPanelWidget; }
+	ULayoutValidationPanelWidget* GetValidationPanelForTests() const { return ValidationPanelWidget; }
 	UMapPanelWidget* GetMapPanelForTests() const { return MapPanelWidget; }
 	UBuildingInfoPanelWidget* GetBuildingInfoPanelForTests() const { return BuildingInfoPanelWidget; }
+	// Step by step navigation: a step inside a building is shown on the interior screen. Returns true when this screen has handed over
+	// to it. Registered with the controller (SetNavigationStepScreenCallback); public for tests.
+	bool HandOverToBuildingForStep(const FNavigationRoutePoint& Point);
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -71,6 +79,8 @@ private:
 
 	// Opens the selected building in the interior editor: the 2D floor editor, or (b3DView) straight into its 3D view.
 	void OpenInteriorEditor(bool b3DView);
+	// Opens a building's interior screen, as OpenInteriorEditor does for the selected building.
+	void OpenInteriorForBuilding(const FString& BuildingId, bool b3DView);
 
 	// Calls PC->Increase/DecreaseCameraSpeedExterior() - the exterior free-fly camera's default speed
 	// auto-scales to the loaded campus's span (see FocusCameraOnAllBuildings), but these let the user
@@ -200,6 +210,13 @@ private:
 	UFUNCTION()
 	void OnWindowDebugCheckChanged(bool bIsChecked);
 
+	UFUNCTION()
+	void OnWindowNavigationCheckChanged(bool bIsChecked);
+
+	// Bound to UNavigationPanelWidget::OnStateChanged: repaints the Navigation panel.
+	UFUNCTION()
+	void HandleNavigationStateChanged();
+
 	// Window > Reset Layout - back to the team default arrangement.
 	UFUNCTION()
 	void OnWindowResetLayoutClicked();
@@ -223,6 +240,7 @@ private:
 	void SyncAudioPanelWidth();
 	// Same for the Map panel's building controls.
 	void SyncMapPanelWidth();
+	void SyncNavigationPanelWidth();
 	// And the Building panel.
 	void SyncBuildingPanelWidth();
 
@@ -297,6 +315,9 @@ private:
 	UPROPERTY()
 	UCheckBox* WindowDebugCheckbox = nullptr;
 
+	UPROPERTY()
+	UCheckBox* WindowNavigationCheckbox = nullptr;
+
 	// The dock system's host: lays out the three panels below. Stretches over the whole canvas; only its
 	// chrome takes mouse input, so clicks on the empty area still reach the 3D scene.
 	UPROPERTY()
@@ -324,6 +345,14 @@ private:
 	// The Debug dock panel (shared with the interior editor, see DebugPanelWidget.h). Starts hidden.
 	UPROPERTY()
 	UDebugPanelWidget* DebugPanelWidget = nullptr;
+	UPROPERTY()
+	ULayoutValidationPanelWidget* ValidationPanelWidget = nullptr;
+	UPROPERTY() UPluginToolHost* PluginToolHost = nullptr;
+
+	// The Navigation dock panel (shared with the interior editor, see NavigationDockPanelWidget.h): where Start and Destination
+	// are chosen outside (a building's main door, or a click on the ground), Find Route and the directions. Starts hidden.
+	UPROPERTY()
+	UNavigationDockPanelWidget* NavigationPanelWidget = nullptr;
 
 	// Full-screen, fully transparent, Collapsed by default - see
 	// UInteriorScreenWidget::OnMenuClickCatcherMouseButtonDown's own comment for why this is how

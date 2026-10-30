@@ -1802,6 +1802,9 @@ bool FDockLayout::FromJson(const TSharedPtr<FJsonObject>& Root, const FVector2D&
 			(*WindowObject)->TryGetNumberField(TEXT("y"), Y);
 			(*WindowObject)->TryGetNumberField(TEXT("w"), Wf);
 			(*WindowObject)->TryGetNumberField(TEXT("h"), Hf);
+			// A size saved while the canvas was a made-up size can be many times the canvas; a window is at most as big as it.
+			Wf = FMath::Min(Wf, 1.0);
+			Hf = FMath::Min(Hf, 1.0);
 			FDockFloatingWindow Window;
 			Window.Root = Node;
 			Window.Position = FVector2D(X * W, Y * H);
@@ -1813,7 +1816,7 @@ bool FDockLayout::FromJson(const TSharedPtr<FJsonObject>& Root, const FVector2D&
 	const TSharedPtr<FJsonObject>* HiddenObject = nullptr;
 	if (Root->TryGetObjectField(TEXT("hidden"), HiddenObject))
 	{
-		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*HiddenObject)->Values)
+		for (const auto& Pair : (*HiddenObject)->Values)
 		{
 			const FName Panel(*Pair.Key);
 			const TSharedPtr<FJsonObject>* HintObject = nullptr;
@@ -1849,6 +1852,8 @@ bool FDockLayout::FromJson(const TSharedPtr<FJsonObject>& Root, const FVector2D&
 			(*HintObject)->TryGetNumberField(TEXT("y"), Y);
 			(*HintObject)->TryGetNumberField(TEXT("w"), Wf);
 			(*HintObject)->TryGetNumberField(TEXT("h"), Hf);
+			Wf = FMath::Min(Wf, 1.0);
+			Hf = FMath::Min(Hf, 1.0);
 			Hint.FloatPosition = FVector2D(X * W, Y * H);
 			Hint.FloatSize = FVector2D(Wf * W, Hf * H);
 			Temp->HiddenHints.Add(Panel, Hint);

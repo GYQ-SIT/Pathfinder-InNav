@@ -10,6 +10,7 @@
 #include "BuildingGenerator.generated.h"
 
 class APolyBuilding;
+class AStaticMeshActor;
 class FJsonObject;
 
 UCLASS()
@@ -56,6 +57,8 @@ public:
 	// Returns how many buildings were successfully spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingsFromFile(const FString& FilePath);
+	// Same loader for a detached in-memory project (mobile navigation never writes a temporary project file).
+	int32 LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& RootObject);
 
 	// Second, database-backed way to load exterior buildings - queries a SQLite file (schema:
 	// buildings(building_id, building_type), building_nodes(building_id, node_id, sequence, lat,
@@ -146,6 +149,19 @@ public:
 	// buildings' own extent) - this function just applies them.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void SetRoadsAndPOIsWithinCampusOnly(bool bEnable, const FVector2D& Center, float Radius);
+
+	// The ground under the campus. The level has one floor (a static mesh actor using the template map's floor mesh); it is made the size of
+	// what the Map panel's filters show - the campus buildings that pass the filters, the other buildings, the roads and the places - with a
+	// margin, so everything seen stands on ground, and a smaller area when less is shown. It follows every change of a filter and every
+	// load or clear, a moment later (once per frame at most). With nothing shown, or no such floor in the level, it is left as it is.
+	void UpdateGroundToVisible();
+	// Same explicit template-floor lookup as ground fitting, without moving it.
+	AStaticMeshActor* FindGroundActor();
+	void SetGroundFitSuspended(bool bSuspended) { bGroundFitSuspended = bSuspended; }
+	bool IsGroundFitSuspended() const { return bGroundFitSuspended; }
+
+	// The area of the world (X, Y) that what the filters show covers; false when nothing is shown.
+	bool GetVisibleExtent(FBox2D& OutExtent) const;
 
 	// Looks up an already-spawned building by id (e.g. for InteriorGenerator to find which
 	// building's shell a piece of interior data belongs to). Returns nullptr if not found.
@@ -327,4 +343,15 @@ private:
 
 	UPROPERTY()
 	TArray<AActor*> SpawnedContextBuildingActors;
+
+	// Whether the filter panel shows the other (non-campus) buildings: SetNonCampusBuildingsVisible.
+	bool bNonCampusBuildingsVisible = true;
+
+	// The level's floor and how it was, found the first time the ground is updated (see UpdateGroundToVisible).
+	TWeakObjectPtr<AStaticMeshActor> GroundActor;
+	FTransform GroundOriginalTransform;
+	bool bGroundSearched = false;
+	bool bGroundFitSuspended = false;
+	bool bGroundUpdateQueued = false;
+	void MarkGroundDirty();
 };

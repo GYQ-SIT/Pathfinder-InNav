@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -11,7 +11,17 @@
 #include "NavPlayerController.generated.h"
 
 class APolyBuilding;
+class AInteriorBuildingPreviewPivot;
+
+// How dragging turns the model in Isolate: Orbit moves the camera around it (drag right and the model seems to turn left), Grab makes it
+// follow the mouse like a thing held in the hand (drag right and its near side goes right).
+enum class EInspectionRotateStyle : uint8 { Orbit, Grab };
+
+// What a held mouse button does to the model in Isolate: the left one pans it, the right one turns it.
+enum class EInspectionDrag : uint8 { None, Pan, Rotate };
+struct FNavigationRoutePoint;
 class ABuildingGenerator;
+class ULayoutValidationSession;
 class AInteriorGenerator;
 class AInteriorRoom;
 class AInteriorConnectorMarker;
@@ -128,6 +138,9 @@ public:
 	// Used by the 2D floor plan while a navigation endpoint is armed.
 	bool IsSelectingNavigationPoint() const;
 	void SelectNavigationPoint(FVector2D FootprintPosition, int32 Floor);
+	// The click that sets a navigation point on the exterior screen: the spot of the ground under the cursor (see
+	// UNavigationPanelWidget::SelectOutdoorGroundPoint).
+	void SelectOutdoorPointUnderCursor();
 	UFUNCTION(BlueprintPure, Category = "Navigation")
 	UNavigationPanelWidget* GetNavigationPanel() const { return NavigationPanel; }
 
@@ -137,6 +150,15 @@ public:
 	// ScreenOwner identifies the screen, so a screen being torn down never clears the one that replaced it.
 	void SetPointerOverUICallback(const UObject* ScreenOwner, TFunction<bool(const FVector2D&)> Callback);
 	void ClearPointerOverUICallback(const UObject* ScreenOwner);
+
+	// Step by step navigation can need the other screen: a step outside is shown on the exterior screen (the campus), a step inside a
+	// building on the interior screen. The screen that is up registers this; FollowNavigationStep asks it first, and it returns true
+	// when it has handed over to the other screen (which then follows the step itself when it comes up).
+	void SetNavigationStepScreenCallback(const UObject* ScreenOwner, TFunction<bool(const FNavigationRoutePoint&)> Callback);
+	void ClearNavigationStepScreenCallback(const UObject* ScreenOwner);
+	// Puts the open interior's edits that are not saved into the project data, as opening another building does, so that they stay
+	// when the interior is closed without a save (they are still counted as unsaved changes).
+	void SyncLoadedInterior();
 	bool IsPointerOverUI() const;
 
 	// Bind this once to catch every failed action (see FOnActionFailed above) instead of hunting
@@ -188,6 +210,30 @@ public:
 	// SetIn3DEditMode) - re-entering 3D preview always starts fresh in View mode.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void SetIn3DPreviewMode(bool bEnable);
+
+	// Whole-model inspection: the bottom platform and the surroundings are hidden. Left-drag pans the model, right-drag turns it about its
+	// own centre (at first the centre of the lowest floor), the wheel zooms.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	void SetInteriorInspectionEnabled(bool bEnable);
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool IsInteriorInspectionEnabled() const { return bInteriorInspectionEnabled; }
+	UFUNCTION(BlueprintPure, Category = "Interior")
+	bool CanInspectBuilding() const;
+	int32 GetInspectionLowestFloor() const;
+	void SetInspectionRotateStyle(EInspectionRotateStyle Style) { InspectionRotateStyle = Style; }
+	EInspectionRotateStyle GetInspectionRotateStyle() const { return InspectionRotateStyle; }
+	AInteriorBuildingPreviewPivot* GetInspectionPivot() const { return InspectionPivot; }
+	void RotateInspectionBy(float YawDegrees, float TiltDegrees);
+	// Slides the model across the screen by a distance in pixels (what a left-drag does); the view is not moved.
+	void PanInspectionBy(const FVector2D& PixelDelta);
+	UPROPERTY(BlueprintAssignable, Category = "Feedback")
+	FOn3DPreviewModeChanged OnInspectionModeChanged;
+
+	// Step by step navigation (UNavigationPanelWidget::NextStep): takes the view to where the step being shown is. Inside, that is
+	// the step's building (opened if another one is) and floor, kept in 3D if 3D was on; on the exterior screen the camera goes to
+	// the spot on the campus. Bound to the panel's OnGuidedStepChanged.
+	UFUNCTION()
+	void FollowNavigationStep();
 
 	// Whether 3D preview is currently in its Edit sub-mode rather than plain View. Only meaningful
 	// while IsIn3DPreviewMode() is true - always false in 2D mode or outside interior editing.
@@ -304,6 +350,7 @@ public:
 	// for a database-loaded building, where Scale is much larger than buildings.json's own ~10).
 	UFUNCTION(BlueprintPure, Category = "Building")
 	float GetBuildingScale() const;
+	ULayoutValidationSession* GetLayoutValidationSession();
 
 	// The "New" button should call this before switching to the edit screen: destroys every
 	// currently-spawned building/interior and resets back to a blank project (no file path, no
@@ -463,6 +510,11 @@ public:
 	// Whether the 2D plan fills each room with its type's colour. A view setting like the Layers panel's, on by default and not saved.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void ToggleRoomColours();
+
+	// Console command "MobileApp" (and the launch option -MobileApp): shows the phone app's screen in place of everything else, to build and
+	// try it in a phone-sized window on the desktop (for example -windowed -ResX=375 -ResY=812).
+	UFUNCTION(Exec)
+	void MobileApp();
 
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	bool AreRoomColoursVisible() const { return bRoomColoursVisible; }
@@ -1103,6 +1155,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void SetupInputComponent() override;
 	virtual void Tick(float DeltaSeconds) override;
 
@@ -1114,6 +1167,9 @@ private:
 	UNavigationPanelWidget* NavigationPanel = nullptr;
 
 	TWeakObjectPtr<const UObject> PointerOverUIOwner;
+	TWeakObjectPtr<const UObject> NavigationStepScreenOwner;
+	TFunction<bool(const FNavigationRoutePoint&)> NavigationStepScreenCallback;
+	bool bHandingOverStep = false;
 	TFunction<bool(const FVector2D&)> PointerOverUICallback;
 	UPROPERTY(VisibleAnywhere, Category = "Navigation")
 	class UNavigationRouteVisualization* RouteVisualization = nullptr;
@@ -1195,6 +1251,9 @@ private:
 	// The single BuildingGenerator placed in the level; found in BeginPlay.
 	UPROPERTY()
 	ABuildingGenerator* Generator;
+
+	UPROPERTY()
+	ULayoutValidationSession* LayoutValidationSession = nullptr;
 
 	// The single InteriorGenerator placed in the level (if any); found in BeginPlay.
 	UPROPERTY()
@@ -1336,6 +1395,10 @@ private:
 	// Remembers the view it was at beforehand (only the first time, until RestoreExteriorCameraView
 	// is called) so that can be restored later. The actual positioning is PositionCameraForFloor.
 	void FocusCameraOnBuilding(APolyBuilding* Building);
+	// The exterior camera over a spot of the campus (a route point): looking down at it from a person-sized distance, kept far enough
+	// to take in the stretch of the route that goes on from there (Next, the point where the step ends; null for a step that is only a
+	// place). The distance does not depend on the size of the buildings, which on a real campus is large.
+	void FocusCameraOnCampusPoint(const FNavigationRoutePoint& Point, const FNavigationRoutePoint* Next);
 
 	// Moves the exterior camera so the whole building is in view, from an angle above and in front of it, for
 	// picking a building from the filter results list. Unlike FocusCameraOnBuilding (the top-down framing used
@@ -1496,6 +1559,32 @@ private:
 	FVector2D DragStart3DFootprintPosition = FVector2D::ZeroVector;
 
 	bool bIsIn3DPreviewMode = false;
+	UPROPERTY(Transient)
+	AInteriorBuildingPreviewPivot* InspectionPivot = nullptr;
+	bool bInteriorInspectionEnabled = false;
+	EInspectionDrag InspectionDrag = EInspectionDrag::None;
+	EInspectionRotateStyle InspectionRotateStyle = EInspectionRotateStyle::Grab;
+	// The view of the model is fixed (the model is what moves), and the turn is limited to what can be seen from above: the camera looks
+	// down 25 degrees, so the tilt keeps the view between 10 and 85 degrees above the model's floor.
+	static constexpr float InspectionCameraPitch = -25.f;
+	static constexpr float InspectionCameraYaw = -45.f;
+	static constexpr float InspectionTiltMin = -15.f;
+	static constexpr float InspectionTiltMax = 60.f;
+	bool bInspectionSavedEdit = false;
+	int32 InspectionSavedFloor = 0;
+	FString InspectionBuildingId;
+	FVector2D InspectionLastPointer = FVector2D::ZeroVector;
+	FTransform InspectionSavedCamera = FTransform::Identity;
+	FRotator InspectionSavedControlRotation = FRotator::ZeroRotator;
+	TWeakObjectPtr<APawn> InspectionPawn;
+	float InspectionCameraDistance = 0.f;
+	float InspectionDefaultDistance = 0.f;
+	void FrameInspectionCamera(float ZoomFactor = 1.f);
+	void TickInteriorInspection();
+	// Left button (held) pans the model, right button (held) turns it.
+	void BeginInspectionDrag(EInspectionDrag Mode);
+	void OnRightMouseDownInspection();
+	void OnRightMouseUpInspection();
 	bool bIsIn3DEditMode = false;
 	float ThreeDPreviewCameraDistance = 0.f;
 	float ThreeDPreviewYaw = -45.f;

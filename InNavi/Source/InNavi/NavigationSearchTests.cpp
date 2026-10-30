@@ -207,8 +207,8 @@ bool FNavigationSearchControlsTest::RunTest(const FString& Parameters)
 	UEditableTextBox* TagsBox = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_RoomTags")));
 	UButton* ApplyTags = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_ApplyRoom"))); // Save changes: the name and the tags
 	UEditableTextBox* Search = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_DestinationSearch")));
-	UComboBoxString* Destinations = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_NavDestinationRoom")));
-	UComboBoxString* Starts = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_NavStartRoom")));
+	UComboBoxString* Destinations = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_NavPlace1")));
+	UComboBoxString* Starts = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_NavPlace0")));
 	if (!TestNotNull(TEXT("Tags field exists"), TagsBox) || !TestNotNull(TEXT("Apply tags exists"), ApplyTags)
 		|| !TestNotNull(TEXT("Destination search exists"), Search) || !TestNotNull(TEXT("Destination results exist"), Destinations)
 		|| !TestNotNull(TEXT("Start dropdown exists"), Starts)) return false;
@@ -252,9 +252,10 @@ bool FNavigationSearchControlsTest::RunTest(const FString& Parameters)
 	Starts->OnSelectionChanged.Broadcast(Room.GetDisplayLabel(), ESelectInfo::OnMouseClick);
 	const int32 StartOptionCount = Starts->GetOptionCount();
 	TypeText(Search, TEXT("PRESENTATION-TAG"));
-	TestEqual(TEXT("Destination typing preserves Start options"), Starts->GetOptionCount(), StartOptionCount);
-	TestEqual(TEXT("Destination typing preserves Start selection"), Starts->GetSelectedOption(), Room.GetDisplayLabel());
-	TestTrue(TEXT("Destination typing preserves actual Start endpoint"), Fixture.Nav->HasStart());
+	// The one search box narrows the Start list too; the Start that was picked stays shown and set.
+	TestTrue(TEXT("Typing narrows the Start options as well"), Starts->GetOptionCount() < StartOptionCount);
+	TestEqual(TEXT("Typing keeps the Start selection"), Starts->GetSelectedOption(), Room.GetDisplayLabel());
+	TestTrue(TEXT("Typing keeps the actual Start endpoint"), Fixture.Nav->HasStart());
 	TestEqual(TEXT("Typing filters the actual destination dropdown"), Destinations->GetOptionCount(), 1);
 	Destinations->OnSelectionChanged.Broadcast(Room.GetDisplayLabel(), ESelectInfo::OnMouseClick);
 	TestTrue(TEXT("Picking a result sets a real destination"), Fixture.Nav->HasDestination() && Fixture.Nav->WasDestinationSetViaDropdown());

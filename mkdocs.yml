@@ -5,14 +5,25 @@ docs_dir: docs
 theme:
   name: readthedocs
 
+extra_css:
+  - stylesheets/extra.css
+
 nav:
   - Home: index.md
   - Proposal: proposal.md
   - Architecture: architecture.md
   - Toolchain Decision: toolchain-decision.md
   - Deliverables: deliverables.md
+  - Performance: performance.md
+  - Configuration: configuration.md
   - Design:
-      - Product Design: design/product-design.md
       - Interior Editor Guide: design/interior-editor-guide.md
+      - Project File Format: design/project-file-format.md
       - UI Panels Guide: design/ui-panels-guide.md
-      - Interior Editor UI Spec: design/interior-editor-ui-spec.md
+      - Layout Validator: design/layout-validator.md
+      - Layout Validator M2 Evidence: design/layout-validator-m2-compliance.md
+  - Mobile app:
+      - Installing the test build: android-install.md
+      - Signing and building the APK: android-signing.md
+      - Connecting real data (read first): mobile-real-data-guide.md
+      - Data interface and screens: design/mobile-app-data-interface.md

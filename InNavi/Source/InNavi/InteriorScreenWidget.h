@@ -16,12 +16,16 @@ class UComboBoxString;
 class UEditableTextBox;
 class FJsonObject;
 class UImage;
+struct FNavigationRoutePoint;
 class UInteriorFloorPlanWidget;
 class ULayerRowWidget;
 class UAudioFileRowWidget;
 class UAudioPanelWidget;
+class UNavigationDockPanelWidget;
 class UMapPanelWidget;
 class UDebugPanelWidget;
+class ULayoutValidationPanelWidget;
+class UPluginToolHost;
 class UPanelWidget;
 class UScrollBox;
 class USizeBox;
@@ -46,11 +50,17 @@ public:
 	class UDockHostWidget* GetDockHost() const { return DockHost; }
 	UAudioPanelWidget* GetAudioPanelForTests() const { return AudioPanelWidget; }
 	UDebugPanelWidget* GetDebugPanelForTests() const { return DebugPanelWidget; }
+	ULayoutValidationPanelWidget* GetValidationPanelForTests() const { return ValidationPanelWidget; }
 
 	// Finds a widget of this screen by name. GetWidgetFromName cannot see the dock panels' contents - they are
 	// registered with DockHost and are not parented in the widget tree - so this also looks at everything the
 	// screen created. For tests and tooling.
 	UWidget* FindScreenWidget(FName Name) const;
+	UMapPanelWidget* GetMapPanelForTests() const { return MapPanelWidget; }
+	void ShowValidationPanel();
+	// Step by step navigation: a step outside is shown on the exterior screen (the campus). Returns true when this screen has handed over
+	// to it (what was edited here stays, unsaved). Registered with the controller (SetNavigationStepScreenCallback); public for tests.
+	bool HandOverToCampusForStep(const FNavigationRoutePoint& Point);
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -165,6 +175,16 @@ private:
 	// ("View"/"Edit") and color (yellow/green).
 	UFUNCTION()
 	void HandleEdit3DModeChanged(bool bIsEditMode);
+	UFUNCTION()
+	void HandleInspectionModeChanged(bool bEnabled);
+	UFUNCTION()
+	void OnInspectionToggleClicked();
+	UFUNCTION()
+	void OnInspectionOrbitClicked();
+	UFUNCTION()
+	void OnInspectionGrabClicked();
+	// Which of Orbit and Grab is on, and whether they can be used.
+	void RefreshInspectionStyleButtons();
 
 	// Bound to ANavPlayerController::OnSnapEnabledChanged - swaps SnapToggleIcon between
 	// Icon_SnappingOn/Icon_SnappingOff so it stays correct even when toggled via the N key.
@@ -225,6 +245,10 @@ private:
 	// should trigger a switch.
 	UFUNCTION()
 	void HandleBuildingSwitcherChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+	// Opens another building's interior (asking what to do with unsaved changes first). What the switcher and the Map panel do.
+	void SwitchToBuilding(const FString& NewBuildingId);
+	// What shows the open building, after another one has been opened.
+	void RefreshAfterBuildingSwitch();
 
 	UFUNCTION()
 	void OnEditBuildingNameClicked();
@@ -471,29 +495,14 @@ private:
 	// could have changed (floor switch/add/remove, building switch).
 	void RefreshLayersList();
 
-	// Navigation panel - presentation layer for ws/jh's UNavigationPanelWidget (route selection/
-	// planning logic), restyled to match this screen's own panels instead of its original bespoke
-	// draggable-overlay look. Each handler just forwards to ANavPlayerController::GetNavigationPanel()'s
-	// public request methods; HandleNavigationStateChanged (bound to NavigationPanel's own
-	// OnStateChanged) is what actually repaints this panel's text/button state - see
-	// RefreshNavigationPanelDisplay.
-	UFUNCTION()
-	void OnNavSetStartClicked();
-
-	UFUNCTION()
-	void OnNavSetDestinationClicked();
-
-	UFUNCTION()
-	void OnNavFindRouteClicked();
-
-	UFUNCTION()
-	void OnNavClearRouteClicked();
-
-	UFUNCTION()
-	void OnNavToggleRouteClicked();
-
+	// Navigation panel - the shared UNavigationDockPanelWidget (see NavigationDockPanelWidget.h), which shows the state of
+	// ws/jh's UNavigationPanelWidget (route selection/planning logic). HandleNavigationStateChanged (bound to that
+	// state's OnStateChanged) repaints it.
 	UFUNCTION()
 	void HandleNavigationStateChanged();
+	// The step being shown has changed (step by step navigation): the plan is shown whole, so the step is in view.
+	UFUNCTION()
+	void HandleGuidedStepChanged();
 
 	void RefreshNavigationPanelDisplay();
 
@@ -507,19 +516,6 @@ private:
 	UFUNCTION()
 	void PlayButtonClickSound();
 
-	// Start/Destination room dropdowns - an alternative to clicking a point on the floor plan.
-	// Populated from UNavigationPanelWidget::GetSelectableRooms() (real rooms only, across every
-	// floor); picking one calls straight through to SetStartToRoom/SetDestinationToRoom, which sets
-	// the room's own centroid as the point (see that function's own comment for why a centroid, not
-	// a door). Only repopulated when the room list could actually have changed (building/floor
-	// structure), not on every click - see the RefreshNavRoomDropdowns call sites.
-	UFUNCTION()
-	void HandleNavStartRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
-
-	UFUNCTION()
-	void HandleNavDestinationRoomChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
-	UFUNCTION()
-	void HandleDestinationSearchChanged(const FText& Text);
 	// Deletes whatever is selected (room, wall, door or connector) - what Backspace does.
 	UFUNCTION()
 	void OnDeleteSelectionClicked();
@@ -536,18 +532,19 @@ private:
 	// Fills the read-only position / size fields from the selected room's bounding box.
 	void RefreshRoomBoundsFields();
 
+	// Refills the navigation panel's Start/Destination dropdowns. Only needed when the room list could actually have
+	// changed (building/floor structure), not on every click - see the call sites.
 	void RefreshNavRoomDropdowns();
-	void RefreshDestinationRoomDropdown();
 
 	// --- Docking ---
 	// The eight panels are laid out by the dock system (DockLayoutModel / DockHostWidget / DockHostUMG): tab
 	// groups, splits, edge areas, drag-to-dock, floating. This class only builds each panel's content, registers
 	// it with DockHost, and reacts to layout changes. Back and the menu bars are fixed chrome, not dockable.
 	// Navigation, Audio and Debug start hidden (see InteriorDock::BuildDefaultLayout); the Window menu shows them.
-	enum class EDockPanelId : uint8{Toolbar,Floor,Properties,Layers,Navigation,Audio,Map,Debug
+	enum class EDockPanelId : uint8{Toolbar,Floor,Properties,Layers,Navigation,Audio,Map,Debug,Validation
 };
 
-	static constexpr int32 NumDockPanels = 8;
+	static constexpr int32 NumDockPanels = 9;
 
 	void InitializeDockRuntimeArrays();
 
@@ -562,6 +559,10 @@ private:
 	// Like GetCanvasSize, but never falls back to GetViewportSize - returns false (OutSize untouched)
 	// if RootCanvas's cached geometry isn't valid yet.
 	bool GetReliableCanvasSize(FVector2D& OutSize) const;
+
+	// The last canvas size that was real (the screen had been laid out), kept for saving the dock layout when the screen is
+	// being torn down and no longer has a geometry. Zero until the screen has been on screen.
+	mutable FVector2D LastKnownCanvasSize = FVector2D::ZeroVector;
 
 	// Window menu show/hide for one panel (restores its last position when shown again).
 	void SetDockPanelUserHidden(EDockPanelId Id, bool bHidden);
@@ -801,64 +802,10 @@ private:
 	// as every other widget's expand/collapse state here already does).
 	TSet<FString> ExpandedLayerCategories;
 
-	// Navigation panel - see the comment above OnNavSetStartClicked. NavigationPanel here is this
-	// screen's own dock panel Border, distinct from ANavPlayerController::NavigationPanel (the
-	// UNavigationPanelWidget instance holding the actual selection/route state this panel displays).
+	// The Navigation dock panel (shared with the exterior screen, see NavigationDockPanelWidget.h). The state it shows lives in
+	// ANavPlayerController::GetNavigationPanel.
 	UPROPERTY()
-	UBorder* NavigationPanel = nullptr;
-
-	UPROPERTY()
-	UTextBlock* NavContextText = nullptr;
-
-	UPROPERTY()
-	UComboBoxString* NavStartRoomComboBox = nullptr;
-
-	// Frame around NavStartRoomComboBox, tinted green only when Start was set by picking this
-	// dropdown (as opposed to clicking a point on the floor plan) - see RefreshNavigationPanelDisplay.
-	// Transparent otherwise, so it doesn't read as a permanent gray box.
-	UPROPERTY()
-	UBorder* NavStartRoomBorder = nullptr;
-
-	UPROPERTY()
-	UComboBoxString* NavDestinationRoomComboBox = nullptr;
-	UPROPERTY()
-	UEditableTextBox* DestinationSearchBox = nullptr;
-	UPROPERTY()
-	UTextBlock* DestinationSearchResultsText = nullptr;
-
-	// Same as NavStartRoomBorder, tinted red for Destination.
-	UPROPERTY()
-	UBorder* NavDestinationRoomBorder = nullptr;
-
-	UPROPERTY()
-	UButton* NavSetStartButton = nullptr;
-
-	UPROPERTY()
-	UTextBlock* NavSetStartButtonLabel = nullptr;
-
-	UPROPERTY()
-	UButton* NavSetDestinationButton = nullptr;
-
-	UPROPERTY()
-	UTextBlock* NavSetDestinationButtonLabel = nullptr;
-
-	UPROPERTY()
-	UButton* NavFindRouteButton = nullptr;
-
-	UPROPERTY()
-	UButton* NavClearRouteButton = nullptr;
-
-	UPROPERTY()
-	UButton* NavToggleRouteButton = nullptr;
-
-	UPROPERTY()
-	UTextBlock* NavToggleRouteButtonLabel = nullptr;
-
-	UPROPERTY()
-	UTextBlock* NavStatusText = nullptr;
-
-	UPROPERTY()
-	UTextBlock* NavRouteDetailsText = nullptr;
+	UNavigationDockPanelWidget* NavigationPanelWidget = nullptr;
 
 	// The Audio dock panel (shared with the exterior screen, see AudioPanelWidget.h). Starts hidden (see
 	// InteriorDock::BuildDefaultLayout).
@@ -873,6 +820,9 @@ private:
 	// The Debug dock panel (shared with the exterior screen, see DebugPanelWidget.h). Starts hidden.
 	UPROPERTY()
 	UDebugPanelWidget* DebugPanelWidget = nullptr;
+	UPROPERTY()
+	ULayoutValidationPanelWidget* ValidationPanelWidget = nullptr;
+	UPROPERTY() UPluginToolHost* PluginToolHost = nullptr;
 
 	UPROPERTY()
 	UComboBoxString* BuildingSwitcherComboBox = nullptr;
@@ -943,6 +893,22 @@ private:
 
 	UPROPERTY()
 	UTextBlock* Edit3DModeToggleButtonText = nullptr;
+	// Isolate, Orbit and Grab: one framed group of three in the switcher bar, between Colours and View.
+	UPROPERTY()
+	UBorder* InspectionFrame = nullptr;
+	UPROPERTY()
+	UButton* InspectionToggleButton = nullptr;
+	UPROPERTY()
+	UButton* InspectionOrbitButton = nullptr;
+	UPROPERTY()
+	UButton* InspectionGrabButton = nullptr;
+	UPROPERTY()
+	UTextBlock* InspectionToggleText = nullptr;
+	UPROPERTY()
+	UTextBlock* InspectionHint = nullptr;
+	UPROPERTY()
+	UImage* InspectionPivotOverlay = nullptr;
+	TArray<TPair<TWeakObjectPtr<UWidget>, bool>> InspectionUiStates;
 
 	bool bIsEditingBuildingName = false;
 

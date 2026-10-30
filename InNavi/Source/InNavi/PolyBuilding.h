@@ -75,6 +75,13 @@ public:
 	// Level must be between 1 and GetFloorCount(); pass 0 to show everything (exterior view).
 	void SetVisibleInteriorLevel(int32 Level);
 
+	// Temporary inspection policy; reapplied after every mesh rebuild, including collision. The bottom platform (section 0) goes, and the
+	// first floor gets a slab of its own while it is the floor being viewed.
+	void SetInspectionBottomHidden(bool bNewHidden);
+	// The floor of Level 1 while the bottom platform is hidden: a slab of its own, facing up, since the platform (section 0) is what the
+	// first floor stands on otherwise.
+	int32 GetInspectionFloorSectionIndex() const { return 2 * FloorCount + 1; }
+
 	// Cuts a gap in the outer wall at each opening, on its floor, and rebuilds the walls. Nothing is rebuilt if the gaps are as they were.
 	void SetWallOpenings(const TArray<FPolyWallOpening>& Openings);
 
@@ -141,6 +148,7 @@ private:
 
 	// See SetVisibleInteriorLevel. 0 = nothing hidden (normal exterior view).
 	int32 VisibleInteriorLevel = 0;
+	bool bInspectionBottomHidden = false;
 
 	UPROPERTY()
 	UProceduralMeshComponent* MeshComp;

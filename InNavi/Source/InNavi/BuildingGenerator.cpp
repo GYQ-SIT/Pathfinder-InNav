@@ -2,6 +2,11 @@
 
 
 #include "BuildingGenerator.h"
+#include "GroundFit.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
+#include "EngineUtils.h"
+#include "TimerManager.h"
 #include "NavigationSearchUtils.h"
 #include "PolyBuilding.h"
 #include "RoadSegmentActor.h"
@@ -130,12 +135,18 @@ int32 ABuildingGenerator::LoadBuildingsFromFile(const FString& FilePath)
 		return 0;
 	}
 
+	return LoadBuildingsFromJson(RootObject);
+}
+
+int32 ABuildingGenerator::LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& RootObject)
+{
+	if (!RootObject.IsValid()) return 0;
 	// No "version" means a file from before versions existed (read as 0, the same format as 1). A newer file is read as well as it can be.
 	LoadedFileVersion = 0;
 	RootObject->TryGetNumberField(TEXT("version"), LoadedFileVersion);
 	if (LoadedFileVersion > ProjectFileVersion)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("%s is project file version %d, newer than this build reads (%d); loading what it can"), *FilePath, LoadedFileVersion, ProjectFileVersion);
+		UE_LOG(LogTemp, Warning, TEXT("Project file version %d is newer than this build reads (%d); loading what it can"), LoadedFileVersion, ProjectFileVersion);
 	}
 
 	Scale = 1.f;
@@ -222,6 +233,7 @@ int32 ABuildingGenerator::LoadBuildingsFromFile(const FString& FilePath)
 	}
 
 	RefreshWallOpenings();
+	MarkGroundDirty();
 	return SpawnedCount;
 }
 
@@ -423,6 +435,7 @@ int32 ABuildingGenerator::LoadBuildingsFromDatabase(const FString& DatabasePath)
 
 	UE_LOG(LogTemp, Warning, TEXT("LoadBuildingsFromDatabase: spawned %d campus building(s) (%d tagged 'university', %d pulled in via adjacency)"),
 		SpawnedCount, TaggedCampusCount, CampusIds.Num() - TaggedCampusCount);
+	MarkGroundDirty();
 	return SpawnedCount;
 }
 
@@ -613,6 +626,7 @@ int32 ABuildingGenerator::LoadRoadsAndPOIsFromDatabase(const FString& DatabasePa
 
 	UE_LOG(LogTemp, Warning, TEXT("LoadRoadsAndPOIsFromDatabase: spawned %d road(s) and %d POI(s) from %s"),
 		SpawnedRoadActors.Num(), SpawnedPOIActors.Num(), *DatabasePath);
+	MarkGroundDirty();
 	return SpawnedCount;
 }
 
@@ -723,6 +737,7 @@ int32 ABuildingGenerator::LoadContextBuildingsFromDatabase(const FString& Databa
 
 	UE_LOG(LogTemp, Warning, TEXT("LoadContextBuildingsFromDatabase: spawned %d context building(s) from %s"),
 		SpawnedContextBuildingActors.Num(), *DatabasePath);
+	MarkGroundDirty();
 	return SpawnedCount;
 }
 
@@ -745,6 +760,7 @@ void ABuildingGenerator::ClearAllRoadsAndPOIs()
 		}
 	}
 	SpawnedPOIActors.Reset();
+	MarkGroundDirty();
 }
 
 void ABuildingGenerator::ClearAllContextBuildings()
@@ -757,6 +773,7 @@ void ABuildingGenerator::ClearAllContextBuildings()
 		}
 	}
 	SpawnedContextBuildingActors.Reset();
+	MarkGroundDirty();
 }
 
 void ABuildingGenerator::SetCampusBuildingsVisible(bool bVisible)
@@ -854,10 +871,12 @@ void ABuildingGenerator::ApplyBuildingFilter()
 			RefreshBuildingFilterFor(*Building);
 		}
 	}
+	MarkGroundDirty();
 }
 
 void ABuildingGenerator::SetNonCampusBuildingsVisible(bool bVisible)
 {
+	bNonCampusBuildingsVisible = bVisible;
 	for (AActor* Actor : SpawnedContextBuildingActors)
 	{
 		if (Actor)
@@ -865,6 +884,7 @@ void ABuildingGenerator::SetNonCampusBuildingsVisible(bool bVisible)
 			Actor->SetActorHiddenInGame(!bVisible);
 		}
 	}
+	MarkGroundDirty();
 }
 
 void ABuildingGenerator::SetRoadCategoryVisible(ERoadCategory Category, bool bVisible)
@@ -877,6 +897,7 @@ void ABuildingGenerator::SetRoadCategoryVisible(ERoadCategory Category, bool bVi
 			RoadActor->SetCategoryVisible(bVisible);
 		}
 	}
+	MarkGroundDirty();
 }
 
 void ABuildingGenerator::SetAllRoadsVisible(bool bVisible)
@@ -888,6 +909,7 @@ void ABuildingGenerator::SetAllRoadsVisible(bool bVisible)
 			RoadActor->SetCategoryVisible(bVisible);
 		}
 	}
+	MarkGroundDirty();
 }
 
 void ABuildingGenerator::SetRoadsAndPOIsWithinCampusOnly(bool bEnable, const FVector2D& Center, float Radius)
@@ -910,6 +932,7 @@ void ABuildingGenerator::SetRoadsAndPOIsWithinCampusOnly(bool bEnable, const FVe
 			POIActor->SetWithinCampusRange(bWithinRange);
 		}
 	}
+	MarkGroundDirty();
 }
 
 APolyBuilding* ABuildingGenerator::SpawnBuildingFromData(const FString& Id, const FString& Name, const TArray<FVector2D>& Footprint, int32 FloorCount, float FloorHeight, FVector2D Offset)
@@ -1350,6 +1373,7 @@ void ABuildingGenerator::ClearAllBuildings()
 	InteriorDataById.Empty();
 	BuildingBaselines.Empty();
 	Scale = 1.f;
+	MarkGroundDirty();
 }
 
 bool ABuildingGenerator::CaptureBuildingBaselineInto(const FString& BuildingId, FBuildingBaseline& Out) const
@@ -1496,4 +1520,145 @@ APolyBuilding* ABuildingGenerator::CreateRegularPolygonBuilding(const FString& I
 	}
 
 	return SpawnBuildingFromData(Id, Name, Footprint, FloorCount, FloorHeight, FVector2D::ZeroVector);
+}
+
+// ---- The ground under the campus ----
+
+namespace
+{
+	// What the ground is sized to (world units are centimetres): at least 40 m each way, and a margin of 5 percent of the longer side, 10 m at least.
+	constexpr double GroundMinSize = 4000.0;
+	constexpr double GroundMarginFraction = 0.05;
+	constexpr double GroundMinMargin = 1000.0;
+
+	FBox2D GroundBoxOf(const AActor& Actor)
+	{
+		const FBox Box = Actor.GetComponentsBoundingBox(true);
+		return Box.IsValid ? FBox2D(FVector2D(Box.Min.X, Box.Min.Y), FVector2D(Box.Max.X, Box.Max.Y)) : FBox2D(ForceInit);
+	}
+}
+
+bool ABuildingGenerator::GetVisibleExtent(FBox2D& OutExtent) const
+{
+	FBox2D All(ForceInit);
+	auto Add = [&All](const FBox2D& Box)
+	{
+		if (Box.bIsValid)
+		{
+			All += Box;
+		}
+	};
+	for (const TPair<FString, APolyBuilding*>& Pair : BuildingsById)
+	{
+		if (IsValid(Pair.Value) && MatchesBuildingFilter(*Pair.Value))
+		{
+			Add(GroundBoxOf(*Pair.Value));
+		}
+	}
+	if (bNonCampusBuildingsVisible)
+	{
+		for (AActor* Actor : SpawnedContextBuildingActors)
+		{
+			if (IsValid(Actor))
+			{
+				Add(GroundBoxOf(*Actor));
+			}
+		}
+	}
+	for (AActor* Actor : SpawnedRoadActors)
+	{
+		const ARoadSegmentActor* Road = Cast<ARoadSegmentActor>(Actor);
+		if (IsValid(Actor) && Road && Road->IsShownByFilters())
+		{
+			Add(Road->GetBounds2D());
+		}
+	}
+	for (AActor* Actor : SpawnedPOIActors)
+	{
+		const APOIMarkerActor* POI = Cast<APOIMarkerActor>(Actor);
+		if (IsValid(Actor) && POI && POI->IsShownByFilters())
+		{
+			const FVector Location = POI->GetActorLocation();
+			Add(FBox2D(FVector2D(Location.X - 100.0, Location.Y - 100.0), FVector2D(Location.X + 100.0, Location.Y + 100.0)));
+		}
+	}
+	if (!All.bIsValid)
+	{
+		return false;
+	}
+	OutExtent = All;
+	return true;
+}
+
+void ABuildingGenerator::MarkGroundDirty()
+{
+	if (bGroundUpdateQueued || !GetWorld())
+	{
+		return;
+	}
+	bGroundUpdateQueued = true;
+	GetWorld()->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this]() { UpdateGroundToVisible(); }));
+}
+
+AStaticMeshActor* ABuildingGenerator::FindGroundActor()
+{
+	if (!GroundActor.IsValid())
+	{
+		if (bGroundSearched)
+		{
+			return nullptr;
+		}
+		bGroundSearched = true;
+		for (TActorIterator<AStaticMeshActor> It(GetWorld()); It; ++It)
+		{
+			const UStaticMeshComponent* Component = It->GetStaticMeshComponent();
+			const UStaticMesh* Mesh = Component ? Component->GetStaticMesh() : nullptr;
+			if (Mesh && Mesh->GetName() == TEXT("SM_Template_Map_Floor"))
+			{
+				GroundActor = *It;
+				GroundOriginalTransform = It->GetActorTransform();
+				break;
+			}
+		}
+		if (!GroundActor.IsValid())
+		{
+			return nullptr;
+		}
+	}
+	return GroundActor.Get();
+}
+
+void ABuildingGenerator::UpdateGroundToVisible()
+{
+	bGroundUpdateQueued = false;
+	if (bGroundFitSuspended || !GetWorld() || !FindGroundActor()) return;
+	UStaticMeshComponent* GroundComponent = GroundActor->GetStaticMeshComponent();
+	GroundComponent->SetMobility(EComponentMobility::Movable);
+	GroundComponent->SetCastShadow(false);
+
+	FBox2D Extent, Rect;
+	if (!GetVisibleExtent(Extent) || !GroundFit::Fit({ Extent }, GroundMinSize, GroundMarginFraction, GroundMinMargin, Rect))
+	{
+		return;
+	}
+	AStaticMeshActor* Ground = GroundActor.Get();
+	const UStaticMesh* Mesh = Ground->GetStaticMeshComponent()->GetStaticMesh();
+	if (!Mesh)
+	{
+		return;
+	}
+	// The mesh's own size and middle (it is not necessarily a unit square centred on its origin).
+	const FBoxSphereBounds MeshBounds = Mesh->GetBounds();
+	const FVector2D MeshSize(MeshBounds.BoxExtent.X * 2.0, MeshBounds.BoxExtent.Y * 2.0);
+	if (MeshSize.X < KINDA_SMALL_NUMBER || MeshSize.Y < KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+	FVector NewScale = Ground->GetActorScale3D();
+	NewScale.X = Rect.GetSize().X / MeshSize.X;
+	NewScale.Y = Rect.GetSize().Y / MeshSize.Y;
+	const FVector2D Centre = Rect.GetCenter();
+	const FVector Location(Centre.X - NewScale.X * MeshBounds.Origin.X, Centre.Y - NewScale.Y * MeshBounds.Origin.Y, Ground->GetActorLocation().Z);
+	Ground->SetActorScale3D(NewScale);
+	Ground->SetActorLocationAndRotation(Location, FQuat::Identity);
 }

@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "InteriorFloorPlanWidget.h"
@@ -9,6 +9,7 @@
 #include "BuildingGenerator.h"
 #include "PolyBuilding.h"
 #include "NavPlayerController.h"
+#include "LayoutValidationSession.h"
 #include "NavigationPanelWidget.h"
 #include "NavigationRouteVisualization.h"
 #include "PolygonGeometryUtils.h"
@@ -1167,12 +1168,18 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			NavigationPanel && NavigationPanel->IsRouteGuidanceVisible())
 		{
 			const int32 ActiveFloor = InteriorGen->GetActiveFloor();
-			auto IsVisibleOnCurrentMap = [ActiveFloor](const FNavigationRoutePoint& Point)
+			auto IsVisibleOnCurrentMap = [ActiveFloor, Building](const FNavigationRoutePoint& Point)
 				{
-					return Point.Floor == ActiveFloor
-						|| (ActiveFloor == 1 && Point.Floor == UNavigationPanelWidget::OutdoorFloor);
+					return UNavigationRouteVisualization::IsPointVisible(Point, Building->BuildingId, ActiveFloor);
 				};
+			auto RouteLocal = [&](const FNavigationRoutePoint& Point)
+			{
+				return WorldToLocal(Point.bHasWorldPosition ? FVector2D(Point.WorldPosition) : (Point.Position + Building->BuildingOffset) * Scale);
+			};
 			const TArray<FNavigationRoutePoint>& Route = NavigationPanel->GetRoutePoints();
+			const TArray<FNavigationRouteLeg>& RouteLegs = NavigationPanel->GetRouteLegs();
+			// Going step by step: only the stretch of the step being shown is drawn in full; the rest of the route is faint.
+			const FNavigationRouteFocus Focus = NavigationPanel->GetGuidedFocus();
 			for (int32 I = 1; I < Route.Num(); ++I)
 			{
 				if (!IsVisibleOnCurrentMap(Route[I - 1]) || !IsVisibleOnCurrentMap(Route[I]))
@@ -1180,11 +1187,28 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 					continue;
 				}
 				TArray<FVector2D> Segment;
-				Segment.Add(WorldToLocal((Route[I - 1].Position + Building->BuildingOffset) * Scale));
-				Segment.Add(WorldToLocal((Route[I].Position + Building->BuildingOffset) * Scale));
+				Segment.Add(RouteLocal(Route[I - 1]));
+				Segment.Add(RouteLocal(Route[I]));
+				// A journey through stops is drawn in a colour for each leg; a route without stops stays orange.
+				FLinearColor SegmentColor(1.f, 0.55f, 0.f, 1.f);
+				if (RouteLegs.Num() > 1)
+				{
+					const int32 LegIndex = RouteLegs.IndexOfByPredicate([I](const FNavigationRouteLeg& Leg) { return I > Leg.FirstPointIndex && I <= Leg.LastPointIndex; });
+					if (LegIndex != INDEX_NONE)
+					{
+						SegmentColor = UNavigationRouteVisualization::LegColor2D(LegIndex);
+					}
+				}
+				if (Focus.IsSet() && !(I > Focus.FirstPointIndex && I <= Focus.LastPointIndex))
+				{
+					FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 3,
+						AllottedGeometry.ToPaintGeometry(), Segment, ESlateDrawEffect::None,
+						SegmentColor * 0.3f, true, 3.f);
+					continue;
+				}
 				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 4,
 					AllottedGeometry.ToPaintGeometry(), Segment, ESlateDrawEffect::None,
-					FLinearColor(1.f, 0.55f, 0.f, 1.f), true, 6.f);
+					SegmentColor, true, 6.f);
 				for (const FNavigationDirectionArrow2D& Arrow :
 					UNavigationRouteVisualization::BuildDirectionArrows2D(Segment[0], Segment[1]))
 				{
@@ -1208,7 +1232,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 					}
 					constexpr float MarkerSize = 18.f;
 					constexpr float OutlineSize = 24.f;
-					const FVector2D MarkerLocal = WorldToLocal((Point.Position + Building->BuildingOffset) * Scale);
+					const FVector2D MarkerLocal = RouteLocal(Point);
 					if (Point.Floor == UNavigationPanelWidget::OutdoorFloor)
 					{
 						TArray<FVector2D> Diamond;
@@ -1244,8 +1268,54 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			{
 				DrawEndpoint(NavigationPanel->GetDestination(), FLinearColor(0.9f, 0.1f, 0.1f, 1.f));
 			}
+			// Where the person is at the step being shown: a ring.
+			if (Focus.IsSet() && Route.IsValidIndex(Focus.FirstPointIndex) && IsVisibleOnCurrentMap(Route[Focus.FirstPointIndex]))
+			{
+				const FVector2D Here = RouteLocal(Route[Focus.FirstPointIndex]);
+				for (const TPair<float, FLinearColor>& Ring : { TPair<float, FLinearColor>(17.f, FLinearColor::Black), TPair<float, FLinearColor>(14.f, FLinearColor::White) })
+				{
+					TArray<FVector2D> Circle;
+					for (int32 Step = 0; Step <= 24; ++Step)
+					{
+						const double Angle = Step * 2.0 * PI / 24;
+						Circle.Add(Here + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Ring.Key);
+					}
+					FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 7, AllottedGeometry.ToPaintGeometry(), Circle,
+						ESlateDrawEffect::None, Ring.Value, true, Ring.Key > 15.f ? 6.f : 3.f);
+				}
+			}
+			// The stops, numbered in the order they are visited, in the colour of the leg that leads to them. Once there is a route
+			// a stop is where its leg ends; before that, the place it was picked.
+			const TArray<FNavigationStop>& Stops = NavigationPanel->GetStops();
+			for (int32 StopIndex = 0; StopIndex < Stops.Num(); ++StopIndex)
+			{
+				const FNavigationRoutePoint& StopPoint = RouteLegs.IsValidIndex(StopIndex) && Route.IsValidIndex(RouteLegs[StopIndex].LastPointIndex)
+					? Route[RouteLegs[StopIndex].LastPointIndex] : Stops[StopIndex].Point;
+				if (!IsVisibleOnCurrentMap(StopPoint))
+				{
+					continue;
+				}
+				DrawEndpoint(StopPoint, UNavigationRouteVisualization::LegColor2D(StopIndex));
+				const FVector2D TextAt = RouteLocal(StopPoint) - FVector2D(4.f, 8.f);
+				FSlateDrawElement::MakeText(OutDrawElements, LayerId + 7,
+					AllottedGeometry.ToPaintGeometry(FVector2f(12.f, 16.f), FSlateLayoutTransform(TextAt)),
+					FText::AsNumber(StopIndex + 1), FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 11),
+					ESlateDrawEffect::None, FLinearColor::White);
+			}
 		}
 	}
 
-	return LayerId + 7;
+	if (PlayerController)
+	{
+		const auto* Issue = PlayerController->GetLayoutValidationSession()->GetFocusedIssue();
+		if (Issue && Issue->bHasPosition && Issue->BuildingId == InteriorGen->GetLoadedBuildingId() && Issue->Floor == InteriorGen->GetActiveFloor())
+		{
+			const FVector2D World = (Issue->Position + Building->BuildingOffset) * Generator->GetScale();
+			const FVector2D Center = WidgetSize * .5 + (World - Origin) * PixelsPerUnit;
+			TArray<FVector2D> Ring;
+			for (int32 I = 0; I <= 24; ++I) { const double Angle = I * 2.0 * PI / 24; Ring.Add(Center + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * 14.0); }
+			FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 8, AllottedGeometry.ToPaintGeometry(), Ring, ESlateDrawEffect::None, FLinearColor::Yellow, true, 3.f);
+		}
+	}
+	return LayerId + 9;
 }

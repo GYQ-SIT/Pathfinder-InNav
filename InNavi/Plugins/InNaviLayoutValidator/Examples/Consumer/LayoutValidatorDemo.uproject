@@ -1,0 +1,6 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": "5.8",
+  "Modules": [{ "Name": "LayoutValidatorDemo", "Type": "Editor", "LoadingPhase": "Default" }],
+  "Plugins": [{ "Name": "InNaviLayoutValidator", "Enabled": true }]
+}

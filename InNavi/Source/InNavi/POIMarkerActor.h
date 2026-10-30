@@ -27,9 +27,14 @@ public:
 	// category filter to combine with) - ABuildingGenerator::SetRoadsAndPOIsWithinCampusOnly calls this
 	// directly off the actor's own GetActorLocation(), which BuildMarker already set to its real
 	// world-space position.
-	void SetWithinCampusRange(bool bVisible) { SetActorHiddenInGame(!bVisible); }
+	void SetWithinCampusRange(bool bVisible) { bWithinCampusRange = bVisible; SetActorHiddenInGame(!bVisible); }
+
+	// Whether the campus-range filter shows this marker (what the campus ground is sized from).
+	bool IsShownByFilters() const { return bWithinCampusRange; }
 
 private:
 	UPROPERTY()
 	UStaticMeshComponent* MeshComp;
+
+	bool bWithinCampusRange = true;
 };
