@@ -1,6 +1,7 @@
 #include "BuildingInfoPanelWidget.h"
 
 #include "BuildingSummary.h"
+#include "BuildingTypes.h"
 #include "FootprintPreviewWidget.h"
 #include "NavPlayerController.h"
 #include "StartScreenStyle.h"
@@ -8,6 +9,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/ComboBoxString.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Overlay.h"
@@ -16,6 +18,60 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+
+void UBuildingInfoPanelWidget::AddTypeRow(UVerticalBox* Stack)
+{
+	using namespace StartStyle;
+	Stack->AddChildToVerticalBox(Text(WidgetTree, TEXT("Txt_BuildingTypeLabel"), TEXT("TYPE"), 10.f, Rgb(170, 190, 214), true, 120))
+		->SetPadding(FMargin(0.f, 16.f * DesignToUi, 0.f, 4.f * DesignToUi));
+	TypeCombo = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cmb_BuildingType"));
+	DarkCombo(TypeCombo);
+	TypeCombo->OnGenerateWidgetEvent.BindDynamic(this, &UBuildingInfoPanelWidget::HandleGenerateTypeItem);
+	for (const FString& Type : BuildingTypes::All())
+	{
+		TypeCombo->AddOption(Type);
+	}
+	TypeCombo->SetSelectedOption(BuildingTypes::Default());
+	Stack->AddChildToVerticalBox(TypeCombo);
+}
+
+UWidget* UBuildingInfoPanelWidget::HandleGenerateTypeItem(FString Item)
+{
+	constexpr int32 MaxRetained = 100;
+	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+	USizeBox* SquareSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+	SquareSize->SetWidthOverride(10.f * StartStyle::DesignToUi);
+	SquareSize->SetHeightOverride(10.f * StartStyle::DesignToUi);
+	UBorder* Square = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	Square->SetBrush(StartStyle::Rounded(BuildingTypes::Color(Item), FLinearColor::Transparent, 3.f, 0.f));
+	Square->SetBrushColor(FLinearColor::White);
+	SquareSize->SetContent(Square);
+	UHorizontalBoxSlot* SquareSlot = Row->AddChildToHorizontalBox(SquareSize);
+	SquareSlot->SetVerticalAlignment(VAlign_Center);
+	SquareSlot->SetPadding(FMargin(0.f, 0.f, 8.f * StartStyle::DesignToUi, 0.f));
+	UTextBlock* ItemText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+	ItemText->SetText(FText::FromString(Item));
+	ItemText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	ApplyStandardFont(ItemText);
+	Row->AddChildToHorizontalBox(ItemText)->SetVerticalAlignment(VAlign_Center);
+
+	RetainedTypeItems.Add(Row);
+	if (RetainedTypeItems.Num() > MaxRetained)
+	{
+		RetainedTypeItems.RemoveAt(0, RetainedTypeItems.Num() - MaxRetained);
+	}
+	return Row;
+}
+
+void UBuildingInfoPanelWidget::HandleTypeSelected(FString SelectedItem, ESelectInfo::Type)
+{
+	ANavPlayerController* PC = GetController();
+	if (bRefreshingType || !PC)
+	{
+		return;
+	}
+	PC->SetSelectedBuildingType(SelectedItem);
+}
 
 TSharedRef<SWidget> UBuildingInfoPanelWidget::RebuildWidget()
 {
@@ -69,6 +125,7 @@ TSharedRef<SWidget> UBuildingInfoPanelWidget::RebuildWidget()
 		IdText = Text(WidgetTree, TEXT("Txt_BuildingId"), TEXT(""), 13.f, Rgb(160, 180, 204));
 		IdText->SetAutoWrapText(true);
 		Content->AddChildToVerticalBox(IdText)->SetPadding(FMargin(0.f, 4.f * DesignToUi, 0.f, 0.f));
+		AddTypeRow(Content);
 
 		// ---- Numbers: floors and rooms side by side, lifts & stairs on a row of its own ----
 		UBorder* Stats = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("BuildingStats"));
@@ -166,6 +223,10 @@ void UBuildingInfoPanelWidget::NativeConstruct()
 			Button->OnClicked.AddUniqueDynamic(this, &UBuildingInfoPanelWidget::PlayButtonClickSound);
 		}
 	}
+	if (TypeCombo)
+	{
+		TypeCombo->OnSelectionChanged.AddUniqueDynamic(this, &UBuildingInfoPanelWidget::HandleTypeSelected);
+	}
 	if (Open2DButton)
 	{
 		Open2DButton->OnClicked.AddUniqueDynamic(this, &UBuildingInfoPanelWidget::HandleOpen2DClicked);
@@ -248,6 +309,12 @@ void UBuildingInfoPanelWidget::Refresh()
 	{
 		IdText->SetText(FText::FromString(FString::Printf(TEXT("Building ID: %s"), *Summary.Id)));
 	}
+	if (TypeCombo)
+	{
+		bRefreshingType = true;
+		TypeCombo->SetSelectedOption(Summary.Type);
+		bRefreshingType = false;
+	}
 	if (FloorsValue)
 	{
 		FloorsValue->SetText(FText::AsNumber(Summary.Floors));
@@ -278,4 +345,7 @@ FString UBuildingInfoPanelWidget::GetFloorsTextForTests() const { return FloorsV
 FString UBuildingInfoPanelWidget::GetRoomsTextForTests() const { return RoomsValue ? RoomsValue->GetText().ToString() : FString(); }
 FString UBuildingInfoPanelWidget::GetLinksTextForTests() const { return LinksValue ? LinksValue->GetText().ToString() : FString(); }
 FString UBuildingInfoPanelWidget::GetStatusTextForTests() const { return StatusText ? StatusText->GetText().ToString() : FString(); }
+FString UBuildingInfoPanelWidget::GetTypeTextForTests() const { return TypeCombo ? TypeCombo->GetSelectedOption() : FString(); }
+int32 UBuildingInfoPanelWidget::GetTypeOptionCountForTests() const { return TypeCombo ? TypeCombo->GetOptionCount() : 0; }
+void UBuildingInfoPanelWidget::SelectTypeForTests(const FString& Type) { HandleTypeSelected(Type, ESelectInfo::OnMouseClick); }
 int32 UBuildingInfoPanelWidget::GetOutlinePointCountForTests() const { return Outline ? Outline->GetPointCountForTests() : 0; }

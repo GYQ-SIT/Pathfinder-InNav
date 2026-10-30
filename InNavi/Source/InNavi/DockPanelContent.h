@@ -38,8 +38,10 @@ protected:
 	// Same size, with the app's dark box and white text (the engine defaults read as the same grey as the panel).
 	static void ApplyStandardFont(UEditableTextBox* TextBox);
 
-	// A check box with a label, as a row at the end of Stack. Returns the check box.
-	UCheckBox* AddCheckRow(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label, bool bChecked, float BottomPadding = 6.f);
+	// A check box with a label, as a row at the end of Stack; with a Swatch, a small square of that colour between the two.
+	// Returns the check box.
+	UCheckBox* AddCheckRow(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label, bool bChecked, float BottomPadding = 6.f,
+		TOptional<FLinearColor> Swatch = TOptional<FLinearColor>());
 
 	// Plays the same click sound every button in the app plays.
 	UFUNCTION()

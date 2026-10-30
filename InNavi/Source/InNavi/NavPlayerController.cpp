@@ -3496,6 +3496,53 @@ void ANavPlayerController::SetNonCampusBuildingsVisible(bool bVisible)
 	}
 }
 
+bool ANavPlayerController::SetSelectedBuildingType(const FString& NewType)
+{
+	const FString Id = GetSelectedBuildingId();
+	if (bInteriorInspectionEnabled || !Generator || Id.IsEmpty())
+	{
+		return false;
+	}
+	const FString Before = Generator->GetBuildingType(Id);
+	if (!Generator->SetBuildingType(Id, NewType))
+	{
+		return false;
+	}
+	if (Before != Generator->GetBuildingType(Id))
+	{
+		bHasUnsavedChanges = true;
+	}
+	return true;
+}
+
+FString ANavPlayerController::GetSelectedBuildingType() const
+{
+	return Generator ? Generator->GetBuildingType(GetSelectedBuildingId()) : BuildingTypes::Default();
+}
+
+void ANavPlayerController::SetBuildingTypeVisible(const FString& Type, bool bVisible)
+{
+	if (bInteriorInspectionEnabled) return;
+	if (Generator)
+	{
+		Generator->SetBuildingTypeVisible(Type, bVisible);
+	}
+}
+
+bool ANavPlayerController::IsBuildingTypeVisible(const FString& Type) const
+{
+	return !Generator || Generator->IsBuildingTypeVisible(Type);
+}
+
+void ANavPlayerController::ResetBuildingTypeFilter()
+{
+	if (bInteriorInspectionEnabled) return;
+	if (Generator)
+	{
+		Generator->ResetBuildingTypeFilter();
+	}
+}
+
 void ANavPlayerController::LogCameraTransform()
 {
 	const APawn* ControlledPawn = GetPawn();

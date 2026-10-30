@@ -588,6 +588,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void SetNonCampusBuildingsVisible(bool bVisible);
 
+	// The selected building's type (BuildingTypes.h). Setting it marks the project as changed when the type actually differs.
+	bool SetSelectedBuildingType(const FString& NewType);
+	FString GetSelectedBuildingType() const;
+	// The Map panel's type check boxes: what the generator hides and shows by type. Not saved in the project.
+	void SetBuildingTypeVisible(const FString& Type, bool bVisible);
+	bool IsBuildingTypeVisible(const FString& Type) const;
+	void ResetBuildingTypeFilter();
+
 	UPROPERTY(BlueprintAssignable, Category = "Interior")
 	FOnSelectModeChanged OnSelectModeChanged;
 

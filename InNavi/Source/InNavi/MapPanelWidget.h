@@ -69,6 +69,10 @@ public:
 	void SetBuildingSearchForTests(const FString& Text);
 	bool IsFiltersSectionOpenForTests() const { return bFiltersOpen; }
 	void SetSectionOpenForTests(bool bFilters, bool bOpen);
+	int32 GetBuildingTypeCheckboxCountForTests() const { return BuildingTypeCheckboxes.Num(); }
+	bool IsBuildingTypeCheckedForTests(const FString& Type) const;
+	void SetBuildingTypeCheckedForTests(const FString& Type, bool bChecked);
+	void ClickResetBuildingFiltersForTests() { OnResetBuildingFiltersClicked(); }
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -97,6 +101,9 @@ private:
 	void OnBuildingCampusCheckChanged(bool bIsChecked);
 	UFUNCTION()
 	void OnBuildingNonCampusCheckChanged(bool bIsChecked);
+	// Every type check box calls this one: it sets what the controller shows for each type from the state of all the boxes.
+	UFUNCTION()
+	void OnBuildingTypeCheckChanged(bool bIsChecked);
 	UFUNCTION()
 	void HandleBuildingSearchChanged(const FText& Text);
 	UFUNCTION()
@@ -124,6 +131,10 @@ private:
 	// A header button that opens and closes the section under it; Body is the box the section's controls go into.
 	UVerticalBox* AddCollapsibleSection(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Title, UButton*& OutHeader, UTextBlock*& OutSign, USizeBox*& OutHeaderBox);
 	void AddRoadRows(UVerticalBox* Stack);
+	// The "Type" part of the building filters: one check box per type of BuildingTypes::All(), each with the colour of its type.
+	void AddBuildingTypeRows(UVerticalBox* Stack);
+	// Sets the type check boxes to what the controller shows, without calling their handlers.
+	void RefreshBuildingTypeChecks();
 	// A control inside a SizeBox whose width follows the panel.
 	USizeBox* WrapInPanelWidth(UWidget* Control);
 
@@ -148,6 +159,9 @@ private:
 	UCheckBox* BuildingCampusCheckbox = nullptr;
 	UPROPERTY()
 	UCheckBox* BuildingNonCampusCheckbox = nullptr;
+	// One per type, in the order of BuildingTypes::All().
+	UPROPERTY()
+	TArray<UCheckBox*> BuildingTypeCheckboxes;
 	UPROPERTY()
 	UEditableTextBox* BuildingSearchBox = nullptr;
 	UPROPERTY()
