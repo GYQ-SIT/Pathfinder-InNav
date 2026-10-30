@@ -47,6 +47,7 @@
         "offset": { "description": "Where the building stands among the others, in footprint units.", "$ref": "#/definitions/point" },
         "floorCount": { "type": "integer", "minimum": 1 },
         "floorHeight": { "description": "In centimetres; the file's floorHeight when absent.", "type": "number", "exclusiveMinimum": 0 },
+        "buildingType": { "description": "One of the types of the editor (BuildingTypes.h), as written there; left out for Other.", "type": "string" },
         "footprint": {
           "description": "The outline, in order; edge i runs from point i to point i + 1 (the last to the first).",
           "type": "array",

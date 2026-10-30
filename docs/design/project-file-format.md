@@ -75,6 +75,7 @@ A complete file to open and read is `docs/test-data/entrance-test-2-with-doors.j
 | `offset` | `[x, y]` | Where the building stands among the others, in footprint units | `[0, 0]` |
 | `floorCount` | integer >= 1 | How many floors | 10 |
 | `floorHeight` | number > 0 | In cm | the file's |
+| `buildingType` | string | One of the types of the editor (`BuildingTypes.h`); the colour and filter of the building on the map | `Other` |
 | `interior` | object | The floors and doors of the building (below) | an empty building |
 
 **The interior** (`interior`): `floors` (array) and `entrances` (array), both optional.

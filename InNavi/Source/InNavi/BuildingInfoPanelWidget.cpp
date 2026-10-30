@@ -1,6 +1,7 @@
 #include "BuildingInfoPanelWidget.h"
 
 #include "BuildingSummary.h"
+#include "BuildingTypes.h"
 #include "FootprintPreviewWidget.h"
 #include "NavPlayerController.h"
 #include "StartScreenStyle.h"
@@ -8,6 +9,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/ComboBoxString.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Overlay.h"
@@ -69,6 +71,7 @@ TSharedRef<SWidget> UBuildingInfoPanelWidget::RebuildWidget()
 		IdText = Text(WidgetTree, TEXT("Txt_BuildingId"), TEXT(""), 13.f, Rgb(160, 180, 204));
 		IdText->SetAutoWrapText(true);
 		Content->AddChildToVerticalBox(IdText)->SetPadding(FMargin(0.f, 4.f * DesignToUi, 0.f, 0.f));
+		BuildBuildingTypeControls();
 
 		// ---- Numbers: floors and rooms side by side, lifts & stairs on a row of its own ----
 		UBorder* Stats = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("BuildingStats"));
@@ -234,6 +237,17 @@ void UBuildingInfoPanelWidget::Refresh()
 	{
 		return;
 	}
+	if (BuildingTypeComboBox)
+	{
+		bUpdatingBuildingType = true;
+		BuildingTypeComboBox->SetSelectedOption(Summary.BuildingType);
+		BuildingTypeComboBox->SetVisibility(ESlateVisibility::Visible);
+		if (BuildingTypeLabel)
+		{
+			BuildingTypeLabel->SetVisibility(ESlateVisibility::Visible);
+		}
+		bUpdatingBuildingType = false;
+	}
 
 	using namespace StartStyle;
 	if (Outline)
@@ -279,3 +293,54 @@ FString UBuildingInfoPanelWidget::GetRoomsTextForTests() const { return RoomsVal
 FString UBuildingInfoPanelWidget::GetLinksTextForTests() const { return LinksValue ? LinksValue->GetText().ToString() : FString(); }
 FString UBuildingInfoPanelWidget::GetStatusTextForTests() const { return StatusText ? StatusText->GetText().ToString() : FString(); }
 int32 UBuildingInfoPanelWidget::GetOutlinePointCountForTests() const { return Outline ? Outline->GetPointCountForTests() : 0; }
+
+FString UBuildingInfoPanelWidget::GetBuildingTypeTextForTests() const
+{
+	return BuildingTypeComboBox ? BuildingTypeComboBox->GetSelectedOption() : FString();
+}
+
+void UBuildingInfoPanelWidget::BuildBuildingTypeControls()
+{
+	using namespace StartStyle;
+	BuildingTypeLabel = Text(WidgetTree, TEXT("Txt_BuildingTypeLabel"), TEXT("TYPE"), 10.f, Rgb(170, 190, 214), true, 120);
+	Content->AddChildToVerticalBox(BuildingTypeLabel)->SetPadding(FMargin(0.f, 12.f * DesignToUi, 0.f, 4.f * DesignToUi));
+	BuildingTypeComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cmb_BuildingType"));
+	BuildingTypeComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UBuildingInfoPanelWidget::HandleGenerateBuildingTypeItem);
+	DarkCombo(BuildingTypeComboBox);
+	for (const FString& Type : BuildingTypes::All())
+	{
+		BuildingTypeComboBox->AddOption(Type);
+	}
+	BuildingTypeComboBox->SetSelectedOption(BuildingTypes::Default());
+	BuildingTypeComboBox->OnSelectionChanged.AddUniqueDynamic(this, &UBuildingInfoPanelWidget::HandleBuildingTypeChanged);
+	Content->AddChildToVerticalBox(BuildingTypeComboBox);
+}
+
+void UBuildingInfoPanelWidget::HandleBuildingTypeChanged(FString SelectedItem, ESelectInfo::Type)
+{
+	if (!bUpdatingBuildingType && !SelectedItem.IsEmpty())
+	{
+		if (ANavPlayerController* PC = GetController())
+		{
+			PC->SetSelectedBuildingType(SelectedItem);
+		}
+	}
+}
+
+UWidget* UBuildingInfoPanelWidget::HandleGenerateBuildingTypeItem(FString Item)
+{
+	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+	USizeBox* Box = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+	Box->SetWidthOverride(10.f * StartStyle::DesignToUi);
+	Box->SetHeightOverride(10.f * StartStyle::DesignToUi);
+	UBorder* Square = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	Square->SetBrush(StartStyle::Rounded(BuildingTypes::Color(Item), FLinearColor::Transparent, 3.f, 0.f));
+	Box->SetContent(Square);
+	Row->AddChildToHorizontalBox(Box)->SetPadding(FMargin(0.f, 0.f, 8.f * StartStyle::DesignToUi, 0.f));
+	UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+	Label->SetText(FText::FromString(Item));
+	Label->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	ApplyStandardFont(Label);
+	Row->AddChildToHorizontalBox(Label);
+	return Row;
+}

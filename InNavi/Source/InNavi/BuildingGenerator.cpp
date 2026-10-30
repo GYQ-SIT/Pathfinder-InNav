@@ -2,6 +2,7 @@
 
 
 #include "BuildingGenerator.h"
+#include "BuildingTypes.h"
 #include "GroundFit.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
@@ -220,8 +221,18 @@ int32 ABuildingGenerator::LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& R
 			}
 		}
 
-		if (SpawnBuildingFromData(Id, Name, Footprint, FloorCount, FloorHeight, Offset))
+		APolyBuilding* Building = FindBuildingById(Id);
+		if (!Building)
 		{
+			Building = SpawnBuildingFromData(Id, Name, Footprint, FloorCount, FloorHeight, Offset);
+		}
+		if (Building)
+		{
+			FString BuildingType;
+			if (B->TryGetStringField(TEXT("buildingType"), BuildingType))
+			{
+				SetBuildingType(Id, BuildingTypes::Normalize(BuildingType));
+			}
 			SpawnedCount++;
 
 			const TSharedPtr<FJsonObject>* InteriorObject;
@@ -427,8 +438,9 @@ int32 ABuildingGenerator::LoadBuildingsFromDatabase(const FString& DatabasePath)
 		const FDatabaseBuildingRow& Row = RowsById.FindChecked(CampusId);
 		const FString Id = FString::Printf(TEXT("SQL-%lld"), CampusId);
 		const FString Name = FString::Printf(TEXT("%s %lld"), *Row.BuildingType, CampusId);
-		if (SpawnBuildingFromData(Id, Name, WorldFootprintsById.FindChecked(CampusId), DefaultFloorCountForDatabaseBuildings, DefaultFloorHeightForDatabaseBuildings, FVector2D::ZeroVector))
+		if (APolyBuilding* Building = SpawnBuildingFromData(Id, Name, WorldFootprintsById.FindChecked(CampusId), DefaultFloorCountForDatabaseBuildings, DefaultFloorHeightForDatabaseBuildings, FVector2D::ZeroVector))
 		{
+			SetBuildingType(Id, BuildingTypes::FromMapDatabase(Row.BuildingType));
 			SpawnedCount++;
 		}
 	}
@@ -664,6 +676,7 @@ int32 ABuildingGenerator::LoadContextBuildingsFromDatabase(const FString& Databa
 
 	struct FDatabaseContextBuildingRow
 	{
+		FString BuildingType;
 		TArray<FVector2D> Points;
 	};
 	TMap<int64, FDatabaseContextBuildingRow> RowsById;
@@ -674,14 +687,16 @@ int32 ABuildingGenerator::LoadContextBuildingsFromDatabase(const FString& Databa
 	// (not by re-filtering on type) is what keeps a building pulled into the campus by adjacency from
 	// ALSO getting spawned here as a second, non-interactive placeholder copy.
 	Database.Execute(
-		TEXT("SELECT b.building_id, bn.lat, bn.lon FROM buildings b ")
+		TEXT("SELECT b.building_id, b.building_type, bn.lat, bn.lon FROM buildings b ")
 		TEXT("JOIN building_nodes bn ON b.building_id = bn.building_id ")
 		TEXT("ORDER BY b.building_id, bn.sequence"),
 		[this, &RowsById](const FSQLitePreparedStatement& Statement) -> ESQLitePreparedStatementExecuteRowResult
 		{
 			int64 BuildingId = 0;
+			FString BuildingType;
 			double Lat = 0.0, Lon = 0.0;
 			if (!Statement.GetColumnValueByName(TEXT("building_id"), BuildingId)
+				|| !Statement.GetColumnValueByName(TEXT("building_type"), BuildingType)
 				|| !Statement.GetColumnValueByName(TEXT("lat"), Lat)
 				|| !Statement.GetColumnValueByName(TEXT("lon"), Lon))
 			{
@@ -691,19 +706,16 @@ int32 ABuildingGenerator::LoadContextBuildingsFromDatabase(const FString& Databa
 			{
 				return ESQLitePreparedStatementExecuteRowResult::Continue;
 			}
-			RowsById.FindOrAdd(BuildingId).Points.Add(FVector2D((float)Lon, (float)Lat));
+			FDatabaseContextBuildingRow& Row = RowsById.FindOrAdd(BuildingId);
+			Row.BuildingType = BuildingType;
+			Row.Points.Add(FVector2D((float)Lon, (float)Lat));
 			return ESQLitePreparedStatementExecuteRowResult::Continue;
 		});
 
 	Database.Close();
 
-	// Flat, uniform placeholder height/tint for every context building regardless of its own OSM
-	// type - this dataset's building_type is far more varied than roads' highway_type (bridge, house,
-	// school, parking, ...) and none of it is being shown as a filter category yet, just a single
-	// "Non-Campus" on/off toggle, so there's no reason to style it beyond "clearly not a real,
-	// enterable campus building".
+	// Context buildings remain simple placeholders while their type colour follows the shared table.
 	constexpr float ContextBuildingHeightWorldUnits = 900.f; // 9m at Scale=100
-	const FLinearColor ContextBuildingColor(0.5f, 0.5f, 0.52f, 1.f);
 
 	int32 SpawnedCount = 0;
 	for (const TPair<int64, FDatabaseContextBuildingRow>& Pair : RowsById)
@@ -730,7 +742,10 @@ int32 ABuildingGenerator::LoadContextBuildingsFromDatabase(const FString& Databa
 		{
 			continue;
 		}
-		ContextActor->BuildFromFootprint(Footprint, ContextBuildingHeightWorldUnits, ContextBuildingColor);
+		const FString Type = BuildingTypes::FromMapDatabase(Pair.Value.BuildingType);
+		ContextActor->SetBuildingType(Type);
+		ContextActor->BuildFromFootprint(Footprint, ContextBuildingHeightWorldUnits, BuildingTypes::Color(Type));
+		ContextActor->SetContextVisible(bNonCampusBuildingsVisible && IsBuildingTypeShown(Type));
 		SpawnedContextBuildingActors.Add(ContextActor);
 		SpawnedCount++;
 	}
@@ -802,9 +817,70 @@ void ABuildingGenerator::SetBuildingFilter(const FString& Query, int32 MinimumFl
 
 bool ABuildingGenerator::MatchesBuildingFilter(const APolyBuilding& Building) const
 {
-	return bCampusBuildingsVisible && Building.GetFloorCount() >= BuildingFilterMinimumFloors
+	return bCampusBuildingsVisible && IsBuildingTypeShown(Building.GetBuildingType()) && Building.GetFloorCount() >= BuildingFilterMinimumFloors
 		&& (BuildingFilterMaximumFloors == 0 || Building.GetFloorCount() <= BuildingFilterMaximumFloors)
 		&& NavigationSearch::MatchesWords(BuildingFilterWords, Building.BuildingName + TEXT(" ") + Building.BuildingId);
+}
+
+bool ABuildingGenerator::IsBuildingTypeShown(const FString& Type) const
+{
+	return !HiddenBuildingTypes.Contains(BuildingTypes::Normalize(Type));
+}
+
+bool ABuildingGenerator::SetBuildingType(const FString& BuildingId, const FString& Type)
+{
+	APolyBuilding* Building = FindBuildingById(BuildingId);
+	if (!IsValid(Building))
+	{
+		return false;
+	}
+	Building->SetBuildingType(Type);
+	++BuildingResultsRevision;
+	ApplyBuildingFilter();
+	return true;
+}
+
+FString ABuildingGenerator::GetBuildingType(const FString& BuildingId) const
+{
+	const APolyBuilding* Building = FindBuildingById(BuildingId);
+	return IsValid(Building) ? Building->GetBuildingType() : BuildingTypes::Default();
+}
+
+void ABuildingGenerator::SetBuildingTypeVisible(const FString& Type, bool bVisible)
+{
+	const FString Normalized = BuildingTypes::Normalize(Type);
+	if (IsBuildingTypeShown(Normalized) == bVisible)
+	{
+		return;
+	}
+	if (bVisible)
+	{
+		HiddenBuildingTypes.Remove(Normalized);
+	}
+	else
+	{
+		HiddenBuildingTypes.Add(Normalized);
+	}
+	++BuildingResultsRevision;
+	ApplyBuildingFilter();
+	SetNonCampusBuildingsVisible(bNonCampusBuildingsVisible);
+}
+
+bool ABuildingGenerator::IsBuildingTypeVisible(const FString& Type) const
+{
+	return IsBuildingTypeShown(Type);
+}
+
+void ABuildingGenerator::ResetBuildingTypeFilter()
+{
+	if (HiddenBuildingTypes.IsEmpty())
+	{
+		return;
+	}
+	HiddenBuildingTypes.Reset();
+	++BuildingResultsRevision;
+	ApplyBuildingFilter();
+	SetNonCampusBuildingsVisible(bNonCampusBuildingsVisible);
 }
 
 const TMap<FString, FString>& ABuildingGenerator::GetFilteredBuildingOptions() const
@@ -879,9 +955,9 @@ void ABuildingGenerator::SetNonCampusBuildingsVisible(bool bVisible)
 	bNonCampusBuildingsVisible = bVisible;
 	for (AActor* Actor : SpawnedContextBuildingActors)
 	{
-		if (Actor)
+		if (AContextBuildingActor* Context = Cast<AContextBuildingActor>(Actor))
 		{
-			Actor->SetActorHiddenInGame(!bVisible);
+			Context->SetContextVisible(bVisible && IsBuildingTypeShown(Context->GetBuildingType()));
 		}
 	}
 	MarkGroundDirty();
@@ -1086,6 +1162,10 @@ bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath) const
 		TSharedRef<FJsonObject> BuildingObject = MakeShared<FJsonObject>();
 		BuildingObject->SetStringField(TEXT("id"), Building->BuildingId);
 		BuildingObject->SetStringField(TEXT("name"), Building->BuildingName);
+		if (Building->GetBuildingType() != BuildingTypes::Default())
+		{
+			BuildingObject->SetStringField(TEXT("buildingType"), Building->GetBuildingType());
+		}
 
 		TArray<TSharedPtr<FJsonValue>> OffsetArray;
 		OffsetArray.Add(MakeShared<FJsonValueNumber>(Building->BuildingOffset.X));
@@ -1289,6 +1369,7 @@ bool ABuildingGenerator::GetBuildingSummary(const FString& BuildingId, FBuilding
 	OutSummary = FBuildingSummary();
 	OutSummary.Id = Building->BuildingId;
 	OutSummary.Name = Building->BuildingName;
+	OutSummary.BuildingType = Building->GetBuildingType();
 	OutSummary.Floors = Building->GetFloorCount();
 	OutSummary.Footprint = Building->GetFootprint();
 

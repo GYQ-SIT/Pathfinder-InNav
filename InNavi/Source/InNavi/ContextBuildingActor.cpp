@@ -14,6 +14,12 @@ AContextBuildingActor::AContextBuildingActor()
 	RootComponent = MeshComp;
 }
 
+void AContextBuildingActor::SetContextVisible(bool bVisible)
+{
+	bContextVisible = bVisible;
+	SetActorHiddenInGame(!bVisible);
+}
+
 void AContextBuildingActor::BuildFromFootprint(const TArray<FVector2D>& Footprint, float HeightWorldUnits, const FLinearColor& Color)
 {
 	if (Footprint.Num() < 3)

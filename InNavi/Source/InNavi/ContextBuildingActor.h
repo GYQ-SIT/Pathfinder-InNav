@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "BuildingTypes.h"
 #include "ContextBuildingActor.generated.h"
 
 class UProceduralMeshComponent;
@@ -25,8 +26,18 @@ public:
 	// closes it itself). Extrudes a flat-roofed block from Z=0 to Z=HeightWorldUnits, tinted Color.
 	// No-op (empty mesh) if Footprint has fewer than 3 points.
 	void BuildFromFootprint(const TArray<FVector2D>& Footprint, float HeightWorldUnits, const FLinearColor& Color);
+	// Sets the normalized database type used by the map filter.
+	void SetBuildingType(const FString& Type) { BuildingType = BuildingTypes::Normalize(Type); }
+	// Returns the context building's normalized type.
+	const FString& GetBuildingType() const { return BuildingType; }
+	// Sets context visibility while remembering the filter result for tests.
+	void SetContextVisible(bool bVisible);
+	// Returns the context filter result for automation tests.
+	bool IsContextVisibleForTests() const { return bContextVisible; }
 
 private:
 	UPROPERTY()
 	UProceduralMeshComponent* MeshComp;
+	FString BuildingType = BuildingTypes::Default();
+	bool bContextVisible = true;
 };

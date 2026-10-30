@@ -2,6 +2,7 @@
 
 
 #include "NavPlayerController.h"
+#include "BuildingTypes.h"
 #include "NavigationPanelWidget.h"
 #include "MobileAppWidget.h"
 #include "MobileSearchPageWidget.h"
@@ -3446,6 +3447,51 @@ bool ANavPlayerController::GetSelectedBuildingSummary(FBuildingSummary& OutSumma
 {
 	const FString Id = GetSelectedBuildingId();
 	return Generator && !Id.IsEmpty() && Generator->GetBuildingSummary(Id, OutSummary);
+}
+
+bool ANavPlayerController::SetSelectedBuildingType(const FString& NewType)
+{
+	if (bInteriorInspectionEnabled || (InteriorGen && !InteriorGen->GetLoadedBuildingId().IsEmpty()) || !Generator || !SelectedBuilding)
+	{
+		return false;
+	}
+	const FString Before = Generator->GetBuildingType(SelectedBuilding->BuildingId);
+	if (!Generator->SetBuildingType(SelectedBuilding->BuildingId, NewType))
+	{
+		return false;
+	}
+	if (Before != Generator->GetBuildingType(SelectedBuilding->BuildingId))
+	{
+		bHasUnsavedChanges = true;
+		OnInteriorContentChanged.Broadcast();
+	}
+	return true;
+}
+
+FString ANavPlayerController::GetSelectedBuildingType() const
+{
+	return Generator && SelectedBuilding ? Generator->GetBuildingType(SelectedBuilding->BuildingId) : FString();
+}
+
+void ANavPlayerController::SetBuildingTypeVisible(const FString& Type, bool bVisible)
+{
+	if (Generator)
+	{
+		Generator->SetBuildingTypeVisible(Type, bVisible);
+	}
+}
+
+bool ANavPlayerController::IsBuildingTypeVisible(const FString& Type) const
+{
+	return Generator && Generator->IsBuildingTypeVisible(Type);
+}
+
+void ANavPlayerController::ResetBuildingTypeFilter()
+{
+	if (Generator)
+	{
+		Generator->ResetBuildingTypeFilter();
+	}
 }
 
 TArray<ANavPlayerController::FBuildingListItem> ANavPlayerController::GetFilteredBuildingList() const

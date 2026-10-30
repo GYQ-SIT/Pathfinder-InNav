@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "DockPanelContent.h"
+#include "BuildingTypes.h"
 #include "MapPanelWidget.generated.h"
 
 class UButton;
@@ -69,6 +70,10 @@ public:
 	void SetBuildingSearchForTests(const FString& Text);
 	bool IsFiltersSectionOpenForTests() const { return bFiltersOpen; }
 	void SetSectionOpenForTests(bool bFilters, bool bOpen);
+	// Returns the number of fixed type checkboxes.
+	int32 GetBuildingTypeFilterCountForTests() const { return BuildingTypeCheckboxes.Num(); }
+	// Returns whether all type checkboxes are checked.
+	bool AreBuildingTypeFiltersCheckedForTests() const;
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -97,6 +102,22 @@ private:
 	void OnBuildingCampusCheckChanged(bool bIsChecked);
 	UFUNCTION()
 	void OnBuildingNonCampusCheckChanged(bool bIsChecked);
+	// Applies type checkbox state for the first fixed type.
+	UFUNCTION() void OnBuildingType0Changed(bool bChecked);
+	// Applies type checkbox state for the second fixed type.
+	UFUNCTION() void OnBuildingType1Changed(bool bChecked);
+	// Applies type checkbox state for the third fixed type.
+	UFUNCTION() void OnBuildingType2Changed(bool bChecked);
+	// Applies type checkbox state for the fourth fixed type.
+	UFUNCTION() void OnBuildingType3Changed(bool bChecked);
+	// Applies type checkbox state for the fifth fixed type.
+	UFUNCTION() void OnBuildingType4Changed(bool bChecked);
+	// Applies type checkbox state for the sixth fixed type.
+	UFUNCTION() void OnBuildingType5Changed(bool bChecked);
+	// Applies type checkbox state for the seventh fixed type.
+	UFUNCTION() void OnBuildingType6Changed(bool bChecked);
+	// Applies type checkbox state for the eighth fixed type.
+	UFUNCTION() void OnBuildingType7Changed(bool bChecked);
 	UFUNCTION()
 	void HandleBuildingSearchChanged(const FText& Text);
 	UFUNCTION()
@@ -118,6 +139,10 @@ private:
 	void SelectFloorOption(int32 Minimum, int32 Maximum);
 	void RefreshFloorChips();
 	void ApplyBuildingFilters();
+	// Builds a coloured checkbox for each fixed type.
+	void BuildBuildingTypeFilter();
+	// Forwards one checkbox state to the controller.
+	void SetBuildingTypeFilter(int32 Index, bool bVisible);
 	void SetSectionOpen(bool bFilters, bool bOpen);
 	void HandleBuildingRowClicked(const FString& BuildingId);
 
@@ -148,6 +173,8 @@ private:
 	UCheckBox* BuildingCampusCheckbox = nullptr;
 	UPROPERTY()
 	UCheckBox* BuildingNonCampusCheckbox = nullptr;
+	UPROPERTY()
+	TArray<UCheckBox*> BuildingTypeCheckboxes;
 	UPROPERTY()
 	UEditableTextBox* BuildingSearchBox = nullptr;
 	UPROPERTY()

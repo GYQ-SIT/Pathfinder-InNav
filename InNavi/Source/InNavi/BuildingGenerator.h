@@ -112,6 +112,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void SetCampusBuildingsVisible(bool bVisible);
 	void SetBuildingFilter(const FString& Query, int32 MinimumFloors, int32 MaximumFloors);
+	// Sets a building's normalized type and invalidates filtered results.
+	bool SetBuildingType(const FString& BuildingId, const FString& Type);
+	// Returns a building's type, or Other when it does not exist.
+	FString GetBuildingType(const FString& BuildingId) const;
+	// Sets whether a type is shown by the building filters.
+	void SetBuildingTypeVisible(const FString& Type, bool bVisible);
+	// Returns whether a type passes the building filter.
+	bool IsBuildingTypeVisible(const FString& Type) const;
+	// Clears all hidden building types.
+	void ResetBuildingTypeFilter();
 	void ApplyBuildingFilter();
 	bool MatchesBuildingFilter(const APolyBuilding& Building) const;
 	TArray<APolyBuilding*> GetFilteredBuildings() const;
@@ -121,6 +131,8 @@ public:
 	bool AreCampusBuildingsVisible() const { return bCampusBuildingsVisible; }
 	uint64 GetBuildingResultsRevision() const { return BuildingResultsRevision; }
 	int32 GetBuildingCount() const { return BuildingsById.Num(); }
+	// Exposes context actors so automation can verify type visibility.
+	const TArray<AActor*>& GetContextBuildingActorsForTests() const { return SpawnedContextBuildingActors; }
 	// Lazily rebuilt once per data/filter change; idle UI frames and selection changes reuse it.
 	const TMap<FString, FString>& GetFilteredBuildingOptions() const;
 
@@ -282,6 +294,8 @@ public:
 	void ClearAllBuildings();
 
 private:
+	// Applies the type visibility preference to campus and context building actors.
+	bool IsBuildingTypeShown(const FString& Type) const;
 	void HandleBuildingFloorCountChanged(APolyBuilding* Building);
 	UFUNCTION()
 	void HandleBuildingDestroyed(AActor* Building);
@@ -315,6 +329,7 @@ private:
 	int32 BuildingFilterMinimumFloors = 0;
 	int32 BuildingFilterMaximumFloors = 0;
 	bool bCampusBuildingsVisible = true;
+	TSet<FString> HiddenBuildingTypes;
 	uint64 BuildingResultsRevision = 0;
 	mutable uint64 CachedBuildingResultsRevision = MAX_uint64;
 	mutable TMap<FString, FString> CachedBuildingOptions;

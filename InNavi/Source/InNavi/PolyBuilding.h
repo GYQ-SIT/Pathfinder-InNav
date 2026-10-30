@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "BuildingTypes.h"
 #include "PolyBuilding.generated.h"
 
 class UProceduralMeshComponent;
@@ -95,6 +96,16 @@ public:
 	UPROPERTY()
 	FString BuildingName;
 
+	// The fixed type that controls this building's map colour and visibility filter.
+	UPROPERTY()
+	FString BuildingType = BuildingTypes::Default();
+	// Sets the normalized type and applies its body colour when not highlighted.
+	void SetBuildingType(const FString& Type);
+	// Returns this building's normalized type.
+	const FString& GetBuildingType() const { return BuildingType; }
+	// Returns the current material colour for automation tests.
+	FLinearColor GetBodyColorForTests() const;
+
 	UPROPERTY()
 	FVector2D BuildingOffset;
 
@@ -147,6 +158,7 @@ private:
 	// See SetVisibleInteriorLevel. 0 = nothing hidden (normal exterior view).
 	int32 VisibleInteriorLevel = 0;
 	bool bInspectionBottomHidden = false;
+	bool bIsHighlighted = false;
 
 	UPROPERTY()
 	UProceduralMeshComponent* MeshComp;

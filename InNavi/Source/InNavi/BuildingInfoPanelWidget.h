@@ -2,10 +2,12 @@
 
 #include "CoreMinimal.h"
 #include "DockPanelContent.h"
+#include "Components/ComboBoxString.h"
 #include "BuildingInfoPanelWidget.generated.h"
 
 class UBorder;
 class UButton;
+class UComboBoxString;
 class UFootprintPreviewWidget;
 class USizeBox;
 class UTextBlock;
@@ -40,6 +42,10 @@ public:
 	FString GetRoomsTextForTests() const;
 	FString GetLinksTextForTests() const;
 	FString GetStatusTextForTests() const;
+	// Returns the selected type shown by the panel.
+	FString GetBuildingTypeTextForTests() const;
+	// Exposes the type combo to automation tests.
+	UComboBoxString* GetBuildingTypeComboForTests() const { return BuildingTypeComboBox; }
 	int32 GetOutlinePointCountForTests() const;
 	UButton* GetOpen2DButtonForTests() const { return Open2DButton; }
 	UButton* GetOpen3DButtonForTests() const { return Open3DButton; }
@@ -53,6 +59,14 @@ private:
 	void HandleOpen2DClicked();
 	UFUNCTION()
 	void HandleOpen3DClicked();
+	// Applies a user-selected building type.
+	UFUNCTION()
+	void HandleBuildingTypeChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+	// Generates a coloured row for one type option.
+	UFUNCTION()
+	UWidget* HandleGenerateBuildingTypeItem(FString Item);
+	// Creates the type label and fixed-list dropdown.
+	void BuildBuildingTypeControls();
 
 	UPROPERTY()
 	USizeBox* ContentSize = nullptr;
@@ -66,6 +80,10 @@ private:
 	UTextBlock* NameText = nullptr;
 	UPROPERTY()
 	UTextBlock* IdText = nullptr;
+	UPROPERTY()
+	UTextBlock* BuildingTypeLabel = nullptr;
+	UPROPERTY()
+	UComboBoxString* BuildingTypeComboBox = nullptr;
 	UPROPERTY()
 	UTextBlock* FloorsValue = nullptr;
 	UPROPERTY()
@@ -82,6 +100,7 @@ private:
 	UButton* Open3DButton = nullptr;
 
 	bool bShowingBuilding = false;
+	bool bUpdatingBuildingType = false;
 	FString DisplayedId;
 	uint64 DisplayedRevision = MAX_uint64;
 	float ContentWidth = 220.f;

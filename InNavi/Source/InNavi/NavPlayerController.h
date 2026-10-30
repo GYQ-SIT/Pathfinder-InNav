@@ -582,6 +582,16 @@ public:
 
 	// What the Building panel shows about the selected building. False when nothing is selected.
 	bool GetSelectedBuildingSummary(FBuildingSummary& OutSummary) const;
+	// Sets the selected building's type and marks the project changed only when it differs.
+	bool SetSelectedBuildingType(const FString& NewType);
+	// Returns the selected building's type, or an empty string without a selection.
+	FString GetSelectedBuildingType() const;
+	// Sets the visibility of one building type in the map filter.
+	void SetBuildingTypeVisible(const FString& Type, bool bVisible);
+	// Returns whether a building type is visible in the map filter.
+	bool IsBuildingTypeVisible(const FString& Type) const;
+	// Clears all hidden building types.
+	void ResetBuildingTypeFilter();
 	uint64 GetBuildingResultsRevision() const;
 	int32 GetEditableBuildingCount() const;
 	bool SelectBuildingById(const FString& BuildingId);
