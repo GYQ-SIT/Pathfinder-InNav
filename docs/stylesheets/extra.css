@@ -1,0 +1,16 @@
+/* The theme (readthedocs) holds the text to 800 px, which leaves half of a wide screen empty, and keeps every table cell on one line, so a
+   table with long cells scrolls sideways. Wider text, and cells that wrap. */
+.wy-nav-content {
+  max-width: 1300px;
+}
+
+.rst-content table.docutils td,
+.rst-content table.docutils th {
+  white-space: normal;
+}
+
+/* A long name in a cell (a file, a class) breaks instead of widening the table. */
+.rst-content table.docutils code {
+  white-space: normal;
+  word-break: break-word;
+}

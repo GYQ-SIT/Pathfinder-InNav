@@ -1,0 +1,43 @@
+name: Lint
+
+# Repository checks that need no Unreal Engine, on a GitHub-hosted runner, so they run (and block a pull request) whether or not the
+# team's own machines are on. What they check is in the header of scripts/lint.py. The C++ is analysed by the Windows build workflow.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Repository checks (JSON, secrets, configuration, headers, links)
+        run: python scripts/lint.py
+
+      - name: JSON Schemas - the validator, the schemas' own tests, and every data file against its schema
+        run: |
+          python scripts/validate_schema.py --self-test
+          python scripts/test_schemas.py
+          python scripts/validate_schema.py docs/schemas/project.schema.json docs/test-data/*.json InNavi/Data/buildings.json
+          python scripts/validate_schema.py docs/schemas/mobile-prototype.schema.json InNavi/Data/Prototype/mobile-prototype.json
+
+      - name: The installer script parses
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check scripts/install-layout-validator.mjs

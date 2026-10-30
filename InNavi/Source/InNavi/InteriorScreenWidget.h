@@ -179,6 +179,12 @@ private:
 	void HandleInspectionModeChanged(bool bEnabled);
 	UFUNCTION()
 	void OnInspectionToggleClicked();
+	UFUNCTION()
+	void OnInspectionOrbitClicked();
+	UFUNCTION()
+	void OnInspectionGrabClicked();
+	// Which of Orbit and Grab is on, and whether they can be used.
+	void RefreshInspectionStyleButtons();
 
 	// Bound to ANavPlayerController::OnSnapEnabledChanged - swaps SnapToggleIcon between
 	// Icon_SnappingOn/Icon_SnappingOff so it stays correct even when toggled via the N key.
@@ -887,9 +893,15 @@ private:
 
 	UPROPERTY()
 	UTextBlock* Edit3DModeToggleButtonText = nullptr;
+	// Isolate, Orbit and Grab: one framed group of three in the switcher bar, between Colours and View.
+	UPROPERTY()
+	UBorder* InspectionFrame = nullptr;
 	UPROPERTY()
 	UButton* InspectionToggleButton = nullptr;
 	UPROPERTY()
+	UButton* InspectionOrbitButton = nullptr;
+	UPROPERTY()
+	UButton* InspectionGrabButton = nullptr;
 	UTextBlock* InspectionToggleText = nullptr;
 	UPROPERTY()
 	UTextBlock* InspectionHint = nullptr;

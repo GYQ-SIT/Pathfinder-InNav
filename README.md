@@ -12,29 +12,33 @@ build, reading project data and routes through a mobile data adapter).
 ## Repository layout
 
 - `README.md` — this file
-- `Readme.txt` — the readme that went into the Milestone 1 submission zip (kept as it was handed in)
 - `.gitignore` — UnrealEngine template, plus signing keys, packaging output and personal test files
-- `.github/workflows/` — CI: `build-windows.yml` (compiles the editor on a self-hosted Windows runner),
+- `.github/workflows/` — CI: `build-windows.yml` (builds the editor from a clean checkout, runs the MSVC static analysis and every
+  automation test, on a self-hosted Windows runner), `lint.yml` (JSON, secrets, configuration, headers and document links; GitHub-hosted), `release-windows.yml` (a pushed tag builds the Windows
+  package and publishes it as a release),
   `validate-json.yml` (every `InNavi/Data/*.json` parses), `deploy-wiki.yml` (publishes `docs/`)
+- `scripts/` — `lint.py` (the repository checks of `lint.yml`), `check-analysis.ps1` and `check-test-report.ps1` (turn the analysis log and
+  the test report into a pass or a fail), `package-windows.ps1`, `smoke-test-package.ps1` and `publish-release.ps1` (the release build,
+  see Releases below), `install-layout-validator.mjs` (installs the plugin package)
 - `InNavi/` — the Unreal Engine project (open `InNavi/InNavi.uproject`)
   - `Source/InNavi/` — all the C++. The phone app is the files starting with `Mobile`
   - `Data/` — sample data, audio, default dock layouts
 - `docs/`
   - `proposal.md` — project proposal
-  - `architecture.md` — system architecture + tech stack
+  - `architecture.md` — system architecture v1.0: the layers, the boundaries, the tech stack, the delivery pipeline, who owns what
+  - `configuration.md` — every setting (files, flags, CI), where it is set, and where the secrets are kept
+  - `performance.md` — the performance budgets and the measured numbers
   - `toolchain-decision.md` — stack/platform decisions and why
   - `deliverables.md` — ownership + M1/M2/M3 targets
   - `design/`
-    - `product-design.md` — product design document
+    - `project-file-format.md` — the project file: every field, units, versions, what happens to wrong input (and `docs/schemas/`, its JSON Schemas)
     - `interior-editor-guide.md` — **how to use the editor** (both screens: controls, panels, doors, floor generator, 3D, navigation)
     - `ui-panels-guide.md` — how the dock panels work and how to add one
-    - `interior-editor-ui-spec.md` — the original C++ interface spec for the editor's UI (written for Padre)
     - `mobile-app-data-interface.md` — the phone app's screens and the data interface they use
-    - `ui-ux/` — wireframes, user flows, mockups
   - `mobile-real-data-guide.md` — **how to connect the phone app to real data** (read this before working on it)
   - `android-install.md` — installing the phone app's test build on an Android phone
   - `android-signing.md` — building and signing the APK
-  - `test-data/` — project files for trying doors and campus routes (three buildings, A and B next to each other, C far away)
+  - `test-data/` — a project file for trying doors and campus routes (three buildings, A and B next to each other, C far away; the tests use it too)
   - `planning/` — Feature Plan + Technical Deliverable Plan
 
 ## Prerequisites
@@ -59,7 +63,7 @@ cd Pathfinder-InNav
 3. Hit **Play** in the Editor. Sample data lives under `InNavi/Data/`: the campus/
    exterior layer loads from `map_extended.db` (SQL-backed), and interior building
    layouts save/load as JSON (e.g. `buildings.json`). For several buildings with doors
-   and generated floors, **File > Load** one of the files in `docs/test-data/`.
+   and generated floors, **File > Load** `docs/test-data/entrance-test-2-with-doors.json`.
 
 The editor has a full on-screen UI on both its screens (the campus and a building's
 interior) — a dockable layout of Toolbar / Floor / Properties / Layers / Navigation /
@@ -74,18 +78,55 @@ report export. Findings never block editing or saving. See
 [`docs/design/layout-validator.md`](docs/design/layout-validator.md) for usage and headless file validation.
 The reusable plugin is versioned as `1.0.0` and distributed through GitHub Packages. See its
 [package README](InNavi/Plugins/InNaviLayoutValidator/README.md) for exact-version installation,
-and the [M2 evidence](docs/design/layout-validator-m2-compliance.md) for the D1�D5 mapping.
+and the [M2 evidence](docs/design/layout-validator-m2-compliance.md) for the D1–D5 mapping.
 
 ## Running the tests
 
-About 120 automation tests (`InNavi.*`). With the editor closed:
+About 165 automation tests (`InNavi.*`), including the measurements of `InNavi.Performance` (see
+[`docs/performance.md`](docs/performance.md) for the budgets and the numbers). With the editor closed:
 
 ```bash
 UnrealEditor-Cmd.exe InNavi/InNavi.uproject -ExecCmds="Automation RunTests InNavi; Quit" -unattended -nullrhi -nosplash
 ```
 
 (`UnrealEditor-Cmd.exe` is in `Engine/Binaries/Win64` of the Unreal install.) A part can be run on its own, e.g. `InNavi.Mobile` or
-`InNavi.Navigation`. Windows CI runs the layout validator, navigation, docking and UI guard tests.
+`InNavi.Navigation`. Windows CI runs **all** of them, and fails the pull request when one fails (the editor exits 0 either way, so
+`scripts/check-test-report.ps1` reads the report). Before a pull request, `python scripts/lint.py` runs the repository checks of `lint.yml`
+on your own machine. The report and the performance measurements of every CI run are kept with it as a downloadable artifact.
+
+## Releases
+
+A Windows build is published from a tag, not by hand. Tag a commit of `main` that passed CI and push the tag:
+
+```bash
+git tag m2-build-1
+git push origin m2-build-1
+```
+
+`release-windows.yml` then packages the build on the Windows runner (`scripts/package-windows.ps1`: cook, stage, pak, clean, zip), starts
+the package once without a window to see that it opens and closes (`scripts/smoke-test-package.ps1`), and attaches
+`InNavi-<tag>.zip` to a GitHub release marked as a test build (`scripts/publish-release.ps1`). Tags look like `m<milestone>-build-<n>`.
+The zip holds `InNavi.exe`, the campus database, the default layouts, `SampleProjects/` to try File > Load with, and `BUILD-INFO.txt`
+(tag, commit, date). The same package can be made on your own machine with
+`powershell -File scripts\package-windows.ps1 -Name InNavi-test -OutputDir C:\Temp\release` (editor closed). The Android phone app is
+built and signed separately (`docs/android-signing.md`).
+
+## Working agreement
+
+The backlog is the Jira project **PAT** (<https://digipen-team-pathfinder.atlassian.net/jira/software/projects/PAT/list>): every piece of work is a story under an
+epic with an owner, and the epics of the four technical deliverables are named in `docs/deliverables.md`. So that anyone can follow who did what:
+
+- **Branch** from `main`, named for what it is (`YQ_nav_panel`), and open a **pull request**; CI (build, analysis, tests, lint) has to be green before it is merged.
+- **Name the Jira issue** in the pull request (the template asks for it) and start each commit message with its key when there is one: `PAT-123 Short summary`.
+- **One owner per story**; a pull request that closes a story says so, and the story is moved to Done when it is merged.
+- Do not commit personal files (your own `buildings.json` edits, saved layouts); `lint.py` also fails on keys and addresses in the source.
+
+## Performance budget
+
+Desktop 60 FPS or more, phone 30 FPS or more; the campus loads in under 3 s, an interior opens in under 0.5 s, a route between buildings
+takes under 1 s (p95). The measured numbers, the machine they were taken on, and the one place that is still slow (the first route in
+the largest, ten-floor building takes about 6 s while it builds the graph of the building; the next ones take about 20 ms) are in [`docs/performance.md`](docs/performance.md). The Debug panel (Window > Debug) shows
+the frame rate while you use the app: the average, the 1 % low and the slowest frame of the last ten seconds.
 
 ## The phone app
 
@@ -105,6 +146,12 @@ The editor and the desktop app: **Windows 11 only**, in practice — this is a U
 Windows; the team's Linux VM has no Windows toolchain to compile it (see the CI/CD note in `docs/deliverables.md`), and macOS has
 not been set up or tested. The phone app: **Android 8 or newer, 64-bit ARM** (and an x86_64 build for PC emulators); there is no iPhone version.
 
+## Documentation (the team wiki)
+
+The documents of `docs/` are published as the team wiki, a MkDocs site rebuilt by `deploy-wiki.yml` on every push to `main` that changes
+them: **http://51.79.240.111:5000/** (the team12 VM of the course). The
+wiki and this repository say the same thing: `docs/` is the one source, and the wiki is only how it is read. Start with `architecture.md`.
+
 ## Team
 
-See `docs/design/product-design.md` for the team roster and roles.
+Who owns which component is in `docs/architecture.md` (section 8) and `docs/deliverables.md`.

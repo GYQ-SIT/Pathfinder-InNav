@@ -49,7 +49,11 @@ class IMobileNavSource
 
 `FMobileMockSource` (`MobileMockSource.h/.cpp`) answers with the prototype's data: the Paya Lebar Mall, the Pathfinder Centre and the SIT Punggol
 campus (E2, E6 with its mezzanine L2M, W2), four places on every level, the mall's closed restaurant, and routes made up from them (lift,
-escalator or stairs by the person's preferences; out of one building and into another). `MobileNavSourceTests.cpp` has a contract check
+escalator or stairs by the person's preferences; out of one building and into another). **The data is a file, not code**:
+`InNavi/Data/Prototype/mobile-prototype.json` (format `innavi-mobile-prototype`, version 1). The file says `"synthetic": true` and carries the
+note the screens show ("All maps, places and positioning are simulated"); a file that does not say it is made up, or that does not read, is
+refused: the source is then empty, with the reason in the log and in `GetLoadError()`, and nothing crashes. To change what the prototype
+shows, edit the file; the class only turns it into places, maps and walks. `MobileNavSourceTests.cpp` has a contract check
 (`CheckContract`) that any source must pass - the real one runs the same check.
 
 Saved places are the app's own state (a small file in `Saved/`), not part of the source. The bottom sheet's flow (search -> place ->

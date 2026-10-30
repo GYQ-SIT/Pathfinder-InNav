@@ -348,6 +348,15 @@ void APolyBuilding::ApplySlabVisibility()
 		BuildWallSection(CachedPoly2D, (L - 1) * FloorHeight, L * FloorHeight, WallSectionIndex, /*bCreateCollision=*/!bHideWall, L);
 		MeshComp->SetMeshSectionVisible(WallSectionIndex, !bHideWall);
 	}
+
+	// With the bottom platform gone the first floor needs a floor of its own, like every floor above it has (the slab at its base).
+	if (bInspectionBottomHidden)
+	{
+		const int32 FloorSection = GetInspectionFloorSectionIndex();
+		const bool bShow = VisibleInteriorLevel <= 1;
+		BuildCapSection(CachedPoly2D, CachedCapTris, 0.f, FloorSection, /*bCreateCollision=*/bShow);
+		MeshComp->SetMeshSectionVisible(FloorSection, bShow);
+	}
 }
 
 void APolyBuilding::SetHighlighted(bool bHighlighted)

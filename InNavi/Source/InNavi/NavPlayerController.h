@@ -12,6 +12,12 @@
 
 class APolyBuilding;
 class AInteriorBuildingPreviewPivot;
+// How dragging turns the model in Isolate: Orbit moves the camera around it (drag right and the model seems to turn left), Grab makes it
+// follow the mouse like a thing held in the hand (drag right and its near side goes right).
+enum class EInspectionRotateStyle : uint8 { Orbit, Grab };
+
+// What a held mouse button does to the model in Isolate: the left one pans it, the right one turns it.
+enum class EInspectionDrag : uint8 { None, Pan, Rotate };
 struct FNavigationRoutePoint;
 class ABuildingGenerator;
 class ULayoutValidationSession;
@@ -204,7 +210,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void SetIn3DPreviewMode(bool bEnable);
 
-	// Whole-model inspection around a fixed pivot at the lowest floor's base.
+	// Whole-model inspection: the bottom platform and the surroundings are hidden. Left-drag pans the model, right-drag turns it about its
+	// own centre (at first the centre of the lowest floor), the wheel zooms.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void SetInteriorInspectionEnabled(bool bEnable);
 	UFUNCTION(BlueprintPure, Category = "Interior")
@@ -212,8 +219,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	bool CanInspectBuilding() const;
 	int32 GetInspectionLowestFloor() const;
+	void SetInspectionRotateStyle(EInspectionRotateStyle Style) { InspectionRotateStyle = Style; }
+	EInspectionRotateStyle GetInspectionRotateStyle() const { return InspectionRotateStyle; }
 	AInteriorBuildingPreviewPivot* GetInspectionPivot() const { return InspectionPivot; }
 	void RotateInspectionBy(float YawDegrees, float TiltDegrees);
+	// Slides the model across the screen by a distance in pixels (what a left-drag does); the view is not moved.
+	void PanInspectionBy(const FVector2D& PixelDelta);
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")
 	FOn3DPreviewModeChanged OnInspectionModeChanged;
 
@@ -1550,7 +1561,14 @@ private:
 	UPROPERTY(Transient)
 	AInteriorBuildingPreviewPivot* InspectionPivot = nullptr;
 	bool bInteriorInspectionEnabled = false;
-	bool bInspectionDragging = false;
+	EInspectionDrag InspectionDrag = EInspectionDrag::None;
+	EInspectionRotateStyle InspectionRotateStyle = EInspectionRotateStyle::Grab;
+	// The view of the model is fixed (the model is what moves), and the turn is limited to what can be seen from above: the camera looks
+	// down 25 degrees, so the tilt keeps the view between 10 and 85 degrees above the model's floor.
+	static constexpr float InspectionCameraPitch = -25.f;
+	static constexpr float InspectionCameraYaw = -45.f;
+	static constexpr float InspectionTiltMin = -15.f;
+	static constexpr float InspectionTiltMax = 60.f;
 	bool bInspectionSavedEdit = false;
 	int32 InspectionSavedFloor = 0;
 	FString InspectionBuildingId;
@@ -1562,7 +1580,10 @@ private:
 	float InspectionDefaultDistance = 0.f;
 	void FrameInspectionCamera(float ZoomFactor = 1.f);
 	void TickInteriorInspection();
-	void BeginInspectionDrag();
+	// Left button (held) pans the model, right button (held) turns it.
+	void BeginInspectionDrag(EInspectionDrag Mode);
+	void OnRightMouseDownInspection();
+	void OnRightMouseUpInspection();
 	bool bIsIn3DEditMode = false;
 	float ThreeDPreviewCameraDistance = 0.f;
 	float ThreeDPreviewYaw = -45.f;

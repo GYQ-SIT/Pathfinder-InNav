@@ -859,6 +859,41 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		RoomColoursButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoomColoursClicked);
 
 
+		// Isolate | Orbit | Grab - in 3D only, as one framed group like 2D | 3D. Isolate hides the bottom platform and the surroundings and lets the
+		// model be turned; Orbit and Grab are how dragging turns it, and one of them is always on (picking one turns the other off).
+		InspectionFrame = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("InspectionFrame"));
+		InspectionFrame->SetBrush(Rounded(Rgb(14, 24, 38), Rgb(46, 66, 94), 8.f));
+		InspectionFrame->SetBrushColor(FLinearColor::White);
+		InspectionFrame->SetPadding(FMargin(3.f));
+		InspectionFrame->SetVisibility(ESlateVisibility::Collapsed);
+		UHorizontalBox* InspectionRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("InspectionRow"));
+		InspectionFrame->SetContent(InspectionRow);
+		auto AddInspectionSegment = [this, InspectionRow](const TCHAR* Name, const TCHAR* Label, UTextBlock** OutCaption) -> UButton*
+		{
+			UButton* Segment = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
+			Segment->SetStyle(Button_Style_Segment(false));
+			Segment->SetBackgroundColor(FLinearColor::White);
+			Segment->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+			UTextBlock* Caption = StartStyle::Text(WidgetTree, FString(Name) + TEXT("Label"), Label, 13.f, FLinearColor::White, true);
+			Caption->SetJustification(ETextJustify::Center);
+			if (OutCaption) *OutCaption = Caption;
+			UBorder* Pad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(Name) + TEXT("Pad")));
+			Pad->SetBrushColor(FLinearColor::Transparent);
+			Pad->SetPadding(FMargin(12.f * StartStyle::DesignToUi, 6.f * StartStyle::DesignToUi));
+			Pad->SetContent(Caption);
+			Segment->SetContent(Pad);
+			Segment->SetVisibility(ESlateVisibility::Collapsed);
+			InspectionRow->AddChildToHorizontalBox(Segment)->SetPadding(FMargin(2.f, 0.f));
+			return Segment;
+		};
+		InspectionToggleButton = AddInspectionSegment(TEXT("Btn_InspectionToggle"), TEXT("Isolate"), &InspectionToggleText);
+		InspectionToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnInspectionToggleClicked);
+		InspectionOrbitButton = AddInspectionSegment(TEXT("Btn_InspectionOrbit"), TEXT("Orbit"), nullptr);
+		InspectionOrbitButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnInspectionOrbitClicked);
+		InspectionGrabButton = AddInspectionSegment(TEXT("Btn_InspectionGrab"), TEXT("Grab"), nullptr);
+		InspectionGrabButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnInspectionGrabClicked);
+		AddCentered(SwitcherRow, InspectionFrame, FMargin(8.f * DesignToUi, 0.f, 0.f, 0.f));
+
 		// "View" / "Edit" - in 3D only, beside 2D | 3D since it is that mode's sub-mode. Starts as "View" (amber), matching PC's
 		// own default (see ANavPlayerController::bIsIn3DEditMode); HandleEdit3DModeChanged makes it green for Edit.
 		Edit3DModeToggleButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Edit3DModeToggle"));
@@ -875,23 +910,6 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		Edit3DModeToggleButton->SetContent(Edit3DPad);
 		Edit3DModeToggleButton->SetVisibility(ESlateVisibility::Collapsed);
 		AddCentered(SwitcherRow, Edit3DModeToggleButton, FMargin(8.f * DesignToUi, 0.f, 0.f, 0.f));
-		InspectionToggleButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_InspectionToggle"));
-		InspectionToggleButton->SetBackgroundColor(FLinearColor::White);
-		InspectionToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnInspectionToggleClicked);
-		InspectionToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
-		InspectionToggleText = Text(WidgetTree, TEXT("Txt_InspectionToggle"), TEXT("Isolate & Rotate"), 13.f, FLinearColor::White, true);
-		UBorder* InspectionPad = WidgetTree->ConstructWidget<UBorder>();
-		InspectionPad->SetBrushColor(FLinearColor::Transparent);
-		InspectionPad->SetPadding(FMargin(16.f * DesignToUi, 9.f * DesignToUi));
-		InspectionPad->SetContent(InspectionToggleText);
-		InspectionToggleButton->SetContent(InspectionPad);
-		InspectionToggleButton->SetVisibility(ESlateVisibility::Collapsed);
-		// The switcher row is already full in smaller desktop windows. Keep this beside Camera.
-		if (UHorizontalBoxSlot* InspectionSlot = Cast<UHorizontalBoxSlot>(MenuBarRow->InsertChildAt(4, InspectionToggleButton)))
-		{
-			InspectionSlot->SetVerticalAlignment(VAlign_Center);
-			InspectionSlot->SetPadding(FMargin(6.f, 0.f));
-		}
 		InspectionHint = Text(WidgetTree, TEXT("Txt_InspectionHint"), TEXT(""), 12.f, StartStyle::Rgb(255, 200, 100), true);
 		InspectionHint->SetVisibility(ESlateVisibility::Collapsed);
 		InspectionHint->SetAutoWrapText(true);
@@ -1964,6 +1982,43 @@ void UInteriorScreenWidget::HandlePreviewModeChanged(bool bIsActive)
 	}
 }
 
+void UInteriorScreenWidget::RefreshInspectionStyleButtons()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC) return;
+	const ESlateVisibility Shown = PC->IsIn3DPreviewMode() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed;
+	if (InspectionFrame) InspectionFrame->SetVisibility(Shown);
+	for (UButton* Button : { InspectionToggleButton, InspectionOrbitButton, InspectionGrabButton })
+	{
+		if (Button) Button->SetVisibility(Shown);
+	}
+	const bool bGrab = PC->GetInspectionRotateStyle() == EInspectionRotateStyle::Grab;
+	if (InspectionOrbitButton)
+	{
+		InspectionOrbitButton->SetIsEnabled(PC->IsInteriorInspectionEnabled());
+		InspectionOrbitButton->SetStyle(Button_Style_Segment(!bGrab));
+		InspectionOrbitButton->SetToolTipText(FText::FromString(TEXT("Orbit: turning the model is like moving the camera around it, so it turns the other way from the mouse.")));
+	}
+	if (InspectionGrabButton)
+	{
+		InspectionGrabButton->SetIsEnabled(PC->IsInteriorInspectionEnabled());
+		InspectionGrabButton->SetStyle(Button_Style_Segment(bGrab));
+		InspectionGrabButton->SetToolTipText(FText::FromString(TEXT("Grab: the model follows the mouse when you turn it, as if you were holding it in your hand.")));
+	}
+}
+
+void UInteriorScreenWidget::OnInspectionOrbitClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) PC->SetInspectionRotateStyle(EInspectionRotateStyle::Orbit);
+	RefreshInspectionStyleButtons();
+}
+
+void UInteriorScreenWidget::OnInspectionGrabClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) PC->SetInspectionRotateStyle(EInspectionRotateStyle::Grab);
+	RefreshInspectionStyleButtons();
+}
+
 void UInteriorScreenWidget::OnInspectionToggleClicked()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) PC->SetInteriorInspectionEnabled(!PC->IsInteriorInspectionEnabled());
@@ -1975,18 +2030,17 @@ void UInteriorScreenWidget::HandleInspectionModeChanged(bool bEnabled)
 	if (!PC) return;
 	if (InspectionToggleButton)
 	{
-		InspectionToggleButton->SetVisibility(PC->IsIn3DPreviewMode() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 		InspectionToggleButton->SetIsEnabled(bEnabled || PC->CanInspectBuilding());
-		InspectionToggleButton->SetStyle(Button_Style_Edit3D(bEnabled));
+		InspectionToggleButton->SetStyle(Button_Style_Segment(bEnabled));
 		InspectionToggleButton->SetToolTipText(FText::FromString(PC->CanInspectBuilding()
-			? TEXT("Hide the lowest storey and surroundings. Drag the model to rotate it about its bottom pivot; scroll to zoom. Turn off to restore the view.")
-			: TEXT("This building needs at least two interior floors to hide its lowest storey.")));
+			? TEXT("Isolate: hide the bottom platform and the surroundings and look at the model on its own. Drag with the left button to move it, with the right button to turn it; scroll to zoom. Click again to restore the view.")
+			: TEXT("This building has no interior floor to look at.")));
 	}
-	if (InspectionToggleText) InspectionToggleText->SetText(FText::FromString(bEnabled ? TEXT("Isolate & Rotate: ON") : TEXT("Isolate & Rotate")));
+	RefreshInspectionStyleButtons();
 	if (InspectionHint)
 	{
 		InspectionHint->SetVisibility(bEnabled ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
-		InspectionHint->SetText(FText::FromString(FString::Printf(TEXT("Level %d hidden; showing Level %d. Drag to rotate, scroll to zoom. Esc to restore."), PC->GetInspectionLowestFloor(), PC->GetActiveFloor())));
+		InspectionHint->SetText(FText::FromString(FString::Printf(TEXT("Showing Level %d without the bottom platform. Left-drag to move the model, right-drag to turn it, scroll to zoom. Esc to restore."), PC->GetActiveFloor())));
 	}
 	if (!bEnabled && InspectionPivotOverlay) InspectionPivotOverlay->SetVisibility(ESlateVisibility::Collapsed);
 	if (bEnabled && InspectionUiStates.IsEmpty())

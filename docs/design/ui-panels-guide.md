@@ -28,8 +28,8 @@ besides the dock host allowed on a root canvas:
 | `Background`, `FloorPlanWidget` | the 2D plan and the backdrop behind it (the central canvas) |
 | `Pnl_MenuBar`, `Pnl_BuildingSwitcherBar` | the fixed bars along the top |
 | `Pnl_FileDropdown`, `Pnl_WindowDropdown`, `Pnl_CameraDropdown`, `MenuClickCatcher` | the menus that open from those bars, and the layer that closes them on a click elsewhere |
-| `Txt_InspectionHint` | temporary instructions and the hidden/active floor status for Isolate & Rotate; stays with the central viewport while tool panels move |
-| `Img_InspectionPivot` | projects the building's bottom anchor into the viewport so it remains visible through the active upper floor; follows the model instead of a dock panel |
+| `Txt_InspectionHint` | temporary instructions and the floor being viewed for Isolate & Rotate; stays with the central viewport while tool panels move |
+| `Img_InspectionPivot` | projects the model's centre (what it turns about) into the viewport so it remains visible through the floor being viewed; follows the model instead of a dock panel |
 | `Chrome_*` | decoration, such as divider lines |
 | `DockHost` | the dock system itself |
 

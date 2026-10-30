@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "DockPanelContent.h"
 #include "InteriorTypes.h"
+#include "FrameStats.h"
 #include "DebugPanelWidget.generated.h"
 
 class UTextBlock;
@@ -51,6 +52,8 @@ private:
 
 	TFunction<FString()> InfoProvider;
 	float SmoothedDeltaTime = 0.f;
+	// The last ten seconds of frames, for the average, the 1 % low and the slowest frame.
+	FFrameStats Frames;
 	// Empty until the first failure.
 	FString LastActionFailedMessage;
 	EActionFailureSeverity LastActionFailedSeverity = EActionFailureSeverity::Warning;

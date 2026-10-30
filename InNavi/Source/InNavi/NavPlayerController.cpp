@@ -215,7 +215,7 @@ void ANavPlayerController::SelectOutdoorPointUnderCursor()
 	GetHitResultUnderCursor(ECC_Visibility, false, Hit);
 	const bool bOnBuilding = Hit.bBlockingHit && Cast<APolyBuilding>(Hit.GetActor()) != nullptr;
 
-	FVector Origin, Direction;
+	FVector Origin = FVector::ZeroVector, Direction = FVector::DownVector;
 	if (!bOnBuilding && !DeprojectMousePositionToWorld(Origin, Direction))
 	{
 		return;
@@ -294,6 +294,9 @@ void ANavPlayerController::SetupInputComponent()
 	// side of the same button.
 	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &ANavPlayerController::OnLeftMouseDown3DEdit);
 	InputComponent->BindKey(EKeys::LeftMouseButton, IE_Released, this, &ANavPlayerController::OnLeftMouseUp3DEdit);
+	// Isolate: the right button turns the model (the left one pans it, above).
+	InputComponent->BindKey(EKeys::RightMouseButton, IE_Pressed, this, &ANavPlayerController::OnRightMouseDownInspection);
+	InputComponent->BindKey(EKeys::RightMouseButton, IE_Released, this, &ANavPlayerController::OnRightMouseUpInspection);
 }
 
 void ANavPlayerController::OnClick()
@@ -3284,7 +3287,7 @@ bool ANavPlayerController::IsPointerOverUI() const
 
 void ANavPlayerController::OnLeftMouseDown3DEdit()
 {
-	if (bInteriorInspectionEnabled) { BeginInspectionDrag(); return; }
+	if (bInteriorInspectionEnabled) { BeginInspectionDrag(EInspectionDrag::Pan); return; }
 	if (!bIsIn3DPreviewMode || !bIsIn3DEditMode || !bSelectMode || !InteriorGen || IsPointerOverUI())
 	{
 		return;
@@ -3320,7 +3323,7 @@ void ANavPlayerController::OnLeftMouseDown3DEdit()
 
 void ANavPlayerController::OnLeftMouseUp3DEdit()
 {
-	bInspectionDragging = false;
+	if (InspectionDrag == EInspectionDrag::Pan) InspectionDrag = EInspectionDrag::None;
 	if (!bIsDragging3DRoom)
 	{
 		return;
