@@ -100,11 +100,12 @@ namespace ProjectSchemaTests
 			bool bNoExtras = false;
 			Schema.TryGetBoolField(TEXT("additionalProperties"), bNoExtras);
 			const bool bExtrasForbidden = Schema.HasTypedField<EJson::Boolean>(TEXT("additionalProperties")) && !bNoExtras;
-			for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : Object->Values)
+			for (const auto& Field : Object->Values)
 			{
+				const FString FieldName(*Field.Key);
 				const TSharedPtr<FJsonObject>* FieldSchema = nullptr;
-				if (Properties && (*Properties)->TryGetObjectField(Field.Key, FieldSchema)) Check(Field.Value, **FieldSchema, Root, Path + TEXT(".") + Field.Key, Errors);
-				else if (bExtrasForbidden) Errors.Add(FString::Printf(TEXT("%s: the field \"%s\" is not in the schema"), *Path, *Field.Key));
+				if (Properties && (*Properties)->TryGetObjectField(FieldName, FieldSchema)) Check(Field.Value, **FieldSchema, Root, Path + TEXT(".") + FieldName, Errors);
+				else if (bExtrasForbidden) Errors.Add(FString::Printf(TEXT("%s: the field \"%s\" is not in the schema"), *Path, *FieldName));
 			}
 		}
 	}

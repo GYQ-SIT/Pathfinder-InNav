@@ -147,12 +147,14 @@ void FMobileMockSource::Load(const FString& DataFile)
 		Fail(TEXT("\"placeSets\" is missing."));
 		return;
 	}
-	for (const TPair<FString, TSharedPtr<FJsonValue>>& Set : (*Sets)->Values)
+	// The keys of a JSON object are not FString in this engine version: a loop that names TPair<FString, ...> copies each pair, and clang (the Android build) refuses that.
+	for (const auto& Set : (*Sets)->Values)
 	{
+		const FString SetName(*Set.Key);
 		const TArray<TSharedPtr<FJsonValue>>* Entries = nullptr;
 		if (!Set.Value->TryGetArray(Entries))
 		{
-			Fail(FString::Printf(TEXT("place set \"%s\" is not a list."), *Set.Key));
+			Fail(FString::Printf(TEXT("place set \"%s\" is not a list."), *SetName));
 			return;
 		}
 		for (const TSharedPtr<FJsonValue>& EntryValue : *Entries)
@@ -163,7 +165,7 @@ void FMobileMockSource::Load(const FString& DataFile)
 				|| !(*Entry)->TryGetStringField(TEXT("category"), Template.Category) || !(*Entry)->TryGetStringField(TEXT("roomType"), Template.RoomType)
 				|| !ReadPointField(*Entry, TEXT("position"), Template.Position))
 			{
-				Fail(FString::Printf(TEXT("a place of the set \"%s\" needs name, number, category, roomType and position."), *Set.Key));
+				Fail(FString::Printf(TEXT("a place of the set \"%s\" needs name, number, category, roomType and position."), *SetName));
 				return;
 			}
 			const TArray<TSharedPtr<FJsonValue>>* Closed = nullptr;
@@ -175,7 +177,7 @@ void FMobileMockSource::Load(const FString& DataFile)
 					if (Level->TryGetNumber(LevelNumber)) Template.UnavailableOnLevels.Add(LevelNumber);
 				}
 			}
-			PlaceSets.FindOrAdd(Set.Key).Add(Template);
+			PlaceSets.FindOrAdd(SetName).Add(Template);
 		}
 	}
 
