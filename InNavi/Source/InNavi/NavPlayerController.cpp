@@ -4057,6 +4057,27 @@ void ANavPlayerController::CopyInteriorKeyHandler()
 	UE_LOG(LogTemp, Log, TEXT("Copied room: %s"), *CopiedRoomId);
 }
 
+TArray<FVector2D> ANavPlayerController::PastedFootprint(const TArray<FVector2D>& Footprint, const FVector2D& BuildingOffset, float Scale, const FVector2D& CursorWorld)
+{
+	TArray<FVector2D> Result = Footprint;
+	if (Result.IsEmpty() || Scale <= 0.f)
+	{
+		return Result;
+	}
+	FVector2D Center = FVector2D::ZeroVector;
+	for (const FVector2D& Point : Result)
+	{
+		Center += Point;
+	}
+	Center /= Result.Num();
+	const FVector2D Move = CursorWorld / Scale - BuildingOffset - Center;
+	for (FVector2D& Point : Result)
+	{
+		Point += Move;
+	}
+	return Result;
+}
+
 void ANavPlayerController::PasteInteriorKeyHandler()
 {
 	if (bInteriorInspectionEnabled) return;
@@ -4074,32 +4095,11 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 
 		const float Scale = Generator->GetScale();
 
-		// Convert mouse world position into the same footprint-space
-		// used by SpawnBuildingFromData.
-		const FVector2D PastePosition(
-			Hit.Location.X / Scale,
-			Hit.Location.Y / Scale
-		);
-
-		TArray<FVector2D> NewFootprint = CopiedBuildingFootprint;
-
-		// Find the center of the copied building.
-		FVector2D Center = FVector2D::ZeroVector;
-
-		for (const FVector2D& Point : NewFootprint)
-		{
-			Center += Point;
-		}
-
-		Center /= NewFootprint.Num();
-
-		// Move the copied footprint so its center follows the mouse.
-		const FVector2D MoveOffset = PastePosition - Center;
-
-		for (FVector2D& Point : NewFootprint)
-		{
-			Point += MoveOffset;
-		}
+		// Move the copied outline so the building's centre is under the mouse (the offset it stands at counts, see PastedFootprint).
+		const TArray<FVector2D> NewFootprint = PastedFootprint(
+			CopiedBuildingFootprint, CopiedBuildingOffset, Scale, FVector2D(Hit.Location.X, Hit.Location.Y));
+		// How far the outline moved, which the interior has to move by as well.
+		const FVector2D MoveOffset = NewFootprint[0] - CopiedBuildingFootprint[0];
 
 		const FString NewId =
 			Generator->GenerateUniqueBuildingId(CopiedBuildingId);

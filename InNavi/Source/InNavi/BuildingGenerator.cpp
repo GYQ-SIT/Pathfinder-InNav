@@ -277,7 +277,9 @@ int32 ABuildingGenerator::LoadBuildingsFromDatabase(const FString& DatabasePath)
 
 			FDatabaseBuildingRow& Row = RowsById.FindOrAdd(BuildingId);
 			Row.BuildingType = BuildingType;
-			Row.LatLonPoints.Add(FVector2D((float)Lon, (float)Lat));
+			// Doubles: a float holds a longitude of 104 degrees only to about 0.4 m, and corners of a building that are a few
+			// centimetres apart ran together.
+			Row.LatLonPoints.Add(FVector2D(Lon, Lat));
 			return ESQLitePreparedStatementExecuteRowResult::Continue;
 		});
 	Database.Close();
@@ -691,7 +693,7 @@ int32 ABuildingGenerator::LoadContextBuildingsFromDatabase(const FString& Databa
 			{
 				return ESQLitePreparedStatementExecuteRowResult::Continue;
 			}
-			RowsById.FindOrAdd(BuildingId).Points.Add(FVector2D((float)Lon, (float)Lat));
+			RowsById.FindOrAdd(BuildingId).Points.Add(FVector2D(Lon, Lat));
 			return ESQLitePreparedStatementExecuteRowResult::Continue;
 		});
 

@@ -423,7 +423,7 @@ FMobileRoute FMobileRealSource::FindRoute(const FMobileRouteRequest& Request)
 	for (int32 I = 0; I + 1 < Planned.Points.Num(); ++I)
 	{
 		const auto& A = Planned.Points[I]; const auto& B = Planned.Points[I + 1];
-		FMobileStep Step; Step.BuildingId = MobileId(A.BuildingId); Step.Level = A.Floor; Step.Position = A.Position;
+		FMobileStep Step; Step.BuildingId = MobileId(A.BuildingId); Step.BuildingName = BuildingName(A.BuildingId); Step.Level = A.Floor; Step.Position = A.Position;
 		Step.LevelLabel = A.Floor == 0 ? TEXT("Outside") : FString::Printf(TEXT("L%d"), A.Floor);
 		Step.Metres = FVector::Distance(A.WorldPosition, B.WorldPosition) / 100.0; Result.Metres += Step.Metres;
 		if (A.Floor > 0 && B.Floor == 0) { Step.Kind = EMobileStepKind::ExitBuilding; Step.Text = TEXT("Leave ") + BuildingName(A.BuildingId); }
@@ -432,7 +432,7 @@ FMobileRoute FMobileRealSource::FindRoute(const FMobileRouteRequest& Request)
 		{
 			Step.Kind = EMobileStepKind::ExitBuilding; Step.Text = TEXT("Leave ") + BuildingName(A.BuildingId) + TEXT(" through the link door");
 			Result.Steps.Add(Step); Step.Metres = 0; Step.Kind = EMobileStepKind::EnterBuilding;
-			Step.BuildingId = MobileId(B.BuildingId); Step.Level = B.Floor; Step.Position = B.Position;
+			Step.BuildingId = MobileId(B.BuildingId); Step.BuildingName = BuildingName(B.BuildingId); Step.Level = B.Floor; Step.Position = B.Position;
 			Step.LevelLabel = FString::Printf(TEXT("L%d"), B.Floor); Step.Text = TEXT("Enter ") + BuildingName(B.BuildingId);
 		}
 		else if (A.Floor != B.Floor)
@@ -461,6 +461,6 @@ FMobileRoute FMobileRealSource::FindRoute(const FMobileRouteRequest& Request)
 		if (Step.Metres > KINDA_SMALL_NUMBER || Step.Kind != EMobileStepKind::Straight) Result.Steps.Add(MoveTemp(Step));
 	}
 	FMobileStep Arrival; Arrival.Kind = EMobileStepKind::Arrive; Arrival.Text = TEXT("You have arrived: ") + Destination.Name;
-	Arrival.BuildingId = Destination.BuildingId; Arrival.Level = Destination.Level; Arrival.LevelLabel = Destination.LevelLabel; Arrival.Position = To.Position;
+	Arrival.BuildingId = Destination.BuildingId; Arrival.BuildingName = Destination.BuildingName; Arrival.Level = Destination.Level; Arrival.LevelLabel = Destination.LevelLabel; Arrival.Position = To.Position;
 	Result.Steps.Add(MoveTemp(Arrival)); Result.Minutes = MobileNav::MinutesForMetres(Result.Metres); return Result;
 }

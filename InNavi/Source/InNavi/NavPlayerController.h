@@ -585,6 +585,10 @@ public:
 	uint64 GetBuildingResultsRevision() const;
 	int32 GetEditableBuildingCount() const;
 	bool SelectBuildingById(const FString& BuildingId);
+
+	// The outline of a pasted building: the copied one moved so that the building's centre, with the offset it stands at and the scale
+	// (a building stands at (outline + offset) * scale, see SpawnBuildingFromData), is at CursorWorld.
+	static TArray<FVector2D> PastedFootprint(const TArray<FVector2D>& Footprint, const FVector2D& BuildingOffset, float Scale, const FVector2D& CursorWorld);
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void SetNonCampusBuildingsVisible(bool bVisible);
 
