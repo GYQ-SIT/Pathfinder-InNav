@@ -15,6 +15,10 @@ $data = Get-Content -Raw -Encoding UTF8 $index | ConvertFrom-Json
 $passed = [int]$data.succeeded + [int]$data.succeededWithWarnings
 $failed = [int]$data.failed
 Write-Host "Tests: $passed passed ($($data.succeededWithWarnings) with warnings), $failed failed, $($data.notRun) not run."
+# What the performance tests measured, so the log shows how fast the machine that ran them is.
+foreach ($test in $data.tests | Where-Object { $_.fullTestPath -like "*Performance*" }) {
+    foreach ($entry in $test.entries | Where-Object { $_.event.type -eq "Info" }) { Write-Host "$($test.fullTestPath): $($entry.event.message)" }
+}
 if ($failed -gt 0) {
     foreach ($test in $data.tests | Where-Object { $_.state -eq 'Fail' }) {
         Write-Host "FAILED: $($test.fullTestPath)"
