@@ -12,7 +12,6 @@
 
 class APolyBuilding;
 class AInteriorBuildingPreviewPivot;
-
 // How dragging turns the model in Isolate: Orbit moves the camera around it (drag right and the model seems to turn left), Grab makes it
 // follow the mouse like a thing held in the hand (drag right and its near side goes right).
 enum class EInspectionRotateStyle : uint8 { Orbit, Grab };

@@ -88,7 +88,6 @@ void ANavPlayerController::BeginPlay()
 		// finds/clears a route - see RefreshRoute3DVisualization's own comment.
 		NavigationPanel->OnStateChanged.AddUniqueDynamic(this, &ANavPlayerController::RefreshRoute3DVisualization);
 		NavigationPanel->OnGuidedStepChanged.AddUniqueDynamic(this, &ANavPlayerController::FollowNavigationStep);
-		OnInteriorContentChanged.AddUniqueDynamic(NavigationPanel, &UNavigationPanelWidget::NotifyInteriorChanged);
 	}
 
 	if (TActorIterator<ABuildingGenerator> It(GetWorld()); It)

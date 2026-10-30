@@ -234,6 +234,7 @@ int32 ABuildingGenerator::LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& R
 
 	RefreshWallOpenings();
 	MarkGroundDirty();
+	NotifyNavigationLayoutChanged();
 	return SpawnedCount;
 }
 
@@ -835,9 +836,16 @@ void ABuildingGenerator::RefreshBuildingFilterFor(APolyBuilding& Building) const
 	Building.SetActorEnableCollision(bVisible);
 }
 
+void ABuildingGenerator::NotifyNavigationLayoutChanged()
+{
+	++NavigationRevision;
+	OnNavigationLayoutChanged.Broadcast();
+}
+
 void ABuildingGenerator::HandleBuildingFloorCountChanged(APolyBuilding*)
 {
 	++BuildingResultsRevision;
+	NotifyNavigationLayoutChanged();
 	// Floor edits also run inside the 3D preview. The controller reapplies exterior visibility
 	// when leaving that view; only the result cache needs invalidating during the edit itself.
 }
@@ -851,6 +859,7 @@ void ABuildingGenerator::HandleBuildingDestroyed(AActor* Actor)
 		UsedBuildingIds.Remove(Building->BuildingId);
 		InteriorDataById.Remove(Building->BuildingId);
 		++BuildingResultsRevision;
+		NotifyNavigationLayoutChanged();
 	}
 }
 
@@ -980,6 +989,7 @@ APolyBuilding* ABuildingGenerator::SpawnBuildingFromData(const FString& Id, cons
 		NewBuilding->OnDestroyed.AddDynamic(this, &ABuildingGenerator::HandleBuildingDestroyed);
 		++BuildingResultsRevision;
 		RefreshBuildingFilterFor(*NewBuilding);
+		NotifyNavigationLayoutChanged();
 	}
 
 	return NewBuilding;
@@ -1045,6 +1055,7 @@ bool ABuildingGenerator::SetBuildingName(const FString& BuildingId, const FStrin
 	{
 		(*Found)->BuildingName = NewName;
 		++BuildingResultsRevision;
+		NotifyNavigationLayoutChanged();
 	}
 	return true;
 }
@@ -1141,10 +1152,11 @@ TSharedPtr<FJsonObject> ABuildingGenerator::GetInteriorDataForBuilding(const FSt
 	return Found ? *Found : nullptr;
 }
 
-void ABuildingGenerator::SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData)
+void ABuildingGenerator::SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData, bool bNotifyNavigation)
 {
 	InteriorDataById.Add(BuildingId, InteriorData);
 	RefreshWallOpenings();
+	if (bNotifyNavigation) NotifyNavigationLayoutChanged();
 }
 
 TArray<FInteriorEntrance> ABuildingGenerator::GetStoredEntrances(const FString& BuildingId) const
@@ -1257,6 +1269,7 @@ bool ABuildingGenerator::RemoveStoredEntrance(const FString& BuildingId, const F
 		Interior->SetArrayField(TEXT("entrances"), Values);
 	}
 	RefreshWallOpenings();
+	NotifyNavigationLayoutChanged();
 	return true;
 }
 
@@ -1439,6 +1452,7 @@ void ABuildingGenerator::ClearAllBuildings()
 	BuildingBaselines.Empty();
 	Scale = 1.f;
 	MarkGroundDirty();
+	NotifyNavigationLayoutChanged();
 }
 
 bool ABuildingGenerator::CaptureBuildingBaselineInto(const FString& BuildingId, FBuildingBaseline& Out) const
@@ -1520,6 +1534,7 @@ void ABuildingGenerator::RestoreBuildingBaselines()
 		}
 	}
 	RefreshWallOpenings();
+	NotifyNavigationLayoutChanged();
 }
 
 APolyBuilding* ABuildingGenerator::CreateRectangleBuilding(const FString& Id, const FString& Name, FVector2D Position, float Width, float Depth, float RotationDegrees, int32 FloorCount, float FloorHeight)

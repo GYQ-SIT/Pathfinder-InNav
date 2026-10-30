@@ -75,8 +75,8 @@ route -> navigating -> arrived) is a state machine of its own; the widgets only 
 | Places across every building of a campus | `FMobileRealSource` indexes stored room JSON without opening editor interiors | built |
 | Route, distance | `FNavigationRoutePlanner::FindCampusRoute`; world-space polyline centimetres / 100 | real |
 | Minutes | `MobileNav::MinutesForMetres` at 1.2 m/s | built |
-| Steps with floor changes | `BuildRouteDetails` ("Take Elevator from Floor 1 to Floor 2") | real, text only |
-| Steps "turn left / follow the corridor / arrived" | actual route polyline converted to `FMobileStep` | built in the real adapter |
+| Walking, turns, doors and floor changes | `NavigationInstructions::Build`, shared with desktop; adjacent straight segments and uninterrupted connector rides are grouped | built in the real adapter |
+| Arrival | destination-specific final `FMobileStep` | built in the real adapter |
 | Accessibility (lift only, stairs only) | `FNavigationRoutePreferences` filters connectors before pathfinding | built |
 | Route across buildings, to the outside | `FindCampusRoute` uses main/link doors and outdoor geometry; overview draws points with building offsets | built |
 | Start = "My location" | manual building/level choice, at an authored entrance or node | built; automatic positioning remains future work |

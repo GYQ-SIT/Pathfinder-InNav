@@ -197,7 +197,7 @@ bool FNavigationRouteStepsTest::RunTest(const FString& Parameters)
 
 	const TArray<UNavigationPanelWidget::FNavigationRouteStep> Steps = Nav->BuildRouteSteps();
 	if (!TestTrue(TEXT("a route has steps"), Steps.Num() >= 4)) return false;
-	TestTrue(TEXT("starts where the Start is"), Steps[0].Text == FString::Printf(TEXT("Start at %s in Building A, Floor 1."), *StartRoom->RoomName));
+	TestTrue(TEXT("starts where the Start is"), Steps[0].Text.StartsWith(FString::Printf(TEXT("Start at %s in Building A, Floor 1."), *StartRoom->RoomName)));
 	TestTrue(TEXT("uses the link door, by building name"), Steps.ContainsByPredicate([](const UNavigationPanelWidget::FNavigationRouteStep& S) { return S.Text == TEXT("Use the link door from Building A to Building B on Floor 1."); }));
 	TestTrue(TEXT("takes a lift or stairs up"), Steps.ContainsByPredicate([](const UNavigationPanelWidget::FNavigationRouteStep& S) { return S.Text.StartsWith(TEXT("Take the ")) && S.Text.Contains(TEXT("in Building B")) && S.Text.EndsWith(TEXT("to Floor 3.")); }));
 	TestEqual(TEXT("ends where the Destination is"), Steps.Last().Text, FString::Printf(TEXT("Arrive at %s in Building B, Floor 3."), *DestinationName));
