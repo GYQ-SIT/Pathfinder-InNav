@@ -474,6 +474,10 @@ FMobileRoute FMobileMockSource::FindRoute(const FMobileRouteRequest& Request)
 		Step.Kind = Kind;
 		Step.Text = Text;
 		Step.BuildingId = BuildingId;
+		if (const FMobileBuilding* Building = Data->Buildings.FindByPredicate([&BuildingId](const FMobileBuilding& B) { return B.Id == BuildingId; }))
+		{
+			Step.BuildingName = Building->Name;
+		}
 		Step.Level = Level;
 		Step.LevelLabel = LevelLabel(*Data, BuildingId, Level);
 		Step.Metres = Metres;

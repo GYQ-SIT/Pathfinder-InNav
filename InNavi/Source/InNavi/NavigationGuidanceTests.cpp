@@ -10,6 +10,7 @@
 #include "Components/Button.h"
 #include "Components/CheckBox.h"
 #include "Components/TextBlock.h"
+#include "Components/VerticalBox.h"
 #include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
@@ -186,7 +187,7 @@ bool FNavigationGuidanceControlTest::RunTest(const FString& Parameters)
 	Nav->OnStateChanged.AddUnique(Refresh);
 	UButton* Button = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_NavToggleRoute")));
 	UTextBlock* Label = Cast<UTextBlock>(Screen->FindScreenWidget(TEXT("Btn_NavToggleRouteLabel")));
-	UTextBlock* Instructions = Cast<UTextBlock>(Screen->FindScreenWidget(TEXT("Txt_NavRouteDetails")));
+	UVerticalBox* Instructions = Cast<UVerticalBox>(Screen->FindScreenWidget(TEXT("Box_NavRouteSteps")));
 	UCheckBox* PanelCheck = Cast<UCheckBox>(Screen->FindScreenWidget(TEXT("Chk_WindowNavigation")));
 	if (!TestNotNull(TEXT("Guidance button exists"), Button) || !TestNotNull(TEXT("Guidance label exists"), Label)
 		|| !TestNotNull(TEXT("Instructions exist"), Instructions) || !TestNotNull(TEXT("Window menu navigation checkbox exists"), PanelCheck))

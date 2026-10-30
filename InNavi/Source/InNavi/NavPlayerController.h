@@ -12,7 +12,6 @@
 
 class APolyBuilding;
 class AInteriorBuildingPreviewPivot;
-
 // How dragging turns the model in Isolate: Orbit moves the camera around it (drag right and the model seems to turn left), Grab makes it
 // follow the mouse like a thing held in the hand (drag right and its near side goes right).
 enum class EInspectionRotateStyle : uint8 { Orbit, Grab };
@@ -585,6 +584,10 @@ public:
 	uint64 GetBuildingResultsRevision() const;
 	int32 GetEditableBuildingCount() const;
 	bool SelectBuildingById(const FString& BuildingId);
+
+	// The outline of a pasted building: the copied one moved so that the building's centre, with the offset it stands at and the scale
+	// (a building stands at (outline + offset) * scale, see SpawnBuildingFromData), is at CursorWorld.
+	static TArray<FVector2D> PastedFootprint(const TArray<FVector2D>& Footprint, const FVector2D& BuildingOffset, float Scale, const FVector2D& CursorWorld);
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void SetNonCampusBuildingsVisible(bool bVisible);
 
@@ -912,6 +915,10 @@ public:
 	// above: Padre's UI should never need a separate InteriorGenerator reference, just this one.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	int32 LoadInteriorForBuilding(const FString& BuildingId);
+	// Same, for after DiscardUnsavedChanges: the building being left is not stored first, since Discard has just put its stored data back.
+	int32 LoadInteriorForBuildingAfterDiscard(const FString& BuildingId);
+	// What the two above do; bKeepEditsOfCurrent says whether the building being left is stored first.
+	int32 LoadInteriorInternal(const FString& BuildingId, bool bKeepEditsOfCurrent);
 
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	void SetActiveFloor(int32 Level);

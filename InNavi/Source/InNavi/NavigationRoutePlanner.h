@@ -19,6 +19,7 @@ struct FNavigationRoutePoint
 	// coordinate so the existing map and directions continue to use the same route.
 	FVector WorldPosition = FVector::ZeroVector;
 	bool bHasWorldPosition = false;
+	bool bIsDoorway = false;
 	// Position is local to this building. Outdoor points retain a coordinate owner too.
 	FString BuildingId;
 };

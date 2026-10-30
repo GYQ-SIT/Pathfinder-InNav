@@ -8,6 +8,7 @@
 #include "LayoutValidationSession.h"
 #include "NavigationRoutePlanner.h"
 #include "NavigationSearchUtils.h"
+#include "NavigationInstructions.h"
 #include "NavPlayerController.h"
 #include "PolygonGeometryUtils.h"
 #include "ProjectLibrary.h"
@@ -143,7 +144,7 @@ bool FMobileRealSource::IsLeftTurnOnMap(const FVector2D& Incoming, const FVector
 {
 	// The map draws footprint coordinates as they are, so y grows DOWN the screen. A positive cross product then turns clockwise on
 	// the screen (east, then south): that is a right turn, and a left turn is a negative one.
-	return FVector2D::CrossProduct(Incoming, Outgoing) < 0;
+	return NavigationInstructions::IsLeftTurn(Incoming, Outgoing);
 }
 
 FMobileRealSource::FMobileRealSource(const FString& ProjectPath, const FString& OverridesDirectory)
@@ -420,47 +421,31 @@ FMobileRoute FMobileRealSource::FindRoute(const FMobileRouteRequest& Request)
 	{
 		FMobileRoutePoint P; P.BuildingId = MobileId(Point.BuildingId); P.Level = Point.Floor; P.Position = Point.Position; Result.Points.Add(P);
 	}
-	for (int32 I = 0; I + 1 < Planned.Points.Num(); ++I)
+	const auto Instructions = NavigationInstructions::Build(Planned.Points,
+		[](const FNavigationRoutePoint& Point) { return Point.WorldPosition; }, BuildingName);
+	for (const auto& Instruction : Instructions)
 	{
-		const auto& A = Planned.Points[I]; const auto& B = Planned.Points[I + 1];
-		FMobileStep Step; Step.BuildingId = MobileId(A.BuildingId); Step.Level = A.Floor; Step.Position = A.Position;
-		Step.LevelLabel = A.Floor == 0 ? TEXT("Outside") : FString::Printf(TEXT("L%d"), A.Floor);
-		Step.Metres = FVector::Distance(A.WorldPosition, B.WorldPosition) / 100.0; Result.Metres += Step.Metres;
-		if (A.Floor > 0 && B.Floor == 0) { Step.Kind = EMobileStepKind::ExitBuilding; Step.Text = TEXT("Leave ") + BuildingName(A.BuildingId); }
-		else if (A.Floor == 0 && B.Floor > 0) { Step.Kind = EMobileStepKind::EnterBuilding; Step.Text = TEXT("Enter ") + BuildingName(B.BuildingId); }
-		else if (A.BuildingId != B.BuildingId && A.Floor > 0 && B.Floor > 0)
+		const auto& Point = Planned.Points[Instruction.PointIndex];
+		FMobileStep Step; Step.Text = Instruction.Text; Step.Metres = Instruction.Metres;
+		Step.BuildingId = MobileId(Point.BuildingId); Step.BuildingName = BuildingName(Point.BuildingId); Step.Level = Point.Floor; Step.Position = Point.Position;
+		Step.LevelLabel = Point.Floor == 0 ? TEXT("Outside") : FString::Printf(TEXT("L%d"), Point.Floor);
+		switch (Instruction.Kind)
 		{
-			Step.Kind = EMobileStepKind::ExitBuilding; Step.Text = TEXT("Leave ") + BuildingName(A.BuildingId) + TEXT(" through the link door");
-			Result.Steps.Add(Step); Step.Metres = 0; Step.Kind = EMobileStepKind::EnterBuilding;
-			Step.BuildingId = MobileId(B.BuildingId); Step.Level = B.Floor; Step.Position = B.Position;
-			Step.LevelLabel = FString::Printf(TEXT("L%d"), B.Floor); Step.Text = TEXT("Enter ") + BuildingName(B.BuildingId);
+		case ENavigationInstructionKind::TurnLeft: Step.Kind = EMobileStepKind::TurnLeft; break;
+		case ENavigationInstructionKind::TurnRight: Step.Kind = EMobileStepKind::TurnRight; break;
+		case ENavigationInstructionKind::TurnAround: Step.Kind = EMobileStepKind::TurnAround; break;
+		case ENavigationInstructionKind::PassDoor: Step.Kind = EMobileStepKind::PassDoor; break;
+		case ENavigationInstructionKind::ChangeFloor: Step.Kind = EMobileStepKind::ChangeFloor; break;
+		case ENavigationInstructionKind::TakeLift: Step.Kind = EMobileStepKind::TakeLift; break;
+		case ENavigationInstructionKind::TakeStairs: Step.Kind = EMobileStepKind::TakeStairs; break;
+		case ENavigationInstructionKind::TakeEscalator: Step.Kind = EMobileStepKind::TakeEscalator; break;
+		case ENavigationInstructionKind::ExitBuilding: Step.Kind = EMobileStepKind::ExitBuilding; break;
+		case ENavigationInstructionKind::EnterBuilding: Step.Kind = EMobileStepKind::EnterBuilding; break;
+		default: break;
 		}
-		else if (A.Floor != B.Floor)
-		{
-			const bool bLift = A.ConnectorType == EInteriorNavNodeType::Elevator, bStairs = A.ConnectorType == EInteriorNavNodeType::Stairs;
-			Step.Kind = bLift ? EMobileStepKind::TakeLift : bStairs ? EMobileStepKind::TakeStairs : EMobileStepKind::TakeEscalator;
-			Step.Text = FString::Printf(TEXT("Take the %s to L%d"), bLift ? TEXT("lift") : bStairs ? TEXT("stairs") : TEXT("escalator"), B.Floor);
-		}
-		else
-		{
-			Step.Text = A.Floor == 0 ? TEXT("Follow the outdoor path") : TEXT("Continue along the corridor");
-			if (I > 0)
-			{
-				const auto& Before = Planned.Points[I - 1];
-				const FVector2D Incoming = FVector2D(A.WorldPosition - Before.WorldPosition).GetSafeNormal();
-				const FVector2D Outgoing = FVector2D(B.WorldPosition - A.WorldPosition).GetSafeNormal();
-				if (Before.Floor == A.Floor && !Incoming.IsNearlyZero() && !Outgoing.IsNearlyZero()
-					&& FVector2D::DotProduct(Incoming, Outgoing) < 0.90)
-				{
-					const bool bLeft = IsLeftTurnOnMap(Incoming, Outgoing);
-					Step.Kind = bLeft ? EMobileStepKind::TurnLeft : EMobileStepKind::TurnRight;
-					Step.Text = bLeft ? TEXT("Turn left and continue") : TEXT("Turn right and continue");
-				}
-			}
-		}
-		if (Step.Metres > KINDA_SMALL_NUMBER || Step.Kind != EMobileStepKind::Straight) Result.Steps.Add(MoveTemp(Step));
+		Result.Metres += Step.Metres; Result.Steps.Add(MoveTemp(Step));
 	}
 	FMobileStep Arrival; Arrival.Kind = EMobileStepKind::Arrive; Arrival.Text = TEXT("You have arrived: ") + Destination.Name;
-	Arrival.BuildingId = Destination.BuildingId; Arrival.Level = Destination.Level; Arrival.LevelLabel = Destination.LevelLabel; Arrival.Position = To.Position;
+	Arrival.BuildingId = Destination.BuildingId; Arrival.BuildingName = Destination.BuildingName; Arrival.Level = Destination.Level; Arrival.LevelLabel = Destination.LevelLabel; Arrival.Position = To.Position;
 	Result.Steps.Add(MoveTemp(Arrival)); Result.Minutes = MobileNav::MinutesForMetres(Result.Metres); return Result;
 }

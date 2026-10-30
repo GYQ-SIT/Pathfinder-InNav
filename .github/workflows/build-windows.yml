@@ -47,20 +47,27 @@ jobs:
       - name: Build InNaviEditor (Win64, Development)
         shell: cmd
         run: |
-          "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" InNaviEditor Win64 Development -Project="%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -WaitMutex -DisableAdaptiveUnity
+          call "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" InNaviEditor Win64 Development -Project="%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -WaitMutex -DisableAdaptiveUnity
 
       - name: Static analysis of the C++ (MSVC /analyze)
         shell: cmd
         run: |
-          "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" InNaviEditor Win64 Development -Project="%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -WaitMutex -DisableAdaptiveUnity -StaticAnalyzer=Default -StaticAnalyzerOutputType=Text > "%RUNNER_TEMP%\analysis.log" 2>&1
+          rem Build.bat is a batch file: without "call" this script ends when it does, and the check below would never run.
+          call "C:\Program Files\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" InNaviEditor Win64 Development -Project="%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -WaitMutex -DisableAdaptiveUnity -StaticAnalyzer=Default -StaticAnalyzerOutputType=Text > "%RUNNER_TEMP%\analysis.log" 2>&1
+          set BUILD_EXIT=%ERRORLEVEL%
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check-analysis.ps1 -Log "%RUNNER_TEMP%\analysis.log"
+          if errorlevel 1 exit /b 1
+          exit /b %BUILD_EXIT%
 
       - name: Automation tests (all of InNavi.*)
         shell: cmd
         run: |
           "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -unattended -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests InNavi; Quit" -ReportExportPath="%GITHUB_WORKSPACE%\InNavi\Saved\AutomationReport"
 
-      - name: Check the test report (the editor exits 0 even when a test fails)
+      # The editor exits with a failure code when a test fails, so this step has to run then too: it is the one that lists which tests failed
+      # and why (the log of the editor itself is not in the log of the job).
+      - name: Check the test report (lists the tests that failed)
+        if: ${{ !cancelled() }}
         shell: cmd
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check-test-report.ps1 -Report "%GITHUB_WORKSPACE%\InNavi\Saved\AutomationReport" -MinimumTests 150
 

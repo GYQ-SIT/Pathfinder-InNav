@@ -46,6 +46,8 @@ struct FInteriorFloorInfo
 	float WallThickness = 20.f;
 };
 
+DECLARE_MULTICAST_DELEGATE(FOnInteriorNavigationLayoutChanged);
+
 UCLASS()
 class INNAVI_API AInteriorGenerator : public AActor
 {
@@ -53,6 +55,8 @@ class INNAVI_API AInteriorGenerator : public AActor
 
 public:
 	AInteriorGenerator();
+	FOnInteriorNavigationLayoutChanged OnNavigationLayoutChanged;
+	uint64 GetNavigationRevision() const { return NavigationRevision; }
 
 	// (Re)generates a building's interior from whatever interior data is stored for it in the
 	// currently loaded project (see BuildingGenerator::GetInteriorDataForBuilding - interior data
@@ -430,6 +434,9 @@ private:
 
 	int32 ActiveFloor = 1;
 	uint64 RoomSearchRevision = 0;
+	uint64 NavigationRevision = 0;
+	bool bLoadingInterior = false;
+	void NotifyNavigationLayoutChanged();
 
 	// Rooms spawned for the currently loaded building, keyed by floor level.
 	UPROPERTY()

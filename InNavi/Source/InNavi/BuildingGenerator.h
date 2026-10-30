@@ -14,6 +14,8 @@ class APolyBuilding;
 class AStaticMeshActor;
 class FJsonObject;
 
+DECLARE_MULTICAST_DELEGATE(FOnBuildingNavigationLayoutChanged);
+
 UCLASS()
 class INNAVI_API ABuildingGenerator : public AActor
 {
@@ -21,6 +23,8 @@ class INNAVI_API ABuildingGenerator : public AActor
 
 public:
 	ABuildingGenerator();
+	FOnBuildingNavigationLayoutChanged OnNavigationLayoutChanged;
+	uint64 GetNavigationRevision() const { return NavigationRevision; }
 
 	// Spawns one building directly from already-parsed data. Used both by JSON loading
 	// (LoadBuildingsFromFile) and by runtime building creation (e.g. NavPlayerController's build mode).
@@ -239,6 +243,11 @@ public:
 	// True if the file is a valid project that just has no buildings yet - what "New project" writes. Loading
 	// such a file spawns nothing, so a spawned count of 0 alone cannot tell it from a broken file.
 	static bool IsEmptyProjectFile(const FString& FilePath);
+	// Whether LoadBuildingsFromFile can make buildings of this file: it reads, is JSON, has a "buildings" list, and that list is
+	// empty (a new project) or has a building with an outline. When not, OutProblem says why. Checked before the scene is cleared.
+	static bool IsLoadableProjectFile(const FString& FilePath, FString& OutProblem);
+	// Whether LoadBuildingsFromDatabase can make the campus of this map database (it opens and has campus buildings).
+	static bool IsLoadableDatabase(const FString& DatabasePath, FString& OutProblem);
 
 	// The raw "interior" JSON sub-object associated with a building id, as loaded from (or to be
 	// written into) the combined project file - not interpreted here, that's InteriorGenerator's
@@ -250,7 +259,8 @@ public:
 
 	// Stashes the interior data for a building id, overwriting whatever was there before (e.g.
 	// InteriorGenerator syncing its current in-memory state before a project save).
-	void SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData);
+	// A live-to-stored sync passes false: model edits already notified navigation, while saving/viewing is not an edit.
+	void SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData, bool bNotifyNavigation = true);
 
 	// --- Doors in the outer wall (see InteriorEntrance.h) ---
 	// Those saved with a building's interior.
@@ -303,6 +313,8 @@ private:
 	bool ShouldShowContextBuilding(const AContextBuildingActor& Building) const;
 	void RefreshContextBuildingVisibility();
 
+	uint64 NavigationRevision = 0;
+	void NotifyNavigationLayoutChanged();
 	float Scale = 1.f;
 	TSet<FString> UsedBuildingIds;
 

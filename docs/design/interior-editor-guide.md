@@ -327,6 +327,15 @@ toggling a category affects everything in it at once.
 
 ### Navigation panel
 
+Editing a layout clears its displayed route and cancels any search in progress. This includes live room and door drags,
+walls, connectors, floors, building changes and undo/redo. Press **Find Route** again after the edit. Room-based places are
+resolved by their saved IDs before replanning, so moved rooms get updated positions and deleted rooms are cleared.
+Changing the viewed floor/building or saving does not itself clear a route.
+
+Desktop and real-data mobile directions use the same instruction generator: straight stretches are grouped, with walking
+distances, left/right turns, reversals, doors, building entries/exits and floor changes. One uninterrupted lift or stair ride
+is one instruction. The route line keeps its original geometry; door crossings are retained as landmarks for guidance.
+
 Where the route is set and gone through. The same panel is on the interior editor and on the exterior screen (Window >
 Navigation; it starts hidden on both). It has two views, the **Plan** and **Go** tabs at the top. **Plan** is where the route is
 set; **Go** is where it is gone through once it is found (it opens by itself when a route has just been found, and **Edit Route**
@@ -433,8 +442,8 @@ floor. Switching buildings (via the building switcher) exits back to 2D first.
 In **3D**, click **Isolate** in the group **Isolate | Orbit | Grab** (in the bar under the menus, between
 **Colours** and **View**) to look at the model on its own and move and turn it, the way the SIT Campus
 Wayfinder's map is handled. The big **bottom platform** the building stands on is hidden, and
-so are the surrounding ground and the other buildings. **Every floor is kept, the first one too**: the
-first floor stands on a floor slab of its own (a slab at its base, like the floors above it have), made
+so are the surrounding ground and the other buildings. **Every floor is kept, the first one too**:
+the first floor stands on a floor slab of its own (a slab at its base, like the floors above it have), made
 while the mode is on, since the bottom platform is what it used to stand on. Only the floor being viewed
 is shown. The shell, rooms, connectors and route graphics turn together.
 
