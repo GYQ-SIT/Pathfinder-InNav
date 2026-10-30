@@ -103,6 +103,10 @@ namespace MobileNavSourceTests
 				if (Route.bFound)
 				{
 					Test.TestFalse(TEXT("with steps"), Route.Steps.IsEmpty());
+					for (const FMobileStep& Step : Route.Steps)
+					{
+						Test.TestFalse(TEXT("every step names its building, so the label is not an internal id"), Step.BuildingName.IsEmpty());
+					}
 					Test.TestTrue(TEXT("the last step is the arrival"), Route.Steps.Last().Kind == EMobileStepKind::Arrive && Route.Steps.Last().Text.Contains(All.Last().Name));
 					Test.TestEqual(TEXT("the time follows the length"), Route.Minutes, MobileNav::MinutesForMetres(Route.Metres));
 					Test.TestTrue(TEXT("a route has points to draw"), Route.Points.Num() >= 2);

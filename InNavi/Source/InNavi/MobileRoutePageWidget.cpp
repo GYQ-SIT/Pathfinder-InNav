@@ -258,7 +258,7 @@ void UMobileRoutePageWidget::RefreshSteps()
 		UTextBlock* Text = MakeText(WidgetTree, FString(), Step.Text, 14.f, Ink, true);
 		Text->SetAutoWrapText(true);
 		Texts->AddChildToVerticalBox(Text);
-		Texts->AddChildToVerticalBox(MakeText(WidgetTree, FString(), Step.BuildingId + TEXT(" · ") + Step.LevelLabel, 11.f, Grey))->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
+		Texts->AddChildToVerticalBox(MakeText(WidgetTree, FString(), Step.WhereText(), 11.f, Grey))->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
 
 		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
 		Row->AddChildToHorizontalBox(BadgeSize)->SetVerticalAlignment(VAlign_Top);
