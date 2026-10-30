@@ -37,10 +37,10 @@ loose guard limits. Every test writes what it measured to `InNavi/Saved/Performa
 | **Whole campus, loaded** | 29 + 407 buildings, 1,824 roads and POIs | | **1.8 s** | < 3 s | met |
 | Opening an interior | 10 floors, 225 rooms (a 175 x 64 m building) | 0.12 s | 0.12 s | < 0.5 s | met |
 | Generating the ten floors (once, when authored) | same | 4.2 s | | | |
-| Route between buildings (over link doors and the ground) | 3 buildings, 30 routes, all found | 41 ms | 42 ms | < 1 s | met |
+| Route between buildings (over link doors and the ground) | 3 buildings, 30 routes, all found | 1.6 ms | 1.9 ms | < 1 s | met |
 | Phone data: open a project | 3 buildings, 42 places | 1 ms | 1 ms | | |
 | Phone data: search places | 42 places | under 1 ms | under 1 ms | < 100 ms | met |
-| Phone data: a route | 40 routes, all found | 52 ms | 53 ms | < 1 s | met |
+| Phone data: a route | 40 routes, all found | 12 ms | 13 ms | < 1 s | met |
 | Route inside one building: the first (it builds the graph of the building) | 10 floors, 225 rooms | 6.0 s | | < 15 s with progress | met, see below |
 | Route inside one building: the next 11 (the graph is kept) | the same, 11 routes | 20 ms | 27 ms | < 1 s | met |
 | Validating one building: the first run, then again | the same building | 6.2 s, then 0.16 s | | < 30 s with progress | met |
@@ -73,7 +73,7 @@ a little each frame, and different for other preferences) and `InNavi.Performanc
 What is left is the **first** route in a building, or the first after a change: it still has to build the graph, about six seconds in the
 largest building the editor makes. That is hidden by spreading the work over frames (the progress bar and Cancel button of the Navigation and
 Validation panels), so the editor keeps its frame rate, but the user waits for it once. Most buildings are far smaller than this one (the
-routes between three buildings take 41 ms), so it is the worst case of the editor, not the usual one. If it has to be faster, the way is to
+routes between three buildings take about 2 ms), so it is the worst case of the editor, not the usual one. If it has to be faster, the way is to
 join the vertices faster (the visibility tests between a room's corners), which is a change of the planner itself and is not planned for M2.
 
 **Not measured: several users at once.** The desktop application and the phone app are single-user and share no state, so there is no
