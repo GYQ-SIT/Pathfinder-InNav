@@ -136,4 +136,38 @@ bool FNavigationGraphCacheCampusTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// The graph of a campus does not depend on where a leg of a trip starts and ends: a trip that goes out of one building and to another does not
+// make a graph for every pair of buildings (it took about ten seconds each in a project with many floors).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationGraphCacheLegsTest, "InNavi.Navigation.GraphCache.LegsOfATripShareTheGraph", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationGraphCacheLegsTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationGraphCacheTests;
+	FGeneratedBuilding B;
+	if (!TestTrue(TEXT("a generated building with rooms to route between"), B.bReady && B.Rooms.Num() >= 3)) return false;
+	const double Units = 100.0 / B.Fixture.Generator->GetScale();
+	const TArray<FVector2D> Outline = { FVector2D(0, 0), FVector2D(20 * Units, 0), FVector2D(20 * Units, 20 * Units), FVector2D(0, 20 * Units) };
+	B.Fixture.Generator->SpawnBuildingFromData(TEXT("OUT1"), TEXT("Outside 1"), Outline, 1, 300.f, FVector2D(30000.0, 9000.0));
+	B.Fixture.Generator->SpawnBuildingFromData(TEXT("OUT2"), TEXT("Outside 2"), Outline, 1, 300.f, FVector2D(9000.0, 30000.0));
+
+	auto OutsideOf = [&](const TCHAR* BuildingId)
+	{
+		FNavigationRoutePoint Point;
+		Point.BuildingId = BuildingId; Point.Floor = UNavigationPanelWidget::OutdoorFloor; Point.Position = FVector2D(-10 * Units, -10 * Units);
+		return Point;
+	};
+	FNavigationRoutePoint Room;
+	Room.BuildingId = TEXT("CACHE"); Room.Floor = B.Rooms[0].Floor; Room.Position = B.Rooms[0].Centroid;
+
+	FNavigationRoutePlanner::ClearGraphCache();
+	FNavigationRouteResult FromFirst, FromSecond;
+	FNavigationRoutePlanner::FindCampusRoute(*B.Fixture.Generator, *B.Fixture.Interior, OutsideOf(TEXT("OUT1")), Room, FromFirst);
+	const int32 Misses = FNavigationRoutePlanner::GetGraphCacheMisses();
+	const int32 Hits = FNavigationRoutePlanner::GetGraphCacheHits();
+	TestTrue(TEXT("the first leg built the graph of the campus"), Misses >= 1);
+	FNavigationRoutePlanner::FindCampusRoute(*B.Fixture.Generator, *B.Fixture.Interior, OutsideOf(TEXT("OUT2")), Room, FromSecond);
+	TestEqual(TEXT("a leg that starts at another building builds nothing"), FNavigationRoutePlanner::GetGraphCacheMisses(), Misses);
+	TestTrue(TEXT("it finds the graph that was kept"), FNavigationRoutePlanner::GetGraphCacheHits() > Hits);
+	return true;
+}
+
 #endif

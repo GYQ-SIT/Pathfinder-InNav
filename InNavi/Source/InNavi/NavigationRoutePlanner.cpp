@@ -8,6 +8,7 @@
 #include "LayoutValidation.h"
 #include "PolygonGeometryUtils.h"
 #include "HAL/PlatformTime.h"
+#include "Async/ParallelFor.h"
 
 namespace
 {
@@ -934,7 +935,8 @@ namespace
 			for (const auto& M : Models) ModelsById.FindOrAdd(M.Building->BuildingId, &M);
 		}
 		bool Begin(const TArray<FNavigationRoutePoint>& Seeds, FString& Error);
-		// Joins vertices until FPlatformTime::Seconds() reaches Deadline; true once every vertex is joined.
+		// Joins vertices until FPlatformTime::Seconds() reaches Deadline; true once every vertex is joined. The vertices of the buildings are
+		// worked out several at a time, on the worker threads; the graph does not depend on how many.
 		bool Step(double Deadline);
 		// 0 to 1. Earlier vertices have more later ones to be joined with, so they take longer.
 		float GetProgress() const
@@ -944,8 +946,14 @@ namespace
 			return static_cast<float>(1.0 - Left * Left);
 		}
 		FCampusGraph Out;
+		// For the timing log (see FNavigationRouteJob): the seconds spent joining the vertices of the buildings and joining the start and
+		// the destination to them, and whether the joined vertices of the buildings were found kept from an earlier route.
+		double StaticJoinSeconds = 0.0;
+		double SeedJoinSeconds = 0.0;
+		bool bCacheHit = false;
 
 	private:
+		void EdgesOf(int32 I, TArray<int32>& Scratch, TArray<FRouteGraphEdge>& Edges) const;
 		const FRouteBuilding* ModelFor(const FString& Id) const
 		{
 			const FRouteBuilding* const* Found = ModelsById.Find(Id);
@@ -971,6 +979,8 @@ namespace
 		TMap<FString, TArray<int32>> ByBuilding, ByLink;
 		TArray<int32> Outdoor, Candidates;
 		int32 NextVertex = 0;
+		// How many vertices of the buildings are worked out at once; it follows how long a batch takes (see Step).
+		int32 BatchSize = 16;
 		uint64 Key = 0;
 		int32 StaticCount = 0;
 		bool bStaticStored = false;
@@ -1076,6 +1086,7 @@ namespace
 			Graph = Found->Edges;
 			NextVertex = StaticCount;
 			bStaticStored = true;
+			bCacheHit = true;
 		}
 		Graph.SetNum(Vertices.Num());
 		// Only some pairs can ever be joined: two outdoor points, two points of one building (any floors), or the two
@@ -1090,81 +1101,123 @@ namespace
 		return true;
 	}
 
+	// The edges from vertex I to the vertices it is joined with, in increasing order of the other vertex. A vertex of a building is joined to the
+	// later ones of the buildings; a seed to every vertex before it, the buildings and the seeds before it, so each pair is met once. It reads
+	// the graph and changes nothing in it, so the vertices of the buildings can be worked out several at a time (Step).
+	void FCampusGraphBuilder::EdgesOf(int32 I, TArray<int32>& Scratch, TArray<FRouteGraphEdge>& Edges) const
+	{
+		const TArray<FVertex>& Vertices = Out.Vertices;
+		const bool bSeed = I >= StaticCount;
+		Scratch.Reset();
+		Edges.Reset();
+		auto Gather = [&](const TArray<int32>& Group) { for (const int32 J : Group) if (bSeed ? J < I : (J > I && J < StaticCount)) Scratch.Add(J); };
+		Gather(ByBuilding.FindChecked(Vertices[I].Point.BuildingId));
+		if (Vertices[I].Point.Floor == 0) Gather(Outdoor);
+		if (const TArray<int32>* Link = ByLink.Find(Vertices[I].Point.ConnectorId)) Gather(*Link);
+		// Met in increasing order and once each, as the loop over every pair would, so the graph comes out the same.
+		Scratch.Sort();
+		int32 Last = INDEX_NONE;
+		for (const int32 J : Scratch)
+		{
+			if (J == Last) continue;
+			Last = J;
+			const FVertex& A = Vertices[I]; const FVertex& B = Vertices[J];
+			const auto* M = ModelFor(A.Point.BuildingId);
+			float Cost = 0;
+			if (A.Point.Floor == 0 && B.Point.Floor == 0)
+			{
+				bool bClear = true;
+				for (const auto& Other : Models)
+				{
+					const FVector2D PA = FVector2D(A.Point.WorldPosition) / Scale - Other.Building->BuildingOffset;
+					const FVector2D PB = FVector2D(B.Point.WorldPosition) / Scale - Other.Building->BuildingOffset;
+					if (!CanTravelOutside(PA, PB, Other.Building->GetFootprint(),
+						IsExteriorExitVertex(A.Point) && A.Point.BuildingId == Other.Building->BuildingId,
+						IsExteriorExitVertex(B.Point) && B.Point.BuildingId == Other.Building->BuildingId)
+						|| InsideOrOnBoundary((PA + PB) * 0.5, Other.Building->GetFootprint())) { bClear = false; break; }
+				}
+				if (!bClear) continue;
+				Cost = FVector::Distance(A.Point.WorldPosition, B.Point.WorldPosition) / Scale;
+			}
+			else if (A.Point.BuildingId != B.Point.BuildingId)
+			{
+				// Mirrored links represent one physical doorway. A floor number alone cannot
+				// connect buildings of different heights, and a missing/dangling link cannot teleport.
+				if (!A.Point.ConnectorId.StartsWith(TEXT("BuildingLink:")) || A.Point.ConnectorId != B.Point.ConnectorId
+					|| A.Point.Floor != B.Point.Floor || FMath::Abs(A.Point.WorldPosition.Z - B.Point.WorldPosition.Z) > 1.f
+					|| FVector::Distance(A.Point.WorldPosition, B.Point.WorldPosition) > 250.f) continue;
+				Cost = FMath::Max(0.01f, static_cast<float>(FVector::Distance(A.Point.WorldPosition, B.Point.WorldPosition) / Scale));
+			}
+			else if (A.Point.Floor == B.Point.Floor)
+			{
+				const auto* Floor = M->Floors.Find(A.Point.Floor);
+				if (!Floor) continue;
+				TArray<int32> Allowed;
+				bool bValid = true;
+				for (const auto* P : { &A.Point, &B.Point }) if (BoundaryPortal(*P))
+				{
+					double Distance;
+					const int32 Edge = FindNearestBoundaryEdge(P->Position, M->Building->GetFootprint(), Distance);
+					if (Edge == INDEX_NONE || Distance > Floor->WallClearance * 1.5) { bValid = false; break; }
+					Allowed.AddUnique(Edge);
+				}
+				if (!bValid || !CanTravel(A.Point.Position, B.Point.Position, M->Building->GetFootprint(), *Floor, Allowed)) continue;
+				Cost = IndoorTravelCost(A.Point.Position, B.Point.Position, M->Building->GetFootprint(), *Floor);
+			}
+			else
+			{
+				if (!CanUseConnectorBetween(A, B)) continue;
+				Cost = A.Point.Floor == 0 || B.Point.Floor == 0 ? 5.f : 20.f + FMath::Abs(A.Point.Floor - B.Point.Floor) * M->Building->GetFloorHeight() / Scale;
+			}
+			Edges.Add({ J, Cost });
+		}
+	}
+
 	bool FCampusGraphBuilder::Step(double Deadline)
 	{
 		const TArray<FVertex>& Vertices = Out.Vertices;
 		TArray<TArray<FRouteGraphEdge>>& Graph = Out.Edges;
-		for (bool bFirst = true; NextVertex < Vertices.Num(); ++NextVertex, bFirst = false)
+		for (bool bFirst = true; NextVertex < Vertices.Num(); bFirst = false)
 		{
 			if (!bFirst && FPlatformTime::Seconds() >= Deadline) return false;
 			// The vertices of the buildings are all joined: keep them, before the first seed is.
 			if (NextVertex == StaticCount && !bStaticStored) StoreStatic();
-			const int32 I = NextVertex;
-			const bool bSeed = I >= StaticCount;
-			Candidates.Reset();
-			// A vertex of a building is joined to the later ones of the buildings; a seed to every vertex before it, the buildings and the seeds
-			// before it, so each pair is met once.
-			auto Gather = [&](const TArray<int32>& Group) { for (const int32 J : Group) if (bSeed ? J < I : (J > I && J < StaticCount)) Candidates.Add(J); };
-			Gather(ByBuilding.FindChecked(Vertices[I].Point.BuildingId));
-			if (Vertices[I].Point.Floor == 0) Gather(Outdoor);
-			if (const TArray<int32>* Link = ByLink.Find(Vertices[I].Point.ConnectorId)) Gather(*Link);
-			// Met in increasing order and once each, as the loop over every pair would, so the graph comes out the same.
-			Candidates.Sort();
-			int32 Last = INDEX_NONE;
-			for (const int32 J : Candidates)
+			const double Started = FPlatformTime::Seconds();
+			if (NextVertex >= StaticCount)
 			{
-				if (J == Last) continue;
-				Last = J;
-				const FVertex& A = Vertices[I]; const FVertex& B = Vertices[J];
-				const auto* M = ModelFor(A.Point.BuildingId);
-				float Cost = 0;
-				if (A.Point.Floor == 0 && B.Point.Floor == 0)
-				{
-					bool bClear = true;
-					for (const auto& Other : Models)
-					{
-						const FVector2D PA = FVector2D(A.Point.WorldPosition) / Scale - Other.Building->BuildingOffset;
-						const FVector2D PB = FVector2D(B.Point.WorldPosition) / Scale - Other.Building->BuildingOffset;
-						if (!CanTravelOutside(PA, PB, Other.Building->GetFootprint(),
-							IsExteriorExitVertex(A.Point) && A.Point.BuildingId == Other.Building->BuildingId,
-							IsExteriorExitVertex(B.Point) && B.Point.BuildingId == Other.Building->BuildingId)
-							|| InsideOrOnBoundary((PA + PB) * 0.5, Other.Building->GetFootprint())) { bClear = false; break; }
-					}
-					if (!bClear) continue;
-					Cost = FVector::Distance(A.Point.WorldPosition, B.Point.WorldPosition) / Scale;
-				}
-				else if (A.Point.BuildingId != B.Point.BuildingId)
-				{
-					// Mirrored links represent one physical doorway. A floor number alone cannot
-					// connect buildings of different heights, and a missing/dangling link cannot teleport.
-					if (!A.Point.ConnectorId.StartsWith(TEXT("BuildingLink:")) || A.Point.ConnectorId != B.Point.ConnectorId
-						|| A.Point.Floor != B.Point.Floor || FMath::Abs(A.Point.WorldPosition.Z - B.Point.WorldPosition.Z) > 1.f
-						|| FVector::Distance(A.Point.WorldPosition, B.Point.WorldPosition) > 250.f) continue;
-					Cost = FMath::Max(0.01f, static_cast<float>(FVector::Distance(A.Point.WorldPosition, B.Point.WorldPosition) / Scale));
-				}
-				else if (A.Point.Floor == B.Point.Floor)
-				{
-					const auto* Floor = M->Floors.Find(A.Point.Floor);
-					if (!Floor) continue;
-					TArray<int32> Allowed;
-					bool bValid = true;
-					for (const auto* P : { &A.Point, &B.Point }) if (BoundaryPortal(*P))
-					{
-						double Distance;
-						const int32 Edge = FindNearestBoundaryEdge(P->Position, M->Building->GetFootprint(), Distance);
-						if (Edge == INDEX_NONE || Distance > Floor->WallClearance * 1.5) { bValid = false; break; }
-						Allowed.AddUnique(Edge);
-					}
-					if (!bValid || !CanTravel(A.Point.Position, B.Point.Position, M->Building->GetFootprint(), *Floor, Allowed)) continue;
-					Cost = IndoorTravelCost(A.Point.Position, B.Point.Position, M->Building->GetFootprint(), *Floor);
-				}
-				else
-				{
-					if (!CanUseConnectorBetween(A, B)) continue;
-					Cost = A.Point.Floor == 0 || B.Point.Floor == 0 ? 5.f : 20.f + FMath::Abs(A.Point.Floor - B.Point.Floor) * M->Building->GetFloorHeight() / Scale;
-				}
-				Graph[I].Add({ J, Cost }); Graph[J].Add({ I, Cost });
+				// A seed (the start, the destination): there are two, and each is joined on its own.
+				const int32 I = NextVertex++;
+				TArray<FRouteGraphEdge> Edges;
+				EdgesOf(I, Candidates, Edges);
+				for (const FRouteGraphEdge& Edge : Edges) { Graph[I].Add({ Edge.To, Edge.Cost }); Graph[Edge.To].Add({ I, Edge.Cost }); }
+				SeedJoinSeconds += FPlatformTime::Seconds() - Started;
+				continue;
 			}
+			// The vertices of the buildings, several at a time: each is worked out on its own (EdgesOf) and its edges are put into the graph
+			// afterwards, in the order of the vertices, so the graph comes out the same as when they are joined one after the other (the list
+			// of every vertex runs from the lowest to the highest other vertex). How many go at once follows how long the last batch took, so
+			// that a slice is about as long as it is allowed to be.
+			const int32 First = NextVertex;
+			const int32 Count = FMath::Min(BatchSize, StaticCount - First);
+			TArray<TArray<FRouteGraphEdge>> Found;
+			Found.SetNum(Count);
+			ParallelFor(Count, [this, First, &Found](int32 Index)
+			{
+				TArray<int32> Scratch;
+				EdgesOf(First + Index, Scratch, Found[Index]);
+			});
+			for (int32 Index = 0; Index < Count; ++Index)
+			{
+				const int32 I = First + Index;
+				for (const FRouteGraphEdge& Edge : Found[Index]) Graph[Edge.To].Add({ I, Edge.Cost });
+				Graph[I].Append(Found[Index]);
+			}
+			NextVertex = First + Count;
+			const double Elapsed = FPlatformTime::Seconds() - Started;
+			StaticJoinSeconds += Elapsed;
+			const double Target = FMath::Clamp(Deadline - Started, 0.002, 0.02);
+			if (Elapsed > Target) BatchSize = FMath::Max(1, BatchSize / 2);
+			else if (Elapsed < Target * 0.5) BatchSize = FMath::Min(512, BatchSize * 2);
 		}
 		if (!bStaticStored && NextVertex >= StaticCount) StoreStatic();
 		return true;
@@ -1201,6 +1254,7 @@ namespace
 			return true;
 		}
 		float GetProgress() const { return Graph.Vertices.Num() > 0 ? FMath::Min(1.f, static_cast<float>(Steps) / Graph.Vertices.Num()) : 1.f; }
+		int32 GetSteps() const { return Steps; }
 		// The length of the shortest route to the destination once the search is over; the largest float when there is none.
 		float GetCost() const { return Destination != INDEX_NONE ? Distances[Destination] : TNumericLimits<float>::Max(); }
 		// The route when there is one; otherwise false, with the reason in Result.Error.
@@ -1319,8 +1373,11 @@ bool FNavigationRoutePlanner::FindRoute(const APolyBuilding& Building, const AIn
 
 namespace
 {
-	TArray<FRouteBuilding> ReadCampusModels(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
-		const FString& StartBuilding, const FString& DestinationBuilding, bool bAllFloors)
+	// The buildings of the campus as the route search sees them. The floors of a building are read when it has doors in its outer wall or an
+	// interior (saved with it, or the one open now), and of every building when bAllFloors says so. That does not depend on where a route
+	// starts and ends: the graph made from these, and its place in the cache, are the same for every leg of a trip. (A leg that ended in another
+	// building used to make a graph of its own, so a trip through four buildings made four.)
+	TArray<FRouteBuilding> ReadCampusModels(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior, bool bAllFloors)
 	{
 		const float Scale = Generator.GetScale();
 		const auto Buildings = Generator.GetAllBuildings();
@@ -1341,8 +1398,9 @@ namespace
 		for (const auto* Building : Buildings) if (IsValid(Building))
 		{
 			const auto& Doors = Entrances.FindChecked(Building->BuildingId);
+			const bool bHasInterior = Building->BuildingId == Interior.GetLoadedBuildingId() || Generator.GetInteriorDataForBuilding(Building->BuildingId).IsValid();
 			Models.Add(ReadRouteBuilding(*Building, Interior, Generator.GetInteriorDataForBuilding(Building->BuildingId), Doors, Scale,
-				bAllFloors || !Doors.IsEmpty() || Building->BuildingId == StartBuilding || Building->BuildingId == DestinationBuilding));
+				bAllFloors || !Doors.IsEmpty() || bHasInterior));
 		}
 		return Models;
 	}
@@ -1443,7 +1501,7 @@ void FNavigationLayoutCheck::FImpl::Read(LayoutValidation::FReport& Report)
 	using namespace LayoutValidation;
 	const ABuildingGenerator& Generator = *LiveGenerator.Get();
 	const AInteriorGenerator& Interior = *LiveInterior.Get();
-	Models = ReadCampusModels(Generator, Interior, FString(), FString(), true);
+	Models = ReadCampusModels(Generator, Interior, true);
 	for (const auto& Model : Models) Buildings.Add(Model.Building);
 	// Shell-only floors must not become invented walkable interiors during validation.
 	for (auto& Model : Models)
@@ -1655,6 +1713,38 @@ struct FNavigationRouteJob::FImpl
 	double OutsideBound = TNumericLimits<double>::Max();
 	mutable float ShownProgress = 0.f;
 
+	// For the log line that ends a search. The search is spread over frames, so the time since it was started (Wall) is longer than the
+	// time it worked (PhaseSeconds, by phase); a search that is made again with the whole campus has two graphs.
+	double StartedAt = 0.0;
+	double PhaseSeconds[5] = {};
+	int32 Slices = 0;
+	int32 Graphs = 0;
+	FString GraphNotes;
+	bool bLogged = false;
+
+	void NoteGraph()
+	{
+		const FCampusGraph& Graph = Builder->Out;
+		int32 Edges = 0;
+		for (const TArray<FRouteGraphEdge>& List : Graph.Edges) Edges += List.Num();
+		++Graphs;
+		GraphNotes += FString::Printf(TEXT("\n    graph %d (%s): %d vertices (%d of the buildings), %d edges, %s; joined %.2f s, start and destination %.2f s"),
+			Graphs, bIndoorOnly ? TEXT("this building only") : TEXT("whole campus"), Graph.Vertices.Num(), Graph.StaticCount, Edges / 2,
+			Builder->bCacheHit ? TEXT("the buildings were found ready") : TEXT("the buildings were joined now"), Builder->StaticJoinSeconds, Builder->SeedJoinSeconds);
+	}
+
+	void LogTimings() const
+	{
+		const double Wall = FPlatformTime::Seconds() - StartedAt;
+		double Worked = 0.0;
+		for (const double Seconds : PhaseSeconds) Worked += Seconds;
+		UE_LOG(LogTemp, Display, TEXT("[RouteTiming] %s L%d to %s L%d: %s after %.2f s (worked %.2f s: reading %.2f, vertices %.2f, joining %.2f, search %.2f; %d slices, %d search steps)%s"),
+			*Start.BuildingId, Start.Floor, *Destination.BuildingId, Destination.Floor, bFound ? TEXT("found") : TEXT("not found"), Wall, Worked,
+			PhaseSeconds[static_cast<int32>(ERoutePhase::Read)], PhaseSeconds[static_cast<int32>(ERoutePhase::Vertices)],
+			PhaseSeconds[static_cast<int32>(ERoutePhase::Joining)], PhaseSeconds[static_cast<int32>(ERoutePhase::Solving)],
+			Slices, Solver ? Solver->GetSteps() : 0, *GraphNotes);
+	}
+
 	bool IsStillThere() const
 	{
 		for (const auto& Building : Buildings) if (!Building.IsValid()) return false;
@@ -1695,6 +1785,7 @@ FNavigationRouteJob::FNavigationRouteJob(const ABuildingGenerator& Generator, co
 	Impl->LiveGenerator = &Generator; Impl->LiveInterior = &Interior; Impl->Start = Start; Impl->Destination = Destination;
 	Impl->Preferences = Preferences; Impl->Scale = Generator.GetScale();
 	Impl->BuildingRevision = Generator.GetNavigationRevision(); Impl->InteriorRevision = Interior.GetNavigationRevision();
+	Impl->StartedAt = FPlatformTime::Seconds();
 }
 
 FNavigationRouteJob::~FNavigationRouteJob() = default;
@@ -1703,6 +1794,7 @@ bool FNavigationRouteJob::Step(double BudgetSeconds)
 {
 	FImpl& State = *Impl;
 	const double Deadline = FPlatformTime::Seconds() + BudgetSeconds;
+	++State.Slices;
 	while (State.Phase != ERoutePhase::Done)
 	{
 		// The copies in Models point at buildings; if the project changed under the search, stop rather than read what is gone.
@@ -1714,12 +1806,14 @@ bool FNavigationRouteJob::Step(double BudgetSeconds)
 			State.bFound = false; State.Phase = ERoutePhase::Done;
 			break;
 		}
+		const ERoutePhase Running = State.Phase;
+		const double PhaseStarted = FPlatformTime::Seconds();
 		switch (State.Phase)
 		{
 		case ERoutePhase::Read:
 		{
 			if (State.Scale <= KINDA_SMALL_NUMBER) { State.Result.Error = TEXT("The project scale is invalid."); State.Phase = ERoutePhase::Done; break; }
-			State.Models = ReadCampusModels(*State.LiveGenerator.Get(), *State.LiveInterior.Get(), State.Start.BuildingId, State.Destination.BuildingId, false);
+			State.Models = ReadCampusModels(*State.LiveGenerator.Get(), *State.LiveInterior.Get(), false);
 			for (auto& Model : State.Models) Model.Nodes.RemoveAll([&](const FInteriorNavNode& Node) { return !State.Preferences.Allows(Node.Type); });
 			for (const auto& Model : State.Models) State.Buildings.Add(Model.Building);
 			State.PrepareIndoorOnly();
@@ -1732,6 +1826,7 @@ bool FNavigationRouteJob::Step(double BudgetSeconds)
 			break;
 		case ERoutePhase::Joining:
 			if (!State.Builder->Step(Deadline)) break;
+			State.NoteGraph();
 			if (BothEndsFound(State.Builder->Out, State.Result))
 			{
 				State.Solver = MakeUnique<FRouteSolver>(State.Builder->Out);
@@ -1757,7 +1852,13 @@ bool FNavigationRouteJob::Step(double BudgetSeconds)
 		}
 		default: break;
 		}
+		State.PhaseSeconds[static_cast<int32>(Running)] += FPlatformTime::Seconds() - PhaseStarted;
 		if (FPlatformTime::Seconds() >= Deadline) break;
+	}
+	if (State.Phase == ERoutePhase::Done && !State.bLogged)
+	{
+		State.bLogged = true;
+		State.LogTimings();
 	}
 	return State.Phase == ERoutePhase::Done;
 }

@@ -41,9 +41,9 @@ loose guard limits. Every test writes what it measured to `InNavi/Saved/Performa
 | Phone data: open a project | 3 buildings, 42 places | 1 ms | 1 ms | | |
 | Phone data: search places | 42 places | under 1 ms | under 1 ms | < 100 ms | met |
 | Phone data: a route | 40 routes, all found | 12 ms | 13 ms | < 1 s | met |
-| Route inside one building: the first (it builds the graph of the building) | 10 floors, 225 rooms | 6.0 s | | < 15 s with progress | met, see below |
+| Route inside one building: the first (it builds the graph of the building) | 10 floors, 225 rooms | 0.9 s | | < 15 s with progress | met, see below |
 | Route inside one building: the next 11 (the graph is kept) | the same, 11 routes | 20 ms | 27 ms | < 1 s | met |
-| Validating one building: the first run, then again | the same building | 6.2 s, then 0.16 s | | < 30 s with progress | met |
+| Validating one building: the first run, then again | the same building | 1.0 s, then 0.17 s | | < 30 s with progress | met |
 
 The frame figures, which need a window on a screen, are read from the **Debug** panel (Window > Debug, on both screens), which shows the
 average, the 1 % low and the slowest frame over the last ten seconds ("Last 10 s: avg 61.2 | 1% low 48.0 | min 31.0 FPS").
@@ -61,20 +61,35 @@ moving. The budget is met on the average in every screen. The dips in the first 
 
 ## Where we are under the target
 
-**The first route in the largest building takes about six seconds; the next ones take about 20 ms.** The cause was measured (a timing of
+**The first route in the largest building takes about one second; the next ones take about 20 ms.** The cause was measured (a timing of
 the three steps of a route in that building: 4,391 vertices, joining them in pairs 6.1 s, the search over them 2 to 12 ms), and it was
-fixed where it could be: the part of the graph that does not depend on where the route starts and ends (the vertices of the buildings and which
+fixed in three steps. The first is that the part of the graph that does not depend on where the route starts and ends (the vertices of the buildings and which
 of them can see each other) is kept, keyed by everything it is made from (geometry, doors, connectors, entrances, the preferences for lifts
 and stairs, the scale), and made again whenever any of that changes. A route then only joins its start and its destination to it. The
-validator uses the same graph: validating the building again takes 0.16 s instead of 6.2 s. The tests are `InNavi.Navigation.GraphCache.*`
+validator uses the same graph: validating the building again takes 0.17 s instead of 6.2 s. The second (2026-10-31) is that the graph is
+the same for every leg of a trip: it is made from the buildings that have doors in their outer wall or an interior, wherever a leg starts and
+ends. Before, a leg that ended in another building made a graph of its own, so a trip through three buildings built it twice (about 25 s on
+the CI laptop in a project of 3,952 vertices, two builds of 12 to 13 s each); now it is built once, and the same trip takes about 4 s. The
+third is that the vertices are joined on several threads, each worked out on its own and put into the graph in the order of the vertices, so
+the graph is the same as before (the same vertices and edges in the project that was timed). The first route in the largest building came down
+from 6.0 s to 0.9 s and validating it the first time from 6.2 s to 1.0 s (the desktop, 14 cores); joining the 3,991 vertices of a real project
+from 5.9 s to 1.2 s on the desktop, and the 3,952 vertices of the same project on the CI laptop from 7.0 s to 2.2 s. The route search writes
+what it measured to the log, one `[RouteTiming]` line for each leg (the time it waited, the time it worked, the vertices and edges of the
+graph, whether it was found kept or joined now), so a slow route can be read off without a profiler. The tests are `InNavi.Navigation.GraphCache.*`
 (the graph is found when nothing changed, made again when a room is removed, shared by the search that works at once and the one the panel runs
 a little each frame, and different for other preferences) and `InNavi.Performance.InteriorRoutes`.
 
-What is left is the **first** route in a building, or the first after a change: it still has to build the graph, about six seconds in the
-largest building the editor makes. That is hidden by spreading the work over frames (the progress bar and Cancel button of the Navigation and
-Validation panels), so the editor keeps its frame rate, but the user waits for it once. Most buildings are far smaller than this one (the
-routes between three buildings take about 2 ms), so it is the worst case of the editor, not the usual one. If it has to be faster, the way is to
-join the vertices faster (the visibility tests between a room's corners), which is a change of the planner itself and is not planned for M2.
+What is left is the **first** route in a building, or the first after a change: it still has to build the graph. That is hidden by
+spreading the work over frames (the progress bar and Cancel button of the Navigation and Validation panels), so the editor keeps its frame
+rate, but the user waits for it once, and a little longer than the work takes, because a slice of the panel's search is only 8 ms of a frame
+(on the CI laptop a build of 2.2 s of work took about twice that). Most buildings are far smaller than the largest one (the routes between three
+buildings take about 2 ms), so it is the worst case of the editor, not the usual one.
+
+**The joining still grows with the square of the number of vertices**, and the threads only lower its factor: a project with three times the
+vertices of the one above would take about nine times as long to join. If it has to be faster than this, the way is to join a vertex only to
+those of its own room and the doors of that room, and to keep a graph for every floor, so that a change of one floor builds only that floor.
+That changes how the planner makes its graph and every route would have to be checked again, so it is not planned for M2. Running the search
+on a worker thread would take away the wait beyond the work, and is left for later.
 
 **Not measured: several users at once.** The desktop application and the phone app are single-user and share no state, so there is no
 concurrent load to measure, and no server that could deadlock. The stability that matters here is that the app does not crash on bad
@@ -101,4 +116,6 @@ the largest building 22.2 s the first time and 0.45 s after. Everything is two t
 table above, and the part that builds the graph of a building the most. The first route is therefore **above the 15 s budget on that
 machine**: it is shown as progress and spread over frames (see "Where we are under the target"), so the editor stays responsive, but the
 user waits about twenty seconds once for the largest building there. The campus load, opening an interior and the next routes meet their budgets
-on both machines (the frame rates were only read on the desktop).
+on both machines (the frame rates were only read on the desktop). The laptop figures of this section are from before the vertices were joined
+on several threads (2026-10-31, see above); the graph of a real project there went from 7.0 s to 2.2 s, and the CI will write the new figures
+of the largest building on its next run.
