@@ -944,6 +944,11 @@ namespace
 			return static_cast<float>(1.0 - Left * Left);
 		}
 		FCampusGraph Out;
+		// For the timing log (see FNavigationRouteJob): the seconds spent joining the vertices of the buildings and joining the start and
+		// the destination to them, and whether the joined vertices of the buildings were found kept from an earlier route.
+		double StaticJoinSeconds = 0.0;
+		double SeedJoinSeconds = 0.0;
+		bool bCacheHit = false;
 
 	private:
 		const FRouteBuilding* ModelFor(const FString& Id) const
@@ -1076,6 +1081,7 @@ namespace
 			Graph = Found->Edges;
 			NextVertex = StaticCount;
 			bStaticStored = true;
+			bCacheHit = true;
 		}
 		Graph.SetNum(Vertices.Num());
 		// Only some pairs can ever be joined: two outdoor points, two points of one building (any floors), or the two
@@ -1101,6 +1107,7 @@ namespace
 			if (NextVertex == StaticCount && !bStaticStored) StoreStatic();
 			const int32 I = NextVertex;
 			const bool bSeed = I >= StaticCount;
+			const double VertexStarted = FPlatformTime::Seconds();
 			Candidates.Reset();
 			// A vertex of a building is joined to the later ones of the buildings; a seed to every vertex before it, the buildings and the seeds
 			// before it, so each pair is met once.
@@ -1165,6 +1172,7 @@ namespace
 				}
 				Graph[I].Add({ J, Cost }); Graph[J].Add({ I, Cost });
 			}
+			(bSeed ? SeedJoinSeconds : StaticJoinSeconds) += FPlatformTime::Seconds() - VertexStarted;
 		}
 		if (!bStaticStored && NextVertex >= StaticCount) StoreStatic();
 		return true;
@@ -1201,6 +1209,7 @@ namespace
 			return true;
 		}
 		float GetProgress() const { return Graph.Vertices.Num() > 0 ? FMath::Min(1.f, static_cast<float>(Steps) / Graph.Vertices.Num()) : 1.f; }
+		int32 GetSteps() const { return Steps; }
 		// The length of the shortest route to the destination once the search is over; the largest float when there is none.
 		float GetCost() const { return Destination != INDEX_NONE ? Distances[Destination] : TNumericLimits<float>::Max(); }
 		// The route when there is one; otherwise false, with the reason in Result.Error.
@@ -1655,6 +1664,38 @@ struct FNavigationRouteJob::FImpl
 	double OutsideBound = TNumericLimits<double>::Max();
 	mutable float ShownProgress = 0.f;
 
+	// For the log line that ends a search. The search is spread over frames, so the time since it was started (Wall) is longer than the
+	// time it worked (PhaseSeconds, by phase); a search that is made again with the whole campus has two graphs.
+	double StartedAt = 0.0;
+	double PhaseSeconds[5] = {};
+	int32 Slices = 0;
+	int32 Graphs = 0;
+	FString GraphNotes;
+	bool bLogged = false;
+
+	void NoteGraph()
+	{
+		const FCampusGraph& Graph = Builder->Out;
+		int32 Edges = 0;
+		for (const TArray<FRouteGraphEdge>& List : Graph.Edges) Edges += List.Num();
+		++Graphs;
+		GraphNotes += FString::Printf(TEXT("\n    graph %d (%s): %d vertices (%d of the buildings), %d edges, %s; joined %.2f s, start and destination %.2f s"),
+			Graphs, bIndoorOnly ? TEXT("this building only") : TEXT("whole campus"), Graph.Vertices.Num(), Graph.StaticCount, Edges / 2,
+			Builder->bCacheHit ? TEXT("the buildings were found ready") : TEXT("the buildings were joined now"), Builder->StaticJoinSeconds, Builder->SeedJoinSeconds);
+	}
+
+	void LogTimings() const
+	{
+		const double Wall = FPlatformTime::Seconds() - StartedAt;
+		double Worked = 0.0;
+		for (const double Seconds : PhaseSeconds) Worked += Seconds;
+		UE_LOG(LogTemp, Display, TEXT("[RouteTiming] %s L%d to %s L%d: %s after %.2f s (worked %.2f s: reading %.2f, vertices %.2f, joining %.2f, search %.2f; %d slices, %d search steps)%s"),
+			*Start.BuildingId, Start.Floor, *Destination.BuildingId, Destination.Floor, bFound ? TEXT("found") : TEXT("not found"), Wall, Worked,
+			PhaseSeconds[static_cast<int32>(ERoutePhase::Read)], PhaseSeconds[static_cast<int32>(ERoutePhase::Vertices)],
+			PhaseSeconds[static_cast<int32>(ERoutePhase::Joining)], PhaseSeconds[static_cast<int32>(ERoutePhase::Solving)],
+			Slices, Solver ? Solver->GetSteps() : 0, *GraphNotes);
+	}
+
 	bool IsStillThere() const
 	{
 		for (const auto& Building : Buildings) if (!Building.IsValid()) return false;
@@ -1695,6 +1736,7 @@ FNavigationRouteJob::FNavigationRouteJob(const ABuildingGenerator& Generator, co
 	Impl->LiveGenerator = &Generator; Impl->LiveInterior = &Interior; Impl->Start = Start; Impl->Destination = Destination;
 	Impl->Preferences = Preferences; Impl->Scale = Generator.GetScale();
 	Impl->BuildingRevision = Generator.GetNavigationRevision(); Impl->InteriorRevision = Interior.GetNavigationRevision();
+	Impl->StartedAt = FPlatformTime::Seconds();
 }
 
 FNavigationRouteJob::~FNavigationRouteJob() = default;
@@ -1703,6 +1745,7 @@ bool FNavigationRouteJob::Step(double BudgetSeconds)
 {
 	FImpl& State = *Impl;
 	const double Deadline = FPlatformTime::Seconds() + BudgetSeconds;
+	++State.Slices;
 	while (State.Phase != ERoutePhase::Done)
 	{
 		// The copies in Models point at buildings; if the project changed under the search, stop rather than read what is gone.
@@ -1714,6 +1757,8 @@ bool FNavigationRouteJob::Step(double BudgetSeconds)
 			State.bFound = false; State.Phase = ERoutePhase::Done;
 			break;
 		}
+		const ERoutePhase Running = State.Phase;
+		const double PhaseStarted = FPlatformTime::Seconds();
 		switch (State.Phase)
 		{
 		case ERoutePhase::Read:
@@ -1732,6 +1777,7 @@ bool FNavigationRouteJob::Step(double BudgetSeconds)
 			break;
 		case ERoutePhase::Joining:
 			if (!State.Builder->Step(Deadline)) break;
+			State.NoteGraph();
 			if (BothEndsFound(State.Builder->Out, State.Result))
 			{
 				State.Solver = MakeUnique<FRouteSolver>(State.Builder->Out);
@@ -1757,7 +1803,13 @@ bool FNavigationRouteJob::Step(double BudgetSeconds)
 		}
 		default: break;
 		}
+		State.PhaseSeconds[static_cast<int32>(Running)] += FPlatformTime::Seconds() - PhaseStarted;
 		if (FPlatformTime::Seconds() >= Deadline) break;
+	}
+	if (State.Phase == ERoutePhase::Done && !State.bLogged)
+	{
+		State.bLogged = true;
+		State.LogTimings();
 	}
 	return State.Phase == ERoutePhase::Done;
 }
