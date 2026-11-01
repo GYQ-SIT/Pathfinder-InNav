@@ -64,7 +64,179 @@ ANavPlayerController::ANavPlayerController()
 	Generator = nullptr;
 	InteriorGen = nullptr;
 }
+void ANavPlayerController::ClearCampusInteriorPreview()
+{
+	for (AInteriorRoom* Room : CampusPreviewRooms)
+	{
+		if (IsValid(Room))
+		{
+			Room->Destroy();
+		}
+	}
 
+	CampusPreviewRooms.Empty();
+}
+
+void ANavPlayerController::SetCampusInteriorPreviewVisible(bool bVisible)
+{
+	for (AInteriorRoom* Room : CampusPreviewRooms)
+	{
+		if (IsValid(Room))
+		{
+			Room->SetActorHiddenInGame(!bVisible);
+		}
+	}
+}
+
+void ANavPlayerController::BuildCampusInteriorPreview()
+{
+	ClearCampusInteriorPreview();
+
+	if (!Generator || !GetWorld())
+	{
+		return;
+	}
+
+	int32 TotalRooms = 0;
+
+	for (APolyBuilding* Building : Generator->GetAllBuildings())
+	{
+		if (!IsValid(Building))
+		{
+			continue;
+		}
+
+		const TSharedPtr<FJsonObject> InteriorData =
+			Generator->GetInteriorDataForBuilding(Building->BuildingId);
+
+		const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
+
+		if (!InteriorData.IsValid() ||
+			!InteriorData->TryGetArrayField(TEXT("floors"), Floors))
+		{
+			continue;
+		}
+
+		for (const TSharedPtr<FJsonValue>& FloorValue : *Floors)
+		{
+			const TSharedPtr<FJsonObject> Floor = FloorValue->AsObject();
+
+			if (!Floor.IsValid())
+			{
+				continue;
+			}
+
+			int32 Level = 1;
+			Floor->TryGetNumberField(TEXT("level"), Level);
+
+			float WallHeight = 280.f;
+			float WallThickness = 20.f;
+
+			Floor->TryGetNumberField(TEXT("wallHeight"), WallHeight);
+			Floor->TryGetNumberField(TEXT("wallThickness"), WallThickness);
+
+			const TArray<TSharedPtr<FJsonValue>>* Rooms = nullptr;
+
+			if (!Floor->TryGetArrayField(TEXT("rooms"), Rooms))
+			{
+				continue;
+			}
+
+			for (const TSharedPtr<FJsonValue>& RoomValue : *Rooms)
+			{
+				const TSharedPtr<FJsonObject> RoomData =
+					RoomValue->AsObject();
+
+				if (!RoomData.IsValid())
+				{
+					continue;
+				}
+
+				const TArray<TSharedPtr<FJsonValue>>* Points = nullptr;
+
+				if (!RoomData->TryGetArrayField(TEXT("footprint"), Points))
+				{
+					continue;
+				}
+
+				TArray<FVector2D> Footprint;
+
+				for (const TSharedPtr<FJsonValue>& PointValue : *Points)
+				{
+					const TArray<TSharedPtr<FJsonValue>>* Pair = nullptr;
+
+					if (PointValue.IsValid() &&
+						PointValue->TryGetArray(Pair) &&
+						Pair->Num() >= 2)
+					{
+						Footprint.Add(FVector2D(
+							(*Pair)[0]->AsNumber(),
+							(*Pair)[1]->AsNumber()
+						));
+					}
+				}
+
+				bool bClosedLoop = true;
+				RoomData->TryGetBoolField(TEXT("closed"), bClosedLoop);
+
+				if (Footprint.Num() < (bClosedLoop ? 3 : 2))
+				{
+					continue;
+				}
+
+				AInteriorRoom* PreviewRoom =
+					GetWorld()->SpawnActor<AInteriorRoom>(
+						FVector::ZeroVector,
+						FRotator::ZeroRotator
+					);
+
+				if (!IsValid(PreviewRoom))
+				{
+					continue;
+				}
+
+				RoomData->TryGetStringField(
+					TEXT("id"), PreviewRoom->RoomId);
+
+				RoomData->TryGetStringField(
+					TEXT("name"), PreviewRoom->RoomName);
+
+				PreviewRoom->FloorLevel = Level;
+
+				// Preview only: do not interfere with building selection.
+				PreviewRoom->SetActorEnableCollision(false);
+
+				const float FloorBaseZ =
+					(Level - 1) * Building->GetFloorHeight();
+
+				TArray<FInteriorOpening> PreviewOpenings;
+
+				PreviewRoom->BuildWalls(
+					Footprint,
+					Generator->GetScale(),
+					Building->BuildingOffset,
+					FloorBaseZ,
+					WallHeight,
+					WallThickness,
+					PreviewOpenings,
+					bClosedLoop
+				);
+
+				PreviewRoom->SetActorEnableCollision(false);
+
+				CampusPreviewRooms.Add(PreviewRoom);
+				++TotalRooms;
+			}
+		}
+
+		// Hide the exterior floor slabs for the X-ray view.
+		Building->SetCampusXRayMode(true);
+	}
+
+	UE_LOG(LogTemp, Warning,
+		TEXT("[Campus XRay] Created %d preview rooms"),
+		TotalRooms);
+}
 void ANavPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
@@ -618,9 +790,9 @@ void ANavPlayerController::UpdateBuildingTransparency()
 		FVector2D(0.2f, 1.0f),
 		Distance);
 
-	Building->SetBuildingOpacity(Opacity);
+	Building->SetBuildingOpacity(0.1f);
 
-	UE_LOG(LogTemp, Warning, TEXT("BUILDING OPACITY = %f"), Opacity);
+	UE_LOG(LogTemp, Warning, TEXT("BUILDING OPACITY TEST = 0.1"));
 }
 void ANavPlayerController::ToggleDrawRoomMode()
 {
@@ -2317,6 +2489,8 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 		bHasUnsavedChanges = false;
 		FocusCameraOnAllBuildings();
 	}
+	// Rebuild the campus X-ray interior preview after loading buildings.
+	//BuildCampusInteriorPreview();
 	return Count;
 }
 
@@ -2380,6 +2554,7 @@ int32 ANavPlayerController::LoadBuildingDataFromDatabase(const FString& Database
 		Generator->LoadContextBuildingsFromDatabase(DatabasePath);
 		FocusCameraOnAllBuildings();
 	}
+	BuildCampusInteriorPreview();
 	return Count;
 }
 
@@ -3920,7 +4095,8 @@ void ANavPlayerController::RestoreExteriorCameraView()
 		ControlledPawn->SetActorLocationAndRotation(SavedCameraLocation, SavedCameraRotation);
 		SetControlRotation(SavedCameraRotation);
 	}
-
+	// Restore all campus preview rooms when returning to exterior view.
+	SetCampusInteriorPreviewVisible(true);
 	bHasSavedCameraView = false;
 }
 
@@ -4379,6 +4555,8 @@ int32 ANavPlayerController::LoadInteriorInternal(const FString& BuildingId, bool
 	{
 		InteriorGen->SyncInteriorToBuildingGenerator();
 	}
+	// Hide campus preview rooms while editing an individual building.
+	SetCampusInteriorPreviewVisible(false);
 	const int32 Result = InteriorGen->LoadInteriorForBuilding(BuildingId);
 	if (Result < 0)
 	{

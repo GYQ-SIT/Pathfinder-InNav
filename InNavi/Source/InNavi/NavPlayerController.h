@@ -1175,6 +1175,15 @@ protected:
 	virtual void Tick(float DeltaSeconds) override;
 
 private:
+	// Campus-wide X-ray interior preview.
+	// These actors are separate from the editable interior rooms.
+	void BuildCampusInteriorPreview();
+	void ClearCampusInteriorPreview();
+	void SetCampusInteriorPreviewVisible(bool bVisible);
+
+	// Keeps all preview rooms alive while the campus is displayed.
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<AInteriorRoom>> CampusPreviewRooms;
 	// Left-click: selects a building normally, or adds a footprint point while in build mode.
 	void OnClick();
 

@@ -240,7 +240,7 @@ void AInteriorRoom::RebuildMesh()
 			DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
 
 			// Test with very low opacity
-			DynMaterial->SetScalarParameterValue(TEXT("Opacity"), 0.05f);
+			DynMaterial->SetScalarParameterValue(TEXT("Opacity"), 0.09f);
 
 			// Bright red so we can confirm the material is applied
 			DynMaterial->SetVectorParameterValue(

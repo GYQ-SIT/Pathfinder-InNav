@@ -88,6 +88,7 @@ void APolyBuilding::RebuildMesh()
 	CachedPoly2D = Poly2D;
 	CachedCapTris = CapTris;
 
+	// Exterior wall material
 	if (!DynMaterial)
 	{
 		UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(
@@ -99,7 +100,7 @@ void APolyBuilding::RebuildMesh()
 		{
 			DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
 
-			DynMaterial->SetScalarParameterValue(TEXT("Opacity"), 1.0f);
+			DynMaterial->SetScalarParameterValue(TEXT("Opacity"), 0.1f);
 			DynMaterial->SetVectorParameterValue(
 				TEXT("Color"),
 				FLinearColor(0.6f, 0.6f, 0.6f)
@@ -112,8 +113,27 @@ void APolyBuilding::RebuildMesh()
 		}
 	}
 
-	// Section count changes with FloorCount (one slab section per inter-floor boundary, one wall
-	// section per floor) - clear whatever sections a previous, possibly-taller build left behind.
+	// Floor material
+	if (!FloorDynMaterial)
+	{
+		UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(
+			nullptr,
+			TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial")
+		);
+
+		if (BaseMat)
+		{
+			FloorDynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
+
+			FloorDynMaterial->SetScalarParameterValue(TEXT("Opacity"), 1.0f);
+			FloorDynMaterial->SetVectorParameterValue(
+				TEXT("Color"),
+				FLinearColor(0.65f, 0.65f, 0.65f)
+			);
+		}
+	}
+
+	// Section count changes with FloorCount
 	MeshComp->ClearAllMeshSections();
 
 	// ---- Section 0: ground floor cap only - always visible (closes off the exterior shell's
@@ -140,7 +160,7 @@ void APolyBuilding::RebuildMesh()
 
 	TArray<FColor> GroundVertexColors;
 	MeshComp->CreateMeshSection(0, GroundVertices, GroundTriangles, GroundNormals, GroundUV0, GroundVertexColors, GroundTangents, !bInspectionBottomHidden);
-	MeshComp->SetMaterial(0, DynMaterial);
+	MeshComp->SetMaterial(0, FloorDynMaterial);
 	MeshComp->SetMeshSectionVisible(0, !bInspectionBottomHidden);
 
 	// Sections 1..FloorCount (roof + inter-floor slabs) and FloorCount+1..2*FloorCount (one wall ring
@@ -180,7 +200,11 @@ void APolyBuilding::BuildCapSection(const TArray<FVector2D>& Poly2D, const TArra
 
 	TArray<FColor> VertexColors;
 	MeshComp->CreateMeshSection(SectionIndex, Vertices, Triangles, Normals, UV0, VertexColors, Tangents, bCreateCollision);
-	MeshComp->SetMaterial(SectionIndex, DynMaterial);
+	MeshComp->SetMaterial(SectionIndex, FloorDynMaterial);
+	UE_LOG(LogTemp, Warning,
+		TEXT("FLOOR MATERIAL: Section=%d Material=%s"),
+		SectionIndex,
+		*GetNameSafe(MeshComp->GetMaterial(SectionIndex)));
 }
 
 void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBottom, float ZTop, int32 SectionIndex, bool bCreateCollision, int32 Level)
@@ -333,6 +357,9 @@ void APolyBuilding::ApplySlabVisibility()
 		const int32 SectionIndex = (L == FloorCount) ? 1 : (1 + L);
 		const float Z = (L == FloorCount) ? (FloorCount * FloorHeight) : (L * FloorHeight);
 
+		// Hide roof in campus view, but still build the walls.
+		const bool bHideCampusRoof =
+			(L == FloorCount && VisibleInteriorLevel <= 0);
 		// Show only the viewed floor's own floor cap (L == VisibleInteriorLevel - 1, i.e. the slab at
 		// the viewed floor's own base) - hide every other floor's cap, both above (its ceiling/the
 		// roof) and below (every lower floor's own slab). The near-top-down 2D floor-plan camera never
@@ -341,7 +368,10 @@ void APolyBuilding::ApplySlabVisibility()
 		// "visible". The 3D preview camera sits back at an oblique angle though, where every lower
 		// floor's slab was visible past the edge of the one above it - a stack of floors "peeking out"
 		// like the fins on a vent, rather than just the one floor being looked at.
-		const bool bHide = (VisibleInteriorLevel > 0 && L != VisibleInteriorLevel - 1);
+		const bool bHide =
+			(bCampusXRayMode && VisibleInteriorLevel <= 0) ||
+			bHideCampusRoof ||
+			(VisibleInteriorLevel > 0 && L != VisibleInteriorLevel - 1);
 
 		// UProceduralMeshComponent has no way to toggle an existing section's collision, so a
 		// visibility change here means recreating the section - the geometry is identical either
@@ -398,13 +428,31 @@ void APolyBuilding::SetBuildingOpacity(float NewOpacity)
 {
 	if (!DynMaterial)
 	{
+		UE_LOG(LogTemp, Error,
+			TEXT("TRANSPARENCY ERROR: DynMaterial is NULL"));
 		return;
 	}
 
-	const float ClampedOpacity = FMath::Clamp(NewOpacity, 0.0f, 1.0f);
+	const float ClampedOpacity =
+		FMath::Clamp(NewOpacity, 0.0f, 1.0f);
 
 	DynMaterial->SetScalarParameterValue(
 		TEXT("Opacity"),
 		ClampedOpacity
 	);
+
+	UE_LOG(LogTemp, Warning,
+		TEXT("TRANSPARENCY: Opacity=%.2f Material=%s"),
+		ClampedOpacity,
+		*GetNameSafe(DynMaterial));
+}
+void APolyBuilding::SetCampusXRayMode(bool bEnabled)
+{
+	if (bCampusXRayMode == bEnabled)
+	{
+		return;
+	}
+
+	bCampusXRayMode = bEnabled;
+	ApplySlabVisibility();
 }

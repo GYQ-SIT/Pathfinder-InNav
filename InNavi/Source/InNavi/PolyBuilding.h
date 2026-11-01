@@ -62,6 +62,9 @@ public:
 	// Highlight / unhighlight this building
 	void SetHighlighted(bool bHighlighted);
 
+	// Control building transparency
+	void SetBuildingOpacity(float NewOpacity);
+	void SetCampusXRayMode(bool bEnabled);
 	// What kind of building this is (one value from BuildingTypes::All(); anything else becomes Other). The building is drawn in the
 	// colour of its type, except while it is highlighted.
 	void SetBuildingType(const FString& NewType);
@@ -157,6 +160,7 @@ private:
 
 	// See SetVisibleInteriorLevel. 0 = nothing hidden (normal exterior view).
 	int32 VisibleInteriorLevel = 0;
+	bool bCampusXRayMode = false;
 	bool bInspectionBottomHidden = false;
 
 	UPROPERTY()
@@ -164,8 +168,10 @@ private:
 
 	UPROPERTY()
 	UMaterialInstanceDynamic* DynMaterial;
-
+	UPROPERTY()
+	UMaterialInstanceDynamic* FloorDynMaterial = nullptr;
 	FString BuildingType = BuildingTypes::Default();
 	bool bIsHighlighted = false;
 	FLinearColor CurrentBodyColor = FLinearColor::White;
+
 };
