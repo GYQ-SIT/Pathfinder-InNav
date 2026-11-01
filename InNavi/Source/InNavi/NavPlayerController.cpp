@@ -88,7 +88,6 @@ void ANavPlayerController::BeginPlay()
 		// finds/clears a route - see RefreshRoute3DVisualization's own comment.
 		NavigationPanel->OnStateChanged.AddUniqueDynamic(this, &ANavPlayerController::RefreshRoute3DVisualization);
 		NavigationPanel->OnGuidedStepChanged.AddUniqueDynamic(this, &ANavPlayerController::FollowNavigationStep);
-		OnInteriorContentChanged.AddUniqueDynamic(NavigationPanel, &UNavigationPanelWidget::NotifyInteriorChanged);
 	}
 
 	if (TActorIterator<ABuildingGenerator> It(GetWorld()); It)
@@ -2277,6 +2276,13 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 		OnActionFailed.Broadcast(TEXT("No file selected - click Browse first."), EActionFailureSeverity::Warning);
 		return 0;
 	}
+	// A file that cannot be loaded is found out here, before anything is cleared: what is open stays open.
+	FString Problem;
+	if (!ABuildingGenerator::IsLoadableProjectFile(FilePath, Problem))
+	{
+		OnActionFailed.Broadcast(Problem, EActionFailureSeverity::Critical);
+		return 0;
+	}
 	if (NavigationPanel)
 	{
 		NavigationPanel->ClearAll();
@@ -2329,6 +2335,13 @@ int32 ANavPlayerController::LoadBuildingDataFromDatabase(const FString& Database
 		OnActionFailed.Broadcast(TEXT("No database file selected."), EActionFailureSeverity::Warning);
 		return 0;
 	}
+	// Same as for a project file: a database that cannot be loaded leaves what is open as it is.
+	FString Problem;
+	if (!ABuildingGenerator::IsLoadableDatabase(DatabasePath, Problem))
+	{
+		OnActionFailed.Broadcast(Problem, EActionFailureSeverity::Critical);
+		return 0;
+	}
 	if (NavigationPanel)
 	{
 		NavigationPanel->ClearAll();
@@ -2352,12 +2365,15 @@ int32 ANavPlayerController::LoadBuildingDataFromDatabase(const FString& Database
 	{
 		// Deliberately NOT setting CurrentProjectFilePath to DatabasePath - Ctrl+S writes JSON via
 		// SaveBuildingsToFile, and pointing that at the .db file would overwrite it with JSON text.
+		// It is emptied, too: left as it was it would still be the JSON file opened before, and Ctrl+S would write the
+		// campus of this database into it.
 		// A database-loaded project has no "file to save back to" yet; the existing Save-As flow
 		// (whatever prompts for a path when CurrentProjectFilePath is empty) is what should kick in if
 		// the user wants to persist it - interiors drawn afterward still save fine once they do, since
 		// SaveBuildingsToFile serializes whatever APolyBuilding actors currently exist regardless of
 		// how they were spawned.
 		bHasUnsavedChanges = false;
+		CurrentProjectFilePath.Empty();
 		// Best-effort, first-look visualization (see LoadRoadsAndPOIsFromDatabase's own comment on
 		// scope) - a failure here shouldn't block the buildings that DID load from showing up.
 		Generator->LoadRoadsAndPOIsFromDatabase(DatabasePath);
@@ -3541,6 +3557,53 @@ void ANavPlayerController::SetNonCampusBuildingsVisible(bool bVisible)
 	}
 }
 
+bool ANavPlayerController::SetSelectedBuildingType(const FString& NewType)
+{
+	const FString Id = GetSelectedBuildingId();
+	if (bInteriorInspectionEnabled || !Generator || Id.IsEmpty())
+	{
+		return false;
+	}
+	const FString Before = Generator->GetBuildingType(Id);
+	if (!Generator->SetBuildingType(Id, NewType))
+	{
+		return false;
+	}
+	if (Before != Generator->GetBuildingType(Id))
+	{
+		bHasUnsavedChanges = true;
+	}
+	return true;
+}
+
+FString ANavPlayerController::GetSelectedBuildingType() const
+{
+	return Generator ? Generator->GetBuildingType(GetSelectedBuildingId()) : BuildingTypes::Default();
+}
+
+void ANavPlayerController::SetBuildingTypeVisible(const FString& Type, bool bVisible)
+{
+	if (bInteriorInspectionEnabled) return;
+	if (Generator)
+	{
+		Generator->SetBuildingTypeVisible(Type, bVisible);
+	}
+}
+
+bool ANavPlayerController::IsBuildingTypeVisible(const FString& Type) const
+{
+	return !Generator || Generator->IsBuildingTypeVisible(Type);
+}
+
+void ANavPlayerController::ResetBuildingTypeFilter()
+{
+	if (bInteriorInspectionEnabled) return;
+	if (Generator)
+	{
+		Generator->ResetBuildingTypeFilter();
+	}
+}
+
 void ANavPlayerController::LogCameraTransform()
 {
 	const APawn* ControlledPawn = GetPawn();
@@ -4085,6 +4148,27 @@ void ANavPlayerController::CopyInteriorKeyHandler()
 	UE_LOG(LogTemp, Log, TEXT("Copied room: %s"), *CopiedRoomId);
 }
 
+TArray<FVector2D> ANavPlayerController::PastedFootprint(const TArray<FVector2D>& Footprint, const FVector2D& BuildingOffset, float Scale, const FVector2D& CursorWorld)
+{
+	TArray<FVector2D> Result = Footprint;
+	if (Result.IsEmpty() || Scale <= 0.f)
+	{
+		return Result;
+	}
+	FVector2D Center = FVector2D::ZeroVector;
+	for (const FVector2D& Point : Result)
+	{
+		Center += Point;
+	}
+	Center /= Result.Num();
+	const FVector2D Move = CursorWorld / Scale - BuildingOffset - Center;
+	for (FVector2D& Point : Result)
+	{
+		Point += Move;
+	}
+	return Result;
+}
+
 void ANavPlayerController::PasteInteriorKeyHandler()
 {
 	if (bInteriorInspectionEnabled) return;
@@ -4102,32 +4186,11 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 
 		const float Scale = Generator->GetScale();
 
-		// Convert mouse world position into the same footprint-space
-		// used by SpawnBuildingFromData.
-		const FVector2D PastePosition(
-			Hit.Location.X / Scale,
-			Hit.Location.Y / Scale
-		);
-
-		TArray<FVector2D> NewFootprint = CopiedBuildingFootprint;
-
-		// Find the center of the copied building.
-		FVector2D Center = FVector2D::ZeroVector;
-
-		for (const FVector2D& Point : NewFootprint)
-		{
-			Center += Point;
-		}
-
-		Center /= NewFootprint.Num();
-
-		// Move the copied footprint so its center follows the mouse.
-		const FVector2D MoveOffset = PastePosition - Center;
-
-		for (FVector2D& Point : NewFootprint)
-		{
-			Point += MoveOffset;
-		}
+		// Move the copied outline so the building's centre is under the mouse (the offset it stands at counts, see PastedFootprint).
+		const TArray<FVector2D> NewFootprint = PastedFootprint(
+			CopiedBuildingFootprint, CopiedBuildingOffset, Scale, FVector2D(Hit.Location.X, Hit.Location.Y));
+		// How far the outline moved, which the interior has to move by as well.
+		const FVector2D MoveOffset = NewFootprint[0] - CopiedBuildingFootprint[0];
 
 		const FString NewId =
 			Generator->GenerateUniqueBuildingId(CopiedBuildingId);
@@ -4265,6 +4328,16 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 
 int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 {
+	return LoadInteriorInternal(BuildingId, /*bKeepEditsOfCurrent=*/true);
+}
+
+int32 ANavPlayerController::LoadInteriorForBuildingAfterDiscard(const FString& BuildingId)
+{
+	return LoadInteriorInternal(BuildingId, /*bKeepEditsOfCurrent=*/false);
+}
+
+int32 ANavPlayerController::LoadInteriorInternal(const FString& BuildingId, bool bKeepEditsOfCurrent)
+{
 	if (!InteriorGen)
 	{
 		UE_LOG(LogTemp, Error, TEXT("LoadInteriorForBuilding: no InteriorGenerator placed in the level"));
@@ -4300,7 +4373,9 @@ int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 		Generator->CaptureBuildingBaseline(BuildingId);
 	}
 
-	if (!InteriorGen->GetLoadedBuildingId().IsEmpty() && InteriorGen->GetLoadedBuildingId() != BuildingId)
+	// The building being left is stored first so its edits are not lost - except after Discard, which has just put its stored data
+	// back: writing the live copy over it would bring the discarded edits back.
+	if (bKeepEditsOfCurrent && !InteriorGen->GetLoadedBuildingId().IsEmpty() && InteriorGen->GetLoadedBuildingId() != BuildingId)
 	{
 		InteriorGen->SyncInteriorToBuildingGenerator();
 	}

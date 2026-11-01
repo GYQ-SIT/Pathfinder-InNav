@@ -37,13 +37,13 @@ loose guard limits. Every test writes what it measured to `InNavi/Saved/Performa
 | **Whole campus, loaded** | 29 + 407 buildings, 1,824 roads and POIs | | **1.8 s** | < 3 s | met |
 | Opening an interior | 10 floors, 225 rooms (a 175 x 64 m building) | 0.12 s | 0.12 s | < 0.5 s | met |
 | Generating the ten floors (once, when authored) | same | 4.2 s | | | |
-| Route between buildings (over link doors and the ground) | 3 buildings, 30 routes, all found | 41 ms | 42 ms | < 1 s | met |
+| Route between buildings (over link doors and the ground) | 3 buildings, 30 routes, all found | 1.6 ms | 1.9 ms | < 1 s | met |
 | Phone data: open a project | 3 buildings, 42 places | 1 ms | 1 ms | | |
 | Phone data: search places | 42 places | under 1 ms | under 1 ms | < 100 ms | met |
-| Phone data: a route | 40 routes, all found | 52 ms | 53 ms | < 1 s | met |
-| Route inside one building: the first (it builds the graph of the building) | 10 floors, 225 rooms | 6.0 s | | < 15 s with progress | met, see below |
+| Phone data: a route | 40 routes, all found | 12 ms | 13 ms | < 1 s | met |
+| Route inside one building: the first (it builds the graph of the building) | 10 floors, 225 rooms | 0.9 s | | < 15 s with progress | met, see below |
 | Route inside one building: the next 11 (the graph is kept) | the same, 11 routes | 20 ms | 27 ms | < 1 s | met |
-| Validating one building: the first run, then again | the same building | 6.2 s, then 0.16 s | | < 30 s with progress | met |
+| Validating one building: the first run, then again | the same building | 1.0 s, then 0.17 s | | < 30 s with progress | met |
 
 The frame figures, which need a window on a screen, are read from the **Debug** panel (Window > Debug, on both screens), which shows the
 average, the 1 % low and the slowest frame over the last ten seconds ("Last 10 s: avg 61.2 | 1% low 48.0 | min 31.0 FPS").
@@ -54,27 +54,42 @@ average, the 1 % low and the slowest frame over the last ten seconds ("Last 10 s
 | Interior editor, 2D plan | 60 FPS | **average 126.3, 1 % low 76.1, minimum 37.0 FPS**. Average met. The low minimum is a short hitch while the rooms were generated with the one-click generator (noted by the person who took the reading, not measured separately) |
 | Interior editor, 3D preview (a five-floor building) | 60 FPS | **average 126.6, 1 % low 53.1, minimum 17.1 FPS**. Average met. The 1 % low and the minimum (17.1 FPS, 58 ms) come from a short hitch while the rooms were generated with the one-click generator (noted by the person who took the reading, not measured separately) |
 | Interior editor, 3D preview of a 15-floor building (floor 10 shown) | 60 FPS | **average 131.2, 1 % low 103.5, minimum 84.1 FPS**. Met, with nothing being generated |
-| Phone app, on a Samsung Galaxy S24+ | 30 FPS | steady 60 FPS with the made-up data (2026-10-23); to be repeated with real project data |
+| Phone app, on a Samsung Galaxy S24+, real project data | 30 FPS | **60 FPS (the app's cap) in every scenario, no frame over 33 ms except one**. 2026-10-31, Development build, USB, with the real `buildings.json` and `map_extended.db` (sites of 6 and 29 buildings). Scenarios, each read from the app's own `[MobilePerf]` line (every 2 s, about 120 frames): sites list scrolling, switching the four tabs, the places sheet dragged up and down, the 2D plan and the 3D plan dragged, a route to a room, navigation stepped through, idle. The slowest frames were 20 to 33 ms. The one frame over 33 ms (121 ms) was the first route being worked out right after the tap. Made-up data, 2026-10-23: also steady 60 FPS |
 
 The desktop readings are from the Debug panel on 2026-10-28, on the machine above with an RTX 4060, with the interior open and the mouse
 moving. The budget is met on the average in every screen. The dips in the first two interior readings are one-off hitches of the generator; the reading of the 15-floor building, taken without generating anything, shows the steady figure.
 
 ## Where we are under the target
 
-**The first route in the largest building takes about six seconds; the next ones take about 20 ms.** The cause was measured (a timing of
+**The first route in the largest building takes about one second; the next ones take about 20 ms.** The cause was measured (a timing of
 the three steps of a route in that building: 4,391 vertices, joining them in pairs 6.1 s, the search over them 2 to 12 ms), and it was
-fixed where it could be: the part of the graph that does not depend on where the route starts and ends (the vertices of the buildings and which
+fixed in three steps. The first is that the part of the graph that does not depend on where the route starts and ends (the vertices of the buildings and which
 of them can see each other) is kept, keyed by everything it is made from (geometry, doors, connectors, entrances, the preferences for lifts
 and stairs, the scale), and made again whenever any of that changes. A route then only joins its start and its destination to it. The
-validator uses the same graph: validating the building again takes 0.16 s instead of 6.2 s. The tests are `InNavi.Navigation.GraphCache.*`
+validator uses the same graph: validating the building again takes 0.17 s instead of 6.2 s. The second (2026-10-31) is that the graph is
+the same for every leg of a trip: it is made from the buildings that have doors in their outer wall or an interior, wherever a leg starts and
+ends. Before, a leg that ended in another building made a graph of its own, so a trip through three buildings built it twice (about 25 s on
+the CI laptop in a project of 3,952 vertices, two builds of 12 to 13 s each); now it is built once, and the same trip takes about 4 s. The
+third is that the vertices are joined on several threads, each worked out on its own and put into the graph in the order of the vertices, so
+the graph is the same as before (the same vertices and edges in the project that was timed). The first route in the largest building came down
+from 6.0 s to 0.9 s and validating it the first time from 6.2 s to 1.0 s (the desktop, 14 cores); joining the 3,991 vertices of a real project
+from 5.9 s to 1.2 s on the desktop, and the 3,952 vertices of the same project on the CI laptop from 7.0 s to 2.2 s. The route search writes
+what it measured to the log, one `[RouteTiming]` line for each leg (the time it waited, the time it worked, the vertices and edges of the
+graph, whether it was found kept or joined now), so a slow route can be read off without a profiler. The tests are `InNavi.Navigation.GraphCache.*`
 (the graph is found when nothing changed, made again when a room is removed, shared by the search that works at once and the one the panel runs
 a little each frame, and different for other preferences) and `InNavi.Performance.InteriorRoutes`.
 
-What is left is the **first** route in a building, or the first after a change: it still has to build the graph, about six seconds in the
-largest building the editor makes. That is hidden by spreading the work over frames (the progress bar and Cancel button of the Navigation and
-Validation panels), so the editor keeps its frame rate, but the user waits for it once. Most buildings are far smaller than this one (the
-routes between three buildings take 41 ms), so it is the worst case of the editor, not the usual one. If it has to be faster, the way is to
-join the vertices faster (the visibility tests between a room's corners), which is a change of the planner itself and is not planned for M2.
+What is left is the **first** route in a building, or the first after a change: it still has to build the graph. That is hidden by
+spreading the work over frames (the progress bar and Cancel button of the Navigation and Validation panels), so the editor keeps its frame
+rate, but the user waits for it once, and a little longer than the work takes, because a slice of the panel's search is only 8 ms of a frame
+(on the CI laptop a build of 2.2 s of work took about twice that). Most buildings are far smaller than the largest one (the routes between three
+buildings take about 2 ms), so it is the worst case of the editor, not the usual one.
+
+**The joining still grows with the square of the number of vertices**, and the threads only lower its factor: a project with three times the
+vertices of the one above would take about nine times as long to join. If it has to be faster than this, the way is to join a vertex only to
+those of its own room and the doors of that room, and to keep a graph for every floor, so that a change of one floor builds only that floor.
+That changes how the planner makes its graph and every route would have to be checked again, so it is not planned for M2. Running the search
+on a worker thread would take away the wait beyond the work, and is left for later.
 
 **Not measured: several users at once.** The desktop application and the phone app are single-user and share no state, so there is no
 concurrent load to measure, and no server that could deadlock. The stability that matters here is that the app does not crash on bad
@@ -89,5 +104,18 @@ UnrealEditor-Cmd.exe InNavi/InNavi.uproject -ExecCmds="Automation RunTests InNav
 ```
 
 The measurements are in `InNavi/Saved/Performance/*.json`. The tests fail when a loose guard limit is broken (campus load 10 s, interior
-5 s, a route in the largest building 15 s, a route between buildings 5 s, validation 30 s), so a large slowdown is caught on the pull
-request that causes it.
+5 s, the first route in the largest building 45 s, a route between buildings 5 s, validating a building 45 s and a project 30 s), so a
+large slowdown is caught on the pull request that causes it. The limits are not the budgets above: they are set for the slowest machine the
+tests run on (see the next section).
+
+## The machine that runs the CI is slower
+
+The same tests on the laptop that runs the CI (the build workflow, 2026-10-30) gave: the whole campus loaded 3.8 s (p95), generating the ten
+floors 9.9 s, opening the interior 0.21 s, **the first route in the largest building 21.8 s** (the next ones 37 ms, p95 55 ms), validating
+the largest building 22.2 s the first time and 0.45 s after. Everything is two to three and a half times slower than on the desktop of the
+table above, and the part that builds the graph of a building the most. The first route is therefore **above the 15 s budget on that
+machine**: it is shown as progress and spread over frames (see "Where we are under the target"), so the editor stays responsive, but the
+user waits about twenty seconds once for the largest building there. The campus load, opening an interior and the next routes meet their budgets
+on both machines (the frame rates were only read on the desktop). The laptop figures of this section are from before the vertices were joined
+on several threads (2026-10-31, see above); the graph of a real project there went from 7.0 s to 2.2 s, and the CI will write the new figures
+of the largest building on its next run.

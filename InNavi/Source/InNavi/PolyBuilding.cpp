@@ -375,18 +375,23 @@ void APolyBuilding::ApplySlabVisibility()
 
 void APolyBuilding::SetHighlighted(bool bHighlighted)
 {
-	if (!DynMaterial)
-	{
-		return;
-	}
+	bIsHighlighted = bHighlighted;
+	ApplyBodyColor();
+}
 
-	if (bHighlighted)
+void APolyBuilding::SetBuildingType(const FString& NewType)
+{
+	BuildingType = BuildingTypes::Normalize(NewType);
+	ApplyBodyColor();
+}
+
+void APolyBuilding::ApplyBodyColor()
+{
+	const FLinearColor HighlightColor(1.0f, 0.85f, 0.0f);
+	CurrentBodyColor = bIsHighlighted ? HighlightColor : BuildingTypes::Color(BuildingType);
+	if (DynMaterial)
 	{
-		DynMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(1.0f, 0.85f, 0.0f));
-	}
-	else
-	{
-		DynMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.6f, 0.6f, 0.6f));
+		DynMaterial->SetVectorParameterValue(TEXT("Color"), CurrentBodyColor);
 	}
 }
 void APolyBuilding::SetBuildingOpacity(float NewOpacity)

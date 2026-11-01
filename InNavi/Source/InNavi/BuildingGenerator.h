@@ -9,9 +9,12 @@
 #include "RoadSegmentActor.h"
 #include "BuildingGenerator.generated.h"
 
+class AContextBuildingActor;
 class APolyBuilding;
 class AStaticMeshActor;
 class FJsonObject;
+
+DECLARE_MULTICAST_DELEGATE(FOnBuildingNavigationLayoutChanged);
 
 UCLASS()
 class INNAVI_API ABuildingGenerator : public AActor
@@ -20,6 +23,8 @@ class INNAVI_API ABuildingGenerator : public AActor
 
 public:
 	ABuildingGenerator();
+	FOnBuildingNavigationLayoutChanged OnNavigationLayoutChanged;
+	uint64 GetNavigationRevision() const { return NavigationRevision; }
 
 	// Spawns one building directly from already-parsed data. Used both by JSON loading
 	// (LoadBuildingsFromFile) and by runtime building creation (e.g. NavPlayerController's build mode).
@@ -130,6 +135,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void SetNonCampusBuildingsVisible(bool bVisible);
 
+	// What kind of building a campus building is (one value from BuildingTypes::All()). False when there is no such building. A change
+	// counts as a change of the results, so the lists and the Building panel follow it, and the building is shown or hidden as the type
+	// filter says.
+	bool SetBuildingType(const FString& BuildingId, const FString& Type);
+	FString GetBuildingType(const FString& BuildingId) const;
+
+	// Shows/hides the buildings of one type, campus and non-campus alike - the Map panel's type check boxes. Not saved in the project.
+	void SetBuildingTypeVisible(const FString& Type, bool bVisible);
+	bool IsBuildingTypeVisible(const FString& Type) const;
+	// Shows every type again.
+	void ResetBuildingTypeFilter();
+
 	// Shows/hides every currently-spawned road actor in Category at once - what a road-visibility
 	// filter panel's checkboxes call. Takes effect immediately (no reload/re-query needed) since
 	// every road actor already remembers its own category (see ARoadSegmentActor::GetCategory).
@@ -226,6 +243,11 @@ public:
 	// True if the file is a valid project that just has no buildings yet - what "New project" writes. Loading
 	// such a file spawns nothing, so a spawned count of 0 alone cannot tell it from a broken file.
 	static bool IsEmptyProjectFile(const FString& FilePath);
+	// Whether LoadBuildingsFromFile can make buildings of this file: it reads, is JSON, has a "buildings" list, and that list is
+	// empty (a new project) or has a building with an outline. When not, OutProblem says why. Checked before the scene is cleared.
+	static bool IsLoadableProjectFile(const FString& FilePath, FString& OutProblem);
+	// Whether LoadBuildingsFromDatabase can make the campus of this map database (it opens and has campus buildings).
+	static bool IsLoadableDatabase(const FString& DatabasePath, FString& OutProblem);
 
 	// The raw "interior" JSON sub-object associated with a building id, as loaded from (or to be
 	// written into) the combined project file - not interpreted here, that's InteriorGenerator's
@@ -237,7 +259,8 @@ public:
 
 	// Stashes the interior data for a building id, overwriting whatever was there before (e.g.
 	// InteriorGenerator syncing its current in-memory state before a project save).
-	void SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData);
+	// A live-to-stored sync passes false: model edits already notified navigation, while saving/viewing is not an edit.
+	void SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData, bool bNotifyNavigation = true);
 
 	// --- Doors in the outer wall (see InteriorEntrance.h) ---
 	// Those saved with a building's interior.
@@ -286,7 +309,12 @@ private:
 	UFUNCTION()
 	void HandleBuildingDestroyed(AActor* Building);
 	void RefreshBuildingFilterFor(APolyBuilding& Building) const;
+	// A non-campus building is shown when the Non-Campus filter and the filter of its type both allow it.
+	bool ShouldShowContextBuilding(const AContextBuildingActor& Building) const;
+	void RefreshContextBuildingVisibility();
 
+	uint64 NavigationRevision = 0;
+	void NotifyNavigationLayoutChanged();
 	float Scale = 1.f;
 	TSet<FString> UsedBuildingIds;
 
@@ -346,6 +374,9 @@ private:
 
 	// Whether the filter panel shows the other (non-campus) buildings: SetNonCampusBuildingsVisible.
 	bool bNonCampusBuildingsVisible = true;
+
+	// The types the filter panel hides: SetBuildingTypeVisible. Empty when every type is shown.
+	TSet<FString> HiddenBuildingTypes;
 
 	// The level's floor and how it was, found the first time the ground is updated (see UpdateGroundToVisible).
 	TWeakObjectPtr<AStaticMeshActor> GroundActor;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Components/ComboBoxString.h"
 #include "DockPanelContent.h"
 #include "BuildingInfoPanelWidget.generated.h"
 
@@ -40,6 +41,10 @@ public:
 	FString GetRoomsTextForTests() const;
 	FString GetLinksTextForTests() const;
 	FString GetStatusTextForTests() const;
+	// The type the drop-down shows, how many types it lists, and choosing one in it (what a click on an item does).
+	FString GetTypeTextForTests() const;
+	int32 GetTypeOptionCountForTests() const;
+	void SelectTypeForTests(const FString& Type);
 	int32 GetOutlinePointCountForTests() const;
 	UButton* GetOpen2DButtonForTests() const { return Open2DButton; }
 	UButton* GetOpen3DButtonForTests() const { return Open3DButton; }
@@ -53,6 +58,15 @@ private:
 	void HandleOpen2DClicked();
 	UFUNCTION()
 	void HandleOpen3DClicked();
+	// The user chose a type in the drop-down.
+	UFUNCTION()
+	void HandleTypeSelected(FString SelectedItem, ESelectInfo::Type SelectionType);
+	// An item of the drop-down: the type's colour as a small square before its name.
+	UFUNCTION()
+	UWidget* HandleGenerateTypeItem(FString Item);
+
+	// The label and the drop-down for the building's type, as rows at the end of Stack.
+	void AddTypeRow(UVerticalBox* Stack);
 
 	UPROPERTY()
 	USizeBox* ContentSize = nullptr;
@@ -66,6 +80,14 @@ private:
 	UTextBlock* NameText = nullptr;
 	UPROPERTY()
 	UTextBlock* IdText = nullptr;
+	UPROPERTY()
+	UComboBoxString* TypeCombo = nullptr;
+	// What the drop-down hands to Slate is a widget made on the spot that nothing else owns; without this it can be collected while
+	// the drop-down still draws it. Only the newest are kept.
+	UPROPERTY()
+	TArray<TObjectPtr<UWidget>> RetainedTypeItems;
+	// True while the drop-down is being set from the building, so that does not count as the user choosing a type.
+	bool bRefreshingType = false;
 	UPROPERTY()
 	UTextBlock* FloorsValue = nullptr;
 	UPROPERTY()

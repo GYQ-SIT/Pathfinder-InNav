@@ -100,11 +100,12 @@ namespace ProjectSchemaTests
 			bool bNoExtras = false;
 			Schema.TryGetBoolField(TEXT("additionalProperties"), bNoExtras);
 			const bool bExtrasForbidden = Schema.HasTypedField<EJson::Boolean>(TEXT("additionalProperties")) && !bNoExtras;
-			for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : Object->Values)
+			for (const auto& Field : Object->Values)
 			{
+				const FString FieldName(*Field.Key);
 				const TSharedPtr<FJsonObject>* FieldSchema = nullptr;
-				if (Properties && (*Properties)->TryGetObjectField(Field.Key, FieldSchema)) Check(Field.Value, **FieldSchema, Root, Path + TEXT(".") + Field.Key, Errors);
-				else if (bExtrasForbidden) Errors.Add(FString::Printf(TEXT("%s: the field \"%s\" is not in the schema"), *Path, *Field.Key));
+				if (Properties && (*Properties)->TryGetObjectField(FieldName, FieldSchema)) Check(Field.Value, **FieldSchema, Root, Path + TEXT(".") + FieldName, Errors);
+				else if (bExtrasForbidden) Errors.Add(FString::Printf(TEXT("%s: the field \"%s\" is not in the schema"), *Path, *FieldName));
 			}
 		}
 	}
@@ -132,6 +133,7 @@ bool FProjectSchemaSavedTest::RunTest(const FString& Parameters)
 	const double Units = 100.0 / Fixture.Generator->GetScale();
 	const TArray<FVector2D> Outline = { FVector2D(0, 0), FVector2D(60 * Units, 0), FVector2D(60 * Units, 30 * Units), FVector2D(0, 30 * Units) };
 	Fixture.Generator->SpawnBuildingFromData(TEXT("SCHEMA"), TEXT("Schema test"), Outline, 2, 300.f, FVector2D(9000.0, 9000.0));
+	Fixture.Generator->SetBuildingType(TEXT("SCHEMA"), TEXT("School"));
 	Fixture.Interior->LoadInteriorForBuilding(TEXT("SCHEMA"));
 	if (Fixture.Interior->GetActiveFloor() < 1) Fixture.Interior->AddFloor();
 	FString Error;
@@ -157,6 +159,13 @@ bool FProjectSchemaSavedTest::RunTest(const FString& Parameters)
 	const TArray<FString> Found = Errors(Saved);
 	for (const FString& Problem : Found) AddError(TEXT("the saved project does not match docs/schemas/project.schema.json: ") + Problem);
 	TestTrue(TEXT("the saved project says its version"), Saved->HasTypedField<EJson::Number>(TEXT("version")));
+	for (const TSharedPtr<FJsonValue>& BuildingValue : Saved->GetArrayField(TEXT("buildings")))
+	{
+		if (BuildingValue->AsObject()->GetStringField(TEXT("id")) == TEXT("SCHEMA"))
+		{
+			TestEqual(TEXT("the building type is saved"), BuildingValue->AsObject()->GetStringField(TEXT("buildingType")), FString(TEXT("School")));
+		}
+	}
 	// It has what is worth checking: rooms with doors, a lift, and a door in the outer wall.
 	bool bRoom = false, bDoor = false, bNode = false, bEntrance = false;
 	for (const TSharedPtr<FJsonValue>& BuildingValue : Saved->GetArrayField(TEXT("buildings")))

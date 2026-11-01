@@ -98,7 +98,7 @@ void UMobileNavigatePageWidget::Refresh()
 	InstructionText->SetText(FText::FromString(Step.Text));
 	ProgressText->SetText(FText::FromString(FString::Printf(TEXT("Step %d of %d"), Index + 1, Count)));
 	RemainingText->SetText(FText::FromString(FString::Printf(TEXT("%d m remaining"), FMath::RoundToInt(MetresRemaining(Route, Index)))));
-	LevelText->SetText(FText::FromString(Step.BuildingId + TEXT(" · ") + Step.LevelLabel));
+	LevelText->SetText(FText::FromString(Step.WhereText()));
 	// The last step is the arrival: the button says so.
 	NextLabel->SetText(FText::FromString(Index >= Count - 1 ? TEXT("I have arrived") : TEXT("Next instruction")));
 }

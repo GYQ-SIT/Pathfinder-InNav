@@ -3,10 +3,12 @@
 #include "NavPlayerController.h"
 #include "StartScreenStyle.h"
 #include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
 #include "Components/CheckBox.h"
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
@@ -52,7 +54,7 @@ void UDockPanelContentWidget::ApplyStandardFont(UEditableTextBox* TextBox)
 	TextBox->SetWidgetStyle(Style);
 }
 
-UCheckBox* UDockPanelContentWidget::AddCheckRow(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label, bool bChecked, float BottomPadding)
+UCheckBox* UDockPanelContentWidget::AddCheckRow(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label, bool bChecked, float BottomPadding, TOptional<FLinearColor> Swatch)
 {
 	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
 	UCheckBox* CheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), FName(Name));
@@ -60,6 +62,19 @@ UCheckBox* UDockPanelContentWidget::AddCheckRow(UVerticalBox* Stack, const TCHAR
 	StartStyle::DarkCheckBox(CheckBox);
 	UHorizontalBoxSlot* CheckSlot = Row->AddChildToHorizontalBox(CheckBox);
 	CheckSlot->SetVerticalAlignment(VAlign_Center);
+	if (Swatch.IsSet())
+	{
+		USizeBox* SquareSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		SquareSize->SetWidthOverride(10.f * StartStyle::DesignToUi);
+		SquareSize->SetHeightOverride(10.f * StartStyle::DesignToUi);
+		UBorder* Square = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+		Square->SetBrush(StartStyle::Rounded(Swatch.GetValue(), FLinearColor::Transparent, 3.f, 0.f));
+		Square->SetBrushColor(FLinearColor::White);
+		SquareSize->SetContent(Square);
+		UHorizontalBoxSlot* SquareSlot = Row->AddChildToHorizontalBox(SquareSize);
+		SquareSlot->SetVerticalAlignment(VAlign_Center);
+		SquareSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
+	}
 	UTextBlock* Text = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 	Text->SetText(FText::FromString(FString(Label)));
 	Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));

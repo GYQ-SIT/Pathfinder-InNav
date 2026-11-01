@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "BuildingTypes.h"
 #include "GameFramework/Actor.h"
 #include "PolyBuilding.generated.h"
 
@@ -60,9 +61,14 @@ public:
 
 	// Highlight / unhighlight this building
 	void SetHighlighted(bool bHighlighted);
-	// Controls building exterior transparency.
-    // 1.0 = fully visible, 0.0 = invisible.
-	void SetBuildingOpacity(float NewOpacity);
+
+	// What kind of building this is (one value from BuildingTypes::All(); anything else becomes Other). The building is drawn in the
+	// colour of its type, except while it is highlighted.
+	void SetBuildingType(const FString& NewType);
+	const FString& GetBuildingType() const { return BuildingType; }
+	// The colour the building body is drawn in now (its type's, or the highlight's), for tests.
+	FLinearColor GetBodyColorForTests() const { return CurrentBodyColor; }
+
 	// Shows the given floor's plan by hiding every ceiling from that floor up through the roof
 	// (both visually and its collision, so clicks reach the floor below too) - every slab AT or BELOW
 	// the given floor stay visible/solid, so you don't see (or click) through into whatever's
@@ -107,6 +113,9 @@ private:
 	// Regenerates the mesh sections from the cached footprint/scale/offset and current
 	// FloorCount/FloorHeight. Called by both BuildFromFootprint and SetFloorCount.
 	void RebuildMesh();
+
+	// Paints the body in the highlight colour, or in the colour of its type. The one place a type becomes how the building looks.
+	void ApplyBodyColor();
 
 	// Builds (or rebuilds) one flat cap section (the triangulated footprint, facing up) at height Z,
 	// at the given mesh section index - used for the roof and every inter-floor slab, which are
@@ -155,4 +164,8 @@ private:
 
 	UPROPERTY()
 	UMaterialInstanceDynamic* DynMaterial;
+
+	FString BuildingType = BuildingTypes::Default();
+	bool bIsHighlighted = false;
+	FLinearColor CurrentBodyColor = FLinearColor::White;
 };
