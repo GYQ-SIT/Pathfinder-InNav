@@ -118,7 +118,7 @@ void APolyBuilding::RebuildMesh()
 	{
 		UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(
 			nullptr,
-			TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial")
+			TEXT("/Game/ImageAssets/Materials/M_BuildingTransparent.M_BuildingTransparent")
 		);
 
 		if (BaseMat)
@@ -161,7 +161,7 @@ void APolyBuilding::RebuildMesh()
 	TArray<FColor> GroundVertexColors;
 	MeshComp->CreateMeshSection(0, GroundVertices, GroundTriangles, GroundNormals, GroundUV0, GroundVertexColors, GroundTangents, !bInspectionBottomHidden);
 	MeshComp->SetMaterial(0, FloorDynMaterial);
-	MeshComp->SetMeshSectionVisible(0, !bInspectionBottomHidden);
+	MeshComp->SetMeshSectionVisible(0, false);
 
 	// Sections 1..FloorCount (roof + inter-floor slabs) and FloorCount+1..2*FloorCount (one wall ring
 	// per floor, see GetWallSectionIndex) are all built by ApplySlabVisibility, which also decides
@@ -380,8 +380,7 @@ void APolyBuilding::ApplySlabVisibility()
 		// with what's actually visible, even though interior room/wall editing itself now happens
 		// entirely through the 2D floor plan canvas (UInteriorFloorPlanWidget), not 3D raycasts.
 		BuildCapSection(CachedPoly2D, CachedCapTris, Z, SectionIndex, /*bCreateCollision=*/!bHide);
-		MeshComp->SetMeshSectionVisible(SectionIndex, !bHide);
-
+		MeshComp->SetMeshSectionVisible(0, !bInspectionBottomHidden);
 		// This floor's own exterior wall ring - visible whenever nothing's hidden yet (normal exterior
 		// view, VisibleInteriorLevel <= 0) or L is exactly the floor being viewed; every other floor's
 		// wall ring hides completely so the 3D interior preview camera (which sits outside the
@@ -426,25 +425,29 @@ void APolyBuilding::ApplyBodyColor()
 }
 void APolyBuilding::SetBuildingOpacity(float NewOpacity)
 {
-	if (!DynMaterial)
-	{
-		UE_LOG(LogTemp, Error,
-			TEXT("TRANSPARENCY ERROR: DynMaterial is NULL"));
-		return;
-	}
-
 	const float ClampedOpacity =
 		FMath::Clamp(NewOpacity, 0.0f, 1.0f);
 
-	DynMaterial->SetScalarParameterValue(
-		TEXT("Opacity"),
-		ClampedOpacity
-	);
+	if (DynMaterial)
+	{
+		DynMaterial->SetScalarParameterValue(
+			TEXT("Opacity"),
+			ClampedOpacity
+		);
+	}
+
+	if (FloorDynMaterial)
+	{
+		FloorDynMaterial->SetScalarParameterValue(
+			TEXT("Opacity"),
+			ClampedOpacity
+		);
+	}
 
 	UE_LOG(LogTemp, Warning,
-		TEXT("TRANSPARENCY: Opacity=%.2f Material=%s"),
+		TEXT("TRANSPARENCY: Walls=%.2f Floors=%.2f"),
 		ClampedOpacity,
-		*GetNameSafe(DynMaterial));
+		ClampedOpacity);
 }
 void APolyBuilding::SetCampusXRayMode(bool bEnabled)
 {

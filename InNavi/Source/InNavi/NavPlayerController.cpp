@@ -759,40 +759,65 @@ void ANavPlayerController::ToggleShapeTestMode()
 }
 void ANavPlayerController::UpdateBuildingTransparency()
 {
-	UE_LOG(LogTemp, Warning, TEXT("TRANSPARENCY FUNCTION CALLED"));
-
-	if (!bIsIn3DPreviewMode || !Generator || !InteriorGen)
+	if (!Generator || bInteriorInspectionEnabled || bIsIn3DPreviewMode)
 		return;
-
-	APolyBuilding* Building = Generator->FindBuildingById(
-		InteriorGen->GetLoadedBuildingId());
-
-	if (!IsValid(Building))
-	{
-		UE_LOG(LogTemp, Warning, TEXT("TRANSPARENCY: Building not found"));
-		return;
-	}
 
 	APawn* ControlledPawn = GetPawn();
 	if (!ControlledPawn)
 		return;
 
-	FVector BuildingOrigin;
-	FVector BuildingExtent;
-	Building->GetActorBounds(false, BuildingOrigin, BuildingExtent);
+	const FVector CameraLocation =
+		PlayerCameraManager
+		? PlayerCameraManager->GetCameraLocation()
+		: ControlledPawn->GetActorLocation();
 
-	const float Distance = FVector::Distance(
-		ControlledPawn->GetActorLocation(),
-		BuildingOrigin);
+	APolyBuilding* NearestBuilding = nullptr;
+	float NearestDistance = TNumericLimits<float>::Max();
 
-	const float Opacity = FMath::GetMappedRangeValueClamped(
-		FVector2D(800.0f, 2500.0f),
-		FVector2D(0.2f, 1.0f),
-		Distance);
+	// Find the closest building
+	for (APolyBuilding* Building : Generator->GetAllBuildings())
+	{
+		if (!IsValid(Building))
+			continue;
 
-	Building->SetBuildingOpacity(0.1f);
+		FVector Origin, Extent;
+		Building->GetActorBounds(false, Origin, Extent);
 
-	UE_LOG(LogTemp, Warning, TEXT("BUILDING OPACITY TEST = 0.1"));
+		// Distance to the building's bounding box
+		const FVector ClosestPoint = CameraLocation.BoundToBox(
+			Origin - Extent,
+			Origin + Extent
+		);
+
+		const float Distance =
+			FVector::Distance(CameraLocation, ClosestPoint);
+
+		if (Distance < NearestDistance)
+		{
+			NearestDistance = Distance;
+			NearestBuilding = Building;
+		}
+	}
+
+	// Only fade the closest building
+	for (APolyBuilding* Building : Generator->GetAllBuildings())
+	{
+		if (!IsValid(Building))
+			continue;
+
+		float Opacity = 1.0f;
+
+		if (Building == NearestBuilding)
+		{
+			Opacity = FMath::GetMappedRangeValueClamped(
+				FVector2D(200.0f, 1500.0f),
+				FVector2D(0.2f, 1.0f),
+				NearestDistance
+			);
+		}
+
+		Building->SetBuildingOpacity(Opacity);
+	}
 }
 void ANavPlayerController::ToggleDrawRoomMode()
 {
@@ -2814,33 +2839,47 @@ void ANavPlayerController::SetOtherBuildingsHidden(bool bNewHidden)
 
 void ANavPlayerController::ZoomIn3DPreview()
 {
-	if (bInteriorInspectionEnabled) { if (!IsPointerOverUI()) FrameInspectionCamera(0.9f); return; }
-	// Dollies the pawn along whatever direction it's CURRENTLY facing, rather than recomputing the
-	// whole pose from ThreeDPreviewYaw/Pitch/the framing center (what PositionCameraFor3DPreview does)
-	// - free WASD/mouse-look (see SetIn3DPreviewMode) can leave those stale the moment the user moves,
-	// so calling PositionCameraFor3DPreview here would snap the camera back to the original framing on
-	// every scroll tick instead of just zooming from wherever it actually is.
-	if (!bIsIn3DPreviewMode)
+	if (bInteriorInspectionEnabled)
 	{
+		if (!IsPointerOverUI())
+			FrameInspectionCamera(0.9f);
 		return;
 	}
+
+	if (IsPointerOverUI())
+		return;
+
 	if (APawn* ControlledPawn = GetPawn())
 	{
-		ControlledPawn->AddActorWorldOffset(GetControlRotation().Vector() * ThreeDPreviewZoomStep);
+		ControlledPawn->AddActorWorldOffset(
+			GetControlRotation().Vector() * ThreeDPreviewZoomStep,
+			true
+		);
+
 		UpdateBuildingTransparency();
 	}
 }
 
 void ANavPlayerController::ZoomOut3DPreview()
 {
-	if (bInteriorInspectionEnabled) { if (!IsPointerOverUI()) FrameInspectionCamera(1.1f); return; }
-	if (!bIsIn3DPreviewMode)
+	if (bInteriorInspectionEnabled)
 	{
+		if (!IsPointerOverUI())
+			FrameInspectionCamera(1.1f);
 		return;
 	}
+
+	if (IsPointerOverUI())
+		return;
+
 	if (APawn* ControlledPawn = GetPawn())
 	{
-		ControlledPawn->AddActorWorldOffset(-GetControlRotation().Vector() * ThreeDPreviewZoomStep);
+		ControlledPawn->AddActorWorldOffset(
+			-GetControlRotation().Vector() * ThreeDPreviewZoomStep,
+			true
+		);
+
+		UpdateBuildingTransparency();
 	}
 }
 
