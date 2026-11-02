@@ -380,6 +380,7 @@ void APolyBuilding::ApplySlabVisibility()
 		// with what's actually visible, even though interior room/wall editing itself now happens
 		// entirely through the 2D floor plan canvas (UInteriorFloorPlanWidget), not 3D raycasts.
 		BuildCapSection(CachedPoly2D, CachedCapTris, Z, SectionIndex, /*bCreateCollision=*/!bHide);
+		MeshComp->SetMeshSectionVisible(SectionIndex, !bHide);
 		MeshComp->SetMeshSectionVisible(0, !bInspectionBottomHidden);
 		// This floor's own exterior wall ring - visible whenever nothing's hidden yet (normal exterior
 		// view, VisibleInteriorLevel <= 0) or L is exactly the floor being viewed; every other floor's
@@ -387,7 +388,8 @@ void APolyBuilding::ApplySlabVisibility()
 		// footprint, unlike the near-top-down 2D floor-plan camera) isn't blocked by floors it isn't
 		// looking at.
 		const int32 WallSectionIndex = GetWallSectionIndex(L);
-		const bool bHideWall = (VisibleInteriorLevel > 0 && L != VisibleInteriorLevel);
+		const bool bHideWall =
+			(VisibleInteriorLevel > 0 && L != VisibleInteriorLevel);
 		BuildWallSection(CachedPoly2D, (L - 1) * FloorHeight, L * FloorHeight, WallSectionIndex, /*bCreateCollision=*/!bHideWall, L);
 		MeshComp->SetMeshSectionVisible(WallSectionIndex, !bHideWall);
 	}

@@ -759,8 +759,20 @@ void ANavPlayerController::ToggleShapeTestMode()
 }
 void ANavPlayerController::UpdateBuildingTransparency()
 {
-	if (!Generator || bInteriorInspectionEnabled || bIsIn3DPreviewMode)
+	if (!Generator)
 		return;
+
+	if (bInteriorInspectionEnabled || bIsIn3DPreviewMode)
+	{
+		for (APolyBuilding* Building : Generator->GetAllBuildings())
+		{
+			if (IsValid(Building))
+			{
+				Building->SetBuildingOpacity(1.0f);
+			}
+		}
+		return;
+	}
 
 	APawn* ControlledPawn = GetPawn();
 	if (!ControlledPawn)
@@ -2521,7 +2533,7 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 		FocusCameraOnAllBuildings();
 	}
 	// Rebuild the campus X-ray interior preview after loading buildings.
-	//BuildCampusInteriorPreview();
+	BuildCampusInteriorPreview();
 	return Count;
 }
 
@@ -3025,6 +3037,7 @@ void ANavPlayerController::SetIn3DPreviewMode(bool bEnable)
 	}
 
 	bIsIn3DPreviewMode = bEnable;
+	UpdateBuildingTransparency();
 	if (bEnable)
 	{
 		UpdateBuildingTransparency();

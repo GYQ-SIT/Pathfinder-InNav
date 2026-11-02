@@ -239,13 +239,13 @@ void AInteriorRoom::RebuildMesh()
 		{
 			DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
 
-			// Test with very low opacity
-			DynMaterial->SetScalarParameterValue(TEXT("Opacity"), 0.09f);
+			// Make interior walls fully visible
+			DynMaterial->SetScalarParameterValue(TEXT("Opacity"), 1.0f);
 
-			// Bright red so we can confirm the material is applied
+			// Use a neutral light grey wall color
 			DynMaterial->SetVectorParameterValue(
 				TEXT("Color"),
-				FLinearColor(1.0f, 0.0f, 0.0f)
+				FLinearColor(0.85f, 0.85f, 0.82f)
 			);
 		}
 		else
