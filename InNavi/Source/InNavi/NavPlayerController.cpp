@@ -798,7 +798,13 @@ void ANavPlayerController::UpdateBuildingTransparency()
 			NearestBuilding = Building;
 		}
 	}
-
+	if (NearestBuilding)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("Nearest Building: %s | Distance: %.1f"),
+			*NearestBuilding->BuildingId,
+			NearestDistance);
+	}
 	// Only fade the closest building
 	for (APolyBuilding* Building : Generator->GetAllBuildings())
 	{
@@ -4984,14 +4990,15 @@ void ANavPlayerController::Tick(float DeltaSeconds)
 		}
 	}
 
-	if (bRotatingCCW == bRotatingCW)
+	if (bRotatingCCW != bRotatingCW)
 	{
-		// Neither held, or both held at once (cancel out) - nothing to do.
-		return;
+		const float Direction = bRotatingCCW ? -1.f : 1.f;
+		RotateSelectedRoom(Direction * RotationDegreesPerSecond * DeltaSeconds);
 	}
-
-	const float Direction = bRotatingCCW ? -1.f : 1.f;
-	RotateSelectedRoom(Direction * RotationDegreesPerSecond * DeltaSeconds);
+	if (!bIsIn3DPreviewMode && !bInteriorInspectionEnabled)
+	{
+		UpdateBuildingTransparency();
+	}
 }
 
 void ANavPlayerController::RotateSelectedRoom(float DeltaDegrees)
