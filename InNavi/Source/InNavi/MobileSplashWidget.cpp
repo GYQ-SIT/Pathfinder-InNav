@@ -25,9 +25,9 @@ namespace
 	}
 
 	// A rounded box with only an outline: the logo mark of the start screen.
-	FSlateBrush SplashOutline(const FLinearColor& Colour, float Radius, float Width)
+	FSlateBrush SplashOutline(const FLinearColor& Colour, float Radius, float SplashWidth)
 	{
-		return MobileStyle::Rounded(FLinearColor::Transparent, Colour, Radius, Width);
+		return MobileStyle::Rounded(FLinearColor::Transparent, Colour, Radius, SplashWidth);
 	}
 }
 
@@ -50,71 +50,71 @@ TSharedRef<SWidget> UMobileSplashWidget::RebuildWidget()
 	if (WidgetTree && !WidgetTree->RootWidget)
 	{
 		UWidgetTree* Tree = WidgetTree;
-		UOverlay* Root = Tree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("SplashRoot"));
-		Tree->RootWidget = Root;
+		UOverlay* SplashRoot = Tree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("SplashRoot"));
+		Tree->RootWidget = SplashRoot;
 
 		// The black. It is a hit-testable widget, so that no touch goes through to what is under the splash.
-		UBorder* Black = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SplashBlack"));
-		Black->SetBrushColor(FLinearColor::Black);
-		Black->SetVisibility(ESlateVisibility::Visible);
-		UOverlaySlot* BlackSlot = Root->AddChildToOverlay(Black);
-		BlackSlot->SetHorizontalAlignment(HAlign_Fill);
-		BlackSlot->SetVerticalAlignment(VAlign_Fill);
+		UBorder* SplashBlack = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SplashBlack"));
+		SplashBlack->SetBrushColor(FLinearColor::Black);
+		SplashBlack->SetVisibility(ESlateVisibility::Visible);
+		UOverlaySlot* SplashBlackSlot = SplashRoot->AddChildToOverlay(SplashBlack);
+		SplashBlackSlot->SetHorizontalAlignment(HAlign_Fill);
+		SplashBlackSlot->SetVerticalAlignment(VAlign_Fill);
 
 		// The logo: the blue outlined square with the two-column symbol of the start screen, and the name under it.
 		const FLinearColor LogoBlue = StartStyle::Rgb(52, 142, 255);
-		USizeBox* MarkSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("SplashMarkSize"));
-		MarkSize->SetWidthOverride(88.f);
-		MarkSize->SetHeightOverride(88.f);
-		UBorder* MarkFrame = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SplashMark"));
-		MarkFrame->SetBrush(SplashOutline(LogoBlue, 20.f, 2.5f));
-		MarkFrame->SetBrushColor(FLinearColor::White);
-		MarkFrame->SetHorizontalAlignment(HAlign_Center);
-		MarkFrame->SetVerticalAlignment(VAlign_Center);
-		USizeBox* SymbolSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("SplashSymbolSize"));
-		SymbolSize->SetWidthOverride(40.f);
-		SymbolSize->SetHeightOverride(40.f);
-		UOverlay* Symbol = Tree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("SplashSymbol"));
-		UBorder* SymbolBox = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SplashSymbolBox"));
-		SymbolBox->SetBrush(SplashOutline(LogoBlue, 4.f, 3.5f));
-		SymbolBox->SetBrushColor(FLinearColor::White);
-		UOverlaySlot* SymbolBoxSlot = Symbol->AddChildToOverlay(SymbolBox);
-		SymbolBoxSlot->SetHorizontalAlignment(HAlign_Fill);
-		SymbolBoxSlot->SetVerticalAlignment(VAlign_Fill);
-		USizeBox* LineSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("SplashSymbolLineSize"));
-		LineSize->SetWidthOverride(3.5f);
-		UBorder* Line = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SplashSymbolLine"));
-		Line->SetBrushColor(LogoBlue);
-		LineSize->SetContent(Line);
-		UOverlaySlot* LineSlot = Symbol->AddChildToOverlay(LineSize);
-		LineSlot->SetHorizontalAlignment(HAlign_Center);
-		LineSlot->SetVerticalAlignment(VAlign_Fill);
-		SymbolSize->SetContent(Symbol);
-		MarkFrame->SetContent(SymbolSize);
-		MarkSize->SetContent(MarkFrame);
+		USizeBox* SplashMarkSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("SplashMarkSize"));
+		SplashMarkSize->SetWidthOverride(88.f);
+		SplashMarkSize->SetHeightOverride(88.f);
+		UBorder* SplashMarkFrame = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SplashMark"));
+		SplashMarkFrame->SetBrush(SplashOutline(LogoBlue, 20.f, 2.5f));
+		SplashMarkFrame->SetBrushColor(FLinearColor::White);
+		SplashMarkFrame->SetHorizontalAlignment(HAlign_Center);
+		SplashMarkFrame->SetVerticalAlignment(VAlign_Center);
+		USizeBox* SplashSymbolSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("SplashSymbolSize"));
+		SplashSymbolSize->SetWidthOverride(40.f);
+		SplashSymbolSize->SetHeightOverride(40.f);
+		UOverlay* SplashSymbol = Tree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("SplashSymbol"));
+		UBorder* SplashSymbolBox = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SplashSymbolBox"));
+		SplashSymbolBox->SetBrush(SplashOutline(LogoBlue, 4.f, 3.5f));
+		SplashSymbolBox->SetBrushColor(FLinearColor::White);
+		UOverlaySlot* SplashSymbolBoxSlot = SplashSymbol->AddChildToOverlay(SplashSymbolBox);
+		SplashSymbolBoxSlot->SetHorizontalAlignment(HAlign_Fill);
+		SplashSymbolBoxSlot->SetVerticalAlignment(VAlign_Fill);
+		USizeBox* SplashLineSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("SplashSymbolLineSize"));
+		SplashLineSize->SetWidthOverride(3.5f);
+		UBorder* SplashLine = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SplashSymbolLine"));
+		SplashLine->SetBrushColor(LogoBlue);
+		SplashLineSize->SetContent(SplashLine);
+		UOverlaySlot* SplashLineSlot = SplashSymbol->AddChildToOverlay(SplashLineSize);
+		SplashLineSlot->SetHorizontalAlignment(HAlign_Center);
+		SplashLineSlot->SetVerticalAlignment(VAlign_Fill);
+		SplashSymbolSize->SetContent(SplashSymbol);
+		SplashMarkFrame->SetContent(SplashSymbolSize);
+		SplashMarkSize->SetContent(SplashMarkFrame);
 
-		UHorizontalBox* Name = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("SplashName"));
-		Name->AddChildToHorizontalBox(MobileStyle::MakeText(Tree, TEXT("Txt_SplashIn"), TEXT("In"), 40.f, FLinearColor::White, true));
-		Name->AddChildToHorizontalBox(MobileStyle::MakeText(Tree, TEXT("Txt_SplashNav"), TEXT("Nav"), 40.f, StartStyle::Rgb(92, 172, 255), true));
+		UHorizontalBox* SplashName = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("SplashName"));
+		SplashName->AddChildToHorizontalBox(MobileStyle::MakeText(Tree, TEXT("Txt_SplashIn"), TEXT("In"), 40.f, FLinearColor::White, true));
+		SplashName->AddChildToHorizontalBox(MobileStyle::MakeText(Tree, TEXT("Txt_SplashNav"), TEXT("Nav"), 40.f, StartStyle::Rgb(92, 172, 255), true));
 
-		UVerticalBox* Group = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("SplashLogo"));
-		UVerticalBoxSlot* MarkSlot = Group->AddChildToVerticalBox(MarkSize);
-		MarkSlot->SetHorizontalAlignment(HAlign_Center);
-		MarkSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 18.f));
-		Group->AddChildToVerticalBox(Name)->SetHorizontalAlignment(HAlign_Center);
-		LogoGroup = Group;
+		UVerticalBox* SplashGroup = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("SplashLogo"));
+		UVerticalBoxSlot* SplashMarkSlot = SplashGroup->AddChildToVerticalBox(SplashMarkSize);
+		SplashMarkSlot->SetHorizontalAlignment(HAlign_Center);
+		SplashMarkSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 18.f));
+		SplashGroup->AddChildToVerticalBox(SplashName)->SetHorizontalAlignment(HAlign_Center);
+		LogoGroup = SplashGroup;
 
 		// Laid out in a space 375 wide, and blown up to the window's width (NativeTick), as the app is.
-		USizeBox* Width = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("SplashWidth"));
-		Width->SetWidthOverride(static_cast<float>(UMobileAppWidget::DesignWidth));
-		Width->SetContent(Group);
+		USizeBox* SplashWidth = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("SplashWidth"));
+		SplashWidth->SetWidthOverride(static_cast<float>(UMobileAppWidget::DesignWidth));
+		SplashWidth->SetContent(SplashGroup);
 		LogoScale = Tree->ConstructWidget<UScaleBox>(UScaleBox::StaticClass(), TEXT("SplashScale"));
 		LogoScale->SetStretch(EStretch::UserSpecified);
 		LogoScale->SetUserSpecifiedScale(1.f);
-		LogoScale->SetContent(Width);
-		UOverlaySlot* ScaleSlot = Root->AddChildToOverlay(LogoScale);
-		ScaleSlot->SetHorizontalAlignment(HAlign_Center);
-		ScaleSlot->SetVerticalAlignment(VAlign_Center);
+		LogoScale->SetContent(SplashWidth);
+		UOverlaySlot* SplashScaleSlot = SplashRoot->AddChildToOverlay(LogoScale);
+		SplashScaleSlot->SetHorizontalAlignment(HAlign_Center);
+		SplashScaleSlot->SetVerticalAlignment(VAlign_Center);
 	}
 	return Super::RebuildWidget();
 }
