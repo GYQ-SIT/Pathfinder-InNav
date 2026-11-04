@@ -189,6 +189,29 @@ TSharedRef<SWidget> UBuildingInfoPanelWidget::RebuildWidget()
 		StatusRow->AddChildToHorizontalBox(StatusTag);
 		Content->AddChildToVerticalBox(StatusRow)->SetPadding(FMargin(0.f, 18.f * DesignToUi, 0.f, 0.f));
 
+		// ---- See-through: make the building clear, and choose the floor whose rooms show ----
+		Content->AddChildToVerticalBox(Text(WidgetTree, TEXT("Txt_BuildingSeeThroughLabel"), TEXT("SEE-THROUGH"), 10.f, Rgb(170, 190, 214), true, 120))
+			->SetPadding(FMargin(0.f, 18.f * DesignToUi, 0.f, 6.f * DesignToUi));
+		TransparentButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_BuildingTransparent"));
+		TransparentButton->SetBackgroundColor(FLinearColor::White);
+		TransparentLabel = Text(WidgetTree, TEXT("Txt_BuildingTransparent"), TEXT("Transparent OFF"), 13.f, FLinearColor::White, true);
+		TransparentLabel->SetJustification(ETextJustify::Center);
+		UBorder* TransparentPad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Btn_BuildingTransparentPad"));
+		TransparentPad->SetBrushColor(FLinearColor::Transparent);
+		TransparentPad->SetPadding(FMargin(10.f * DesignToUi, 11.f * DesignToUi));
+		TransparentPad->SetContent(TransparentLabel);
+		TransparentButton->SetContent(TransparentPad);
+		ShowTransparentState(false);
+		Content->AddChildToVerticalBox(TransparentButton)->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f * DesignToUi));
+		Content->AddChildToVerticalBox(Text(WidgetTree, TEXT("Txt_RoomFloorLabel"), TEXT("Show rooms of"), 11.f, Rgb(150, 170, 196)))
+			->SetPadding(FMargin(0.f, 4.f * DesignToUi, 0.f, 4.f * DesignToUi));
+		RoomFloorCombo = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cmb_RoomFloor"));
+		DarkCombo(RoomFloorCombo);
+		RoomFloorCombo->OnGenerateWidgetEvent.BindDynamic(this, &UBuildingInfoPanelWidget::HandleGenerateRoomFloorItem);
+		RoomFloorCombo->AddOption(TEXT("All floors"));
+		RoomFloorCombo->SetSelectedOption(TEXT("All floors"));
+		Content->AddChildToVerticalBox(RoomFloorCombo);
+
 		// ---- The two ways in ----
 		auto AddWideButton = [this](const TCHAR* Name, const TCHAR* Label, const FButtonStyle& Style) -> UButton*
 		{
@@ -227,6 +250,15 @@ void UBuildingInfoPanelWidget::NativeConstruct()
 	{
 		TypeCombo->OnSelectionChanged.AddUniqueDynamic(this, &UBuildingInfoPanelWidget::HandleTypeSelected);
 	}
+	if (TransparentButton)
+	{
+		TransparentButton->OnClicked.AddUniqueDynamic(this, &UBuildingInfoPanelWidget::PlayButtonClickSound);
+		TransparentButton->OnClicked.AddUniqueDynamic(this, &UBuildingInfoPanelWidget::HandleTransparentClicked);
+	}
+	if (RoomFloorCombo)
+	{
+		RoomFloorCombo->OnSelectionChanged.AddUniqueDynamic(this, &UBuildingInfoPanelWidget::HandleRoomFloorSelected);
+	}
 	if (Open2DButton)
 	{
 		Open2DButton->OnClicked.AddUniqueDynamic(this, &UBuildingInfoPanelWidget::HandleOpen2DClicked);
@@ -235,6 +267,62 @@ void UBuildingInfoPanelWidget::NativeConstruct()
 	{
 		Open3DButton->OnClicked.AddUniqueDynamic(this, &UBuildingInfoPanelWidget::HandleOpen3DClicked);
 	}
+}
+
+void UBuildingInfoPanelWidget::HandleTransparentClicked()
+{
+	ANavPlayerController* PC = GetController();
+	if (!PC || DisplayedId.IsEmpty())
+	{
+		return;
+	}
+	const bool bNowOn = !PC->IsBuildingMadeTransparent(DisplayedId);
+	PC->SetBuildingMadeTransparent(DisplayedId, bNowOn);
+	ShowTransparentState(bNowOn);
+}
+
+void UBuildingInfoPanelWidget::ShowTransparentState(bool bOn)
+{
+	using namespace StartStyle;
+	bTransparentShownOn = bOn;
+	if (TransparentButton)
+	{
+		// ON: the bright orange of the interior editor's 3D View button; OFF: the usual outlined button.
+		TransparentButton->SetStyle(bOn ? OrangeButton(8.f) : SecondaryButton());
+	}
+	if (TransparentLabel)
+	{
+		TransparentLabel->SetText(FText::FromString(bOn ? TEXT("Transparent ON") : TEXT("Transparent OFF")));
+	}
+}
+
+UWidget* UBuildingInfoPanelWidget::HandleGenerateRoomFloorItem(FString Item)
+{
+	constexpr int32 MaxRetained = 100;
+	UTextBlock* ItemText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
+	ItemText->SetText(FText::FromString(Item));
+	ItemText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
+	ApplyStandardFont(ItemText);
+
+	RetainedTypeItems.Add(ItemText);
+	if (RetainedTypeItems.Num() > MaxRetained)
+	{
+		RetainedTypeItems.RemoveAt(0, RetainedTypeItems.Num() - MaxRetained);
+	}
+	return ItemText;
+}
+
+void UBuildingInfoPanelWidget::HandleRoomFloorSelected(FString SelectedItem, ESelectInfo::Type)
+{
+	ANavPlayerController* PC = GetController();
+	if (bRefreshingReveal || !PC || DisplayedId.IsEmpty())
+	{
+		return;
+	}
+	// "All floors" is 0; "Floor 3" is 3.
+	const FString Prefix(TEXT("Floor "));
+	const int32 Floor = SelectedItem.StartsWith(Prefix) ? FCString::Atoi(*SelectedItem.RightChop(Prefix.Len())) : 0;
+	PC->SetBuildingRoomFloor(DisplayedId, Floor);
 }
 
 void UBuildingInfoPanelWidget::HandleOpen2DClicked()
@@ -315,6 +403,24 @@ void UBuildingInfoPanelWidget::Refresh()
 		TypeCombo->SetSelectedOption(Summary.Type);
 		bRefreshingType = false;
 	}
+	bRefreshingReveal = true;
+	if (RoomFloorCombo)
+	{
+		// One item per floor of this building, so the list follows the selection.
+		if (RoomFloorCombo->GetOptionCount() != Summary.Floors + 1)
+		{
+			RoomFloorCombo->ClearOptions();
+			RoomFloorCombo->AddOption(TEXT("All floors"));
+			for (int32 Level = 1; Level <= Summary.Floors; ++Level)
+			{
+				RoomFloorCombo->AddOption(FString::Printf(TEXT("Floor %d"), Level));
+			}
+		}
+		const int32 ChosenFloor = PC ? FMath::Clamp(PC->GetBuildingRoomFloor(Summary.Id), 0, Summary.Floors) : 0;
+		RoomFloorCombo->SetSelectedOption(ChosenFloor == 0 ? FString(TEXT("All floors")) : FString::Printf(TEXT("Floor %d"), ChosenFloor));
+	}
+	bRefreshingReveal = false;
+	ShowTransparentState(PC && PC->IsBuildingMadeTransparent(Summary.Id));
 	if (FloorsValue)
 	{
 		FloorsValue->SetText(FText::AsNumber(Summary.Floors));
@@ -349,3 +455,6 @@ FString UBuildingInfoPanelWidget::GetTypeTextForTests() const { return TypeCombo
 int32 UBuildingInfoPanelWidget::GetTypeOptionCountForTests() const { return TypeCombo ? TypeCombo->GetOptionCount() : 0; }
 void UBuildingInfoPanelWidget::SelectTypeForTests(const FString& Type) { HandleTypeSelected(Type, ESelectInfo::OnMouseClick); }
 int32 UBuildingInfoPanelWidget::GetOutlinePointCountForTests() const { return Outline ? Outline->GetPointCountForTests() : 0; }
+FString UBuildingInfoPanelWidget::GetTransparentTextForTests() const { return TransparentLabel ? TransparentLabel->GetText().ToString() : FString(); }
+FString UBuildingInfoPanelWidget::GetRoomFloorTextForTests() const { return RoomFloorCombo ? RoomFloorCombo->GetSelectedOption() : FString(); }
+int32 UBuildingInfoPanelWidget::GetRoomFloorOptionCountForTests() const { return RoomFloorCombo ? RoomFloorCombo->GetOptionCount() : 0; }

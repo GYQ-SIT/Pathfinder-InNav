@@ -62,6 +62,13 @@ public:
 	// Highlight / unhighlight this building
 	void SetHighlighted(bool bHighlighted);
 
+	// Control building transparency
+	void SetBuildingOpacity(float NewOpacity);
+	// The opacity SetBuildingOpacity last set (-1 before any).
+	float GetBuildingOpacity() const { return LastBuildingOpacity; }
+	// Where this building is drawn among the see-through things of the scene. Without a fixed order they are sorted by their distance from the
+	// camera, and two that overlap (buildings that touch, a building and the rooms in it) trade places as the camera moves, which flickers.
+	void SetTranslucentSortOrder(int32 Order);
 	// What kind of building this is (one value from BuildingTypes::All(); anything else becomes Other). The building is drawn in the
 	// colour of its type, except while it is highlighted.
 	void SetBuildingType(const FString& NewType);
@@ -164,8 +171,22 @@ private:
 
 	UPROPERTY()
 	UMaterialInstanceDynamic* DynMaterial;
+	UPROPERTY()
+	UMaterialInstanceDynamic* FloorDynMaterial = nullptr;
+	// The opacity last given to both materials (-1 = not yet, or a material was just made); lets SetBuildingOpacity skip a repeat.
+	float LastBuildingOpacity = -1.f;
 
+	// While the building is fully opaque (seen from far away) it is drawn with this plain solid material in the colour of its type, for every
+	// section: a see-through material draws its sections in a fixed order whatever their depth, so the far walls would show over the roof.
+	UPROPERTY()
+	UMaterialInstanceDynamic* SolidMaterial = nullptr;
+	bool bSolidLook = true;
+	UMaterialInstanceDynamic* WallMaterialNow() const { return (bSolidLook && SolidMaterial) ? SolidMaterial : DynMaterial; }
+	UMaterialInstanceDynamic* FloorMaterialNow() const { return (bSolidLook && SolidMaterial) ? SolidMaterial : FloorDynMaterial; }
+	// Gives every section the material that goes with bSolidLook.
+	void ApplySectionMaterials();
 	FString BuildingType = BuildingTypes::Default();
 	bool bIsHighlighted = false;
 	FLinearColor CurrentBodyColor = FLinearColor::White;
+
 };

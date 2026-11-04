@@ -4,12 +4,14 @@
 #include "DockPanelContent.h"
 #include "MapPanelWidget.generated.h"
 
+class UBorder;
 class UButton;
 class UCheckBox;
 class UEditableTextBox;
 class UMapBuildingRowWidget;
 class UScrollBox;
 class USizeBox;
+class USlider;
 class UTextBlock;
 class UVerticalBox;
 
@@ -68,6 +70,13 @@ public:
 	bool AreRoadsCheckedForTests() const;
 	void SetBuildingSearchForTests(const FString& Text);
 	bool IsFiltersSectionOpenForTests() const { return bFiltersOpen; }
+	// The See-through section: the button for every building, and the two sliders (in metres).
+	FString GetAllSeeThroughTextForTests() const;
+	void ClickAllSeeThroughForTests() { OnAllSeeThroughClicked(); }
+	void MoveRevealFarSliderForTests(float Metres) { OnRevealFarChanged(Metres); }
+	void MoveRevealNearSliderForTests(float Metres) { OnRevealNearChanged(Metres); }
+	float GetRevealFarSliderForTests() const;
+	float GetRevealNearSliderForTests() const;
 	void SetSectionOpenForTests(bool bFilters, bool bOpen);
 	int32 GetBuildingTypeCheckboxCountForTests() const { return BuildingTypeCheckboxes.Num(); }
 	bool IsBuildingTypeCheckedForTests(const FString& Type) const;
@@ -120,6 +129,15 @@ private:
 	void OnFiltersHeaderClicked();
 	UFUNCTION()
 	void OnRoadsHeaderClicked();
+	UFUNCTION()
+	void OnViewHeaderClicked();
+	// The button that turns the see-through view of every building on or off.
+	UFUNCTION()
+	void OnAllSeeThroughClicked();
+	UFUNCTION()
+	void OnRevealFarChanged(float NewValue);
+	UFUNCTION()
+	void OnRevealNearChanged(float NewValue);
 
 	FString SelectedBuildingId() const;
 	void SelectFloorOption(int32 Minimum, int32 Maximum);
@@ -129,14 +147,17 @@ private:
 	void HandleBuildingRowClicked(const FString& BuildingId);
 
 	// A header button that opens and closes the section under it; Body is the box the section's controls go into.
-	UVerticalBox* AddCollapsibleSection(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Title, UButton*& OutHeader, UTextBlock*& OutSign, USizeBox*& OutHeaderBox);
+	// The header and the body sit in one frame (OutFrame), outlined while the section is open so it is clear which controls belong to which header.
+	UVerticalBox* AddCollapsibleSection(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Title, UButton*& OutHeader, UTextBlock*& OutSign, USizeBox*& OutHeaderBox, UBorder*& OutFrame);
 	void AddRoadRows(UVerticalBox* Stack);
 	// The "Type" part of the building filters: one check box per type of BuildingTypes::All(), each with the colour of its type.
 	void AddBuildingTypeRows(UVerticalBox* Stack);
 	// Sets the type check boxes to what the controller shows, without calling their handlers.
 	void RefreshBuildingTypeChecks();
-	// A control inside a SizeBox whose width follows the panel.
-	USizeBox* WrapInPanelWidth(UWidget* Control);
+	// A control inside a SizeBox whose width follows the panel (less Inset, for a control inside a section's frame).
+	USizeBox* WrapInPanelWidth(UWidget* Control, float Inset = 0.f);
+	// Sets the See-through sliders and their labels to what the controller uses, without calling their handlers.
+	void RefreshRevealControls();
 
 	UPROPERTY()
 	UCheckBox* RoadHideAllCheckbox = nullptr;
@@ -176,6 +197,12 @@ private:
 	UPROPERTY()
 	TArray<UButton*> FloorChips;
 	UPROPERTY()
+	UBorder* FiltersFrame = nullptr;
+	UPROPERTY()
+	UBorder* RoadsFrame = nullptr;
+	UPROPERTY()
+	UBorder* ViewFrame = nullptr;
+	UPROPERTY()
 	UButton* FiltersHeader = nullptr;
 	UPROPERTY()
 	UTextBlock* FiltersSign = nullptr;
@@ -187,6 +214,26 @@ private:
 	UTextBlock* RoadsSign = nullptr;
 	UPROPERTY()
 	UVerticalBox* RoadsBody = nullptr;
+	// The See-through section: how far from a building the camera has to be for it to be solid, and how close for it to be clear (in metres).
+	UPROPERTY()
+	UButton* ViewHeader = nullptr;
+	UPROPERTY()
+	UTextBlock* ViewSign = nullptr;
+	UPROPERTY()
+	UVerticalBox* ViewBody = nullptr;
+	UPROPERTY()
+	UButton* AllSeeThroughButton = nullptr;
+	UPROPERTY()
+	UTextBlock* AllSeeThroughLabel = nullptr;
+	UPROPERTY()
+	USlider* RevealFarSlider = nullptr;
+	UPROPERTY()
+	USlider* RevealNearSlider = nullptr;
+	UPROPERTY()
+	UTextBlock* RevealFarText = nullptr;
+	UPROPERTY()
+	UTextBlock* RevealNearText = nullptr;
+	bool bViewOpen = false;
 
 	TFunction<void(const FString&)> BuildingClickHandler;
 	TFunction<FString()> SelectedBuildingProvider;

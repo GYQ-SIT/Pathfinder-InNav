@@ -66,7 +66,207 @@ ANavPlayerController::ANavPlayerController()
 	Generator = nullptr;
 	InteriorGen = nullptr;
 }
+void ANavPlayerController::ClearCampusInteriorPreview()
+{
+	for (TPair<FString, FCampusPreviewRooms>& Entry : CampusPreview)
+	{
+		for (const TWeakObjectPtr<AInteriorRoom>& Room : Entry.Value.Rooms)
+		{
+			if (Room.IsValid())
+			{
+				Room->Destroy();
+			}
+		}
+	}
 
+	CampusPreview.Empty();
+}
+
+void ANavPlayerController::SetCampusInteriorPreviewVisible(bool bVisible)
+{
+	bCampusPreviewAllowed = bVisible;
+	if (bVisible)
+	{
+		UpdateBuildingTransparency();
+		return;
+	}
+
+	for (TPair<FString, FCampusPreviewRooms>& Entry : CampusPreview)
+	{
+		for (const TWeakObjectPtr<AInteriorRoom>& Room : Entry.Value.Rooms)
+		{
+			if (Room.IsValid())
+			{
+				Room->SetActorHiddenInGame(true);
+			}
+		}
+		Entry.Value.bShown = false;
+	}
+}
+
+void ANavPlayerController::BuildCampusInteriorPreview()
+{
+	ClearCampusInteriorPreview();
+
+	if (!Generator || !GetWorld())
+	{
+		return;
+	}
+
+	int32 TotalRooms = 0;
+
+	for (APolyBuilding* Building : Generator->GetAllBuildings())
+	{
+		if (!IsValid(Building))
+		{
+			continue;
+		}
+
+		const TSharedPtr<FJsonObject> InteriorData =
+			Generator->GetInteriorDataForBuilding(Building->BuildingId);
+
+		FCampusPreviewRooms& BuildingPreview = CampusPreview.FindOrAdd(Building->BuildingId);
+
+		const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
+
+		if (!InteriorData.IsValid() ||
+			!InteriorData->TryGetArrayField(TEXT("floors"), Floors))
+		{
+			continue;
+		}
+
+		for (const TSharedPtr<FJsonValue>& FloorValue : *Floors)
+		{
+			const TSharedPtr<FJsonObject> Floor = FloorValue->AsObject();
+
+			if (!Floor.IsValid())
+			{
+				continue;
+			}
+
+			int32 Level = 1;
+			Floor->TryGetNumberField(TEXT("level"), Level);
+
+			float WallHeight = 280.f;
+			float WallThickness = 20.f;
+
+			Floor->TryGetNumberField(TEXT("wallHeight"), WallHeight);
+			Floor->TryGetNumberField(TEXT("wallThickness"), WallThickness);
+
+			const TArray<TSharedPtr<FJsonValue>>* Rooms = nullptr;
+
+			if (!Floor->TryGetArrayField(TEXT("rooms"), Rooms))
+			{
+				continue;
+			}
+
+			for (const TSharedPtr<FJsonValue>& RoomValue : *Rooms)
+			{
+				const TSharedPtr<FJsonObject> RoomData =
+					RoomValue->AsObject();
+
+				if (!RoomData.IsValid())
+				{
+					continue;
+				}
+
+				const TArray<TSharedPtr<FJsonValue>>* Points = nullptr;
+
+				if (!RoomData->TryGetArrayField(TEXT("footprint"), Points))
+				{
+					continue;
+				}
+
+				TArray<FVector2D> Footprint;
+
+				for (const TSharedPtr<FJsonValue>& PointValue : *Points)
+				{
+					const TArray<TSharedPtr<FJsonValue>>* Pair = nullptr;
+
+					if (PointValue.IsValid() &&
+						PointValue->TryGetArray(Pair) &&
+						Pair->Num() >= 2)
+					{
+						Footprint.Add(FVector2D(
+							(*Pair)[0]->AsNumber(),
+							(*Pair)[1]->AsNumber()
+						));
+					}
+				}
+
+				bool bClosedLoop = true;
+				RoomData->TryGetBoolField(TEXT("closed"), bClosedLoop);
+
+				if (Footprint.Num() < (bClosedLoop ? 3 : 2))
+				{
+					continue;
+				}
+
+				AInteriorRoom* PreviewRoom =
+					GetWorld()->SpawnActor<AInteriorRoom>(
+						FVector::ZeroVector,
+						FRotator::ZeroRotator
+					);
+
+				if (!IsValid(PreviewRoom))
+				{
+					continue;
+				}
+
+				RoomData->TryGetStringField(
+					TEXT("id"), PreviewRoom->RoomId);
+
+				RoomData->TryGetStringField(
+					TEXT("name"), PreviewRoom->RoomName);
+
+				PreviewRoom->FloorLevel = Level;
+
+				// Preview only: do not interfere with building selection.
+				PreviewRoom->SetActorEnableCollision(false);
+
+				const float FloorBaseZ =
+					(Level - 1) * Building->GetFloorHeight();
+
+				TArray<FInteriorOpening> PreviewOpenings;
+
+				PreviewRoom->BuildWalls(
+					Footprint,
+					Generator->GetScale(),
+					Building->BuildingOffset,
+					FloorBaseZ,
+					WallHeight,
+					WallThickness,
+					PreviewOpenings,
+					bClosedLoop
+				);
+
+				PreviewRoom->SetActorEnableCollision(false);
+
+				// Out of sight until the camera is close enough for UpdateBuildingTransparency to show them.
+				PreviewRoom->SetActorHiddenInGame(true);
+
+				// Drawn after the walls of the buildings whatever the camera does, so the rooms and the walls around them do not trade places.
+				// The see-through sort order of rooms: after the walls of every building (those count from 0).
+				constexpr int32 CampusRoomSortPriority = 1000;
+				TArray<UPrimitiveComponent*> RoomParts;
+				PreviewRoom->GetComponents(RoomParts);
+				for (UPrimitiveComponent* RoomPart : RoomParts)
+				{
+					RoomPart->SetTranslucentSortPriority(CampusRoomSortPriority);
+				}
+
+				BuildingPreview.Rooms.Add(PreviewRoom);
+				++TotalRooms;
+			}
+		}
+	}
+
+	UE_LOG(LogTemp, Warning,
+		TEXT("[Campus XRay] Created %d preview rooms"),
+		TotalRooms);
+
+	UpdateBuildingTransparency();
+}
 void ANavPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
@@ -606,6 +806,158 @@ void ANavPlayerController::ToggleShapeTestMode()
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Shape test mode OFF"));
 	}
+}
+namespace
+{
+	// How the exterior camera reveals a building, by its distance (cm) from the bounding box of the building.
+	constexpr float CampusRevealMinimumGap = 100.f;          // the far distance stays at least this much beyond the near one
+	constexpr float CampusRevealHysteresis = 0.05f;          // the rooms of a building that shows them stay until its opacity is this much above the limit
+	constexpr float CampusRevealNearOpacity = 0.12f;         // the wall/roof opacity at that closest distance
+	constexpr float CampusRevealRoomsBelowOpacity = 0.8f;    // the rooms inside show once the walls are this clear (any earlier they would show through solid walls)
+}
+
+void ANavPlayerController::UpdateBuildingTransparency()
+{
+	if (!Generator)
+		return;
+
+	if (bInteriorInspectionEnabled || bIsIn3DPreviewMode)
+	{
+		for (APolyBuilding* Building : Generator->GetAllBuildings())
+		{
+			if (IsValid(Building))
+			{
+				Building->SetBuildingOpacity(1.0f);
+			}
+		}
+		return;
+	}
+
+	APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn)
+		return;
+
+	const FVector CameraLocation =
+		PlayerCameraManager
+		? PlayerCameraManager->GetCameraLocation()
+		: ControlledPawn->GetActorLocation();
+
+	// Every building is judged by how far the camera is from it: far away it is the whole, solid building with its roof; coming closer its walls
+	// and roof fade out, and once they can be looked through the rooms inside show.
+	int32 SortOrder = 0;
+	for (APolyBuilding* Building : Generator->GetAllBuildings())
+	{
+		if (!IsValid(Building))
+			continue;
+
+		// A fixed order for everything see-through, so that buildings that touch do not trade places as the camera moves.
+		Building->SetTranslucentSortOrder(SortOrder++);
+
+		FVector Origin, Extent;
+		Building->GetActorBounds(false, Origin, Extent);
+
+		// Distance to the bounding box of the building
+		const FVector ClosestPoint = CameraLocation.BoundToBox(
+			Origin - Extent,
+			Origin + Extent
+		);
+
+		const float Distance =
+			FVector::Distance(CameraLocation, ClosestPoint);
+
+		const FBuildingRevealChoice* Choice = BuildingReveal.Find(Building->BuildingId);
+		const bool bMadeTransparent = Choice && Choice->bTransparent;
+		const int32 RoomFloor = Choice ? Choice->RoomFloor : 0;
+
+		// Made transparent from the Building panel wins over everything; otherwise the camera distance decides, if see-through is on at all.
+		const float Opacity = bMadeTransparent
+			? CampusRevealNearOpacity
+			: (bCampusSeeThroughEnabled
+				? FMath::GetMappedRangeValueClamped(
+					FVector2D(CampusRevealFar, CampusRevealNear),
+					FVector2D(1.0f, CampusRevealNearOpacity),
+					Distance)
+				: 1.0f);
+
+		Building->SetBuildingOpacity(Opacity);
+
+		if (FCampusPreviewRooms* Preview = CampusPreview.Find(Building->BuildingId))
+		{
+			const bool bShowRooms = bCampusPreviewAllowed && (bMadeTransparent || Opacity < CampusRevealRoomsBelowOpacity + (Preview->bShown ? CampusRevealHysteresis : 0.f));
+			if (Preview->bShown != bShowRooms || Preview->AppliedFloor != RoomFloor)
+			{
+				Preview->bShown = bShowRooms;
+				Preview->AppliedFloor = RoomFloor;
+				for (const TWeakObjectPtr<AInteriorRoom>& Room : Preview->Rooms)
+				{
+					if (Room.IsValid())
+					{
+						Room->SetActorHiddenInGame(!(bShowRooms && (RoomFloor <= 0 || Room->FloorLevel == RoomFloor)));
+					}
+				}
+			}
+		}
+	}
+}
+
+void ANavPlayerController::SetCampusRevealFarDistance(float Centimetres)
+{
+	CampusRevealFar = FMath::Clamp(Centimetres, 2.f * CampusRevealMinimumGap, 50000.f);
+	CampusRevealNear = FMath::Min(CampusRevealNear, CampusRevealFar - CampusRevealMinimumGap);
+	UpdateBuildingTransparency();
+}
+
+void ANavPlayerController::SetCampusRevealNearDistance(float Centimetres)
+{
+	CampusRevealNear = FMath::Clamp(Centimetres, CampusRevealMinimumGap, 50000.f - CampusRevealMinimumGap);
+	CampusRevealFar = FMath::Max(CampusRevealFar, CampusRevealNear + CampusRevealMinimumGap);
+	UpdateBuildingTransparency();
+}
+
+int32 ANavPlayerController::CountShownCampusRoomsForTests(const FString& BuildingId) const
+{
+	int32 Shown = 0;
+	if (const FCampusPreviewRooms* Preview = CampusPreview.Find(BuildingId))
+	{
+		for (const TWeakObjectPtr<AInteriorRoom>& Room : Preview->Rooms)
+		{
+			if (Room.IsValid() && !Room->IsHidden())
+			{
+				++Shown;
+			}
+		}
+	}
+	return Shown;
+}
+
+void ANavPlayerController::SetCampusSeeThroughEnabled(bool bEnabled)
+{
+	bCampusSeeThroughEnabled = bEnabled;
+	UpdateBuildingTransparency();
+}
+
+bool ANavPlayerController::IsBuildingMadeTransparent(const FString& BuildingId) const
+{
+	const FBuildingRevealChoice* Choice = BuildingReveal.Find(BuildingId);
+	return Choice && Choice->bTransparent;
+}
+
+void ANavPlayerController::SetBuildingMadeTransparent(const FString& BuildingId, bool bTransparent)
+{
+	BuildingReveal.FindOrAdd(BuildingId).bTransparent = bTransparent;
+	UpdateBuildingTransparency();
+}
+
+int32 ANavPlayerController::GetBuildingRoomFloor(const FString& BuildingId) const
+{
+	const FBuildingRevealChoice* Choice = BuildingReveal.Find(BuildingId);
+	return Choice ? Choice->RoomFloor : 0;
+}
+
+void ANavPlayerController::SetBuildingRoomFloor(const FString& BuildingId, int32 Floor)
+{
+	BuildingReveal.FindOrAdd(BuildingId).RoomFloor = FMath::Max(0, Floor);
+	UpdateBuildingTransparency();
 }
 
 void ANavPlayerController::ToggleDrawRoomMode()
@@ -2303,6 +2655,8 @@ int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 		bHasUnsavedChanges = false;
 		FocusCameraOnAllBuildings();
 	}
+	// Rebuild the campus X-ray interior preview after loading buildings.
+	BuildCampusInteriorPreview();
 	return Count;
 }
 
@@ -2366,6 +2720,7 @@ int32 ANavPlayerController::LoadBuildingDataFromDatabase(const FString& Database
 		Generator->LoadContextBuildingsFromDatabase(DatabasePath);
 		FocusCameraOnAllBuildings();
 	}
+	BuildCampusInteriorPreview();
 	return Count;
 }
 
@@ -2625,32 +2980,47 @@ void ANavPlayerController::SetOtherBuildingsHidden(bool bNewHidden)
 
 void ANavPlayerController::ZoomIn3DPreview()
 {
-	if (bInteriorInspectionEnabled) { if (!IsPointerOverUI()) FrameInspectionCamera(0.9f); return; }
-	// Dollies the pawn along whatever direction it's CURRENTLY facing, rather than recomputing the
-	// whole pose from ThreeDPreviewYaw/Pitch/the framing center (what PositionCameraFor3DPreview does)
-	// - free WASD/mouse-look (see SetIn3DPreviewMode) can leave those stale the moment the user moves,
-	// so calling PositionCameraFor3DPreview here would snap the camera back to the original framing on
-	// every scroll tick instead of just zooming from wherever it actually is.
-	if (!bIsIn3DPreviewMode)
+	if (bInteriorInspectionEnabled)
 	{
+		if (!IsPointerOverUI())
+			FrameInspectionCamera(0.9f);
 		return;
 	}
+
+	if (IsPointerOverUI())
+		return;
+
 	if (APawn* ControlledPawn = GetPawn())
 	{
-		ControlledPawn->AddActorWorldOffset(GetControlRotation().Vector() * ThreeDPreviewZoomStep);
+		ControlledPawn->AddActorWorldOffset(
+			GetControlRotation().Vector() * ThreeDPreviewZoomStep,
+			true
+		);
+
+		UpdateBuildingTransparency();
 	}
 }
 
 void ANavPlayerController::ZoomOut3DPreview()
 {
-	if (bInteriorInspectionEnabled) { if (!IsPointerOverUI()) FrameInspectionCamera(1.1f); return; }
-	if (!bIsIn3DPreviewMode)
+	if (bInteriorInspectionEnabled)
 	{
+		if (!IsPointerOverUI())
+			FrameInspectionCamera(1.1f);
 		return;
 	}
+
+	if (IsPointerOverUI())
+		return;
+
 	if (APawn* ControlledPawn = GetPawn())
 	{
-		ControlledPawn->AddActorWorldOffset(-GetControlRotation().Vector() * ThreeDPreviewZoomStep);
+		ControlledPawn->AddActorWorldOffset(
+			-GetControlRotation().Vector() * ThreeDPreviewZoomStep,
+			true
+		);
+
+		UpdateBuildingTransparency();
 	}
 }
 
@@ -2790,6 +3160,15 @@ void ANavPlayerController::SetIn3DPreviewMode(bool bEnable)
 	}
 
 	bIsIn3DPreviewMode = bEnable;
+	UpdateBuildingTransparency();
+	if (bEnable)
+	{
+		UpdateBuildingTransparency();
+	}
+	else
+	{
+		Building->SetBuildingOpacity(1.0f);
+	}
 	if (bEnable)
 	{
 		ResetFloorFraming(Building);
@@ -3897,7 +4276,8 @@ void ANavPlayerController::RestoreExteriorCameraView()
 		ControlledPawn->SetActorLocationAndRotation(SavedCameraLocation, SavedCameraRotation);
 		SetControlRotation(SavedCameraRotation);
 	}
-
+	// Restore all campus preview rooms when returning to exterior view.
+	SetCampusInteriorPreviewVisible(true);
 	bHasSavedCameraView = false;
 }
 
@@ -4356,6 +4736,8 @@ int32 ANavPlayerController::LoadInteriorInternal(const FString& BuildingId, bool
 	{
 		InteriorGen->SyncInteriorToBuildingGenerator();
 	}
+	// Hide campus preview rooms while editing an individual building.
+	SetCampusInteriorPreviewVisible(false);
 	const int32 Result = InteriorGen->LoadInteriorForBuilding(BuildingId);
 	if (Result < 0)
 	{
@@ -4744,14 +5126,15 @@ void ANavPlayerController::Tick(float DeltaSeconds)
 		}
 	}
 
-	if (bRotatingCCW == bRotatingCW)
+	if (bRotatingCCW != bRotatingCW)
 	{
-		// Neither held, or both held at once (cancel out) - nothing to do.
-		return;
+		const float Direction = bRotatingCCW ? -1.f : 1.f;
+		RotateSelectedRoom(Direction * RotationDegreesPerSecond * DeltaSeconds);
 	}
-
-	const float Direction = bRotatingCCW ? -1.f : 1.f;
-	RotateSelectedRoom(Direction * RotationDegreesPerSecond * DeltaSeconds);
+	if (!bIsIn3DPreviewMode && !bInteriorInspectionEnabled)
+	{
+		UpdateBuildingTransparency();
+	}
 }
 
 void ANavPlayerController::RotateSelectedRoom(float DeltaDegrees)

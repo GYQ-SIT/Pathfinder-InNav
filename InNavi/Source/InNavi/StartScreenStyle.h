@@ -85,6 +85,12 @@ namespace StartStyle
 		return Button(Rgb(92, 62, 18), Rgb(112, 76, 22), Rgb(72, 48, 14), Rgb(230, 150, 30), Radius);
 	}
 
+	// A toggle that is switched on: the bright orange of the interior editor's 3D View button (the off look is SecondaryButton).
+	inline FButtonStyle OrangeButton(float Radius = 8.f)
+	{
+		return Button(Rgb(196, 112, 8), Rgb(220, 130, 14), Rgb(160, 90, 4), Rgb(196, 112, 8), Radius);
+	}
+
 	// The two button looks of the page: the blue primary one and the outlined secondary one.
 	inline FButtonStyle PrimaryButton()
 	{

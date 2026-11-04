@@ -88,18 +88,67 @@ void APolyBuilding::RebuildMesh()
 	CachedPoly2D = Poly2D;
 	CachedCapTris = CapTris;
 
+	// Exterior wall material
 	if (!DynMaterial)
 	{
 		UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(
-			nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+			nullptr,
+			TEXT("/Game/ImageAssets/Materials/M_BuildingTransparent.M_BuildingTransparent")
+		);
+
 		if (BaseMat)
 		{
 			DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
+			LastBuildingOpacity = -1.f; // a new material starts at its own opacity, so the next SetBuildingOpacity must apply
+
+			DynMaterial->SetScalarParameterValue(TEXT("Opacity"), 0.1f);
+			DynMaterial->SetVectorParameterValue(
+				TEXT("Color"),
+				FLinearColor(0.6f, 0.6f, 0.6f)
+			);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error,
+				TEXT("Failed to load M_BuildingTransparent material"));
 		}
 	}
 
-	// Section count changes with FloorCount (one slab section per inter-floor boundary, one wall
-	// section per floor) - clear whatever sections a previous, possibly-taller build left behind.
+	// Floor material
+	if (!FloorDynMaterial)
+	{
+		UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(
+			nullptr,
+			TEXT("/Game/ImageAssets/Materials/M_BuildingTransparent.M_BuildingTransparent")
+		);
+
+		if (BaseMat)
+		{
+			FloorDynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
+			LastBuildingOpacity = -1.f;
+
+			FloorDynMaterial->SetScalarParameterValue(TEXT("Opacity"), 1.0f);
+			FloorDynMaterial->SetVectorParameterValue(
+				TEXT("Color"),
+				FLinearColor(0.65f, 0.65f, 0.65f)
+			);
+		}
+	}
+
+	// The solid look (see SolidMaterial)
+	if (!SolidMaterial)
+	{
+		UMaterialInterface* SolidBase = LoadObject<UMaterialInterface>(
+			nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+		if (SolidBase)
+		{
+			SolidMaterial = UMaterialInstanceDynamic::Create(SolidBase, this);
+			SolidMaterial->SetVectorParameterValue(TEXT("Color"), CurrentBodyColor);
+			LastBuildingOpacity = -1.f;
+		}
+	}
+
+	// Section count changes with FloorCount
 	MeshComp->ClearAllMeshSections();
 
 	// ---- Section 0: ground floor cap only - always visible (closes off the exterior shell's
@@ -126,8 +175,8 @@ void APolyBuilding::RebuildMesh()
 
 	TArray<FColor> GroundVertexColors;
 	MeshComp->CreateMeshSection(0, GroundVertices, GroundTriangles, GroundNormals, GroundUV0, GroundVertexColors, GroundTangents, !bInspectionBottomHidden);
-	MeshComp->SetMaterial(0, DynMaterial);
-	MeshComp->SetMeshSectionVisible(0, !bInspectionBottomHidden);
+	MeshComp->SetMaterial(0, FloorMaterialNow());
+	MeshComp->SetMeshSectionVisible(0, false);
 
 	// Sections 1..FloorCount (roof + inter-floor slabs) and FloorCount+1..2*FloorCount (one wall ring
 	// per floor, see GetWallSectionIndex) are all built by ApplySlabVisibility, which also decides
@@ -166,10 +215,10 @@ void APolyBuilding::BuildCapSection(const TArray<FVector2D>& Poly2D, const TArra
 
 	TArray<FColor> VertexColors;
 	MeshComp->CreateMeshSection(SectionIndex, Vertices, Triangles, Normals, UV0, VertexColors, Tangents, bCreateCollision);
-	MeshComp->SetMaterial(SectionIndex, DynMaterial);
+	MeshComp->SetMaterial(SectionIndex, FloorMaterialNow());
 }
 
-void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBottom, float ZTop, int32 SectionIndex, bool bCreateCollision, int32 Level)
+void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBottom, float FullZTop, int32 SectionIndex, bool bCreateCollision, int32 Level)
 {
 	const int32 N = Poly2D.Num();
 
@@ -180,7 +229,12 @@ void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBot
 	// AInteriorRoom's own default wall thickness so the exterior shell and the rooms it contains read
 	// as the same kind of wall.
 	constexpr float ExteriorWallThickness = 20.f;
-	const float HalfThickness = ExteriorWallThickness * 0.5f;
+	// The walls of buildings that touch lie in the same planes. A solid building (it writes depth) beside a see-through one (it does not) fights
+	// it for those pixels, which flickers. So while the building is see-through its walls are a little thinner and its top ring a little lower:
+	// they lie just inside the solid walls of the neighbour, which then win everywhere they overlap.
+	constexpr float SeeThroughInset = 2.f;
+	const float HalfThickness = (bSolidLook ? ExteriorWallThickness : ExteriorWallThickness - 2.f * SeeThroughInset) * 0.5f;
+	const float ZTop = (bSolidLook || Level != FloorCount) ? FullZTop : FullZTop - SeeThroughInset;
 
 	TArray<FVector> Vertices;
 	TArray<int32> Triangles;
@@ -265,7 +319,7 @@ void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBot
 
 	TArray<FColor> VertexColors;
 	MeshComp->CreateMeshSection(SectionIndex, Vertices, Triangles, Normals, UV0, VertexColors, Tangents, bCreateCollision);
-	MeshComp->SetMaterial(SectionIndex, DynMaterial);
+	MeshComp->SetMaterial(SectionIndex, WallMaterialNow());
 }
 
 void APolyBuilding::SetWallOpenings(const TArray<FPolyWallOpening>& Openings)
@@ -337,14 +391,15 @@ void APolyBuilding::ApplySlabVisibility()
 		// entirely through the 2D floor plan canvas (UInteriorFloorPlanWidget), not 3D raycasts.
 		BuildCapSection(CachedPoly2D, CachedCapTris, Z, SectionIndex, /*bCreateCollision=*/!bHide);
 		MeshComp->SetMeshSectionVisible(SectionIndex, !bHide);
-
+		MeshComp->SetMeshSectionVisible(0, !bInspectionBottomHidden);
 		// This floor's own exterior wall ring - visible whenever nothing's hidden yet (normal exterior
 		// view, VisibleInteriorLevel <= 0) or L is exactly the floor being viewed; every other floor's
 		// wall ring hides completely so the 3D interior preview camera (which sits outside the
 		// footprint, unlike the near-top-down 2D floor-plan camera) isn't blocked by floors it isn't
 		// looking at.
 		const int32 WallSectionIndex = GetWallSectionIndex(L);
-		const bool bHideWall = (VisibleInteriorLevel > 0 && L != VisibleInteriorLevel);
+		const bool bHideWall =
+			(VisibleInteriorLevel > 0 && L != VisibleInteriorLevel);
 		BuildWallSection(CachedPoly2D, (L - 1) * FloorHeight, L * FloorHeight, WallSectionIndex, /*bCreateCollision=*/!bHideWall, L);
 		MeshComp->SetMeshSectionVisible(WallSectionIndex, !bHideWall);
 	}
@@ -378,5 +433,75 @@ void APolyBuilding::ApplyBodyColor()
 	if (DynMaterial)
 	{
 		DynMaterial->SetVectorParameterValue(TEXT("Color"), CurrentBodyColor);
+	}
+	if (SolidMaterial)
+	{
+		SolidMaterial->SetVectorParameterValue(TEXT("Color"), CurrentBodyColor);
+	}
+}
+
+void APolyBuilding::SetTranslucentSortOrder(int32 Order)
+{
+	if (MeshComp)
+	{
+		MeshComp->SetTranslucentSortPriority(Order);
+	}
+}
+
+void APolyBuilding::ApplySectionMaterials()
+{
+	if (!MeshComp)
+	{
+		return;
+	}
+
+	MeshComp->SetMaterial(0, FloorMaterialNow());
+	for (int32 L = 1; L <= FloorCount; L++)
+	{
+		MeshComp->SetMaterial((L == FloorCount) ? 1 : (1 + L), FloorMaterialNow());
+		MeshComp->SetMaterial(GetWallSectionIndex(L), WallMaterialNow());
+	}
+	if (bInspectionBottomHidden)
+	{
+		MeshComp->SetMaterial(GetInspectionFloorSectionIndex(), FloorMaterialNow());
+	}
+}
+void APolyBuilding::SetBuildingOpacity(float NewOpacity)
+{
+	const float ClampedOpacity =
+		FMath::Clamp(NewOpacity, 0.0f, 1.0f);
+
+	// Called for every building on every frame of the exterior camera, so do nothing when nothing changed.
+	if (FMath::IsNearlyEqual(ClampedOpacity, LastBuildingOpacity, 0.005f))
+	{
+		return;
+	}
+	LastBuildingOpacity = ClampedOpacity;
+
+	// Fully opaque: the plain solid material; anything less: the see-through one.
+	// (With a margin, so an opacity hovering at the limit does not swap the two looks back and forth.)
+	const bool bNewSolidLook = bSolidLook ? (ClampedOpacity >= 0.97f) : (ClampedOpacity >= 0.995f);
+	if (bNewSolidLook != bSolidLook)
+	{
+		bSolidLook = bNewSolidLook;
+		ApplySectionMaterials();
+		// The walls are a little thinner while the building is see-through (see BuildWallSection), so they are built again.
+		ApplySlabVisibility();
+	}
+
+	if (DynMaterial)
+	{
+		DynMaterial->SetScalarParameterValue(
+			TEXT("Opacity"),
+			ClampedOpacity
+		);
+	}
+
+	if (FloorDynMaterial)
+	{
+		FloorDynMaterial->SetScalarParameterValue(
+			TEXT("Opacity"),
+			ClampedOpacity
+		);
 	}
 }

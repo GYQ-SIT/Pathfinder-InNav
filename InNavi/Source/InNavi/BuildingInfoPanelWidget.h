@@ -46,6 +46,13 @@ public:
 	int32 GetTypeOptionCountForTests() const;
 	void SelectTypeForTests(const FString& Type);
 	int32 GetOutlinePointCountForTests() const;
+	// The See-through controls: whether the button shows ON, what the floor drop-down shows, how many items it lists, and the user using them.
+	bool IsTransparentOnForTests() const { return bTransparentShownOn; }
+	FString GetTransparentTextForTests() const;
+	FString GetRoomFloorTextForTests() const;
+	int32 GetRoomFloorOptionCountForTests() const;
+	void ClickTransparentForTests() { HandleTransparentClicked(); }
+	void SelectRoomFloorForTests(const FString& Item) { HandleRoomFloorSelected(Item, ESelectInfo::OnMouseClick); }
 	UButton* GetOpen2DButtonForTests() const { return Open2DButton; }
 	UButton* GetOpen3DButtonForTests() const { return Open3DButton; }
 
@@ -64,6 +71,18 @@ private:
 	// An item of the drop-down: the type's colour as a small square before its name.
 	UFUNCTION()
 	UWidget* HandleGenerateTypeItem(FString Item);
+
+	// The button that makes the building transparent (ON) or not (OFF).
+	UFUNCTION()
+	void HandleTransparentClicked();
+	// Makes the button look ON (orange) or OFF (the usual look) and say so.
+	void ShowTransparentState(bool bOn);
+	// An item of the floor drop-down, in the light text of the panel.
+	UFUNCTION()
+	UWidget* HandleGenerateRoomFloorItem(FString Item);
+	// The user chose "All floors" or a floor in the drop-down of the floor whose rooms show.
+	UFUNCTION()
+	void HandleRoomFloorSelected(FString SelectedItem, ESelectInfo::Type SelectionType);
 
 	// The label and the drop-down for the building's type, as rows at the end of Stack.
 	void AddTypeRow(UVerticalBox* Stack);
@@ -88,6 +107,16 @@ private:
 	TArray<TObjectPtr<UWidget>> RetainedTypeItems;
 	// True while the drop-down is being set from the building, so that does not count as the user choosing a type.
 	bool bRefreshingType = false;
+	UPROPERTY()
+	UButton* TransparentButton = nullptr;
+	UPROPERTY()
+	UTextBlock* TransparentLabel = nullptr;
+	bool bTransparentShownOn = false;
+	// "All floors", then one item per floor of the selected building.
+	UPROPERTY()
+	UComboBoxString* RoomFloorCombo = nullptr;
+	// True while the floor drop-down is being set from the controller, so that does not count as the user using it.
+	bool bRefreshingReveal = false;
 	UPROPERTY()
 	UTextBlock* FloorsValue = nullptr;
 	UPROPERTY()
