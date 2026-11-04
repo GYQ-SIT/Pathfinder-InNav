@@ -2,6 +2,7 @@
 
 
 #include "InteriorGenerator.h"
+#include "LayoutValidation.h"
 #include "InteriorRoom.h"
 #include "FloorLayout.h"
 #include "NavigationSearchUtils.h"
@@ -400,12 +401,14 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 			continue;
 		}
 
-		int32 Level = 1;
-		FloorObject->TryGetNumberField(TEXT("level"), Level);
-		if (Level < 1)
+		double LevelValue = 1;
+		FloorObject->TryGetNumberField(TEXT("level"), LevelValue);
+		if (!FMath::IsFinite(LevelValue) || LevelValue < 1 || LevelValue > LayoutValidation::MaxBuildingFloors
+			|| LevelValue != FMath::FloorToDouble(LevelValue))
 		{
 			continue;
 		}
+		const int32 Level = static_cast<int32>(LevelValue);
 		ShellFloorCount = FMath::Max(ShellFloorCount, Level);
 
 		float WallHeight = 280.f;
@@ -514,6 +517,7 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 				{
 					Room->SetTypeColourShown(bRoomColoursVisible);
 					Room->RoomId = RoomId;
+					RoomObject->TryGetStringField(TEXT("navigationId"), Room->NavigationId);
 					Room->RoomName = RoomName;
 					const TArray<TSharedPtr<FJsonValue>>* TagValues;
 					if (RoomObject->TryGetArrayField(TEXT("tags"), TagValues))
@@ -577,14 +581,53 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 				{
 					for (const TSharedPtr<FJsonValue>& FloorNum : *ConnectsFloorsArray)
 					{
-						Node.ConnectsFloors.Add(static_cast<int32>(FloorNum->AsNumber()));
+						double ServedFloor = 0;
+						if (FloorNum && FloorNum->TryGetNumber(ServedFloor) && ServedFloor >= 1
+							&& ServedFloor <= LayoutValidation::MaxBuildingFloors && ServedFloor == FMath::FloorToDouble(ServedFloor))
+						{
+							Node.ConnectsFloors.Add(static_cast<int32>(ServedFloor));
+						}
 					}
 				}
 
 				NavNodes.Add(Node);
-				SpawnConnectorMarker(NavNodes.Last(), Building);
 			}
 		}
+	}
+
+	// Older projects could contain separate shafts with the same group ID.
+	TMap<FString, TArray<int32>> ShaftsByGroup;
+	for (int32 Index = 0; Index < NavNodes.Num(); ++Index)
+	{
+		auto& Node = NavNodes[Index];
+		if (!Node.ConnectorGroupId.IsEmpty() && Node.Type != EInteriorNavNodeType::PathNode)
+		{
+			auto& Shafts = ShaftsByGroup.FindOrAdd(Node.ConnectorGroupId);
+			const int32* Shaft = Shafts.FindByPredicate([&](int32 Candidate)
+			{
+				const auto& First = NavNodes[Candidate];
+				return First.Type == Node.Type && First.Position.Equals(Node.Position, 0.01);
+			});
+			if (Shaft)
+			{
+				const FString& GroupId = NavNodes[*Shaft].ConnectorGroupId;
+				if (Node.ConnectorGroupId != GroupId)
+				{
+					Node.ConnectorGroupId = GroupId;
+					Node.Id = FString::Printf(TEXT("%s-F%02d"), *GroupId, Node.Level);
+				}
+			}
+			else
+			{
+				if (!Shafts.IsEmpty())
+				{
+					Node.ConnectorGroupId = LoadedBuildingId + TEXT("-NAV-") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
+					Node.Id = FString::Printf(TEXT("%s-F%02d"), *Node.ConnectorGroupId, Node.Level);
+				}
+				Shafts.Add(Index);
+			}
+		}
+		SpawnConnectorMarker(Node, Building);
 	}
 
 	// The saved shell includes unauthored floors. Expand it if a legacy save placed a floor above it.
@@ -716,6 +759,11 @@ int32 AInteriorGenerator::AddFloor()
 		HighestLevel = FMath::Max(HighestLevel, Pair.Key);
 	}
 	const int32 NewLevel = Building->GetFloorCount() + 1;
+	if (NewLevel > LayoutValidation::MaxBuildingFloors)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AddFloor: building '%s' is at the floor limit"), *LoadedBuildingId);
+		return INDEX_NONE;
+	}
 
 	FInteriorFloorInfo NewFloorInfo;
 	if (const FInteriorFloorInfo* TopFloor = FloorInfoByLevel.Find(HighestLevel))
@@ -868,11 +916,8 @@ FString AInteriorGenerator::PeekNextRoomId() const
 		return FString();
 	}
 
-	// Scans for the first free index rather than basing this on how many rooms currently exist on the
-	// floor (the old Rooms.Num() + 1 scheme) - that undercounts as soon as anything on this floor has
-	// ever been deleted (UsedRoomIds still remembers the id was used, Rooms.Num() doesn't), so it could
-	// hand out an id that's actually still in use by a room/wall that was never deleted. This is
-	// correct regardless of how many rooms/walls were created and deleted before this call.
+	// The display ID only has to be unique among current rooms and walls. New rooms also
+	// carry a permanent navigation ID so reusing a display ID can't retarget a bookmark.
 	for (int32 Index = 1; ; Index++)
 	{
 		const FString CandidateId = FString::Printf(TEXT("%s-%02d-%02d"), *LoadedBuildingId, ActiveFloor, Index);
@@ -984,6 +1029,7 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprintWithTags(const TArray<
 	{
 		Room->SetTypeColourShown(bRoomColoursVisible);
 		Room->RoomId = ResolvedId;
+		Room->NavigationId = FGuid::NewGuid().ToString(EGuidFormats::Digits);
 		Room->RoomName = RoomName.IsEmpty() ? ResolvedId : RoomName;
 		Room->RoomTags = NavigationSearch::NormalizeTags(InTags);
 		Room->RoomType = RoomTypes::Normalize(InRoomType);
@@ -1359,21 +1405,43 @@ FString AInteriorGenerator::PlaceConnectorNode(EInteriorNavNodeType Type, FVecto
 		}
 	}
 
-	const FString GroupId = FString::Printf(TEXT("%s-NAV-%02d"), *LoadedBuildingId, NavNodes.Num() + 1);
-	for (int32 Level : ConnectsToFloors)
+	// Each group represents one physical shaft. Duplicate floor inputs must not create duplicate nodes.
+	TArray<int32> Floors;
+	for (int32 Level : ConnectsToFloors) Floors.AddUnique(Level);
+	if (Floors.IsEmpty()) return FString();
+
+	TSet<FString> ExistingIds;
+	for (const FInteriorNavNode& Node : NavNodes)
+	{
+		ExistingIds.Add(Node.ConnectorGroupId);
+		ExistingIds.Add(Node.Id);
+	}
+	FString GroupId;
+	for (int32 Index = 1; ; ++Index)
+	{
+		GroupId = FString::Printf(TEXT("%s-NAV-%02d"), *LoadedBuildingId, Index);
+		if (!ExistingIds.Contains(GroupId) && !Floors.ContainsByPredicate([&](int32 Level)
+		{
+			return ExistingIds.Contains(FString::Printf(TEXT("%s-F%02d"), *GroupId, Level));
+		}))
+		{
+			break;
+		}
+	}
+	for (int32 Level : Floors)
 	{
 		FInteriorNavNode Node;
 		Node.Id = FString::Printf(TEXT("%s-F%02d"), *GroupId, Level);
 		Node.Type = Type;
 		Node.Level = Level;
 		Node.Position = Position;
-		Node.ConnectsFloors = ConnectsToFloors;
+		Node.ConnectsFloors = Floors;
 		Node.ConnectorGroupId = GroupId;
 		NavNodes.Add(Node);
 		SpawnConnectorMarker(NavNodes.Last(), Building);
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("Placed connector '%s' on %d floor(s)"), *GroupId, ConnectsToFloors.Num());
+	UE_LOG(LogTemp, Warning, TEXT("Placed connector '%s' on %d floor(s)"), *GroupId, Floors.Num());
 
 	RecordHistorySnapshot();
 	return GroupId;
@@ -2416,12 +2484,13 @@ bool AInteriorGenerator::RemoveEntrance(const FString& Id)
 	{
 		// The door belongs to the building next door; taking it from there takes it from both.
 		const FString Source = Found->SourceBuildingId;
-		if (!Generator->RemoveStoredEntrance(Source, Id))
+		TSharedPtr<FJsonObject> Removed;
+		if (!Generator->RemoveStoredEntrance(Source, Id, &Removed))
 		{
 			return false;
 		}
 		RefreshMirroredEntrances();
-		RecordHistorySnapshot();
+		RecordHistorySnapshotInternal(Source, MoveTemp(Removed));
 		return true;
 	}
 	Entrances.RemoveAll([&Id](const FInteriorEntrance& E) { return E.Id == Id; });
@@ -2706,6 +2775,7 @@ TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 
 				TSharedRef<FJsonObject> RoomObject = MakeShared<FJsonObject>();
 				RoomObject->SetStringField(TEXT("id"), Room->RoomId);
+				if (!Room->NavigationId.IsEmpty()) RoomObject->SetStringField(TEXT("navigationId"), Room->NavigationId);
 				RoomObject->SetStringField(TEXT("name"), Room->RoomName);
 				TArray<TSharedPtr<FJsonValue>> SerializedTags;
 				for (const FString& Tag : Room->RoomTags) SerializedTags.Add(MakeShared<FJsonValueString>(Tag));
@@ -3016,6 +3086,11 @@ void AInteriorGenerator::NotifyNavigationLayoutChanged()
 
 void AInteriorGenerator::RecordHistorySnapshot()
 {
+	RecordHistorySnapshotInternal(FString(), nullptr);
+}
+
+void AInteriorGenerator::RecordHistorySnapshotInternal(const FString& EntranceOwnerId, TSharedPtr<FJsonObject> RemovedEntrance)
+{
 	// Only a new snapshot is an edit: selecting a door can also finish a gesture and record
 	// the same state. Live previews notify separately, before their eventual commit.
 	if (bIsRestoringHistory || bBulkEditing || LoadedBuildingId.IsEmpty())
@@ -3031,6 +3106,8 @@ void AInteriorGenerator::RecordHistorySnapshot()
 	TSharedRef<FJsonObject> InteriorObject = SerializeCurrentInterior();
 	FInteriorHistorySnapshot Snapshot;
 	Snapshot.FloorCount = Building->GetFloorCount();
+	Snapshot.EntranceOwnerId = EntranceOwnerId;
+	Snapshot.RemovedEntrance = MoveTemp(RemovedEntrance);
 	TSharedRef<TJsonWriter<>> Writer =
 		TJsonWriterFactory<>::Create(&Snapshot.Json);
 
@@ -3042,7 +3119,7 @@ void AInteriorGenerator::RecordHistorySnapshot()
 	}
 
 	// Don't store the exact same state twice.
-	if (HistoryIndex >= 0 &&
+	if (!Snapshot.RemovedEntrance && HistoryIndex >= 0 &&
 		InteriorHistory.IsValidIndex(HistoryIndex) &&
 		InteriorHistory[HistoryIndex].FloorCount == Snapshot.FloorCount &&
 		InteriorHistory[HistoryIndex].Json == Snapshot.Json)
@@ -3072,98 +3149,24 @@ void AInteriorGenerator::RecordHistorySnapshot()
 
 bool AInteriorGenerator::Undo()
 {
-	// Need an earlier state to go back to.
-	if (HistoryIndex <= 0 ||
-		!InteriorHistory.IsValidIndex(HistoryIndex - 1))
-	{
-		UE_LOG(LogTemp, Warning,
-			TEXT("Undo: nothing to undo"));
-		return false;
-	}
-
-	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
-	if (!Building)
-	{
-		UE_LOG(LogTemp, Warning,
-			TEXT("Undo: no interior is currently loaded"));
-		return false;
-	}
-
-	const FString BuildingId = LoadedBuildingId;
-	const int32 PreviousActiveFloor = ActiveFloor;
-
-	const int32 TargetIndex = HistoryIndex - 1;
-	const FInteriorHistorySnapshot& Snapshot = InteriorHistory[TargetIndex];
-
-	TSharedPtr<FJsonObject> RestoredInterior;
-	TSharedRef<TJsonReader<>> Reader =
-		TJsonReaderFactory<>::Create(Snapshot.Json);
-
-	if (!FJsonSerializer::Deserialize(Reader, RestoredInterior) ||
-		!RestoredInterior.IsValid())
-	{
-		UE_LOG(LogTemp, Error,
-			TEXT("Undo: failed to deserialize history snapshot"));
-		return false;
-	}
-
-	bIsRestoringHistory = true;
-	if (Building->GetFloorCount() != Snapshot.FloorCount)
-	{
-		Building->SetFloorCount(Snapshot.FloorCount);
-	}
-
-	Generator->SetInteriorDataForBuilding(
-		BuildingId,
-		RestoredInterior);
-
-	const int32 LoadResult =
-		LoadInteriorForBuilding(BuildingId);
-
-	if (LoadResult < 0)
-	{
-		bIsRestoringHistory = false;
-
-		UE_LOG(LogTemp, Error,
-			TEXT("Undo: failed to restore interior"));
-		return false;
-	}
-
-	HistoryIndex = TargetIndex;
-
-	// Try to remain on the same floor.
-	if (FloorInfoByLevel.Contains(PreviousActiveFloor))
-	{
-		SetActiveFloor(PreviousActiveFloor);
-	}
-
-	bIsRestoringHistory = false;
-	NotifyNavigationLayoutChanged();
-
-	UE_LOG(LogTemp, Log,
-		TEXT("Undo complete. Index=%d"),
-		HistoryIndex);
-
-	return true;
+	return RestoreHistorySnapshot(HistoryIndex - 1);
 }
 
 
 bool AInteriorGenerator::Redo()
 {
-	const int32 TargetIndex = HistoryIndex + 1;
+	return RestoreHistorySnapshot(HistoryIndex + 1);
+}
 
-	if (!InteriorHistory.IsValidIndex(TargetIndex))
-	{
-		UE_LOG(LogTemp, Warning,
-			TEXT("Redo: nothing to redo"));
-		return false;
-	}
+bool AInteriorGenerator::RestoreHistorySnapshot(int32 TargetIndex)
+{
+	if (!InteriorHistory.IsValidIndex(HistoryIndex) || !InteriorHistory.IsValidIndex(TargetIndex)) return false;
 
 	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
 	if (!Building)
 	{
 		UE_LOG(LogTemp, Warning,
-			TEXT("Redo: no interior is currently loaded"));
+			TEXT("History: no interior is currently loaded"));
 		return false;
 	}
 
@@ -3180,11 +3183,22 @@ bool AInteriorGenerator::Redo()
 		!RestoredInterior.IsValid())
 	{
 		UE_LOG(LogTemp, Error,
-			TEXT("Redo: failed to deserialize history snapshot"));
+			TEXT("History: failed to deserialize history snapshot"));
 		return false;
 	}
 
-	bIsRestoringHistory = true;
+	const bool bUndo = TargetIndex < HistoryIndex;
+	const FInteriorHistorySnapshot& Edit = bUndo ? InteriorHistory[HistoryIndex] : Snapshot;
+	const auto ApplyEntranceEdit = [&](bool bRestore)
+	{
+		if (!Edit.RemovedEntrance) return true;
+		return bRestore
+			? Generator->RestoreStoredEntrance(Edit.EntranceOwnerId, Edit.RemovedEntrance)
+			: Generator->RemoveStoredEntrance(Edit.EntranceOwnerId, Edit.RemovedEntrance->GetStringField(TEXT("id")));
+	};
+	TGuardValue<bool> Restoring(bIsRestoringHistory, true);
+	if (!ApplyEntranceEdit(bUndo)) return false;
+
 	if (Building->GetFloorCount() != Snapshot.FloorCount)
 	{
 		Building->SetFloorCount(Snapshot.FloorCount);
@@ -3199,10 +3213,10 @@ bool AInteriorGenerator::Redo()
 
 	if (LoadResult < 0)
 	{
-		bIsRestoringHistory = false;
+		ApplyEntranceEdit(!bUndo);
 
 		UE_LOG(LogTemp, Error,
-			TEXT("Redo: failed to restore interior"));
+			TEXT("History: failed to restore interior"));
 		return false;
 	}
 
@@ -3213,11 +3227,10 @@ bool AInteriorGenerator::Redo()
 		SetActiveFloor(PreviousActiveFloor);
 	}
 
-	bIsRestoringHistory = false;
 	NotifyNavigationLayoutChanged();
 
 	UE_LOG(LogTemp, Log,
-		TEXT("Redo complete. Index=%d"),
+		TEXT("History restored. Index=%d"),
 		HistoryIndex);
 
 	return true;

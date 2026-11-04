@@ -452,7 +452,7 @@ namespace LayoutValidation
             ById.Add(Reader.C.Building, Building);
             Reader.String(Building, TEXT("name"), true);
             const int32 Count = Reader.Integer(Building, TEXT("floorCount"), 10);
-            if (Count < 1 || Reader.Number(Building, TEXT("floorHeight"), Reader.Number(Project, TEXT("floorHeight"), 300)) <= 0) Reader.Invalid(TEXT("building floor dimensions"));
+            if (Count < 1 || Count > MaxBuildingFloors || Reader.Number(Building, TEXT("floorHeight"), Reader.Number(Project, TEXT("floorHeight"), 300)) <= 0) Reader.Invalid(TEXT("building floor dimensions"));
             const auto Boundary = Reader.Shape(Building, true);
             if (const auto Offset = Building->Values.Find(TEXT("offset"))) Reader.XY(*Offset);
             const auto Interior = Building->Values.Find(TEXT("interior"));

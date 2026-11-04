@@ -466,7 +466,12 @@ private:
 	{
 		FString Json;
 		int32 FloorCount = 1;
+		// An edit to another building is recorded on the transition into this snapshot.
+		FString EntranceOwnerId;
+		TSharedPtr<FJsonObject> RemovedEntrance;
 	};
+	void RecordHistorySnapshotInternal(const FString& EntranceOwnerId, TSharedPtr<FJsonObject> RemovedEntrance);
+	bool RestoreHistorySnapshot(int32 TargetIndex);
 	TArray<FInteriorHistorySnapshot> InteriorHistory;
 
 	int32 HistoryIndex = -1;

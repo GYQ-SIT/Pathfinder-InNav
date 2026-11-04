@@ -7,6 +7,7 @@
 #include "MobileSearchPageWidget.h"
 #include "MobileMapWidget.h"
 #include "MobilePlacePageWidget.h"
+#include "MobileRoutePageWidget.h"
 #include "InteriorRoom.h"
 #include "LayoutValidationSession.h"
 #include "LayoutValidation.h"
@@ -14,6 +15,7 @@
 #include "Components/Button.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformProcess.h"
 #include "Misc/FileHelper.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/Paths.h"
@@ -244,10 +246,30 @@ bool FMobileRealScreenTest::RunTest(const FString& Parameters)
 	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
 	UMobileAppWidget* Screen = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
 	if (!TestNotNull(TEXT("mobile screen"), Screen)) { World->DestroyWorld(false); return false; }
-	Screen->SetSource(Source); Screen->TakeWidget(); Screen->SetActiveTab(UMobileAppWidget::ETab::Directory);
+	Screen->SetSource(Source);
+	const auto Slate = Screen->TakeWidget();
+	Screen->SetActiveTab(UMobileAppWidget::ETab::Directory);
 	TestFalse(TEXT("real Explore does not show mock-location text"), Screen->GetExplorePage()->IsDataNoteShown());
 	Screen->ShowPlace(Places[2]); Screen->SendSheetEvent(EMobileSheetEvent::DirectionsRequested);
-	if (TestTrue(TEXT("unchanged route page consumes the real source"), Screen->GetCurrentRoute().bFound))
+	TestFalse(TEXT("the route is still pending when the button handler returns"), Screen->GetCurrentRoute().bFound);
+	TestTrue(TEXT("the page shows that calculation is pending"), Screen->GetRoutePage()->GetErrorString().Contains(TEXT("Finding route")));
+	Screen->SendSheetEvent(EMobileSheetEvent::NavigationStarted);
+	TestTrue(TEXT("a pending route cannot start navigation"), Screen->GetFlow().GetState() == EMobileSheetState::Route);
+
+	FMobileRouteRequest Changed;
+	Changed.FromPlaceId = Changed.ToPlaceId = Places[2].Id;
+	Screen->ApplyRouteRequest(Changed);
+	Slate->Tick(FGeometry(), FPlatformTime::Seconds(), 0.f);
+	TestTrue(TEXT("the latest request supersedes the original job"), Screen->GetCurrentRoute().Error.Contains(TEXT("already at")));
+	Changed.FromPlaceId = Places[0].Id;
+	Screen->ApplyRouteRequest(Changed);
+	const double Deadline = FPlatformTime::Seconds() + 5.0;
+	while (!Screen->GetCurrentRoute().bFound && Screen->GetCurrentRoute().Error.IsEmpty() && FPlatformTime::Seconds() < Deadline)
+	{
+		Slate->Tick(FGeometry(), FPlatformTime::Seconds(), 0.f);
+		FPlatformProcess::SleepNoStats(0.001f);
+	}
+	if (TestTrue(TEXT("the real route completes across ticks"), Screen->GetCurrentRoute().bFound))
 	{
 		Screen->SendSheetEvent(EMobileSheetEvent::NavigationStarted);
 		bool bSawOutside = false;
@@ -262,6 +284,52 @@ bool FMobileRealScreenTest::RunTest(const FString& Parameters)
 	Screen->RebuildForAppearance();
 	TestTrue(TEXT("appearance rebuild retains the real provider"), Screen->GetSource() == &Source.Get());
 	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRoomBookmarkIdentityTest, "InNavi.Mobile.Source.RoomBookmarkIdentity", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileRoomBookmarkIdentityTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	Fixture.Interior->ClearLoadedInterior();
+	Fixture.Generator->ClearAllBuildings();
+	const double Unit = 1.0 / Fixture.Generator->GetScale();
+	const FString BuildingId = TEXT("Bookmarks");
+	Fixture.Generator->SpawnBuildingFromData(BuildingId, BuildingId,
+		{{0, 0}, {1000 * Unit, 0}, {1000 * Unit, 800 * Unit}, {0, 800 * Unit}}, 1, 300, {0, 0});
+	Fixture.Interior->LoadInteriorForBuilding(BuildingId);
+	const auto Create = [&](const FString& Name, double Left)
+	{
+		FString Error;
+		return Fixture.Interior->CreateRoomFromFootprint(
+			{{Left * Unit, 100 * Unit}, {(Left + 300) * Unit, 100 * Unit},
+			{(Left + 300) * Unit, 400 * Unit}, {Left * Unit, 400 * Unit}}, FString(), Name, true, false, false, Error);
+	};
+	const auto* Original = Create(TEXT("Original"), 100);
+	if (!TestNotNull(TEXT("original room exists"), Original)) return false;
+	const FString RoomId = Original->RoomId;
+	MobileRealTests::FProjectFiles Files;
+	const FString Path = Files.Directory / TEXT("bookmarks.json");
+	const auto Save = [&]()
+	{
+		Fixture.Interior->SyncInteriorToBuildingGenerator();
+		return Fixture.Generator->SaveBuildingsToFile(Path);
+	};
+	TestTrue(TEXT("the first project is saved"), Save());
+	FMobileRealSource Before(Path);
+	const auto FirstPlaces = MobileRealTests::Places(Before);
+	if (!TestEqual(TEXT("the original room appears in mobile"), FirstPlaces.Num(), 1)) return false;
+	TestTrue(TEXT("the editor can delete the room"), Fixture.Interior->DeleteRoom(RoomId));
+	const auto* Replacement = Create(TEXT("Replacement"), 500);
+	if (!TestNotNull(TEXT("replacement room exists"), Replacement)) return false;
+	TestEqual(TEXT("the editor reuses the display ID"), Replacement->RoomId, RoomId);
+	TestTrue(TEXT("the changed project is saved"), Save());
+	FMobileRealSource After(Path);
+	FMobilePlace Place;
+	TestFalse(TEXT("the old bookmark cannot resolve to the replacement"), After.FindPlace(FirstPlaces[0].Id, Place));
+	const auto SecondPlaces = MobileRealTests::Places(After);
+	if (TestEqual(TEXT("the replacement is indexed"), SecondPlaces.Num(), 1))
+		TestNotEqual(TEXT("the replacement has a separate persisted identity"), SecondPlaces[0].Id, FirstPlaces[0].Id);
 	return true;
 }
 

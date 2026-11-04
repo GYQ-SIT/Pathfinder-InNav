@@ -126,10 +126,11 @@ void UMobileRoutePageWidget::SetChoices(const TArray<FMobilePlace>& InPlaces, co
 	Refresh();
 }
 
-void UMobileRoutePageWidget::SetRequest(const FMobileRouteRequest& InRequest, const FMobileRoute& InRoute)
+void UMobileRoutePageWidget::SetRequest(const FMobileRouteRequest& InRequest, const FMobileRoute& InRoute, bool bInPending)
 {
 	Request = InRequest;
 	Route = InRoute;
+	bPending = bInPending;
 	Refresh();
 }
 
@@ -153,7 +154,8 @@ void UMobileRoutePageWidget::Refresh()
 	const bool bFound = Route.bFound;
 	StatsBox->SetVisibility(bFound ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	ErrorText->SetVisibility(bFound ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
-	ErrorText->SetText(FText::FromString(Route.Error.IsEmpty() ? TEXT("No route.") : Route.Error));
+	ErrorText->SetColorAndOpacity(FSlateColor(bPending ? Grey : Red));
+	ErrorText->SetText(FText::FromString(bPending ? TEXT("Finding route…") : Route.Error.IsEmpty() ? TEXT("No route.") : Route.Error));
 	MinutesText->SetText(FText::FromString(FString::Printf(TEXT("%d min"), Route.Minutes)));
 	MetresText->SetText(FText::FromString(FString::Printf(TEXT("%d m"), FMath::RoundToInt(Route.Metres))));
 	StartButton->SetIsEnabled(bFound);

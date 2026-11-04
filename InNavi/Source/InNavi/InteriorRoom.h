@@ -62,6 +62,9 @@ public:
 	UPROPERTY()
 	FString RoomId;
 
+	// Separate from the human-readable editor ID, which can be reused after deletion.
+	FString NavigationId;
+
 	UPROPERTY()
 	FString RoomName;
 

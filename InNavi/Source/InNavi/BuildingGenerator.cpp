@@ -4,12 +4,14 @@
 #include "BuildingGenerator.h"
 #include "BuildingTypes.h"
 #include "GroundFit.h"
+#include "LayoutValidation.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
 #include "TimerManager.h"
 #include "NavigationSearchUtils.h"
 #include "PolyBuilding.h"
+#include "ProjectFile.h"
 #include "RoadSegmentActor.h"
 #include "POIMarkerActor.h"
 #include "ContextBuildingActor.h"
@@ -19,6 +21,46 @@
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
 #include "SQLiteDatabase.h"
+
+static bool CheckProjectFloorLimits(const TArray<TSharedPtr<FJsonValue>>& Buildings, FString& OutProblem)
+{
+	const auto IsValidFloor = [](const FJsonObject& Object, const TCHAR* Field)
+	{
+		double Value = 0;
+		return !Object.HasField(Field) || (Object.TryGetNumberField(Field, Value)
+			&& FMath::IsFinite(Value) && Value >= 1 && Value <= LayoutValidation::MaxBuildingFloors
+			&& Value == FMath::FloorToDouble(Value));
+	};
+	for (const auto& Value : Buildings)
+	{
+		const TSharedPtr<FJsonObject>* Building = nullptr;
+		if (!Value.IsValid() || !Value->TryGetObject(Building) || !Building->IsValid()) continue;
+		bool bValid = IsValidFloor(**Building, TEXT("floorCount"));
+		const TSharedPtr<FJsonObject>* Interior = nullptr;
+		const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
+		if (bValid && (*Building)->TryGetObjectField(TEXT("interior"), Interior) && Interior->IsValid()
+			&& (*Interior)->TryGetArrayField(TEXT("floors"), Floors))
+		{
+			for (const auto& FloorValue : *Floors)
+			{
+				const TSharedPtr<FJsonObject>* Floor = nullptr;
+				if (FloorValue.IsValid() && FloorValue->TryGetObject(Floor) && Floor->IsValid() && !IsValidFloor(**Floor, TEXT("level")))
+				{
+					bValid = false;
+					break;
+				}
+			}
+		}
+		if (!bValid)
+		{
+			FString Id;
+			(*Building)->TryGetStringField(TEXT("id"), Id);
+			OutProblem = FString::Printf(TEXT("Building '%s' must use whole floor counts and levels from 1 to %d."), *Id, LayoutValidation::MaxBuildingFloors);
+			return false;
+		}
+	}
+	return true;
+}
 
 // ---- Helper: do segments AB and CD properly cross each other? ---- Named distinctly (not just
 // "SegmentsIntersect") because NavigationRoutePlannerTests.cpp defines its own same-named,
@@ -152,6 +194,20 @@ int32 ABuildingGenerator::LoadBuildingsFromFile(const FString& FilePath)
 int32 ABuildingGenerator::LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& RootObject)
 {
 	if (!RootObject.IsValid()) return 0;
+	const TArray<TSharedPtr<FJsonValue>>* BuildingsArray;
+	if (!RootObject->TryGetArrayField(TEXT("buildings"), BuildingsArray))
+	{
+		UE_LOG(LogTemp, Error, TEXT("No 'buildings' array found in JSON"));
+		return 0;
+	}
+	FString FloorProblem;
+	if (!CheckProjectFloorLimits(*BuildingsArray, FloorProblem))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("%s"), *FloorProblem);
+		return 0;
+	}
+	if (!GetWorld()) return 0;
+
 	// No "version" means a file from before versions existed (read as 0, the same format as 1). A newer file is read as well as it can be.
 	LoadedFileVersion = 0;
 	RootObject->TryGetNumberField(TEXT("version"), LoadedFileVersion);
@@ -171,18 +227,6 @@ int32 ABuildingGenerator::LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& R
 
 	float GlobalFloorHeight = 300.f;
 	RootObject->TryGetNumberField(TEXT("floorHeight"), GlobalFloorHeight);
-
-	const TArray<TSharedPtr<FJsonValue>>* BuildingsArray;
-	if (!RootObject->TryGetArrayField(TEXT("buildings"), BuildingsArray))
-	{
-		UE_LOG(LogTemp, Error, TEXT("No 'buildings' array found in JSON"));
-		return 0;
-	}
-
-	if (!GetWorld())
-	{
-		return 0;
-	}
 
 	int32 SpawnedCount = 0;
 
@@ -251,8 +295,11 @@ int32 ABuildingGenerator::LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& R
 		}
 	}
 
-	RefreshWallOpenings();
-	MarkGroundDirty();
+	if (!bNavigationGeometryOnly)
+	{
+		RefreshWallOpenings();
+		MarkGroundDirty();
+	}
 	NotifyNavigationLayoutChanged();
 	return SpawnedCount;
 }
@@ -1089,7 +1136,7 @@ APolyBuilding* ABuildingGenerator::SpawnBuildingFromData(const FString& Id, cons
 	{
 		NewBuilding->BuildingId = Id;
 		NewBuilding->BuildingName = Name;
-		NewBuilding->BuildFromFootprint(Footprint, Scale, Offset, FloorCount, FloorHeight);
+		NewBuilding->BuildFromFootprint(Footprint, Scale, Offset, FloorCount, FloorHeight, !bNavigationGeometryOnly);
 		UsedBuildingIds.Add(Id);
 		BuildingsById.Add(Id, NewBuilding);
 		NewBuilding->OnFloorCountChanged.AddUObject(this, &ABuildingGenerator::HandleBuildingFloorCountChanged);
@@ -1247,7 +1294,7 @@ bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath) const
 		return false;
 	}
 
-	if (!FFileHelper::SaveStringToFile(OutputString, *FilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	if (!ProjectFile::WriteText(FilePath, OutputString))
 	{
 		UE_LOG(LogTemp, Error, TEXT("SaveBuildingsToFile: could not write to %s"), *FilePath);
 		return false;
@@ -1354,33 +1401,50 @@ TArray<FInteriorEntrance> ABuildingGenerator::GetMirroredEntrances(const FString
 	return Result;
 }
 
-bool ABuildingGenerator::RemoveStoredEntrance(const FString& BuildingId, const FString& EntranceId)
+bool ABuildingGenerator::RemoveStoredEntrance(const FString& BuildingId, const FString& EntranceId, TSharedPtr<FJsonObject>* OutRemoved)
 {
 	const TSharedPtr<FJsonObject> Interior = GetInteriorDataForBuilding(BuildingId);
-	if (!Interior.IsValid())
+	const TArray<TSharedPtr<FJsonValue>>* Stored = nullptr;
+	if (!Interior || !Interior->TryGetArrayField(TEXT("entrances"), Stored))
 	{
 		return false;
 	}
-	TArray<FInteriorEntrance> Entrances = InteriorEntrances::ReadAll(Interior);
-	if (Entrances.RemoveAll([&EntranceId](const FInteriorEntrance& E) { return E.Id == EntranceId; }) == 0)
+	TArray<TSharedPtr<FJsonValue>> Entrances = *Stored;
+	const int32 Index = Entrances.IndexOfByPredicate([&EntranceId](const TSharedPtr<FJsonValue>& Value)
+	{
+		const TSharedPtr<FJsonObject>* Entrance = nullptr;
+		FString Id;
+		return Value && Value->TryGetObject(Entrance) && Entrance->IsValid()
+			&& (*Entrance)->TryGetStringField(TEXT("id"), Id) && Id == EntranceId;
+	});
+	if (Index == INDEX_NONE) return false;
+	if (OutRemoved) *OutRemoved = Entrances[Index]->AsObject();
+	Entrances.RemoveAt(Index);
+	CaptureBuildingBaseline(BuildingId);
+	auto Updated = MakeShared<FJsonObject>(*Interior);
+	if (Entrances.IsEmpty()) Updated->RemoveField(TEXT("entrances"));
+	else Updated->SetArrayField(TEXT("entrances"), MoveTemp(Entrances));
+	SetInteriorDataForBuilding(BuildingId, Updated);
+	return true;
+}
+
+bool ABuildingGenerator::RestoreStoredEntrance(const FString& BuildingId, const TSharedPtr<FJsonObject>& Entrance)
+{
+	const auto Interior = GetInteriorDataForBuilding(BuildingId);
+	FString Id;
+	if (!FindBuildingById(BuildingId) || !Interior || !Entrance || !Entrance->TryGetStringField(TEXT("id"), Id)
+		|| GetStoredEntrances(BuildingId).ContainsByPredicate([&Id](const FInteriorEntrance& Existing) { return Existing.Id == Id; }))
 	{
 		return false;
 	}
-	TArray<TSharedPtr<FJsonValue>> Values;
-	for (const FInteriorEntrance& Entrance : Entrances)
-	{
-		Values.Add(MakeShared<FJsonValueObject>(InteriorEntrances::ToJson(Entrance)));
-	}
-	if (Values.IsEmpty())
-	{
-		Interior->RemoveField(TEXT("entrances"));
-	}
-	else
-	{
-		Interior->SetArrayField(TEXT("entrances"), Values);
-	}
-	RefreshWallOpenings();
-	NotifyNavigationLayoutChanged();
+	const TArray<TSharedPtr<FJsonValue>>* Stored = nullptr;
+	TArray<TSharedPtr<FJsonValue>> Entrances;
+	if (Interior->TryGetArrayField(TEXT("entrances"), Stored)) Entrances = *Stored;
+	Entrances.Add(MakeShared<FJsonValueObject>(Entrance));
+	CaptureBuildingBaseline(BuildingId);
+	auto Updated = MakeShared<FJsonObject>(*Interior);
+	Updated->SetArrayField(TEXT("entrances"), MoveTemp(Entrances));
+	SetInteriorDataForBuilding(BuildingId, Updated);
 	return true;
 }
 
@@ -1481,6 +1545,7 @@ int32 ABuildingGenerator::ReplaceBuildingsFromPath(const FString& Path, bool bDa
 			OutProblem = TEXT("The project file is missing its buildings array.");
 			return INDEX_NONE;
 		}
+		if (!CheckProjectFloorLimits(*Buildings, OutProblem)) return INDEX_NONE;
 		ExpectedCount = Buildings->Num();
 	}
 

@@ -6,6 +6,8 @@ class FJsonObject;
 
 namespace LayoutValidation
 {
+    inline constexpr int32 MaxBuildingFloors = 200;
+
     enum class ESeverity : uint8 { Error, Warning, Info };
     enum class EObjectKind : uint8 { Project, Building, Floor, Room, Opening, Connector, Entrance };
 

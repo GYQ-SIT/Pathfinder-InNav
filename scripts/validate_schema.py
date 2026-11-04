@@ -14,6 +14,7 @@ Usage:
 """
 import glob
 import json
+import math
 import re
 import sys
 
@@ -22,10 +23,25 @@ KEYWORDS = {"type", "enum", "const", "required", "properties", "additionalProper
             "exclusiveMinimum", "minLength", "pattern", "$ref"}
 
 
+def reject_constant(token):
+    raise ValueError(f"{token} is not a JSON number")
+
+
+def parse_finite_float(token):
+    value = float(token)
+    if not math.isfinite(value):
+        raise ValueError(f"{token} is outside the supported number range")
+    return value
+
+
+def decode_json(data):
+    return json.loads(data, parse_constant=reject_constant, parse_float=parse_finite_float)
+
+
 def load(path):
     with open(path, "rb") as handle:
         # Older editor saves can be UTF-16 with a byte order mark.
-        return json.loads(handle.read())
+        return decode_json(handle.read())
 
 
 def type_matches(value, name):
@@ -74,6 +90,8 @@ def check_schema(schema, where="#"):
 
 def validate(value, schema, root, path="$"):
     """Returns a list of "path: what is wrong"; empty when the value is valid."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return [f"{path}: expected a finite number"]
     if schema is True:
         return []
     if schema is False:
@@ -141,6 +159,7 @@ def self_test():
     cases = [
         ({"a": 1}, 0), ({"a": 1, "b": [1, 2.5], "c": "x"}, 0), ({}, 1), ({"a": 0}, 1), ({"a": 1.5}, 1), ({"a": True}, 1),
         ({"a": 1, "z": 1}, 1), ({"a": 1, "b": [1]}, 1), ({"a": 1, "b": [1, "s"]}, 1), ({"a": 1, "c": "q"}, 1), ([], 1),
+        ({"a": 1, "b": [float("nan"), float("inf")]}, 2),
     ]
     failed = 0
     for value, expected in cases:
@@ -154,7 +173,15 @@ def self_test():
         print("self-test: an unsupported keyword was accepted")
     except ValueError:
         pass
-    print("self-test: " + ("failed" if failed else f"all {len(cases) + 1} cases pass"))
+    bad_numbers = ("NaN", "Infinity", "-Infinity", "1e999", "-1e999")
+    for token in bad_numbers:
+        try:
+            decode_json(f'{{"unchecked": [{token}]}}')
+            failed += 1
+            print(f"self-test: {token} was accepted")
+        except ValueError:
+            pass
+    print("self-test: " + ("failed" if failed else f"all {len(cases) + len(bad_numbers) + 1} cases pass"))
     return 1 if failed else 0
 
 

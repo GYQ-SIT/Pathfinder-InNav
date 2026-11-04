@@ -665,6 +665,13 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 void UMobileAppWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	if (PendingRoute && PendingRoute->Step(0.003, CurrentRoute))
+	{
+		PendingRoute.Reset();
+		if (RoutePage) RoutePage->SetRequest(ActiveRouteRequest, CurrentRoute);
+		RefreshNavigation();
+		RefreshMap();
+	}
 #if PLATFORM_ANDROID && !UE_BUILD_SHIPPING
 	++PerfFrames;
 	PerfSeconds += InDeltaTime;
@@ -870,6 +877,7 @@ void UMobileAppWidget::SetActiveTab(ETab Tab)
 
 void UMobileAppWidget::SendSheetEvent(EMobileSheetEvent Event)
 {
+	if (Event == EMobileSheetEvent::NavigationStarted && !CurrentRoute.bFound) return;
 	if (Flow.Handle(Event))
 	{
 		Snap = MobileSheet::SnapForState(Flow.GetState());
@@ -878,6 +886,10 @@ void UMobileAppWidget::SendSheetEvent(EMobileSheetEvent Event)
 		if (Flow.GetState() == EMobileSheetState::Route)
 		{
 			RefreshRoute();
+		}
+		else
+		{
+			PendingRoute.Reset();
 		}
 		// Setting off starts at the first instruction; arriving shows the place.
 		if (Flow.GetState() == EMobileSheetState::Navigating && Event == EMobileSheetEvent::NavigationStarted)
@@ -937,9 +949,18 @@ void UMobileAppWidget::RefreshRoute()
 	Request.Preferences = RoutePreferences;
 	Request.MyLocationBuildingId = MyLocationBuildingId;
 	Request.MyLocationLevel = MyLocationLevel;
-	CurrentRoute = Source->FindRoute(Request);
-	RoutePage->SetRequest(Request, CurrentRoute);
+	ActiveRouteRequest = Request;
+	PendingRoute.Reset();
+	PendingRoute = Source->BeginRoute(Request);
+	CurrentRoute = PendingRoute ? FMobileRoute() : Source->FindRoute(Request);
+	RoutePage->SetRequest(Request, CurrentRoute, PendingRoute.IsValid());
 	RefreshMap();
+}
+
+void UMobileAppWidget::NativeDestruct()
+{
+	PendingRoute.Reset();
+	Super::NativeDestruct();
 }
 
 void UMobileAppWidget::ApplyRouteRequest(const FMobileRouteRequest& Changed)
@@ -1177,6 +1198,11 @@ void UMobileAppWidget::PreviewState(EMobileSheetState Target)
 
 void UMobileAppWidget::SelectPlace(const FMobilePlace& Place)
 {
+	if (SelectedPlace.Id != Place.Id)
+	{
+		PendingRoute.Reset();
+		CurrentRoute = FMobileRoute();
+	}
 	SelectedPlace = Place;
 	if (PlacePage)
 	{
@@ -1552,6 +1578,8 @@ void UMobileAppWidget::OpenSite(const FString& NewSiteId)
 	// Everything starts again for the site: no place, no start, no route, the sheet at "Where to?", My location in its first building.
 	SiteId = NewSiteId;
 	Flow.Reset();
+	PendingRoute.Reset();
+	ActiveRouteRequest = FMobileRouteRequest();
 	SelectedPlace = FMobilePlace();
 	StartPlaceId.Reset();
 	CurrentRoute = FMobileRoute();
@@ -1713,7 +1741,8 @@ void UMobileAppWidget::RebuildForAppearance()
 	if (!SelectedPlace.Id.IsEmpty())
 	{
 		SelectPlace(SelectedPlace);
-		RefreshRoute();
+		if (Flow.GetState() == EMobileSheetState::Route) RefreshRoute();
+		else if (RoutePage) RoutePage->SetRequest(ActiveRouteRequest, CurrentRoute);
 	}
 	RefreshNavigation();
 	RefreshArrived();

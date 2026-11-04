@@ -5,10 +5,50 @@
 
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
+#include "InteriorRoom.h"
 #include "PolyBuilding.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationConcaveRoomPickerTest, "InNavi.Navigation.ConcaveRoomPicker",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationConcaveRoomPickerTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	auto* Generator = World->SpawnActor<ABuildingGenerator>();
+	auto* Interior = World->SpawnActor<AInteriorGenerator>();
+	Interior->DispatchBeginPlay();
+	const FString BuildingId = TEXT("Concave");
+	const double Unit = 1.0 / Generator->GetScale();
+	Generator->SpawnBuildingFromData(BuildingId, BuildingId,
+		{{0, 0}, {800 * Unit, 0}, {800 * Unit, 800 * Unit}, {0, 800 * Unit}}, 1, 300.f, {0, 0});
+	Interior->LoadInteriorForBuilding(BuildingId);
+	TArray<FVector2D> Footprint = {{100, 100}, {700, 100}, {700, 700}, {550, 700}, {550, 250}, {250, 250}, {250, 700}, {100, 700}};
+	for (auto& Point : Footprint) Point *= Unit;
+	FString Error;
+	const auto* Room = Interior->CreateRoomFromFootprint(Footprint, TEXT("U"), TEXT("U room"), true, false, false, Error);
+	if (TestNotNull(TEXT("the U-shaped room is authored"), Room))
+	{
+		auto* Panel = NewObject<UNavigationPanelWidget>();
+		Panel->SetNavigationContext(Generator, Interior);
+		const auto Rooms = Panel->GetSelectableRooms();
+		if (TestEqual(TEXT("the room is listed"), Rooms.Num(), 1))
+		{
+			const auto InsideRoom = [Unit](FVector2D Point)
+			{
+				Point /= Unit;
+				return Point.X > 100 && Point.X < 700 && Point.Y > 100 && Point.Y < 700
+					&& (Point.X < 250 || Point.X > 550 || Point.Y < 250);
+			};
+			TestFalse(TEXT("the area centroid is in the cutout"), InsideRoom(Rooms[0].Centroid));
+			TestTrue(TEXT("the destination can be selected by name"), Panel->SetDestinationToRoom(Rooms[0].GetDisplayLabel()));
+			TestTrue(TEXT("the route endpoint is inside the room"), InsideRoom(Panel->GetDestination().Position));
+		}
+	}
+	World->DestroyWorld(false);
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationPanelOutdoorPresentationTest,
 	"InNavi.Navigation.PersonBOutdoorPresentation",

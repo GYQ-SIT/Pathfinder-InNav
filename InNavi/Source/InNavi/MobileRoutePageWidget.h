@@ -26,7 +26,7 @@ public:
 	// The places and buildings the drop-downs offer.
 	void SetChoices(const TArray<FMobilePlace>& InPlaces, const TArray<FMobileBuilding>& InBuildings);
 	// What the page shows: the request (where from and to, the ways between levels) and the route found for it.
-	void SetRequest(const FMobileRouteRequest& InRequest, const FMobileRoute& InRoute);
+	void SetRequest(const FMobileRouteRequest& InRequest, const FMobileRoute& InRoute, bool bInPending = false);
 
 	void SetOnBack(TFunction<void()> InCallback) { OnBack = MoveTemp(InCallback); }
 	void SetOnRequestChanged(TFunction<void(const FMobileRouteRequest&)> InCallback) { OnRequestChanged = MoveTemp(InCallback); }
@@ -101,6 +101,7 @@ private:
 	TArray<FMobileBuilding> Buildings;
 	FMobileRouteRequest Request;
 	FMobileRoute Route;
+	bool bPending = false;
 	int32 ShownSteps = 0;
 
 	TFunction<void()> OnBack;

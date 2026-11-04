@@ -26,11 +26,13 @@ public:
 	virtual TArray<FMobilePlace> SearchPlaces(const FString& SiteId, const FString& Query, const FMobilePlaceFilter& Filter) override;
 	virtual bool FindPlace(const FString& PlaceId, FMobilePlace& OutPlace) override;
 	virtual FMobileRoute FindRoute(const FMobileRouteRequest& Request) override;
+	virtual TUniquePtr<IMobileRouteJob> BeginRoute(const FMobileRouteRequest& Request) override;
 	virtual bool GetLevelMap(const FString& BuildingId, int32 Level, FMobileLevelMap& OutMap) override;
 	virtual FMobileCampusMap GetCampusMap(const FString& SiteId) override;
 
 private:
 	struct FProject;
+	class FRouteJob;
 	TArray<TSharedPtr<FProject>> Projects;
 	void AddProject(const FString& Path);
 	void IndexProject(FProject& Project);

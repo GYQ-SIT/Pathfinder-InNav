@@ -64,6 +64,8 @@ public:
 	int32 LoadBuildingsFromFile(const FString& FilePath);
 	// Same loader for a detached in-memory project (mobile navigation never writes a temporary project file).
 	int32 LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& RootObject);
+	// For a private routing world that needs footprints and authored data without exterior meshes.
+	void UseNavigationGeometryOnly() { bNavigationGeometryOnly = true; }
 
 	// Second, database-backed way to load exterior buildings - queries a SQLite file (schema:
 	// buildings(building_id, building_type), building_nodes(building_id, node_id, sequence, lat,
@@ -266,7 +268,8 @@ public:
 	// edge there is long enough for the opening.
 	bool MakeMirrorOfEntrance(const FString& SourceBuildingId, const FInteriorEntrance& Source, const FString& OnBuildingId, FInteriorEntrance& OutMirror) const;
 	// Takes one saved door out of a building's interior data (also what removes the mirror of it from the building next door).
-	bool RemoveStoredEntrance(const FString& BuildingId, const FString& EntranceId);
+	bool RemoveStoredEntrance(const FString& BuildingId, const FString& EntranceId, TSharedPtr<FJsonObject>* OutRemoved = nullptr);
+	bool RestoreStoredEntrance(const FString& BuildingId, const TSharedPtr<FJsonObject>& Entrance);
 	// Cuts every building's outer wall to match its doors, its own and the mirrored ones.
 	void RefreshWallOpenings();
 
@@ -328,6 +331,7 @@ private:
 		FString InteriorJson; // the interior data serialized, so later edits to the live object cannot reach it
 	};
 	TMap<FString, FBuildingBaseline> BuildingBaselines;
+	bool bNavigationGeometryOnly = false;
 	bool CaptureBuildingBaselineInto(const FString& BuildingId, FBuildingBaseline& Out) const;
 	FString BuildingFilterText;
 	TArray<FString> BuildingFilterWords;

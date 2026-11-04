@@ -1089,16 +1089,22 @@ bool UNavigationPanelWidget::MakeOptionPoint(const FNavigationRoomOption& Option
 	const bool bOutdoor = Option.Floor == OutdoorFloor;
 	const APolyBuilding* Building = !Generator || !Interior ? nullptr
 		: Generator->FindBuildingById(bOutdoor ? Option.BuildingId : Interior->GetLoadedBuildingId());
+	FVector2D Position = Option.Centroid;
 	FString Reason;
-	if (!Building || !FNavigationRoutePlanner::IsValidPoint(*Building, *Interior, Generator->GetScale(), Option.Floor, Option.Centroid, Reason))
+	const AInteriorRoom* Room = Building && !bOutdoor ? Interior->GetRoomById(Option.RoomId) : nullptr;
+	const bool bValid = Building && (bOutdoor
+		? FNavigationRoutePlanner::IsValidPoint(*Building, *Interior, Generator->GetScale(), Option.Floor, Position, Reason)
+		: Room && FNavigationRoutePlanner::FindRoomDestination(*Generator, *Interior, Building->BuildingId,
+			Option.Floor, Room->GetFootprint(), Position, &Option.Centroid));
+	if (!bValid)
 	{
 		OutError = bOutdoor
 			? FString::Printf(TEXT("'%s' cannot be used as a point (%s)."), *Option.DisplayLabel, *Reason)
-			: FString::Printf(TEXT("'%s''s center isn't reachable (%s) - try clicking a point inside it instead."), *Option.RoomName, *Reason);
+			: FString::Printf(TEXT("No point with enough clearance could be found inside '%s'."), *Option.RoomName);
 		return false;
 	}
 	OutPoint = FNavigationRoutePoint();
-	OutPoint.Position = Option.Centroid;
+	OutPoint.Position = Position;
 	OutPoint.Floor = Option.Floor;
 	OutBuildingId = Building->BuildingId;
 	return true;
@@ -1577,11 +1583,14 @@ void UNavigationPanelWidget::RefreshSelectedPlaces()
 			{
 				if (const auto* Room = Interior->GetRoomById(Endpoint.RoomId); Room && Room->IsClosedLoop())
 				{
-					Endpoint.Point.Position = ComputePolygonCentroid(Room->GetFootprint()); Endpoint.Point.Floor = Room->FloorLevel;
-					Endpoint.RoomOptionLabel = FString::Printf(TEXT("%s (Floor %d)"), *Room->RoomName, Room->FloorLevel); bFound = true;
+					const FVector2D Center = ComputePolygonCentroid(Room->GetFootprint());
+					bFound = FNavigationRoutePlanner::FindRoomDestination(*Generator, *Interior, Endpoint.BuildingId,
+						Room->FloorLevel, Room->GetFootprint(), Endpoint.Point.Position, &Center);
+					Endpoint.Point.Floor = Room->FloorLevel;
+					Endpoint.RoomOptionLabel = FString::Printf(TEXT("%s (Floor %d)"), *Room->RoomName, Room->FloorLevel);
 				}
 			}
-			else if (const auto Data = Generator->GetInteriorDataForBuilding(Endpoint.BuildingId))
+			else if (const auto Data = Interior ? Generator->GetInteriorDataForBuilding(Endpoint.BuildingId) : nullptr)
 			{
 				const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
 				if (Data->TryGetArrayField(TEXT("floors"), Floors)) for (const auto& Value : *Floors)
@@ -1600,8 +1609,10 @@ void UNavigationPanelWidget::RefreshSelectedPlaces()
 							const TArray<TSharedPtr<FJsonValue>>* XY = nullptr;
 							if (P->TryGetArray(XY) && XY->Num() >= 2) Polygon.Add({ (*XY)[0]->AsNumber(), (*XY)[1]->AsNumber() });
 						}
-						if (Polygon.Num() < 3) continue;
-						Endpoint.Point.Position = ComputePolygonCentroid(Polygon); Endpoint.Point.Floor = Level;
+						const FVector2D Center = ComputePolygonCentroid(Polygon);
+						if (!FNavigationRoutePlanner::FindRoomDestination(*Generator, *Interior, Endpoint.BuildingId,
+							Level, Polygon, Endpoint.Point.Position, &Center)) continue;
+						Endpoint.Point.Floor = Level;
 						Room->TryGetStringField(TEXT("name"), Name); if (Name.IsEmpty()) Name = Id;
 						Endpoint.RoomOptionLabel = FString::Printf(TEXT("%s (Floor %d)"), *Name, Level); bFound = true; break;
 					}

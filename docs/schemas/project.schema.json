@@ -46,7 +46,7 @@
         "name": { "type": "string" },
         "offset": { "description": "Where the building stands among the others, in footprint units.", "$ref": "#/definitions/point" },
         "buildingType": { "description": "One of the types of the editor (BuildingTypes.h), as written there; left out for Other.", "type": "string" },
-        "floorCount": { "type": "integer", "minimum": 1 },
+        "floorCount": { "type": "integer", "minimum": 1, "maximum": 200 },
         "floorHeight": { "description": "In centimetres; the file's floorHeight when absent.", "type": "number", "exclusiveMinimum": 0 },
         "footprint": {
           "description": "The outline, in order; edge i runs from point i to point i + 1 (the last to the first).",
@@ -70,7 +70,7 @@
       "required": ["level"],
       "additionalProperties": false,
       "properties": {
-        "level": { "description": "1 is the ground floor.", "type": "integer", "minimum": 1 },
+        "level": { "description": "1 is the ground floor.", "type": "integer", "minimum": 1, "maximum": 200 },
         "wallHeight": { "description": "Centimetres.", "type": "number", "exclusiveMinimum": 0 },
         "wallThickness": { "description": "Centimetres.", "type": "number", "exclusiveMinimum": 0 },
         "rooms": { "type": "array", "items": { "$ref": "#/definitions/room" } },
@@ -86,6 +86,7 @@
         "name": { "type": "string" },
         "tags": { "type": "array", "items": { "type": "string" } },
         "roomType": { "description": "One of the types of the editor (RoomTypes.h), as written there.", "type": "string" },
+        "navigationId": { "description": "Stable mobile place identity for newly authored rooms.", "type": "string", "pattern": "^[0-9A-Fa-f]{32}$" },
         "access": { "type": "string", "enum": ["public", "private"] },
         "requireKey": { "type": "boolean" },
         "closed": { "description": "False for a wall that does not close into a room.", "type": "boolean" },

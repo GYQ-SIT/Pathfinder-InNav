@@ -170,6 +170,17 @@ bool FEntranceBothSidesTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("on the same floor"), Shown->Level, 2);
 	}
 	TestTrue(TEXT("deleting it from E3's side"), Fixture.Interior->RemoveEntrance(Id));
+	TestTrue(TEXT("the owner's stored copy is removed"), Fixture.Generator->GetStoredEntrances(TEXT("E2")).IsEmpty());
+	TestTrue(TEXT("undo can restore an edit made from the mirrored side"), Fixture.Interior->Undo());
+	TestNotNull(TEXT("undo restores the mirror"), Fixture.Interior->FindEntranceById(Id));
+	TestEqual(TEXT("undo restores the owner's copy"), Fixture.Generator->GetStoredEntrances(TEXT("E2")).Num(), 1);
+	TestTrue(TEXT("redo can reapply the deletion"), Fixture.Interior->Redo());
+	TestNull(TEXT("redo removes the mirror"), Fixture.Interior->FindEntranceById(Id));
+	Fixture.Interior->ClearLoadedInterior();
+	Fixture.Generator->RestoreBuildingBaselines();
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("E3"));
+	TestNotNull(TEXT("discard restores the mirror"), Fixture.Interior->FindEntranceById(Id));
+	TestTrue(TEXT("the restored entrance can be removed again"), Fixture.Interior->RemoveEntrance(Id));
 	Fixture.Interior->LoadInteriorForBuilding(TEXT("E2"));
 	TestTrue(TEXT("removes it from E2 as well"), Fixture.Interior->GetEntrances().IsEmpty());
 	IFileManager::Get().Delete(*SavePath);

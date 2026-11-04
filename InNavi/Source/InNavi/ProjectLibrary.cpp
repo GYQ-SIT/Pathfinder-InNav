@@ -1,4 +1,5 @@
 #include "ProjectLibrary.h"
+#include "ProjectFile.h"
 
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
@@ -27,14 +28,14 @@ namespace
 		return FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), OutRoot) && OutRoot.IsValid();
 	}
 
-	bool WriteProjectJson(const FString& FilePath, const TSharedRef<FJsonObject>& Root)
+	bool WriteProjectJson(const FString& FilePath, const TSharedRef<FJsonObject>& Root, bool bReplace)
 	{
 		FString Text;
 		if (!FJsonSerializer::Serialize(Root, TJsonWriterFactory<>::Create(&Text)))
 		{
 			return false;
 		}
-		return FFileHelper::SaveStringToFile(Text, *FilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+		return ProjectFile::WriteText(FilePath, Text, bReplace);
 	}
 
 	// How many buildings a database holds: the campus ones (tagged "university"), which are the ones the editor opens.
@@ -184,7 +185,7 @@ bool ProjectLibrary::Duplicate(const FProjectLibraryEntry& Entry, const FString&
 		return false;
 	}
 	Root->SetStringField(TEXT("projectName"), CopyName);
-	if (!WriteProjectJson(CopyPath, Root.ToSharedRef()))
+	if (!WriteProjectJson(CopyPath, Root.ToSharedRef(), false))
 	{
 		OutError = TEXT("The copy could not be written - check that the Data folder can be written to.");
 		return false;
@@ -227,16 +228,19 @@ bool ProjectLibrary::Rename(const FProjectLibraryEntry& Entry, const FString& Ne
 		return false;
 	}
 	Root->SetStringField(TEXT("projectName"), Name);
-	if (!WriteProjectJson(NewPath, Root.ToSharedRef()))
+	if (!WriteProjectJson(bSameFile ? Entry.FilePath : NewPath, Root.ToSharedRef(), bSameFile))
 	{
 		OutError = TEXT("The project file could not be written - check that the Data folder can be written to.");
 		return false;
 	}
-	if (!bSameFile)
+	if (!bSameFile && !IFileManager::Get().Delete(*Entry.FilePath, true, false, true))
 	{
-		IFileManager::Get().Delete(*Entry.FilePath);
+		OutError = IFileManager::Get().Delete(*NewPath, true, false, true)
+			? TEXT("The original project could not be removed. The rename was rolled back.")
+			: TEXT("The original project could not be removed and the renamed copy could not be cleaned up. Both files may be present.");
+		return false;
 	}
-	OutNewPath = NewPath;
+	OutNewPath = bSameFile ? Entry.FilePath : NewPath;
 	return true;
 }
 

@@ -707,7 +707,9 @@ namespace
 		bool bSameConnector = false;
 
 		if (!A.Point.ConnectorId.IsEmpty() &&
-			A.Point.ConnectorId == B.Point.ConnectorId)
+			A.Point.ConnectorId == B.Point.ConnectorId &&
+			A.Point.ConnectorType == B.Point.ConnectorType &&
+			A.Point.Position.Equals(B.Point.Position, 0.01f))
 		{
 			// Newer data uses ConnectorGroupId.
 			bSameConnector = true;
@@ -845,7 +847,8 @@ namespace
 	}
 
 	FRouteBuilding ReadRouteBuilding(const APolyBuilding& Building, const AInteriorGenerator& Live,
-		const TSharedPtr<FJsonObject>& Saved, const TArray<FInteriorEntrance>& Entrances, float Scale, bool bReadFloors)
+		const TSharedPtr<FJsonObject>& Saved, const TArray<FInteriorEntrance>& Entrances, float Scale, bool bReadFloors,
+		int32 OnlyFloor = INDEX_NONE)
 	{
 		FRouteBuilding Model;
 		Model.Building = &Building;
@@ -856,6 +859,7 @@ namespace
 		if (Saved.IsValid()) Saved->TryGetArrayField(TEXT("floors"), SavedFloors);
 		for (int32 Level = 1; Level <= Building.GetFloorCount(); ++Level)
 		{
+			if (OnlyFloor != INDEX_NONE && OnlyFloor != Level) continue;
 			if (bLive)
 			{
 				for (const auto* Room : Live.GetRoomsOnFloor(Level)) if (IsValid(Room))
@@ -1540,13 +1544,19 @@ bool FNavigationRoutePlanner::FindCampusRoute(const ABuildingGenerator& Generato
 }
 
 bool FNavigationRoutePlanner::FindRoomDestination(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
-	const FString& BuildingId, int32 Floor, const TArray<FVector2D>& Polygon, FVector2D& OutPosition)
+	const FString& BuildingId, int32 Floor, const TArray<FVector2D>& Polygon, FVector2D& OutPosition, const FVector2D* PreferredPosition)
 {
 	const auto* Building = Generator.FindBuildingById(BuildingId);
 	if (!Building || Polygon.Num() < 3 || Generator.GetScale() <= KINDA_SMALL_NUMBER) return false;
 	const auto Model = ReadRouteBuilding(*Building, Interior, Generator.GetInteriorDataForBuilding(BuildingId),
-		Generator.GetStoredEntrances(BuildingId), Generator.GetScale(), true);
+		Generator.GetStoredEntrances(BuildingId), Generator.GetScale(), true, Floor);
 	const auto* Geometry = Model.Floors.Find(Floor);
+	if (Geometry && PreferredPosition && InsideOrOnBoundary(*PreferredPosition, Polygon)
+		&& IsPointClearOfWalls(*PreferredPosition, Building->GetFootprint(), *Geometry))
+	{
+		OutPosition = *PreferredPosition;
+		return true;
+	}
 	return Geometry && FindClearRoomPoint(Polygon, Building->GetFootprint(), *Geometry, OutPosition);
 }
 
