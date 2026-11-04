@@ -15,6 +15,7 @@
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/ScrollBox.h"
 #include "Components/ScrollBoxSlot.h"
+#include "Components/Slider.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -24,17 +25,33 @@
 namespace
 {
 	constexpr float MapRowBottomPadding = 4.f;
+	// A section's header and the controls under it sit in one frame (see AddCollapsibleSection), with this much room between the outline and them.
+	constexpr float SectionFramePadding = 6.f * StartStyle::DesignToUi;
+	// What the controls inside a frame lose of the panel's width.
+	constexpr float SectionInset = 2.f * SectionFramePadding;
+
+	// The frame of an open section is outlined; that of a closed one is not drawn and takes no room.
+	void ApplySectionFrame(UBorder* Frame, bool bOpen)
+	{
+		if (!Frame)
+		{
+			return;
+		}
+		using namespace StartStyle;
+		Frame->SetBrush(bOpen ? Rounded(FLinearColor::Transparent, Rgb(96, 116, 146), 10.f, 1.5f) : Rounded(FLinearColor::Transparent, FLinearColor::Transparent, 10.f, 0.f));
+		Frame->SetPadding(bOpen ? FMargin(SectionFramePadding) : FMargin(0.f));
+	}
 }
 
-USizeBox* UMapPanelWidget::WrapInPanelWidth(UWidget* Control)
+USizeBox* UMapPanelWidget::WrapInPanelWidth(UWidget* Control, float Inset)
 {
 	USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-	SizeBox->SetWidthOverride(ContentWidth);
+	SizeBox->SetWidthOverride(ContentWidth - Inset);
 	SizeBox->SetContent(Control);
 	return SizeBox;
 }
 
-UVerticalBox* UMapPanelWidget::AddCollapsibleSection(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Title, UButton*& OutHeader, UTextBlock*& OutSign, USizeBox*& OutHeaderBox)
+UVerticalBox* UMapPanelWidget::AddCollapsibleSection(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Title, UButton*& OutHeader, UTextBlock*& OutSign, USizeBox*& OutHeaderBox, UBorder*& OutFrame)
 {
 	using namespace StartStyle;
 	const FString Base(Name);
@@ -57,12 +74,19 @@ UVerticalBox* UMapPanelWidget::AddCollapsibleSection(UVerticalBox* Stack, const 
 	TitleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 	OutSign = Text(WidgetTree, Base + TEXT("Sign"), TEXT("+"), 14.f, Rgb(150, 172, 202), true);
 	Row->AddChildToHorizontalBox(OutSign);
-	OutHeaderBox = WrapInPanelWidth(OutHeader);
+	// The header and the body in one frame, outlined while the section is open (ApplySectionFrame).
+	OutFrame = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(Base + TEXT("Frame")));
+	OutFrame->SetBrushColor(FLinearColor::White);
+	ApplySectionFrame(OutFrame, false);
+	UVerticalBox* Inner = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), FName(Base + TEXT("Inner")));
+	OutFrame->SetContent(Inner);
+	Inner->AddChildToVerticalBox(OutHeader);
+	OutHeaderBox = WrapInPanelWidth(OutFrame);
 	Stack->AddChildToVerticalBox(OutHeaderBox)->SetPadding(FMargin(0.f, 10.f * DesignToUi, 0.f, 0.f));
 
 	UVerticalBox* Body = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), FName(Base + TEXT("Body")));
 	Body->SetVisibility(ESlateVisibility::Collapsed);
-	Stack->AddChildToVerticalBox(Body)->SetPadding(FMargin(4.f * DesignToUi, 10.f * DesignToUi, 0.f, 0.f));
+	Inner->AddChildToVerticalBox(Body)->SetPadding(FMargin(0.f, 10.f * DesignToUi, 0.f, 2.f * DesignToUi));
 	return Body;
 }
 
@@ -151,7 +175,7 @@ TSharedRef<SWidget> UMapPanelWidget::RebuildWidget()
 
 		// ---- Filters (collapsed) ----
 		USizeBox* FiltersHeaderBox = nullptr;
-		FiltersBody = AddCollapsibleSection(Stack, TEXT("Filters"), TEXT("FILTERS"), FiltersHeader, FiltersSign, FiltersHeaderBox);
+		FiltersBody = AddCollapsibleSection(Stack, TEXT("Filters"), TEXT("FILTERS"), FiltersHeader, FiltersSign, FiltersHeaderBox, FiltersFrame);
 		FiltersHeader->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::OnFiltersHeaderClicked);
 		FiltersHeader->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::PlayButtonClickSound);
 
@@ -180,7 +204,7 @@ TSharedRef<SWidget> UMapPanelWidget::RebuildWidget()
 		{
 			Chip->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::PlayButtonClickSound);
 		}
-		FiltersBody->AddChildToVerticalBox(WrapInPanelWidth(Chips))->SetPadding(FMargin(0.f, 6.f * DesignToUi, 0.f, 12.f * DesignToUi));
+		FiltersBody->AddChildToVerticalBox(WrapInPanelWidth(Chips, SectionInset))->SetPadding(FMargin(0.f, 6.f * DesignToUi, 0.f, 12.f * DesignToUi));
 		RefreshFloorChips();
 
 		FiltersBody->AddChildToVerticalBox(Text(WidgetTree, TEXT("Txt_ShowLabel"), TEXT("Show"), 11.f, Rgb(165, 182, 204), true, 30))
@@ -207,14 +231,67 @@ TSharedRef<SWidget> UMapPanelWidget::RebuildWidget()
 		ResetBuildingFiltersButton->SetContent(ResetPad);
 		ResetBuildingFiltersButton->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::OnResetBuildingFiltersClicked);
 		ResetBuildingFiltersButton->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::PlayButtonClickSound);
-		FiltersBody->AddChildToVerticalBox(WrapInPanelWidth(ResetBuildingFiltersButton))->SetPadding(FMargin(0.f, 6.f * DesignToUi, 0.f, 0.f));
+		FiltersBody->AddChildToVerticalBox(WrapInPanelWidth(ResetBuildingFiltersButton, SectionInset))->SetPadding(FMargin(0.f, 6.f * DesignToUi, 0.f, 0.f));
 
 		// ---- Roads (collapsed) ----
 		USizeBox* RoadsHeaderBox = nullptr;
-		RoadsBody = AddCollapsibleSection(Stack, TEXT("Roads"), TEXT("ROADS"), RoadsHeader, RoadsSign, RoadsHeaderBox);
+		RoadsBody = AddCollapsibleSection(Stack, TEXT("Roads"), TEXT("ROADS"), RoadsHeader, RoadsSign, RoadsHeaderBox, RoadsFrame);
 		RoadsHeader->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::OnRoadsHeaderClicked);
 		RoadsHeader->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::PlayButtonClickSound);
 		AddRoadRows(RoadsBody);
+
+		// ---- See-through (collapsed) ----
+		USizeBox* ViewHeaderBox = nullptr;
+		ViewBody = AddCollapsibleSection(Stack, TEXT("View"), TEXT("SEE-THROUGH"), ViewHeader, ViewSign, ViewHeaderBox, ViewFrame);
+		ViewHeader->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::OnViewHeaderClicked);
+		ViewHeader->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::PlayButtonClickSound);
+		AllSeeThroughButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_SeeThroughAll"));
+		AllSeeThroughButton->SetBackgroundColor(FLinearColor::White);
+		AllSeeThroughButton->SetStyle(OrangeButton(8.f));
+		AllSeeThroughLabel = Text(WidgetTree, TEXT("Txt_SeeThroughAll"), TEXT("See-through ON"), 12.f, FLinearColor::White, true);
+		AllSeeThroughLabel->SetJustification(ETextJustify::Center);
+		UBorder* AllSeeThroughPad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Btn_SeeThroughAllPad"));
+		AllSeeThroughPad->SetBrushColor(FLinearColor::Transparent);
+		AllSeeThroughPad->SetPadding(FMargin(10.f * DesignToUi, 10.f * DesignToUi));
+		AllSeeThroughPad->SetContent(AllSeeThroughLabel);
+		AllSeeThroughButton->SetContent(AllSeeThroughPad);
+		AllSeeThroughButton->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::OnAllSeeThroughClicked);
+		AllSeeThroughButton->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::PlayButtonClickSound);
+		ViewBody->AddChildToVerticalBox(WrapInPanelWidth(AllSeeThroughButton, SectionInset))->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f * DesignToUi));
+		UTextBlock* ViewHelp = Text(WidgetTree, TEXT("Txt_RevealHelp"),
+			TEXT("Far away a building is solid, with its roof. Coming closer, its walls and roof turn clear and its rooms show."), 11.f, Rgb(136, 156, 182));
+		ViewHelp->SetAutoWrapText(true);
+		ViewBody->AddChildToVerticalBox(WrapInPanelWidth(ViewHelp, SectionInset))->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f * DesignToUi));
+		struct FRevealSpec { const TCHAR* TextName; const TCHAR* SliderName; float Minimum; float Maximum; float Initial; };
+		const FRevealSpec RevealSpecs[] = {
+			{ TEXT("Txt_RevealFar"), TEXT("Slider_RevealFar"), 10.f, 150.f, 80.f },
+			{ TEXT("Txt_RevealNear"), TEXT("Slider_RevealNear"), 2.f, 80.f, 70.f } };
+		for (const FRevealSpec& Spec : RevealSpecs)
+		{
+			const bool bFar = (&Spec == &RevealSpecs[0]);
+			UTextBlock* Label = Text(WidgetTree, Spec.TextName, TEXT(""), 11.f, Rgb(165, 182, 204), true, 30);
+			USlider* Slider = WidgetTree->ConstructWidget<USlider>(USlider::StaticClass(), FName(Spec.SliderName));
+			Slider->SetMinValue(Spec.Minimum);
+			Slider->SetMaxValue(Spec.Maximum);
+			Slider->SetStepSize(1.f);
+			Slider->SetValue(Spec.Initial);
+			DarkSlider(Slider);
+			if (bFar)
+			{
+				Slider->OnValueChanged.AddUniqueDynamic(this, &UMapPanelWidget::OnRevealFarChanged);
+				RevealFarText = Label;
+				RevealFarSlider = Slider;
+			}
+			else
+			{
+				Slider->OnValueChanged.AddUniqueDynamic(this, &UMapPanelWidget::OnRevealNearChanged);
+				RevealNearText = Label;
+				RevealNearSlider = Slider;
+			}
+			ViewBody->AddChildToVerticalBox(Label);
+			ViewBody->AddChildToVerticalBox(WrapInPanelWidth(Slider, SectionInset))->SetPadding(FMargin(0.f, 4.f * DesignToUi, 0.f, 12.f * DesignToUi));
+		}
+		RefreshRevealControls();
 
 		// ---- Note ----
 		UBorder* Note = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("MapNote"));
@@ -238,14 +315,23 @@ void UMapPanelWidget::SetContentWidth(float Width)
 	}
 	ContentWidth = Width;
 	// Every SizeBox the panel put its controls in follows the panel's width.
-	TArray<UWidget*> Controls = { BuildingSearchBox, BuildingFilterResultsText, BuildingList, ResetBuildingFiltersButton, FiltersHeader, RoadsHeader };
+	TArray<UWidget*> Controls = { BuildingSearchBox, BuildingFilterResultsText, BuildingList, FiltersFrame, RoadsFrame, ViewFrame };
+	// The controls inside the frames are narrower than the panel by what the frames take.
+	TArray<UWidget*> InnerControls = { ResetBuildingFiltersButton, AllSeeThroughButton, RevealFarSlider, RevealNearSlider };
 	if (WidgetTree)
 	{
-		for (const FName Name : { FName(TEXT("Txt_MapHelp")), FName(TEXT("FloorChips")), FName(TEXT("MapNote")) })
+		for (const FName Name : { FName(TEXT("Txt_MapHelp")), FName(TEXT("MapNote")) })
 		{
 			if (UWidget* Found = FindContentWidget(Name))
 			{
 				Controls.Add(Found);
+			}
+		}
+		for (const FName Name : { FName(TEXT("FloorChips")), FName(TEXT("Txt_RevealHelp")) })
+		{
+			if (UWidget* Found = FindContentWidget(Name))
+			{
+				InnerControls.Add(Found);
 			}
 		}
 	}
@@ -256,6 +342,16 @@ void UMapPanelWidget::SetContentWidth(float Width)
 			if (USizeBox* SizeBox = Cast<USizeBox>(Control->GetParent()))
 			{
 				SizeBox->SetWidthOverride(Width);
+			}
+		}
+	}
+	for (UWidget* Control : InnerControls)
+	{
+		if (Control)
+		{
+			if (USizeBox* SizeBox = Cast<USizeBox>(Control->GetParent()))
+			{
+				SizeBox->SetWidthOverride(Width - SectionInset);
 			}
 		}
 	}
@@ -283,6 +379,7 @@ void UMapPanelWidget::Refresh()
 		FloorMaximum = PC->GetBuildingFilterMaximumFloors();
 		RefreshFloorChips();
 		bUpdatingBuildingFilters = false;
+		RefreshRevealControls();
 		ApplyBuildingFilters();
 	}
 }
@@ -387,6 +484,7 @@ void UMapPanelWidget::SetSectionOpen(bool bFilters, bool bOpen)
 {
 	bool& bFlag = bFilters ? bFiltersOpen : bRoadsOpen;
 	bFlag = bOpen;
+	ApplySectionFrame(bFilters ? FiltersFrame : RoadsFrame, bOpen);
 	if (UVerticalBox* Body = bFilters ? FiltersBody : RoadsBody)
 	{
 		Body->SetVisibility(bOpen ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
@@ -410,6 +508,98 @@ void UMapPanelWidget::OnFiltersHeaderClicked()
 void UMapPanelWidget::OnRoadsHeaderClicked()
 {
 	SetSectionOpen(false, !bRoadsOpen);
+}
+
+void UMapPanelWidget::OnViewHeaderClicked()
+{
+	bViewOpen = !bViewOpen;
+	ApplySectionFrame(ViewFrame, bViewOpen);
+	if (ViewBody)
+	{
+		ViewBody->SetVisibility(bViewOpen ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+	}
+	if (ViewSign)
+	{
+		ViewSign->SetText(FText::FromString(bViewOpen ? TEXT("-") : TEXT("+")));
+	}
+}
+
+void UMapPanelWidget::RefreshRevealControls()
+{
+	ANavPlayerController* PC = GetController();
+	if (!PC)
+	{
+		return;
+	}
+	const bool bWasUpdating = bUpdatingBuildingFilters;
+	bUpdatingBuildingFilters = true;
+	if (AllSeeThroughButton)
+	{
+		const bool bAllOn = PC->IsCampusSeeThroughEnabled();
+		AllSeeThroughButton->SetStyle(bAllOn ? StartStyle::OrangeButton(8.f) : StartStyle::SecondaryButton());
+		if (AllSeeThroughLabel)
+		{
+			AllSeeThroughLabel->SetText(FText::FromString(bAllOn ? TEXT("See-through ON") : TEXT("See-through OFF")));
+		}
+	}
+	const float FarMetres = PC->GetCampusRevealFarDistance() / 100.f;
+	const float NearMetres = PC->GetCampusRevealNearDistance() / 100.f;
+	if (RevealFarSlider)
+	{
+		RevealFarSlider->SetValue(FarMetres);
+	}
+	if (RevealNearSlider)
+	{
+		RevealNearSlider->SetValue(NearMetres);
+	}
+	if (RevealFarText)
+	{
+		RevealFarText->SetText(FText::FromString(FString::Printf(TEXT("Starts to clear at %.0f m"), FarMetres)));
+	}
+	if (RevealNearText)
+	{
+		RevealNearText->SetText(FText::FromString(FString::Printf(TEXT("Fully clear within %.0f m"), NearMetres)));
+	}
+	bUpdatingBuildingFilters = bWasUpdating;
+}
+
+FString UMapPanelWidget::GetAllSeeThroughTextForTests() const { return AllSeeThroughLabel ? AllSeeThroughLabel->GetText().ToString() : FString(); }
+float UMapPanelWidget::GetRevealFarSliderForTests() const { return RevealFarSlider ? RevealFarSlider->GetValue() : -1.f; }
+float UMapPanelWidget::GetRevealNearSliderForTests() const { return RevealNearSlider ? RevealNearSlider->GetValue() : -1.f; }
+
+void UMapPanelWidget::OnAllSeeThroughClicked()
+{
+	if (ANavPlayerController* PC = GetController())
+	{
+		PC->SetCampusSeeThroughEnabled(!PC->IsCampusSeeThroughEnabled());
+	}
+	RefreshRevealControls();
+}
+
+void UMapPanelWidget::OnRevealFarChanged(float NewValue)
+{
+	if (bUpdatingBuildingFilters)
+	{
+		return;
+	}
+	if (ANavPlayerController* PC = GetController())
+	{
+		PC->SetCampusRevealFarDistance(NewValue * 100.f);
+	}
+	RefreshRevealControls();
+}
+
+void UMapPanelWidget::OnRevealNearChanged(float NewValue)
+{
+	if (bUpdatingBuildingFilters)
+	{
+		return;
+	}
+	if (ANavPlayerController* PC = GetController())
+	{
+		PC->SetCampusRevealNearDistance(NewValue * 100.f);
+	}
+	RefreshRevealControls();
 }
 
 // ---------------------------------------------------------------------------

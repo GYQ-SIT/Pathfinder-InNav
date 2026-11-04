@@ -1168,6 +1168,29 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void SetMasterVolume(float NewVolume);
 
+	// How the exterior camera reveals a building, by its distance (cm) from the building: at the far distance and beyond it is solid, with
+	// its roof; closer its walls and roof fade, and at the near distance and closer they are as clear as they get and its rooms show.
+	// The Map panel's See-through section sets them. Setting one moves the other if they would come too close together.
+	float GetCampusRevealFarDistance() const { return CampusRevealFar; }
+	float GetCampusRevealNearDistance() const { return CampusRevealNear; }
+	void SetCampusRevealFarDistance(float Centimetres);
+	void SetCampusRevealNearDistance(float Centimetres);
+	// Whether the camera distance reveals buildings at all. Off, every building stays solid, except the ones made transparent from the Building
+	// panel (see SetBuildingMadeTransparent): those come first.
+	bool IsCampusSeeThroughEnabled() const { return bCampusSeeThroughEnabled; }
+	void SetCampusSeeThroughEnabled(bool bEnabled);
+
+	// Tests: makes the preview rooms of the campus (done when a project is loaded), and counts the rooms of one building that are showing.
+	void BuildCampusInteriorPreviewForTests() { BuildCampusInteriorPreview(); }
+	int32 CountShownCampusRoomsForTests(const FString& BuildingId) const;
+
+	// What the Building panel does to one building. Made transparent, a building is as clear as it gets whatever the distance and its
+	// rooms show. RoomFloor is the one floor whose rooms show while the rooms of the building show at all (0 = every floor).
+	bool IsBuildingMadeTransparent(const FString& BuildingId) const;
+	void SetBuildingMadeTransparent(const FString& BuildingId, bool bTransparent);
+	int32 GetBuildingRoomFloor(const FString& BuildingId) const;
+	void SetBuildingRoomFloor(const FString& BuildingId, int32 Floor);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -1179,11 +1202,31 @@ private:
 	// These actors are separate from the editable interior rooms.
 	void BuildCampusInteriorPreview();
 	void ClearCampusInteriorPreview();
+	// Allows (true) or stops (false) the preview rooms from showing; while allowed, UpdateBuildingTransparency decides per building.
 	void SetCampusInteriorPreviewVisible(bool bVisible);
 
-	// Keeps all preview rooms alive while the campus is displayed.
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<AInteriorRoom>> CampusPreviewRooms;
+	// The preview rooms of one building. The rooms are actors of the world (it keeps them alive), so they are only watched here.
+	struct FCampusPreviewRooms
+	{
+		TArray<TWeakObjectPtr<AInteriorRoom>> Rooms;
+		bool bShown = false;
+		// The floor whose rooms are shown now (0 = all); -1 = not set yet.
+		int32 AppliedFloor = -1;
+	};
+	// By building id.
+	TMap<FString, FCampusPreviewRooms> CampusPreview;
+	bool bCampusPreviewAllowed = true;
+	float CampusRevealFar = 8000.f;
+	float CampusRevealNear = 7000.f;
+	bool bCampusSeeThroughEnabled = true;
+
+	struct FBuildingRevealChoice
+	{
+		bool bTransparent = false;
+		int32 RoomFloor = 0;
+	};
+	// By building id.
+	TMap<FString, FBuildingRevealChoice> BuildingReveal;
 	// Left-click: selects a building normally, or adds a footprint point while in build mode.
 	void OnClick();
 
