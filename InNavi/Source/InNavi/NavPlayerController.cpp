@@ -5,6 +5,8 @@
 #include "NavigationPanelWidget.h"
 #include "MobileAppWidget.h"
 #include "MobileSearchPageWidget.h"
+#include "MobileSplashWidget.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "TimerManager.h"
 #include "NavigationRouteVisualization.h"
@@ -115,6 +117,12 @@ void ANavPlayerController::BeginPlay()
 #endif
 	if (bPhone)
 	{
+		// Black over everything at once, so that the desktop start screen the level puts up never shows; MobileApp builds the app under it.
+		MobileSplash = CreateWidget<UMobileSplashWidget>(this, UMobileSplashWidget::StaticClass());
+		if (MobileSplash)
+		{
+			MobileSplash->AddToViewport(UMobileSplashWidget::ZOrder);
+		}
 		FTimerHandle Handle;
 		GetWorldTimerManager().SetTimer(Handle, this, &ANavPlayerController::MobileApp, 0.5f, false);
 	}
@@ -122,7 +130,16 @@ void ANavPlayerController::BeginPlay()
 
 void ANavPlayerController::MobileApp()
 {
-	UWidgetLayoutLibrary::RemoveAllWidgets(this);
+	// Everything the level put up goes, but not the splash that covers it.
+	TArray<UUserWidget*> Widgets;
+	UWidgetBlueprintLibrary::GetAllWidgetsOfClass(this, Widgets, UUserWidget::StaticClass(), true);
+	for (UUserWidget* Widget : Widgets)
+	{
+		if (Widget != MobileSplash)
+		{
+			Widget->RemoveFromParent();
+		}
+	}
 	if (UMobileAppWidget* Screen = CreateWidget<UMobileAppWidget>(this, UMobileAppWidget::StaticClass()))
 	{
 		// The look (theme and text size) is read before the screen is built, so it is built in it.
@@ -194,6 +211,11 @@ void ANavPlayerController::MobileApp()
 			Screen->SetSnap(SnapName == TEXT("Full") ? EMobileSheetSnap::Full : SnapName == TEXT("Collapsed") ? EMobileSheetSnap::Collapsed : EMobileSheetSnap::Half);
 			Screen->SnapSheetNow();
 		}
+	}
+	// The app is built under the splash: the splash goes as soon as the logo has had its time.
+	if (MobileSplash)
+	{
+		MobileSplash->SetAppReady();
 	}
 }
 
