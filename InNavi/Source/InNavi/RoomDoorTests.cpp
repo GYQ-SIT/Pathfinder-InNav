@@ -87,4 +87,26 @@ bool FRoomDoorUniqueIdsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRoomDoorResizeTest, "InNavi.Interior.RoomDoor.ResizeKeepsOpenings", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FRoomDoorResizeTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	const FString RoomId = TEXT("E2-01-02");
+	AInteriorRoom* Room = Fixture.Interior->GetRoomById(RoomId);
+	if (!TestNotNull(TEXT("the room exists"), Room)) return false;
+	const FString DoorId = Fixture.Interior->AddDoorToRoom(RoomId, 0, 450.f);
+	if (!TestFalse(TEXT("a door near the end of the wall is created"), DoorId.IsEmpty())) return false;
+	TestTrue(TEXT("the room can shrink while the door still fits"), Fixture.Interior->ResizeRoom(RoomId, 15.f, 45.f));
+	FInteriorOpening Door;
+	TestTrue(TEXT("the door remains available"), Fixture.Interior->GetDoorOpening(RoomId, DoorId, Door));
+	TestEqual(TEXT("the physical width stays the same"), Door.Width, 90.f);
+	const auto Footprint = Room->GetFootprint();
+	const double WallLength = FVector2D::Distance(Footprint[0], Footprint[1]) * Fixture.Generator->GetScale();
+	TestTrue(TEXT("the repositioned door fits on the wall"), Door.Offset >= 0.f && Door.Offset + Door.Width <= WallLength + KINDA_SMALL_NUMBER);
+	TestFalse(TEXT("a wall shorter than the door is rejected"), Fixture.Interior->ResizeRoom(RoomId, 5.f, 45.f));
+	TestTrue(TEXT("the rejected edit preserves the footprint"), Footprint == Room->GetFootprint());
+	TestEqual(TEXT("the rejected edit preserves the opening position"), Room->GetOpenings()[0].Offset, Door.Offset);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

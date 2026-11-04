@@ -881,9 +881,22 @@ void ABuildingGenerator::HandleBuildingDestroyed(AActor* Actor)
 		BuildingsById.Remove(Building->BuildingId);
 		UsedBuildingIds.Remove(Building->BuildingId);
 		InteriorDataById.Remove(Building->BuildingId);
+		BuildingBaselines.Remove(Building->BuildingId);
 		++BuildingResultsRevision;
+		MarkGroundDirty();
 		NotifyNavigationLayoutChanged();
 	}
+}
+
+bool ABuildingGenerator::RemoveBuilding(APolyBuilding& Building)
+{
+	if (FindBuildingById(Building.BuildingId) != &Building || !Building.Destroy())
+	{
+		return false;
+	}
+	// In worlds with actor callbacks disabled, Destroy does not broadcast OnDestroyed.
+	HandleBuildingDestroyed(&Building);
+	return true;
 }
 
 TArray<APolyBuilding*> ABuildingGenerator::GetFilteredBuildings() const
@@ -941,6 +954,7 @@ bool ABuildingGenerator::SetBuildingType(const FString& BuildingId, const FStrin
 	const FString Known = BuildingTypes::Normalize(Type);
 	if (Building->GetBuildingType() != Known)
 	{
+		CaptureBuildingBaseline(BuildingId);
 		Building->SetBuildingType(Known);
 		++BuildingResultsRevision;
 		RefreshBuildingFilterFor(*Building);
@@ -1233,7 +1247,7 @@ bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath) const
 		return false;
 	}
 
-	if (!FFileHelper::SaveStringToFile(OutputString, *FilePath))
+	if (!FFileHelper::SaveStringToFile(OutputString, *FilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 	{
 		UE_LOG(LogTemp, Error, TEXT("SaveBuildingsToFile: could not write to %s"), *FilePath);
 		return false;
@@ -1552,6 +1566,7 @@ bool ABuildingGenerator::CaptureBuildingBaselineInto(const FString& BuildingId, 
 	}
 	Out.FloorCount = (*Found)->GetFloorCount();
 	Out.Name = (*Found)->BuildingName;
+	Out.Type = (*Found)->GetBuildingType();
 	Out.bHadInterior = false;
 	Out.InteriorJson.Reset();
 	const TSharedPtr<FJsonObject> Interior = GetInteriorDataForBuilding(BuildingId);
@@ -1606,6 +1621,7 @@ void ABuildingGenerator::RestoreBuildingBaselines()
 		}
 		// Straight back to the remembered name - it was valid then, so no uniqueness check is needed.
 		Building->BuildingName = Baseline.Name;
+		Building->SetBuildingType(Baseline.Type);
 
 		if (Baseline.bHadInterior)
 		{
@@ -1621,6 +1637,8 @@ void ABuildingGenerator::RestoreBuildingBaselines()
 			InteriorDataById.Remove(Pair.Key);
 		}
 	}
+	++BuildingResultsRevision;
+	ApplyBuildingFilter();
 	RefreshWallOpenings();
 	NotifyNavigationLayoutChanged();
 }

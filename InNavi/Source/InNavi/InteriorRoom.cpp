@@ -100,17 +100,53 @@ void AInteriorRoom::SetFloorBaseZ(float NewFloorBaseZ)
 	RebuildMesh();
 }
 
-void AInteriorRoom::ResizeFootprint(const TArray<FVector2D>& NewFootprint)
+bool AInteriorRoom::ResizeFootprint(const TArray<FVector2D>& NewFootprint, bool bFitOpenings)
 {
 	const int32 MinPoints = CachedClosedLoop ? 3 : 2;
 	if (NewFootprint.Num() < MinPoints)
 	{
 		UE_LOG(LogTemp, Error, TEXT("ResizeFootprint: '%s' needs at least %d points"), *RoomId, MinPoints);
-		return;
+		return false;
+	}
+
+	if (bFitOpenings && !CachedOpenings.IsEmpty())
+	{
+		TArray<FInteriorOpening> Fitted = CachedOpenings;
+		const int32 EdgeCount = CachedClosedLoop ? NewFootprint.Num() : NewFootprint.Num() - 1;
+		for (FInteriorOpening& Opening : Fitted)
+		{
+			const int32 Edge = Opening.EdgeIndex;
+			if (Edge < 0 || Edge >= EdgeCount || CachedFootprint.Num() != NewFootprint.Num()) return false;
+			const int32 Next = (Edge + 1) % NewFootprint.Num();
+			const double OldLength = FVector2D::Distance(CachedFootprint[Edge], CachedFootprint[Next]) * CachedScale;
+			const double NewLength = FVector2D::Distance(NewFootprint[Edge], NewFootprint[Next]) * CachedScale;
+			if (OldLength <= UE_SMALL_NUMBER || Opening.Width <= 0.f || Opening.Width > NewLength) return false;
+			const double HalfWidth = Opening.Width * 0.5;
+			const double Offset = (Opening.Offset + HalfWidth) * NewLength / OldLength - HalfWidth;
+			Opening.Offset = FMath::Clamp(Offset, 0.0, NewLength - Opening.Width);
+		}
+		auto Overlap = [](const FInteriorOpening& A, const FInteriorOpening& B)
+		{
+			return FMath::Min(A.Offset + A.Width, B.Offset + B.Width) - FMath::Max(A.Offset, B.Offset);
+		};
+		for (int32 I = 0; I < Fitted.Num(); ++I)
+		{
+			for (int32 J = I + 1; J < Fitted.Num(); ++J)
+			{
+				if (Fitted[I].EdgeIndex == Fitted[J].EdgeIndex &&
+					Overlap(Fitted[I], Fitted[J]) > KINDA_SMALL_NUMBER &&
+					Overlap(CachedOpenings[I], CachedOpenings[J]) <= KINDA_SMALL_NUMBER)
+				{
+					return false;
+				}
+			}
+		}
+		CachedOpenings = MoveTemp(Fitted);
 	}
 
 	CachedFootprint = NewFootprint;
 	RebuildMesh();
+	return true;
 }
 
 void AInteriorRoom::AddOpening(const FInteriorOpening& Opening)

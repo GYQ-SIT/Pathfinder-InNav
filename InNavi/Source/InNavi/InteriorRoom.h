@@ -35,11 +35,9 @@ public:
 	// FloorBaseZ moves.
 	void SetFloorBaseZ(float NewFloorBaseZ);
 
-	// Replaces the footprint (e.g. after a resize - see AInteriorGenerator::ResizeRoom) while
-	// keeping every other cached input (scale/offset/floor height/wall height/thickness/openings/
-	// closed-loop) the same, and regenerates the mesh. Openings' EdgeIndex/Offset aren't remapped -
-	// fine for now since nothing that calls this has openings yet.
-	void ResizeFootprint(const TArray<FVector2D>& NewFootprint);
+	// Rebuilds the mesh with a new footprint. Size edits can reposition openings at their existing
+	// widths; if they cannot fit, the room stays as it was and the call returns false.
+	bool ResizeFootprint(const TArray<FVector2D>& NewFootprint, bool bFitOpenings = false);
 
 	// Adds a single opening (e.g. from the "add door" tool - see AInteriorGenerator::AddDoorToRoom)
 	// to whatever openings this room already has, and regenerates the mesh. Unlike BuildWalls, this

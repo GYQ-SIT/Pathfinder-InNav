@@ -248,4 +248,32 @@ bool FRobustnessDiscardTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRobustnessDiscardExteriorTest, "InNavi.Project.Robustness.DiscardExteriorEdits", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FRobustnessDiscardExteriorTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	Controller->RestoreExteriorCameraView();
+	const FString Before = Fixture.Generator->GetBuildingType(TEXT("E2"));
+	const FString Changed = Before == TEXT("Commercial") ? TEXT("University") : TEXT("Commercial");
+	TestTrue(TEXT("an existing building can be selected"), Controller->SelectBuildingById(TEXT("E2")));
+	TestTrue(TEXT("its type can be changed"), Controller->SetSelectedBuildingType(Changed));
+	TestNotNull(TEXT("a new building can be drawn"), Controller->CreateRectangleBuilding(TEXT("New"), TEXT("New"), FVector2D::ZeroVector, 400, 400, 0, 2, 300));
+	TestTrue(TEXT("the new building can be selected"), Controller->SelectBuildingById(TEXT("New")));
+	TestTrue(TEXT("the changes mark the project dirty"), Controller->HasUnsavedChanges());
+	Controller->DiscardUnsavedChanges();
+	TestEqual(TEXT("the original type is restored"), Fixture.Generator->GetBuildingType(TEXT("E2")), Before);
+	TestNull(TEXT("the unsaved building is removed"), Fixture.Generator->FindBuildingById(TEXT("New")));
+	TestTrue(TEXT("the discarded building's selection is cleared"), Controller->GetSelectedBuildingId().IsEmpty());
+	TestFalse(TEXT("discard leaves the project clean"), Controller->HasUnsavedChanges());
+
+	TestNotNull(TEXT("the removed ID can be used again"), Controller->CreateRectangleBuilding(TEXT("New"), TEXT("New"), FVector2D::ZeroVector, 400, 400, 0, 2, 300));
+	const FString Path = RobustnessTests::TemporaryFile(TEXT(".json"));
+	TestTrue(TEXT("the new building can be saved"), Controller->SaveCurrentProjectAs(Path));
+	Controller->DiscardUnsavedChanges();
+	TestNotNull(TEXT("the saved building survives discard"), Fixture.Generator->FindBuildingById(TEXT("New")));
+	IFileManager::Get().Delete(*Path);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

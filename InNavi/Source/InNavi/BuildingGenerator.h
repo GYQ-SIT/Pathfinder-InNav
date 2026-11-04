@@ -271,21 +271,15 @@ public:
 	void RefreshWallOpenings();
 
 	// --- "Discard unsaved changes" ---
-	// Editing a building's interior changes things that live on the building itself (its floor count -
-	// the exterior shell's height - and its name) as well as its interior data. To be able to throw those
-	// edits away without reloading the whole project (a database can be huge), a small baseline is kept
-	// for each building that has been opened for editing: just those three things, not the project.
-	//
-	// Captures the building's current state as its baseline, unless one is already kept (so entering the
-	// same building twice does not overwrite what the last save/open left behind). Call right before a
-	// building's interior is opened.
+	// Capture the floor count, name, type and interior data on the first edit of a building.
+	// Reopening the interior keeps the existing baseline until the next save.
 	void CaptureBuildingBaseline(const FString& BuildingId);
 
 	// Re-captures every kept baseline from the current state - call after a successful save, which is
 	// what the baselines are meant to represent.
 	void RefreshBuildingBaselines();
 
-	// Puts every building that has a baseline back to it (floor count, name, interior data). Buildings
+	// Puts every building that has a baseline back to it. Buildings
 	// that no longer exist are skipped. Does not touch the live InteriorGenerator - callers leave or
 	// reload the interior afterwards.
 	void RestoreBuildingBaselines();
@@ -298,6 +292,7 @@ public:
 	// (LoadBuildingsFromFile only adds - it never removes what's already there on its own).
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void ClearAllBuildings();
+	bool RemoveBuilding(APolyBuilding& Building);
 
 private:
 	void HandleBuildingFloorCountChanged(APolyBuilding* Building);
@@ -328,6 +323,7 @@ private:
 	{
 		int32 FloorCount = 1;
 		FString Name;
+		FString Type;
 		bool bHadInterior = false;
 		FString InteriorJson; // the interior data serialized, so later edits to the live object cannot reach it
 	};

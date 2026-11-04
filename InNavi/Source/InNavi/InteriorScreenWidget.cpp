@@ -3202,8 +3202,14 @@ void UInteriorScreenWidget::HandleSwitchBuildingDiscard()
 	SaveDockLayoutToDisk();
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
+		const FString PreviousBuildingId = PC->GetLoadedBuildingId();
 		PC->DiscardUnsavedChanges();
-		PC->LoadInteriorForBuildingAfterDiscard(PendingBuildingId);
+		if (PC->LoadInteriorForBuildingAfterDiscard(PendingBuildingId) < 0 &&
+			PC->LoadInteriorForBuildingAfterDiscard(PreviousBuildingId) < 0)
+		{
+			GoToEditScreen();
+			return;
+		}
 	}
 	RefreshAfterBuildingSwitch();
 }

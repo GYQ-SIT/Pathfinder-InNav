@@ -34,7 +34,7 @@ namespace
 		{
 			return false;
 		}
-		return FFileHelper::SaveStringToFile(Text, *FilePath);
+		return FFileHelper::SaveStringToFile(Text, *FilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
 	}
 
 	// How many buildings a database holds: the campus ones (tagged "university"), which are the ones the editor opens.

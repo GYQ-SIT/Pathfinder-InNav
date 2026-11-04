@@ -1,5 +1,7 @@
 #include "LayoutValidation.h"
 
+#include "CompGeom/PolygonTriangulation.h"
+#include "Containers/StaticArray.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Misc/FileHelper.h"
@@ -123,7 +125,49 @@ namespace LayoutValidation
             TArray<int32> Floors;
         };
         struct FReference { FContext Context; FString Input, Target; };
-        struct FRoomShape { FContext Context; TArray<FVector2D> Points; };
+        struct FRoomShape
+        {
+            FContext Context;
+            FBox2D Bounds{ForceInit};
+            TArray<TStaticArray<FVector2D, 3>> Triangles;
+
+            FRoomShape(const FContext& InContext, const TArray<FVector2D>& Points) : Context(InContext)
+            {
+                for (const FVector2D& Point : Points) Bounds += Point;
+                TArray<UE::Geometry::FIndex3i> Indices;
+                PolygonTriangulation::TriangulateSimplePolygon(Points, Indices);
+                for (const auto& Triangle : Indices)
+                {
+                    const FVector2D A = Points[Triangle.A], B = Points[Triangle.B], C = Points[Triangle.C];
+                    const double Area = Cross(A, B, C);
+                    if (FMath::Abs(Area) > Epsilon)
+                    {
+                        Triangles.Add(Area > 0 ? TStaticArray<FVector2D, 3>{A, B, C} : TStaticArray<FVector2D, 3>{A, C, B});
+                    }
+                }
+            }
+        };
+
+        bool RoomAreasOverlap(const FRoomShape& A, const FRoomShape& B)
+        {
+            if (!A.Bounds.Intersect(B.Bounds)) return false;
+            // A separating edge also rules out triangles that only share an edge or vertex.
+            auto HasSeparatingEdge = [](const auto& One, const auto& Other)
+            {
+                for (int32 I = 0; I < 3; ++I)
+                {
+                    const FVector2D From = One[I], To = One[(I + 1) % 3];
+                    if (FMath::Max3(Cross(From, To, Other[0]), Cross(From, To, Other[1]), Cross(From, To, Other[2])) <= Epsilon)
+                        return true;
+                }
+                return false;
+            };
+            for (const auto& First : A.Triangles) for (const auto& Second : B.Triangles)
+            {
+                if (!HasSeparatingEdge(First, Second) && !HasSeparatingEdge(Second, First)) return true;
+            }
+            return false;
+        }
 
         struct FReader
         {
@@ -274,9 +318,11 @@ namespace LayoutValidation
                         const auto Room = Object(Rooms[R]); if (!Room) continue;
                         Id(Room, RoomIds); String(Room, TEXT("name")); String(Room, TEXT("roomType")); String(Room, TEXT("access")); Boolean(Room, TEXT("requireKey"), false);
                         const bool bClosed = Boolean(Room, TEXT("closed"), true);
-                        const auto Points = Shape(Room, bClosed); Containment(Points, bClosed, Boundary);
+                        const int32 IssuesBeforeShape = Report.Issues.Num();
+                        const auto Points = Shape(Room, bClosed);
+                        if (bClosed && Report.Issues.Num() == IssuesBeforeShape) Shapes.Emplace(C, Points);
+                        Containment(Points, bClosed, Boundary);
                         const auto RoomContext = C;
-                        if (bClosed && Points.Num() >= 3) Shapes.Add({ RoomContext, Points });
                         TSet<FString> OpeningIds;
                         const auto Openings = Array(Room, TEXT("openings"));
                         for (int32 O = 0; O < Openings.Num(); ++O)
@@ -326,17 +372,7 @@ namespace LayoutValidation
                 for (int32 A = 0; A < Shapes.Num(); ++A) for (int32 B = A + 1; B < Shapes.Num(); ++B)
                 {
                     if (Shapes[A].Context.Floor != Shapes[B].Context.Floor) continue;
-                    const auto& PA = Shapes[A].Points; const auto& PB = Shapes[B].Points;
-                    auto StrictInside = [](FVector2D P, const TArray<FVector2D>& Polygon)
-                    {
-                        for (int32 E = 0; E < Polygon.Num(); ++E) if (On(P, Polygon[E], Polygon[(E + 1) % Polygon.Num()])) return false;
-                        return Inside(P, Polygon);
-                    };
-                    bool bOverlap = PA == PB;
-                    for (auto P : PA) bOverlap |= StrictInside(P, PB);
-                    for (auto P : PB) bOverlap |= StrictInside(P, PA);
-                    for (int32 I = 0; I < PA.Num(); ++I) for (int32 J = 0; J < PB.Num(); ++J) bOverlap |= Crosses(PA[I], PA[(I + 1) % PA.Num()], PB[J], PB[(J + 1) % PB.Num()]);
-                    if (bOverlap)
+                    if (RoomAreasOverlap(Shapes[A], Shapes[B]))
                     {
                         C = Shapes[A].Context;
                         Issue(TEXT("ROOM_OVERLAP"), TEXT("Room footprint overlaps ") + Shapes[B].Context.Id + TEXT("."), TEXT("Review the overlap; keep it if it is intentional."), ESeverity::Warning);

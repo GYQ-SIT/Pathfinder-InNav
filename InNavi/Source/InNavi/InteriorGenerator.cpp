@@ -1618,6 +1618,10 @@ bool AInteriorGenerator::DeleteRoom(const FString& RoomId)
 
 bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth)
 {
+	if (!FMath::IsFinite(NewWidth) || !FMath::IsFinite(NewDepth) || NewWidth <= 0.f || NewDepth <= 0.f)
+	{
+		return false;
+	}
 	for (auto& Pair : RoomsByFloor)
 	{
 		for (AInteriorRoom* Room : Pair.Value.Rooms)
@@ -1678,7 +1682,11 @@ bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float
 				return false;
 			}
 
-			Room->ResizeFootprint(NewFootprint);
+			if (!Room->ResizeFootprint(NewFootprint, /*bFitOpenings=*/true))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("ResizeRoom: openings in '%s' would not fit on the resized walls"), *RoomId);
+				return false;
+			}
 			UE_LOG(LogTemp, Warning, TEXT("Resized %s to %.1f x %.1f"), *RoomId, NewWidth, NewDepth);
 			RecordHistorySnapshot();
 			return true;

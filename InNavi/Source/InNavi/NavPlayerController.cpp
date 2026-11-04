@@ -82,15 +82,9 @@ void ANavPlayerController::ClearCampusInteriorPreview()
 	CampusPreview.Empty();
 }
 
-void ANavPlayerController::SetCampusInteriorPreviewVisible(bool bVisible)
+void ANavPlayerController::HideCampusInteriorPreview()
 {
-	bCampusPreviewAllowed = bVisible;
-	if (bVisible)
-	{
-		UpdateBuildingTransparency();
-		return;
-	}
-
+	bCampusPreviewAllowed = false;
 	for (TPair<FString, FCampusPreviewRooms>& Entry : CampusPreview)
 	{
 		for (const TWeakObjectPtr<AInteriorRoom>& Room : Entry.Value.Rooms)
@@ -883,7 +877,8 @@ void ANavPlayerController::UpdateBuildingTransparency()
 
 		if (FCampusPreviewRooms* Preview = CampusPreview.Find(Building->BuildingId))
 		{
-			const bool bShowRooms = bCampusPreviewAllowed && (bMadeTransparent || Opacity < CampusRevealRoomsBelowOpacity + (Preview->bShown ? CampusRevealHysteresis : 0.f));
+			const bool bShowRooms = bCampusPreviewAllowed && !Building->IsHidden()
+				&& (bMadeTransparent || Opacity < CampusRevealRoomsBelowOpacity + (Preview->bShown ? CampusRevealHysteresis : 0.f));
 			if (Preview->bShown != bShowRooms || Preview->AppliedFloor != RoomFloor)
 			{
 				Preview->bShown = bShowRooms;
@@ -1504,7 +1499,7 @@ void ANavPlayerController::FinishBuilding(const FString& CustomId, const FString
 	{
 		NextNewBuildingIndex++;
 	}
-	bHasUnsavedChanges = true;
+	MarkBuildingCreated(NewBuilding);
 	FlushPersistentDebugLines(GetWorld());
 	PendingFootprint.Reset();
 	OnFootprintPointCountChanged.Broadcast(0);
@@ -2518,7 +2513,7 @@ APolyBuilding* ANavPlayerController::CreateRectangleBuilding(const FString& Id, 
 	}
 	else
 	{
-		bHasUnsavedChanges = true;
+		MarkBuildingCreated(Result);
 	}
 	return Result;
 }
@@ -2540,7 +2535,7 @@ APolyBuilding* ANavPlayerController::CreateRegularPolygonBuilding(const FString&
 	}
 	else
 	{
-		bHasUnsavedChanges = true;
+		MarkBuildingCreated(Result);
 	}
 	return Result;
 }
@@ -2656,6 +2651,8 @@ int32 ANavPlayerController::LoadBuildingData(const FString& FilePath, bool bData
 
 	// Ctrl+S writes JSON, so a database-backed project starts without a save path.
 	CurrentProjectFilePath = bDatabase ? FString() : FilePath;
+	UnsavedBuildings.Reset();
+	BuildingReveal.Reset();
 	bHasUnsavedChanges = false;
 	if (bDatabase)
 	{
@@ -2670,6 +2667,11 @@ int32 ANavPlayerController::LoadBuildingData(const FString& FilePath, bool bData
 void ANavPlayerController::StartNewProject()
 {
 	SetInteriorInspectionEnabled(false);
+	SetIn3DPreviewMode(false);
+	ClearCampusInteriorPreview();
+	bCampusPreviewAllowed = true;
+	BuildingReveal.Reset();
+	UnsavedBuildings.Reset();
 	if (NavigationPanel)
 	{
 		NavigationPanel->ClearAll();
@@ -4200,19 +4202,21 @@ void ANavPlayerController::RestoreExteriorCameraView()
 	}
 	SelectRoom(FString());
 
-	if (!bHasSavedCameraView)
+	if (bHasSavedCameraView)
 	{
-		return;
+		if (APawn* ControlledPawn = GetPawn())
+		{
+			ControlledPawn->SetActorLocationAndRotation(SavedCameraLocation, SavedCameraRotation);
+			SetControlRotation(SavedCameraRotation);
+		}
+		bHasSavedCameraView = false;
 	}
 
-	if (APawn* ControlledPawn = GetPawn())
+	if (!bCampusPreviewAllowed)
 	{
-		ControlledPawn->SetActorLocationAndRotation(SavedCameraLocation, SavedCameraRotation);
-		SetControlRotation(SavedCameraRotation);
+		bCampusPreviewAllowed = true;
+		BuildCampusInteriorPreview();
 	}
-	// Restore all campus preview rooms when returning to exterior view.
-	SetCampusInteriorPreviewVisible(true);
-	bHasSavedCameraView = false;
 }
 
 bool ANavPlayerController::SaveCurrentProject()
@@ -4246,6 +4250,7 @@ bool ANavPlayerController::SaveCurrentProject()
 	if (bSuccess)
 	{
 		Generator->RefreshBuildingBaselines();
+		UnsavedBuildings.Reset();
 		bHasUnsavedChanges = false;
 		UE_LOG(LogTemp, Warning, TEXT("Saved to %s"), *CurrentProjectFilePath);
 		OnProjectSaved.Broadcast();
@@ -4326,6 +4331,7 @@ bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
 	if (bSuccess)
 	{
 		Generator->RefreshBuildingBaselines();
+		UnsavedBuildings.Reset();
 		CurrentProjectFilePath = FilePath;
 		bHasUnsavedChanges = false;
 		UE_LOG(LogTemp, Warning, TEXT("Saved to %s"), *FilePath);
@@ -4338,13 +4344,55 @@ bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
 	return bSuccess;
 }
 
+void ANavPlayerController::MarkBuildingCreated(APolyBuilding* Building)
+{
+	UnsavedBuildings.Add(Building);
+	bHasUnsavedChanges = true;
+}
+
 void ANavPlayerController::DiscardUnsavedChanges()
 {
+	SetInteriorInspectionEnabled(false);
+	SetIn3DPreviewMode(false);
+	if (InteriorGen)
+	{
+		InteriorGen->ClearLoadedInterior();
+	}
+	for (auto It = UnsavedBuildings.CreateIterator(); It; ++It)
+	{
+		APolyBuilding* Building = It->Get();
+		if (!Building)
+		{
+			It.RemoveCurrent();
+		}
+		else if (Generator && Generator->RemoveBuilding(*Building))
+		{
+			if (SelectedBuilding == Building)
+			{
+				SelectedBuilding = nullptr;
+				OnBuildingSelected.Broadcast(FString());
+			}
+			BuildingReveal.Remove(Building->BuildingId);
+			It.RemoveCurrent();
+		}
+	}
 	if (Generator)
 	{
 		Generator->RestoreBuildingBaselines();
 	}
-	bHasUnsavedChanges = false;
+	if (!bCampusPreviewAllowed)
+	{
+		RestoreExteriorCameraView();
+	}
+	else
+	{
+		BuildCampusInteriorPreview();
+	}
+	bHasUnsavedChanges = !UnsavedBuildings.IsEmpty();
+	if (bHasUnsavedChanges)
+	{
+		OnActionFailed.Broadcast(TEXT("Some new buildings could not be discarded."), EActionFailureSeverity::Warning);
+	}
 }
 
 void ANavPlayerController::SaveCurrentProjectKeyHandler()
@@ -4522,7 +4570,11 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 			}
 		}
 
-		bHasUnsavedChanges = true;
+		MarkBuildingCreated(NewBuilding);
+		if (bCampusPreviewAllowed && CopiedBuildingInterior.IsValid())
+		{
+			BuildCampusInteriorPreview();
+		}
 
 		UE_LOG(LogTemp, Log,
 			TEXT("Pasted whole building: %s"),
@@ -4671,7 +4723,7 @@ int32 ANavPlayerController::LoadInteriorInternal(const FString& BuildingId, bool
 		InteriorGen->SyncInteriorToBuildingGenerator();
 	}
 	// Hide campus preview rooms while editing an individual building.
-	SetCampusInteriorPreviewVisible(false);
+	HideCampusInteriorPreview();
 	const int32 Result = InteriorGen->LoadInteriorForBuilding(BuildingId);
 	if (Result < 0)
 	{
@@ -5254,6 +5306,10 @@ void ANavPlayerController::ConfirmShapeTest()
 	if (!NewBuilding)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Could not create building - see error above. Edit the id in test_shape_params.json and try again."));
+	}
+	else
+	{
+		MarkBuildingCreated(NewBuilding);
 	}
 }
 

@@ -2,6 +2,10 @@
 
 Versions follow Semantic Versioning. Changes to exported report types or tool interface methods require a major version when incompatible.
 
+## 1.0.1
+
+- Detect overlapping room areas regardless of vertex order or collinear edges, while allowing rooms to share an edge or corner.
+
 ## 1.0.0 — 2026-10-27
 
 - Initial versioned Unreal Runtime plugin release with read-only layout validation, stable issue codes, snapshot fingerprints and JSON report export.

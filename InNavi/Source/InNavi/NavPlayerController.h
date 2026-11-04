@@ -399,15 +399,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Building")
 	bool HasUnsavedChanges() const { return bHasUnsavedChanges; }
 
-	// What the confirm dialog's "Discard" button calls, right before it navigates away (Back to
-	// exterior, Back to start screen, etc.): puts every building that was opened for editing back to how
-	// it was at the last save/open - floor count (the exterior shell's height), name and interior data
-	// (see ABuildingGenerator::RestoreBuildingBaselines) - and clears the unsaved-changes flag, so the very
-	// next unrelated navigation does not wrongly prompt again. Edits to the live interior itself are
-	// already gone once it is left (they only reach the building data on a save), so callers must leave or
-	// reload the interior afterwards; this does not touch the interior that is currently loaded. Only
-	// buildings that were opened for editing are covered - it never reloads the project, so it stays cheap
-	// however big the database is.
+	// Closes the live interior, restores edited buildings and removes buildings created since the last save.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void DiscardUnsavedChanges();
 
@@ -1200,13 +1192,15 @@ protected:
 	virtual void Tick(float DeltaSeconds) override;
 
 private:
+	void MarkBuildingCreated(APolyBuilding* Building);
+	TSet<TWeakObjectPtr<APolyBuilding>> UnsavedBuildings;
 	int32 LoadBuildingData(const FString& FilePath, bool bDatabase);
 	// Campus-wide X-ray interior preview.
 	// These actors are separate from the editable interior rooms.
 	void BuildCampusInteriorPreview();
 	void ClearCampusInteriorPreview();
-	// Allows (true) or stops (false) the preview rooms from showing; while allowed, UpdateBuildingTransparency decides per building.
-	void SetCampusInteriorPreviewVisible(bool bVisible);
+	// Hide the campus previews while an individual interior is open.
+	void HideCampusInteriorPreview();
 
 	// The preview rooms of one building. The rooms are actors of the world (it keeps them alive), so they are only watched here.
 	struct FCampusPreviewRooms

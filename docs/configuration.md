@@ -44,7 +44,7 @@ The phone app is described in `mobile-real-data-guide.md`.
 | `UE_ROOT` | environment of the machine that packages (optional) | the Unreal Engine 5.8 folder; `scripts/package-windows.ps1` defaults to `C:\Program Files\Epic Games\UE_5.8` |
 | `WIKI_DIR` | `.github/workflows/deploy-wiki.yml` | where on the team12 VM the wiki is published (`/var/www/innavi-wiki`), served by nginx on port 5000 (the VM allows only 22 and 5000-5050) |
 | Runner labels | `runs-on:` of each workflow | `[self-hosted, windows]` (build, analysis, tests, release), `[self-hosted, linux, ovh]` (JSON check, wiki), `ubuntu-latest` (lint, plugin publish) |
-| Plugin version | `package.json` (exact pin) and `InNaviLayoutValidator.uplugin` | `1.0.0`; a version that differs from the pin is rejected by `scripts/install-layout-validator.mjs` |
+| Plugin version | `package.json` (published pin) and `InNaviLayoutValidator.uplugin` (checked-in source) | The installer requires matching versions. Windows CI allows newer source before publication. |
 
 ## Secrets, and where they are
 

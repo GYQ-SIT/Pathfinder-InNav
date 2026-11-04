@@ -24,8 +24,8 @@ KEYWORDS = {"type", "enum", "const", "required", "properties", "additionalProper
 
 def load(path):
     with open(path, "rb") as handle:
-        # The editor writes a byte order mark; JSON readers must accept it.
-        return json.loads(handle.read().decode("utf-8-sig"))
+        # Older editor saves can be UTF-16 with a byte order mark.
+        return json.loads(handle.read())
 
 
 def type_matches(value, name):

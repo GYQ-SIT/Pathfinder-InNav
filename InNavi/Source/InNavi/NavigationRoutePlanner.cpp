@@ -271,6 +271,92 @@ namespace
 		return true;
 	}
 
+	double SignedDistanceInside(const FVector2D& Point, const TArray<FVector2D>& Polygon)
+	{
+		double Distance = TNumericLimits<double>::Max();
+		for (int32 I = 0; I < Polygon.Num(); ++I)
+		{
+			Distance = FMath::Min(Distance, PointToSegmentDistance(Point, Polygon[I], Polygon[(I + 1) % Polygon.Num()]));
+		}
+		return InsideOrOnBoundary(Point, Polygon) ? Distance : -Distance;
+	}
+
+	bool FindClearRoomPoint(const TArray<FVector2D>& Polygon, const TArray<FVector2D>& Boundary,
+		const FFloorGeometry& Geometry, FVector2D& OutPosition)
+	{
+		if (Polygon.Num() < 3) return false;
+		auto IsUsable = [&](const FVector2D& Point)
+		{
+			return InsideOrOnBoundary(Point, Polygon) && IsPointClearOfWalls(Point, Boundary, Geometry);
+		};
+
+		TArray<int32> Triangles;
+		TriangulatePolygon(Polygon, Triangles);
+		double BestArea = -1.0;
+		for (int32 I = 0; I + 2 < Triangles.Num(); I += 3)
+		{
+			const FVector2D A = Polygon[Triangles[I]], B = Polygon[Triangles[I + 1]], C = Polygon[Triangles[I + 2]];
+			const FVector2D Point = (A + B + C) / 3.0;
+			const double Area = FMath::Abs(Cross(A, B, C));
+			if (Area > BestArea && IsUsable(Point))
+			{
+				OutPosition = Point;
+				BestArea = Area;
+			}
+		}
+		if (BestArea >= 0.0) return true;
+
+		// Centroids can all hug the wall of a narrow room. Search the room bounds for
+		// another point, prioritizing cells that can still meet the clearance.
+		FBox2D Bounds(ForceInit);
+		for (const FVector2D& Point : Polygon) Bounds += Point;
+		struct FCell
+		{
+			FVector2D Center;
+			FVector2D Extent;
+			double BestPossibleClearance;
+		};
+		TArray<FCell> Cells;
+		auto Better = [](const FCell& A, const FCell& B) { return A.BestPossibleClearance > B.BestPossibleClearance; };
+		auto Visit = [&](const FVector2D& Center, const FVector2D& Extent)
+		{
+			if (IsUsable(Center))
+			{
+				OutPosition = Center;
+				return true;
+			}
+			const double Required = Geometry.WallClearance - GeometryEpsilon;
+			double Margin = FMath::Min(SignedDistanceInside(Center, Polygon), SignedDistanceInside(Center, Boundary) - Required);
+			for (const FSegment& Wall : Geometry.Walls)
+			{
+				Margin = FMath::Min(Margin, PointToSegmentDistance(Center, Wall.A, Wall.B) - Required);
+			}
+			for (const auto& Room : Geometry.RestrictedRooms)
+			{
+				Margin = FMath::Min(Margin, -SignedDistanceInside(Center, Room));
+			}
+			// None of the distance margins can increase by more than the cell radius.
+			const double BestPossibleClearance = Margin + Extent.Size();
+			if (BestPossibleClearance >= -GeometryEpsilon && Extent.GetMax() > GeometryEpsilon)
+			{
+				Cells.HeapPush({Center, Extent, BestPossibleClearance}, Better);
+			}
+			return false;
+		};
+		if (Visit(Bounds.GetCenter(), Bounds.GetExtent())) return true;
+		constexpr int32 MaxSubdivisions = 1024;
+		for (int32 I = 0; I < MaxSubdivisions && !Cells.IsEmpty(); ++I)
+		{
+			FCell Cell;
+			Cells.HeapPop(Cell, Better, EAllowShrinking::No);
+			const bool bSplitX = Cell.Extent.X >= Cell.Extent.Y;
+			const FVector2D Shift = bSplitX ? FVector2D(Cell.Extent.X * 0.5, 0.0) : FVector2D(0.0, Cell.Extent.Y * 0.5);
+			const FVector2D Half = Cell.Extent - Shift;
+			if (Visit(Cell.Center - Shift, Half) || Visit(Cell.Center + Shift, Half)) return true;
+		}
+		return false;
+	}
+
 	bool TryAddTurnPoint(FFloorGeometry& Geometry, const TArray<FVector2D>& BuildingBoundary,
 		const FVector2D& Candidate)
 	{
@@ -1461,20 +1547,7 @@ bool FNavigationRoutePlanner::FindRoomDestination(const ABuildingGenerator& Gene
 	const auto Model = ReadRouteBuilding(*Building, Interior, Generator.GetInteriorDataForBuilding(BuildingId),
 		Generator.GetStoredEntrances(BuildingId), Generator.GetScale(), true);
 	const auto* Geometry = Model.Floors.Find(Floor);
-	if (!Geometry) return false;
-	TArray<int32> Triangles; TriangulatePolygon(Polygon, Triangles);
-	double BestArea = -1;
-	for (int32 I = 0; I + 2 < Triangles.Num(); I += 3)
-	{
-		const auto A = Polygon[Triangles[I]], B = Polygon[Triangles[I + 1]], C = Polygon[Triangles[I + 2]];
-		const auto Point = (A + B + C) / 3.0;
-		const double Area = FMath::Abs(Cross(A, B, C));
-		if (Area > BestArea && InsideOrOnBoundary(Point, Polygon) && IsPointClearOfWalls(Point, Building->GetFootprint(), *Geometry))
-		{
-			OutPosition = Point; BestArea = Area;
-		}
-	}
-	return BestArea >= 0;
+	return Geometry && FindClearRoomPoint(Polygon, Building->GetFootprint(), *Geometry, OutPosition);
 }
 
 namespace
@@ -1568,21 +1641,18 @@ void FNavigationLayoutCheck::FImpl::Read(LayoutValidation::FReport& Report)
 					++Report.RoomsSkipped;
 					continue;
 				}
-				TArray<int32> Triangles; TriangulatePolygon(Room.Footprint, Triangles);
-				bool bFound = false;
-				for (int32 T = 0; T + 2 < Triangles.Num(); T += 3)
+				FVector2D Position;
+				if (FindClearRoomPoint(Room.Footprint, Model.Building->GetFootprint(), *Geometry, Position))
 				{
-					const FVector2D P = (Room.Footprint[Triangles[T]] + Room.Footprint[Triangles[T + 1]] + Room.Footprint[Triangles[T + 2]]) / 3.0;
-					if (!InsideOrOnBoundary(P, Room.Footprint) || !IsPointClearOfWalls(P, Model.Building->GetFootprint(), *Geometry)) continue;
-					FNavigationRoutePoint Point; Point.BuildingId = Model.Building->BuildingId; Point.Floor = Pair.Key; Point.Position = P;
-					Probes.Add({ Point.BuildingId, Room.RoomId, Pair.Key, Seeds.Add(Point), P }); bFound = true; break;
+					FNavigationRoutePoint Point; Point.BuildingId = Model.Building->BuildingId; Point.Floor = Pair.Key; Point.Position = Position;
+					Probes.Add({ Point.BuildingId, Room.RoomId, Pair.Key, Seeds.Add(Point), Position });
 				}
-				if (!bFound)
+				else
 				{
 					++Report.RoomsSkipped;
 					AddIssue(Report, TEXT("ROOM_PROBE_UNAVAILABLE"), ESeverity::Warning, Model.Building->BuildingId, Pair.Key, EObjectKind::Room, Room.RoomId,
 						TEXT("No destination point with the planner's wall clearance could be established in this room."),
-						TEXT("Review room size, internal walls and clearance. Reachability for this room was not checked."), Room.Footprint[0]);
+						TEXT("Review room size, internal walls and clearance. Reachability for this room was not checked."), Room.Footprint.IsEmpty() ? FVector2D::ZeroVector : Room.Footprint[0]);
 				}
 			}
 		}

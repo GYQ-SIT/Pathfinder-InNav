@@ -1,10 +1,10 @@
-# InNavi Layout Validator 1.0.0
+# InNavi Layout Validator
 
 A reusable Unreal Engine 5.8 Runtime plugin for advisory validation of indoor-navigation layout JSON. It does not modify input, force fixes or block saving. The package contains source, not platform binaries. UnrealBuildTool compiles it for the consuming target.
 
 ## Install the pinned package
 
-The source package is `@gyq-sit/innavi-layout-validator` on GitHub Packages. The product pins **exactly `1.0.0`** in its root `package.json`; `package-lock.json` pins the resolved archive and integrity hash. The checked-in Unreal plugin is an offline source mirror, verified against the installed package in CI.
+The source package is `@gyq-sit/innavi-layout-validator` on GitHub Packages. The root `package.json` pins the published version and `package-lock.json` records its archive and integrity hash. Windows CI verifies the checked-in source against the archive when the versions match. It builds from the checkout when the source carries a newer, unreleased version.
 
 Use Node.js 22+ and a GitHub token with `read:packages` and access to this private repository/package. Set `NODE_AUTH_TOKEN` in your shell or CI secret store; never put a token in `.npmrc` or Git. GitHub Actions uses the repository's `GITHUB_TOKEN` with `packages: read`.
 
@@ -14,7 +14,7 @@ npm run install:plugins
 node scripts/install-layout-validator.mjs --check
 ```
 
-Run installation before opening Unreal. The installer replaces package-owned source/docs and preserves local Binaries/Intermediate. To check local changes without replacing them, run only `--check`. Commit intended package changes and release a new version before updating the consumer pin; installation replaces local edits in those package-owned paths.
+Run installation before opening Unreal. The installer replaces package-owned source and docs and preserves local Binaries/Intermediate. It refuses to overwrite a checkout with a different plugin version. To install the pinned registry version separately, pass `--destination` followed by a fresh directory to the installer.
 
 In another Unreal product, place the installed plugin in `<Project>/Plugins/InNaviLayoutValidator`, enable it in `.uproject`, and add `InNaviLayoutValidator` to the consuming module's dependencies. No game-module dependency is needed by this plugin. See [the working example](Examples/README.md).
 
@@ -49,6 +49,6 @@ The validator registers the first real tool through this interface. Its product 
 
 The plugin has the same team, consumer and release schedule as InNavi, so source remains in the product repository under D2's single-product exception. The standalone example is a demonstration, not a separately maintained product. If independent ownership, release scheduling or another real product is introduced, move the package to its own repository and preserve its public API/version history.
 
-Update the descriptor's `VersionName`, integer `Version`, npm version and CHANGELOG together. Validate the editor, game target and standalone example before tagging `innavi-layout-validator-v<version>`. `.github/workflows/publish-layout-validator.yml` publishes that immutable version to GitHub Packages and produces a consumer lockfile artifact. Update the product's exact dependency and lockfile for each release. Consumers use `npm ci`, not an unpinned Git branch.
+Update the descriptor's `VersionName`, integer `Version`, npm version and CHANGELOG together. Validate the editor, game target and standalone example before tagging `innavi-layout-validator-v<version>`. The publish workflow publishes the immutable package, verifies the archive against the checkout, and exports the updated consumer manifest and lockfile. Commit those two files to update the product pin after publication.
 
 Product usage, validation limits and headless routing checks are documented in `docs/design/layout-validator.md` in the repository.

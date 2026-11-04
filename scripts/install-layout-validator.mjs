@@ -15,6 +15,24 @@ if (pkg.version !== pin || descriptor.VersionName !== pin) throw Error('Installe
 const targetArg = process.argv.indexOf('--destination');
 const destination = targetArg < 0 ? join(root, 'InNavi/Plugins/InNaviLayoutValidator') : resolve(process.argv[targetArg + 1]);
 const checkOnly = process.argv.includes('--check');
+const allowUnreleased = process.argv.includes('--allow-unreleased');
+if (allowUnreleased && !checkOnly) throw Error('--allow-unreleased requires --check');
+const localDescriptor = await readFile(join(destination, 'InNaviLayoutValidator.uplugin'), 'utf8').then(JSON.parse, error => {
+  if (error.code !== 'ENOENT') throw error;
+  return null;
+});
+if (localDescriptor && localDescriptor.VersionName !== pin) {
+  const localVersion = localDescriptor.VersionName;
+  const localPackage = JSON.parse(await readFile(join(destination, 'package.json'), 'utf8'));
+  const versionParts = /^\d+\.\d+\.\d+$/.test(localVersion) ? localVersion.split('.').map(Number) : [];
+  const pinnedParts = pin.split('.').map(Number);
+  const difference = versionParts.findIndex((part, index) => part !== pinnedParts[index]);
+  if (allowUnreleased && localPackage.version === localVersion && difference >= 0 && versionParts[difference] > pinnedParts[difference]) {
+    console.log(`Using checked-in ${name}@${localVersion} while the registry consumer pins ${pin}`);
+    process.exit(0);
+  }
+  throw Error(`Plugin destination is at ${localVersion}; installing or verifying ${pin} here would use a different version`);
+}
 const files = ['InNaviLayoutValidator.uplugin', 'Source', 'README.md', 'CHANGELOG.md', 'Examples', 'package.json'];
 async function manifest(base, items = files) {
   const result = {};

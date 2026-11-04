@@ -3,11 +3,14 @@
 #include "BuildingGenerator.h"
 #include "BuildingInfoPanelWidget.h"
 #include "EditScreenWidget.h"
+#include "InteriorRoom.h"
 #include "MapPanelWidget.h"
 #include "PolyBuilding.h"
 #include "UiTestFixture.h"
 
 #include "GameFramework/DefaultPawn.h"
+#include "EngineUtils.h"
+#include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
 
 namespace SeeThroughTests
@@ -179,6 +182,31 @@ bool FSeeThroughPanelsTest::RunTest(const FString& Parameters)
 	Map->MoveRevealNearSliderForTests(50.f);
 	TestNearlyEqual(TEXT("moving the near slider sets the near distance"), Controller->GetCampusRevealNearDistance(), 5000.f, 0.1f);
 	TestNearlyEqual(TEXT("the far slider is pushed out with it"), Map->GetRevealFarSliderForTests(), 51.f, 0.5f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSeeThroughPreviewLifecycleTest, "InNavi.Building.SeeThrough.PreviewLifecycle", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSeeThroughPreviewLifecycleTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	Controller->Possess(Fixture.World->SpawnActor<ADefaultPawn>());
+	Controller->BuildCampusInteriorPreviewForTests();
+	Controller->SetBuildingMadeTransparent(TEXT("E2"), true);
+	const int32 Before = Controller->CountShownCampusRoomsForTests(TEXT("E2"));
+	if (!TestTrue(TEXT("the campus preview shows E2's rooms"), Before > 0)) return false;
+	Controller->LoadInteriorForBuilding(TEXT("E2"));
+	TestTrue(TEXT("a room is deleted"), Controller->DeleteRoom(TEXT("E2-01-02")));
+	const FString Path = FPaths::ProjectSavedDir() / TEXT("AutomationTemp") / (FGuid::NewGuid().ToString() + TEXT(".json"));
+	TestTrue(TEXT("the edited layout saves"), Controller->SaveCurrentProjectAs(Path));
+	Controller->RestoreExteriorCameraView();
+	TestEqual(TEXT("the exterior shows the saved rooms"), Controller->CountShownCampusRoomsForTests(TEXT("E2")), Before - 1);
+	Controller->SetCampusBuildingsVisible(false);
+	Controller->SetBuildingMadeTransparent(TEXT("E2"), true);
+	TestEqual(TEXT("hiding the shell hides its preview rooms"), Controller->CountShownCampusRoomsForTests(TEXT("E2")), 0);
+	Controller->StartNewProject();
+	TestFalse(TEXT("New clears preview actors"), static_cast<bool>(TActorIterator<AInteriorRoom>(Fixture.World)));
+	IFileManager::Get().Delete(*Path);
 	return true;
 }
 

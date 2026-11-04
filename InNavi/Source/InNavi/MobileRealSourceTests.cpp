@@ -141,6 +141,39 @@ bool FMobileRealRouteTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRealNarrowRoomTest, "InNavi.Mobile.Source.NarrowRoom", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileRealNarrowRoomTest::RunTest(const FString& Parameters)
+{
+	MobileRealTests::FProjectFiles Files;
+	auto Room = Files.Room(0);
+	auto SetWidth = [&](int32 Width)
+	{
+		TArray<TSharedPtr<FJsonValue>> Footprint;
+		for (const FVector2D& Point : TArray<FVector2D>{{100, 100}, {100.0 + Width, 100}, {100.0 + Width, 600}, {100, 600}})
+		{
+			Footprint.Add(MakeShared<FJsonValueArray>(TArray<TSharedPtr<FJsonValue>>{
+				MakeShared<FJsonValueNumber>(Point.X), MakeShared<FJsonValueNumber>(Point.Y)}));
+		}
+		Room->SetArrayField(TEXT("footprint"), Footprint);
+	};
+	SetWidth(75);
+	const auto Opening = Room->GetArrayField(TEXT("openings"))[0]->AsObject();
+	Opening->SetNumberField(TEXT("edgeIndex"), 1);
+	Opening->SetNumberField(TEXT("offset"), 150);
+	FMobileRealSource Source(Files.Write());
+	const auto Places = MobileRealTests::Places(Source);
+	if (!TestEqual(TEXT("both rooms are indexed"), Places.Num(), 2)) return false;
+	FMobileRouteRequest Request;
+	Request.FromPlaceId = Places[1].Id;
+	Request.ToPlaceId = Places[0].Id;
+	TestTrue(TEXT("the planner finds a route into a narrow room even when both centroids fail"), Source.FindRoute(Request).bFound);
+	SetWidth(50);
+	Room->SetArrayField(TEXT("openings"), {});
+	FMobileRealSource TooNarrow(Files.Write());
+	TestFalse(TEXT("the fallback still refuses a room with insufficient clearance"), TooNarrow.FindRoute(Request).bFound);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRealRestrictedTest, "InNavi.Mobile.Source.RestrictedRooms", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FMobileRealRestrictedTest::RunTest(const FString& Parameters)
 {
