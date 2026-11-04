@@ -383,6 +383,7 @@ public:
 	void ClearHistory();
 protected:
 	virtual void BeginPlay() override;
+	void HandleBuildingRemoved(const FString& BuildingId);
 
 private:
 	// Builds a JSON object matching the "interior" schema (floors[].{wallHeight,wallThickness,

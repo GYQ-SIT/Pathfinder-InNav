@@ -143,6 +143,36 @@ bool FMobileRealRouteTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRealLegacyFloorsTest, "InNavi.Mobile.Source.RealLegacyFloorsAndDuplicateIdentity", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileRealLegacyFloorsTest::RunTest(const FString& Parameters)
+{
+	MobileRealTests::FProjectFiles Files;
+	Files.Building()->SetNumberField(TEXT("floorCount"), 1);
+	FMobileRealSource Legacy(Files.Write());
+	const auto Places = MobileRealTests::Places(Legacy);
+	if (!TestEqual(TEXT("both authored levels are indexed"), Places.Num(), 2)) return false;
+	FMobileRouteRequest Request;
+	Request.FromPlaceId = Places[0].Id;
+	Request.ToPlaceId = Places[1].Id;
+	TestTrue(TEXT("routing uses the expanded legacy shell"), Legacy.FindRoute(Request).bFound);
+	const FString SharedId = TEXT("0123456789abcdef0123456789abcdef");
+	Files.Room(0)->SetStringField(TEXT("navigationId"), SharedId);
+	Files.Room(1)->SetStringField(TEXT("navigationId"), SharedId);
+	const auto Report = LayoutValidation::ValidateProject(Files.Root);
+	TestTrue(TEXT("duplicate stable IDs are flagged"), Report.Issues.ContainsByPredicate([](const auto& Issue)
+	{
+		return Issue.Rule == TEXT("NAVIGATION_ID_DUPLICATE");
+	}));
+	FMobileRealSource Conflicted(Files.Write());
+	const auto ConflictedPlaces = MobileRealTests::Places(Conflicted);
+	if (!TestEqual(TEXT("the conflict hides neither room"), ConflictedPlaces.Num(), 2)) return false;
+	TestNotEqual(TEXT("the fallback room identities differ"), ConflictedPlaces[0].Id, ConflictedPlaces[1].Id);
+	Request.FromPlaceId = ConflictedPlaces[0].Id;
+	Request.ToPlaceId = ConflictedPlaces[1].Id;
+	TestTrue(TEXT("the rooms can still be routed using distinct fallback identities"), Conflicted.FindRoute(Request).bFound);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRealNarrowRoomTest, "InNavi.Mobile.Source.NarrowRoom", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FMobileRealNarrowRoomTest::RunTest(const FString& Parameters)
 {

@@ -49,6 +49,8 @@ namespace LayoutValidation
     INNAVILAYOUTVALIDATOR_API const TCHAR* SeverityName(ESeverity Severity);
     // These functions only read their input. File validation runs before actor loading can discard bad entries.
     INNAVILAYOUTVALIDATOR_API FReport ValidateProject(const TSharedPtr<FJsonObject>& Project);
+    // Returns an empty report if cancellation is requested. The callback must stay valid for the call.
+    INNAVILAYOUTVALIDATOR_API FReport ValidateProject(const TSharedPtr<FJsonObject>& Project, TFunctionRef<bool()> ShouldCancel);
     INNAVILAYOUTVALIDATOR_API FReport ValidateFile(const FString& Path);
     INNAVILAYOUTVALIDATOR_API FString Fingerprint(const TSharedPtr<FJsonObject>& Project);
     INNAVILAYOUTVALIDATOR_API bool ExportReport(const FReport& Report, const FString& Path);

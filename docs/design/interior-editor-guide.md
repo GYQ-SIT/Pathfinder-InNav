@@ -53,8 +53,7 @@ defaults refer to them by name; a database cannot be duplicated. A database card
 The 3D building-cluster view (before entering any building's interior) has its own top
 menu bar, same look as the interior editor's:
 
-- **File** — **New**/**Load**, same behavior and unsaved-changes check as the interior
-  editor's own File menu below.
+- **File** — **New** and **Load** prompt about unsaved changes. **Save As** saves to a path you choose, including when the original file changed on disk.
 - **Window** — **Audio** (see Audio panel below), **Map** (see Map panel below),
   **Building**, **Debug** and **Navigation** (see Navigation panel below), plus **Reset Layout**.
 - **Camera** — the free-fly camera's controls, in a dropdown: **Reset**, the typed move
@@ -150,9 +149,9 @@ left out as inert placeholder blocks.
 Pinned across the very top of the interior editor screen.
 
 - **Save** — same as `Ctrl+S`, left of File.
-- **File** — **New** clears everything and starts a blank project; **Generate floor** fills the
-  current floor (see below); **Load** opens the
-  OS file picker for an existing `buildings.json` or `.db`. New and Load check for unsaved
+- **File** — **New** starts a blank project, **Generate floor** fills the current floor,
+  and **Load** opens the OS file picker for an existing `buildings.json` or `.db`.
+  **Save As** writes the current project to a path you choose. New and Load check for unsaved
   changes first and prompt to save/discard/cancel, exactly like leaving to the
   exterior does.
 - **Window** — a checklist of the eight dockable panels (Toolbar/Floor/Properties/
@@ -393,7 +392,7 @@ Route** hides or restores the route lines, direction arrows, markers and written
 ### Audio panel
 
 Hidden by default (Window > Audio to show it). Lists every wav file under
-`InNavi/Data/Audio/` with its own **Play** button — click to start it,
+`InNavi/Data/Audio/` with its own **Play** button. Playback accepts WAV files up to 64 MiB. Click to start a file,
 click again while it's playing to see it highlighted green; **Stop All** halts
 everything at once. Multiple files can play together (e.g. background music plus an
 effect). A **Button Click Sound** checkbox mutes/unmutes the short click sound every

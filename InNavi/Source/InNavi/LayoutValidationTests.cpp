@@ -77,6 +77,14 @@ namespace InNaviValidationTests
         TestTrue(TEXT("duplicate floor levels"), Has(ValidateProject(Root), TEXT("FLOOR_DUPLICATE")));
         Root = Project(); Root->RemoveField(TEXT("version"));
         TestFalse(TEXT("legacy files without versions are accepted"), ValidateProject(Root).HasErrors());
+        Root->SetNumberField(TEXT("scale"), 0.000001);
+        TestTrue(TEXT("a scale that the editor cannot load fails validation"), ValidateProject(Root).HasErrors());
+        int32 FullCheckpoints = 0;
+        ValidateProject(Project(), [&FullCheckpoints] { ++FullCheckpoints; return false; });
+        int32 Checkpoints = 0;
+        const auto Cancelled = ValidateProject(Project(), [&Checkpoints] { return ++Checkpoints >= 12; });
+        TestTrue(TEXT("the data scan stops before completing"), Checkpoints >= 12 && Checkpoints < FullCheckpoints);
+        TestTrue(TEXT("a cancelled scan does not publish a report"), Cancelled.Fingerprint.IsEmpty() && Cancelled.Issues.IsEmpty());
         return true;
     }
 
@@ -222,6 +230,8 @@ namespace InNaviValidationTests
         auto* Status=Cast<UTextBlock>(Panel->FindContentWidget(TEXT("Txt_ValidationStatus")));
         TestTrue(TEXT("stale warning visible"),Status&&Status->GetText().ToString().Contains(TEXT("Layout changed")));
         auto* Exterior=NewObject<UEditScreenWidget>(); Exterior->Initialize(); Exterior->TakeWidget(); Exterior->SetOwningPlayer(PC);
+        TestNotNull(TEXT("interior File menu exposes Save As"), Screen->FindScreenWidget(TEXT("Btn_FileSaveAs")));
+        TestNotNull(TEXT("exterior File menu exposes Save As"), Exterior->FindScreenWidget(TEXT("Btn_FileSaveAs")));
         TestNotNull(TEXT("exterior validation panel"),Exterior->GetValidationPanelForTests());
         TestTrue(TEXT("exterior registered"),Exterior->GetDockHost()->IsPanelRegistered(ExteriorDock::Validation));
         FDockLayout Old; Old.DockPanelToEdge(InteriorDock::Toolbar, EDockSide::Left);

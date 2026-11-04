@@ -288,6 +288,8 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		FileNewButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnFileNewClicked);
 		UButton* FileLoadButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileLoad"), TEXT("Load"));
 		FileLoadButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnFileLoadClicked);
+		UButton* FileSaveAsButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileSaveAs"), TEXT("Save As"));
+		FileSaveAsButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnFileSaveAsClicked);
 
 		WindowMenuDropdown = ConstructDropdown(TEXT("Pnl_WindowDropdown"), EditMenuBarLeftMargin + EditSaveButtonWidth + EditMenuButtonWidth);
 		UVerticalBox* WindowDropdownStack = Cast<UVerticalBox>(WindowMenuDropdown->GetContent());
@@ -911,6 +913,12 @@ void UEditScreenWidget::HandleFileNewDiscard()
 void UEditScreenWidget::HandleFileNewCancel()
 {
 	// Nothing to do - the dialog already removed itself.
+}
+
+void UEditScreenWidget::OnFileSaveAsClicked()
+{
+	CloseMenuDropdowns();
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) PC->SaveCurrentProjectToNewLocation();
 }
 
 void UEditScreenWidget::OnFileLoadClicked()

@@ -2,6 +2,10 @@
 
 Versions follow Semantic Versioning. Changes to exported report types or tool interface methods require a major version when incompatible.
 
+## 1.1.0
+
+- Add cancellable data validation, report duplicate mobile place IDs, and enforce the editor's supported scale range.
+
 ## 1.0.1
 
 - Detect overlapping room areas regardless of vertex order or collinear edges, while allowing rooms to share an edge or corner.

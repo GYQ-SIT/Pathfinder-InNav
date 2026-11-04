@@ -15,6 +15,7 @@ class AStaticMeshActor;
 class FJsonObject;
 
 DECLARE_MULTICAST_DELEGATE(FOnBuildingNavigationLayoutChanged);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnProjectBuildingRemoved, const FString&);
 
 UCLASS()
 class INNAVI_API ABuildingGenerator : public AActor
@@ -24,6 +25,7 @@ class INNAVI_API ABuildingGenerator : public AActor
 public:
 	ABuildingGenerator();
 	FOnBuildingNavigationLayoutChanged OnNavigationLayoutChanged;
+	FOnProjectBuildingRemoved OnBuildingRemoved;
 	uint64 GetNavigationRevision() const { return NavigationRevision; }
 
 	// Spawns one building directly from already-parsed data. Used both by JSON loading
@@ -311,6 +313,9 @@ private:
 	void NotifyNavigationLayoutChanged();
 	float Scale = 1.f;
 	TSet<FString> UsedBuildingIds;
+	TSet<FString> RemovedBuildingIds;
+	friend class AInteriorGenerator;
+	TSharedPtr<FJsonObject> WithoutRemovedBuildingLinks(const TSharedPtr<FJsonObject>& Interior) const;
 
 	// LoadBuildingsFromDatabase's fallback FloorCount/FloorHeight - the buildings/building_nodes
 	// schema has no floor data at all (it's OSM footprint+type only), unlike buildings.json's

@@ -7,8 +7,10 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
+#include "Serialization/JsonSerializer.h"
 
 UInNaviValidateLayoutCommandlet::UInNaviValidateLayoutCommandlet()
 {
@@ -29,7 +31,22 @@ int32 UInNaviValidateLayoutCommandlet::Main(const FString& Params)
         Output = FPaths::ConvertRelativePathToFull(Output); FPaths::CollapseRelativeDirectories(Output);
         if (Input.Equals(Output, ESearchCase::IgnoreCase)) { UE_LOG(LogTemp, Error, TEXT("Report output must differ from the input file.")); return 2; }
     }
-    auto Report = LayoutValidation::ValidateFile(Input);
+    FString Text;
+    TSharedPtr<FJsonObject> Project;
+    LayoutValidation::FReport Report;
+    if (FFileHelper::LoadFileToString(Text, *Input)
+        && FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Project) && Project)
+        Report = LayoutValidation::ValidateProject(Project);
+    else
+    {
+        LayoutValidation::FIssue Issue;
+        Issue.Rule = TEXT("FILE_READ");
+        Issue.JsonPath = TEXT("$");
+        Issue.Message = TEXT("The file could not be read as a JSON project.");
+        Issue.Suggestion = TEXT("Check the path and JSON syntax.");
+        Report.Issues.Add(MoveTemp(Issue));
+    }
+    Report.Source = Input;
     if (!Report.HasErrors())
     {
         // Geometry is generated only in a disposable world. No current editor/project state is used or saved.
@@ -38,9 +55,18 @@ int32 UInNaviValidateLayoutCommandlet::Main(const FString& Params)
         GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
         auto* Buildings = World->SpawnActor<ABuildingGenerator>();
         auto* Interior = World->SpawnActor<AInteriorGenerator>();
-        Interior->DispatchBeginPlay();
-        Buildings->LoadBuildingsFromFile(Input);
-        FNavigationRoutePlanner::ValidateLayoutConnectivity(*Buildings, *Interior, FString(), Report);
+        if (Buildings && Interior && Buildings->LoadBuildingsFromJson(Project) == Project->GetArrayField(TEXT("buildings")).Num())
+        {
+            Interior->DispatchBeginPlay();
+            FNavigationRoutePlanner::ValidateLayoutConnectivity(*Buildings, *Interior, FString(), Report);
+        }
+        else
+        {
+            LayoutValidation::FIssue Issue;
+            Issue.Rule = TEXT("NAVIGATION_LOAD_FAILED");
+            Issue.Message = TEXT("The project could not be fully loaded for navigation checks.");
+            Report.Issues.Add(MoveTemp(Issue));
+        }
         World->DestroyWorld(false); GEngine->DestroyWorldContext(World);
     }
     else

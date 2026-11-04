@@ -540,11 +540,11 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 					Screen->OpenSavedPlace(Place);
 				}
 			});
-			SavedPage->SetOnRemove([WeakSaved](const FMobilePlace& Place)
+			SavedPage->SetOnRemove([WeakSaved](const FString& PlaceId)
 			{
 				if (UMobileAppWidget* Screen = WeakSaved.Get())
 				{
-					if (!Screen->SavedPlaces.Remove(Place.Id)) Screen->ShowStorageError();
+					if (!Screen->SavedPlaces.Remove(PlaceId)) Screen->ShowStorageError();
 					Screen->RefreshSaved();
 					Screen->SelectPlace(Screen->SelectedPlace);
 					Screen->RefreshArrived();

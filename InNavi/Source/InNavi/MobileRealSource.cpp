@@ -276,15 +276,33 @@ void FMobileRealSource::IndexProject(FProject& Project)
 		if (Building.Name.IsEmpty()) Building.Name = RawId;
 		const double FloorCount = Number(Json, TEXT("floorCount"), 10);
 		if (FloorCount < 1 || FloorCount > LayoutValidation::MaxBuildingFloors || FloorCount != FMath::FloorToDouble(FloorCount)) continue;
-		const int32 Count = static_cast<int32>(FloorCount);
 		const auto Interior = Child(Json, TEXT("interior"));
+		const auto& Floors = Array(Interior, TEXT("floors"));
+		int32 Count = static_cast<int32>(FloorCount);
+		TMap<FString, int32> NavigationIdCounts;
+		for (const auto& FloorValue : Floors)
+		{
+			const auto Floor = Object(FloorValue);
+			const double Level = Number(Floor, TEXT("level"), 1);
+			if (Level >= 1 && Level <= LayoutValidation::MaxBuildingFloors && Level == FMath::FloorToDouble(Level))
+				Count = FMath::Max(Count, static_cast<int32>(Level));
+			for (const auto& RoomValue : Array(Floor, TEXT("rooms")))
+			{
+				const FString Id = String(Object(RoomValue), TEXT("navigationId"));
+				if (!Id.IsEmpty()) ++NavigationIdCounts.FindOrAdd(Id);
+			}
+		}
+		// The editor expands legacy shells to include authored upper floors. Normalize the mobile
+		// snapshot too, so the catalogue, validation and the route world's floor count agree.
+		if (Count > FloorCount && (!Json->HasField(TEXT("floorCount")) || Json->HasTypedField<EJson::Number>(TEXT("floorCount"))))
+			Json->SetNumberField(TEXT("floorCount"), Count);
 		auto& Maps = Project.Maps.Add(BuildingId);
 		for (int32 Level = 1; Level <= Count; ++Level)
 		{
 			FMobileLevel Label; Label.Level = Level; Label.Label = FString::Printf(TEXT("L%d"), Level); Building.Levels.Add(Label);
 			FMobileLevelMap Map; Map.BuildingId = BuildingId; Map.Level = Level; Map.Outline = Outline; Map.bHasEntrance = false;
 			TSharedPtr<FJsonObject> Floor;
-			for (const auto& F : Array(Interior, TEXT("floors"))) if (Number(Object(F), TEXT("level"), 1) == Level) { Floor = Object(F); break; }
+			for (const auto& F : Floors) if (Number(Object(F), TEXT("level"), 1) == Level) { Floor = Object(F); break; }
 			for (const auto& RoomValue : Array(Floor, TEXT("rooms")))
 			{
 				const auto Room = Object(RoomValue);
@@ -292,7 +310,7 @@ void FMobileRealSource::IndexProject(FProject& Project)
 				const auto Shape = Polygon(Room); const FString RoomId = String(Room, TEXT("id"));
 				if (!bClosed || Shape.Num() < 3 || FMath::Abs(Area(Shape)) < KINDA_SMALL_NUMBER || RoomId.IsEmpty()) continue;
 				const FString NavigationId = String(Room, TEXT("navigationId"));
-				const FString PlaceId = NavigationId.IsEmpty()
+				const FString PlaceId = NavigationIdCounts.FindRef(NavigationId) != 1
 					? BuildingId + FString::Printf(TEXT("/level/%d/room/"), Level) + Escape(RoomId)
 					: BuildingId + TEXT("/room/") + Escape(NavigationId);
 				if (Project.RoomShapes.Contains(PlaceId)) continue;

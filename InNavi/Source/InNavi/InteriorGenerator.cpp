@@ -56,7 +56,40 @@ void AInteriorGenerator::BeginPlay()
 	for (TActorIterator<ABuildingGenerator> It(GetWorld()); It; ++It)
 	{
 		Generator = *It;
+		Generator->OnBuildingRemoved.AddUObject(this, &AInteriorGenerator::HandleBuildingRemoved);
 		break;
+	}
+}
+
+void AInteriorGenerator::HandleBuildingRemoved(const FString& BuildingId)
+{
+	if (LoadedBuildingId == BuildingId)
+	{
+		ClearLoadedInterior();
+		return;
+	}
+	Entrances.RemoveAll([&BuildingId](const FInteriorEntrance& Door)
+	{
+		return Door.Kind == EInteriorEntranceKind::Link && Door.ConnectsTo == BuildingId;
+	});
+	RefreshMirroredEntrances();
+	// The deleted ID can be used again. Remove the old links from every undo/redo snapshot now.
+	for (auto& Snapshot : InteriorHistory)
+	{
+		FString Target;
+		if (Snapshot.RemovedEntrance) Snapshot.RemovedEntrance->TryGetStringField(TEXT("connectsTo"), Target);
+		if (Snapshot.EntranceOwnerId == BuildingId || Target == BuildingId)
+		{
+			Snapshot.EntranceOwnerId.Reset();
+			Snapshot.RemovedEntrance.Reset();
+		}
+		TSharedPtr<FJsonObject> Data;
+		if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Snapshot.Json), Data)) continue;
+		const auto Updated = Generator->WithoutRemovedBuildingLinks(Data);
+		if (Updated == Data) continue;
+		FString Text;
+		if (FJsonSerializer::Serialize(Updated.ToSharedRef(), TJsonWriterFactory<>::Create(&Text)))
+			Snapshot.Json = MoveTemp(Text);
 	}
 }
 
@@ -169,21 +202,6 @@ static bool InteriorGen_IsPointInPolygon(const FVector2D& Point, const TArray<FV
 	return bInside;
 }
 
-// ---- Helper: is every point of Footprint inside Poly? (a room/wall staying within the building's
-// own outline - approximate for a concave building, since it only checks vertices, but consistent
-// with the rest of this project's schematic fidelity) ----
-static bool IsFootprintFullyInsidePolygon(const TArray<FVector2D>& Footprint, const TArray<FVector2D>& Poly)
-{
-	for (const FVector2D& Point : Footprint)
-	{
-		if (!InteriorGen_IsPointInPolygon(Point, Poly))
-		{
-			return false;
-		}
-	}
-	return true;
-}
-
 // ---- Helper: the point on segment AB closest to Point (mirrors InteriorFloorPlanWidget.cpp's
 // InteriorGen_DistancePointToSegment2D, generalized to return the point itself, not just the distance to it -
 // FindSnapOffset needs the point; InteriorGen_DistancePointToSegment2D below is now just this plus one more step) ----
@@ -204,6 +222,52 @@ static FVector2D ClosestPointOnSegment2D(const FVector2D& Point, const FVector2D
 static float InteriorGen_DistancePointToSegment2D(const FVector2D& Point, const FVector2D& A, const FVector2D& B)
 {
 	return FVector2D::Distance(Point, ClosestPointOnSegment2D(Point, A, B));
+}
+
+// Between successive boundary intersections a segment stays on the same side of the outline.
+static TArray<double, TInlineAllocator<8>> InteriorGen_BoundaryCuts(const FVector2D& Start, const FVector2D& End, const TArray<FVector2D>& Poly)
+{
+	TArray<double, TInlineAllocator<8>> Cuts{0.0, 1.0};
+	const FVector2D Direction = End - Start;
+	for (int32 Index = 0; Index < Poly.Num(); ++Index)
+	{
+		const FVector2D From = Poly[Index] - Start;
+		const FVector2D Edge = Poly[(Index + 1) % Poly.Num()] - Poly[Index];
+		const double Cross = FVector2D::CrossProduct(Direction, Edge);
+		if (FMath::IsNearlyZero(Cross, UE_DOUBLE_SMALL_NUMBER)) continue;
+		const double Along = FVector2D::CrossProduct(From, Edge) / Cross;
+		const double Across = FVector2D::CrossProduct(From, Direction) / Cross;
+		if (Along > 0.0 && Along < 1.0 && Across >= -UE_DOUBLE_SMALL_NUMBER && Across <= 1.0 + UE_DOUBLE_SMALL_NUMBER)
+			Cuts.Add(Along);
+	}
+	Cuts.Sort();
+	return Cuts;
+}
+
+static bool IsFootprintFullyInsidePolygon(const TArray<FVector2D>& Footprint, const TArray<FVector2D>& Poly, bool bClosed = true)
+{
+	const auto IsInsideOrOnBoundary = [&Poly](const FVector2D& Point)
+	{
+		if (InteriorGen_IsPointInPolygon(Point, Poly)) return true;
+		for (int32 Index = 0; Index < Poly.Num(); ++Index)
+		{
+			if (InteriorGen_DistancePointToSegment2D(Point, Poly[Index], Poly[(Index + 1) % Poly.Num()]) <= 1e-5) return true;
+		}
+		return false;
+	};
+	for (const FVector2D& Point : Footprint) if (!IsInsideOrOnBoundary(Point)) return false;
+	const int32 EdgeCount = bClosed ? Footprint.Num() : Footprint.Num() - 1;
+	for (int32 Index = 0; Index < EdgeCount; ++Index)
+	{
+		const FVector2D& Start = Footprint[Index];
+		const FVector2D& End = Footprint[(Index + 1) % Footprint.Num()];
+		const auto Cuts = InteriorGen_BoundaryCuts(Start, End, Poly);
+		for (int32 Cut = 1; Cut < Cuts.Num(); ++Cut)
+		{
+			if (!IsInsideOrOnBoundary(FMath::Lerp(Start, End, (Cuts[Cut - 1] + Cuts[Cut]) * 0.5))) return false;
+		}
+	}
+	return true;
 }
 
 // ---- Helper: shortest distance between segments AB and CD - 0 if they cross (checked via
@@ -311,17 +375,32 @@ static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClos
 			// Collinear boundaries overlap when both closed polygons extend into the same side.
 			// This catches stacked rooms while still allowing adjacent rooms to share a wall.
 			constexpr double CollinearityTolerance = 1e-3;
-			if (bBothClosed &&
+			if ((bBothClosed || (!bAClosed && !bBClosed)) &&
 				FMath::Abs(FVector2D::CrossProduct(EdgeDirection, B0 - A0)) < CollinearityTolerance &&
 				FMath::Abs(FVector2D::CrossProduct(EdgeDirection, B1 - A0)) < CollinearityTolerance)
 			{
 				const double Start = FVector2D::DotProduct(B0 - A0, EdgeDirection);
 				const double End = FVector2D::DotProduct(B1 - A0, EdgeDirection);
 				const double SharedLength = FMath::Min(EdgeLength, FMath::Max(Start, End)) - FMath::Max(0.0, FMath::Min(Start, End));
-				if (SharedLength > ToleranceUnits && ((End > Start) == bSameWinding))
+				if (SharedLength > ToleranceUnits && (!bBothClosed || ((End > Start) == bSameWinding)))
 				{
 					return true;
 				}
+			}
+		}
+	}
+
+	if (bAClosed != bBClosed)
+	{
+		const auto& Wall = bAClosed ? FootprintB : FootprintA;
+		const auto& Room = bAClosed ? FootprintA : FootprintB;
+		for (int32 Edge = 1; Edge < Wall.Num(); ++Edge)
+		{
+			const auto Cuts = InteriorGen_BoundaryCuts(Wall[Edge - 1], Wall[Edge], Room);
+			for (int32 Cut = 1; Cut < Cuts.Num(); ++Cut)
+			{
+				const auto Point = FMath::Lerp(Wall[Edge - 1], Wall[Edge], (Cuts[Cut - 1] + Cuts[Cut]) * 0.5);
+				if (IsPointClearlyInsidePolygon(Point, Room, ToleranceUnits)) return true;
 			}
 		}
 	}
@@ -1116,6 +1195,11 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 		OutError = TEXT("A wall needs at least 2 points.");
 		return nullptr;
 	}
+	if (!IsFootprintFullyInsidePolygon(Points, Building->GetFootprint(), false))
+	{
+		OutError = TEXT("The wall extends outside the building's outline.");
+		return nullptr;
+	}
 
 	// Same overlap/connector-block checks CreateRoomFromFootprint runs for a closed room, adapted for
 	// an open polyline (bClosedLoop=false throughout - DoFootprintsOverlap/DoesFootprintBlockConnector
@@ -1774,7 +1858,7 @@ bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float
 			}
 
 			APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
-			if (Building && !IsFootprintFullyInsidePolygon(NewFootprint, Building->GetFootprint()))
+			if (Building && !IsFootprintFullyInsidePolygon(NewFootprint, Building->GetFootprint(), Room->IsClosedLoop()))
 			{
 				UE_LOG(LogTemp, Error, TEXT("ResizeRoom: '%s' at %.1f x %.1f would extend outside the building's outline"), *RoomId, NewWidth, NewDepth);
 				return false;
@@ -1783,6 +1867,11 @@ bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float
 			// Resize is a discrete per-press step (not a drag with its own release), so unlike
 			// CommitRoomMove there's no separate "allowed mid-gesture" phase to speak of - each step
 			// is checked and rejected immediately, same as the boundary check above.
+			for (const AInteriorRoom* Other : Pair.Value.Rooms)
+			{
+				if (Other && Other != Room && DoFootprintsOverlap(NewFootprint, Room->IsClosedLoop(), Other->GetFootprint(), Other->IsClosedLoop(),
+					OverlapToleranceWorldUnits / (Generator ? Generator->GetScale() : 1.f))) return false;
+			}
 			if (DoesFootprintBlockConnector(NewFootprint, Room->IsClosedLoop(), Pair.Key))
 			{
 				UE_LOG(LogTemp, Error, TEXT("ResizeRoom: '%s' at %.1f x %.1f would wall in an elevator/stairs/escalator"), *RoomId, NewWidth, NewDepth);
@@ -1847,7 +1936,7 @@ bool AInteriorGenerator::RotateRoom(const FString& RoomId, float DeltaDegrees)
 			}
 
 			APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
-			if (Building && !IsFootprintFullyInsidePolygon(NewFootprint, Building->GetFootprint()))
+			if (Building && !IsFootprintFullyInsidePolygon(NewFootprint, Building->GetFootprint(), Room->IsClosedLoop()))
 			{
 				// Silently rejected, not logged as an error - this is called every tick while a
 				// rotation key is held, so hitting the building's edge shouldn't spam the log.
@@ -1919,7 +2008,7 @@ bool AInteriorGenerator::MoveRoom(const FString& RoomId, const TArray<FVector2D>
 			// move is simply not applied, so the room stays at its last valid position instead of
 			// following the cursor past the wall - no other feedback needed for a live drag.
 			APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
-			if (Building && !IsFootprintFullyInsidePolygon(NewFootprint, Building->GetFootprint()))
+			if (Building && !IsFootprintFullyInsidePolygon(NewFootprint, Building->GetFootprint(), Room->IsClosedLoop()))
 			{
 				return false;
 			}

@@ -140,16 +140,18 @@ bool FMobileSavedPageTest::RunTest(const FString& Parameters)
 	Page->SetSaved({ TEXT("E2-01-101") });
 	TestEqual(TEXT("one place is not plural"), Page->GetCountString(), FString(TEXT("1 place")));
 	Page->SetSaved({ TEXT("E2-01-101"), TEXT("no-such-place") });
-	TestEqual(TEXT("an id the source does not know is left out"), Page->GetShownPlaces().Num(), 1);
+	TestEqual(TEXT("an id the source does not know is still shown"), Page->GetShownPlaces().Num(), 2);
+	TestEqual(TEXT("an unknown place is labelled unavailable"), Page->GetShownPlaces().Last().Name, FString(TEXT("Unavailable place")));
 
 	// A tap and a Remove report the place.
 	FString Log;
 	Page->SetOnPlaceChosen([&Log](const FMobilePlace& P) { Log += TEXT("open:") + P.Id + TEXT(";"); });
-	Page->SetOnRemove([&Log](const FMobilePlace& P) { Log += TEXT("remove:") + P.Id + TEXT(";"); });
+	Page->SetOnRemove([&Log](const FString& Id) { Log += TEXT("remove:") + Id + TEXT(";"); });
 	Page->ChoosePlace(TEXT("E2-01-101"));
 	Page->RemovePlace(TEXT("E2-01-101"));
 	Page->ChoosePlace(TEXT("no-such-place"));
-	TestEqual(TEXT("each reports (and an unknown place nothing)"), Log, FString(TEXT("open:E2-01-101;remove:E2-01-101;")));
+	Page->RemovePlace(TEXT("no-such-place"));
+	TestEqual(TEXT("an unknown place can be removed but cannot be opened"), Log, FString(TEXT("open:E2-01-101;remove:E2-01-101;remove:no-such-place;")));
 	World->DestroyWorld(false);
 	return true;
 }

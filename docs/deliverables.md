@@ -116,7 +116,7 @@ Ubuntu 24.04) is confirmed too underpowered/wrong-platform to compile this UE5 W
 project (no Windows toolchain, likely not enough RAM even if it had one), so
 the compile step runs on a self-hosted runner on a capable Windows PC
 (`.github/workflows/build-windows.yml` builds `InNaviEditor` on pushes to `main`).
-The check waits in the queue while that PC (or its runner) is off. A tag also builds the release package there (`release-windows.yml`). (It also builds with adaptive unity off, so the code is compiled as it is on a clean checkout: that found two helper functions named `Write` that could not be built together, now renamed.)
+The check waits in the queue while that PC (or its runner) is off. The release workflow verifies that the milestone tag points to a commit on `main` before the Windows runner builds that exact commit. Run manual releases from `main`. Restrict who can create or move release tags and who can run jobs on the persistent Windows runner, since GitHub can load older workflow definitions from tags pointing to older commits.
 The VM runs a registered self-hosted Actions runner
 (`team12-ovh-vm`, installed as a systemd service) for wiki publishing from `main`.
 JSON validation runs on a GitHub-hosted runner for data changes on `main` and pull requests. VM access is

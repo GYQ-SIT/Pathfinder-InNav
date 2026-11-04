@@ -67,11 +67,7 @@ void UMobileSavedPageWidget::ChoosePlace(const FString& PlaceId)
 
 void UMobileSavedPageWidget::RemovePlace(const FString& PlaceId)
 {
-	FMobilePlace Place;
-	if (Source && Source->FindPlace(PlaceId, Place) && OnRemove)
-	{
-		OnRemove(Place);
-	}
+	if (Ids.Contains(PlaceId) && OnRemove) OnRemove(PlaceId);
 }
 
 void UMobileSavedPageWidget::AddRow(const FMobilePlace& Place)
@@ -90,7 +86,8 @@ void UMobileSavedPageWidget::AddRow(const FMobilePlace& Place)
 
 	UVerticalBox* Texts = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
 	Texts->AddChildToVerticalBox(MakeText(WidgetTree, FString(), Place.Name, 15.f, Ink, true));
-	Texts->AddChildToVerticalBox(MakeText(WidgetTree, FString(), Place.WithCode(Place.GroupLabel()), 11.f, Grey))->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
+	const FString Details = Place.SiteId.IsEmpty() ? Place.Description : Place.WithCode(Place.GroupLabel());
+	Texts->AddChildToVerticalBox(MakeText(WidgetTree, FString(), Details, 11.f, Grey))->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
 	UHorizontalBox* Info = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
 	Info->AddChildToHorizontalBox(IconSize)->SetVerticalAlignment(VAlign_Center);
 	UHorizontalBoxSlot* TextSlot = Info->AddChildToHorizontalBox(Texts);
@@ -105,7 +102,7 @@ void UMobileSavedPageWidget::AddRow(const FMobilePlace& Place)
 	TWeakObjectPtr<UMobileSavedPageWidget> WeakThis(this);
 	UMobileTapTarget* Open = CreateWidget<UMobileTapTarget>(this, UMobileTapTarget::StaticClass());
 	Open->Setup(InfoPad, Place.Id, FLinearColor::Transparent, 0.f);
-	Open->SetOnTapped([WeakThis](const FString& Id)
+	if (!Place.SiteId.IsEmpty()) Open->SetOnTapped([WeakThis](const FString& Id)
 	{
 		if (UMobileSavedPageWidget* Self = WeakThis.Get())
 		{
@@ -161,7 +158,14 @@ void UMobileSavedPageWidget::Refresh()
 			FMobilePlace Place;
 			if (Source->FindPlace(Id, Place))
 			{
-				ShownPlaces.Add(Place);
+				ShownPlaces.Add(MoveTemp(Place));
+			}
+			else
+			{
+				Place.Id = Id;
+				Place.Name = TEXT("Unavailable place");
+				Place.Description = TEXT("This place is no longer in the current data.");
+				ShownPlaces.Add(MoveTemp(Place));
 			}
 		}
 	}
@@ -189,7 +193,7 @@ void UMobileSavedPageWidget::Refresh()
 	}
 	for (const FString& SiteId : SiteOrder)
 	{
-		FString SiteName = SiteId;
+		FString SiteName = SiteId.IsEmpty() ? TEXT("Unavailable") : SiteId;
 		for (const FMobileSite& Site : Source->ListSites())
 		{
 			if (Site.Id == SiteId)

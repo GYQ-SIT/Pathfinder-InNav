@@ -11,6 +11,7 @@ See [the design notes](design/mobile-app-data-interface.md) for the screen contr
 - When opened from an editor session with a known project file, the phone view uses that project's current applied data, including unsaved edits. It does not switch editor buildings.
 - `-MobileProject="<project.json>"` selects one file explicitly and takes precedence over the editor session.
 - Missing data does not select the mock. An empty catalogue displays an explanatory message.
+- Authored floors above a legacy shell count remain visible and routable. When rooms share a mobile place ID, the validator flags the conflict and the app uses distinct floor-and-room IDs. A saved place that can no longer be resolved stays visible as unavailable and can be removed individually.
 
 `Data/buildings.json` contains the authored exterior and room data. `Data/map_extended.db` supplies campus footprints through the existing database loader; it has no authored rooms. Empty interiors remain empty. The adapter does not generate rooms, doors or routes to fill gaps in a project.
 

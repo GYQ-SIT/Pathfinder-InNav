@@ -17,24 +17,58 @@ on:
         required: true
 
 permissions:
-  contents: write
-  packages: read
+  contents: read
 
 concurrency:
   group: release-windows
   cancel-in-progress: false
 
-env:
-  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
-
 jobs:
-  release:
-    runs-on: [self-hosted, windows]
-    timeout-minutes: 180
+  verify:
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      commit: ${{ steps.tag.outputs.commit }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: refs/heads/main
+          fetch-depth: 0
+      - name: Verify the release tag
+        id: tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^m[0-9]-build-[a-zA-Z0-9]+([._-][a-zA-Z0-9]+)*$ ]]; then
+            echo 'Expected a milestone tag such as m2-build-1.' >&2
+            exit 1
+          fi
+          commit=$(git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}")
+          git merge-base --is-ancestor "$commit" HEAD
+          printf 'tag=%s\ncommit=%s\n' "$RELEASE_TAG" "$commit" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: verify
+    runs-on: [self-hosted, windows]
+    timeout-minutes: 180
+    permissions:
+      contents: write
+      packages: read
+    env:
+      RELEASE_TAG: ${{ needs.verify.outputs.tag }}
+    steps:
+      - name: Set the release output directory
+        shell: powershell
+        run: |
+          $path = Join-Path $env:RUNNER_TEMP "innavi-release-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "RELEASE_DIRECTORY=$path" -Encoding utf8
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.commit }}
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -52,20 +86,24 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Package the build (cook, stage, pak, zip)
-        shell: cmd
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package-windows.ps1 -Name "InNavi-%RELEASE_TAG%" -OutputDir "%RUNNER_TEMP%\release" -Version "%RELEASE_TAG%"
+        shell: powershell
+        run: ./scripts/package-windows.ps1 -Name "InNavi-$env:RELEASE_TAG" -OutputDir $env:RELEASE_DIRECTORY -Version $env:RELEASE_TAG
 
       - name: Start the packaged build once, without a window
-        shell: cmd
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke-test-package.ps1 -Zip "%RUNNER_TEMP%\release\InNavi-%RELEASE_TAG%.zip"
+        shell: powershell
+        run: ./scripts/smoke-test-package.ps1 -Zip (Join-Path $env:RELEASE_DIRECTORY "InNavi-$env:RELEASE_TAG.zip")
 
       - name: Publish the release
-        shell: cmd
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\publish-release.ps1 -Tag "%RELEASE_TAG%" -Zip "%RUNNER_TEMP%\release\InNavi-%RELEASE_TAG%.zip" -Repo "%GITHUB_REPOSITORY%" -Token "%GITHUB_TOKEN%"
+        shell: powershell
+        run: ./scripts/publish-release.ps1 -Tag $env:RELEASE_TAG -Zip (Join-Path $env:RELEASE_DIRECTORY "InNavi-$env:RELEASE_TAG.zip") -Repo $env:GITHUB_REPOSITORY -Token $env:GITHUB_TOKEN
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clean up
-        if: always()
-        shell: cmd
-        run: if exist "%RUNNER_TEMP%\release" rmdir /s /q "%RUNNER_TEMP%\release"
+        if: always() && env.RELEASE_DIRECTORY != ''
+        shell: powershell
+        run: |
+          $path = [IO.Path]::GetFullPath($env:RELEASE_DIRECTORY)
+          $parent = [IO.Path]::GetDirectoryName((Join-Path ([IO.Path]::GetFullPath($env:RUNNER_TEMP)) 'placeholder'))
+          if ([IO.Path]::GetDirectoryName($path) -ne $parent) { throw 'Invalid release directory.' }
+          if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }

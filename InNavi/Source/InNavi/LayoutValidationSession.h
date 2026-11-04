@@ -5,6 +5,7 @@
 #include "LayoutValidation.h"
 #include "Containers/Ticker.h"
 #include "UObject/Object.h"
+#include <atomic>
 #include "LayoutValidationSession.generated.h"
 
 class ABuildingGenerator;
@@ -57,8 +58,10 @@ private:
     int32 DataIssueCount = 0;
     void StopTicker();
     bool TickValidate(float DeltaTime);
+    void CancelDataCheck();
     TSharedPtr<FNavigationLayoutCheck> Check;
     TFuture<LayoutValidation::FReport> DataCheck;
+    TSharedPtr<std::atomic<bool>> DataCheckCancelled;
     uint64 BuildingRevision = 0;
     uint64 InteriorRevision = 0;
     FString RunScope;

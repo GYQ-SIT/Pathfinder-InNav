@@ -7,6 +7,7 @@
 #include "NavPlayerController.h"
 #include "PolyBuilding.h"
 #include "UiTestFixture.h"
+#include "WavFileLoader.h"
 
 #include "Dom/JsonObject.h"
 #include "Engine/GameViewportClient.h"
@@ -15,6 +16,7 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Serialization/JsonSerializer.h"
+#include "Serialization/Archive.h"
 #include "SQLiteDatabase.h"
 #include "UObject/Script.h"
 
@@ -429,6 +431,109 @@ bool FProjectInvalidShellTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectInvalidInteriorImportTest, "InNavi.Project.Robustness.InvalidInteriorImport", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FProjectInvalidInteriorImportTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	auto* Controller = Fixture.MakeController();
+	auto* Previous = Fixture.Generator->FindBuildingById(TEXT("E2"));
+	const FString Path = RobustnessTests::WriteTemporaryFile(TEXT(R"({
+		"buildings":[{"id":"B","name":"B","footprint":[[0,0],[1000,0],[1000,1000],[0,1000]],
+		"interior":{"floors":[{"level":1,"rooms":[{"id":"CannotDrop","name":"Room without geometry"}]}]}}]
+	})"), TEXT(".json"));
+	TestFalse(TEXT("a missing room footprint fails import"), Controller->TryLoadBuildingDataFromPathOrDatabase(Path));
+	TestTrue(TEXT("the original project stays open"), Fixture.Generator->FindBuildingById(TEXT("E2")) == Previous);
+	IFileManager::Get().Delete(*Path);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectRemoveLinkedBuildingTest, "InNavi.Project.Robustness.RemoveLinkedBuilding", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FProjectRemoveLinkedBuildingTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	auto* Controller = Fixture.MakeController();
+	Controller->StartNewProject();
+	const TArray<FVector2D> Outline = {{0,0},{1000,0},{1000,1000},{0,1000}};
+	Fixture.Generator->SpawnBuildingFromData(TEXT("Source"), TEXT("Source"), Outline, 1, 300, {0,0});
+	auto* Target = Fixture.Generator->SpawnBuildingFromData(TEXT("Target"), TEXT("Target"), Outline, 1, 300, {1000,0});
+	if (!TestNotNull(TEXT("the linked building exists"), Target)) return false;
+	TSharedPtr<FJsonObject> Data;
+	const FString Json = TEXT(R"({"floors":[{"level":1}],"entrances":[
+		{"id":"Main","kind":"main","level":1,"edge":0,"offset":100,"width":120},
+		{"id":"Link","kind":"link","connectsTo":"Target","level":1,"edge":1,"offset":100,"width":120}
+	]})");
+	FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Data);
+	Fixture.Generator->SetInteriorDataForBuilding(TEXT("Source"), Data);
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("Source"));
+	TestEqual(TEXT("both authored entrances load"), Fixture.Interior->GetEntrances().Num(), 2);
+	FString Error;
+	TestNotNull(TEXT("a room edit creates an undo step"), Fixture.Interior->CreateRoomFromFootprint(
+		{{300,300},{500,300},{500,500},{300,500}}, TEXT("Room"), TEXT("Room"), true, false, false, Error));
+	TestTrue(TEXT("the target can be removed"), Fixture.Generator->RemoveBuilding(*Target));
+	TestEqual(TEXT("the stored link is removed"), Fixture.Generator->GetStoredEntrances(TEXT("Source")).Num(), 1);
+	TestEqual(TEXT("the open interior keeps only the main entrance"), Fixture.Interior->GetEntrances().Num(), 1);
+	Fixture.Interior->SyncInteriorToBuildingGenerator();
+	TestEqual(TEXT("writing back the open interior cannot resurrect the link"), Fixture.Generator->GetStoredEntrances(TEXT("Source")).Num(), 1);
+	Fixture.Generator->SetInteriorDataForBuilding(TEXT("Source"), Data);
+	TestEqual(TEXT("restoring an old snapshot cannot resurrect the link"), Fixture.Generator->GetStoredEntrances(TEXT("Source")).Num(), 1);
+	TestNotNull(TEXT("the deleted ID is available again"), Fixture.Generator->SpawnBuildingFromData(TEXT("Target"), TEXT("New target"), Outline, 1, 300, {1000,0}));
+	TestTrue(TEXT("undo still works after the deletion"), Fixture.Interior->Undo());
+	TestEqual(TEXT("undo cannot link to the replacement building"), Fixture.Interior->GetEntrances().Num(), 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectSaveDuringRotationTest, "InNavi.Project.Robustness.SaveDuringRotation", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FProjectSaveDuringRotationTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	auto* Controller = Fixture.MakeController();
+	Controller->StartNewProject();
+	Fixture.Generator->SpawnBuildingFromData(TEXT("Rotation"), TEXT("Rotation"), {{0,0},{2200,0},{2200,1600},{0,1600}}, 2, 300, {0,0});
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("Rotation"));
+	const TArray<FVector2D> Original = {{100,100},{450,100},{450,450},{100,450}};
+	const TArray<FVector2D> Preview = {{700,500},{1100,500},{1100,750},{700,750}};
+	FString Error;
+	auto* Room = Fixture.Interior->CreateRoomFromFootprint(Original, TEXT("Rotated"), TEXT("Rotated"), true, false, false, Error);
+	if (!TestNotNull(TEXT("the room exists"), Room)) return false;
+	if (!TestFalse(TEXT("the lift is placed"), Fixture.Interior->PlaceConnectorNode(EInteriorNavNodeType::Elevator, {900,500}, {1,2}).IsEmpty())) return false;
+	Controller->SelectRoom(Room->RoomId);
+	Controller->StartRotateCW();
+	TestTrue(TEXT("the temporary room crosses the connector"), Controller->MoveRoomTo(Room->RoomId, Preview));
+	const FString Path = RobustnessTests::TemporaryFile(TEXT(".json"));
+	TestTrue(TEXT("save succeeds"), Controller->SaveCurrentProjectAs(Path));
+	TestTrue(TEXT("save reverts the blocked rotation"), Room->GetFootprint() == Original);
+	Controller->StopRotateCW();
+	Controller->LoadBuildingDataFromPath(Path);
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("Rotation"));
+	if (const auto* Loaded = Fixture.Interior->GetRoomById(TEXT("Rotated")); TestNotNull(TEXT("saved room reloads"), Loaded))
+		TestTrue(TEXT("the valid footprint was saved"), Loaded->GetFootprint() == Original);
+	IFileManager::Get().Delete(*Path);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectGeometryEditTest, "InNavi.Project.Robustness.GeometryEdits", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FProjectGeometryEditTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	Fixture.MakeController()->StartNewProject();
+	Fixture.Generator->SpawnBuildingFromData(TEXT("Notch"), TEXT("Notch"),
+		{{0,0},{1000,0},{1000,1000},{700,1000},{700,300},{300,300},{300,1000},{0,1000}}, 1, 300, {0,0});
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("Notch"));
+	FString Error;
+	AddExpectedError(TEXT("footprint extends outside"), EAutomationExpectedErrorFlags::Contains, 1);
+	TestNull(TEXT("a room cannot span a concave notch"), Fixture.Interior->CreateRoomFromFootprint(
+		{{150,600},{850,600},{850,800},{150,800}}, TEXT("Bridge"), TEXT("Bridge"), true, false, false, Error));
+	TestNull(TEXT("a wall cannot span the notch"), Fixture.Interior->CreateWallFromPoints({{150,600},{850,600}}, TEXT("BridgeWall"), Error));
+	const TArray<FVector2D> Left = {{100,100},{200,100},{200,200},{100,200}};
+	TestNotNull(TEXT("a valid room can be created"), Fixture.Interior->CreateRoomFromFootprint(Left, TEXT("Left"), TEXT("Left"), true, false, false, Error));
+	TestNotNull(TEXT("its neighbour can be created"), Fixture.Interior->CreateRoomFromFootprint(
+		{{220,100},{290,100},{290,200},{220,200}}, TEXT("Right"), TEXT("Right"), true, false, false, Error));
+	AddExpectedError(TEXT("wall overlaps existing room"), EAutomationExpectedErrorFlags::Contains, 1);
+	TestNull(TEXT("a wall cannot cut through two opposite corners"), Fixture.Interior->CreateWallFromPoints({Left[0], Left[2]}, TEXT("Diagonal"), Error));
+	TestFalse(TEXT("a resize cannot overlap a neighbouring room"), Fixture.Interior->ResizeRoom(TEXT("Left"), 180, 100));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectSaveDuringDragTest, "InNavi.Project.Robustness.SaveDuringDrag", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FProjectSaveDuringDragTest::RunTest(const FString& Parameters)
 {
@@ -461,6 +566,36 @@ bool FProjectSaveDuringDragTest::RunTest(const FString& Parameters)
 	if (auto* Loaded = Fixture.Interior->GetRoomById(TEXT("Moved")); TestNotNull(TEXT("the saved room reloads"), Loaded))
 		TestTrue(TEXT("the file contains the valid position"), Loaded->GetFootprint() == Original);
 	IFileManager::Get().Delete(*Path);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectWavBoundsTest, "InNavi.Audio.WavBounds", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FProjectWavBoundsTest::RunTest(const FString& Parameters)
+{
+	const FString Sample = FPaths::ProjectDir() / TEXT("Data/Audio/select_ui.wav");
+	TestNotNull(TEXT("a shipped WAV is still accepted"), LoadWavFileAsSoundWave(Sample, GetTransientPackage()));
+	const FString Oversized = FPaths::CreateTempFilename(FPlatformProcess::UserTempDir(), TEXT("InNavi-audio-"), TEXT(".wav"));
+	TUniquePtr<FArchive> Writer(IFileManager::Get().CreateFileWriter(*Oversized));
+	if (!TestTrue(TEXT("the test file can be opened"), Writer.IsValid())) return false;
+	Writer->Seek(64 * 1024 * 1024);
+	uint8 Byte = 0;
+	Writer->Serialize(&Byte, 1);
+	Writer.Reset();
+	AddExpectedError(TEXT("no larger than 64 MiB"), EAutomationExpectedErrorFlags::Contains, 1);
+	TestNull(TEXT("oversized audio is rejected before decoding"), LoadWavFileAsSoundWave(Oversized, GetTransientPackage()));
+	IFileManager::Get().Delete(*Oversized);
+
+	const TArray<uint8> EmptyWave = {
+		'R','I','F','F', 36,0,0,0, 'W','A','V','E', 'f','m','t',' ', 16,0,0,0,
+		1,0, 1,0, 0x40,0x1F,0,0, 0x80,0x3E,0,0, 2,0, 16,0, 'd','a','t','a', 0,0,0,0
+	};
+	const FString Empty = FPaths::CreateTempFilename(FPlatformProcess::UserTempDir(), TEXT("InNavi-empty-audio-"), TEXT(".wav"));
+	if (TestTrue(TEXT("an empty WAV can be written"), FFileHelper::SaveArrayToFile(EmptyWave, *Empty)))
+	{
+		AddExpectedError(TEXT("has no audio data"), EAutomationExpectedErrorFlags::Contains, 1);
+		TestNull(TEXT("an empty data chunk at the end is handled safely"), LoadWavFileAsSoundWave(Empty, GetTransientPackage()));
+	}
+	IFileManager::Get().Delete(*Empty);
 	return true;
 }
 

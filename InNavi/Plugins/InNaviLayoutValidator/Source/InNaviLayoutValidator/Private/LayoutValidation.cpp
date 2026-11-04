@@ -171,6 +171,8 @@ namespace LayoutValidation
 
         struct FReader
         {
+            explicit FReader(TFunctionRef<bool()> InShouldCancel) : ShouldCancel(InShouldCancel) {}
+            TFunctionRef<bool()> ShouldCancel;
             FReport Report;
             FContext C;
 
@@ -249,6 +251,7 @@ namespace LayoutValidation
                 double Area = 0;
                 for (int32 I = 0; I < Edges; ++I)
                 {
+                    if (ShouldCancel()) return {};
                     const auto A = Points[I], B = Points[(I + 1) % Points.Num()];
                     if (A.Equals(B, Epsilon)) Issue(TEXT("GEOMETRY_ZERO_EDGE"), TEXT("The footprint contains a zero-length edge."), TEXT("Remove repeated adjacent points."));
                     Area += A.X * B.Y - B.X * A.Y;
@@ -269,6 +272,7 @@ namespace LayoutValidation
                 const int32 Edges = bClosed ? Points.Num() : FMath::Max(0, Points.Num() - 1);
                 for (int32 I = 0; I < Edges; ++I)
                 {
+                    if (ShouldCancel()) return;
                     const auto A = Points[I], B = Points[(I + 1) % Points.Num()];
                     bFits &= Inside((A + B) * 0.5, Boundary);
                     for (int32 J = 0; J < Boundary.Num(); ++J) bFits &= !Crosses(A, B, Boundary[J], Boundary[(J + 1) % Boundary.Num()]);
@@ -295,7 +299,7 @@ namespace LayoutValidation
             {
                 const auto Base = C;
                 TSet<int32> FloorIds;
-                TSet<FString> RoomIds, NodeIds, EntranceIds;
+                TSet<FString> RoomIds, NavigationIds, NodeIds, EntranceIds;
                 TArray<FNode> Nodes;
                 TArray<FReference> References;
                 TArray<FRoomShape> Shapes;
@@ -303,6 +307,7 @@ namespace LayoutValidation
                 if (Floors.IsEmpty()) Issue(TEXT("INTERIOR_UNAUTHORED"), TEXT("This building has no authored floors."), TEXT("Author its interior before checking room reachability."), ESeverity::Info);
                 for (int32 I = 0; I < Floors.Num(); ++I)
                 {
+                    if (ShouldCancel()) return;
                     C = Base; C.Kind = EObjectKind::Floor; C.Path = Base.Path + FString::Printf(TEXT(".floors[%d]"), I);
                     const auto Floor = Object(Floors[I]); if (!Floor) continue;
                     C.Floor = Integer(Floor, TEXT("level"), 1);
@@ -314,12 +319,21 @@ namespace LayoutValidation
                     const auto Rooms = Array(Floor, TEXT("rooms"));
                     for (int32 R = 0; R < Rooms.Num(); ++R)
                     {
+                        if (ShouldCancel()) return;
                         C = FloorContext; C.Kind = EObjectKind::Room; C.Path += FString::Printf(TEXT(".rooms[%d]"), R);
                         const auto Room = Object(Rooms[R]); if (!Room) continue;
                         Id(Room, RoomIds); String(Room, TEXT("name")); String(Room, TEXT("roomType")); String(Room, TEXT("access")); Boolean(Room, TEXT("requireKey"), false);
+                        const FString NavigationId = String(Room, TEXT("navigationId"));
+                        if (!NavigationId.IsEmpty())
+                        {
+                            if (NavigationIds.Contains(NavigationId))
+                                Issue(TEXT("NAVIGATION_ID_DUPLICATE"), TEXT("Multiple rooms share the same mobile place ID."), TEXT("Assign a unique navigationId to each room."), ESeverity::Warning);
+                            NavigationIds.Add(NavigationId);
+                        }
                         const bool bClosed = Boolean(Room, TEXT("closed"), true);
                         const int32 IssuesBeforeShape = Report.Issues.Num();
                         const auto Points = Shape(Room, bClosed);
+                        if (ShouldCancel()) return;
                         if (bClosed && Report.Issues.Num() == IssuesBeforeShape) Shapes.Emplace(C, Points);
                         Containment(Points, bClosed, Boundary);
                         const auto RoomContext = C;
@@ -333,6 +347,7 @@ namespace LayoutValidation
                         // Overlaps are advisory: the authoring tools allow intentional overlap.
                         for (int32 O = 0; O < Openings.Num(); ++O) for (int32 P = O + 1; P < Openings.Num(); ++P)
                         {
+                            if (ShouldCancel()) return;
                             if (!Openings[O].IsValid() || !Openings[P].IsValid() || Openings[O]->Type != EJson::Object || Openings[P]->Type != EJson::Object) continue;
                             const auto A = Openings[O]->AsObject(), B = Openings[P]->AsObject();
                             int32 EA = 0, EB = 0; double OA = 0, OB = 0, WA = 0, WB = 0;
@@ -371,6 +386,7 @@ namespace LayoutValidation
                 }
                 for (int32 A = 0; A < Shapes.Num(); ++A) for (int32 B = A + 1; B < Shapes.Num(); ++B)
                 {
+                    if (ShouldCancel()) return;
                     if (Shapes[A].Context.Floor != Shapes[B].Context.Floor) continue;
                     if (RoomAreasOverlap(Shapes[A], Shapes[B]))
                     {
@@ -387,6 +403,7 @@ namespace LayoutValidation
                 }
                 for (const auto& Node : Nodes)
                 {
+                    if (ShouldCancel()) return;
                     C = Node.Context;
                     for (int32 Level : Node.Floors) if (!FloorIds.Contains(Level)) Issue(TEXT("CONNECTOR_FLOOR_MISSING"), TEXT("A connector refers to an unauthored floor."), TEXT("Author that floor or update the connector's served floors."));
                     if (Node.Type.IsEmpty() || Node.Type == TEXT("pathnode") || Node.Group.IsEmpty()) continue; // The planner supports legacy ungrouped connectors.
@@ -430,11 +447,17 @@ namespace LayoutValidation
 
     FReport ValidateProject(const TSharedPtr<FJsonObject>& Project)
     {
+        return ValidateProject(Project, [] { return false; });
+    }
+
+    FReport ValidateProject(const TSharedPtr<FJsonObject>& Project, TFunctionRef<bool()> ShouldCancel)
+    {
         using namespace Private;
-        FReader Reader;
+        if (ShouldCancel()) return {};
+        FReader Reader(ShouldCancel);
         if (!Project) { Reader.Invalid(TEXT("project object")); return Reader.Report; }
         const double Scale = Reader.Number(Project, TEXT("scale"), 1);
-        if (Scale <= 0) Reader.Invalid(TEXT("positive project scale"));
+        if (Scale <= KINDA_SMALL_NUMBER || Scale > TNumericLimits<float>::Max()) Reader.Invalid(TEXT("supported project scale"));
         if (Reader.Number(Project, TEXT("floorHeight"), 300) <= 0) Reader.Invalid(TEXT("floorHeight"));
         const int32 Version = Reader.Integer(Project, TEXT("version"), 0);
         if (Version < 0) Reader.Invalid(TEXT("version"));
@@ -444,6 +467,7 @@ namespace LayoutValidation
         TMap<FString, TSharedPtr<FJsonObject>> ById;
         for (int32 B = 0; B < Buildings.Num(); ++B)
         {
+            if (ShouldCancel()) return {};
             Reader.C = {}; Reader.C.Kind = EObjectKind::Building; Reader.C.Path = FString::Printf(TEXT("$.buildings[%d]"), B);
             const auto Building = Reader.Object(Buildings[B]); if (!Building) continue;
             Reader.Id(Building, Ids); Reader.C.Building = Reader.C.Id;
@@ -466,6 +490,7 @@ namespace LayoutValidation
         // Resolve link references after indexing every building. A reciprocal saved entrance is not required.
         for (int32 B = 0; B < Buildings.Num(); ++B)
         {
+            if (ShouldCancel()) return {};
             if (!Buildings[B].IsValid() || Buildings[B]->Type != EJson::Object) continue;
             const auto Building = Buildings[B]->AsObject();
             const TSharedPtr<FJsonObject>* Interior = nullptr;
@@ -484,6 +509,7 @@ namespace LayoutValidation
                 Reader.Issue(TEXT("ENTRANCE_BUILDING_MISSING"), TEXT("Link entrance refers to a missing building: ") + Target, TEXT("Choose an existing neighbouring building."));
             }
         }
+        if (ShouldCancel()) return {};
         Reader.Report.Fingerprint = Fingerprint(Project);
         Reader.Report.Sort();
         return Reader.Report;

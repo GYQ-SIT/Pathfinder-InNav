@@ -409,6 +409,7 @@ public:
 	// Returns true on success; false if the user cancelled the dialog or the save failed.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	bool SaveCurrentProject();
+	bool SaveCurrentProjectToNewLocation();
 
 	// Opens the OS "save file" dialog and returns the path picked (empty if cancelled). Doesn't save
 	// anything - SaveCurrentProject already calls this automatically when needed, so most UI never
@@ -1324,8 +1325,11 @@ private:
 	// same drag-start/drag-end split as MoveRoom/CommitRoomMove, but for a key-hold gesture instead
 	// of a mouse drag.
 	TArray<FVector2D> RotationStartFootprint;
+	TWeakObjectPtr<AInteriorRoom> RotationRoom;
 	void BeginRotationGestureIfNeeded();
 	void EndRotationGestureIfFinished();
+	void FinishRotationGesture();
+	void CommitRotationGesture();
 
 	// Backspace handler - wraps DeleteSelection() because key bindings require a void() signature.
 	void DeleteSelectionKeyHandler();

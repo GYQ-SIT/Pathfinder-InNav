@@ -1,6 +1,7 @@
 #include "WavFileLoader.h"
 
-#include "Misc/FileHelper.h"
+#include "HAL/FileManager.h"
+#include "Serialization/Archive.h"
 #include "Sound/SoundWaveProcedural.h"
 
 namespace
@@ -8,6 +9,7 @@ namespace
 	constexpr uint16 WaveFormatPcm = 1;
 	constexpr uint16 WaveFormatIeeeFloat = 3;
 	constexpr uint16 WaveFormatExtensible = 0xFFFE;
+	constexpr int64 MaxWaveFileBytes = 64 * 1024 * 1024;
 
 	uint32 ReadUInt32LE(const uint8* Data)
 	{
@@ -55,16 +57,30 @@ namespace
 
 USoundWaveProcedural* LoadWavFileAsSoundWave(const FString& FilePath, UObject* Outer)
 {
-	TArray<uint8> FileBytes;
-	if (!FFileHelper::LoadFileToArray(FileBytes, *FilePath))
+	TUniquePtr<FArchive> Reader(IFileManager::Get().CreateFileReader(*FilePath));
+	if (!Reader)
 	{
 		UE_LOG(LogTemp, Error, TEXT("LoadWavFileAsSoundWave: could not read '%s'"), *FilePath);
 		return nullptr;
 	}
+	const int64 Size = Reader->TotalSize();
+	if (Size < 12 || Size > MaxWaveFileBytes)
+	{
+		UE_LOG(LogTemp, Error, TEXT("LoadWavFileAsSoundWave: '%s' must be a WAV file no larger than 64 MiB"), *FilePath);
+		return nullptr;
+	}
+	TArray<uint8> FileBytes;
+	FileBytes.SetNumUninitialized(static_cast<int32>(Size));
+	Reader->Serialize(FileBytes.GetData(), Size);
+	if (Reader->IsError())
+	{
+		UE_LOG(LogTemp, Error, TEXT("LoadWavFileAsSoundWave: could not read '%s'"), *FilePath);
+		return nullptr;
+	}
+	Reader.Reset();
 
 	// RIFF header: "RIFF" (4) + chunk size (4) + "WAVE" (4) = 12 bytes minimum before any sub-chunk.
-	if (FileBytes.Num() < 12 ||
-		FileBytes[0] != 'R' || FileBytes[1] != 'I' || FileBytes[2] != 'F' || FileBytes[3] != 'F' ||
+	if (FileBytes[0] != 'R' || FileBytes[1] != 'I' || FileBytes[2] != 'F' || FileBytes[3] != 'F' ||
 		FileBytes[8] != 'W' || FileBytes[9] != 'A' || FileBytes[10] != 'V' || FileBytes[11] != 'E')
 	{
 		UE_LOG(LogTemp, Error, TEXT("LoadWavFileAsSoundWave: '%s' isn't a RIFF/WAVE file"), *FilePath);
@@ -81,14 +97,15 @@ USoundWaveProcedural* LoadWavFileAsSoundWave(const FString& FilePath, UObject* O
 	// Walks every sub-chunk rather than assuming "fmt " is always immediately followed by "data" -
 	// some export tools insert others ("LIST", "fact", ...) in between, or after.
 	int32 Offset = 12;
-	while (Offset + 8 <= FileBytes.Num())
+	while (Offset <= FileBytes.Num() - 8)
 	{
 		const uint8* ChunkId = &FileBytes[Offset];
 		const uint32 ChunkSize = ReadUInt32LE(&FileBytes[Offset + 4]);
 		const int32 ChunkDataStart = Offset + 8;
 		if (ChunkDataStart + (int64)ChunkSize > FileBytes.Num())
 		{
-			break; // Truncated/corrupt file - stop rather than read out of bounds.
+			UE_LOG(LogTemp, Error, TEXT("LoadWavFileAsSoundWave: truncated chunk in '%s'"), *FilePath);
+			return nullptr;
 		}
 
 		if (ChunkId[0] == 'f' && ChunkId[1] == 'm' && ChunkId[2] == 't' && ChunkId[3] == ' ' && ChunkSize >= 16)
@@ -111,15 +128,15 @@ USoundWaveProcedural* LoadWavFileAsSoundWave(const FString& FilePath, UObject* O
 		}
 		else if (ChunkId[0] == 'd' && ChunkId[1] == 'a' && ChunkId[2] == 't' && ChunkId[3] == 'a')
 		{
-			DataChunk = &FileBytes[ChunkDataStart];
+			DataChunk = FileBytes.GetData() + ChunkDataStart;
 			DataChunkSize = ChunkSize;
 		}
 
 		// Chunks are word-aligned - a chunk with an odd size is followed by one pad byte.
-		Offset = ChunkDataStart + ChunkSize + (ChunkSize & 1);
+		Offset = ChunkDataStart + static_cast<int32>(ChunkSize) + (ChunkSize & 1);
 	}
 
-	if (!DataChunk || NumChannels == 0 || SampleRate == 0 || BitsPerSample == 0)
+	if (!DataChunk || NumChannels == 0 || SampleRate == 0 || SampleRate > MAX_int32 || BitsPerSample == 0)
 	{
 		UE_LOG(LogTemp, Error, TEXT("LoadWavFileAsSoundWave: '%s' is missing a usable 'fmt '/'data' chunk"), *FilePath);
 		return nullptr;

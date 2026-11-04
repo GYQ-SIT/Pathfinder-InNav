@@ -215,6 +215,12 @@ bool ProjectLibrary::Rename(const FProjectLibraryEntry& Entry, const FString& Ne
 		OutError = TEXT("The name needs at least one letter or number.");
 		return false;
 	}
+	const ProjectFile::FMutationLock Lock;
+	if (!Lock.IsValid())
+	{
+		OutError = TEXT("Another editor is changing a project. Try again.");
+		return false;
+	}
 	const bool bSameFile = FPaths::GetCleanFilename(NewPath).Equals(Entry.FileName, ESearchCase::IgnoreCase);
 	if (!bSameFile && IFileManager::Get().FileExists(*NewPath))
 	{
@@ -253,6 +259,12 @@ bool ProjectLibrary::SoftDelete(const FProjectLibraryEntry& Entry, const FString
 		OutError = TEXT("The sample files that come with the project cannot be deleted.");
 		return false;
 	}
+	const ProjectFile::FMutationLock Lock;
+	if (!Lock.IsValid())
+	{
+		OutError = TEXT("Another editor is changing a project. Try again.");
+		return false;
+	}
 	if (!IFileManager::Get().FileExists(*Entry.FilePath))
 	{
 		OutError = TEXT("The project file is already gone.");
@@ -268,7 +280,7 @@ bool ProjectLibrary::SoftDelete(const FProjectLibraryEntry& Entry, const FString
 		const FString Suffix = Attempt == 0 ? Stamp : FString::Printf(TEXT("%s-%d"), *Stamp, Attempt + 1);
 		Target = DeletedFolder / FString::Printf(TEXT("%s (deleted %s).%s"), *FPaths::GetBaseFilename(Entry.FileName), *Suffix, *FPaths::GetExtension(Entry.FileName));
 	}
-	if (!IFileManager::Get().Move(*Target, *Entry.FilePath))
+	if (!ProjectFile::MoveWithoutReplacement(Entry.FilePath, Target))
 	{
 		OutError = TEXT("The project file could not be moved - it may be open in another program.");
 		return false;

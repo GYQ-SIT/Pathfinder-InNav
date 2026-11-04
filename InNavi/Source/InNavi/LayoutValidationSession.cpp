@@ -89,7 +89,11 @@ void ULayoutValidationSession::BeginValidate(const FString& ScopeBuildingId, boo
     if (bAsync)
     {
         // The worker sees only detached JSON. Building actors and route checks stay on the game thread.
-        DataCheck = Async(EAsyncExecution::ThreadPool, [Snapshot]() { return LayoutValidation::ValidateProject(Snapshot); });
+        DataCheckCancelled = MakeShared<std::atomic<bool>>(false);
+        DataCheck = Async(EAsyncExecution::ThreadPool, [Snapshot, Cancelled = DataCheckCancelled]()
+        {
+            return LayoutValidation::ValidateProject(Snapshot, [&Cancelled] { return Cancelled->load(); });
+        });
         bRunning = true;
         return;
     }
@@ -134,6 +138,7 @@ bool ULayoutValidationSession::StepValidate(double BudgetSeconds)
         if (!DataCheck.IsReady() && BudgetSeconds != TNumericLimits<double>::Max()) return false;
         Report = DataCheck.Get();
         DataCheck = {};
+        DataCheckCancelled.Reset();
         BeginRouteChecks();
         return !bRunning;
     }
@@ -145,7 +150,7 @@ bool ULayoutValidationSession::StepValidate(double BudgetSeconds)
 void ULayoutValidationSession::FinishValidate()
 {
     StopTicker();
-    DataCheck = {};
+    CancelDataCheck();
     Check.Reset(); bRunning = false;
     RouteIssues.Reset();
     for (int32 I = DataIssueCount; I < Report.Issues.Num(); ++I) RouteIssues.Add(Report.Issues[I]);
@@ -157,9 +162,16 @@ void ULayoutValidationSession::CancelValidate()
 {
     StopTicker();
     if (!bRunning) return;
-    DataCheck = {};
+    CancelDataCheck();
     Check.Reset(); bRunning = false;
     Report = {}; bHasReport = false; ++Generation;
+}
+
+void ULayoutValidationSession::CancelDataCheck()
+{
+    if (DataCheckCancelled) DataCheckCancelled->store(true);
+    DataCheckCancelled.Reset();
+    DataCheck = {};
 }
 
 float ULayoutValidationSession::GetProgress() const { return bRunning && Check ? Check->GetProgress() : bHasReport ? 1.f : 0.f; }
@@ -184,6 +196,7 @@ bool ULayoutValidationSession::TickValidate(float DeltaTime)
 void ULayoutValidationSession::BeginDestroy()
 {
     StopTicker();
+    CancelDataCheck();
     Super::BeginDestroy();
 }
 

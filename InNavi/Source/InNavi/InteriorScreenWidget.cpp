@@ -635,6 +635,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		FileNewButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileNewClicked);
 		UButton* FileLoadButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileLoad"), TEXT("Load"));
 		FileLoadButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileLoadClicked);
+		UButton* FileSaveAsButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileSaveAs"), TEXT("Save As"));
+		FileSaveAsButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileSaveAsClicked);
 		UButton* FileGenerateFloorButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileGenerateFloor"), TEXT("Generate floor"));
 		FileGenerateFloorButton->SetToolTip(MakeToolTipWidget(TEXT("Fill this floor with rooms along its outer wall and a core beside each door")));
 		FileGenerateFloorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileGenerateFloorClicked);
@@ -3710,6 +3712,12 @@ void UInteriorScreenWidget::OnFileGenerateFloorClicked()
 		FString Message;
 		PC->GenerateFloorForActiveFloor(Message);
 	}
+}
+
+void UInteriorScreenWidget::OnFileSaveAsClicked()
+{
+	CloseMenuDropdowns();
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) PC->SaveCurrentProjectToNewLocation();
 }
 
 void UInteriorScreenWidget::OnFileLoadClicked()

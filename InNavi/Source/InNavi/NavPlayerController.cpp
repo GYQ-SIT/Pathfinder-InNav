@@ -29,6 +29,7 @@
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
+#include "ProjectFile.h"
 #include "Serialization/JsonSerializer.h"
 #if PLATFORM_DESKTOP
 #include "DesktopPlatformModule.h"
@@ -1566,6 +1567,7 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 
 void ANavPlayerController::SelectRoom(const FString& RoomId)
 {
+	if (SelectedRoomId != RoomId) FinishRotationGesture();
 	SelectEntrance(FString());
 	// Tracked (rather than an early-return once SelectedRoomId itself is unchanged) so
 	// RefreshSelectionHighlight still fires when this call's only real effect was clearing a
@@ -1602,6 +1604,7 @@ void ANavPlayerController::SelectRoom(const FString& RoomId)
 
 void ANavPlayerController::SelectDoor(const FString& RoomId, const FString& DoorId)
 {
+	FinishRotationGesture();
 	SelectEntrance(FString());
 	if (!SelectedRoomId.IsEmpty())
 	{
@@ -1622,6 +1625,7 @@ void ANavPlayerController::SelectDoor(const FString& RoomId, const FString& Door
 
 void ANavPlayerController::SelectConnector(const FString& GroupId)
 {
+	if (SelectedConnectorGroupId != GroupId) FinishRotationGesture();
 	SelectEntrance(FString());
 	// See SelectRoom's own comment on why this is tracked rather than an early return.
 	bool bChanged = false;
@@ -2096,6 +2100,7 @@ void ANavPlayerController::SelectEntrance(const FString& EntranceId, const FStri
 	}
 	if (!EntranceId.IsEmpty())
 	{
+		FinishRotationGesture();
 		// A door in the outer wall is selected on its own, like a room, a door or a connector.
 		if (!SelectedRoomId.IsEmpty())
 		{
@@ -2677,6 +2682,7 @@ int32 ANavPlayerController::LoadBuildingData(const FString& FilePath, bool bData
 
 void ANavPlayerController::StartNewProject()
 {
+	FinishRotationGesture();
 	SetInteriorInspectionEnabled(false);
 	SetIn3DPreviewMode(false);
 	ClearCampusInteriorPreview();
@@ -4143,19 +4149,32 @@ bool ANavPlayerController::CreateNewProject(const FString& Name, const FString& 
 		return false;
 	}
 
+	const auto Project = MakeShared<FJsonObject>();
+	Project->SetNumberField(TEXT("version"), ABuildingGenerator::ProjectFileVersion);
+	Project->SetStringField(TEXT("projectName"), TrimmedName);
+	const FString TrimmedDescription = Description.TrimStartAndEnd();
+	if (!TrimmedDescription.IsEmpty()) Project->SetStringField(TEXT("description"), TrimmedDescription);
+	Project->SetArrayField(TEXT("buildings"), {});
+	FString Text;
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(FilePath), true);
-	StartNewProject();
-	Generator->SetProjectInfo(TrimmedName, Description.TrimStartAndEnd());
-	if (!SaveCurrentProjectAs(FilePath))
+	if (!FJsonSerializer::Serialize(Project, TJsonWriterFactory<>::Create(&Text)) || !ProjectFile::WriteText(FilePath, Text, false))
 	{
 		OutError = TEXT("The project file could not be written - check that the Data folder can be written to.");
 		return false;
 	}
+	if (LoadBuildingData(FilePath, false) == INDEX_NONE)
+	{
+		OutError = TEXT("The project file was created but could not be opened.");
+		return false;
+	}
+	NextNewBuildingIndex = 1;
+	OnProjectSaved.Broadcast();
 	return true;
 }
 
 void ANavPlayerController::RestoreExteriorCameraView()
 {
+	FinishRotationGesture();
 	// Leaving interior editing entirely (any Back path) needs to unwind 3D preview mode first if it
 	// was left active - otherwise SetOtherBuildingsHidden(true)'s hide never gets undone (every other
 	// building stays hidden even back on the exterior cluster view) and SetIgnoreMoveInput/
@@ -4248,15 +4267,15 @@ bool ANavPlayerController::SaveCurrentProject()
 		{
 			OnActionFailed.Broadcast(TEXT("This project uses a newer format. Choose a different file name to save a compatible copy."), EActionFailureSeverity::Warning);
 		}
-		const FString ChosenPath = BrowseForSaveLocation();
-		if (ChosenPath.IsEmpty())
-		{
-			// User cancelled the dialog - not a failure, nothing to report.
-			return false;
-		}
-		return SaveCurrentProjectAs(ChosenPath);
+		return SaveCurrentProjectToNewLocation();
 	}
 	return SaveCurrentProjectAs(CurrentProjectFilePath);
+}
+
+bool ANavPlayerController::SaveCurrentProjectToNewLocation()
+{
+	const FString Path = BrowseForSaveLocation();
+	return !Path.IsEmpty() && SaveCurrentProjectAs(Path);
 }
 
 FString ANavPlayerController::BrowseForSaveLocation()
@@ -4305,6 +4324,7 @@ FString ANavPlayerController::BrowseForSaveLocation()
 
 bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
 {
+	FinishRotationGesture();
 	if (bIsDragging3DRoom) OnLeftMouseUp3DEdit();
 	for (TObjectIterator<UInteriorFloorPlanWidget> It; It; ++It)
 	{
@@ -4758,6 +4778,7 @@ int32 ANavPlayerController::LoadInteriorInternal(const FString& BuildingId, bool
 		return -1;
 	}
 
+	FinishRotationGesture();
 	// Switching straight to a different building's interior (e.g. via the building switcher) while
 	// still in 3D preview mode for the PREVIOUS building would otherwise leave that previous building
 	// hidden forever (SetOtherBuildingsHidden's hide never gets undone) and move/look input still
@@ -5273,10 +5294,11 @@ void ANavPlayerController::BeginRotationGestureIfNeeded()
 		return;
 	}
 
-	for (const AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
+	for (AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
 	{
 		if (Room && Room->RoomId == SelectedRoomId)
 		{
+			RotationRoom = Room;
 			RotationStartFootprint = Room->GetFootprint();
 			break;
 		}
@@ -5286,21 +5308,27 @@ void ANavPlayerController::BeginRotationGestureIfNeeded()
 void ANavPlayerController::EndRotationGestureIfFinished()
 {
 	if (bInteriorInspectionEnabled) return;
-	if (!bRotatingCCW && !bRotatingCW &&
-		!SelectedConnectorGroupId.IsEmpty() &&
-		InteriorGen)
+	if (!bRotatingCCW && !bRotatingCW) CommitRotationGesture();
+}
+
+void ANavPlayerController::FinishRotationGesture()
+{
+	if (!bRotatingCCW && !bRotatingCW) return;
+	bRotatingCCW = bRotatingCW = false;
+	CommitRotationGesture();
+}
+
+void ANavPlayerController::CommitRotationGesture()
+{
+	if (AInteriorRoom* Room = RotationRoom.Get(); Room && InteriorGen && InteriorGen->GetRoomById(Room->RoomId) == Room)
+	{
+		InteriorGen->CommitRoomRotation(Room->RoomId, RotationStartFootprint);
+	}
+	else if (InteriorGen && !SelectedConnectorGroupId.IsEmpty())
 	{
 		InteriorGen->RecordHistorySnapshot();
-		return;
 	}
-	// Only commit once both keys are up - releasing one while the other is still held just means
-	// switching direction mid-gesture, not the end of it.
-	if (bRotatingCCW || bRotatingCW || SelectedRoomId.IsEmpty() || !InteriorGen || RotationStartFootprint.Num() == 0)
-	{
-		return;
-	}
-
-	InteriorGen->CommitRoomRotation(SelectedRoomId, RotationStartFootprint);
+	RotationRoom.Reset();
 	RotationStartFootprint.Reset();
 }
 

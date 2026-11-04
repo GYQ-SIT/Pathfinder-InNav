@@ -12,7 +12,6 @@
 #include "NavigationSearchUtils.h"
 #include "PolyBuilding.h"
 #include "ProjectFile.h"
-#include "HAL/CriticalSection.h"
 #include "RoadSegmentActor.h"
 #include "POIMarkerActor.h"
 #include "ContextBuildingActor.h"
@@ -202,6 +201,59 @@ static bool ReadBuildingProjectPoint(const TSharedPtr<FJsonValue>& Value, FVecto
 	return Value && Value->TryGetArray(Pair) && Pair->Num() >= 2
 		&& (*Pair)[0] && (*Pair)[0]->Type == EJson::Number && (*Pair)[0]->TryGetNumber(Point.X) && FMath::IsFinite(Point.X)
 		&& (*Pair)[1] && (*Pair)[1]->Type == EJson::Number && (*Pair)[1]->TryGetNumber(Point.Y) && FMath::IsFinite(Point.Y);
+}
+
+static bool ReadProjectRecords(const FJsonObject& Owner, const TCHAR* Field, TArray<TSharedPtr<FJsonObject>>& Out)
+{
+	Out.Reset();
+	if (!Owner.HasField(Field)) return true;
+	const TArray<TSharedPtr<FJsonValue>>* Records = nullptr;
+	if (!Owner.TryGetArrayField(Field, Records)) return false;
+	for (const auto& Value : *Records)
+	{
+		const TSharedPtr<FJsonObject>* Record = nullptr;
+		if (!Value || !Value->TryGetObject(Record) || !Record->IsValid()) return false;
+		Out.Add(*Record);
+	}
+	return true;
+}
+
+static bool CanLoadInteriorRecords(const FJsonObject& Building)
+{
+	if (!Building.HasField(TEXT("interior"))) return true;
+	const TSharedPtr<FJsonObject>* Interior = nullptr;
+	if (!Building.TryGetObjectField(TEXT("interior"), Interior) || !Interior->IsValid()) return false;
+
+	TArray<TSharedPtr<FJsonObject>> Floors, Rooms, Records;
+	if (!ReadProjectRecords(**Interior, TEXT("floors"), Floors)
+		|| !ReadProjectRecords(**Interior, TEXT("entrances"), Records)) return false;
+	TSet<int32> Levels;
+	TSet<FString> RoomIds;
+	for (const auto& Floor : Floors)
+	{
+		int32 Level = 1;
+		Floor->TryGetNumberField(TEXT("level"), Level);
+		if (Levels.Contains(Level) || !ReadProjectRecords(*Floor, TEXT("rooms"), Rooms)
+			|| !ReadProjectRecords(*Floor, TEXT("navNodes"), Records)) return false;
+		Levels.Add(Level);
+		for (const auto& Room : Rooms)
+		{
+			FString Id;
+			bool bClosed = true;
+			const TArray<TSharedPtr<FJsonValue>>* Footprint = nullptr;
+			if (!Room->TryGetStringField(TEXT("id"), Id) || Id.TrimStartAndEnd().IsEmpty() || RoomIds.Contains(Id)
+				|| (Room->HasField(TEXT("closed")) && !Room->TryGetBoolField(TEXT("closed"), bClosed))
+				|| !Room->TryGetArrayField(TEXT("footprint"), Footprint) || Footprint->Num() < (bClosed ? 3 : 2)
+				|| !ReadProjectRecords(*Room, TEXT("openings"), Records)) return false;
+			for (const auto& Value : *Footprint)
+			{
+				FVector2D Point;
+				if (!ReadBuildingProjectPoint(Value, Point)) return false;
+			}
+			RoomIds.Add(Id);
+		}
+	}
+	return true;
 }
 
 static TSharedPtr<FJsonObject> ReadBuildingProjectFile(const FString& FilePath, FString& OutProblem, FString* OutRevision = nullptr)
@@ -980,8 +1032,24 @@ void ABuildingGenerator::HandleBuildingDestroyed(AActor* Actor)
 	{
 		BuildingsById.Remove(Building->BuildingId);
 		UsedBuildingIds.Remove(Building->BuildingId);
+		RemovedBuildingIds.Add(Building->BuildingId);
 		InteriorDataById.Remove(Building->BuildingId);
 		BuildingBaselines.Remove(Building->BuildingId);
+		for (auto& Pair : InteriorDataById) Pair.Value = WithoutRemovedBuildingLinks(Pair.Value);
+		for (auto& Pair : BuildingBaselines)
+		{
+			FBuildingBaseline& Baseline = Pair.Value;
+			if (!Baseline.bHadInterior) continue;
+			TSharedPtr<FJsonObject> Snapshot;
+			if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Baseline.InteriorJson), Snapshot)) continue;
+			const auto Updated = WithoutRemovedBuildingLinks(Snapshot);
+			if (Updated == Snapshot) continue;
+			FString Text;
+			if (FJsonSerializer::Serialize(Updated.ToSharedRef(), TJsonWriterFactory<>::Create(&Text)))
+				Baseline.InteriorJson = MoveTemp(Text);
+		}
+		RefreshWallOpenings();
+		OnBuildingRemoved.Broadcast(Building->BuildingId);
 		++BuildingResultsRevision;
 		MarkGroundDirty();
 		NotifyNavigationLayoutChanged();
@@ -1207,6 +1275,7 @@ APolyBuilding* ABuildingGenerator::SpawnBuildingFromData(const FString& Id, cons
 		NewBuilding->BuildingName = Name;
 		NewBuilding->BuildFromFootprint(Footprint, Scale, Offset, FloorCount, FloorHeight, !bNavigationGeometryOnly);
 		UsedBuildingIds.Add(Id);
+		RemovedBuildingIds.Remove(Id);
 		BuildingsById.Add(Id, NewBuilding);
 		NewBuilding->OnFloorCountChanged.AddUObject(this, &ABuildingGenerator::HandleBuildingFloorCountChanged);
 		NewBuilding->OnDestroyed.AddDynamic(this, &ABuildingGenerator::HandleBuildingDestroyed);
@@ -1305,14 +1374,12 @@ bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath, FString& O
 {
 	OutProblem.Reset();
 	// The revision check and replacement are one operation for cooperating editor instances.
-#if PLATFORM_DESKTOP
-	FSystemWideCriticalSection SaveLock(TEXT("InNavi.ProjectSave"), FTimespan::FromSeconds(2));
+	const ProjectFile::FMutationLock SaveLock;
 	if (!SaveLock.IsValid())
 	{
 		OutProblem = TEXT("Another editor is saving a project. Try again.");
 		return false;
 	}
-#endif
 	const FString FullPath = FPaths::ConvertRelativePathToFull(FilePath);
 	const bool bCheckRevision = !ProjectRevision.IsEmpty() && FPaths::IsSamePath(ProjectRevisionPath, FullPath);
 	FString CurrentRevision;
@@ -1420,9 +1487,31 @@ TSharedPtr<FJsonObject> ABuildingGenerator::GetInteriorDataForBuilding(const FSt
 
 void ABuildingGenerator::SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData, bool bNotifyNavigation)
 {
-	InteriorDataById.Add(BuildingId, InteriorData);
+	InteriorDataById.Add(BuildingId, WithoutRemovedBuildingLinks(InteriorData));
 	RefreshWallOpenings();
 	if (bNotifyNavigation) NotifyNavigationLayoutChanged();
+}
+
+TSharedPtr<FJsonObject> ABuildingGenerator::WithoutRemovedBuildingLinks(const TSharedPtr<FJsonObject>& Interior) const
+{
+	const TArray<TSharedPtr<FJsonValue>>* Stored = nullptr;
+	if (!Interior || !Interior->TryGetArrayField(TEXT("entrances"), Stored)) return Interior;
+	const auto IsRemovedLink = [this](const TSharedPtr<FJsonValue>& Value)
+	{
+		const TSharedPtr<FJsonObject>* Door = nullptr;
+		FString Kind, Target;
+		return Value && Value->TryGetObject(Door) && Door->IsValid()
+			&& (*Door)->TryGetStringField(TEXT("kind"), Kind) && Kind.Equals(TEXT("link"), ESearchCase::IgnoreCase)
+			&& (*Door)->TryGetStringField(TEXT("connectsTo"), Target)
+			&& RemovedBuildingIds.Contains(Target);
+	};
+	if (!Stored->ContainsByPredicate(IsRemovedLink)) return Interior;
+	auto Updated = MakeShared<FJsonObject>(*Interior);
+	auto Remaining = *Stored;
+	Remaining.RemoveAll(IsRemovedLink);
+	if (Remaining.IsEmpty()) Updated->RemoveField(TEXT("entrances"));
+	else Updated->SetArrayField(TEXT("entrances"), MoveTemp(Remaining));
+	return Updated;
 }
 
 TArray<FInteriorEntrance> ABuildingGenerator::GetStoredEntrances(const FString& BuildingId) const
@@ -1673,6 +1762,17 @@ int32 ABuildingGenerator::ReplaceBuildingsFromPath(const FString& Path, bool bDa
 			return INDEX_NONE;
 		}
 		if (!CheckProjectFloorLimits(*Buildings, OutProblem)) return INDEX_NONE;
+		for (const auto& Value : *Buildings)
+		{
+			const TSharedPtr<FJsonObject>* Building = nullptr;
+			if (Value && Value->TryGetObject(Building) && Building->IsValid() && !CanLoadInteriorRecords(**Building))
+			{
+				FString Id;
+				(*Building)->TryGetStringField(TEXT("id"), Id);
+				OutProblem = FString::Printf(TEXT("Building '%s' has interior records the editor cannot load safely. Correct the file before opening it."), *Id);
+				return INDEX_NONE;
+			}
+		}
 		ExpectedCount = Buildings->Num();
 	}
 
@@ -1747,6 +1847,7 @@ void ABuildingGenerator::ClearAllBuildings()
 	BuildingsById.Empty();
 	++BuildingResultsRevision;
 	UsedBuildingIds.Empty();
+	RemovedBuildingIds.Empty();
 	InteriorDataById.Empty();
 	BuildingBaselines.Empty();
 	Scale = 1.f;
@@ -1830,7 +1931,7 @@ void ABuildingGenerator::RestoreBuildingBaselines()
 			const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Baseline.InteriorJson);
 			if (FJsonSerializer::Deserialize(Reader, Restored) && Restored.IsValid())
 			{
-				InteriorDataById.Add(Pair.Key, Restored);
+				InteriorDataById.Add(Pair.Key, WithoutRemovedBuildingLinks(Restored));
 			}
 		}
 		else

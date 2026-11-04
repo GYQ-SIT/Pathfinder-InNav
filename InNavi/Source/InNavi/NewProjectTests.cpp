@@ -81,6 +81,12 @@ bool FNewProjectCreateTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("with its name"), Fixture.Generator->GetProjectName(), FString(TEXT("Campus Navigation")));
 	TestEqual(TEXT("and its description"), Fixture.Generator->GetProjectDescription(), FString(TEXT("Demo of the flow")));
 
+	// A file in place of the destination directory forces the creation write to fail.
+	Controller->SetProjectsDirectoryOverrideForTests(File);
+	TestFalse(TEXT("creation fails when its directory cannot be written"), Controller->CreateNewProject(TEXT("Blocked"), FString(), Error));
+	TestEqual(TEXT("a failed creation keeps the current file"), Controller->GetCurrentProjectFilePath(), File);
+	TestEqual(TEXT("and keeps the current project"), Fixture.Generator->GetProjectName(), FString(TEXT("Campus Navigation")));
+
 	// A project saved with buildings keeps its name too.
 	Controller->StartNewProject();
 	TestEqual(TEXT("a fresh New starts without a name"), Fixture.Generator->GetProjectName(), FString());
