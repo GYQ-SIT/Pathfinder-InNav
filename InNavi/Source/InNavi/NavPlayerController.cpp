@@ -2601,136 +2601,70 @@ FString ANavPlayerController::BrowseForBuildingDataFile()
 
 int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 {
-	SetInteriorInspectionEnabled(false);
-	if (!Generator)
-	{
-		UE_LOG(LogTemp, Error, TEXT("LoadBuildingDataFromPath: no BuildingGenerator found in the level"));
-		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."), EActionFailureSeverity::Warning);
-		return 0;
-	}
-
-	if (FilePath.IsEmpty())
-	{
-		OnActionFailed.Broadcast(TEXT("No file selected - click Browse first."), EActionFailureSeverity::Warning);
-		return 0;
-	}
-	// A file that cannot be loaded is found out here, before anything is cleared: what is open stays open.
-	FString Problem;
-	if (!ABuildingGenerator::IsLoadableProjectFile(FilePath, Problem))
-	{
-		OnActionFailed.Broadcast(Problem, EActionFailureSeverity::Critical);
-		return 0;
-	}
-	if (NavigationPanel)
-	{
-		NavigationPanel->ClearAll();
-		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
-	}
-
-	if (InteriorGen)
-	{
-		InteriorGen->ClearLoadedInterior();
-	}
-	Generator->ClearAllBuildings();
-	// A previous database-loaded project could have left roads/POIs/context buildings behind -
-	// LoadBuildingsFromFile (below) has no concept of any of them, so nothing else would clear them.
-	Generator->ClearAllRoadsAndPOIs();
-	Generator->ClearAllContextBuildings();
-	// ClearAllBuildings() just destroyed whatever SelectedBuilding was pointing at - same reasoning as
-	// StartNewProject's own reset, just missing here until now (SelectBuildingUnderCursor/
-	// GetSelectedBuildingId would otherwise dereference a stale pointer if called right after an Open).
-	SelectedBuilding = nullptr;
-
-	const int32 Count = Generator->LoadBuildingsFromFile(FilePath);
-	UE_LOG(LogTemp, Warning, TEXT("LoadBuildingDataFromPath: loaded %d buildings from %s"), Count, *FilePath);
-	if (Count == 0 && !ABuildingGenerator::IsEmptyProjectFile(FilePath))
-	{
-		OnActionFailed.Broadcast(TEXT("No buildings were loaded from that file - check that it matches the expected JSON format."), EActionFailureSeverity::Critical);
-	}
-	else
-	{
-		// This file is now what Ctrl+S saves back to. (A project that was just created has no buildings yet and is
-		// still a good file.)
-		CurrentProjectFilePath = FilePath;
-		bHasUnsavedChanges = false;
-		FocusCameraOnAllBuildings();
-	}
-	// Rebuild the campus X-ray interior preview after loading buildings.
-	BuildCampusInteriorPreview();
-	return Count;
+	return FMath::Max(0, LoadBuildingData(FilePath, false));
 }
 
 int32 ANavPlayerController::LoadBuildingDataFromDatabase(const FString& DatabasePath)
 {
-	SetInteriorInspectionEnabled(false);
-	if (!Generator)
-	{
-		UE_LOG(LogTemp, Error, TEXT("LoadBuildingDataFromDatabase: no BuildingGenerator found in the level"));
-		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."), EActionFailureSeverity::Warning);
-		return 0;
-	}
-
-	if (DatabasePath.IsEmpty())
-	{
-		OnActionFailed.Broadcast(TEXT("No database file selected."), EActionFailureSeverity::Warning);
-		return 0;
-	}
-	// Same as for a project file: a database that cannot be loaded leaves what is open as it is.
-	FString Problem;
-	if (!ABuildingGenerator::IsLoadableDatabase(DatabasePath, Problem))
-	{
-		OnActionFailed.Broadcast(Problem, EActionFailureSeverity::Critical);
-		return 0;
-	}
-	if (NavigationPanel)
-	{
-		NavigationPanel->ClearAll();
-		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
-	}
-
-	if (InteriorGen)
-	{
-		InteriorGen->ClearLoadedInterior();
-	}
-	Generator->ClearAllBuildings();
-	SelectedBuilding = nullptr;
-
-	const int32 Count = Generator->LoadBuildingsFromDatabase(DatabasePath);
-	UE_LOG(LogTemp, Warning, TEXT("LoadBuildingDataFromDatabase: loaded %d buildings from %s"), Count, *DatabasePath);
-	if (Count == 0)
-	{
-		OnActionFailed.Broadcast(TEXT("No buildings were loaded from that database - check that it has 'buildings'/'building_nodes' tables."), EActionFailureSeverity::Critical);
-	}
-	else
-	{
-		// Deliberately NOT setting CurrentProjectFilePath to DatabasePath - Ctrl+S writes JSON via
-		// SaveBuildingsToFile, and pointing that at the .db file would overwrite it with JSON text.
-		// It is emptied, too: left as it was it would still be the JSON file opened before, and Ctrl+S would write the
-		// campus of this database into it.
-		// A database-loaded project has no "file to save back to" yet; the existing Save-As flow
-		// (whatever prompts for a path when CurrentProjectFilePath is empty) is what should kick in if
-		// the user wants to persist it - interiors drawn afterward still save fine once they do, since
-		// SaveBuildingsToFile serializes whatever APolyBuilding actors currently exist regardless of
-		// how they were spawned.
-		bHasUnsavedChanges = false;
-		CurrentProjectFilePath.Empty();
-		// Best-effort, first-look visualization (see LoadRoadsAndPOIsFromDatabase's own comment on
-		// scope) - a failure here shouldn't block the buildings that DID load from showing up.
-		Generator->LoadRoadsAndPOIsFromDatabase(DatabasePath);
-		Generator->LoadContextBuildingsFromDatabase(DatabasePath);
-		FocusCameraOnAllBuildings();
-	}
-	BuildCampusInteriorPreview();
-	return Count;
+	return FMath::Max(0, LoadBuildingData(DatabasePath, true));
 }
 
 int32 ANavPlayerController::LoadBuildingDataFromPathOrDatabase(const FString& FilePath)
 {
-	if (FPaths::GetExtension(FilePath).Equals(TEXT("db"), ESearchCase::IgnoreCase))
+	return FMath::Max(0, LoadBuildingData(FilePath, FPaths::GetExtension(FilePath).Equals(TEXT("db"), ESearchCase::IgnoreCase)));
+}
+
+bool ANavPlayerController::TryLoadBuildingDataFromPathOrDatabase(const FString& FilePath)
+{
+	return LoadBuildingData(FilePath, FPaths::GetExtension(FilePath).Equals(TEXT("db"), ESearchCase::IgnoreCase)) != INDEX_NONE;
+}
+
+int32 ANavPlayerController::LoadBuildingData(const FString& FilePath, bool bDatabase)
+{
+	if (!Generator)
 	{
-		return LoadBuildingDataFromDatabase(FilePath);
+		UE_LOG(LogTemp, Error, TEXT("LoadBuildingData: no BuildingGenerator found in the level"));
+		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."), EActionFailureSeverity::Warning);
+		return INDEX_NONE;
 	}
-	return LoadBuildingDataFromPath(FilePath);
+	if (FilePath.IsEmpty())
+	{
+		OnActionFailed.Broadcast(TEXT("No file selected."), EActionFailureSeverity::Warning);
+		return INDEX_NONE;
+	}
+
+	FString Problem;
+	const int32 Count = Generator->ReplaceBuildingsFromPath(FilePath, bDatabase, [this]()
+	{
+		SetInteriorInspectionEnabled(false);
+		if (InteriorGen && !InteriorGen->GetLoadedBuildingId().IsEmpty())
+		{
+			RestoreExteriorCameraView();
+		}
+		if (NavigationPanel)
+		{
+			NavigationPanel->ClearAll();
+			NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
+		}
+		SelectedBuilding = nullptr;
+	}, Problem);
+	if (Count == INDEX_NONE)
+	{
+		OnActionFailed.Broadcast(Problem, EActionFailureSeverity::Critical);
+		return INDEX_NONE;
+	}
+
+	// Ctrl+S writes JSON, so a database-backed project starts without a save path.
+	CurrentProjectFilePath = bDatabase ? FString() : FilePath;
+	bHasUnsavedChanges = false;
+	if (bDatabase)
+	{
+		Generator->LoadRoadsAndPOIsFromDatabase(FilePath);
+		Generator->LoadContextBuildingsFromDatabase(FilePath);
+	}
+	FocusCameraOnAllBuildings();
+	BuildCampusInteriorPreview();
+	return Count;
 }
 
 void ANavPlayerController::StartNewProject()

@@ -10,6 +10,8 @@
 #include "HAL/PlatformFileManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
+#include "Serialization/JsonSerializer.h"
+#include "SQLiteDatabase.h"
 
 namespace RobustnessTests
 {
@@ -83,6 +85,10 @@ bool FRobustnessBadFilesTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	const int32 Buildings = Fixture.Generator->GetBuildingCount();
+	APolyBuilding* OpenBuilding = Fixture.Generator->FindBuildingById(TEXT("E2"));
+	Controller->LoadInteriorForBuilding(TEXT("E2"));
+	TestTrue(TEXT("there is an unsaved floor in the live interior"), Controller->AddFloor() > 0);
+	const int32 ActiveFloor = Controller->GetActiveFloor();
 
 	struct FBadFile
 	{
@@ -92,7 +98,11 @@ bool FRobustnessBadFilesTest::RunTest(const FString& Parameters)
 	const FBadFile BadFiles[] = {
 		{ TEXT("a file that is not JSON"), TEXT("{ this is not json") },
 		{ TEXT("a file without a list of buildings"), TEXT("{ \"version\": 1 }") },
-		{ TEXT("a file whose buildings have no outline"), TEXT("{ \"version\": 1, \"buildings\": [ { \"id\": \"X\", \"name\": \"No outline\" } ] }") } };
+		{ TEXT("a file whose buildings have no outline"), TEXT("{ \"version\": 1, \"buildings\": [ { \"id\": \"X\", \"name\": \"No outline\" } ] }") },
+		{ TEXT("a file with an empty building ID"), TEXT(R"({"buildings":[{"id":"","name":"Broken","footprint":[[0,0],[1000,0],[1000,1000],[0,1000]]}]})") },
+		{ TEXT("a file with one good and one bad building"), TEXT(R"({"buildings":[{"id":"Other","name":"Other","footprint":[[0,0],[1000,0],[1000,1000],[0,1000]]},{"id":"Broken","name":"Broken"}]})") }
+	};
+	AddExpectedError(TEXT("SpawnBuildingFromData: building id cannot be empty"), EAutomationExpectedErrorFlags::Contains, 1);
 	for (const FBadFile& Bad : BadFiles)
 	{
 		const FString Path = WriteTemporaryFile(Bad.Text, TEXT(".json"));
@@ -110,13 +120,75 @@ bool FRobustnessBadFilesTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("and the file to save to"), Controller->GetCurrentProjectFilePath(), Good);
 	IFileManager::Get().Delete(*NotADatabase);
 
+	const FString MissingNodes = TemporaryFile(TEXT(".db"));
+	FSQLiteDatabase Database;
+	if (TestTrue(TEXT("a database without building nodes can be created"), Database.Open(*MissingNodes, ESQLiteDatabaseOpenMode::ReadWriteCreate)))
+	{
+		TestTrue(TEXT("the database contains a campus building"),
+			Database.Execute(TEXT("CREATE TABLE buildings (building_id INTEGER, building_type TEXT)")) &&
+			Database.Execute(TEXT("INSERT INTO buildings VALUES (1, 'university')")));
+		Database.Close();
+		TestFalse(TEXT("the malformed database fails to load"), Controller->TryLoadBuildingDataFromPathOrDatabase(MissingNodes));
+	}
+	IFileManager::Get().Delete(*MissingNodes);
+	TestEqual(TEXT("the original building actor is intact"), Fixture.Generator->FindBuildingById(TEXT("E2")), OpenBuilding);
+	TestEqual(TEXT("the original interior is still open"), Controller->GetLoadedBuildingId(), FString(TEXT("E2")));
+	TestEqual(TEXT("the unsaved floor is still active"), Controller->GetActiveFloor(), ActiveFloor);
+	TestTrue(TEXT("the project is still marked as unsaved"), Controller->HasUnsavedChanges());
+	TestEqual(TEXT("the original save path is intact"), Controller->GetCurrentProjectFilePath(), Good);
+	TestTrue(TEXT("Ctrl+S can still save the original project"), Controller->SaveCurrentProject());
+	FString Saved;
+	TSharedPtr<FJsonObject> SavedRoot;
+	if (TestTrue(TEXT("the saved file is readable"), FFileHelper::LoadFileToString(Saved, *Good) &&
+		FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Saved), SavedRoot)))
+	{
+		TestEqual(TEXT("Ctrl+S saved the original buildings"), SavedRoot->GetArrayField(TEXT("buildings")).Num(), Buildings);
+	}
+
 	// A new project, with no buildings yet, is a good file.
 	const FString Empty = WriteTemporaryFile(TEXT("{ \"version\": 1, \"buildings\": [] }"), TEXT(".json"));
-	Controller->LoadBuildingDataFromPath(Empty);
+	TestTrue(TEXT("an empty project is opened successfully"), Controller->TryLoadBuildingDataFromPathOrDatabase(Empty));
 	TestEqual(TEXT("a project without buildings opens, empty"), Fixture.Generator->GetBuildingCount(), 0);
 	TestEqual(TEXT("and is the file to save to"), Controller->GetCurrentProjectFilePath(), Empty);
 	IFileManager::Get().Delete(*Empty);
 	IFileManager::Get().Delete(*Good);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRobustnessSparseFloorTest, "InNavi.Project.Robustness.SparseFloorsPreserveShell", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FRobustnessSparseFloorTest::RunTest(const FString& Parameters)
+{
+	using namespace RobustnessTests;
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	const FString Path = WriteTemporaryFile(TEXT(R"({"buildings":[{"id":"Sparse","name":"Sparse","floorCount":4,"footprint":[[0,0],[1000,0],[1000,1000],[0,1000]],"interior":{"floors":[{"level":1},{"level":3}]}}]})"), TEXT(".json"));
+	if (!TestEqual(TEXT("the sparse project opens"), Controller->LoadBuildingDataFromPath(Path), 1))
+	{
+		IFileManager::Get().Delete(*Path);
+		return false;
+	}
+	APolyBuilding* Building = Fixture.Generator->FindBuildingById(TEXT("Sparse"));
+	Controller->LoadInteriorForBuilding(TEXT("Sparse"));
+	TestEqual(TEXT("opening the interior keeps all four shell floors"), Building->GetFloorCount(), 4);
+	const TArray<int32> AuthoredLevels{1, 3};
+	TestTrue(TEXT("the authored levels retain their numbers"), Fixture.Interior->GetFloorLevels() == AuthoredLevels);
+	TestEqual(TEXT("a new floor goes above the shell"), Controller->AddFloor(), 5);
+	TestTrue(TEXT("undo succeeds"), Controller->UndoInteriorEdit());
+	TestEqual(TEXT("undo restores the previous shell height"), Building->GetFloorCount(), 4);
+	TestTrue(TEXT("redo succeeds"), Controller->RedoInteriorEdit());
+	TestEqual(TEXT("redo restores the added shell floor"), Building->GetFloorCount(), 5);
+	TestTrue(TEXT("the added floor can be removed"), Controller->RemoveFloor(5));
+	TestEqual(TEXT("removing one floor leaves the other four"), Building->GetFloorCount(), 4);
+	TestTrue(TEXT("the project saves"), Controller->SaveCurrentProject());
+	TestEqual(TEXT("the saved project reloads"), Controller->LoadBuildingDataFromPath(Path), 1);
+	Building = Fixture.Generator->FindBuildingById(TEXT("Sparse"));
+	if (TestNotNull(TEXT("the saved building exists"), Building))
+	{
+		Controller->LoadInteriorForBuilding(TEXT("Sparse"));
+		TestEqual(TEXT("the shell survives saving and reopening"), Building->GetFloorCount(), 4);
+		TestTrue(TEXT("the saved interior retains levels 1 and 3"), Fixture.Interior->GetFloorLevels() == AuthoredLevels);
+	}
+	IFileManager::Get().Delete(*Path);
 	return true;
 }
 

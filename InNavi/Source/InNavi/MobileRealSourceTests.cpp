@@ -141,6 +141,31 @@ bool FMobileRealRouteTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRealRestrictedTest, "InNavi.Mobile.Source.RestrictedRooms", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileRealRestrictedTest::RunTest(const FString& Parameters)
+{
+	MobileRealTests::FProjectFiles Files;
+	for (const bool bPrivate : {true, false})
+	{
+		Files.Room(1)->SetStringField(TEXT("access"), bPrivate ? TEXT("private") : TEXT("public"));
+		Files.Room(1)->SetBoolField(TEXT("requireKey"), !bPrivate);
+		FMobileRealSource Source(Files.Write());
+		const auto Places = MobileRealTests::Places(Source);
+		if (!TestEqual(TEXT("both rooms remain listed"), Places.Num(), 2)) return false;
+		TestTrue(TEXT("the public room remains available"), Places[0].bAvailable);
+		TestFalse(TEXT("the restricted room is marked unavailable"), Places[1].bAvailable);
+		FMobileRouteRequest Request;
+		Request.FromPlaceId = Places[0].Id;
+		Request.ToPlaceId = Places[1].Id;
+		auto Route = Source.FindRoute(Request);
+		TestTrue(TEXT("directions explain why a restricted destination is refused"), !Route.bFound && Route.Error.Contains(TEXT("restricted")));
+		Swap(Request.FromPlaceId, Request.ToPlaceId);
+		Route = Source.FindRoute(Request);
+		TestTrue(TEXT("directions also refuse a restricted start"), !Route.bFound && Route.Error.Contains(TEXT("restricted")));
+	}
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRealCampusTest, "InNavi.Mobile.Source.RealCampusRoutes", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FMobileRealCampusTest::RunTest(const FString& Parameters)
 {

@@ -930,8 +930,10 @@ void UEditScreenWidget::OnFileLoadClicked()
 	}
 	if (!PC->HasUnsavedChanges())
 	{
-		PC->LoadBuildingDataFromPathOrDatabase(FilePath);
-		HandleBuildingSelected(FString());
+		if (PC->TryLoadBuildingDataFromPathOrDatabase(FilePath))
+		{
+			HandleBuildingSelected(FString());
+		}
 		return;
 	}
 	PendingLoadFilePath = FilePath;
@@ -948,23 +950,22 @@ void UEditScreenWidget::HandleFileLoadSave()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		if (!PC->SaveCurrentProject())
+		if (PC->SaveCurrentProject() && PC->TryLoadBuildingDataFromPathOrDatabase(PendingLoadFilePath))
 		{
-			return;
+			HandleBuildingSelected(FString());
 		}
-		PC->LoadBuildingDataFromPathOrDatabase(PendingLoadFilePath);
 	}
-	HandleBuildingSelected(FString());
 }
 
 void UEditScreenWidget::HandleFileLoadDiscard()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		PC->DiscardUnsavedChanges();
-		PC->LoadBuildingDataFromPathOrDatabase(PendingLoadFilePath);
+		if (PC->TryLoadBuildingDataFromPathOrDatabase(PendingLoadFilePath))
+		{
+			HandleBuildingSelected(FString());
+		}
 	}
-	HandleBuildingSelected(FString());
 }
 
 void UEditScreenWidget::HandleFileLoadCancel()

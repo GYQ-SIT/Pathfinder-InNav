@@ -261,4 +261,73 @@ bool FNavigationRoutePlannerIntegrationTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationRestrictedRoomTest, "InNavi.Navigation.RestrictedRooms", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationRestrictedRoomTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	auto* Generator = World->SpawnActor<ABuildingGenerator>();
+	auto* Interior = World->SpawnActor<AInteriorGenerator>();
+	Interior->DispatchBeginPlay();
+	auto* Building = Generator->SpawnBuildingFromData(TEXT("A"), TEXT("Building A"),
+		{{0, 0}, {1600, 0}, {1600, 1000}, {0, 1000}}, 1, 300.f, FVector2D::ZeroVector);
+	if (!TestNotNull(TEXT("the test building exists"), Building))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+	Interior->LoadInteriorForBuilding(TEXT("A"));
+	const TArray<FVector2D> Footprint{{500, 300}, {1000, 300}, {1000, 700}, {500, 700}};
+	FString Error;
+	AInteriorRoom* Room = Interior->CreateRoomFromFootprint(Footprint, TEXT("R"), TEXT("Room"), true, false, false, Error);
+	if (!TestNotNull(TEXT("the test room exists"), Room))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+	TestFalse(TEXT("the right door exists"), Interior->AddDoorToRoom(TEXT("R"), 1, 155.f).IsEmpty());
+	TestFalse(TEXT("the left door exists"), Interior->AddDoorToRoom(TEXT("R"), 3, 155.f).IsEmpty());
+
+	FNavigationRoutePoint Start;
+	Start.BuildingId = TEXT("A"); Start.Floor = 1; Start.Position = {250, 500};
+	FNavigationRoutePoint End = Start;
+	End.Position = {1250, 500};
+	FNavigationRoutePoint Inside = Start;
+	Inside.Position = {750, 500};
+	FNavigationRouteResult Route;
+	TestTrue(TEXT("a public room with the same geometry is reachable"), FNavigationRoutePlanner::FindCampusRoute(*Generator, *Interior, Start, Inside, Route));
+
+	auto CheckRestrictedRoutes = [&]()
+	{
+		TestFalse(TEXT("a restricted room cannot be the destination"), FNavigationRoutePlanner::FindCampusRoute(*Generator, *Interior, Start, Inside, Route));
+		TestFalse(TEXT("a restricted room cannot be the start"), FNavigationRoutePlanner::FindCampusRoute(*Generator, *Interior, Inside, End, Route));
+		if (TestTrue(TEXT("a public route can detour around the room"), FNavigationRoutePlanner::FindCampusRoute(*Generator, *Interior, Start, End, Route)))
+		{
+			for (int32 I = 1; I < Route.Points.Num(); ++I)
+			{
+				for (int32 Edge = 0; Edge < Footprint.Num(); ++Edge)
+				{
+					TestTrue(TEXT("the route clears each restricted wall, including its doors"),
+						SegmentDistance(Route.Points[I - 1].Position, Route.Points[I].Position,
+							Footprint[Edge], Footprint[(Edge + 1) % Footprint.Num()]) >= 29.99);
+				}
+			}
+		}
+	};
+	for (const bool bPrivate : {true, false})
+	{
+		Room = Interior->GetRoomById(TEXT("R"));
+		if (!TestNotNull(TEXT("the room is loaded for this access case"), Room)) break;
+		Room->bIsPublic = !bPrivate;
+		Room->bRequiresKey = !bPrivate;
+		TestFalse(TEXT("point picking rejects a restricted room"), FNavigationRoutePlanner::IsValidPoint(*Building, *Interior, 1.f, 1, Inside.Position, Error));
+		CheckRestrictedRoutes();
+		Interior->SyncInteriorToBuildingGenerator();
+		Interior->ClearLoadedInterior();
+		CheckRestrictedRoutes();
+		Interior->LoadInteriorForBuilding(TEXT("A"));
+	}
+	World->DestroyWorld(false);
+	return true;
+}
+
 #endif

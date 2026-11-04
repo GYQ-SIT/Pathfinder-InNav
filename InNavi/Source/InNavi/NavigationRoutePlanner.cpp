@@ -46,6 +46,7 @@ namespace
 		TArray<FSegment> DoorSegments;
 		TArray<FVector2D> TurnPoints;
 		TArray<FExteriorExit> ExteriorExits;
+		TArray<TArray<FVector2D>> RestrictedRooms;
 		double WallClearance = 0.0;
 		double PreferredWallClearance = 0.0;
 	};
@@ -64,6 +65,7 @@ namespace
 		TArray<FVector2D> Footprint;
 		TArray<FInteriorOpening> Openings;
 		bool bClosed = true;
+		bool bRestricted = false;
 		const TArray<FVector2D>& GetFootprint() const { return Footprint; }
 		const TArray<FInteriorOpening>& GetOpenings() const { return Openings; }
 		bool IsClosedLoop() const { return bClosed; }
@@ -235,10 +237,18 @@ namespace
 		}
 	}
 
+	bool IsInsideRestrictedRoom(const FVector2D& Point, const FFloorGeometry& Geometry)
+	{
+		return Geometry.RestrictedRooms.ContainsByPredicate([&Point](const TArray<FVector2D>& Room)
+		{
+			return InsideOrOnBoundary(Point, Room);
+		});
+	}
+
 	bool IsPointClearOfWalls(const FVector2D& Point, const TArray<FVector2D>& BuildingBoundary,
 		const FFloorGeometry& Geometry)
 	{
-		if (!InsideOrOnBoundary(Point, BuildingBoundary))
+		if (!InsideOrOnBoundary(Point, BuildingBoundary) || IsInsideRestrictedRoom(Point, Geometry))
 		{
 			return false;
 		}
@@ -367,6 +377,11 @@ namespace
 				continue;
 			}
 			const TArray<FVector2D>& Footprint = Room->GetFootprint();
+			const bool bRestricted = Room->IsClosedLoop() && Room->bRestricted && Footprint.Num() >= 3;
+			if (bRestricted)
+			{
+				Geometry.RestrictedRooms.Add(Footprint);
+			}
 			const int32 NumEdges = Room->IsClosedLoop() ? Footprint.Num() : Footprint.Num() - 1;
 			for (int32 EdgeIndex = 0; EdgeIndex < NumEdges; ++EdgeIndex)
 			{
@@ -376,6 +391,13 @@ namespace
 				const double Length = FVector2D::Distance(A, B);
 				if (Length <= GeometryEpsilon)
 				{
+					continue;
+				}
+
+				// An opening in a restricted room remains closed to public routing.
+				if (bRestricted)
+				{
+					AddWall(Geometry, A, B);
 					continue;
 				}
 
@@ -490,7 +512,7 @@ namespace
 		TArray<FRouteRoom> Values;
 		for (const AInteriorRoom* Room : Interior.GetRoomsOnFloor(Floor))
 		{
-			if (IsValid(Room)) Values.Add({ Room->RoomId, Room->GetFootprint(), Room->GetOpenings(), Room->IsClosedLoop() });
+			if (IsValid(Room)) Values.Add({ Room->RoomId, Room->GetFootprint(), Room->GetOpenings(), Room->IsClosedLoop(), !Room->bIsPublic || Room->bRequiresKey });
 		}
 		TArray<const FRouteRoom*> Rooms;
 		for (const FRouteRoom& Room : Values) Rooms.Add(&Room);
@@ -681,6 +703,11 @@ bool FNavigationRoutePlanner::IsValidPoint(const APolyBuilding& Building,
 	}
 	const TArray<FVector2D>& Boundary = Building.GetFootprint();
 	const FFloorGeometry Geometry = MakeFloorGeometry(Interior, Scale, Floor, Boundary);
+	if (IsInsideRestrictedRoom(Point, Geometry))
+	{
+		OutError = TEXT("Select a point in an area open to public navigation.");
+		return false;
+	}
 
 	for (int32 Index = 0; Index < Boundary.Num(); ++Index)
 	{
@@ -746,7 +773,7 @@ namespace
 			if (bLive)
 			{
 				for (const auto* Room : Live.GetRoomsOnFloor(Level)) if (IsValid(Room))
-					Model.Rooms.FindOrAdd(Level).Add({ Room->RoomId, Room->GetFootprint(), Room->GetOpenings(), Room->IsClosedLoop() });
+					Model.Rooms.FindOrAdd(Level).Add({ Room->RoomId, Room->GetFootprint(), Room->GetOpenings(), Room->IsClosedLoop(), !Room->bIsPublic || Room->bRequiresKey });
 				Model.Floors.Add(Level, MakeFloorGeometry(Live, Scale, Level, Building.GetFootprint()));
 				continue;
 			}
@@ -768,6 +795,11 @@ namespace
 					FRouteRoom Data;
 					Room->TryGetStringField(TEXT("id"), Data.RoomId);
 					Room->TryGetBoolField(TEXT("closed"), Data.bClosed);
+					FString Access;
+					bool bRequiresKey = false;
+					Room->TryGetStringField(TEXT("access"), Access);
+					Room->TryGetBoolField(TEXT("requireKey"), bRequiresKey);
+					Data.bRestricted = Access == TEXT("private") || bRequiresKey;
 					const TArray<TSharedPtr<FJsonValue>>* Points = nullptr;
 					if (Room->TryGetArrayField(TEXT("footprint"), Points)) for (const auto& P : *Points) Data.Footprint.Add(ReadRouteXY(P));
 					const TArray<TSharedPtr<FJsonValue>>* Openings = nullptr;
@@ -904,6 +936,8 @@ namespace
 				Hash.Pod(Level); Hash.Pod(Floor.WallClearance); Hash.Pod(Floor.PreferredWallClearance);
 				Hash.Pod(Floor.Walls.Num());
 				for (const FSegment& Wall : Floor.Walls) { Hash.Pod(Wall.A.X); Hash.Pod(Wall.A.Y); Hash.Pod(Wall.B.X); Hash.Pod(Wall.B.Y); }
+				Hash.Pod(Floor.RestrictedRooms.Num());
+				for (const auto& Room : Floor.RestrictedRooms) Hash.Points(Room);
 				Hash.Points(Floor.DoorPoints); Hash.Points(Floor.RoomDoors); Hash.Points(Floor.TurnPoints);
 				Hash.Pod(Floor.ExteriorExits.Num());
 				for (const FExteriorExit& Exit : Floor.ExteriorExits) { Hash.Text(Exit.Id); Hash.Pod(Exit.Position.X); Hash.Pod(Exit.Position.Y); }
@@ -1021,12 +1055,17 @@ namespace
 		for (const auto& M : Models) for (const auto& Floor : M.Floors)
 			bNeedsOutdoor |= !Floor.Value.ExteriorExits.IsEmpty();
 		auto Add = [&](const FRouteBuilding& M, FVector2D P, int32 Floor, const FString& Id = FString(),
-			EInteriorNavNodeType Type = EInteriorNavNodeType::PathNode, const TArray<int32>& Levels = TArray<int32>())
+			EInteriorNavNodeType Type = EInteriorNavNodeType::PathNode, const TArray<int32>& Levels = TArray<int32>(), bool bIsDoorway = false)
 		{
+			const FFloorGeometry* Geometry = M.Floors.Find(Floor);
+			if (Geometry && IsInsideRestrictedRoom(P, *Geometry)) return false;
+
 			FNavigationRoutePoint Point;
 			Point.Position = P; Point.Floor = Floor; Point.ConnectorId = Id; Point.ConnectorType = Type;
+			Point.bIsDoorway = bIsDoorway;
 			Stamp(Point, *M.Building);
 			Vertices.Add({ Point, Levels });
+			return true;
 		};
 		for (const auto& M : Models)
 		{
@@ -1035,15 +1074,13 @@ namespace
 				for (const auto& Door : Pair.Value.DoorSegments) Out.Doorways.Add({ M.Building->BuildingId, Pair.Key, Door });
 				for (const auto& Door : Pair.Value.DoorPoints)
 				{
-					Add(M, Door, Pair.Key);
-					Vertices.Last().Point.bIsDoorway = Pair.Value.RoomDoors.Contains(Door);
+					Add(M, Door, Pair.Key, {}, EInteriorNavNodeType::PathNode, {}, Pair.Value.RoomDoors.Contains(Door));
 				}
 				for (const auto& Turn : Pair.Value.TurnPoints) Add(M, Turn, Pair.Key);
 				for (const auto& Exit : Pair.Value.ExteriorExits)
 				{
 					const FString Id = TEXT("OutsideExit:") + M.Building->BuildingId + TEXT(":") + Exit.Id;
-					Add(M, Exit.Position, Pair.Key, Id);
-					Add(M, Exit.Position, 0, Id);
+					if (Add(M, Exit.Position, Pair.Key, Id)) Add(M, Exit.Position, 0, Id);
 				}
 			}
 			for (const auto& Node : M.Nodes) if (M.Floors.Contains(Node.Level)) Add(M, Node.Position, Node.Level, Node.ConnectorGroupId, Node.Type, Node.ConnectsFloors);
@@ -1526,6 +1563,11 @@ void FNavigationLayoutCheck::FImpl::Read(LayoutValidation::FReport& Report)
 			for (const auto& Room : Pair.Value)
 			{
 				if (!Room.bClosed) continue;
+				if (Room.bRestricted)
+				{
+					++Report.RoomsSkipped;
+					continue;
+				}
 				TArray<int32> Triangles; TriangulatePolygon(Room.Footprint, Triangles);
 				bool bFound = false;
 				for (int32 T = 0; T + 2 < Triangles.Num(); T += 3)

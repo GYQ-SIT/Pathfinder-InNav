@@ -3726,9 +3726,10 @@ void UInteriorScreenWidget::OnFileLoadClicked()
 
 	if (!PC->HasUnsavedChanges())
 	{
-		PC->RestoreExteriorCameraView();
-		PC->LoadBuildingDataFromPathOrDatabase(FilePath);
-		GoToEditScreen();
+		if (PC->TryLoadBuildingDataFromPathOrDatabase(FilePath))
+		{
+			GoToEditScreen();
+		}
 		return;
 	}
 
@@ -3746,25 +3747,22 @@ void UInteriorScreenWidget::HandleFileLoadSave()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		if (!PC->SaveCurrentProject())
+		if (PC->SaveCurrentProject() && PC->TryLoadBuildingDataFromPathOrDatabase(PendingLoadFilePath))
 		{
-			return;
+			GoToEditScreen();
 		}
-		PC->RestoreExteriorCameraView();
-		PC->LoadBuildingDataFromPathOrDatabase(PendingLoadFilePath);
 	}
-	GoToEditScreen();
 }
 
 void UInteriorScreenWidget::HandleFileLoadDiscard()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		PC->DiscardUnsavedChanges();
-		PC->RestoreExteriorCameraView();
-		PC->LoadBuildingDataFromPathOrDatabase(PendingLoadFilePath);
+		if (PC->TryLoadBuildingDataFromPathOrDatabase(PendingLoadFilePath))
+		{
+			GoToEditScreen();
+		}
 	}
-	GoToEditScreen();
 }
 
 void UInteriorScreenWidget::HandleFileLoadCancel()

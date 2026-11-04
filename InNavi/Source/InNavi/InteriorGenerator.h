@@ -102,7 +102,7 @@ public:
 	// the default thickness.
 	float GetWallThicknessForFloor(int32 Level) const;
 
-	// Adds a new, empty floor above the highest currently-loaded floor for the currently loaded
+	// Adds a new, empty floor above the shell of the currently loaded
 	// building, and grows the exterior shell to match (APolyBuilding::SetFloorCount) - the new
 	// floor has no rooms yet, Phase 3's drawing tools are what would populate it.
 	// WallHeight/WallThickness default to the topmost existing floor's values (or 280/20 if this
@@ -462,7 +462,12 @@ private:
 
 	// ---- Undo / Redo History ----
 
-	TArray<FString> InteriorHistory;
+	struct FInteriorHistorySnapshot
+	{
+		FString Json;
+		int32 FloorCount = 1;
+	};
+	TArray<FInteriorHistorySnapshot> InteriorHistory;
 
 	int32 HistoryIndex = -1;
 

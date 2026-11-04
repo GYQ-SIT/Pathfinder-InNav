@@ -53,4 +53,38 @@ bool FRoomDoorLegacyOutsideTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRoomDoorUniqueIdsTest, "InNavi.Interior.RoomDoor.UniqueIds", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FRoomDoorUniqueIdsTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	const FString RoomId = TEXT("E2-01-02");
+	AInteriorRoom* Room = Fixture.Interior->GetRoomById(RoomId);
+	if (!TestNotNull(TEXT("the sealed room exists"), Room)) return false;
+
+	const FString First = Controller->AddDoorToWall(RoomId, 0, 100.f);
+	const FString Second = Controller->AddDoorToWall(RoomId, 1, 100.f);
+	if (!TestTrue(TEXT("two doors were added"), !First.IsEmpty() && !Second.IsEmpty())) return false;
+	TestTrue(TEXT("the first door can be deleted"), Controller->DeleteDoor(RoomId, First));
+	const FString Third = Controller->AddDoorToWall(RoomId, 2, 100.f);
+	TestTrue(TEXT("the replacement has an unused ID"), !Third.IsEmpty() && Third != Second);
+	TestTrue(TEXT("the second door can be deleted"), Controller->DeleteDoor(RoomId, Second));
+	FInteriorOpening Remaining;
+	if (!TestTrue(TEXT("deleting the second leaves the third"), Fixture.Interior->GetDoorOpening(RoomId, Third, Remaining))) return false;
+
+	// Simulate a project saved before ID allocation was fixed.
+	Remaining.EdgeIndex = 3;
+	Room->AddOpening(Remaining);
+	Fixture.Interior->SyncInteriorToBuildingGenerator();
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("E2"));
+	Room = Fixture.Interior->GetRoomById(RoomId);
+	if (!TestNotNull(TEXT("the legacy room reloads"), Room) ||
+		!TestEqual(TEXT("both legacy doors are preserved"), Room->GetOpenings().Num(), 2)) return false;
+	const FString RepairedId = Room->GetOpenings()[1].Id;
+	TestNotEqual(TEXT("the legacy duplicate receives a different ID"), RepairedId, Third);
+	TestTrue(TEXT("the repaired door is independently selectable"), Fixture.Interior->GetDoorOpening(RoomId, RepairedId, Remaining));
+	TestEqual(TEXT("the repaired door keeps its original wall"), Remaining.EdgeIndex, 3);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

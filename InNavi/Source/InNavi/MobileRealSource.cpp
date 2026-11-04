@@ -259,12 +259,16 @@ void FMobileRealSource::IndexProject(FProject& Project)
 				if (MapRoom.Name.IsEmpty()) MapRoom.Name = RoomId;
 				const FString Type = RoomTypes::Normalize(String(Room, TEXT("roomType")));
 				MapRoom.Category = Category(Type);
+				bool bRequiresKey = false;
+				Room->TryGetBoolField(TEXT("requireKey"), bRequiresKey);
+				MapRoom.bAvailable = String(Room, TEXT("access")) != TEXT("private") && !bRequiresKey;
 				if (Type != TEXT("Corridor") && Type != TEXT("Storage"))
 				{
 					MapRoom.PlaceId = PlaceId;
 					FMobilePlace Place; Place.Id = PlaceId; Place.Name = MapRoom.Name; // The room id is an internal one, not a door number: no code (it is still searched, below).
 					Place.SiteId = Project.Site.Id; Place.BuildingId = BuildingId; Place.BuildingName = Building.Name;
 					Place.Level = Level; Place.LevelLabel = Label.Label; Place.RoomType = Type; Place.Category = MapRoom.Category;
+					Place.bAvailable = MapRoom.bAvailable;
 					Place.Position = InteriorPoint(Shape); Place.Description = String(Room, TEXT("description"));
 					for (const auto& Tag : Array(Room, TEXT("tags"))) { FString Text; if (Tag && Tag->TryGetString(Text)) Place.Tags.Add(Text); }
 					Project.SearchText.Add(PlaceId, (Place.Name + TEXT(" ") + RoomId + TEXT(" ") + RawId + TEXT(" ") + Building.Name
@@ -372,10 +376,12 @@ FMobileRoute FMobileRealSource::FindRoute(const FMobileRouteRequest& Request)
 	using namespace MobileRealData;
 	FMobilePlace Destination, Start;
 	if (!FindPlace(Request.ToPlaceId, Destination)) return Failure(TEXT("Choose a destination that exists in this project."));
+	if (!Destination.bAvailable) return Failure(TEXT("The destination room is restricted."));
 	if (!Request.FromPlaceId.IsEmpty())
 	{
 		if (!FindPlace(Request.FromPlaceId, Start)) return Failure(TEXT("The starting place is no longer in the project."));
 		if (Start.SiteId != Destination.SiteId) return Failure(TEXT("Choose a start and destination in the same project."));
+		if (!Start.bAvailable) return Failure(TEXT("The starting room is restricted."));
 		if (Start.Id == Destination.Id) return Failure(TEXT("You are already at this destination."));
 	}
 	auto& Project = *ProjectForSite(Destination.SiteId);

@@ -319,8 +319,7 @@ public:
 
 	// Loads a buildings.json-format file from an explicit path (typically one
 	// BrowseForBuildingDataFile just returned) the same way the startup buildings.json is loaded.
-	// Clears out whatever was already spawned first, so buildings left over from a previous New/Open
-	// in this session don't stick around alongside the new file.
+	// Replaces the open project only after the incoming buildings load successfully.
 	// On success, this also becomes the file SaveCurrentProject (Ctrl+S) writes back to.
 	// Returns how many buildings were spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
@@ -328,9 +327,8 @@ public:
 
 	// Second, database-backed way to load exterior buildings - see
 	// ABuildingGenerator::LoadBuildingsFromDatabase for the schema/coordinate-conversion details.
-	// Same clear-first behavior as LoadBuildingDataFromPath, but does NOT set CurrentProjectFilePath
-	// (see its own comment for why) - a database-loaded project needs an explicit Save As before
-	// Ctrl+S has anywhere to write. Returns how many buildings were spawned.
+	// A database-loaded project needs an explicit Save As before Ctrl+S has anywhere to write.
+	// Returns how many buildings were spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingDataFromDatabase(const FString& DatabasePath);
 
@@ -342,6 +340,9 @@ public:
 	// were spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingDataFromPathOrDatabase(const FString& FilePath);
+
+	// Reports success even when the opened project is empty.
+	bool TryLoadBuildingDataFromPathOrDatabase(const FString& FilePath);
 
 	// ABuildingGenerator::GetScale() pass-through, defaulting to 1 if no BuildingGenerator is placed
 	// in the level - what any footprint-space size/distance constant (snap tolerance, prefab room
@@ -1199,6 +1200,7 @@ protected:
 	virtual void Tick(float DeltaSeconds) override;
 
 private:
+	int32 LoadBuildingData(const FString& FilePath, bool bDatabase);
 	// Campus-wide X-ray interior preview.
 	// These actors are separate from the editable interior rooms.
 	void BuildCampusInteriorPreview();

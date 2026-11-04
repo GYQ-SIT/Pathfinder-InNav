@@ -21,6 +21,17 @@
 // world space first (CanPlaceConnectorOnFloor's building-vs-building check) uses it bare.
 static constexpr float OverlapToleranceWorldUnits = 5.f;
 
+static FString FindUnusedOpeningId(const TArray<FInteriorOpening>& Openings, const FString& Prefix, int32 Number)
+{
+	FString Id;
+	do
+	{
+		Id = FString::Printf(TEXT("%s%02d"), *Prefix, Number++);
+	}
+	while (Openings.ContainsByPredicate([&Id](const FInteriorOpening& Opening) { return Opening.Id == Id; }));
+	return Id;
+}
+
 AInteriorGenerator::AInteriorGenerator()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -347,7 +358,7 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 	RefreshMirroredEntrances();
 
 	const TArray<TSharedPtr<FJsonValue>>* FloorsArray = nullptr;
-	if (!InteriorData.IsValid() || !InteriorData->TryGetArrayField(TEXT("floors"), FloorsArray))
+	if (!InteriorData.IsValid() || !InteriorData->TryGetArrayField(TEXT("floors"), FloorsArray) || FloorsArray->IsEmpty())
 	{
 		// No interior data yet for this building in the current project - not an error, start blank.
 		// Pre-fill one empty floor slot per floor the exterior shell already claims to have, so a
@@ -379,6 +390,7 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 	const float ExteriorFloorHeight = Building->GetFloorHeight();
 
 	int32 SpawnedCount = 0;
+	int32 ShellFloorCount = Building->GetFloorCount();
 
 	for (const TSharedPtr<FJsonValue>& FloorValue : *FloorsArray)
 	{
@@ -390,6 +402,11 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 
 		int32 Level = 1;
 		FloorObject->TryGetNumberField(TEXT("level"), Level);
+		if (Level < 1)
+		{
+			continue;
+		}
+		ShellFloorCount = FMath::Max(ShellFloorCount, Level);
 
 		float WallHeight = 280.f;
 		FloorObject->TryGetNumberField(TEXT("wallHeight"), WallHeight);
@@ -473,6 +490,17 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 						// Retain legacy outside exits so older projects remain routable without reauthoring doors.
 
 						Openings.Add(Opening);
+					}
+					// Older edits could save several openings with the same ID. Keep the first and give
+					// each later opening its own ID without colliding with any ID already in the file.
+					TSet<FString> SeenOpeningIds;
+					for (FInteriorOpening& Opening : Openings)
+					{
+						if (SeenOpeningIds.Contains(Opening.Id))
+						{
+							Opening.Id = FindUnusedOpeningId(Openings, Opening.Id + TEXT("-"), 2);
+						}
+						SeenOpeningIds.Add(Opening.Id);
 					}
 				}
 
@@ -559,13 +587,17 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 		}
 	}
 
-	// Interior floor count is the source of truth for how tall the exterior shell is.
-	Building->SetFloorCount(FloorsArray->Num());
+	// The saved shell includes unauthored floors. Expand it if a legacy save placed a floor above it.
+	if (Building->GetFloorCount() != ShellFloorCount)
+	{
+		Building->SetFloorCount(ShellFloorCount);
+		RefreshMirroredEntrances();
+	}
 
 	ActiveFloor = 1;
 	SetActiveFloor(ActiveFloor);
 
-	UE_LOG(LogTemp, Warning, TEXT("Loaded interior for %s: %d floors, %d rooms"), *BuildingId, FloorsArray->Num(), SpawnedCount);
+	UE_LOG(LogTemp, Warning, TEXT("Loaded interior for %s: %d floors, %d rooms"), *BuildingId, FloorInfoByLevel.Num(), SpawnedCount);
 
 	// Start a fresh Undo/Redo history for this building.
 	if (!bIsRestoringHistory)
@@ -683,7 +715,7 @@ int32 AInteriorGenerator::AddFloor()
 	{
 		HighestLevel = FMath::Max(HighestLevel, Pair.Key);
 	}
-	const int32 NewLevel = HighestLevel + 1;
+	const int32 NewLevel = Building->GetFloorCount() + 1;
 
 	FInteriorFloorInfo NewFloorInfo;
 	if (const FInteriorFloorInfo* TopFloor = FloorInfoByLevel.Find(HighestLevel))
@@ -729,13 +761,7 @@ bool AInteriorGenerator::RemoveFloor(int32 Level)
 		return false;
 	}
 
-	// Compute the highest floor BEFORE removing anything, so it doesn't matter whether Level
-	// itself happens to be the top floor.
-	int32 MaxLevel = 0;
-	for (const auto& Pair : FloorInfoByLevel)
-	{
-		MaxLevel = FMath::Max(MaxLevel, Pair.Key);
-	}
+	const int32 MaxLevel = Building->GetFloorCount();
 
 	// Destroy the removed floor's rooms.
 	if (FInteriorRoomList* RemovedRooms = RoomsByFloor.Find(Level))
@@ -821,12 +847,11 @@ bool AInteriorGenerator::RemoveFloor(int32 Level)
 			--Entrance.Level;
 		}
 	}
-	RefreshMirroredEntrances();
-
 	const int32 NewFloorCount = MaxLevel - 1;
 
 	// New floor count is the source of truth for how tall the exterior shell is.
 	Building->SetFloorCount(NewFloorCount);
+	RefreshMirroredEntrances();
 
 	SetActiveFloor(FMath::Clamp(ActiveFloor, 1, NewFloorCount));
 
@@ -1949,7 +1974,7 @@ FString AInteriorGenerator::AddDoorToRoom(const FString& RoomId, int32 EdgeIndex
 			}
 
 			FInteriorOpening Opening;
-			Opening.Id = FString::Printf(TEXT("%s-D%02d"), *RoomId, Room->GetOpenings().Num() + 1);
+			Opening.Id = FindUnusedOpeningId(Room->GetOpenings(), RoomId + TEXT("-D"), Room->GetOpenings().Num() + 1);
 			Opening.Type = EInteriorOpeningType::Door;
 			Opening.EdgeIndex = EdgeIndex;
 			Opening.Offset = OffsetWorldUnits;
@@ -2991,12 +3016,15 @@ void AInteriorGenerator::RecordHistorySnapshot()
 		return;
 	}
 
-	// Convert the current live interior into JSON.
-	TSharedRef<FJsonObject> InteriorObject = SerializeCurrentInterior();
+	const APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+	if (!Building) return;
 
-	FString Snapshot;
+	// Convert the current live interior into JSON. The shell can have unauthored floors.
+	TSharedRef<FJsonObject> InteriorObject = SerializeCurrentInterior();
+	FInteriorHistorySnapshot Snapshot;
+	Snapshot.FloorCount = Building->GetFloorCount();
 	TSharedRef<TJsonWriter<>> Writer =
-		TJsonWriterFactory<>::Create(&Snapshot);
+		TJsonWriterFactory<>::Create(&Snapshot.Json);
 
 	if (!FJsonSerializer::Serialize(InteriorObject, Writer))
 	{
@@ -3008,7 +3036,8 @@ void AInteriorGenerator::RecordHistorySnapshot()
 	// Don't store the exact same state twice.
 	if (HistoryIndex >= 0 &&
 		InteriorHistory.IsValidIndex(HistoryIndex) &&
-		InteriorHistory[HistoryIndex] == Snapshot)
+		InteriorHistory[HistoryIndex].FloorCount == Snapshot.FloorCount &&
+		InteriorHistory[HistoryIndex].Json == Snapshot.Json)
 	{
 		return;
 	}
@@ -3022,7 +3051,7 @@ void AInteriorGenerator::RecordHistorySnapshot()
 			InteriorHistory.Num() - HistoryIndex - 1);
 	}
 
-	InteriorHistory.Add(Snapshot);
+	InteriorHistory.Add(MoveTemp(Snapshot));
 	HistoryIndex = InteriorHistory.Num() - 1;
 	NotifyNavigationLayoutChanged();
 
@@ -3044,7 +3073,8 @@ bool AInteriorGenerator::Undo()
 		return false;
 	}
 
-	if (!Generator || LoadedBuildingId.IsEmpty())
+	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+	if (!Building)
 	{
 		UE_LOG(LogTemp, Warning,
 			TEXT("Undo: no interior is currently loaded"));
@@ -3055,11 +3085,11 @@ bool AInteriorGenerator::Undo()
 	const int32 PreviousActiveFloor = ActiveFloor;
 
 	const int32 TargetIndex = HistoryIndex - 1;
-	const FString& Snapshot = InteriorHistory[TargetIndex];
+	const FInteriorHistorySnapshot& Snapshot = InteriorHistory[TargetIndex];
 
 	TSharedPtr<FJsonObject> RestoredInterior;
 	TSharedRef<TJsonReader<>> Reader =
-		TJsonReaderFactory<>::Create(Snapshot);
+		TJsonReaderFactory<>::Create(Snapshot.Json);
 
 	if (!FJsonSerializer::Deserialize(Reader, RestoredInterior) ||
 		!RestoredInterior.IsValid())
@@ -3070,6 +3100,10 @@ bool AInteriorGenerator::Undo()
 	}
 
 	bIsRestoringHistory = true;
+	if (Building->GetFloorCount() != Snapshot.FloorCount)
+	{
+		Building->SetFloorCount(Snapshot.FloorCount);
+	}
 
 	Generator->SetInteriorDataForBuilding(
 		BuildingId,
@@ -3117,7 +3151,8 @@ bool AInteriorGenerator::Redo()
 		return false;
 	}
 
-	if (!Generator || LoadedBuildingId.IsEmpty())
+	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+	if (!Building)
 	{
 		UE_LOG(LogTemp, Warning,
 			TEXT("Redo: no interior is currently loaded"));
@@ -3127,11 +3162,11 @@ bool AInteriorGenerator::Redo()
 	const FString BuildingId = LoadedBuildingId;
 	const int32 PreviousActiveFloor = ActiveFloor;
 
-	const FString& Snapshot = InteriorHistory[TargetIndex];
+	const FInteriorHistorySnapshot& Snapshot = InteriorHistory[TargetIndex];
 
 	TSharedPtr<FJsonObject> RestoredInterior;
 	TSharedRef<TJsonReader<>> Reader =
-		TJsonReaderFactory<>::Create(Snapshot);
+		TJsonReaderFactory<>::Create(Snapshot.Json);
 
 	if (!FJsonSerializer::Deserialize(Reader, RestoredInterior) ||
 		!RestoredInterior.IsValid())
@@ -3142,6 +3177,10 @@ bool AInteriorGenerator::Redo()
 	}
 
 	bIsRestoringHistory = true;
+	if (Building->GetFloorCount() != Snapshot.FloorCount)
+	{
+		Building->SetFloorCount(Snapshot.FloorCount);
+	}
 
 	Generator->SetInteriorDataForBuilding(
 		BuildingId,
