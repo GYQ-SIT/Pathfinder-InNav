@@ -25,6 +25,7 @@ class AInteriorGenerator;
 class AInteriorRoom;
 class AInteriorConnectorMarker;
 class UNavigationPanelWidget;
+class UMobileSplashWidget;
 class UAudioComponent;
 
 // One currently-playing audio file (see PlayAudioFile/StopAllAudio). AudioComponent already keeps
@@ -1232,6 +1233,10 @@ private:
 
 	UPROPERTY()
 	UNavigationPanelWidget* NavigationPanel = nullptr;
+
+	// What the phone app opens with (black, the logo, then the app); put up at once and left by MobileApp. See UMobileSplashWidget.
+	UPROPERTY()
+	TObjectPtr<UMobileSplashWidget> MobileSplash;
 
 	TWeakObjectPtr<const UObject> PointerOverUIOwner;
 	TWeakObjectPtr<const UObject> NavigationStepScreenOwner;
