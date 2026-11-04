@@ -225,6 +225,7 @@ public:
 	// first so in-progress edits aren't lost. Returns true on success.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	bool SaveBuildingsToFile(const FString& FilePath) const;
+	bool SaveBuildingsToFile(const FString& FilePath, FString& OutProblem) const;
 
 	// The project's own name and description, written to the file's top level as "projectName" and
 	// "description" and read back by LoadBuildingsFromFile. Empty for a file made before they existed.
@@ -344,6 +345,8 @@ private:
 	FString ProjectName;
 	FString ProjectDescription;
 	int32 LoadedFileVersion = 0;
+	mutable FString ProjectRevisionPath;
+	mutable FString ProjectRevision;
 
 	// The lat/lon centroid LoadBuildingsFromDatabase projects around, stashed so
 	// LoadRoadsAndPOIsFromDatabase can project roads/POIs into that exact same local-meters space

@@ -177,7 +177,6 @@ bool FBuildingTypesSaveLoadTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	const TSharedPtr<FJsonObject> Saved = ReadJson(Path);
-	IFileManager::Get().Delete(*Path);
 	const TSharedPtr<FJsonObject> SavedA = FindSavedBuilding(Saved, TEXT("TYPE-A"));
 	const TSharedPtr<FJsonObject> SavedB = FindSavedBuilding(Saved, TEXT("TYPE-B"));
 	if (!TestNotNull(TEXT("the typed building is in the file"), SavedA.Get()) || !TestNotNull(TEXT("the other building too"), SavedB.Get()))
@@ -187,7 +186,7 @@ bool FBuildingTypesSaveLoadTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("the type is written as the list spells it"), SavedA->GetStringField(TEXT("buildingType")), FString(TEXT("School")));
 	TestFalse(TEXT("Other is left out"), SavedB->HasField(TEXT("buildingType")));
 
-	// Read back from the file just saved.
+	// Read back from the same file after a second save.
 	if (!TestTrue(TEXT("the project is saved again"), Generator->SaveBuildingsToFile(Path)))
 	{
 		return false;

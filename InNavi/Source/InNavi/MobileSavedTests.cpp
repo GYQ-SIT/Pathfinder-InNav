@@ -16,6 +16,7 @@
 #include "Components/TextBlock.h"
 #include "Engine/World.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformFileManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
@@ -30,6 +31,42 @@ namespace
 		return FPaths::ProjectSavedDir() / TEXT("AutomationTemp") / (FString(Prefix) + FGuid::NewGuid().ToString() + TEXT(".json"));
 	}
 }
+
+#if PLATFORM_WINDOWS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileStorageFailureTest, "InNavi.Mobile.StorageFailure", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileStorageFailureTest::RunTest(const FString& Parameters)
+{
+	const FString SavedPath = TempSavedFile(TEXT("locked-saved-"));
+	const FString PrefsPath = TempSavedFile(TEXT("locked-prefs-"));
+	FMobileSavedPlaces Saved;
+	FMobilePreferences Preferences;
+	Saved.UseFile(SavedPath);
+	Preferences.UseFile(PrefsPath);
+	TestTrue(TEXT("the first bookmark is written"), Saved.Add(TEXT("original")));
+	TestTrue(TEXT("the first preference is written"), Preferences.SetTheme(EMobileTheme::Night));
+	auto& Platform = FPlatformFileManager::Get().GetPlatformFile();
+	{
+		TUniquePtr<IFileHandle> SavedLock(Platform.OpenRead(*SavedPath));
+		TUniquePtr<IFileHandle> PrefsLock(Platform.OpenRead(*PrefsPath));
+		if (TestTrue(TEXT("both files are locked"), SavedLock && PrefsLock))
+		{
+			bool bPersisted = true;
+			TestFalse(TEXT("failed toggle leaves the new bookmark unsaved"), Saved.Toggle(TEXT("new"), &bPersisted));
+			TestFalse(TEXT("the UI can detect the failure"), bPersisted);
+			TestTrue(TEXT("the original remains saved"), Saved.Contains(TEXT("original")));
+			TestFalse(TEXT("preference reset fails cleanly"), Preferences.Reset());
+			TestTrue(TEXT("the current preference is retained"), Preferences.GetTheme() == EMobileTheme::Night);
+		}
+	}
+	TestTrue(TEXT("the bookmark file stays readable"), Saved.Load());
+	TestTrue(TEXT("only the original bookmark was stored"), Saved.Num() == 1 && Saved.Contains(TEXT("original")));
+	TestTrue(TEXT("the preferences file stays readable"), Preferences.Load());
+	TestTrue(TEXT("the original preference was stored"), Preferences.GetTheme() == EMobileTheme::Night);
+	IFileManager::Get().Delete(*SavedPath);
+	IFileManager::Get().Delete(*PrefsPath);
+	return true;
+}
+#endif
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileSavedPlacesTest, "InNavi.Mobile.SavedPlaces", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FMobileSavedPlacesTest::RunTest(const FString& Parameters)

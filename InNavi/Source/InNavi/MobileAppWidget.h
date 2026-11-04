@@ -254,6 +254,10 @@ private:
 	UPROPERTY()
 	UCanvasPanel* Phone = nullptr;
 	UPROPERTY()
+	UBorder* StorageError = nullptr;
+	float StorageErrorSeconds = 0.f;
+	void ShowStorageError();
+	UPROPERTY()
 	UBorder* SheetBorder = nullptr;
 	UPROPERTY()
 	UWidgetSwitcher* SheetPages = nullptr;

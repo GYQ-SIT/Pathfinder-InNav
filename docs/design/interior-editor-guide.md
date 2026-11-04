@@ -329,7 +329,7 @@ toggling a category affects everything in it at once.
 
 Editing a layout clears its displayed route and cancels any search in progress. This includes live room and door drags,
 walls, connectors, floors, building changes and undo/redo. Press **Find Route** again after the edit. Room-based places are
-resolved by their saved IDs before replanning, so moved rooms get updated positions and deleted rooms are cleared.
+resolved by their saved IDs before replanning. Moved rooms get updated positions. If a place is unavailable, the editor asks you to replace or remove it before planning again.
 Changing the viewed floor/building or saving does not itself clear a route.
 
 Desktop and real-data mobile directions use the same instruction generator: straight stretches are grouped, with walking

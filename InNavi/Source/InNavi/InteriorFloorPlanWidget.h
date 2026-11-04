@@ -35,6 +35,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	FVector2D LocalPositionToFootprintPoint(FVector2D LocalPosition, FVector2D WidgetSize) const;
 	void ResetView() { PanOffset = FVector2D::ZeroVector; ZoomMultiplier = 1.f; }
+	void FinishEditDrag();
 
 protected:
 	virtual void NativeConstruct() override;
@@ -47,6 +48,7 @@ protected:
 	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual void NativeOnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent) override;
 
 	// Mouse wheel zooms in/out (see ZoomMultiplier below), centered on the current view rather than
 	// the cursor position.
@@ -121,6 +123,7 @@ private:
 	// moving) has no visible effect beyond the SelectDoor call already made on mouse down; if the
 	// user drags instead, NativeOnMouseMove slides the door along DraggingDoorEdgeIndex via MoveDoor.
 	bool bIsDraggingDoor = false;
+	TWeakObjectPtr<AInteriorRoom> DragTarget;
 	FString DraggingDoorRoomId;
 	FString DraggingDoorId;
 	int32 DraggingDoorEdgeIndex = INDEX_NONE;

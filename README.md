@@ -13,10 +13,10 @@ build, reading project data and routes through a mobile data adapter).
 
 - `README.md` — this file
 - `.gitignore` — UnrealEngine template, plus signing keys, packaging output and personal test files
-- `.github/workflows/` — CI: `build-windows.yml` (builds the editor from a clean checkout, runs the MSVC static analysis and every
+- `.github/workflows/` — CI: `build-windows.yml` (builds the editor from a clean checkout of `main`, runs the MSVC static analysis and every
   automation test, on a self-hosted Windows runner), `lint.yml` (JSON, secrets, configuration, headers and document links; GitHub-hosted), `release-windows.yml` (a pushed tag builds the Windows
   package and publishes it as a release),
-  `validate-json.yml` (every `InNavi/Data/*.json` parses), `deploy-wiki.yml` (publishes `docs/`)
+  `validate-json.yml` (checks JSON under `InNavi/Data` on a GitHub-hosted runner), `deploy-wiki.yml` (publishes `docs/`)
 - `scripts/` — `lint.py` (the repository checks of `lint.yml`), `check-analysis.ps1` and `check-test-report.ps1` (turn the analysis log and
   the test report into a pass or a fail), `package-windows.ps1`, `smoke-test-package.ps1` and `publish-release.ps1` (the release build,
   see Releases below), `install-layout-validator.mjs` (installs the plugin package)

@@ -12,11 +12,13 @@
 #include "NavigationSearchUtils.h"
 #include "PolyBuilding.h"
 #include "ProjectFile.h"
+#include "HAL/CriticalSection.h"
 #include "RoadSegmentActor.h"
 #include "POIMarkerActor.h"
 #include "ContextBuildingActor.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/SecureHash.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
 #include "Serialization/JsonSerializer.h"
@@ -161,7 +163,48 @@ ABuildingGenerator::ABuildingGenerator()
 	PrimaryActorTick.bCanEverTick = false;
 }
 
-static TSharedPtr<FJsonObject> ReadBuildingProjectFile(const FString& FilePath, FString& OutProblem)
+static bool ReadProjectScale(const FJsonObject& Project, float& OutScale, FString& OutProblem)
+{
+	double Value = 1.0;
+	if (Project.HasField(TEXT("scale")) && (!Project.HasTypedField<EJson::Number>(TEXT("scale"))
+		|| !Project.TryGetNumberField(TEXT("scale"), Value) || !FMath::IsFinite(Value)
+		|| Value <= KINDA_SMALL_NUMBER || Value > TNumericLimits<float>::Max()))
+	{
+		OutProblem = TEXT("The project scale must be a positive number within the supported range.");
+		return false;
+	}
+	OutScale = static_cast<float>(Value);
+	return true;
+}
+
+static FString BuildingProjectRevision(const FString& Text)
+{
+	const FTCHARToUTF8 Utf8(*Text, Text.Len());
+	return FMD5::HashBytes(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length());
+}
+
+static bool ReadBuildingFloorHeight(const FJsonObject& Object, float Default, float& OutHeight)
+{
+	double Height = Default;
+	if (Object.HasField(TEXT("floorHeight")) && (!Object.HasTypedField<EJson::Number>(TEXT("floorHeight"))
+		|| !Object.TryGetNumberField(TEXT("floorHeight"), Height) || !FMath::IsFinite(Height)
+		|| Height <= UE_SMALL_NUMBER || Height > TNumericLimits<float>::Max()))
+	{
+		return false;
+	}
+	OutHeight = static_cast<float>(Height);
+	return true;
+}
+
+static bool ReadBuildingProjectPoint(const TSharedPtr<FJsonValue>& Value, FVector2D& Point)
+{
+	const TArray<TSharedPtr<FJsonValue>>* Pair = nullptr;
+	return Value && Value->TryGetArray(Pair) && Pair->Num() >= 2
+		&& (*Pair)[0] && (*Pair)[0]->Type == EJson::Number && (*Pair)[0]->TryGetNumber(Point.X) && FMath::IsFinite(Point.X)
+		&& (*Pair)[1] && (*Pair)[1]->Type == EJson::Number && (*Pair)[1]->TryGetNumber(Point.Y) && FMath::IsFinite(Point.Y);
+}
+
+static TSharedPtr<FJsonObject> ReadBuildingProjectFile(const FString& FilePath, FString& OutProblem, FString* OutRevision = nullptr)
 {
 	FString JsonString;
 	if (!FFileHelper::LoadFileToString(JsonString, *FilePath))
@@ -169,6 +212,7 @@ static TSharedPtr<FJsonObject> ReadBuildingProjectFile(const FString& FilePath, 
 		OutProblem = TEXT("That file could not be read.");
 		return nullptr;
 	}
+	if (OutRevision) *OutRevision = BuildingProjectRevision(JsonString);
 
 	TSharedPtr<FJsonObject> RootObject;
 	if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(JsonString), RootObject) || !RootObject.IsValid())
@@ -182,13 +226,21 @@ static TSharedPtr<FJsonObject> ReadBuildingProjectFile(const FString& FilePath, 
 int32 ABuildingGenerator::LoadBuildingsFromFile(const FString& FilePath)
 {
 	FString Problem;
-	const TSharedPtr<FJsonObject> RootObject = ReadBuildingProjectFile(FilePath, Problem);
+	FString Revision;
+	const TSharedPtr<FJsonObject> RootObject = ReadBuildingProjectFile(FilePath, Problem, &Revision);
 	if (!RootObject)
 	{
 		UE_LOG(LogTemp, Error, TEXT("Could not load %s: %s"), *FilePath, *Problem);
 		return 0;
 	}
-	return LoadBuildingsFromJson(RootObject);
+	const int32 Count = LoadBuildingsFromJson(RootObject);
+	const TArray<TSharedPtr<FJsonValue>>* Buildings = nullptr;
+	if (RootObject->TryGetArrayField(TEXT("buildings"), Buildings) && Count == Buildings->Num())
+	{
+		ProjectRevisionPath = FPaths::ConvertRelativePathToFull(FilePath);
+		ProjectRevision = MoveTemp(Revision);
+	}
+	return Count;
 }
 
 int32 ABuildingGenerator::LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& RootObject)
@@ -200,33 +252,39 @@ int32 ABuildingGenerator::LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& R
 		UE_LOG(LogTemp, Error, TEXT("No 'buildings' array found in JSON"));
 		return 0;
 	}
-	FString FloorProblem;
-	if (!CheckProjectFloorLimits(*BuildingsArray, FloorProblem))
+	FString Problem;
+	float ProjectScale = 1.f;
+	if (!ReadProjectScale(*RootObject, ProjectScale, Problem) || !CheckProjectFloorLimits(*BuildingsArray, Problem))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("%s"), *FloorProblem);
+		UE_LOG(LogTemp, Warning, TEXT("%s"), *Problem);
+		return 0;
+	}
+	float GlobalFloorHeight = 300.f;
+	if (!ReadBuildingFloorHeight(*RootObject, 300.f, GlobalFloorHeight))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("The project floor height must be a positive number."));
 		return 0;
 	}
 	if (!GetWorld()) return 0;
 
 	// No "version" means a file from before versions existed (read as 0, the same format as 1). A newer file is read as well as it can be.
-	LoadedFileVersion = 0;
-	RootObject->TryGetNumberField(TEXT("version"), LoadedFileVersion);
+	double Version = 0;
+	RootObject->TryGetNumberField(TEXT("version"), Version);
+	LoadedFileVersion = Version >= ProjectFileVersion
+		? static_cast<int32>(FMath::Min(FMath::CeilToDouble(Version), double(MAX_int32)))
+		: 0;
 	if (LoadedFileVersion > ProjectFileVersion)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Project file version %d is newer than this build reads (%d); loading what it can"), LoadedFileVersion, ProjectFileVersion);
 	}
 
-	Scale = 1.f;
-	RootObject->TryGetNumberField(TEXT("scale"), Scale);
+	Scale = ProjectScale;
 
 	// A file made before projects had a name carries neither field.
 	ProjectName.Reset();
 	ProjectDescription.Reset();
 	RootObject->TryGetStringField(TEXT("projectName"), ProjectName);
 	RootObject->TryGetStringField(TEXT("description"), ProjectDescription);
-
-	float GlobalFloorHeight = 300.f;
-	RootObject->TryGetNumberField(TEXT("floorHeight"), GlobalFloorHeight);
 
 	int32 SpawnedCount = 0;
 
@@ -245,16 +303,11 @@ int32 ABuildingGenerator::LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& R
 		int32 FloorCount = 10;
 		B->TryGetNumberField(TEXT("floorCount"), FloorCount);
 
-		float FloorHeight = GlobalFloorHeight;   // default to global
-		B->TryGetNumberField(TEXT("floorHeight"), FloorHeight);   // override if building has its own
+		float FloorHeight = GlobalFloorHeight;
+		if (!ReadBuildingFloorHeight(*B, GlobalFloorHeight, FloorHeight)) continue;
 
 		FVector2D Offset(0.f, 0.f);
-		const TArray<TSharedPtr<FJsonValue>>* OffsetArray;
-		if (B->TryGetArrayField(TEXT("offset"), OffsetArray) && OffsetArray->Num() >= 2)
-		{
-			Offset.X = (*OffsetArray)[0]->AsNumber();
-			Offset.Y = (*OffsetArray)[1]->AsNumber();
-		}
+		if (B->HasField(TEXT("offset")) && !ReadBuildingProjectPoint(B->TryGetField(TEXT("offset")), Offset)) continue;
 
 		const TArray<TSharedPtr<FJsonValue>>* FootprintArray;
 		if (!B->TryGetArrayField(TEXT("footprint"), FootprintArray))
@@ -266,13 +319,13 @@ int32 ABuildingGenerator::LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& R
 		TArray<FVector2D> Footprint;
 		for (const TSharedPtr<FJsonValue>& PointValue : *FootprintArray)
 		{
-			const TArray<TSharedPtr<FJsonValue>>* Pair;
-			if (PointValue->TryGetArray(Pair) && Pair->Num() >= 2)
+			FVector2D Point;
+			if (!ReadBuildingProjectPoint(PointValue, Point))
 			{
-				float X = (*Pair)[0]->AsNumber();
-				float Y = (*Pair)[1]->AsNumber();
-				Footprint.Add(FVector2D(X, Y));
+				Footprint.Reset();
+				break;
 			}
+			Footprint.Add(Point);
 		}
 
 		if (APolyBuilding* Spawned = SpawnBuildingFromData(Id, Name, Footprint, FloorCount, FloorHeight, Offset))
@@ -1119,10 +1172,26 @@ APolyBuilding* ABuildingGenerator::SpawnBuildingFromData(const FString& Id, cons
 		UE_LOG(LogTemp, Error, TEXT("SpawnBuildingFromData: building '%s' needs at least 3 footprint points (has %d)"), *Id, Footprint.Num());
 		return nullptr;
 	}
+	double TwiceArea = 0;
+	for (int32 I = 1; I + 1 < Footprint.Num(); ++I)
+	{
+		TwiceArea += FVector2D::CrossProduct(Footprint[I] - Footprint[0], Footprint[I + 1] - Footprint[0]);
+	}
+	if (!FMath::IsFinite(TwiceArea) || !FMath::IsFinite(FloorHeight)
+		|| FloorHeight <= UE_SMALL_NUMBER || double(FloorHeight) * FMath::Max(1, FloorCount) > TNumericLimits<float>::Max())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Building '%s' must have a nonzero footprint and a valid floor height."), *Id);
+		return nullptr;
+	}
 
 	if (PolygonSelfIntersects(Footprint))
 	{
 		UE_LOG(LogTemp, Error, TEXT("SpawnBuildingFromData: building '%s' footprint crosses itself - fix the outline before finishing"), *Id);
+		return nullptr;
+	}
+	if (TwiceArea == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Building '%s' has a footprint with zero area."), *Id);
 		return nullptr;
 	}
 
@@ -1228,6 +1297,43 @@ FString ABuildingGenerator::FindBuildingIdByName(const FString& Name) const
 
 bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath) const
 {
+	FString Problem;
+	return SaveBuildingsToFile(FilePath, Problem);
+}
+
+bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath, FString& OutProblem) const
+{
+	OutProblem.Reset();
+	// The revision check and replacement are one operation for cooperating editor instances.
+#if PLATFORM_DESKTOP
+	FSystemWideCriticalSection SaveLock(TEXT("InNavi.ProjectSave"), FTimespan::FromSeconds(2));
+	if (!SaveLock.IsValid())
+	{
+		OutProblem = TEXT("Another editor is saving a project. Try again.");
+		return false;
+	}
+#endif
+	const FString FullPath = FPaths::ConvertRelativePathToFull(FilePath);
+	const bool bCheckRevision = !ProjectRevision.IsEmpty() && FPaths::IsSamePath(ProjectRevisionPath, FullPath);
+	FString CurrentRevision;
+	if (IFileManager::Get().FileExists(*FilePath))
+	{
+		FString ReadProblem;
+		const auto Existing = ReadBuildingProjectFile(FilePath, ReadProblem, &CurrentRevision);
+		double ExistingVersion = 0;
+		if (Existing && Existing->TryGetNumberField(TEXT("version"), ExistingVersion) && ExistingVersion > ProjectFileVersion)
+		{
+			OutProblem = TEXT("That file uses a newer project format. Choose a different file name to save a compatible copy.");
+			UE_LOG(LogTemp, Warning, TEXT("%s"), *OutProblem);
+			return false;
+		}
+	}
+	if (bCheckRevision && CurrentRevision != ProjectRevision)
+	{
+		OutProblem = TEXT("The project file changed on disk. Reload it or save your edits under a different name.");
+		return false;
+	}
+
 	TSharedRef<FJsonObject> RootObject = MakeShared<FJsonObject>();
 	RootObject->SetNumberField(TEXT("version"), ProjectFileVersion);
 	RootObject->SetNumberField(TEXT("scale"), Scale);
@@ -1299,6 +1405,8 @@ bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath) const
 		UE_LOG(LogTemp, Error, TEXT("SaveBuildingsToFile: could not write to %s"), *FilePath);
 		return false;
 	}
+	ProjectRevisionPath = FullPath;
+	ProjectRevision = BuildingProjectRevision(OutputString);
 
 	UE_LOG(LogTemp, Warning, TEXT("SaveBuildingsToFile: saved %d buildings to %s"), BuildingsArray.Num(), *FilePath);
 	return true;
@@ -1327,6 +1435,12 @@ bool ABuildingGenerator::MakeMirrorOfEntrance(const FString& SourceBuildingId, c
 	const APolyBuilding* From = FindBuildingById(SourceBuildingId);
 	const APolyBuilding* To = FindBuildingById(OnBuildingId);
 	if (!From || !To || Scale <= KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+	if (Source.Level < 1 || Source.Level > From->GetFloorCount() || Source.Level > To->GetFloorCount()
+		|| !InteriorEntrances::AreElevationsAligned((Source.Level - 1) * double(From->GetFloorHeight()),
+			(Source.Level - 1) * double(To->GetFloorHeight())))
 	{
 		return false;
 	}
@@ -1373,6 +1487,10 @@ bool ABuildingGenerator::MakeMirrorOfEntrance(const FString& SourceBuildingId, c
 	OutMirror = Source;
 	OutMirror.EdgeIndex = BestEdge;
 	OutMirror.Offset = static_cast<float>(FMath::Clamp(BestAlong * Scale - Source.Width * 0.5, 20.0, LengthWorld - Source.Width - 20.0));
+	const FVector2D MirrorStart = ToOutline[BestEdge];
+	const FVector2D MirrorDirection = (ToOutline[(BestEdge + 1) % ToOutline.Num()] - MirrorStart).GetSafeNormal();
+	const FVector2D MirrorMiddle = MirrorStart + MirrorDirection * ((OutMirror.Offset + Source.Width * 0.5) / Scale);
+	if (FVector2D::Distance(Middle, MirrorMiddle) * Scale > InteriorEntrances::MaxLinkDistanceWorldUnits) return false;
 	OutMirror.Kind = EInteriorEntranceKind::Link;
 	OutMirror.ConnectsTo = SourceBuildingId;
 	OutMirror.bMirrored = true;
@@ -1533,11 +1651,20 @@ int32 ABuildingGenerator::ReplaceBuildingsFromPath(const FString& Path, bool bDa
 {
 	OutProblem.Reset();
 	TSharedPtr<FJsonObject> RootObject;
+	FString Revision;
 	int32 ExpectedCount = 0;
 	if (!bDatabase)
 	{
-		RootObject = ReadBuildingProjectFile(Path, OutProblem);
+		RootObject = ReadBuildingProjectFile(Path, OutProblem, &Revision);
 		if (!RootObject) return INDEX_NONE;
+		float ProjectScale = 1.f;
+		if (!ReadProjectScale(*RootObject, ProjectScale, OutProblem)) return INDEX_NONE;
+		float FloorHeight;
+		if (!ReadBuildingFloorHeight(*RootObject, 300.f, FloorHeight))
+		{
+			OutProblem = TEXT("The project floor height must be a positive number.");
+			return INDEX_NONE;
+		}
 
 		const TArray<TSharedPtr<FJsonValue>>* Buildings = nullptr;
 		if (!RootObject->TryGetArrayField(TEXT("buildings"), Buildings))
@@ -1567,7 +1694,7 @@ int32 ABuildingGenerator::ReplaceBuildingsFromPath(const FString& Path, bool bDa
 		Staged->Destroy();
 		OutProblem = bDatabase
 			? TEXT("No buildings could be loaded. Check that the database has campus buildings with valid building nodes.")
-			: TEXT("Some buildings could not be loaded. Check their IDs and outlines.");
+			: TEXT("Some buildings could not be loaded. Check their IDs, floor heights and outlines.");
 		return INDEX_NONE;
 	}
 
@@ -1582,6 +1709,11 @@ int32 ABuildingGenerator::ReplaceBuildingsFromPath(const FString& Path, bool bDa
 	ProjectName = MoveTemp(Staged->ProjectName);
 	ProjectDescription = MoveTemp(Staged->ProjectDescription);
 	LoadedFileVersion = Staged->LoadedFileVersion;
+	if (!bDatabase)
+	{
+		ProjectRevisionPath = FPaths::ConvertRelativePathToFull(Path);
+		ProjectRevision = MoveTemp(Revision);
+	}
 	bHasDatabaseRefPoint = Staged->bHasDatabaseRefPoint;
 	DatabaseRefLat = Staged->DatabaseRefLat;
 	DatabaseRefLon = Staged->DatabaseRefLon;
@@ -1618,6 +1750,9 @@ void ABuildingGenerator::ClearAllBuildings()
 	InteriorDataById.Empty();
 	BuildingBaselines.Empty();
 	Scale = 1.f;
+	LoadedFileVersion = 0;
+	ProjectRevisionPath.Reset();
+	ProjectRevision.Reset();
 	MarkGroundDirty();
 	NotifyNavigationLayoutChanged();
 }
@@ -1658,6 +1793,7 @@ void ABuildingGenerator::CaptureBuildingBaseline(const FString& BuildingId)
 
 void ABuildingGenerator::RefreshBuildingBaselines()
 {
+	LoadedFileVersion = ProjectFileVersion;
 	for (TPair<FString, FBuildingBaseline>& Pair : BuildingBaselines)
 	{
 		FBuildingBaseline Fresh;

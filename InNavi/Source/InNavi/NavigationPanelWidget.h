@@ -325,7 +325,7 @@ private:
 	// The checks both ways of finding a route start with; false (with the reason shown) when there is nothing to find.
 	bool CanStartFindRoute();
 	void HandleLayoutChanged();
-	void RefreshSelectedPlaces();
+	bool RefreshSelectedPlaces();
 	bool bEndpointsNeedRefresh = false;
 	// The trip from the Start through the stops to the Destination, as the legs it is planned in. Both ways of finding a route plan
 	// one leg after another and end in ApplyJourney, or in FailJourney with the leg that could not be.

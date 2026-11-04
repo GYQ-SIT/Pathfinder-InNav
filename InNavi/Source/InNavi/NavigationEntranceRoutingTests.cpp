@@ -83,6 +83,37 @@ namespace NavigationEntranceRoutingTests
 	}
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationLinkIdentityTest, "InNavi.Navigation.Entrances.LinkIdentity",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationLinkIdentityTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationEntranceRoutingTests;
+	FNavigationSearchFixture Fixture;
+	Fixture.Interior->ClearLoadedInterior();
+	Fixture.Generator->ClearAllBuildings();
+	const TArray<FVector2D> Shape = {{0,0}, {1000,0}, {1000,1000}, {0,1000}};
+	Fixture.Generator->SpawnBuildingFromData(TEXT("A"), TEXT("A"), Shape, 2, 300, {0,0});
+	Fixture.Generator->SpawnBuildingFromData(TEXT("A:B"), TEXT("A:B"), Shape, 2, 300, {0,1000});
+	Fixture.Generator->SpawnBuildingFromData(TEXT("C"), TEXT("C"), Shape, 2, 300, {1000,0});
+	Fixture.Generator->SpawnBuildingFromData(TEXT("D"), TEXT("D"), Shape, 2, 300, {1000,1000});
+	auto First = Door(TEXT("B:Door"), EInteriorEntranceKind::Link, 1, 1, TEXT("C"));
+	auto Second = Door(TEXT("Door"), EInteriorEntranceKind::Link, 1, 1, TEXT("D"));
+	First.Offset = 875; First.Width = 100;
+	Second.Offset = 25; Second.Width = 100;
+	Fixture.Generator->SetInteriorDataForBuilding(TEXT("A"), InteriorData({First}));
+	Fixture.Generator->SetInteriorDataForBuilding(TEXT("A:B"), InteriorData({Second}));
+	Fixture.Generator->SetInteriorDataForBuilding(TEXT("C"), InteriorData({}));
+	Fixture.Generator->SetInteriorDataForBuilding(TEXT("D"), InteriorData({}));
+	FNavigationRouteResult Route;
+	TestTrue(TEXT("the first authored pair connects"), FNavigationRoutePlanner::FindCampusRoute(*Fixture.Generator, *Fixture.Interior,
+		Point(TEXT("A"), 1, {900,925}), Point(TEXT("C"), 1, {100,925}), Route));
+	TestTrue(TEXT("the second authored pair connects"), FNavigationRoutePlanner::FindCampusRoute(*Fixture.Generator, *Fixture.Interior,
+		Point(TEXT("A:B"), 1, {900,75}), Point(TEXT("D"), 1, {100,75}), Route));
+	TestFalse(TEXT("similar IDs cannot join the two unrelated pairs"), FNavigationRoutePlanner::FindCampusRoute(*Fixture.Generator, *Fixture.Interior,
+		Point(TEXT("A"), 1, {900,925}), Point(TEXT("D"), 1, {100,75}), Route));
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationEntranceMainTest, "InNavi.Navigation.Entrances.MainAndOutdoor",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FNavigationEntranceMainTest::RunTest(const FString& Parameters)

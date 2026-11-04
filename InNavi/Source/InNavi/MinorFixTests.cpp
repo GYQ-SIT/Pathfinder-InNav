@@ -3,6 +3,7 @@
 #include "BuildingGenerator.h"
 #include "InteriorEntrance.h"
 #include "InteriorGenerator.h"
+#include "InteriorRoom.h"
 #include "NavPlayerController.h"
 #include "PolyBuilding.h"
 #include "ProjectLibrary.h"
@@ -56,6 +57,54 @@ namespace MinorFixTests
 		}
 		return true;
 	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInteriorPasteGeometryTest, "InNavi.Interior.PasteGeometry", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FInteriorPasteGeometryTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	Fixture.Interior->ClearLoadedInterior();
+	Fixture.Generator->ClearAllBuildings();
+	const TArray<FVector2D> Outline = {{0,0}, {1600,0}, {1600,1000}, {0,1000}};
+	Fixture.Generator->SpawnBuildingFromData(TEXT("Copy"), TEXT("Copy"), Outline, 3, 300, {0,0});
+	Fixture.Generator->SpawnBuildingFromData(TEXT("Far"), TEXT("Far"), Outline, 3, 300, {10000,0});
+	auto* Interior = Fixture.Interior;
+	Interior->LoadInteriorForBuilding(TEXT("Copy"));
+	Interior->SetActiveFloor(3);
+	FString Error;
+	FInteriorOpening Opening;
+	Opening.Id = TEXT("Door"); Opening.Type = EInteriorOpeningType::Door; Opening.Width = 90;
+	Opening.Offset = 80; Opening.InputId = TEXT("old"); Opening.ConnectsTo = TEXT("outside");
+	auto* Room = Interior->CreateRoomFromFootprintWithTags({{200,200}, {600,200}, {600,500}, {200,500}},
+		TEXT("new"), TEXT("Room copy"), true, false, false, Error, {}, FString(), {Opening});
+	if (TestNotNull(TEXT("room is pasted"), Room) && TestEqual(TEXT("the opening is preserved"), Room->GetOpenings().Num(), 1))
+	{
+		TestEqual(TEXT("the width is preserved"), Room->GetOpenings()[0].Width, 90.f);
+		TestEqual(TEXT("the opening belongs to the new room"), Room->GetOpenings()[0].InputId, FString(TEXT("new")));
+	}
+	auto* Wall = Interior->CreateWallFromPoints({{800,200}, {1200,200}}, TEXT("wall"), Error, {Opening}, TEXT("Wall copy"));
+	if (TestNotNull(TEXT("two-point wall is pasted"), Wall))
+	{
+		TestFalse(TEXT("the pasted wall remains open"), Wall->IsClosedLoop());
+		TestEqual(TEXT("the wall retains its opening"), Wall->GetOpenings().Num(), 1);
+		const double OldZ = Wall->GetComponentsBoundingBox().Min.Z;
+		TestTrue(TEXT("the lower floor can be removed"), Interior->RemoveFloor(2));
+		TestEqual(TEXT("the wall moves down with the floor"), Wall->GetComponentsBoundingBox().Min.Z, OldZ - 300);
+	}
+	FInteriorEntrance Link;
+	Link.Kind = EInteriorEntranceKind::Link;
+	Link.Id = TEXT("Link"); Link.EdgeIndex = 1; Link.Offset = 200; Link.ConnectsTo = TEXT("Far");
+	FInteriorEntrance Main = Link;
+	Main.Kind = EInteriorEntranceKind::Main; Main.Id = TEXT("Main"); Main.ConnectsTo.Reset();
+	auto Data = MakeShared<FJsonObject>();
+	Data->SetArrayField(TEXT("entrances"), {MakeShared<FJsonValueObject>(InteriorEntrances::ToJson(Link)),
+		MakeShared<FJsonValueObject>(InteriorEntrances::ToJson(Main))});
+	const auto Doors = InteriorEntrances::ReadAll(Interior->CreateTranslatedInteriorCopy(Data, {3000, 0}));
+	TestTrue(TEXT("the copy retains the main door and drops the original site's link"), Doors.Num() == 1 && Doors[0].Id == TEXT("Main"));
+	FInteriorEntrance Mirror;
+	TestFalse(TEXT("an imported link cannot punch a mirror into a distant wall"),
+		Fixture.Generator->MakeMirrorOfEntrance(TEXT("Copy"), Link, TEXT("Far"), Mirror));
+	return true;
 }
 
 // Deleting a floor takes the lifts, stairs and doors in the outer wall of that floor with it, and renumbers the lifts and stairs of the floors

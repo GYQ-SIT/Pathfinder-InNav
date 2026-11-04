@@ -6,6 +6,7 @@
 #include "MobileAppWidget.h"
 #include "MobileSearchPageWidget.h"
 #include "MobileSplashWidget.h"
+#include "ConfirmDialogWidget.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "TimerManager.h"
@@ -22,6 +23,7 @@
 #include "InteriorRoom.h"
 #include "InteriorConnectorMarker.h"
 #include "EngineUtils.h"
+#include "Engine/GameViewportClient.h"
 #include "DrawDebugHelpers.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -466,6 +468,13 @@ void ANavPlayerController::SelectNavigationPoint(FVector2D FootprintPosition, in
 void ANavPlayerController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
+
+#if PLATFORM_DESKTOP
+	if (GetWorld() && GetWorld()->WorldType == EWorldType::Game && GetLocalPlayer())
+	{
+		BindGameWindowCloseGuard(GetWorld()->GetGameViewport());
+	}
+#endif
 
 	InputComponent->BindAction("SelectBuilding", IE_Pressed, this, &ANavPlayerController::OnClick);
 	InputComponent->BindKey(EKeys::B, IE_Pressed, this, &ANavPlayerController::ToggleBuildMode);
@@ -2009,7 +2018,7 @@ bool ANavPlayerController::DeleteSelection()
 	if (!SelectedEntranceId.IsEmpty())
 	{
 		const FString Id = SelectedEntranceId;
-		if (!InteriorGen || !InteriorGen->RemoveEntrance(Id))
+		if (!InteriorGen || !InteriorGen->RemoveEntrance(Id, &SelectedEntranceSourceBuildingId))
 		{
 			return false;
 		}
@@ -2058,12 +2067,12 @@ bool ANavPlayerController::AddEntranceAtFootprintPosition(const FVector2D& Footp
 
 bool ANavPlayerController::SelectEntranceNear(const FVector2D& FootprintPoint, float ToleranceFootprintUnits)
 {
-	const FString Id = InteriorGen ? InteriorGen->FindEntranceNear(FootprintPoint, ToleranceFootprintUnits) : FString();
-	if (Id.IsEmpty())
+	const auto* Entrance = InteriorGen ? InteriorGen->FindEntranceNear(FootprintPoint, ToleranceFootprintUnits) : nullptr;
+	if (!Entrance)
 	{
 		return false;
 	}
-	SelectEntrance(Id);
+	SelectEntrance(Entrance->Id, Entrance->SourceBuildingId);
 	return true;
 }
 
@@ -2073,14 +2082,15 @@ FString ANavPlayerController::GetBuildingDisplayName(const FString& BuildingId) 
 	return Building && !Building->BuildingName.IsEmpty() ? Building->BuildingName : BuildingId;
 }
 
-const FInteriorEntrance* ANavPlayerController::FindEntrance(const FString& Id) const
+const FInteriorEntrance* ANavPlayerController::GetSelectedEntrance() const
 {
-	return InteriorGen ? InteriorGen->FindEntranceById(Id) : nullptr;
+	return InteriorGen && !SelectedEntranceId.IsEmpty()
+		? InteriorGen->FindEntranceById(SelectedEntranceId, &SelectedEntranceSourceBuildingId) : nullptr;
 }
 
-void ANavPlayerController::SelectEntrance(const FString& EntranceId)
+void ANavPlayerController::SelectEntrance(const FString& EntranceId, const FString& SourceBuildingId)
 {
-	if (EntranceId == SelectedEntranceId)
+	if (EntranceId == SelectedEntranceId && SourceBuildingId == SelectedEntranceSourceBuildingId)
 	{
 		return;
 	}
@@ -2105,6 +2115,7 @@ void ANavPlayerController::SelectEntrance(const FString& EntranceId)
 		}
 	}
 	SelectedEntranceId = EntranceId;
+	SelectedEntranceSourceBuildingId = SourceBuildingId;
 	OnSelectedEntranceChanged.Broadcast(SelectedEntranceId);
 }
 
@@ -3669,6 +3680,7 @@ void ANavPlayerController::OnLeftMouseDown3DEdit()
 	SetIgnoreLookInput(true);
 
 	bIsDragging3DRoom = true;
+	Dragging3DRoom = Room;
 	Dragging3DRoomId = Room->RoomId;
 	DragStart3DRoomFootprint = Room->GetFootprint();
 	DragStart3DFootprintPosition = StartFootprintPosition;
@@ -3684,7 +3696,8 @@ void ANavPlayerController::OnLeftMouseUp3DEdit()
 
 	bIsDragging3DRoom = false;
 	SetIgnoreLookInput(false);
-	CommitRoomMove(Dragging3DRoomId, DragStart3DRoomFootprint);
+	if (Dragging3DRoom.IsValid()) CommitRoomMove(Dragging3DRoomId, DragStart3DRoomFootprint);
+	Dragging3DRoom.Reset();
 	Dragging3DRoomId.Empty();
 	DragStart3DRoomFootprint.Reset();
 }
@@ -4221,7 +4234,6 @@ void ANavPlayerController::RestoreExteriorCameraView()
 
 bool ANavPlayerController::SaveCurrentProject()
 {
-	OnBeforeProjectSave.Broadcast();
 	if (!Generator)
 	{
 		UE_LOG(LogTemp, Error, TEXT("SaveCurrentProject: no BuildingGenerator found in the level"));
@@ -4229,9 +4241,13 @@ bool ANavPlayerController::SaveCurrentProject()
 		return false;
 	}
 
-	if (CurrentProjectFilePath.IsEmpty())
+	const bool bNewerFormat = Generator->GetLoadedFileVersion() > ABuildingGenerator::ProjectFileVersion;
+	if (CurrentProjectFilePath.IsEmpty() || bNewerFormat)
 	{
-		// No file yet (e.g. a brand-new session) - ask where to save, same dialog Open uses.
+		if (bNewerFormat)
+		{
+			OnActionFailed.Broadcast(TEXT("This project uses a newer format. Choose a different file name to save a compatible copy."), EActionFailureSeverity::Warning);
+		}
 		const FString ChosenPath = BrowseForSaveLocation();
 		if (ChosenPath.IsEmpty())
 		{
@@ -4240,26 +4256,7 @@ bool ANavPlayerController::SaveCurrentProject()
 		}
 		return SaveCurrentProjectAs(ChosenPath);
 	}
-
-	if (InteriorGen)
-	{
-		InteriorGen->SyncInteriorToBuildingGenerator();
-	}
-
-	const bool bSuccess = Generator->SaveBuildingsToFile(CurrentProjectFilePath);
-	if (bSuccess)
-	{
-		Generator->RefreshBuildingBaselines();
-		UnsavedBuildings.Reset();
-		bHasUnsavedChanges = false;
-		UE_LOG(LogTemp, Warning, TEXT("Saved to %s"), *CurrentProjectFilePath);
-		OnProjectSaved.Broadcast();
-	}
-	else
-	{
-		OnActionFailed.Broadcast(TEXT("Could not save - see the Output Log for details."), EActionFailureSeverity::Critical);
-	}
-	return bSuccess;
+	return SaveCurrentProjectAs(CurrentProjectFilePath);
 }
 
 FString ANavPlayerController::BrowseForSaveLocation()
@@ -4308,6 +4305,11 @@ FString ANavPlayerController::BrowseForSaveLocation()
 
 bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
 {
+	if (bIsDragging3DRoom) OnLeftMouseUp3DEdit();
+	for (TObjectIterator<UInteriorFloorPlanWidget> It; It; ++It)
+	{
+		if (It->GetWorld() == GetWorld() && It->GetOwningPlayer() == this) It->FinishEditDrag();
+	}
 	OnBeforeProjectSave.Broadcast();
 	if (!Generator)
 	{
@@ -4327,7 +4329,8 @@ bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
 		InteriorGen->SyncInteriorToBuildingGenerator();
 	}
 
-	const bool bSuccess = Generator->SaveBuildingsToFile(FilePath);
+	FString Problem;
+	const bool bSuccess = Generator->SaveBuildingsToFile(FilePath, Problem);
 	if (bSuccess)
 	{
 		Generator->RefreshBuildingBaselines();
@@ -4339,9 +4342,71 @@ bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
 	}
 	else
 	{
-		OnActionFailed.Broadcast(TEXT("Could not save - see the Output Log for details."), EActionFailureSeverity::Critical);
+		OnActionFailed.Broadcast(Problem.IsEmpty() ? TEXT("Could not save - see the Output Log for details.") : Problem, EActionFailureSeverity::Critical);
 	}
 	return bSuccess;
+}
+
+void ANavPlayerController::BindGameWindowCloseGuard(UGameViewportClient* Viewport)
+{
+	if (!Viewport || Viewport->OnWindowCloseRequested().IsBound()) return;
+	GuardedGameViewport = Viewport;
+	Viewport->OnWindowCloseRequested().BindUObject(this, &ANavPlayerController::HandleGameWindowCloseRequested);
+}
+
+void ANavPlayerController::UnbindGameWindowCloseGuard()
+{
+	if (auto* Viewport = GuardedGameViewport.Get(); Viewport && Viewport->OnWindowCloseRequested().IsBoundToObject(this))
+	{
+		Viewport->OnWindowCloseRequested().Unbind();
+	}
+	GuardedGameViewport.Reset();
+	if (auto* Dialog = WindowCloseDialog.Get()) Dialog->RemoveFromParent();
+	WindowCloseDialog.Reset();
+}
+
+bool ANavPlayerController::HandleGameWindowCloseRequested()
+{
+	if (!HasUnsavedChanges()) return true;
+	if (!WindowCloseDialog.IsValid())
+	{
+		if (auto* Dialog = CreateWidget<UConfirmDialogWidget>(this, UConfirmDialogWidget::StaticClass()))
+		{
+			WindowCloseDialog = Dialog;
+			Dialog->OnSaveAndLeave.AddUniqueDynamic(this, &ANavPlayerController::SaveAndCloseGameWindow);
+			Dialog->OnDiscardAndLeave.AddUniqueDynamic(this, &ANavPlayerController::DiscardAndCloseGameWindow);
+			Dialog->OnCancel.AddUniqueDynamic(this, &ANavPlayerController::CancelGameWindowClose);
+			Dialog->AddToViewport(1000);
+		}
+	}
+	return false;
+}
+
+void ANavPlayerController::SaveAndCloseGameWindow()
+{
+	const bool bSaved = SaveCurrentProject();
+	WindowCloseDialog.Reset();
+	if (bSaved) CloseGameWindow();
+}
+
+void ANavPlayerController::DiscardAndCloseGameWindow()
+{
+	WindowCloseDialog.Reset();
+	DiscardUnsavedChanges();
+	if (!HasUnsavedChanges()) CloseGameWindow();
+}
+
+void ANavPlayerController::CancelGameWindowClose()
+{
+	WindowCloseDialog.Reset();
+}
+
+void ANavPlayerController::CloseGameWindow()
+{
+	if (auto* Viewport = GuardedGameViewport.Get())
+	{
+		if (auto Window = Viewport->GetWindow()) Window->RequestDestroyWindow();
+	}
 }
 
 void ANavPlayerController::MarkBuildingCreated(APolyBuilding* Building)
@@ -4477,6 +4542,9 @@ void ANavPlayerController::CopyInteriorKeyHandler()
 
 	CopiedRoomId = Room->RoomId;
 	CopiedRoomFootprint = Room->GetFootprint();
+	CopiedRoomOpenings = Room->GetOpenings();
+	CopiedRoomScale = GetBuildingScale();
+	bCopiedRoomClosed = Room->IsClosedLoop();
 	CopiedRoomName = Room->RoomName;
 	CopiedRoomTags = Room->RoomTags;
 	CopiedRoomType = Room->RoomType;
@@ -4588,6 +4656,7 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 	}
 
 	TArray<FVector2D> NewFootprint = CopiedRoomFootprint;
+	for (FVector2D& Point : NewFootprint) Point *= CopiedRoomScale / GetBuildingScale();
 	bool bFoundPastePosition = false;
 	// Move the pasted copy slightly so it does not sit exactly on top.
 	const FVector2D CursorScreenPosition = FSlateApplication::Get().GetCursorPos();
@@ -4637,7 +4706,7 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 		break;
 	}
 	FString CreateError;
-	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprintWithTags(
+	AInteriorRoom* NewRoom = bCopiedRoomClosed ? InteriorGen->CreateRoomFromFootprintWithTags(
 		NewFootprint,
 		FString(),                 // Empty = generate a new unique ID
 		CopiedRoomName,
@@ -4646,8 +4715,9 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 		/*bAllowOverlap=*/false,
 		CreateError,
 		CopiedRoomTags,
-		CopiedRoomType
-	);
+		CopiedRoomType,
+		CopiedRoomOpenings
+	) : InteriorGen->CreateWallFromPoints(NewFootprint, FString(), CreateError, CopiedRoomOpenings, CopiedRoomName);
 
 	if (NewRoom)
 	{
@@ -5091,6 +5161,7 @@ void ANavPlayerController::Tick(float DeltaSeconds)
 		return;
 	}
 
+	if (bIsDragging3DRoom && (!IsInputKeyDown(EKeys::LeftMouseButton) || !Dragging3DRoom.IsValid())) OnLeftMouseUp3DEdit();
 	if (bIsDragging3DRoom)
 	{
 		FHitResult Hit;

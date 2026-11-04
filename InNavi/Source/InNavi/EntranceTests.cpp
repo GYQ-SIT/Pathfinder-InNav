@@ -187,6 +187,77 @@ bool FEntranceBothSidesTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEntranceSharedIdSelectionTest, "InNavi.Interior.Entrance.SharedIdSelection", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FEntranceSharedIdSelectionTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	Fixture.Interior->ClearLoadedInterior();
+	Fixture.Generator->ClearAllBuildings();
+	const TArray<FVector2D> Outline = {{0, 0}, {1000, 0}, {1000, 1000}, {0, 1000}};
+	Fixture.Generator->SpawnBuildingFromData(TEXT("A"), TEXT("A"), Outline, 2, 300, {0, 0});
+	Fixture.Generator->SpawnBuildingFromData(TEXT("B"), TEXT("B"), Outline, 2, 300, {1000, 0});
+	Fixture.Generator->SpawnBuildingFromData(TEXT("C"), TEXT("C"), Outline, 2, 300, {2000, 0});
+	const auto StoreLink = [&](const FString& Owner, int32 Edge)
+	{
+		FInteriorEntrance Door;
+		Door.Id = TEXT("shared-door");
+		Door.Kind = EInteriorEntranceKind::Link;
+		Door.ConnectsTo = TEXT("B");
+		Door.EdgeIndex = Edge;
+		Door.Offset = 380;
+		auto Interior = MakeShared<FJsonObject>();
+		Interior->SetArrayField(TEXT("entrances"), {MakeShared<FJsonValueObject>(InteriorEntrances::ToJson(Door))});
+		Fixture.Generator->SetInteriorDataForBuilding(Owner, Interior);
+	};
+	StoreLink(TEXT("A"), 1);
+	StoreLink(TEXT("C"), 3);
+	auto* Controller = Fixture.MakeController();
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("B"));
+	TestEqual(TEXT("both mirrors are present"), Fixture.Interior->GetAllEntrances().Num(), 2);
+	TestNull(TEXT("the bare ID is ambiguous"), Fixture.Interior->FindEntranceById(TEXT("shared-door")));
+	TestTrue(TEXT("the left mirror is selectable"), Controller->SelectEntranceNear({0, 500}, 10));
+	if (const auto* Door = Controller->GetSelectedEntrance(); TestNotNull(TEXT("left mirror selection"), Door))
+		TestEqual(TEXT("the left mirror belongs to A"), Door->SourceBuildingId, FString(TEXT("A")));
+	TestTrue(TEXT("clicking the right mirror changes the selection despite the shared ID"), Controller->SelectEntranceNear({1000, 500}, 10));
+	if (const auto* Door = Controller->GetSelectedEntrance(); TestNotNull(TEXT("right mirror selection"), Door))
+		TestEqual(TEXT("the right mirror belongs to C"), Door->SourceBuildingId, FString(TEXT("C")));
+	TestTrue(TEXT("Delete removes the selected mirror"), Controller->DeleteSelection());
+	TestEqual(TEXT("the other owner's door survives"), Fixture.Generator->GetStoredEntrances(TEXT("A")).Num(), 1);
+	TestTrue(TEXT("only the selected owner's door is removed"), Fixture.Generator->GetStoredEntrances(TEXT("C")).IsEmpty());
+	TestTrue(TEXT("Undo restores the selected door"), Fixture.Interior->Undo());
+	TestEqual(TEXT("the original owner again has its door"), Fixture.Generator->GetStoredEntrances(TEXT("C")).Num(), 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEntranceElevationTest, "InNavi.Interior.Entrance.AlignedElevations", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FEntranceElevationTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	Fixture.Interior->ClearLoadedInterior();
+	Fixture.Generator->ClearAllBuildings();
+	const TArray<FVector2D> Outline = {{0, 0}, {1000, 0}, {1000, 1000}, {0, 1000}};
+	Fixture.Generator->SpawnBuildingFromData(TEXT("A"), TEXT("A"), Outline, 2, 300, {0, 0});
+	auto* Neighbour = Fixture.Generator->SpawnBuildingFromData(TEXT("B"), TEXT("B"), Outline, 2, 400, {1000, 0});
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("A"));
+	Fixture.Interior->SetActiveFloor(2);
+	FString Error;
+	TestTrue(TEXT("floor 2 is refused when the landings are at different heights"),
+		Fixture.Interior->AddEntranceAtPoint({1000, 500}, 10, Error).IsEmpty());
+	TestTrue(TEXT("the refusal identifies the height mismatch"), Error.Contains(TEXT("different height")));
+	TestTrue(TEXT("the rejected link creates no door"), Fixture.Interior->GetEntrances().IsEmpty());
+	Fixture.Interior->SetActiveFloor(1);
+	const FString Ground = Fixture.Interior->AddEntranceAtPoint({1000, 500}, 10, Error);
+	TestFalse(TEXT("the aligned ground floors can still connect"), Ground.IsEmpty());
+	if (!Ground.IsEmpty()) Fixture.Interior->RemoveEntrance(Ground);
+	Neighbour->BuildFromFootprint(Outline, 1, {1000, 0}, 2, 300);
+	Fixture.Interior->SetActiveFloor(2);
+	TestFalse(TEXT("aligned upper floors can connect"), Fixture.Interior->AddEntranceAtPoint({1000, 500}, 10, Error).IsEmpty());
+	TestEqual(TEXT("the aligned link has a mirror"), Fixture.Generator->GetMirroredEntrances(TEXT("B")).Num(), 1);
+	Neighbour->SetFloorCount(1);
+	TestTrue(TEXT("there is no mirror on a floor that no longer exists"), Fixture.Generator->GetMirroredEntrances(TEXT("B")).IsEmpty());
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEntrancePropertiesTest, "InNavi.Interior.Entrance.Properties", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FEntrancePropertiesTest::RunTest(const FString& Parameters)
 {

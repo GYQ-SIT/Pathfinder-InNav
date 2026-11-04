@@ -60,6 +60,7 @@ if (checkOnly) {
   const stage = destination + '.install-stage';
   await mkdir(stage, { recursive: false });
   const replaced = [];
+  let keepRecoveryFiles = false;
   try {
     for (const item of files) await cp(join(source, item), join(stage, item), { recursive: true });
     for (const item of files) {
@@ -71,11 +72,20 @@ if (checkOnly) {
       await rename(join(stage, item), old);
     }
   } catch (error) {
+    const recoveryErrors = [];
     for (const {item, existed} of replaced.reverse()) {
-      await rm(join(destination, item), { recursive: true, force: true });
-      if (existed) await rename(join(stage, item + '.previous'), join(destination, item));
+      try {
+        await rm(join(destination, item), { recursive: true, force: true });
+        if (existed) await rename(join(stage, item + '.previous'), join(destination, item));
+      } catch (recoveryError) {
+        recoveryErrors.push(recoveryError);
+      }
+    }
+    if (recoveryErrors.length) {
+      keepRecoveryFiles = true;
+      throw new AggregateError([error, ...recoveryErrors], 'Plugin rollback was incomplete; remaining originals are in ' + stage);
     }
     throw error;
-  } finally { await rm(stage, { recursive: true, force: true }); }
+  } finally { if (!keepRecoveryFiles) await rm(stage, { recursive: true, force: true }); }
   console.log(`Installed ${name}@${pin} into ${destination}`);
 }

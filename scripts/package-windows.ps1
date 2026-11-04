@@ -17,54 +17,86 @@ $runUat = Join-Path $UnrealRoot 'Engine\Build\BatchFiles\RunUAT.bat'
 if (-not (Test-Path $runUat)) { throw "Unreal Engine not found at $UnrealRoot (set UE_ROOT)." }
 if (Get-Process -Name 'UnrealEditor' -ErrorAction SilentlyContinue) { throw 'Close the Unreal editor first: it cannot package while it is open.' }
 
-$archive = Join-Path $OutputDir 'archive'
-$zip = Join-Path $OutputDir "$Name.zip"
-if (Test-Path $archive) { Remove-Item -Recurse -Force $archive }
-if (Test-Path $zip) { Remove-Item -Force $zip }
-New-Item -ItemType Directory -Force $OutputDir | Out-Null
-
-Write-Host "== Packaging $Name (this cooks the project: it takes a while)"
-& $runUat BuildCookRun "-project=$project" -noP4 -platform=Win64 -clientconfig=Development -build -cook -stage -pak -prereqs -archive "-archivedirectory=$archive" -utf8output
-if ($LASTEXITCODE -ne 0) { throw "BuildCookRun failed ($LASTEXITCODE)." }
-
-$root = Join-Path $archive 'Windows'
-if (-not (Test-Path (Join-Path $root 'InNavi.exe'))) { throw "No InNavi.exe in ${root}: the package is not complete." }
-
-Write-Host '== Cleaning the package'
-# Nothing of the machine it was made on goes in: logs, saved layouts, symbols, tools the app does not use.
-foreach ($pattern in 'Manifest_*.txt', 'NOTICES.txt', '*.pdb') {
-    Get-ChildItem -Path $root -Recurse -Force -Filter $pattern -ErrorAction SilentlyContinue | Remove-Item -Force
+if ([string]::IsNullOrWhiteSpace($Name) -or $Name.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0) {
+    throw 'Name must be a valid Windows file name.'
 }
-foreach ($folder in 'InNavi\Saved', 'Engine\Saved', 'Engine\Binaries\ThirdParty\Vulkan', 'Engine\Extras\GPUDumpViewer') {
-    $path = Join-Path $root $folder
-    if (Test-Path $path) { Remove-Item -Recurse -Force $path }
+$output = (New-Item -ItemType Directory -Force $OutputDir).FullName
+$nonce = [guid]::NewGuid().ToString('N')
+$archive = Join-Path $output "archive-$nonce"
+$temporaryZip = Join-Path $output "build-$nonce.zip"
+$backup = Join-Path $output "previous-$nonce.zip"
+$zip = Join-Path $output "$Name.zip"
+$published = $false
+try {
+    Write-Host "== Packaging $Name (this cooks the project: it takes a while)"
+    & $runUat BuildCookRun "-project=$project" -noP4 -platform=Win64 -clientconfig=Development -build -cook -stage -pak -prereqs -archive "-archivedirectory=$archive" -utf8output
+    if ($LASTEXITCODE -ne 0) { throw "BuildCookRun failed ($LASTEXITCODE)." }
+
+    $root = Join-Path $archive 'Windows'
+    foreach ($needed in 'InNavi.exe', 'InNavi\Data\buildings.json') {
+        if (-not (Test-Path -LiteralPath (Join-Path $root $needed) -PathType Leaf)) {
+            throw "No $needed in $root. The package is not complete."
+        }
+    }
+
+    Write-Host '== Cleaning the package'
+    foreach ($pattern in 'Manifest_*.txt', 'NOTICES.txt', '*.pdb', 'vc_redist.arm64.exe') {
+        Get-ChildItem -LiteralPath $root -Recurse -Force -Filter $pattern -ErrorAction SilentlyContinue | Remove-Item -Force
+    }
+    $rootPrefix = (Get-Item -LiteralPath $root).FullName + [IO.Path]::DirectorySeparatorChar
+    foreach ($folder in 'InNavi\Saved', 'Engine\Saved', 'Engine\Binaries\ThirdParty\Vulkan', 'Engine\Extras\GPUDumpViewer') {
+        $path = Join-Path $root $folder
+        if (Test-Path -LiteralPath $path) {
+            $resolved = (Get-Item -LiteralPath $path).FullName
+            if (-not $resolved.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw "Unsafe staging path $resolved." }
+            Remove-Item -LiteralPath $resolved -Recurse -Force
+        }
+    }
+    # The default mobile catalogue lives in buildings.json. Keep it alongside the campus database.
+    Get-ChildItem -LiteralPath (Join-Path $root 'InNavi\Data') -File -Filter '*.json' |
+        Where-Object Name -ne 'buildings.json' | Remove-Item -Force
+    $samples = Join-Path $root 'SampleProjects'
+    New-Item -ItemType Directory -Force $samples | Out-Null
+    Copy-Item (Join-Path $repo 'docs\test-data\*.json') $samples
+
+    $commit = (& git -C $repo rev-parse --short HEAD).Trim()
+    @(
+        "InNavi - Team Pathfinder"
+        "Build:   $Name"
+        "Version: $(if ($Version) { $Version } else { 'n/a' })"
+        "Commit:  $commit"
+        "Date:    $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm')) UTC"
+        "Engine:  Unreal Engine 5.8, Windows 11 (64-bit)"
+        ""
+        "Run InNavi.exe. The campus loads from InNavi\Data\map_extended.db."
+        "SampleProjects\ has projects to open with File > Load (three buildings with doors, and campus routes)."
+        "Documentation: https://github.com/GYQ-SIT/Pathfinder-InNav (README.md, docs/)."
+    ) | Set-Content -Encoding UTF8 (Join-Path $root 'BUILD-INFO.txt')
+
+    Write-Host "== Zipping to $zip"
+    # Windows tar chooses the ZIP format from the temporary file's extension.
+    & tar.exe -a -c -f $temporaryZip -C $root .
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $temporaryZip -PathType Leaf)) { throw 'Zipping failed.' }
+    $entries = & tar.exe -t -f $temporaryZip | ForEach-Object { $_ -replace '^\./', '' }
+    if ($LASTEXITCODE -ne 0 -or $entries -notcontains 'InNavi.exe' -or $entries -notcontains 'InNavi/Data/buildings.json') {
+        throw 'The ZIP is incomplete.'
+    }
+
+    if ([IO.File]::Exists($zip)) { [IO.File]::Replace($temporaryZip, $zip, $backup) }
+    else { [IO.File]::Move($temporaryZip, $zip) }
+    $published = $true
+} finally {
+    if ([IO.File]::Exists($backup)) {
+        if ($published) { Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue }
+        elseif (-not [IO.File]::Exists($zip)) { [IO.File]::Move($backup, $zip) }
+        else { Write-Warning "The previous ZIP was retained at $backup." }
+    }
+    if (Test-Path -LiteralPath $temporaryZip) { Remove-Item -LiteralPath $temporaryZip -Force -ErrorAction SilentlyContinue }
+    if (Test-Path -LiteralPath $archive) {
+        $resolved = (Get-Item -LiteralPath $archive).FullName
+        if ([IO.Path]::GetDirectoryName($resolved) -eq $output) {
+            Remove-Item -LiteralPath $resolved -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
-Get-ChildItem -Path $root -Recurse -Force -Filter 'vc_redist.arm64.exe' -ErrorAction SilentlyContinue | Remove-Item -Force
-# The data folder keeps the campus database, the click sounds and the default dock layouts; the hand-made test projects stay in the repository.
-Get-ChildItem -Path (Join-Path $root 'InNavi\Data') -Filter '*.json' -ErrorAction SilentlyContinue | Remove-Item -Force
-# Sample projects to try File > Load with (doors, link doors between buildings, campus routes).
-$samples = Join-Path $root 'SampleProjects'
-New-Item -ItemType Directory -Force $samples | Out-Null
-Copy-Item (Join-Path $repo 'docs\test-data\*.json') $samples
-
-$commit = (& git -C $repo rev-parse --short HEAD).Trim()
-@(
-    "InNavi - Team Pathfinder"
-    "Build:   $Name"
-    "Version: $(if ($Version) { $Version } else { 'n/a' })"
-    "Commit:  $commit"
-    "Date:    $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm')) UTC"
-    "Engine:  Unreal Engine 5.8, Windows 11 (64-bit)"
-    ""
-    "Run InNavi.exe. The campus loads from InNavi\Data\map_extended.db."
-    "SampleProjects\ has projects to open with File > Load (three buildings with doors, and campus routes)."
-    "Documentation: https://github.com/GYQ-SIT/Pathfinder-InNav (README.md, docs/)."
-) | Set-Content -Encoding UTF8 (Join-Path $root 'BUILD-INFO.txt')
-
-Write-Host "== Zipping to $zip"
-# Windows' own tar writes a zip that Explorer opens (Git Bash's tar does not understand a drive letter).
-Push-Location $root
-try { & tar.exe -a -c -f $zip * } finally { Pop-Location }
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path $zip)) { throw 'Zipping failed.' }
-Remove-Item -Recurse -Force $archive
-Write-Host ("== Done: {0} ({1:N0} MB)" -f $zip, ((Get-Item $zip).Length / 1MB))
+Write-Host ("== Done: {0} ({1:N0} MB)" -f $zip, ((Get-Item -LiteralPath $zip).Length / 1MB))

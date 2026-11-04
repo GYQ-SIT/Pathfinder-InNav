@@ -43,8 +43,12 @@ The phone app is described in `mobile-real-data-guide.md`.
 | `NODE_AUTH_TOKEN` | the Windows build workflows set it to `secrets.GITHUB_TOKEN` | lets `npm ci` read the private package `@gyq-sit/innavi-layout-validator` |
 | `UE_ROOT` | environment of the machine that packages (optional) | the Unreal Engine 5.8 folder; `scripts/package-windows.ps1` defaults to `C:\Program Files\Epic Games\UE_5.8` |
 | `WIKI_DIR` | `.github/workflows/deploy-wiki.yml` | where on the team12 VM the wiki is published (`/var/www/innavi-wiki`), served by nginx on port 5000 (the VM allows only 22 and 5000-5050) |
-| Runner labels | `runs-on:` of each workflow | `[self-hosted, windows]` (build, analysis, tests, release), `[self-hosted, linux, ovh]` (JSON check, wiki), `ubuntu-latest` (lint, plugin publish) |
+| Runner labels | `runs-on:` of each workflow | `[self-hosted, windows]` (main-branch build, analysis, tests, release), `[self-hosted, linux, ovh]` (wiki deploy), `ubuntu-latest` (PR lint and JSON checks, plugin publish) |
 | Plugin version | `package.json` (published pin) and `InNaviLayoutValidator.uplugin` (checked-in source) | The installer requires matching versions. Windows CI allows newer source before publication. |
+
+The wiki deploy runner needs write access to the parent of the web root so it can stage a sibling directory. The Linux filesystem must support atomic directory exchange via `renameat2`. The running wiki stays in place if staging or exchange fails.
+
+If branch protection requires the Windows workflow on pull requests, update the required checks to match the hosted PR workflows or provide an isolated Unreal runner for PR builds.
 
 ## Secrets, and where they are
 

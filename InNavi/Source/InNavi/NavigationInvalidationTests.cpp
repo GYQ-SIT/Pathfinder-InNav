@@ -102,7 +102,9 @@ bool FNavigationPendingEditInvalidationTest::RunTest(const FString& Parameters)
 	Fixture.Nav->StartFindRoute();
 	TestTrue(TEXT("a moved room endpoint is resolved by ID before replanning"), Fixture.Nav->GetStart().Position.Equals({1100,1000}, .01));
 	Fixture.Interior->DeleteRoom(TEXT("Room")); Fixture.Nav->StartFindRoute();
-	TestFalse(TEXT("a deleted room endpoint is cleared before replanning"), Fixture.Nav->HasStart());
+	TestTrue(TEXT("a deleted room endpoint stays visible for correction"), Fixture.Nav->HasStart());
+	TestFalse(TEXT("planning cannot silently use another start"), Fixture.Nav->IsFindingRoute());
+	TestTrue(TEXT("the unavailable start is explained"), Fixture.Nav->GetDisplayStatusMessage().Contains(TEXT("unavailable")));
 	// Once detached from a context its model events must no longer affect the panel.
 	Fixture.Nav->SetNavigationContext(nullptr, nullptr);
 	FNavigationRouteResult Imported; Imported.Points = { {}, {} }; Fixture.Nav->ApplyRouteResult(Imported);

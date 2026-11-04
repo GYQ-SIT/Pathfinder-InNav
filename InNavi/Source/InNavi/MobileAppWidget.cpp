@@ -379,7 +379,9 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 				{
 					if (UMobileAppWidget* Screen = WeakThis.Get())
 					{
-						Screen->SavedPlaces.Toggle(Place.Id);
+						bool bPersisted;
+						Screen->SavedPlaces.Toggle(Place.Id, &bPersisted);
+						if (!bPersisted) Screen->ShowStorageError();
 						Screen->RefreshSaved();
 						Screen->SelectPlace(Place);
 					}
@@ -472,7 +474,9 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 			{
 				if (UMobileAppWidget* Screen = WeakThis.Get())
 				{
-					Screen->SavedPlaces.Toggle(Place.Id);
+					bool bPersisted;
+					Screen->SavedPlaces.Toggle(Place.Id, &bPersisted);
+					if (!bPersisted) Screen->ShowStorageError();
 					Screen->RefreshSaved();
 					Screen->SelectPlace(Place);
 					Screen->RefreshArrived();
@@ -540,7 +544,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 			{
 				if (UMobileAppWidget* Screen = WeakSaved.Get())
 				{
-					Screen->SavedPlaces.Remove(Place.Id);
+					if (!Screen->SavedPlaces.Remove(Place.Id)) Screen->ShowStorageError();
 					Screen->RefreshSaved();
 					Screen->SelectPlace(Screen->SelectedPlace);
 					Screen->RefreshArrived();
@@ -561,7 +565,11 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 			{
 				if (UMobileAppWidget* Screen = WeakProfile.Get())
 				{
-					Screen->Preferences.SetTheme(Theme);
+					if (!Screen->Preferences.SetTheme(Theme))
+					{
+						Screen->ProfilePage->SetPreferences(Screen->Preferences);
+						Screen->ShowStorageError();
+					}
 					Screen->SyncAppearance();
 				}
 			});
@@ -569,7 +577,11 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 			{
 				if (UMobileAppWidget* Screen = WeakProfile.Get())
 				{
-					Screen->Preferences.SetLargerText(bLarger);
+					if (!Screen->Preferences.SetLargerText(bLarger))
+					{
+						Screen->ProfilePage->SetPreferences(Screen->Preferences);
+						Screen->ShowStorageError();
+					}
 					Screen->SyncAppearance();
 				}
 			});
@@ -665,6 +677,8 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 void UMobileAppWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	if (StorageErrorSeconds > 0.f && (StorageErrorSeconds -= InDeltaTime) <= 0.f && StorageError)
+		StorageError->SetVisibility(ESlateVisibility::Collapsed);
 	if (PendingRoute && PendingRoute->Step(0.003, CurrentRoute))
 	{
 		PendingRoute.Reset();
@@ -1654,16 +1668,36 @@ void UMobileAppWidget::UsePreferencesFile(const FString& Path)
 
 void UMobileAppWidget::ResetSavedAndPreferences()
 {
-	SavedPlaces.Clear();
-	Preferences.Reset();
+	const bool bSavedPlacesReset = SavedPlaces.Clear();
+	const bool bPreferencesReset = Preferences.Reset();
 	RefreshSaved();
 	SelectPlace(SelectedPlace);
 	RefreshArrived();
 	if (ProfilePage)
 	{
 		ProfilePage->SetPreferences(Preferences);
+		if (!bSavedPlacesReset || !bPreferencesReset) ProfilePage->ShowStatus(TEXT("Some changes could not be saved."));
 	}
 	SyncAppearance();
+}
+
+void UMobileAppWidget::ShowStorageError()
+{
+	if (!Phone || !WidgetTree) return;
+	if (!StorageError || StorageError->GetParent() != Phone)
+	{
+		StorageError = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("MobileStorageError"));
+		StorageError->SetBrushColor(RedSoft);
+		StorageError->SetPadding(FMargin(12.f, 8.f));
+		StorageError->SetContent(MakeText(WidgetTree, TEXT("MobileStorageErrorText"), TEXT("Could not save your changes."), 13.f, Red));
+		auto* ErrorSlot = Phone->AddChildToCanvas(StorageError);
+		ErrorSlot->SetAnchors(FAnchors(0.5f, 0.2f));
+		ErrorSlot->SetAlignment(FVector2D(0.5, 0));
+		ErrorSlot->SetAutoSize(true);
+		ErrorSlot->SetZOrder(100);
+	}
+	StorageErrorSeconds = 4.f;
+	StorageError->SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 
 // ---- The look: theme and text size ----

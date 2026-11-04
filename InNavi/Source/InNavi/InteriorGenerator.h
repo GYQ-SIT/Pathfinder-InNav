@@ -134,7 +134,7 @@ public:
 	// Clipboard creation includes tags in the same undo snapshot as the new room.
 	AInteriorRoom* CreateRoomFromFootprintWithTags(const TArray<FVector2D>& Footprint, const FString& RoomId,
 		const FString& RoomName, bool bIsPublic, bool bRequiresKey, bool bAllowOverlap, FString& OutError, const TArray<FString>& InTags,
-		const FString& InRoomType = FString());
+		const FString& InRoomType = FString(), TArray<FInteriorOpening> CopiedOpenings = {});
 
 	// Builds a standalone open wall/partition line on the active floor - same id/floor rules as
 	// CreateRoomFromFootprint, but the points aren't closed into a loop (at least 2 points, not 3)
@@ -143,6 +143,8 @@ public:
 	// CreateRoomFromFootprint's own comment.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	AInteriorRoom* CreateWallFromPoints(const TArray<FVector2D>& Points, const FString& WallId, FString& OutError);
+	AInteriorRoom* CreateWallFromPoints(const TArray<FVector2D>& Points, const FString& WallId, FString& OutError,
+		TArray<FInteriorOpening> CopiedOpenings, const FString& WallName);
 
 	// The id CreateRoomFromFootprint would auto-generate right now if given an empty RoomId -
 	// exposed so UI can show it as a placeholder/default in the "Create Room" form.
@@ -295,7 +297,9 @@ public:
 	const TArray<FInteriorEntrance>& GetEntrances() const { return Entrances; }
 	// The own doors plus the copies of the neighbouring buildings' Link doors that show here - everything to draw, select and route through.
 	const TArray<FInteriorEntrance>& GetAllEntrances() const { return AllEntrances; }
-	const FInteriorEntrance* FindEntranceById(const FString& Id) const;
+	// A source identifies a mirrored entrance. An empty source identifies an owned entrance.
+	// With no source specified, the ID must have exactly one match.
+	const FInteriorEntrance* FindEntranceById(const FString& Id, const FString* SourceBuildingId = nullptr) const;
 	// The Add door tool on the outer wall: puts a door in the outline at the point nearest FootprintPoint (which must be within
 	// ToleranceFootprintUnits of the outline), on the active floor. Where it goes decides what it is:
 	//  - Away from every other building's wall: a Main door, the way out - ground floor only.
@@ -303,10 +307,10 @@ public:
 	//    building shows the same door at the matching spot.
 	// Anything in between, or on top of another door, is refused. Returns the new id, or empty with OutError saying why.
 	FString AddEntranceAtPoint(const FVector2D& FootprintPoint, float ToleranceFootprintUnits, FString& OutError);
-	// The id of the active floor's door within ToleranceFootprintUnits of FootprintPoint (own or mirrored), or empty.
-	FString FindEntranceNear(const FVector2D& FootprintPoint, float ToleranceFootprintUnits) const;
+	// The active floor's closest door within ToleranceFootprintUnits of FootprintPoint, if any.
+	const FInteriorEntrance* FindEntranceNear(const FVector2D& FootprintPoint, float ToleranceFootprintUnits) const;
 	// Removes a door. A mirrored one is removed from the building it belongs to, which takes it from both.
-	bool RemoveEntrance(const FString& Id);
+	bool RemoveEntrance(const FString& Id, const FString* SourceBuildingId = nullptr);
 	// Works out again which neighbouring buildings' Link doors show here (call after something else changed them).
 	void RefreshMirroredEntrances();
 

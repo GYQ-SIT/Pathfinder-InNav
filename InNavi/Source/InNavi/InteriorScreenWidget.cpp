@@ -2278,7 +2278,7 @@ void UInteriorScreenWidget::HandleSelectedEntranceChanged(FString EntranceId)
 		return;
 	}
 
-	const FInteriorEntrance* Entrance = PC->FindEntrance(EntranceId);
+	const FInteriorEntrance* Entrance = PC->GetSelectedEntrance();
 	if (!Entrance)
 	{
 		return;

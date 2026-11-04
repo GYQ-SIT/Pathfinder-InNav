@@ -51,11 +51,19 @@ namespace
 		double PreferredWallClearance = 0.0;
 	};
 
+	enum class EPortal : uint8 { None, ExteriorExit, BuildingLink };
+
 	struct FVertex
 	{
 		FNavigationRoutePoint Point;
 		TArray<int32> ConnectsFloors;
+		EPortal Portal = EPortal::None;
 	};
+
+	FString LinkPortalId(const FString& Owner, const FString& DoorId)
+	{
+		return FString::Printf(TEXT("BuildingLink:%d:%s%s"), Owner.Len(), *Owner, *DoorId);
+	}
 
 	// Value snapshots let the planner read unopened interiors without spawning actors, switching
 	// the editor's building, or replacing its undo history.
@@ -181,9 +189,9 @@ namespace
 		return NearestEdge;
 	}
 
-	bool IsExteriorExitVertex(const FNavigationRoutePoint& Point)
+	bool IsExteriorExitVertex(const FVertex& Vertex)
 	{
-		return Point.ConnectorId.StartsWith(TEXT("OutsideExit:"));
+		return Vertex.Portal == EPortal::ExteriorExit;
 	}
 
 	bool CanTravelOutside(
@@ -520,7 +528,7 @@ namespace
 							&& Opening.ConnectsTo.Equals(TEXT("outside"), ESearchCase::IgnoreCase))
 						{
 							FExteriorExit Exit;
-							Exit.Id = Room->RoomId + TEXT(":") + Opening.Id;
+							Exit.Id = FString::Printf(TEXT("Room:%d:%s%s"), Room->RoomId.Len(), *Room->RoomId, *Opening.Id);
 							Exit.Position = DoorPosition;
 							Geometry.ExteriorExits.Add(Exit);
 						}
@@ -685,8 +693,8 @@ namespace
 				|| (B.Point.Floor == UNavigationPanelWidget::OutdoorFloor && A.Point.Floor == 1);
 
 			return bCorrectFloorPair
-				&& IsExteriorExitVertex(A.Point)
-				&& IsExteriorExitVertex(B.Point)
+				&& IsExteriorExitVertex(A)
+				&& IsExteriorExitVertex(B)
 				&& A.Point.ConnectorId == B.Point.ConnectorId;
 		}
 
@@ -945,11 +953,6 @@ namespace
 		return Model;
 	}
 
-	bool BoundaryPortal(const FNavigationRoutePoint& Point)
-	{
-		return IsExteriorExitVertex(Point) || Point.ConnectorId.StartsWith(TEXT("BuildingLink:"));
-	}
-
 	struct FRouteDoorway
 	{
 		FString BuildingId;
@@ -1145,7 +1148,8 @@ namespace
 		for (const auto& M : Models) for (const auto& Floor : M.Floors)
 			bNeedsOutdoor |= !Floor.Value.ExteriorExits.IsEmpty();
 		auto Add = [&](const FRouteBuilding& M, FVector2D P, int32 Floor, const FString& Id = FString(),
-			EInteriorNavNodeType Type = EInteriorNavNodeType::PathNode, const TArray<int32>& Levels = TArray<int32>(), bool bIsDoorway = false)
+			EInteriorNavNodeType Type = EInteriorNavNodeType::PathNode, const TArray<int32>& Levels = TArray<int32>(),
+			bool bIsDoorway = false, EPortal Portal = EPortal::None)
 		{
 			const FFloorGeometry* Geometry = M.Floors.Find(Floor);
 			if (Geometry && IsInsideRestrictedRoom(P, *Geometry)) return false;
@@ -1154,7 +1158,7 @@ namespace
 			Point.Position = P; Point.Floor = Floor; Point.ConnectorId = Id; Point.ConnectorType = Type;
 			Point.bIsDoorway = bIsDoorway;
 			Stamp(Point, *M.Building);
-			Vertices.Add({ Point, Levels });
+			Vertices.Add({ Point, Levels, Portal });
 			return true;
 		};
 		for (const auto& M : Models)
@@ -1170,7 +1174,8 @@ namespace
 				for (const auto& Exit : Pair.Value.ExteriorExits)
 				{
 					const FString Id = TEXT("OutsideExit:") + M.Building->BuildingId + TEXT(":") + Exit.Id;
-					if (Add(M, Exit.Position, Pair.Key, Id)) Add(M, Exit.Position, 0, Id);
+					if (Add(M, Exit.Position, Pair.Key, Id, EInteriorNavNodeType::PathNode, {}, false, EPortal::ExteriorExit))
+						Add(M, Exit.Position, 0, Id, EInteriorNavNodeType::PathNode, {}, false, EPortal::ExteriorExit);
 				}
 			}
 			for (const auto& Node : M.Nodes) if (M.Floors.Contains(Node.Level)) Add(M, Node.Position, Node.Level, Node.ConnectorGroupId, Node.Type, Node.ConnectsFloors);
@@ -1179,7 +1184,7 @@ namespace
 				FVector2D P;
 				if (Door.Kind != EInteriorEntranceKind::Link || !EntrancePosition(M, Door, Scale, P)) continue;
 				const FString Source = Door.bMirrored ? Door.SourceBuildingId : M.Building->BuildingId;
-				Add(M, P, Door.Level, TEXT("BuildingLink:") + Source + TEXT(":") + Door.Id);
+				Add(M, P, Door.Level, LinkPortalId(Source, Door.Id), EInteriorNavNodeType::PathNode, {}, false, EPortal::BuildingLink);
 			}
 			// Outdoor visibility vertices allow a route to go around every building, including
 			// buildings that have no entrances/interior data. Coordinates retain their owner.
@@ -1223,7 +1228,7 @@ namespace
 			const FNavigationRoutePoint& Point = Vertices[I].Point;
 			ByBuilding.FindOrAdd(Point.BuildingId).Add(I);
 			if (Point.Floor == 0) Outdoor.Add(I);
-			if (Point.ConnectorId.StartsWith(TEXT("BuildingLink:"))) ByLink.FindOrAdd(Point.ConnectorId).Add(I);
+			if (Vertices[I].Portal == EPortal::BuildingLink) ByLink.FindOrAdd(Point.ConnectorId).Add(I);
 		}
 		return true;
 	}
@@ -1240,7 +1245,7 @@ namespace
 		auto Gather = [&](const TArray<int32>& Group) { for (const int32 J : Group) if (bSeed ? J < I : (J > I && J < StaticCount)) Scratch.Add(J); };
 		Gather(ByBuilding.FindChecked(Vertices[I].Point.BuildingId));
 		if (Vertices[I].Point.Floor == 0) Gather(Outdoor);
-		if (const TArray<int32>* Link = ByLink.Find(Vertices[I].Point.ConnectorId)) Gather(*Link);
+		if (Vertices[I].Portal == EPortal::BuildingLink) Gather(ByLink.FindChecked(Vertices[I].Point.ConnectorId));
 		// Met in increasing order and once each, as the loop over every pair would, so the graph comes out the same.
 		Scratch.Sort();
 		int32 Last = INDEX_NONE;
@@ -1259,8 +1264,8 @@ namespace
 					const FVector2D PA = FVector2D(A.Point.WorldPosition) / Scale - Other.Building->BuildingOffset;
 					const FVector2D PB = FVector2D(B.Point.WorldPosition) / Scale - Other.Building->BuildingOffset;
 					if (!CanTravelOutside(PA, PB, Other.Building->GetFootprint(),
-						IsExteriorExitVertex(A.Point) && A.Point.BuildingId == Other.Building->BuildingId,
-						IsExteriorExitVertex(B.Point) && B.Point.BuildingId == Other.Building->BuildingId)
+						IsExteriorExitVertex(A) && A.Point.BuildingId == Other.Building->BuildingId,
+						IsExteriorExitVertex(B) && B.Point.BuildingId == Other.Building->BuildingId)
 						|| InsideOrOnBoundary((PA + PB) * 0.5, Other.Building->GetFootprint())) { bClear = false; break; }
 				}
 				if (!bClear) continue;
@@ -1270,9 +1275,9 @@ namespace
 			{
 				// Mirrored links represent one physical doorway. A floor number alone cannot
 				// connect buildings of different heights, and a missing/dangling link cannot teleport.
-				if (!A.Point.ConnectorId.StartsWith(TEXT("BuildingLink:")) || A.Point.ConnectorId != B.Point.ConnectorId
-					|| A.Point.Floor != B.Point.Floor || FMath::Abs(A.Point.WorldPosition.Z - B.Point.WorldPosition.Z) > 1.f
-					|| FVector::Distance(A.Point.WorldPosition, B.Point.WorldPosition) > 250.f) continue;
+				if (A.Portal != EPortal::BuildingLink || B.Portal != EPortal::BuildingLink || A.Point.ConnectorId != B.Point.ConnectorId
+					|| A.Point.Floor != B.Point.Floor || !InteriorEntrances::AreElevationsAligned(A.Point.WorldPosition.Z, B.Point.WorldPosition.Z)
+					|| FVector::Distance(A.Point.WorldPosition, B.Point.WorldPosition) > InteriorEntrances::MaxLinkDistanceWorldUnits) continue;
 				Cost = FMath::Max(0.01f, static_cast<float>(FVector::Distance(A.Point.WorldPosition, B.Point.WorldPosition) / Scale));
 			}
 			else if (A.Point.Floor == B.Point.Floor)
@@ -1281,10 +1286,10 @@ namespace
 				if (!Floor) continue;
 				TArray<int32> Allowed;
 				bool bValid = true;
-				for (const auto* P : { &A.Point, &B.Point }) if (BoundaryPortal(*P))
+				for (const auto* Vertex : { &A, &B }) if (Vertex->Portal != EPortal::None)
 				{
 					double Distance;
-					const int32 Edge = FindNearestBoundaryEdge(P->Position, M->Building->GetFootprint(), Distance);
+					const int32 Edge = FindNearestBoundaryEdge(Vertex->Point.Position, M->Building->GetFootprint(), Distance);
 					if (Edge == INDEX_NONE || Distance > Floor->WallClearance * 1.5) { bValid = false; break; }
 					Allowed.AddUnique(Edge);
 				}
@@ -1698,18 +1703,18 @@ void FNavigationLayoutCheck::FImpl::Finish(LayoutValidation::FReport& Report)
 	for (int32 I = 0; I < Graph.Vertices.Num(); ++I)
 	{
 		const auto& Point = Graph.Vertices[I].Point;
-		if (Point.Floor == 0 && IsExteriorExitVertex(Point)) { Reachable[I] = true; Queue.Add(I); }
+		if (Point.Floor == 0 && IsExteriorExitVertex(Graph.Vertices[I])) { Reachable[I] = true; Queue.Add(I); }
 	}
 	// Also inspect authored links when no main entrance exists: a valid link is stored on only one side.
 	for (const auto& Model : Models) for (const auto& Door : Model.Entrances)
 	{
 		if (Door.bMirrored || Door.Kind != EInteriorEntranceKind::Link || (!ScopeBuildingId.IsEmpty() && Model.Building->BuildingId != ScopeBuildingId)) continue;
-		const FString Id = TEXT("BuildingLink:") + Model.Building->BuildingId + TEXT(":") + Door.Id;
+		const FString Id = LinkPortalId(Model.Building->BuildingId, Door.Id);
 		bool bConnected = false;
 		for (int32 I = 0; I < Graph.Vertices.Num(); ++I)
 		{
 			const auto& P = Graph.Vertices[I].Point;
-			if (P.BuildingId != Model.Building->BuildingId || P.ConnectorId != Id) continue;
+			if (Graph.Vertices[I].Portal != EPortal::BuildingLink || P.BuildingId != Model.Building->BuildingId || P.ConnectorId != Id) continue;
 			for (const auto& Edge : Graph.Edges[I]) bConnected |= Graph.Vertices[Edge.To].Point.BuildingId == Door.ConnectsTo;
 		}
 		if (!bConnected)

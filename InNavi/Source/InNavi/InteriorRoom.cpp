@@ -90,7 +90,7 @@ void AInteriorRoom::BuildWalls(const TArray<FVector2D>& Footprint, float Scale, 
 
 void AInteriorRoom::SetFloorBaseZ(float NewFloorBaseZ)
 {
-	if (CachedFootprint.Num() < 3)
+	if (CachedFootprint.Num() < (CachedClosedLoop ? 3 : 2))
 	{
 		UE_LOG(LogTemp, Error, TEXT("SetFloorBaseZ: room '%s' has no walls built yet"), *RoomId);
 		return;

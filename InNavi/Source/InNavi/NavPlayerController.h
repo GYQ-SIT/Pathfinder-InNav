@@ -715,9 +715,9 @@ public:
 	bool AddEntranceAtFootprintPosition(const FVector2D& FootprintPoint, float ToleranceFootprintUnits);
 	// Selects the active floor's outer-wall door near FootprintPoint (so Delete removes it); false if none is that close.
 	bool SelectEntranceNear(const FVector2D& FootprintPoint, float ToleranceFootprintUnits);
-	void SelectEntrance(const FString& EntranceId);
+	void SelectEntrance(const FString& EntranceId, const FString& SourceBuildingId = FString());
 	const FString& GetSelectedEntranceId() const { return SelectedEntranceId; }
-	const FInteriorEntrance* FindEntrance(const FString& Id) const;
+	const FInteriorEntrance* GetSelectedEntrance() const;
 	// A building's name as the user has set it (its id if it has none) - what to show instead of an id.
 	FString GetBuildingDisplayName(const FString& BuildingId) const;
 
@@ -1192,6 +1192,23 @@ protected:
 	virtual void Tick(float DeltaSeconds) override;
 
 private:
+	void BindGameWindowCloseGuard(class UGameViewportClient* Viewport);
+	void UnbindGameWindowCloseGuard();
+	bool HandleGameWindowCloseRequested();
+	void CloseGameWindow();
+	UFUNCTION()
+	void SaveAndCloseGameWindow();
+	UFUNCTION()
+	void DiscardAndCloseGameWindow();
+	UFUNCTION()
+	void CancelGameWindowClose();
+	TWeakObjectPtr<class UGameViewportClient> GuardedGameViewport;
+	TWeakObjectPtr<class UConfirmDialogWidget> WindowCloseDialog;
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FProjectWindowCloseTest;
+	friend class FProjectSaveDuringDragTest;
+#endif
+
 	void MarkBuildingCreated(APolyBuilding* Building);
 	TSet<TWeakObjectPtr<APolyBuilding>> UnsavedBuildings;
 	int32 LoadBuildingData(const FString& FilePath, bool bDatabase);
@@ -1336,6 +1353,7 @@ private:
 	// See HasUnsavedChanges above.
 	bool bHasUnsavedChanges = false;
 	FString SelectedEntranceId;
+	FString SelectedEntranceSourceBuildingId;
 
 	bool bBuildMode = false;
 	TArray<FVector2D> PendingFootprint;
@@ -1364,6 +1382,9 @@ private:
 	FString SelectedRoomId;
 	FString CopiedRoomId;
 	TArray<FVector2D> CopiedRoomFootprint;
+	TArray<FInteriorOpening> CopiedRoomOpenings;
+	float CopiedRoomScale = 1.f;
+	bool bCopiedRoomClosed = true;
 	FString CopiedRoomName;
 	TArray<FString> CopiedRoomTags;
 	bool bHasCopiedRoom = false;
@@ -1622,6 +1643,7 @@ private:
 	void OnLeftMouseDown3DEdit();
 	void OnLeftMouseUp3DEdit();
 	bool bIsDragging3DRoom = false;
+	TWeakObjectPtr<AInteriorRoom> Dragging3DRoom;
 	FString Dragging3DRoomId;
 	TArray<FVector2D> DragStart3DRoomFootprint;
 	FVector2D DragStart3DFootprintPosition = FVector2D::ZeroVector;

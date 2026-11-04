@@ -3,12 +3,11 @@ name: Build, analyse and test (Windows)
 # Runs on the team's own self-hosted Windows runner (has UE5.8 + Visual Studio already installed) - the team12 Ubuntu VM can't do this
 # (wrong OS/underpowered). The checks that need no Unreal Engine are in lint.yml, on a GitHub-hosted runner.
 #
-# A pull request is merged only when this passes: the editor builds from a clean checkout (all the code in one unity build, which is where
+# The main branch is checked on the persistent Unreal runner. Pull requests run the hosted lint and JSON workflows.
+# The editor builds from a clean checkout (all the code in one unity build, which is where
 # a name used twice in two files shows up), the product code has no finding of the MSVC static analyser, and every automation test passes.
 on:
   push:
-    branches: [main]
-  pull_request:
     branches: [main]
   workflow_dispatch:
 
@@ -22,6 +21,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, windows]
     timeout-minutes: 120
     env:

@@ -1,4 +1,5 @@
 #include "MobilePreferences.h"
+#include "ProjectFile.h"
 
 #include "Dom/JsonObject.h"
 #include "Misc/FileHelper.h"
@@ -7,31 +8,29 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
-void FMobilePreferences::SetTheme(EMobileTheme InTheme)
+bool FMobilePreferences::SetTheme(EMobileTheme InTheme)
 {
-	Theme = InTheme;
-	Changed();
+	return Apply(InTheme, bLargerText);
 }
 
-void FMobilePreferences::SetLargerText(bool bInLargerText)
+bool FMobilePreferences::SetLargerText(bool bInLargerText)
 {
-	bLargerText = bInLargerText;
-	Changed();
+	return Apply(Theme, bInLargerText);
 }
 
-void FMobilePreferences::Reset()
+bool FMobilePreferences::Reset()
 {
-	Theme = EMobileTheme::Light;
-	bLargerText = false;
-	Changed();
+	return Apply(EMobileTheme::Light, false);
 }
 
-void FMobilePreferences::Changed()
+bool FMobilePreferences::Apply(EMobileTheme InTheme, bool bInLargerText)
 {
-	if (!Path.IsEmpty())
-	{
-		Save();
-	}
+	Swap(Theme, InTheme);
+	Swap(bLargerText, bInLargerText);
+	if (Path.IsEmpty() || Save()) return true;
+	Swap(Theme, InTheme);
+	Swap(bLargerText, bInLargerText);
+	return false;
 }
 
 void FMobilePreferences::UseFile(const FString& InPath)
@@ -75,8 +74,7 @@ bool FMobilePreferences::Save() const
 	Root->SetBoolField(TEXT("largerText"), bLargerText);
 	FString Text;
 	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Text);
-	FJsonSerializer::Serialize(Root, Writer);
-	return FFileHelper::SaveStringToFile(Text, *Path);
+	return FJsonSerializer::Serialize(Root, Writer) && ProjectFile::WriteText(Path, Text);
 }
 
 FString FMobilePreferences::DefaultFile()

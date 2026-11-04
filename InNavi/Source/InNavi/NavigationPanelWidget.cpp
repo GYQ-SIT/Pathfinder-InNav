@@ -631,7 +631,7 @@ void UNavigationPanelWidget::FailJourney(const FJourney& Trip, const FNavigation
 
 bool UNavigationPanelWidget::CanStartFindRoute()
 {
-	RefreshSelectedPlaces();
+	if (!RefreshSelectedPlaces()) return false;
 	if (!CanFindRoute())
 	{
 		SetStatusMessage(TEXT("Set at least two places for the route."), ENavigationMessageKind::Error);
@@ -1567,9 +1567,9 @@ void UNavigationPanelWidget::NotifyInteriorChanged()
 	}
 }
 
-void UNavigationPanelWidget::RefreshSelectedPlaces()
+bool UNavigationPanelWidget::RefreshSelectedPlaces()
 {
-	if (!bEndpointsNeedRefresh) return;
+	if (!bEndpointsNeedRefresh) return true;
 	bEndpointsNeedRefresh = false;
 	auto Refresh = [this](FSelectedEndpoint& Endpoint)
 	{
@@ -1636,13 +1636,29 @@ void UNavigationPanelWidget::RefreshSelectedPlaces()
 		}
 		StampPoint(Endpoint.Point, Endpoint.BuildingId);
 	};
-	Refresh(Start); Refresh(Destination);
+	auto RefreshRequired = [&](FSelectedEndpoint& Selection, const FString& Role)
+	{
+		auto Refreshed = Selection;
+		Refresh(Refreshed);
+		if (Selection.bValid && !Refreshed.bValid)
+		{
+			bEndpointsNeedRefresh = true;
+			SetStatusMessage(FString::Printf(TEXT("%s (%s) is unavailable. Replace or remove it before finding a route."),
+				*Role, *EndpointPhrase(Selection)), ENavigationMessageKind::Warning);
+			return false;
+		}
+		Selection = MoveTemp(Refreshed);
+		return true;
+	};
+	if (!RefreshRequired(Start, TEXT("Start")) || !RefreshRequired(Destination, TEXT("Destination"))) return false;
 	for (int32 I = Stops.Num() - 1; I >= 0; --I)
 	{
-		auto Endpoint = StopAsEndpoint(Stops[I]); Refresh(Endpoint);
-		if (!Endpoint.bValid) Stops.RemoveAt(I);
-		else { Stops[I].Point = Endpoint.Point; Stops[I].RoomOptionLabel = Endpoint.RoomOptionLabel; }
+		auto Endpoint = StopAsEndpoint(Stops[I]);
+		if (!RefreshRequired(Endpoint, FString::Printf(TEXT("Stop %d"), I + 1))) return false;
+		Stops[I].Point = Endpoint.Point;
+		Stops[I].RoomOptionLabel = Endpoint.RoomOptionLabel;
 	}
+	return true;
 }
 
 bool UNavigationPanelWidget::CanClearRoute() const

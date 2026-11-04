@@ -11,10 +11,10 @@ class INNAVI_API FMobilePreferences
 public:
 	EMobileTheme GetTheme() const { return Theme; }
 	bool IsLargerText() const { return bLargerText; }
-	void SetTheme(EMobileTheme InTheme);
-	void SetLargerText(bool bInLargerText);
+	bool SetTheme(EMobileTheme InTheme);
+	bool SetLargerText(bool bInLargerText);
 	// Back to the app's own choices (light, normal text).
-	void Reset();
+	bool Reset();
 
 	// Keeps the choices in this file from now on and reads what is in it (a missing or damaged file is the defaults). Every change is written.
 	void UseFile(const FString& InPath);
@@ -26,7 +26,7 @@ public:
 	static FString DefaultFile();
 
 private:
-	void Changed();
+	bool Apply(EMobileTheme InTheme, bool bInLargerText);
 
 	EMobileTheme Theme = EMobileTheme::Light;
 	bool bLargerText = false;

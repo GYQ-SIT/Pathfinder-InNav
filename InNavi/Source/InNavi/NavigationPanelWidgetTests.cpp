@@ -11,6 +11,40 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationUnavailableStopTest, "InNavi.Navigation.UnavailableStop",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationUnavailableStopTest::RunTest(const FString& Parameters)
+{
+	auto* World = UWorld::CreateWorld(EWorldType::Game, false);
+	auto* Generator = World->SpawnActor<ABuildingGenerator>();
+	auto* Interior = World->SpawnActor<AInteriorGenerator>();
+	Interior->DispatchBeginPlay();
+	Generator->SpawnBuildingFromData(TEXT("Waypoints"), TEXT("Waypoints"), {{0,0}, {1600,0}, {1600,800}, {0,800}}, 1, 300, {0,0});
+	Interior->LoadInteriorForBuilding(TEXT("Waypoints"));
+	FString Error;
+	TestNotNull(TEXT("the waypoint room exists"), Interior->CreateRoomFromFootprint(
+		{{500,200}, {900,200}, {900,600}, {500,600}}, TEXT("Stop"), TEXT("Stop"), true, false, false, Error));
+	auto* Panel = NewObject<UNavigationPanelWidget>();
+	Panel->SetNavigationContext(Generator, Interior);
+	Panel->ToggleSelectStart(); Panel->SelectPoint({200,100}, 1);
+	Panel->ToggleSelectDestination(); Panel->SelectPoint({1400,100}, 1);
+	const auto Options = Panel->GetSelectableRooms();
+	if (TestEqual(TEXT("the waypoint can be selected"), Options.Num(), 1))
+	{
+		TestTrue(TEXT("the user requests a stop"), Panel->AddStopToRoom(Options[0].GetDisplayLabel()));
+		TestTrue(TEXT("the room is then deleted"), Interior->DeleteRoom(TEXT("Stop")));
+		Panel->RequestFindRoute();
+		TestTrue(TEXT("a shortened route is refused"), Panel->GetRoutePoints().IsEmpty());
+		TestEqual(TEXT("the stop remains visible for correction"), Panel->GetPlaceCount(), 3);
+		TestTrue(TEXT("the reason is shown"), Panel->GetDisplayStatusMessage().Contains(TEXT("unavailable")));
+		Panel->RemoveStop(0);
+		Panel->RequestFindRoute();
+		TestFalse(TEXT("the user can explicitly remove the stop and route"), Panel->GetRoutePoints().IsEmpty());
+	}
+	World->DestroyWorld(false);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationConcaveRoomPickerTest, "InNavi.Navigation.ConcaveRoomPicker",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FNavigationConcaveRoomPickerTest::RunTest(const FString& Parameters)
