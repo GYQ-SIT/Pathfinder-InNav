@@ -33,6 +33,7 @@ jobs:
         run: |
           python scripts/validate_schema.py --self-test
           python scripts/test_schemas.py
+          python scripts/test_publish_wiki.py
           python scripts/validate_schema.py docs/schemas/project.schema.json docs/test-data/*.json InNavi/Data/buildings.json
           python scripts/validate_schema.py docs/schemas/mobile-prototype.schema.json InNavi/Data/Prototype/mobile-prototype.json
 
