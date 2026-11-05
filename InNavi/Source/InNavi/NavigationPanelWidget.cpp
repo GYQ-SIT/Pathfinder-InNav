@@ -1649,7 +1649,8 @@ bool UNavigationPanelWidget::RefreshSelectedPlaces()
 					Endpoint.RoomOptionLabel = FString::Printf(TEXT("%s (Floor %d)"), *Room->RoomName, Room->FloorLevel);
 				}
 			}
-			else if (const auto Data = Interior ? Generator->GetInteriorDataForBuilding(Endpoint.BuildingId) : nullptr)
+			// Interior is named in the condition as well as used in the initializer: the static analyser does not see through the conditional.
+			else if (const auto Data = Interior ? Generator->GetInteriorDataForBuilding(Endpoint.BuildingId) : nullptr; Data && Interior)
 			{
 				const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
 				if (Data->TryGetArrayField(TEXT("floors"), Floors)) for (const auto& Value : *Floors)
