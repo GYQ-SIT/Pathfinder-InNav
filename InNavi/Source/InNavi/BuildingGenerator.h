@@ -83,7 +83,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingsFromDatabase(const FString& DatabasePath);
 
-	// Loads roads (as flat ribbon actors) and points of interest (as small marker actors) from the
+	// Loads roads (as flat ribbon actors; the database's points of interest are not loaded) from the
 	// SAME database LoadBuildingsFromDatabase reads buildings from - must be called AFTER a
 	// successful LoadBuildingsFromDatabase(DatabasePath) using that exact same path, since it reuses
 	// that call's own lat/lon reference point (see bHasDatabaseRefPoint) so roads/POIs/buildings all
@@ -387,21 +387,14 @@ private:
 		FString HighwayType;
 		TArray<FVector2D> Points;
 	};
-	struct FSceneryPoi
-	{
-		FString PoiType;
-		FVector2D Position = FVector2D::ZeroVector;
-	};
 	struct FSceneryContextBuilding
 	{
 		FString BuildingType;
 		TArray<FVector2D> Footprint;
 	};
 	TArray<FSceneryRoad> SceneryRoads;
-	TArray<FSceneryPoi> SceneryPois;
 	TArray<FSceneryContextBuilding> SceneryContextBuildings;
 	bool SpawnRoad(const FString& HighwayType, const TArray<FVector2D>& WorldPoints);
-	bool SpawnPoi(const FString& PoiType, const FVector2D& WorldPosition);
 	bool SpawnContextBuilding(const FString& BuildingType, const TArray<FVector2D>& WorldFootprint);
 	// The roads, places and buildings around the campus of a project file's JSON (all optional: an older file has none).
 	void LoadSceneryFromJson(const TSharedPtr<FJsonObject>& RootObject);

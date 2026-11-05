@@ -681,15 +681,6 @@ namespace
 			break;
 		}
 	}
-
-	FLinearColor GetPOIColor(const FString& POIType)
-	{
-		if (POIType == TEXT("amenity")) return FLinearColor(0.2f, 0.4f, 0.9f);
-		if (POIType == TEXT("shop")) return FLinearColor(0.85f, 0.2f, 0.65f);
-		if (POIType == TEXT("leisure")) return FLinearColor(0.25f, 0.75f, 0.3f);
-		if (POIType == TEXT("tourism")) return FLinearColor(0.9f, 0.75f, 0.15f);
-		return FLinearColor::White;
-	}
 }
 
 int32 ABuildingGenerator::LoadRoadsAndPOIsFromDatabase(const FString& DatabasePath)
@@ -765,30 +756,11 @@ int32 ABuildingGenerator::LoadRoadsAndPOIsFromDatabase(const FString& DatabasePa
 		}
 	}
 
-	Database.Execute(
-		TEXT("SELECT poi_id, lat, lon, poi_type FROM pois"),
-		[this, &ProjectToWorldXY, &SpawnedCount](const FSQLitePreparedStatement& Statement) -> ESQLitePreparedStatementExecuteRowResult
-		{
-			double Lat = 0.0, Lon = 0.0;
-			FString POIType;
-			if (!Statement.GetColumnValueByName(TEXT("lat"), Lat)
-				|| !Statement.GetColumnValueByName(TEXT("lon"), Lon)
-				|| !Statement.GetColumnValueByName(TEXT("poi_type"), POIType))
-			{
-				return ESQLitePreparedStatementExecuteRowResult::Error;
-			}
-
-			if (SpawnPoi(POIType, ProjectToWorldXY(Lat, Lon)))
-			{
-				SpawnedCount++;
-			}
-			return ESQLitePreparedStatementExecuteRowResult::Continue;
-		});
-
+	// The database's places of interest (shops, amenities ...) are not loaded: they were small coloured spheres scattered over the ground
+	// that no screen did anything with.
 	Database.Close();
 
-	UE_LOG(LogTemp, Warning, TEXT("LoadRoadsAndPOIsFromDatabase: spawned %d road(s) and %d POI(s) from %s"),
-		SpawnedRoadActors.Num(), SpawnedPOIActors.Num(), *DatabasePath);
+	UE_LOG(LogTemp, Warning, TEXT("LoadRoadsAndPOIsFromDatabase: spawned %d road(s) from %s"), SpawnedRoadActors.Num(), *DatabasePath);
 	MarkGroundDirty();
 	return SpawnedCount;
 }
@@ -920,20 +892,6 @@ bool ABuildingGenerator::SpawnRoad(const FString& HighwayType, const TArray<FVec
 	return true;
 }
 
-bool ABuildingGenerator::SpawnPoi(const FString& PoiType, const FVector2D& WorldPosition)
-{
-	APOIMarkerActor* POIActor = GetWorld() ? GetWorld()->SpawnActor<APOIMarkerActor>() : nullptr;
-	if (!POIActor)
-	{
-		return false;
-	}
-	constexpr float POIMarkerRadiusWorld = 60.f;
-	POIActor->BuildMarker(WorldPosition, POIMarkerRadiusWorld, GetPOIColor(PoiType));
-	SpawnedPOIActors.Add(POIActor);
-	SceneryPois.Add({ PoiType, WorldPosition });
-	return true;
-}
-
 bool ABuildingGenerator::SpawnContextBuilding(const FString& BuildingType, const TArray<FVector2D>& WorldFootprint)
 {
 	// A flat, uniform placeholder height for every context building; what tells them apart is the colour of
@@ -965,7 +923,7 @@ void ABuildingGenerator::LoadSceneryFromJson(const TSharedPtr<FJsonObject>& Root
 	{
 		ClearAllContextBuildings();
 	}
-	if (RootObject->TryGetArrayField(TEXT("roads"), Present) || RootObject->TryGetArrayField(TEXT("pois"), Present))
+	if (RootObject->TryGetArrayField(TEXT("roads"), Present))
 	{
 		ClearAllRoadsAndPOIs();
 	}
@@ -1035,28 +993,13 @@ void ABuildingGenerator::LoadSceneryFromJson(const TSharedPtr<FJsonObject>& Root
 			}
 		}
 	}
-	if (RootObject->TryGetArrayField(TEXT("pois"), Array))
-	{
-		for (const TSharedPtr<FJsonValue>& Value : *Array)
-		{
-			const TSharedPtr<FJsonObject> Object = Value.IsValid() ? Value->AsObject() : nullptr;
-			const TArray<TSharedPtr<FJsonValue>>* Position = nullptr;
-			FVector2D Point;
-			if (Object.IsValid() && Object->TryGetArrayField(TEXT("position"), Position) && ReadPair(*Position, Point))
-			{
-				FString Type;
-				Object->TryGetStringField(TEXT("poiType"), Type);
-				SpawnPoi(Type, Point);
-			}
-		}
-	}
+	// A "pois" array, in a file saved by an earlier build, is read past: the places of interest are not shown any more.
 	MarkGroundDirty();
 }
 
 void ABuildingGenerator::ClearAllRoadsAndPOIs()
 {
 	SceneryRoads.Reset();
-	SceneryPois.Reset();
 	for (AActor* Actor : SpawnedRoadActors)
 	{
 		if (Actor)
@@ -1541,7 +1484,7 @@ bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath, FString& O
 	TSharedRef<FJsonObject> RootObject = MakeShared<FJsonObject>();
 	// Version 2 only for a project that has the map around the campus; every other project stays version 1.
 	const bool bHasMap = Scale > KINDA_SMALL_NUMBER
-		&& (!SceneryContextBuildings.IsEmpty() || !SceneryRoads.IsEmpty() || !SceneryPois.IsEmpty());
+		&& (!SceneryContextBuildings.IsEmpty() || !SceneryRoads.IsEmpty());
 	RootObject->SetNumberField(TEXT("version"), bHasMap ? ProjectFileVersion : BasicProjectFileVersion);
 	RootObject->SetNumberField(TEXT("scale"), Scale);
 	RootObject->SetNumberField(TEXT("floorHeight"), 300.f);
@@ -1639,18 +1582,6 @@ bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath, FString& O
 				Array.Add(MakeShared<FJsonValueObject>(Object));
 			}
 			RootObject->SetArrayField(TEXT("roads"), Array);
-		}
-		if (!SceneryPois.IsEmpty())
-		{
-			TArray<TSharedPtr<FJsonValue>> Array;
-			for (const FSceneryPoi& Poi : SceneryPois)
-			{
-				TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
-				Object->SetStringField(TEXT("poiType"), Poi.PoiType);
-				Object->SetArrayField(TEXT("position"), PointValue(Poi.Position));
-				Array.Add(MakeShared<FJsonValueObject>(Object));
-			}
-			RootObject->SetArrayField(TEXT("pois"), Array);
 		}
 	}
 

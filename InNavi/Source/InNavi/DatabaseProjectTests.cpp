@@ -82,7 +82,8 @@ bool FDatabaseProjectKeepsEverythingTest::RunTest(const FString& Parameters)
 	const FMapSnapshot Opened = Describe(Fixture.World, *Generator);
 	AddInfo(FString::Printf(TEXT("opened: campus [%s] context [%s] roads %d pois %d"), *Text(Opened.CampusTypes), *Text(Opened.ContextTypes), Opened.Roads, Opened.Pois));
 	TestTrue(TEXT("the campus has a type besides Other"), Opened.CampusTypes.Num() > 1 || !Opened.CampusTypes.Contains(BuildingTypes::Default()));
-	TestTrue(TEXT("the database has buildings around the campus, roads and places"), Opened.ContextTypes.Num() > 0 && Opened.Roads > 0 && Opened.Pois > 0);
+	TestTrue(TEXT("the database has buildings around the campus and roads"), Opened.ContextTypes.Num() > 0 && Opened.Roads > 0);
+	TestEqual(TEXT("its places of interest (the coloured spheres) are not shown"), Opened.Pois, 0);
 
 	const FString Path = FPaths::ProjectSavedDir() / TEXT("AutomationTemp") / (TEXT("database-project-") + FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT(".json"));
 	if (!TestTrue(TEXT("the project is saved as JSON"), Controller->SaveCurrentProjectAs(Path)))
@@ -104,7 +105,8 @@ bool FDatabaseProjectKeepsEverythingTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("each campus type is kept"), Text(Reopened.CampusTypes), Text(Opened.CampusTypes));
 	TestEqual(TEXT("each type of the buildings around the campus is kept"), Text(Reopened.ContextTypes), Text(Opened.ContextTypes));
 	TestEqual(TEXT("the roads are kept"), Reopened.Roads, Opened.Roads);
-	TestEqual(TEXT("the places of interest are kept"), Reopened.Pois, Opened.Pois);
+	TestEqual(TEXT("and still none after reopening"), Reopened.Pois, 0);
+	TestFalse(TEXT("none are written to the file"), SavedRoot.IsValid() && SavedRoot->HasField(TEXT("pois")));
 	return true;
 }
 
@@ -121,7 +123,7 @@ bool FDatabaseProjectCarefulReadTest::RunTest(const FString& Parameters)
 		TEXT("\"roads\": [ { \"highway\": \"footway\", \"points\": [[0, 0], [1, \"x\"]] }, { \"highway\": \"footway\", \"points\": [[0, 0], [5, 5]] }, ")
 		TEXT("{ \"highway\": \"footway\", \"points\": [[0, 0], [null, 3], [7, 7]] } ], ")
 		TEXT("\"contextBuildings\": [ { \"buildingType\": \"school\", \"footprint\": [[0, 0], [4, 0]] }, { \"buildingType\": \"school\", \"footprint\": [[0, 0], [4, 0], [4, 4]] } ], ")
-		TEXT("\"pois\": [ { \"poiType\": \"shop\", \"position\": [\"a\", 1] }, { \"poiType\": \"shop\", \"position\": [2, 2] } ] }");
+		TEXT("\"pois\": [ { \"poiType\": \"shop\", \"position\": [2, 2] } ] }");
 	if (!TestTrue(TEXT("the file is written"), FFileHelper::SaveStringToFile(Json, *Path)))
 	{
 		return false;
@@ -136,7 +138,7 @@ bool FDatabaseProjectCarefulReadTest::RunTest(const FString& Parameters)
 	const FMapSnapshot Map = Describe(Fixture.World, *Fixture.Generator);
 	TestEqual(TEXT("two of the three roads have two points that are numbers"), Map.Roads, 2);
 	TestEqual(TEXT("one of the two buildings around the campus has three points"), Map.ContextTypes.FindRef(TEXT("School")), 1);
-	TestEqual(TEXT("one of the two places has a position that is numbers"), Map.Pois, 1);
+	TestEqual(TEXT("a places-of-interest list in an older file is read past"), Map.Pois, 0);
 	return true;
 }
 

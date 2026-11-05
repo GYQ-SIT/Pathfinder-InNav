@@ -4363,10 +4363,12 @@ FString ANavPlayerController::BrowseForSaveLocation()
 	}
 
 	TArray<FString> OutFiles;
+	// Opens in the folder the projects live in (the project library lists it, and Open starts there too), not wherever the system dialog was
+	// last: it is an absolute path, which the native dialog needs in a packaged build.
 	const bool bPicked = DesktopPlatform->SaveFileDialog(
 		ParentWindowHandle,
 		TEXT("Save building data"),
-		TEXT(""),
+		GetProjectsDirectory(),
 		TEXT("NewProject.json"),
 		TEXT("JSON files (*.json)|*.json"),
 		EFileDialogFlags::None,
