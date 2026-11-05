@@ -59,11 +59,11 @@ jobs:
     env:
       RELEASE_TAG: ${{ needs.verify.outputs.tag }}
     steps:
+      # The runner's PowerShell does not run script files (execution policy), so every step is cmd, which starts powershell with Bypass
+      # for the one script it runs, as the earlier release workflow did.
       - name: Set the release output directory
-        shell: powershell
-        run: |
-          $path = Join-Path $env:RUNNER_TEMP "innavi-release-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          Add-Content -LiteralPath $env:GITHUB_ENV -Value "RELEASE_DIRECTORY=$path" -Encoding utf8
+        shell: cmd
+        run: echo RELEASE_DIRECTORY=%RUNNER_TEMP%\innavi-release-%GITHUB_RUN_ID%-%GITHUB_RUN_ATTEMPT%>> "%GITHUB_ENV%"
 
       - uses: actions/checkout@v4
         with:
@@ -86,24 +86,20 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Package the build (cook, stage, pak, zip)
-        shell: powershell
-        run: ./scripts/package-windows.ps1 -Name "InNavi-$env:RELEASE_TAG" -OutputDir $env:RELEASE_DIRECTORY -Version $env:RELEASE_TAG
+        shell: cmd
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package-windows.ps1 -Name "InNavi-%RELEASE_TAG%" -OutputDir "%RELEASE_DIRECTORY%" -Version "%RELEASE_TAG%"
 
       - name: Start the packaged build once, without a window
-        shell: powershell
-        run: ./scripts/smoke-test-package.ps1 -Zip (Join-Path $env:RELEASE_DIRECTORY "InNavi-$env:RELEASE_TAG.zip")
+        shell: cmd
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke-test-package.ps1 -Zip "%RELEASE_DIRECTORY%\InNavi-%RELEASE_TAG%.zip"
 
       - name: Publish the release
-        shell: powershell
-        run: ./scripts/publish-release.ps1 -Tag $env:RELEASE_TAG -Zip (Join-Path $env:RELEASE_DIRECTORY "InNavi-$env:RELEASE_TAG.zip") -Repo $env:GITHUB_REPOSITORY -Token $env:GITHUB_TOKEN
+        shell: cmd
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\publish-release.ps1 -Tag "%RELEASE_TAG%" -Zip "%RELEASE_DIRECTORY%\InNavi-%RELEASE_TAG%.zip" -Repo "%GITHUB_REPOSITORY%" -Token "%GITHUB_TOKEN%"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Clean up
         if: always() && env.RELEASE_DIRECTORY != ''
-        shell: powershell
-        run: |
-          $path = [IO.Path]::GetFullPath($env:RELEASE_DIRECTORY)
-          $parent = [IO.Path]::GetDirectoryName((Join-Path ([IO.Path]::GetFullPath($env:RUNNER_TEMP)) 'placeholder'))
-          if ([IO.Path]::GetDirectoryName($path) -ne $parent) { throw 'Invalid release directory.' }
-          if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }
+        shell: cmd
+        run: powershell -NoProfile -ExecutionPolicy Bypass -Command "$path = [IO.Path]::GetFullPath($env:RELEASE_DIRECTORY); $parent = [IO.Path]::GetDirectoryName((Join-Path ([IO.Path]::GetFullPath($env:RUNNER_TEMP)) 'placeholder')); if ([IO.Path]::GetDirectoryName($path) -ne $parent) { throw 'Invalid release directory.' }; if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Recurse -Force }"
