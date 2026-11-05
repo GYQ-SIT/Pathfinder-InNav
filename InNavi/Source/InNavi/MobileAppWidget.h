@@ -238,6 +238,8 @@ private:
 	void ApplyDeviceSafeArea();
 	// Makes the look of the preferences the open one, and asks for the pages to be built again if they were built in another.
 	void SyncAppearance();
+	// The volume of the app's sounds: what the controller plays them at.
+	void ApplyVolume(float Volume);
 	void QueueAppearanceRebuild();
 	void RefreshSheetPage();
 	void PositionSheet();

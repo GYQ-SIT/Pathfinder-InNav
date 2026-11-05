@@ -586,6 +586,27 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 					Screen->SyncAppearance();
 				}
 			});
+			ProfilePage->SetOnVolumeChanged([WeakProfile](float Volume, bool bFinal)
+			{
+				if (UMobileAppWidget* Screen = WeakProfile.Get())
+				{
+					// Heard while the slider moves; kept, with a click to hear it by, when the finger is lifted.
+					Screen->ApplyVolume(Volume);
+					if (bFinal)
+					{
+						if (!Screen->Preferences.SetVolume(Volume))
+						{
+							Screen->ApplyVolume(Screen->Preferences.GetVolume());
+							Screen->ProfilePage->SetPreferences(Screen->Preferences);
+							Screen->ShowStorageError();
+						}
+						if (ANavPlayerController* Controller = Screen->GetOwningPlayer<ANavPlayerController>())
+						{
+							Controller->PlayButtonClickSound();
+						}
+					}
+				}
+			});
 			ProfilePage->SetOnReset([WeakProfile]()
 			{
 				if (UMobileAppWidget* Screen = WeakProfile.Get())
@@ -942,6 +963,11 @@ void UMobileAppWidget::AdvanceNavigation()
 	if (NavStepIndex < CurrentRoute.Steps.Num() - 1)
 	{
 		++NavStepIndex;
+		// "Next instruction" has its own sound (the last one, "I have arrived", has the arrival's: see SendSheetEvent).
+		if (ANavPlayerController* Controller = GetOwningPlayer<ANavPlayerController>())
+		{
+			Controller->PlayNextInstructionSound();
+		}
 		RefreshNavigation();
 		RefreshMap();
 	}
@@ -1673,9 +1699,18 @@ void UMobileAppWidget::UseSavedFile(const FString& Path)
 	RefreshArrived();
 }
 
+void UMobileAppWidget::ApplyVolume(float Volume)
+{
+	if (ANavPlayerController* Controller = GetOwningPlayer<ANavPlayerController>())
+	{
+		Controller->SetMasterVolume(Volume);
+	}
+}
+
 void UMobileAppWidget::UsePreferencesFile(const FString& Path)
 {
 	Preferences.UseFile(Path);
+	ApplyVolume(Preferences.GetVolume());
 	if (ProfilePage)
 	{
 		ProfilePage->SetPreferences(Preferences);
@@ -1687,6 +1722,7 @@ void UMobileAppWidget::ResetSavedAndPreferences()
 {
 	const bool bSavedPlacesReset = SavedPlaces.Clear();
 	const bool bPreferencesReset = Preferences.Reset();
+	ApplyVolume(Preferences.GetVolume());
 	RefreshSaved();
 	SelectPlace(SelectedPlace);
 	RefreshArrived();

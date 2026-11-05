@@ -1160,6 +1160,12 @@ public:
 	// Tests: how many times the phone app asked for the sound, whether it was muted or not.
 	int32 GetDirectionsSoundRequestsForTests() const { return DirectionsSoundRequests; }
 
+	// The phone app's "Next instruction" button (every instruction but the last): plays Data/Audio/UI_Dull_05.wav. Same rules as above.
+	void PlayNextInstructionSound();
+	bool IsNextInstructionSoundEnabled() const { return bNextInstructionSoundEnabled; }
+	void SetNextInstructionSoundEnabled(bool bEnabled) { bNextInstructionSoundEnabled = bEnabled; }
+	int32 GetNextInstructionSoundRequestsForTests() const { return NextInstructionSoundRequests; }
+
 	// The phone app's "I have arrived" button (the last instruction's button): plays Data/Audio/UI_Place_2.wav as the arrival page opens.
 	// Same rules as PlayDirectionsSound.
 	void PlayArrivalSound();
@@ -1782,6 +1788,8 @@ private:
 	int32 DirectionsSoundRequests = 0;
 	bool bArrivalSoundEnabled = true;
 	int32 ArrivalSoundRequests = 0;
+	bool bNextInstructionSoundEnabled = true;
+	int32 NextInstructionSoundRequests = 0;
 
 	// See GetMasterVolume/SetMasterVolume's own comment.
 	float MasterVolume = 1.f;

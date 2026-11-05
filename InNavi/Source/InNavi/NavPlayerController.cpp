@@ -5578,6 +5578,17 @@ void ANavPlayerController::PlayDirectionsSound()
 	PlayShortSoundEffect(TEXT("UI_Dull_08.wav"));
 }
 
+void ANavPlayerController::PlayNextInstructionSound()
+{
+	++NextInstructionSoundRequests;
+	if (!bNextInstructionSoundEnabled)
+	{
+		return;
+	}
+
+	PlayShortSoundEffect(TEXT("UI_Dull_05.wav"));
+}
+
 void ANavPlayerController::PlayArrivalSound()
 {
 	++ArrivalSoundRequests;
@@ -5596,6 +5607,7 @@ void ANavPlayerController::SetAllUiSoundsEnabled(bool bEnabled)
 	bQuitConfirmSoundEnabled = bEnabled;
 	bDirectionsSoundEnabled = bEnabled;
 	bArrivalSoundEnabled = bEnabled;
+	bNextInstructionSoundEnabled = bEnabled;
 }
 
 void ANavPlayerController::SetMasterVolume(float NewVolume)

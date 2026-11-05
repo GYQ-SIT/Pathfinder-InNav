@@ -8,6 +8,7 @@
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/ScrollBox.h"
+#include "Components/Slider.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -142,6 +143,42 @@ TSharedRef<SWidget> UMobileProfilePageWidget::RebuildWidget()
 		Divider->SetContent(Rule);
 		Add(Divider, FMargin(0.f, 6.f, 0.f, 0.f));
 
+		// Sound: the volume of the app's sounds, a slider and the number it stands for.
+		Add(MakeText(Tree, TEXT("Txt_ProfileSound"), TEXT("Sound"), 15.f, Ink, true), FMargin(0.f, 20.f, 0.f, 0.f));
+		Add(Wrapped(TEXT("Txt_ProfileSoundNote"), TEXT("How loud the app's sounds are."), 12.f, Grey, false), FMargin(0.f, 4.f, 0.f, 0.f));
+		VolumeSlider = Tree->ConstructWidget<USlider>(USlider::StaticClass(), TEXT("Slider_ProfileVolume"));
+		VolumeSlider->SetMinValue(0.f);
+		VolumeSlider->SetMaxValue(1.f);
+		VolumeSlider->SetStepSize(0.05f);
+		VolumeSlider->SetValue(Volume);
+		VolumeSlider->SetSliderBarColor(Line);
+		VolumeSlider->SetSliderHandleColor(Blue);
+		VolumeSlider->OnValueChanged.AddUniqueDynamic(this, &UMobileProfilePageWidget::HandleVolumeSlider);
+		VolumeSlider->OnMouseCaptureEnd.AddUniqueDynamic(this, &UMobileProfilePageWidget::HandleVolumeReleased);
+		USizeBox* SliderSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		SliderSize->SetHeightOverride(36.f);
+		SliderSize->SetContent(VolumeSlider);
+		VolumeText = MakeText(Tree, TEXT("Txt_ProfileVolume"), TEXT("100%"), 14.f, Ink, true);
+		VolumeText->SetJustification(ETextJustify::Right);
+		USizeBox* VolumeTextSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		VolumeTextSize->SetWidthOverride(48.f);
+		VolumeTextSize->SetContent(VolumeText);
+		UHorizontalBox* VolumeRow = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ProfileVolumeRow"));
+		UHorizontalBoxSlot* SliderSlot = VolumeRow->AddChildToHorizontalBox(SliderSize);
+		SliderSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		SliderSlot->SetVerticalAlignment(VAlign_Center);
+		UHorizontalBoxSlot* VolumeTextSlot = VolumeRow->AddChildToHorizontalBox(VolumeTextSize);
+		VolumeTextSlot->SetPadding(FMargin(12.f, 0.f, 0.f, 0.f));
+		VolumeTextSlot->SetVerticalAlignment(VAlign_Center);
+		Add(VolumeRow, FMargin(0.f, 10.f, 0.f, 0.f));
+
+		USizeBox* SoundDivider = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		SoundDivider->SetHeightOverride(1.f);
+		UBorder* SoundRule = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
+		SoundRule->SetBrushColor(Line);
+		SoundDivider->SetContent(SoundRule);
+		Add(SoundDivider, FMargin(0.f, 14.f, 0.f, 0.f));
+
 		// About, and the reset.
 		Add(MakeText(Tree, TEXT("Txt_ProfileAbout"), TEXT("About InNav"), 15.f, Ink, true), FMargin(0.f, 20.f, 0.f, 0.f));
 		Add(Wrapped(TEXT("Txt_ProfileAboutText"), TEXT("Indoor navigation by Team Pathfinder. This interactive reference demonstrates interface behaviour for the engineering team."), 12.f, Grey, false), FMargin(0.f, 6.f, 0.f, 0.f));
@@ -177,6 +214,7 @@ void UMobileProfilePageWidget::SetPreferences(const FMobilePreferences& InPrefer
 {
 	Theme = InPreferences.GetTheme();
 	bLargerText = InPreferences.IsLargerText();
+	Volume = InPreferences.GetVolume();
 	Refresh();
 }
 
@@ -231,6 +269,34 @@ void UMobileProfilePageWidget::ToggleLargerText()
 	}
 }
 
+void UMobileProfilePageWidget::ChooseVolume(float NewVolume, bool bFinal)
+{
+	Volume = FMath::IsFinite(NewVolume) ? FMath::Clamp(NewVolume, 0.f, 1.f) : 1.f;
+	Refresh();
+	if (bFinal)
+	{
+		SetStatus(TEXT("Volume updated"));
+	}
+	if (OnVolumeChanged)
+	{
+		OnVolumeChanged(Volume, bFinal);
+	}
+}
+
+void UMobileProfilePageWidget::HandleVolumeSlider(float NewValue)
+{
+	// Moving the slider is heard at once; it is kept when the finger is lifted (HandleVolumeReleased).
+	if (!bRefreshing)
+	{
+		ChooseVolume(NewValue, false);
+	}
+}
+
+void UMobileProfilePageWidget::HandleVolumeReleased()
+{
+	ChooseVolume(VolumeSlider ? VolumeSlider->GetValue() : Volume, true);
+}
+
 void UMobileProfilePageWidget::TapReset()
 {
 	SetStatus(TEXT("Saved places and preferences were reset"));
@@ -260,6 +326,16 @@ void UMobileProfilePageWidget::Refresh()
 	};
 	Style(LightPill, LightLabel, Theme == EMobileTheme::Light);
 	Style(NightPill, NightLabel, Theme == EMobileTheme::Night);
+	// The slider stands where the volume is (setting it here does not count as the person moving it).
+	TGuardValue<bool> Refreshing(bRefreshing, true);
+	if (VolumeSlider && !FMath::IsNearlyEqual(VolumeSlider->GetValue(), Volume, 0.001f))
+	{
+		VolumeSlider->SetValue(Volume);
+	}
+	if (VolumeText)
+	{
+		VolumeText->SetText(FText::FromString(FString::Printf(TEXT("%d%%"), FMath::RoundToInt(Volume * 100.f))));
+	}
 	if (LargerBox)
 	{
 		LargerBox->SetBrush(Rounded(bLargerText ? Blue : White, bLargerText ? Blue : Grey, 5.f));
