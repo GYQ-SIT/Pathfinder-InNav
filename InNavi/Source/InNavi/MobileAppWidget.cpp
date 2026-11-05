@@ -12,6 +12,7 @@
 #include "MobileSelectWidget.h"
 #include "MobileSearchPageWidget.h"
 #include "MobileStyle.h"
+#include "NavPlayerController.h"
 #include "MobileRealSource.h"
 #include "MobileMockSource.h"
 #include "StartScreenStyle.h"
@@ -904,6 +905,22 @@ void UMobileAppWidget::SendSheetEvent(EMobileSheetEvent Event)
 		else
 		{
 			PendingRoute.Reset();
+		}
+		// Get directions, taken: the route page is up for the start and the destination chosen, and the phone says so. The same on arriving
+		// ("I have arrived" on the last instruction), with the sound of the place.
+		if (Event == EMobileSheetEvent::DirectionsRequested || Event == EMobileSheetEvent::ArrivedAtDestination)
+		{
+			if (ANavPlayerController* Controller = GetOwningPlayer<ANavPlayerController>())
+			{
+				if (Event == EMobileSheetEvent::DirectionsRequested)
+				{
+					Controller->PlayDirectionsSound();
+				}
+				else
+				{
+					Controller->PlayArrivalSound();
+				}
+			}
 		}
 		// Setting off starts at the first instruction; arriving shows the place.
 		if (Flow.GetState() == EMobileSheetState::Navigating && Event == EMobileSheetEvent::NavigationStarted)

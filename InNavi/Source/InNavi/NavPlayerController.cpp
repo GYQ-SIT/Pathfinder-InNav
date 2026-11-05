@@ -5567,11 +5567,35 @@ void ANavPlayerController::PlayQuitConfirmSound()
 	PlayShortSoundEffect(TEXT("quit_confirm.wav"));
 }
 
+void ANavPlayerController::PlayDirectionsSound()
+{
+	++DirectionsSoundRequests;
+	if (!bDirectionsSoundEnabled)
+	{
+		return;
+	}
+
+	PlayShortSoundEffect(TEXT("UI_Dull_08.wav"));
+}
+
+void ANavPlayerController::PlayArrivalSound()
+{
+	++ArrivalSoundRequests;
+	if (!bArrivalSoundEnabled)
+	{
+		return;
+	}
+
+	PlayShortSoundEffect(TEXT("UI_Place_2.wav"));
+}
+
 void ANavPlayerController::SetAllUiSoundsEnabled(bool bEnabled)
 {
 	bButtonClickSoundEnabled = bEnabled;
 	bBuildingSelectSoundEnabled = bEnabled;
 	bQuitConfirmSoundEnabled = bEnabled;
+	bDirectionsSoundEnabled = bEnabled;
+	bArrivalSoundEnabled = bEnabled;
 }
 
 void ANavPlayerController::SetMasterVolume(float NewVolume)

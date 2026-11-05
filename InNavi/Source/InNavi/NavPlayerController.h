@@ -1151,6 +1151,22 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void SetQuitConfirmSoundEnabled(bool bEnabled) { bQuitConfirmSoundEnabled = bEnabled; }
 
+	// The phone app's "Get directions": plays Data/Audio/UI_Dull_08.wav once the route page has opened for the start and the destination
+	// that were chosen (see UMobileAppWidget::SendSheetEvent). Its own flag; SetAllUiSoundsEnabled(false) mutes it too. Fire-and-forget
+	// like the other short effects; a missing or unreadable file is silent.
+	void PlayDirectionsSound();
+	bool IsDirectionsSoundEnabled() const { return bDirectionsSoundEnabled; }
+	void SetDirectionsSoundEnabled(bool bEnabled) { bDirectionsSoundEnabled = bEnabled; }
+	// Tests: how many times the phone app asked for the sound, whether it was muted or not.
+	int32 GetDirectionsSoundRequestsForTests() const { return DirectionsSoundRequests; }
+
+	// The phone app's "I have arrived" button (the last instruction's button): plays Data/Audio/UI_Place_2.wav as the arrival page opens.
+	// Same rules as PlayDirectionsSound.
+	void PlayArrivalSound();
+	bool IsArrivalSoundEnabled() const { return bArrivalSoundEnabled; }
+	void SetArrivalSoundEnabled(bool bEnabled) { bArrivalSoundEnabled = bEnabled; }
+	int32 GetArrivalSoundRequestsForTests() const { return ArrivalSoundRequests; }
+
 	// Backs the Audio panel's "Mute All" checkbox - sets all three UI-sound flags
 	// (click/select/quit-confirm) to bEnabled at once, e.g. SetAllUiSoundsEnabled(false) to mute
 	// everything in one call. Deliberately doesn't track "what was on before" - un-muting always turns
@@ -1760,6 +1776,12 @@ private:
 
 	// See IsQuitConfirmSoundEnabled/SetQuitConfirmSoundEnabled's own comment.
 	bool bQuitConfirmSoundEnabled = true;
+
+	// See PlayDirectionsSound and PlayArrivalSound.
+	bool bDirectionsSoundEnabled = true;
+	int32 DirectionsSoundRequests = 0;
+	bool bArrivalSoundEnabled = true;
+	int32 ArrivalSoundRequests = 0;
 
 	// See GetMasterVolume/SetMasterVolume's own comment.
 	float MasterVolume = 1.f;
