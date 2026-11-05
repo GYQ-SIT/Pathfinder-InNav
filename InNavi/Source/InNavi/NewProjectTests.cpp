@@ -170,12 +170,12 @@ bool FProjectFileVersionTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("the file is valid JSON"), FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Root) && Root.IsValid());
 	if (Root.IsValid())
 	{
-		TestEqual(TEXT("it holds the current version"), (int32)Root->GetNumberField(TEXT("version")), ABuildingGenerator::ProjectFileVersion);
+		TestEqual(TEXT("it holds the version of a project without a map"), (int32)Root->GetNumberField(TEXT("version")), ABuildingGenerator::BasicProjectFileVersion);
 	}
 	Fixture.Interior->ClearLoadedInterior();
 	Fixture.Generator->ClearAllBuildings();
 	TestTrue(TEXT("the saved file loads"), Fixture.Generator->LoadBuildingsFromFile(Saved) > 0);
-	TestEqual(TEXT("and reads back as it"), Fixture.Generator->GetLoadedFileVersion(), ABuildingGenerator::ProjectFileVersion);
+	TestEqual(TEXT("and reads back as it"), Fixture.Generator->GetLoadedFileVersion(), ABuildingGenerator::BasicProjectFileVersion);
 
 	// A file from a newer build still opens (it is read as well as it can be).
 	const FString Future = Directory / TEXT("future.json");

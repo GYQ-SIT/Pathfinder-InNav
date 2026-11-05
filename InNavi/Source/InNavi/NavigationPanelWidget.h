@@ -99,6 +99,9 @@ public:
 	// there is no such place, it cannot be used as a point, the limit is reached, or it is where the route already is (the Start or
 	// the stop before it, or the Destination).
 	bool AddStopToRoom(const FString& RoomOptionLabel);
+	// What the panel's Add stop does: adds the place AFTER the Destination. The Destination becomes the last stop and the new place
+	// the Destination (with no Destination set, the new place just becomes it). The same refusals as AddStopToRoom.
+	bool AddPlaceToRoom(const FString& RoomOptionLabel);
 	bool RemoveStop(int32 StopIndex);
 	bool MoveStop(int32 FromIndex, int32 ToIndex);
 	void ClearStops();
@@ -126,7 +129,8 @@ public:
 	// The same places the other way round.
 	void ReversePlaces();
 
-	// Click mode for stops: each click on the map (a place indoors, or the ground outside) adds a stop, and the mode stays on for the
+	// Click mode for stops: each click on the map (a place indoors, or the ground outside) adds a place after the Destination (the place
+	// becomes the Destination, the Destination before it a stop), and the mode stays on for the
 	// next one until it is toggled off, Escape is pressed or the limit is reached. Picking a Start or Destination ends it, and the
 	// other way round; adding a stop from the list does not disturb a click mode in progress.
 	void ToggleSelectStops();
@@ -315,6 +319,9 @@ public:
 	// screens subscribe to refresh their Navigation panel's display.
 	UPROPERTY(BlueprintAssignable)
 	FOnNavigationStateChanged OnStateChanged;
+	// Broadcast when clicking the map to pick a Start, Destination or stops is turned on: the mouse is the picking's now, so the
+	// owner turns the other tools that use it off.
+	FSimpleMulticastDelegate OnPickingStarted;
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
@@ -338,6 +345,8 @@ private:
 	bool bStepByStep = true;
 	// Adds a stop at the end of the others (the limit and a place the route is already at are refused, with a message).
 	bool AddStop(FNavigationStop Stop);
+	// Adds a place after the Destination: the Destination becomes the last stop and the place the Destination (same refusals as AddStop).
+	bool AddPlace(FNavigationStop Place);
 	void ApplyJourney(const FJourney& Trip);
 	void FailJourney(const FJourney& Trip, const FNavigationRouteResult& LegResult);
 	TSharedPtr<FJourney> Journey;
@@ -401,6 +410,8 @@ private:
 	void BuildOutdoorOptions() const;
 	bool SetEndpointToOutdoorOption(const FNavigationRoomOption& Option, bool bIsStart);
 	void SetSelectionMode(ENavigationSelectionMode NewMode);
+	// After a Start or Destination is set by a click: the mode stays on, so the next click changes it again; says so in the status.
+	void AddKeepPickingHint();
 	void SetStatusMessage(const FString& Message, ENavigationMessageKind Kind);
 	void BroadcastStateChanged();
 	bool SetEndpointToRoom(const FString& RoomOptionLabel, bool bIsStart);

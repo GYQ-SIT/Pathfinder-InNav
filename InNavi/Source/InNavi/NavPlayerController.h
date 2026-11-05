@@ -137,6 +137,11 @@ public:
 
 	// Used by the 2D floor plan while a navigation endpoint is armed.
 	bool IsSelectingNavigationPoint() const;
+	// The mouse has one use at a time: turning on one of the tools that click the map (build, draw a room or a wall, select, add a
+	// door, a room shape, a connector) ends the clicking for a Start, Destination or stops, and turning that on ends all the tools.
+	// The one turned on last wins; each button follows through its own change delegate.
+	void CancelNavigationPicking();
+	void ExitAllMouseTools();
 	void SelectNavigationPoint(FVector2D FootprintPosition, int32 Floor);
 	// The click that sets a navigation point on the exterior screen: the spot of the ground under the cursor (see
 	// UNavigationPanelWidget::SelectOutdoorGroundPoint).
@@ -1173,6 +1178,11 @@ public:
 	// Whether the camera distance reveals buildings at all. Off, every building stays solid, except the ones made transparent from the Building
 	// panel (see SetBuildingMadeTransparent): those come first.
 	bool IsCampusSeeThroughEnabled() const { return bCampusSeeThroughEnabled; }
+	// Whether a route is being gone through: one has been found and is shown. The camera follows its steps, which takes it close to
+	// the buildings, so for as long as this is true the buildings do not fade with the camera distance (UpdateBuildingTransparency);
+	// when the route is cleared, changed or hidden they go back to what the see-through settings say. A building made transparent from
+	// the Building panel stays as it was made.
+	bool IsNavigationRouteActive() const;
 	void SetCampusSeeThroughEnabled(bool bEnabled);
 
 	// Tests: makes the preview rooms of the campus (done when a project is loaded), and counts the rooms of one building that are showing.

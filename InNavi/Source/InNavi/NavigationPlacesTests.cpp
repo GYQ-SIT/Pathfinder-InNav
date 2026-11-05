@@ -162,12 +162,17 @@ bool FNavigationPlacesPanelTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("the Start is picked"), Pick(0, A));
 	TestFalse(TEXT("one place is not enough"), Find_->GetIsEnabled());
 	TestTrue(TEXT("Add stop is clicked"), Click(TEXT("Btn_NavAddStop")));
-	TestTrue(TEXT("a row appears before the Destination"), Visible(TEXT("Row_NavPlaceSize2")));
-	TestTrue(TEXT("the stop is picked in it"), Pick(1, B));
-	TestEqual(TEXT("the stop is a place"), Fixture.Nav->GetStops().Num(), 1);
-	TestTrue(TEXT("Find Route is enabled with a Start and a stop"), Find_->GetIsEnabled());
+	TestTrue(TEXT("a row appears after the Destination"), Visible(TEXT("Row_NavPlaceSize2")));
+	TestTrue(TEXT("a place is picked in it"), Pick(2, B));
+	TestEqual(TEXT("the Destination was not set, so the place became it"), Fixture.Nav->GetStops().Num(), 0);
+	TestTrue(TEXT("Find Route is enabled with a Start and a Destination"), Find_->GetIsEnabled());
 	TestEqual(TEXT("the Start shows"), ShownIn(0), A);
+	TestEqual(TEXT("the Destination shows"), ShownIn(1), B);
+	TestTrue(TEXT("the row stays open for the next place"), Visible(TEXT("Row_NavPlaceSize2")));
+	TestTrue(TEXT("another is picked in it"), Pick(2, C));
+	TestEqual(TEXT("the Destination before it became a stop"), Fixture.Nav->GetStops().Num(), 1);
 	TestEqual(TEXT("the stop shows"), ShownIn(1), B);
+	TestEqual(TEXT("the new place is the Destination"), ShownIn(2), C);
 	TestTrue(TEXT("Done closes the row for adding"), Click(TEXT("Btn_NavAddStop")));
 	TestFalse(TEXT("which goes"), Visible(TEXT("Row_NavPlaceSize3")));
 
@@ -180,7 +185,7 @@ bool FNavigationPlacesPanelTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("the places changed order: now the stop is first"), ShownIn(0), B);
 	TestEqual(TEXT("and the Start is next"), ShownIn(1), A);
 	TestTrue(TEXT("Reverse is clicked"), Click(TEXT("Btn_NavReverse")));
-	TestTrue(TEXT("Reverse turns the list round: the empty end goes to the Start"), ShownIn(0).IsEmpty());
+	TestEqual(TEXT("Reverse turns the list round: the Destination goes to the Start"), ShownIn(0), C);
 	TestEqual(TEXT("the other end is the Destination"), ShownIn(2), B);
 	TestEqual(TEXT("and the stop stays between"), ShownIn(1), A);
 	TestTrue(TEXT("Remove: the number is chosen"), Click(TEXT("Btn_NavPlaceBadge1")));
@@ -207,6 +212,72 @@ bool FNavigationPlacesPanelTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("and there are two rows again"), Visible(TEXT("Row_NavPlaceSize2")));
 	Fixture.Nav->OnStateChanged.Remove(Repaint);
 	Controller->OnInteriorContentChanged.Remove(Content);
+	return true;
+}
+
+// Clicking the map for the Start or Destination goes on until its button is pressed again, and the mouse has one use at a time: the tool
+// (or the picking) turned on last ends the other.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationPickingExclusiveTest, "InNavi.Navigation.Picking.Exclusive",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationPickingExclusiveTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* PC = Fixture.MakeController();
+	UNavigationPanelWidget* Nav = Fixture.Nav;
+	Nav->OnPickingStarted.AddUObject(PC, &ANavPlayerController::ExitAllMouseTools);
+	const auto Rooms = ReachableRooms(Fixture);
+	if (!TestTrue(TEXT("E2 has two reachable rooms"), Rooms.Num() >= 2)) return false;
+
+	// One press of the button, then as many clicks as wanted.
+	Nav->ToggleSelectStart();
+	Nav->SelectPoint(Rooms[0].Centroid, Rooms[0].Floor);
+	TestTrue(TEXT("the first click sets the Start"), Nav->HasStart() && Nav->GetStart().Position.Equals(Rooms[0].Centroid, 0.5));
+	TestEqual(TEXT("and the picking goes on"), Nav->GetSelectionMode(), ENavigationSelectionMode::Start);
+	Nav->SelectPoint(Rooms[1].Centroid, Rooms[1].Floor);
+	TestTrue(TEXT("the next click changes it"), Nav->GetStart().Position.Equals(Rooms[1].Centroid, 0.5));
+	TestEqual(TEXT("still picking"), Nav->GetSelectionMode(), ENavigationSelectionMode::Start);
+	Nav->ToggleSelectStart();
+	TestEqual(TEXT("the button again stops it"), Nav->GetSelectionMode(), ENavigationSelectionMode::None);
+	Nav->SelectPoint(Rooms[0].Centroid, Rooms[0].Floor);
+	TestTrue(TEXT("and clicks no longer change the Start"), Nav->GetStart().Position.Equals(Rooms[1].Centroid, 0.5));
+
+	// The same for the Destination, and Start and Destination replace each other.
+	Nav->ToggleSelectDestination();
+	Nav->SelectPoint(Rooms[0].Centroid, Rooms[0].Floor);
+	TestTrue(TEXT("the Destination is set and the picking goes on"), Nav->HasDestination() && Nav->GetSelectionMode() == ENavigationSelectionMode::Destination);
+	Nav->ToggleSelectStart();
+	TestEqual(TEXT("picking the Start replaces picking the Destination"), Nav->GetSelectionMode(), ENavigationSelectionMode::Start);
+	Nav->CancelSelection();
+
+	// A tool turned on after the picking ends it.
+	Nav->ToggleSelectDestination();
+	PC->ToggleSelectMode();
+	TestTrue(TEXT("select mode is on"), PC->IsInSelectMode());
+	TestFalse(TEXT("so the picking is over"), Nav->IsSelectingPoint());
+	// The picking turned on after a tool ends the tool.
+	Nav->ToggleSelectStops();
+	TestFalse(TEXT("the picking ends select mode"), PC->IsInSelectMode());
+	TestEqual(TEXT("and is on"), Nav->GetSelectionMode(), ENavigationSelectionMode::Stop);
+	PC->ToggleDrawRoomMode();
+	TestTrue(TEXT("draw room mode is on"), PC->IsInDrawRoomMode());
+	TestFalse(TEXT("so the picking is over"), Nav->IsSelectingPoint());
+	Nav->ToggleSelectStart();
+	TestFalse(TEXT("the picking ends draw room mode"), PC->IsInDrawRoomMode());
+	PC->ToggleAddDoorMode();
+	TestTrue(TEXT("add door mode is on"), PC->IsInAddDoorMode());
+	TestFalse(TEXT("so the picking is over"), Nav->IsSelectingPoint());
+	Nav->ToggleSelectDestination();
+	TestFalse(TEXT("the picking ends add door mode"), PC->IsInAddDoorMode());
+	PC->TogglePrefabRectangleMode();
+	TestTrue(TEXT("a room shape is armed"), PC->IsInPrefabRoomMode());
+	TestFalse(TEXT("so the picking is over"), Nav->IsSelectingPoint());
+	Nav->ToggleSelectStart();
+	TestFalse(TEXT("the picking ends it"), PC->IsInPrefabRoomMode());
+	PC->ToggleElevatorMode();
+	TestTrue(TEXT("a connector is armed"), PC->IsInConnectorMode());
+	TestFalse(TEXT("so the picking is over"), Nav->IsSelectingPoint());
+	Nav->ToggleSelectStart();
+	TestFalse(TEXT("the picking ends it"), PC->IsInConnectorMode());
 	return true;
 }
 

@@ -286,6 +286,7 @@ int32 ABuildingGenerator::LoadBuildingsFromFile(const FString& FilePath)
 		return 0;
 	}
 	const int32 Count = LoadBuildingsFromJson(RootObject);
+	LoadSceneryFromJson(RootObject);
 	const TArray<TSharedPtr<FJsonValue>>* Buildings = nullptr;
 	if (RootObject->TryGetArrayField(TEXT("buildings"), Buildings) && Count == Buildings->Num())
 	{
@@ -322,7 +323,7 @@ int32 ABuildingGenerator::LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& R
 	// No "version" means a file from before versions existed (read as 0, the same format as 1). A newer file is read as well as it can be.
 	double Version = 0;
 	RootObject->TryGetNumberField(TEXT("version"), Version);
-	LoadedFileVersion = Version >= ProjectFileVersion
+	LoadedFileVersion = Version >= BasicProjectFileVersion
 		? static_cast<int32>(FMath::Min(FMath::CeilToDouble(Version), double(MAX_int32)))
 		: 0;
 	if (LoadedFileVersion > ProjectFileVersion)
@@ -758,20 +759,10 @@ int32 ABuildingGenerator::LoadRoadsAndPOIsFromDatabase(const FString& DatabasePa
 	int32 SpawnedCount = 0;
 	for (const TPair<int64, FDatabaseRoadRow>& Pair : RoadsById)
 	{
-		const ERoadCategory Category = GetRoadCategory(Pair.Value.HighwayType);
-		float WidthMeters = 3.f;
-		FLinearColor Color = FLinearColor::Gray;
-		GetRoadCategoryStyle(Category, WidthMeters, Color);
-
-		ARoadSegmentActor* RoadActor = GetWorld()->SpawnActor<ARoadSegmentActor>();
-		if (!RoadActor)
+		if (SpawnRoad(Pair.Value.HighwayType, Pair.Value.Points))
 		{
-			continue;
+			SpawnedCount++;
 		}
-		RoadActor->BuildRoad(Pair.Value.Points, WidthMeters * Scale, /*WorldZ=*/2.f, Color);
-		RoadActor->SetCategory(Category);
-		SpawnedRoadActors.Add(RoadActor);
-		SpawnedCount++;
 	}
 
 	Database.Execute(
@@ -787,12 +778,8 @@ int32 ABuildingGenerator::LoadRoadsAndPOIsFromDatabase(const FString& DatabasePa
 				return ESQLitePreparedStatementExecuteRowResult::Error;
 			}
 
-			APOIMarkerActor* POIActor = GetWorld()->SpawnActor<APOIMarkerActor>();
-			if (POIActor)
+			if (SpawnPoi(POIType, ProjectToWorldXY(Lat, Lon)))
 			{
-				constexpr float POIMarkerRadiusWorld = 60.f;
-				POIActor->BuildMarker(ProjectToWorldXY(Lat, Lon), POIMarkerRadiusWorld, GetPOIColor(POIType));
-				SpawnedPOIActors.Add(POIActor);
 				SpawnedCount++;
 			}
 			return ESQLitePreparedStatementExecuteRowResult::Continue;
@@ -878,10 +865,6 @@ int32 ABuildingGenerator::LoadContextBuildingsFromDatabase(const FString& Databa
 
 	Database.Close();
 
-	// A flat, uniform placeholder height for every context building; what tells them apart is the colour of
-	// their type (BuildingTypes.h), from the database's own building_type.
-	constexpr float ContextBuildingHeightWorldUnits = 900.f; // 9m at Scale=100
-
 	int32 SpawnedCount = 0;
 	for (const TPair<int64, FDatabaseContextBuildingRow>& Pair : RowsById)
 	{
@@ -902,15 +885,10 @@ int32 ABuildingGenerator::LoadContextBuildingsFromDatabase(const FString& Databa
 			continue;
 		}
 
-		AContextBuildingActor* ContextActor = GetWorld()->SpawnActor<AContextBuildingActor>();
-		if (!ContextActor)
+		if (SpawnContextBuilding(BuildingTypes::FromMapDatabase(Pair.Value.BuildingType), Footprint))
 		{
-			continue;
+			SpawnedCount++;
 		}
-		ContextActor->BuildFromFootprint(Footprint, ContextBuildingHeightWorldUnits, BuildingTypes::FromMapDatabase(Pair.Value.BuildingType));
-		ContextActor->SetActorHiddenInGame(!ShouldShowContextBuilding(*ContextActor));
-		SpawnedContextBuildingActors.Add(ContextActor);
-		SpawnedCount++;
 	}
 
 	UE_LOG(LogTemp, Warning, TEXT("LoadContextBuildingsFromDatabase: spawned %d context building(s) from %s"),
@@ -919,8 +897,166 @@ int32 ABuildingGenerator::LoadContextBuildingsFromDatabase(const FString& Databa
 	return SpawnedCount;
 }
 
+bool ABuildingGenerator::SpawnRoad(const FString& HighwayType, const TArray<FVector2D>& WorldPoints)
+{
+	if (!GetWorld())
+	{
+		return false;
+	}
+	const ERoadCategory Category = GetRoadCategory(HighwayType);
+	float WidthMeters = 3.f;
+	FLinearColor Color = FLinearColor::Gray;
+	GetRoadCategoryStyle(Category, WidthMeters, Color);
+
+	ARoadSegmentActor* RoadActor = GetWorld()->SpawnActor<ARoadSegmentActor>();
+	if (!RoadActor)
+	{
+		return false;
+	}
+	RoadActor->BuildRoad(WorldPoints, WidthMeters * Scale, /*WorldZ=*/2.f, Color);
+	RoadActor->SetCategory(Category);
+	SpawnedRoadActors.Add(RoadActor);
+	SceneryRoads.Add({ HighwayType, WorldPoints });
+	return true;
+}
+
+bool ABuildingGenerator::SpawnPoi(const FString& PoiType, const FVector2D& WorldPosition)
+{
+	APOIMarkerActor* POIActor = GetWorld() ? GetWorld()->SpawnActor<APOIMarkerActor>() : nullptr;
+	if (!POIActor)
+	{
+		return false;
+	}
+	constexpr float POIMarkerRadiusWorld = 60.f;
+	POIActor->BuildMarker(WorldPosition, POIMarkerRadiusWorld, GetPOIColor(PoiType));
+	SpawnedPOIActors.Add(POIActor);
+	SceneryPois.Add({ PoiType, WorldPosition });
+	return true;
+}
+
+bool ABuildingGenerator::SpawnContextBuilding(const FString& BuildingType, const TArray<FVector2D>& WorldFootprint)
+{
+	// A flat, uniform placeholder height for every context building; what tells them apart is the colour of
+	// their type (BuildingTypes.h), from the database's own building_type.
+	constexpr float ContextBuildingHeightWorldUnits = 900.f; // 9m at Scale=100
+
+	AContextBuildingActor* ContextActor = GetWorld() && WorldFootprint.Num() >= 3 ? GetWorld()->SpawnActor<AContextBuildingActor>() : nullptr;
+	if (!ContextActor)
+	{
+		return false;
+	}
+	const FString Type = BuildingTypes::Normalize(BuildingType);
+	ContextActor->BuildFromFootprint(WorldFootprint, ContextBuildingHeightWorldUnits, Type);
+	ContextActor->SetActorHiddenInGame(!ShouldShowContextBuilding(*ContextActor));
+	SpawnedContextBuildingActors.Add(ContextActor);
+	SceneryContextBuildings.Add({ Type, WorldFootprint });
+	return true;
+}
+
+void ABuildingGenerator::LoadSceneryFromJson(const TSharedPtr<FJsonObject>& RootObject)
+{
+	if (!RootObject.IsValid() || Scale <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+	// What the file has replaces what is there (loading the same file twice does not double the map).
+	const TArray<TSharedPtr<FJsonValue>>* Present = nullptr;
+	if (RootObject->TryGetArrayField(TEXT("contextBuildings"), Present))
+	{
+		ClearAllContextBuildings();
+	}
+	if (RootObject->TryGetArrayField(TEXT("roads"), Present) || RootObject->TryGetArrayField(TEXT("pois"), Present))
+	{
+		ClearAllRoadsAndPOIs();
+	}
+	// A point of the file is [x, y] in footprint units; the actors are in world units.
+	// A coordinate that is not a finite number is not read as 0: the point is left out (a road would otherwise get a spike to the origin).
+	auto ReadPair = [this](const TArray<TSharedPtr<FJsonValue>>& Pair, FVector2D& Out) -> bool
+	{
+		if (Pair.Num() < 2 || !Pair[0].IsValid() || !Pair[1].IsValid() || Pair[0]->Type != EJson::Number || Pair[1]->Type != EJson::Number)
+		{
+			return false;
+		}
+		const double X = Pair[0]->AsNumber() * Scale, Y = Pair[1]->AsNumber() * Scale;
+		if (!FMath::IsFinite(X) || !FMath::IsFinite(Y))
+		{
+			return false;
+		}
+		Out = FVector2D(X, Y);
+		return true;
+	};
+	auto ReadPoints = [&ReadPair](const TSharedPtr<FJsonObject>& Object, const TCHAR* Field)
+	{
+		TArray<FVector2D> Points;
+		const TArray<TSharedPtr<FJsonValue>>* Array = nullptr;
+		if (Object->TryGetArrayField(Field, Array))
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *Array)
+			{
+				const TArray<TSharedPtr<FJsonValue>>* Pair = nullptr;
+				FVector2D Point;
+				if (Value.IsValid() && Value->TryGetArray(Pair) && ReadPair(*Pair, Point))
+				{
+					Points.Add(Point);
+				}
+			}
+		}
+		return Points;
+	};
+
+	const TArray<TSharedPtr<FJsonValue>>* Array = nullptr;
+	if (RootObject->TryGetArrayField(TEXT("contextBuildings"), Array))
+	{
+		for (const TSharedPtr<FJsonValue>& Value : *Array)
+		{
+			const TSharedPtr<FJsonObject> Object = Value.IsValid() ? Value->AsObject() : nullptr;
+			if (Object.IsValid())
+			{
+				FString Type;
+				Object->TryGetStringField(TEXT("buildingType"), Type);
+				SpawnContextBuilding(Type, ReadPoints(Object, TEXT("footprint")));
+			}
+		}
+	}
+	if (RootObject->TryGetArrayField(TEXT("roads"), Array))
+	{
+		for (const TSharedPtr<FJsonValue>& Value : *Array)
+		{
+			const TSharedPtr<FJsonObject> Object = Value.IsValid() ? Value->AsObject() : nullptr;
+			if (Object.IsValid())
+			{
+				const TArray<FVector2D> Points = ReadPoints(Object, TEXT("points"));
+				FString Type;
+				Object->TryGetStringField(TEXT("highway"), Type);
+				if (Points.Num() >= 2)
+				{
+					SpawnRoad(Type, Points);
+				}
+			}
+		}
+	}
+	if (RootObject->TryGetArrayField(TEXT("pois"), Array))
+	{
+		for (const TSharedPtr<FJsonValue>& Value : *Array)
+		{
+			const TSharedPtr<FJsonObject> Object = Value.IsValid() ? Value->AsObject() : nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Position = nullptr;
+			FVector2D Point;
+			if (Object.IsValid() && Object->TryGetArrayField(TEXT("position"), Position) && ReadPair(*Position, Point))
+			{
+				FString Type;
+				Object->TryGetStringField(TEXT("poiType"), Type);
+				SpawnPoi(Type, Point);
+			}
+		}
+	}
+	MarkGroundDirty();
+}
+
 void ABuildingGenerator::ClearAllRoadsAndPOIs()
 {
+	SceneryRoads.Reset();
+	SceneryPois.Reset();
 	for (AActor* Actor : SpawnedRoadActors)
 	{
 		if (Actor)
@@ -943,6 +1079,7 @@ void ABuildingGenerator::ClearAllRoadsAndPOIs()
 
 void ABuildingGenerator::ClearAllContextBuildings()
 {
+	SceneryContextBuildings.Reset();
 	for (AActor* Actor : SpawnedContextBuildingActors)
 	{
 		if (Actor)
@@ -1402,7 +1539,10 @@ bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath, FString& O
 	}
 
 	TSharedRef<FJsonObject> RootObject = MakeShared<FJsonObject>();
-	RootObject->SetNumberField(TEXT("version"), ProjectFileVersion);
+	// Version 2 only for a project that has the map around the campus; every other project stays version 1.
+	const bool bHasMap = Scale > KINDA_SMALL_NUMBER
+		&& (!SceneryContextBuildings.IsEmpty() || !SceneryRoads.IsEmpty() || !SceneryPois.IsEmpty());
+	RootObject->SetNumberField(TEXT("version"), bHasMap ? ProjectFileVersion : BasicProjectFileVersion);
 	RootObject->SetNumberField(TEXT("scale"), Scale);
 	RootObject->SetNumberField(TEXT("floorHeight"), 300.f);
 	if (!ProjectName.IsEmpty())
@@ -1434,10 +1574,7 @@ bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath, FString& O
 
 		BuildingObject->SetNumberField(TEXT("floorCount"), Building->GetFloorCount());
 		BuildingObject->SetNumberField(TEXT("floorHeight"), Building->GetFloorHeight());
-		if (Building->GetBuildingType() != BuildingTypes::Default())
-		{
-			BuildingObject->SetStringField(TEXT("buildingType"), Building->GetBuildingType());
-		}
+		BuildingObject->SetStringField(TEXT("buildingType"), Building->GetBuildingType());
 
 		TArray<TSharedPtr<FJsonValue>> FootprintArray;
 		for (const FVector2D& Point : Building->GetFootprint())
@@ -1458,6 +1595,64 @@ bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath, FString& O
 	}
 
 	RootObject->SetArrayField(TEXT("buildings"), BuildingsArray);
+
+	// The map around the campus, so a project saved from a map database is complete. Points are in footprint units, like the buildings'.
+	auto PointValue = [this](const FVector2D& World)
+	{
+		auto Units = [this](double Value) { return FMath::RoundToDouble(Value / Scale * 100.0) / 100.0; };
+		TArray<TSharedPtr<FJsonValue>> Pair;
+		Pair.Add(MakeShared<FJsonValueNumber>(Units(World.X)));
+		Pair.Add(MakeShared<FJsonValueNumber>(Units(World.Y)));
+		return Pair;
+	};
+	auto PointsValue = [&PointValue](const TArray<FVector2D>& Points)
+	{
+		TArray<TSharedPtr<FJsonValue>> Array;
+		for (const FVector2D& Point : Points)
+		{
+			Array.Add(MakeShared<FJsonValueArray>(PointValue(Point)));
+		}
+		return Array;
+	};
+	if (Scale > KINDA_SMALL_NUMBER)
+	{
+		if (!SceneryContextBuildings.IsEmpty())
+		{
+			TArray<TSharedPtr<FJsonValue>> Array;
+			for (const FSceneryContextBuilding& Building : SceneryContextBuildings)
+			{
+				TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
+				Object->SetStringField(TEXT("buildingType"), Building.BuildingType);
+				Object->SetArrayField(TEXT("footprint"), PointsValue(Building.Footprint));
+				Array.Add(MakeShared<FJsonValueObject>(Object));
+			}
+			RootObject->SetArrayField(TEXT("contextBuildings"), Array);
+		}
+		if (!SceneryRoads.IsEmpty())
+		{
+			TArray<TSharedPtr<FJsonValue>> Array;
+			for (const FSceneryRoad& Road : SceneryRoads)
+			{
+				TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
+				Object->SetStringField(TEXT("highway"), Road.HighwayType);
+				Object->SetArrayField(TEXT("points"), PointsValue(Road.Points));
+				Array.Add(MakeShared<FJsonValueObject>(Object));
+			}
+			RootObject->SetArrayField(TEXT("roads"), Array);
+		}
+		if (!SceneryPois.IsEmpty())
+		{
+			TArray<TSharedPtr<FJsonValue>> Array;
+			for (const FSceneryPoi& Poi : SceneryPois)
+			{
+				TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
+				Object->SetStringField(TEXT("poiType"), Poi.PoiType);
+				Object->SetArrayField(TEXT("position"), PointValue(Poi.Position));
+				Array.Add(MakeShared<FJsonValueObject>(Object));
+			}
+			RootObject->SetArrayField(TEXT("pois"), Array);
+		}
+	}
 
 	FString OutputString;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputString);
@@ -1827,6 +2022,11 @@ int32 ABuildingGenerator::ReplaceBuildingsFromPath(const FString& Path, bool bDa
 		Building->OnDestroyed.AddDynamic(this, &ABuildingGenerator::HandleBuildingDestroyed);
 	}
 	Staged->Destroy();
+	if (!bDatabase)
+	{
+		// The roads, places and buildings around the campus of the file (the database ones are loaded by the caller).
+		LoadSceneryFromJson(RootObject);
+	}
 	ApplyBuildingFilter();
 	NotifyNavigationLayoutChanged();
 	return Count;

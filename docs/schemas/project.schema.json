@@ -8,7 +8,7 @@
   "additionalProperties": false,
   "properties": {
     "version": {
-      "description": "The format version that wrote the file (1 now). A file without it was made before versions and reads as 1; a newer one is read as well as it can be.",
+      "description": "The format version that wrote the file: 2 when it holds the map around the campus (contextBuildings, roads, pois), 1 otherwise. A file without it was made before versions and reads as 1; a newer one is read as well as it can be.",
       "type": "integer",
       "minimum": 0
     },
@@ -27,6 +27,21 @@
     "buildings": {
       "type": "array",
       "items": { "$ref": "#/definitions/building" }
+    },
+    "contextBuildings": {
+      "description": "The buildings around the campus (of a map database), shown as blocks on the map and not entered. Written when the project was made from a map database.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/contextBuilding" }
+    },
+    "roads": {
+      "description": "The roads of a map database, drawn on the ground.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/road" }
+    },
+    "pois": {
+      "description": "The places of interest of a map database, drawn as markers.",
+      "type": "array",
+      "items": { "$ref": "#/definitions/poi" }
     }
   },
   "definitions": {
@@ -37,6 +52,33 @@
       "maxItems": 2,
       "items": { "type": "number" }
     },
+    "contextBuilding": {
+      "type": "object",
+      "required": ["footprint"],
+      "additionalProperties": false,
+      "properties": {
+        "buildingType": { "description": "One of the types of the editor (BuildingTypes.h).", "type": "string" },
+        "footprint": { "description": "The outline, in footprint units.", "type": "array", "minItems": 3, "items": { "$ref": "#/definitions/point" } }
+      }
+    },
+    "road": {
+      "type": "object",
+      "required": ["points"],
+      "additionalProperties": false,
+      "properties": {
+        "highway": { "description": "The road's own kind in the map database (primary, residential, footway ...); the width and colour follow from it.", "type": "string" },
+        "points": { "description": "The road's line, in footprint units.", "type": "array", "minItems": 2, "items": { "$ref": "#/definitions/point" } }
+      }
+    },
+    "poi": {
+      "type": "object",
+      "required": ["position"],
+      "additionalProperties": false,
+      "properties": {
+        "poiType": { "description": "The place's own kind in the map database (amenity, shop, leisure, tourism); the marker's colour follows from it.", "type": "string" },
+        "position": { "$ref": "#/definitions/point" }
+      }
+    },
     "building": {
       "type": "object",
       "required": ["id", "name", "footprint"],
@@ -45,7 +87,7 @@
         "id": { "description": "Unique in the file; what the rest of the file and the phone app call the building.", "type": "string", "minLength": 1 },
         "name": { "type": "string" },
         "offset": { "description": "Where the building stands among the others, in footprint units.", "$ref": "#/definitions/point" },
-        "buildingType": { "description": "One of the types of the editor (BuildingTypes.h), as written there; left out for Other.", "type": "string" },
+        "buildingType": { "description": "One of the types of the editor (BuildingTypes.h), as written there (Other too).", "type": "string" },
         "floorCount": { "type": "integer", "minimum": 1, "maximum": 200 },
         "floorHeight": { "description": "In centimetres; the file's floorHeight when absent.", "type": "number", "exclusiveMinimum": 0 },
         "footprint": {

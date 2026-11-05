@@ -286,6 +286,8 @@ void ANavPlayerController::BeginPlay()
 		// Keeps the 3D preview's route/start/destination markers live as the user picks points and
 		// finds/clears a route - see RefreshRoute3DVisualization's own comment.
 		NavigationPanel->OnStateChanged.AddUniqueDynamic(this, &ANavPlayerController::RefreshRoute3DVisualization);
+		// Picking points on the map and the tools that click the map do not run together: the one turned on last wins.
+		NavigationPanel->OnPickingStarted.AddUObject(this, &ANavPlayerController::ExitAllMouseTools);
 		NavigationPanel->OnGuidedStepChanged.AddUniqueDynamic(this, &ANavPlayerController::FollowNavigationStep);
 	}
 
@@ -760,6 +762,10 @@ void ANavPlayerController::ToggleBuildMode()
 	ExitAddDoorMode();
 	ExitConnectorMode();
 
+	if (!bBuildMode)
+	{
+		CancelNavigationPicking();
+	}
 	bBuildMode = !bBuildMode;
 	OnBuildModeChanged.Broadcast(bBuildMode);
 
@@ -799,6 +805,10 @@ void ANavPlayerController::ToggleShapeTestMode()
 	ExitAddDoorMode();
 	ExitConnectorMode();
 
+	if (!bShapeTestMode)
+	{
+		CancelNavigationPicking();
+	}
 	bShapeTestMode = !bShapeTestMode;
 	OnShapeModeChanged.Broadcast(bShapeTestMode);
 
@@ -847,7 +857,9 @@ void ANavPlayerController::UpdateBuildingTransparency()
 		: ControlledPawn->GetActorLocation();
 
 	// Every building is judged by how far the camera is from it: far away it is the whole, solid building with its roof; coming closer its walls
-	// and roof fade out, and once they can be looked through the rooms inside show.
+	// and roof fade out, and once they can be looked through the rooms inside show. Not while a route is being gone through: the camera
+	// follows its steps and goes close to the buildings, which must stay solid then.
+	const bool bNavigating = IsNavigationRouteActive();
 	int32 SortOrder = 0;
 	for (APolyBuilding* Building : Generator->GetAllBuildings())
 	{
@@ -876,7 +888,7 @@ void ANavPlayerController::UpdateBuildingTransparency()
 		// Made transparent from the Building panel wins over everything; otherwise the camera distance decides, if see-through is on at all.
 		const float Opacity = bMadeTransparent
 			? CampusRevealNearOpacity
-			: (bCampusSeeThroughEnabled
+			: (bCampusSeeThroughEnabled && !bNavigating
 				? FMath::GetMappedRangeValueClamped(
 					FVector2D(CampusRevealFar, CampusRevealNear),
 					FVector2D(1.0f, CampusRevealNearOpacity),
@@ -933,6 +945,11 @@ int32 ANavPlayerController::CountShownCampusRoomsForTests(const FString& Buildin
 		}
 	}
 	return Shown;
+}
+
+bool ANavPlayerController::IsNavigationRouteActive() const
+{
+	return NavigationPanel && !NavigationPanel->GetRoutePoints().IsEmpty() && NavigationPanel->IsRouteGuidanceVisible();
 }
 
 void ANavPlayerController::SetCampusSeeThroughEnabled(bool bEnabled)
@@ -1002,6 +1019,7 @@ void ANavPlayerController::ToggleDrawRoomMode()
 	ExitAddDoorMode();
 	ExitConnectorMode();
 
+	CancelNavigationPicking();
 	bDrawRoomMode = true;
 	OnDrawRoomModeChanged.Broadcast(true);
 	OnEditModeChanged.Broadcast();
@@ -1046,6 +1064,7 @@ void ANavPlayerController::ToggleDrawWallMode()
 	ExitAddDoorMode();
 	ExitConnectorMode();
 
+	CancelNavigationPicking();
 	bDrawWallMode = true;
 	OnDrawWallModeChanged.Broadcast(true);
 	OnEditModeChanged.Broadcast();
@@ -1126,6 +1145,7 @@ void ANavPlayerController::ToggleSelectMode()
 	ExitAddDoorMode();
 	ExitConnectorMode();
 
+	CancelNavigationPicking();
 	bSelectMode = true;
 	OnSelectModeChanged.Broadcast(true);
 	OnEditModeChanged.Broadcast();
@@ -1196,6 +1216,7 @@ void ANavPlayerController::TogglePrefabRoomMode(int32 ShapeId)
 	ExitAddDoorMode();
 	ExitConnectorMode();
 
+	CancelNavigationPicking();
 	ActivePrefabShape = ShapeId;
 	OnEditModeChanged.Broadcast();
 	UE_LOG(LogTemp, Warning, TEXT("Prefab room placement ON (shape %d): click the 2D canvas to place, press the same key again to stop"), ShapeId);
@@ -1266,6 +1287,7 @@ void ANavPlayerController::ToggleConnectorMode(EInteriorNavNodeType Type)
 	ExitPrefabRoomMode();
 	ExitAddDoorMode();
 
+	CancelNavigationPicking();
 	ActiveConnectorType = RequestedType;
 	OnEditModeChanged.Broadcast();
 	UE_LOG(LogTemp, Warning, TEXT("Connector placement ON (type %d): click the 2D canvas to place, press the same key again to stop"), RequestedType);
@@ -1294,6 +1316,37 @@ void ANavPlayerController::ExitAddDoorMode()
 		OnEditModeChanged.Broadcast();
 		UE_LOG(LogTemp, Warning, TEXT("Add-door mode OFF"));
 	}
+}
+
+void ANavPlayerController::CancelNavigationPicking()
+{
+	if (NavigationPanel && NavigationPanel->IsSelectingPoint())
+	{
+		NavigationPanel->CancelSelection();
+	}
+}
+
+void ANavPlayerController::ExitAllMouseTools()
+{
+	if (bBuildMode)
+	{
+		CancelBuilding();
+		bBuildMode = false;
+		OnBuildModeChanged.Broadcast(false);
+	}
+	if (bShapeTestMode)
+	{
+		bShapeTestMode = false;
+		OnShapeModeChanged.Broadcast(false);
+	}
+	if (bDrawRoomMode || bDrawWallMode)
+	{
+		ExitDrawRoomMode();
+	}
+	ExitSelectMode();
+	ExitPrefabRoomMode();
+	ExitAddDoorMode();
+	ExitConnectorMode();
 }
 
 void ANavPlayerController::ToggleAddDoorMode()
@@ -1332,6 +1385,7 @@ void ANavPlayerController::ToggleAddDoorMode()
 	ExitPrefabRoomMode();
 	ExitConnectorMode();
 
+	CancelNavigationPicking();
 	bAddDoorMode = true;
 	OnEditModeChanged.Broadcast();
 	UE_LOG(LogTemp, Warning, TEXT("Add-door mode ON (floor %d): click a wall edge on the 2D canvas to add a door, Esc/K to exit"), InteriorGen->GetActiveFloor());
@@ -2647,6 +2701,10 @@ int32 ANavPlayerController::LoadBuildingData(const FString& FilePath, bool bData
 	FString Problem;
 	const int32 Count = Generator->ReplaceBuildingsFromPath(FilePath, bDatabase, [this]()
 	{
+		// A tool in use (a footprint half drawn, a room or a connector being placed, clicking the map for a place) belongs to the
+		// project that is going away, and its points are in that project's units.
+		ExitAllMouseTools();
+		CancelNavigationPicking();
 		SetInteriorInspectionEnabled(false);
 		if (InteriorGen && !InteriorGen->GetLoadedBuildingId().IsEmpty())
 		{
@@ -2683,6 +2741,8 @@ int32 ANavPlayerController::LoadBuildingData(const FString& FilePath, bool bData
 void ANavPlayerController::StartNewProject()
 {
 	FinishRotationGesture();
+	ExitAllMouseTools();
+	CancelNavigationPicking();
 	SetInteriorInspectionEnabled(false);
 	SetIn3DPreviewMode(false);
 	ClearCampusInteriorPreview();
@@ -4150,7 +4210,7 @@ bool ANavPlayerController::CreateNewProject(const FString& Name, const FString& 
 	}
 
 	const auto Project = MakeShared<FJsonObject>();
-	Project->SetNumberField(TEXT("version"), ABuildingGenerator::ProjectFileVersion);
+	Project->SetNumberField(TEXT("version"), ABuildingGenerator::BasicProjectFileVersion);
 	Project->SetStringField(TEXT("projectName"), TrimmedName);
 	const FString TrimmedDescription = Description.TrimStartAndEnd();
 	if (!TrimmedDescription.IsEmpty()) Project->SetStringField(TEXT("description"), TrimmedDescription);

@@ -157,7 +157,7 @@ bool FBuildingTypesAppearanceTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// The type is in the project file (left out for Other), is read back, and an older file or an unknown value is Other.
+// The type is in the project file (Other too), is read back, and an older file or an unknown value is Other.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBuildingTypesSaveLoadTest, "InNavi.Building.Types.SaveAndLoad", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FBuildingTypesSaveLoadTest::RunTest(const FString& Parameters)
 {
@@ -184,7 +184,7 @@ bool FBuildingTypesSaveLoadTest::RunTest(const FString& Parameters)
 		return false;
 	}
 	TestEqual(TEXT("the type is written as the list spells it"), SavedA->GetStringField(TEXT("buildingType")), FString(TEXT("School")));
-	TestFalse(TEXT("Other is left out"), SavedB->HasField(TEXT("buildingType")));
+	TestEqual(TEXT("Other is written too"), SavedB->GetStringField(TEXT("buildingType")), BuildingTypes::Default());
 
 	// Read back from the same file after a second save.
 	if (!TestTrue(TEXT("the project is saved again"), Generator->SaveBuildingsToFile(Path)))

@@ -236,7 +236,11 @@ public:
 	// The format version written into every project file as "version". A file from before it existed has none and is read as
 	// version 0, which is the same format as 1. Raise this when the format changes in a way an older reader would misread, and
 	// convert older files in LoadBuildingsFromFile by the version it reports here.
-	static constexpr int32 ProjectFileVersion = 1;
+	// 1 is a project of buildings and their interiors; 2 is one that also holds the map around the campus (roads, places of interest and
+	// the buildings around it, as saved from a map database). A project is written as 2 only when it has such a map, so an older build, which
+	// would drop the map when it saves, knows from the number that it is not the format it writes (it opens the file and asks for a new name).
+	static constexpr int32 BasicProjectFileVersion = 1;
+	static constexpr int32 ProjectFileVersion = 2;
 	int32 GetLoadedFileVersion() const { return LoadedFileVersion; }
 	const FString& GetProjectDescription() const { return ProjectDescription; }
 	void SetProjectInfo(const FString& Name, const FString& Description)
@@ -374,6 +378,33 @@ private:
 
 	UPROPERTY()
 	TArray<AActor*> SpawnedContextBuildingActors;
+
+	// The map around the campus as a project file keeps it: the roads, the places of interest and the buildings around the campus, in
+	// world units (a file's footprint units times Scale). They are recorded as they are spawned, from the map database or from a project
+	// file, and written back by SaveBuildingsToFile ("roads", "pois", "contextBuildings") so a project saved from a database is complete.
+	struct FSceneryRoad
+	{
+		FString HighwayType;
+		TArray<FVector2D> Points;
+	};
+	struct FSceneryPoi
+	{
+		FString PoiType;
+		FVector2D Position = FVector2D::ZeroVector;
+	};
+	struct FSceneryContextBuilding
+	{
+		FString BuildingType;
+		TArray<FVector2D> Footprint;
+	};
+	TArray<FSceneryRoad> SceneryRoads;
+	TArray<FSceneryPoi> SceneryPois;
+	TArray<FSceneryContextBuilding> SceneryContextBuildings;
+	bool SpawnRoad(const FString& HighwayType, const TArray<FVector2D>& WorldPoints);
+	bool SpawnPoi(const FString& PoiType, const FVector2D& WorldPosition);
+	bool SpawnContextBuilding(const FString& BuildingType, const TArray<FVector2D>& WorldFootprint);
+	// The roads, places and buildings around the campus of a project file's JSON (all optional: an older file has none).
+	void LoadSceneryFromJson(const TSharedPtr<FJsonObject>& RootObject);
 
 	// Whether the filter panel shows the other (non-campus) buildings: SetNonCampusBuildingsVisible.
 	bool bNonCampusBuildingsVisible = true;

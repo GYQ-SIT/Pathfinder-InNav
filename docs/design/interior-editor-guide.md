@@ -346,8 +346,9 @@ Destination has to be set. Each place is a row with a letter or number (A and B 
 its leg on the map), a dropdown, and, on the ends, a **+** button to pick the place by clicking the map (green for the Start, red for
 the Destination while it waits for the click). Click a row's number to choose it, then **Up** / **Down** move it along the list
 (an empty end takes a place that moves onto it) and **Remove** empties an end or removes a stop. **+ Add stop** opens an empty
-row before the Destination: pick a place from its dropdown, or press its **+** and click places on the map, one after another
-(Esc or **Done** ends it). Up to 8 stops. **Reverse** turns the list round. **Clear Route** empties the list and the route.
+row after the Destination: pick a place from its dropdown, or press its **+** and click places on the map, one after another
+(Esc or **Done** ends it). What is picked becomes the new Destination and the one before it the last stop; with no Destination set
+it just becomes the Destination. Up to 8 stops. **Reverse** turns the list round. **Clear Route** empties the list and the route.
 
 **Inside a building.** The dropdowns list the open building's rooms across every floor, written as "Room name (Floor N)" (no id; the
 id can still be searched). Picking a room marks its centre; or press the **+** of the Start or Destination and click a point on
