@@ -9,11 +9,11 @@ class INNAVI_API FMobileSavedPlaces
 public:
 	bool Contains(const FString& PlaceId) const { return Order.Contains(PlaceId); }
 	// Saves a place (at the top of the list) or takes it back; returns whether it is saved now.
-	bool Toggle(const FString& PlaceId);
-	void Add(const FString& PlaceId);
+	bool Toggle(const FString& PlaceId, bool* OutPersisted = nullptr);
+	bool Add(const FString& PlaceId);
 	bool Remove(const FString& PlaceId);
 	// Takes every place off.
-	void Clear();
+	bool Clear();
 	// Newest first.
 	const TArray<FString>& Ids() const { return Order; }
 	int32 Num() const { return Order.Num(); }
@@ -28,7 +28,7 @@ public:
 	static FString DefaultFile();
 
 private:
-	void Changed();
+	bool Commit(TArray<FString> NewOrder);
 
 	TArray<FString> Order;
 	FString Path;

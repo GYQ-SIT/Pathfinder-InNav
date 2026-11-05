@@ -1,11 +1,15 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "BuildingGenerator.h"
+#include "LayoutValidation.h"
 #include "PolyBuilding.h"
 
 #include "Dom/JsonObject.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "HAL/FileManager.h"
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBuildingBaselineDiscardTest, "InNavi.Building.DiscardBaseline", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FBuildingBaselineDiscardTest::RunTest(const FString& Parameters)
@@ -79,6 +83,33 @@ bool FBuildingBaselineDiscardTest::RunTest(const FString& Parameters)
 	Generator->ClearAllBuildings();
 	Generator->RestoreBuildingBaselines();
 	TestFalse(TEXT("baselines are dropped with the project"), Generator->HasBuildingBaseline(TEXT("B1")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectFloorLimitsTest, "InNavi.Building.ProjectFloorLimits", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FProjectFloorLimitsTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	auto* Generator = World->SpawnActor<ABuildingGenerator>();
+	auto* Existing = Generator->CreateRectangleBuilding(TEXT("Existing"), TEXT("Existing"), {0, 0}, 400, 400, 0, 1, 300);
+	const FString Path = FPaths::ProjectSavedDir() / TEXT("AutomationTemp") / (FGuid::NewGuid().ToString() + TEXT(".json"));
+	for (const auto& Dimensions : TArray<FIntPoint>{{10000000, 1}, {2, 10000000}})
+	{
+		const FString Json = FString::Printf(TEXT("{\"buildings\":[{\"id\":\"B\",\"name\":\"B\",\"floorCount\":%d,"
+			"\"footprint\":[[0,0],[400,0],[400,400],[0,400]],\"interior\":{\"floors\":[{\"level\":%d}]}}]}"),
+			Dimensions.X, Dimensions.Y);
+		TestTrue(TEXT("the fixture is written"), FFileHelper::SaveStringToFile(Json, *Path));
+		bool bReplaced = false;
+		FString Problem;
+		TestEqual(TEXT("the editor rejects the import before replacement"),
+			Generator->ReplaceBuildingsFromPath(Path, false, [&]() { bReplaced = true; }, Problem), INDEX_NONE);
+		TestTrue(TEXT("the error gives the allowed range"), Problem.Contains(TEXT("1 to 200")));
+		TestFalse(TEXT("the current project is never torn down"), bReplaced);
+		TestTrue(TEXT("the original actor remains"), Generator->FindBuildingById(TEXT("Existing")) == Existing);
+		TestTrue(TEXT("the validator also rejects this file"), LayoutValidation::ValidateFile(Path).HasErrors());
+	}
+	IFileManager::Get().Delete(*Path);
+	World->DestroyWorld(false);
 	return true;
 }
 

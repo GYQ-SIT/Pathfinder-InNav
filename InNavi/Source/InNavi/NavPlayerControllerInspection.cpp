@@ -186,6 +186,7 @@ void ANavPlayerController::TickInteriorInspection()
 
 void ANavPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	UnbindGameWindowCloseGuard();
 	SetInteriorInspectionEnabled(false);
 	Super::EndPlay(EndPlayReason);
 }

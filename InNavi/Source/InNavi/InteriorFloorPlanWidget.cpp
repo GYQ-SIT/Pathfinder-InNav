@@ -133,6 +133,7 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 				// A plain click (mouse up without moving) has no further effect; dragging slides
 				// the door along DraggingDoorEdgeIndex - see NativeOnMouseMove.
 				bIsDraggingDoor = true;
+				DragTarget = InteriorGen ? InteriorGen->GetRoomById(DoorRoomId) : nullptr;
 				DraggingDoorRoomId = DoorRoomId;
 				DraggingDoorId = DoorId;
 				DraggingDoorEdgeIndex = DoorEdgeIndex;
@@ -170,6 +171,7 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 				// whole room via MoveRoomTo, computed fresh each move from this snapshot (see
 				// NativeOnMouseMove) rather than accumulated deltas, so it doesn't drift.
 				bIsDraggingRoom = true;
+				DragTarget = Room;
 				DraggingRoomId = Room->RoomId;
 				DragStartRoomFootprint = Room->GetFootprint();
 				DragStartFootprintPosition = LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize());
@@ -230,29 +232,39 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 
 	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsDraggingDoor)
 	{
-		bIsDraggingDoor = false;
-
-		if (InteriorGen)
-		{
-			InteriorGen->RecordHistorySnapshot();
-		}
-
+		FinishEditDrag();
 		return FReply::Handled().ReleaseMouseCapture();
 	}
 
 	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsDraggingRoom)
 	{
-		bIsDraggingRoom = false;
-		if (PlayerController)
-		{
-			// Overlap with another room/wall was allowed while dragging (see NativeOnMouseMove) -
-			// this is what actually enforces it, reverting to DragStartRoomFootprint if needed.
-			PlayerController->CommitRoomMove(DraggingRoomId, DragStartRoomFootprint);
-		}
+		FinishEditDrag();
 		return FReply::Handled().ReleaseMouseCapture();
 	}
 
 	return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
+}
+
+void UInteriorFloorPlanWidget::FinishEditDrag()
+{
+	if (bIsDraggingDoor)
+	{
+		bIsDraggingDoor = false;
+		if (InteriorGen && DragTarget.IsValid()) InteriorGen->RecordHistorySnapshot();
+	}
+	if (bIsDraggingRoom)
+	{
+		bIsDraggingRoom = false;
+		if (PlayerController && DragTarget.IsValid()) PlayerController->CommitRoomMove(DraggingRoomId, DragStartRoomFootprint);
+	}
+	DragTarget.Reset();
+}
+
+void UInteriorFloorPlanWidget::NativeOnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
+{
+	bIsPanning = false;
+	FinishEditDrag();
+	Super::NativeOnMouseCaptureLost(CaptureLostEvent);
 }
 
 FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
@@ -261,9 +273,9 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 	{
 		// Same defensive check as panning below - a mouse-up that doesn't reach this widget
 		// shouldn't leave the drag stuck on forever.
-		if (!InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+		if (!InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton) || !DragTarget.IsValid())
 		{
-			bIsDraggingDoor = false;
+			FinishEditDrag();
 			return FReply::Handled().ReleaseMouseCapture();
 		}
 
@@ -279,9 +291,9 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 	if (bIsDraggingRoom)
 	{
 		// Same defensive check as the door drag above.
-		if (!InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+		if (!InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton) || !DragTarget.IsValid())
 		{
-			bIsDraggingRoom = false;
+			FinishEditDrag();
 			return FReply::Handled().ReleaseMouseCapture();
 		}
 
@@ -914,6 +926,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 	// ---- Doors in the outer wall on this floor: main doors (green) and link doors (blue), the selected one in yellow ----
 	{
 		const TArray<FVector2D>& Boundary = Building->GetFootprint();
+		const auto* SelectedEntrance = PlayerController ? PlayerController->GetSelectedEntrance() : nullptr;
 		for (const FInteriorEntrance& Entrance : InteriorGen->GetAllEntrances())
 		{
 			if (Entrance.Level != InteriorGen->GetActiveFloor() || !Boundary.IsValidIndex(Entrance.EdgeIndex))
@@ -931,7 +944,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			const FVector2D Start = A + Direction * FMath::Clamp(static_cast<double>(Entrance.Offset) / Scale, 0.0, Length);
 			const FVector2D End = A + Direction * FMath::Clamp(static_cast<double>(Entrance.Offset + Entrance.Width) / Scale, 0.0, Length);
 			const TArray<FVector2D> Opening = { WorldToLocal((Start + Building->BuildingOffset) * Scale), WorldToLocal((End + Building->BuildingOffset) * Scale) };
-			const bool bSelected = PlayerController && PlayerController->GetSelectedEntranceId() == Entrance.Id;
+			const bool bSelected = SelectedEntrance == &Entrance;
 			const FLinearColor Colour = bSelected ? FLinearColor(1.f, 0.85f, 0.2f, 1.f)
 				: (Entrance.Kind == EInteriorEntranceKind::Main ? InteriorDoorColors::MainDoor() : InteriorDoorColors::LinkDoor());
 			FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 1, AllottedGeometry.ToPaintGeometry(), Opening, ESlateDrawEffect::None, Colour, true, bSelected ? 13.f : 9.f);

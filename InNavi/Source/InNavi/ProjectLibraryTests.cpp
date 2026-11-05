@@ -2,11 +2,13 @@
 
 #include "ProjectCardWidget.h"
 #include "ProjectLibrary.h"
+#include "ProjectFile.h"
 #include "ProjectLibraryWidget.h"
 #include "UiTestFixture.h"
 
 #include "Components/Button.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformFileManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Guid.h"
@@ -151,6 +153,42 @@ bool FProjectLibraryEditTest::RunTest(const FString& Parameters)
 	IFileManager::Get().DeleteDirectory(*Folder, false, true);
 	return true;
 }
+
+#if PLATFORM_WINDOWS
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectFileBlockedReplacementTest, "InNavi.Project.Library.BlockedReplacement", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FProjectFileBlockedReplacementTest::RunTest(const FString& Parameters)
+{
+	const FString Folder = ProjectLibraryTests::MakeFolder();
+	const FString Path = Folder / TEXT("Original.json");
+	const FString Original = TEXT("{\"projectName\":\"Original\",\"buildings\":[]}");
+	auto& Files = IFileManager::Get();
+	Files.MakeDirectory(*Folder, true);
+	TestTrue(TEXT("the original project was written"), ProjectFile::WriteText(Path, Original));
+	const auto Entries = ProjectLibrary::Scan(Folder);
+	if (TestEqual(TEXT("the original project is listed"), Entries.Num(), 1))
+	{
+		auto& Platform = FPlatformFileManager::Get().GetPlatformFile();
+		TestTrue(TEXT("the original is made read-only"), Platform.SetReadOnly(*Path, true));
+		TestFalse(TEXT("a blocked replacement fails"), ProjectFile::WriteText(Path, TEXT("replacement")));
+		FString NewPath, Error;
+		TestFalse(TEXT("a rename with a blocked original fails"), ProjectLibrary::Rename(Entries[0], TEXT("New name"), Folder, NewPath, Error));
+		TestTrue(TEXT("the error describes the rollback"), Error.Contains(TEXT("rolled back")));
+		TestFalse(TEXT("the rename leaves no extra project"), Files.FileExists(*(Folder / TEXT("New name.json"))));
+		FString Text;
+		TestTrue(TEXT("the original remains readable"), FFileHelper::LoadFileToString(Text, *Path));
+		TestEqual(TEXT("the original bytes survive"), Text, Original);
+		TArray<FString> FilesInFolder;
+		Files.FindFiles(FilesInFolder, *(Folder / TEXT("*")), true, false);
+		TestEqual(TEXT("no staging files remain"), FilesInFolder.Num(), 1);
+		Platform.SetReadOnly(*Path, false);
+		TestTrue(TEXT("a retry replaces the original"), ProjectFile::WriteText(Path, TEXT("replacement")));
+		TestTrue(TEXT("the replacement is readable"), FFileHelper::LoadFileToString(Text, *Path));
+		TestEqual(TEXT("the replacement is complete"), Text, FString(TEXT("replacement")));
+	}
+	Files.DeleteDirectory(*Folder, false, true);
+	return true;
+}
+#endif
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectLibraryDeleteTest, "InNavi.Project.Library.Delete", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FProjectLibraryDeleteTest::RunTest(const FString& Parameters)

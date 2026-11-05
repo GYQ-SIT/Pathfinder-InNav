@@ -12,6 +12,7 @@
 #include "MobileSelectWidget.h"
 #include "MobileSearchPageWidget.h"
 #include "MobileStyle.h"
+#include "NavPlayerController.h"
 #include "MobileRealSource.h"
 #include "MobileMockSource.h"
 #include "StartScreenStyle.h"
@@ -379,7 +380,9 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 				{
 					if (UMobileAppWidget* Screen = WeakThis.Get())
 					{
-						Screen->SavedPlaces.Toggle(Place.Id);
+						bool bPersisted;
+						Screen->SavedPlaces.Toggle(Place.Id, &bPersisted);
+						if (!bPersisted) Screen->ShowStorageError();
 						Screen->RefreshSaved();
 						Screen->SelectPlace(Place);
 					}
@@ -472,7 +475,9 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 			{
 				if (UMobileAppWidget* Screen = WeakThis.Get())
 				{
-					Screen->SavedPlaces.Toggle(Place.Id);
+					bool bPersisted;
+					Screen->SavedPlaces.Toggle(Place.Id, &bPersisted);
+					if (!bPersisted) Screen->ShowStorageError();
 					Screen->RefreshSaved();
 					Screen->SelectPlace(Place);
 					Screen->RefreshArrived();
@@ -536,11 +541,11 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 					Screen->OpenSavedPlace(Place);
 				}
 			});
-			SavedPage->SetOnRemove([WeakSaved](const FMobilePlace& Place)
+			SavedPage->SetOnRemove([WeakSaved](const FString& PlaceId)
 			{
 				if (UMobileAppWidget* Screen = WeakSaved.Get())
 				{
-					Screen->SavedPlaces.Remove(Place.Id);
+					if (!Screen->SavedPlaces.Remove(PlaceId)) Screen->ShowStorageError();
 					Screen->RefreshSaved();
 					Screen->SelectPlace(Screen->SelectedPlace);
 					Screen->RefreshArrived();
@@ -561,7 +566,11 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 			{
 				if (UMobileAppWidget* Screen = WeakProfile.Get())
 				{
-					Screen->Preferences.SetTheme(Theme);
+					if (!Screen->Preferences.SetTheme(Theme))
+					{
+						Screen->ProfilePage->SetPreferences(Screen->Preferences);
+						Screen->ShowStorageError();
+					}
 					Screen->SyncAppearance();
 				}
 			});
@@ -569,8 +578,33 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 			{
 				if (UMobileAppWidget* Screen = WeakProfile.Get())
 				{
-					Screen->Preferences.SetLargerText(bLarger);
+					if (!Screen->Preferences.SetLargerText(bLarger))
+					{
+						Screen->ProfilePage->SetPreferences(Screen->Preferences);
+						Screen->ShowStorageError();
+					}
 					Screen->SyncAppearance();
+				}
+			});
+			ProfilePage->SetOnVolumeChanged([WeakProfile](float Volume, bool bFinal)
+			{
+				if (UMobileAppWidget* Screen = WeakProfile.Get())
+				{
+					// Heard while the slider moves; kept, with a click to hear it by, when the finger is lifted.
+					Screen->ApplyVolume(Volume);
+					if (bFinal)
+					{
+						if (!Screen->Preferences.SetVolume(Volume))
+						{
+							Screen->ApplyVolume(Screen->Preferences.GetVolume());
+							Screen->ProfilePage->SetPreferences(Screen->Preferences);
+							Screen->ShowStorageError();
+						}
+						if (ANavPlayerController* Controller = Screen->GetOwningPlayer<ANavPlayerController>())
+						{
+							Controller->PlayButtonClickSound();
+						}
+					}
 				}
 			});
 			ProfilePage->SetOnReset([WeakProfile]()
@@ -665,6 +699,15 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 void UMobileAppWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	if (StorageErrorSeconds > 0.f && (StorageErrorSeconds -= InDeltaTime) <= 0.f && StorageError)
+		StorageError->SetVisibility(ESlateVisibility::Collapsed);
+	if (PendingRoute && PendingRoute->Step(0.003, CurrentRoute))
+	{
+		PendingRoute.Reset();
+		if (RoutePage) RoutePage->SetRequest(ActiveRouteRequest, CurrentRoute);
+		RefreshNavigation();
+		RefreshMap();
+	}
 #if PLATFORM_ANDROID && !UE_BUILD_SHIPPING
 	++PerfFrames;
 	PerfSeconds += InDeltaTime;
@@ -870,6 +913,7 @@ void UMobileAppWidget::SetActiveTab(ETab Tab)
 
 void UMobileAppWidget::SendSheetEvent(EMobileSheetEvent Event)
 {
+	if (Event == EMobileSheetEvent::NavigationStarted && !CurrentRoute.bFound) return;
 	if (Flow.Handle(Event))
 	{
 		Snap = MobileSheet::SnapForState(Flow.GetState());
@@ -878,6 +922,26 @@ void UMobileAppWidget::SendSheetEvent(EMobileSheetEvent Event)
 		if (Flow.GetState() == EMobileSheetState::Route)
 		{
 			RefreshRoute();
+		}
+		else
+		{
+			PendingRoute.Reset();
+		}
+		// Get directions, taken: the route page is up for the start and the destination chosen, and the phone says so. The same on arriving
+		// ("I have arrived" on the last instruction), with the sound of the place.
+		if (Event == EMobileSheetEvent::DirectionsRequested || Event == EMobileSheetEvent::ArrivedAtDestination)
+		{
+			if (ANavPlayerController* Controller = GetOwningPlayer<ANavPlayerController>())
+			{
+				if (Event == EMobileSheetEvent::DirectionsRequested)
+				{
+					Controller->PlayDirectionsSound();
+				}
+				else
+				{
+					Controller->PlayArrivalSound();
+				}
+			}
 		}
 		// Setting off starts at the first instruction; arriving shows the place.
 		if (Flow.GetState() == EMobileSheetState::Navigating && Event == EMobileSheetEvent::NavigationStarted)
@@ -899,6 +963,11 @@ void UMobileAppWidget::AdvanceNavigation()
 	if (NavStepIndex < CurrentRoute.Steps.Num() - 1)
 	{
 		++NavStepIndex;
+		// "Next instruction" has its own sound (the last one, "I have arrived", has the arrival's: see SendSheetEvent).
+		if (ANavPlayerController* Controller = GetOwningPlayer<ANavPlayerController>())
+		{
+			Controller->PlayNextInstructionSound();
+		}
 		RefreshNavigation();
 		RefreshMap();
 	}
@@ -937,9 +1006,18 @@ void UMobileAppWidget::RefreshRoute()
 	Request.Preferences = RoutePreferences;
 	Request.MyLocationBuildingId = MyLocationBuildingId;
 	Request.MyLocationLevel = MyLocationLevel;
-	CurrentRoute = Source->FindRoute(Request);
-	RoutePage->SetRequest(Request, CurrentRoute);
+	ActiveRouteRequest = Request;
+	PendingRoute.Reset();
+	PendingRoute = Source->BeginRoute(Request);
+	CurrentRoute = PendingRoute ? FMobileRoute() : Source->FindRoute(Request);
+	RoutePage->SetRequest(Request, CurrentRoute, PendingRoute.IsValid());
 	RefreshMap();
+}
+
+void UMobileAppWidget::NativeDestruct()
+{
+	PendingRoute.Reset();
+	Super::NativeDestruct();
 }
 
 void UMobileAppWidget::ApplyRouteRequest(const FMobileRouteRequest& Changed)
@@ -1177,6 +1255,11 @@ void UMobileAppWidget::PreviewState(EMobileSheetState Target)
 
 void UMobileAppWidget::SelectPlace(const FMobilePlace& Place)
 {
+	if (SelectedPlace.Id != Place.Id)
+	{
+		PendingRoute.Reset();
+		CurrentRoute = FMobileRoute();
+	}
 	SelectedPlace = Place;
 	if (PlacePage)
 	{
@@ -1552,6 +1635,8 @@ void UMobileAppWidget::OpenSite(const FString& NewSiteId)
 	// Everything starts again for the site: no place, no start, no route, the sheet at "Where to?", My location in its first building.
 	SiteId = NewSiteId;
 	Flow.Reset();
+	PendingRoute.Reset();
+	ActiveRouteRequest = FMobileRouteRequest();
 	SelectedPlace = FMobilePlace();
 	StartPlaceId.Reset();
 	CurrentRoute = FMobileRoute();
@@ -1614,9 +1699,18 @@ void UMobileAppWidget::UseSavedFile(const FString& Path)
 	RefreshArrived();
 }
 
+void UMobileAppWidget::ApplyVolume(float Volume)
+{
+	if (ANavPlayerController* Controller = GetOwningPlayer<ANavPlayerController>())
+	{
+		Controller->SetMasterVolume(Volume);
+	}
+}
+
 void UMobileAppWidget::UsePreferencesFile(const FString& Path)
 {
 	Preferences.UseFile(Path);
+	ApplyVolume(Preferences.GetVolume());
 	if (ProfilePage)
 	{
 		ProfilePage->SetPreferences(Preferences);
@@ -1626,16 +1720,37 @@ void UMobileAppWidget::UsePreferencesFile(const FString& Path)
 
 void UMobileAppWidget::ResetSavedAndPreferences()
 {
-	SavedPlaces.Clear();
-	Preferences.Reset();
+	const bool bSavedPlacesReset = SavedPlaces.Clear();
+	const bool bPreferencesReset = Preferences.Reset();
+	ApplyVolume(Preferences.GetVolume());
 	RefreshSaved();
 	SelectPlace(SelectedPlace);
 	RefreshArrived();
 	if (ProfilePage)
 	{
 		ProfilePage->SetPreferences(Preferences);
+		if (!bSavedPlacesReset || !bPreferencesReset) ProfilePage->ShowStatus(TEXT("Some changes could not be saved."));
 	}
 	SyncAppearance();
+}
+
+void UMobileAppWidget::ShowStorageError()
+{
+	if (!Phone || !WidgetTree) return;
+	if (!StorageError || StorageError->GetParent() != Phone)
+	{
+		StorageError = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("MobileStorageError"));
+		StorageError->SetBrushColor(RedSoft);
+		StorageError->SetPadding(FMargin(12.f, 8.f));
+		StorageError->SetContent(MakeText(WidgetTree, TEXT("MobileStorageErrorText"), TEXT("Could not save your changes."), 13.f, Red));
+		auto* ErrorSlot = Phone->AddChildToCanvas(StorageError);
+		ErrorSlot->SetAnchors(FAnchors(0.5f, 0.2f));
+		ErrorSlot->SetAlignment(FVector2D(0.5, 0));
+		ErrorSlot->SetAutoSize(true);
+		ErrorSlot->SetZOrder(100);
+	}
+	StorageErrorSeconds = 4.f;
+	StorageError->SetVisibility(ESlateVisibility::HitTestInvisible);
 }
 
 // ---- The look: theme and text size ----
@@ -1713,7 +1828,8 @@ void UMobileAppWidget::RebuildForAppearance()
 	if (!SelectedPlace.Id.IsEmpty())
 	{
 		SelectPlace(SelectedPlace);
-		RefreshRoute();
+		if (Flow.GetState() == EMobileSheetState::Route) RefreshRoute();
+		else if (RoutePage) RoutePage->SetRequest(ActiveRouteRequest, CurrentRoute);
 	}
 	RefreshNavigation();
 	RefreshArrived();

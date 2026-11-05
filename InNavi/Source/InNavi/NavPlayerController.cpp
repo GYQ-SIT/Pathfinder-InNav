@@ -6,6 +6,7 @@
 #include "MobileAppWidget.h"
 #include "MobileSearchPageWidget.h"
 #include "MobileSplashWidget.h"
+#include "ConfirmDialogWidget.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "TimerManager.h"
@@ -22,11 +23,13 @@
 #include "InteriorRoom.h"
 #include "InteriorConnectorMarker.h"
 #include "EngineUtils.h"
+#include "Engine/GameViewportClient.h"
 #include "DrawDebugHelpers.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
+#include "ProjectFile.h"
 #include "Serialization/JsonSerializer.h"
 #if PLATFORM_DESKTOP
 #include "DesktopPlatformModule.h"
@@ -82,15 +85,9 @@ void ANavPlayerController::ClearCampusInteriorPreview()
 	CampusPreview.Empty();
 }
 
-void ANavPlayerController::SetCampusInteriorPreviewVisible(bool bVisible)
+void ANavPlayerController::HideCampusInteriorPreview()
 {
-	bCampusPreviewAllowed = bVisible;
-	if (bVisible)
-	{
-		UpdateBuildingTransparency();
-		return;
-	}
-
+	bCampusPreviewAllowed = false;
 	for (TPair<FString, FCampusPreviewRooms>& Entry : CampusPreview)
 	{
 		for (const TWeakObjectPtr<AInteriorRoom>& Room : Entry.Value.Rooms)
@@ -289,6 +286,8 @@ void ANavPlayerController::BeginPlay()
 		// Keeps the 3D preview's route/start/destination markers live as the user picks points and
 		// finds/clears a route - see RefreshRoute3DVisualization's own comment.
 		NavigationPanel->OnStateChanged.AddUniqueDynamic(this, &ANavPlayerController::RefreshRoute3DVisualization);
+		// Picking points on the map and the tools that click the map do not run together: the one turned on last wins.
+		NavigationPanel->OnPickingStarted.AddUObject(this, &ANavPlayerController::ExitAllMouseTools);
 		NavigationPanel->OnGuidedStepChanged.AddUniqueDynamic(this, &ANavPlayerController::FollowNavigationStep);
 	}
 
@@ -472,6 +471,13 @@ void ANavPlayerController::SelectNavigationPoint(FVector2D FootprintPosition, in
 void ANavPlayerController::SetupInputComponent()
 {
 	Super::SetupInputComponent();
+
+#if PLATFORM_DESKTOP
+	if (GetWorld() && GetWorld()->WorldType == EWorldType::Game && GetLocalPlayer())
+	{
+		BindGameWindowCloseGuard(GetWorld()->GetGameViewport());
+	}
+#endif
 
 	InputComponent->BindAction("SelectBuilding", IE_Pressed, this, &ANavPlayerController::OnClick);
 	InputComponent->BindKey(EKeys::B, IE_Pressed, this, &ANavPlayerController::ToggleBuildMode);
@@ -756,6 +762,10 @@ void ANavPlayerController::ToggleBuildMode()
 	ExitAddDoorMode();
 	ExitConnectorMode();
 
+	if (!bBuildMode)
+	{
+		CancelNavigationPicking();
+	}
 	bBuildMode = !bBuildMode;
 	OnBuildModeChanged.Broadcast(bBuildMode);
 
@@ -795,6 +805,10 @@ void ANavPlayerController::ToggleShapeTestMode()
 	ExitAddDoorMode();
 	ExitConnectorMode();
 
+	if (!bShapeTestMode)
+	{
+		CancelNavigationPicking();
+	}
 	bShapeTestMode = !bShapeTestMode;
 	OnShapeModeChanged.Broadcast(bShapeTestMode);
 
@@ -843,7 +857,9 @@ void ANavPlayerController::UpdateBuildingTransparency()
 		: ControlledPawn->GetActorLocation();
 
 	// Every building is judged by how far the camera is from it: far away it is the whole, solid building with its roof; coming closer its walls
-	// and roof fade out, and once they can be looked through the rooms inside show.
+	// and roof fade out, and once they can be looked through the rooms inside show. Not while a route is being gone through: the camera
+	// follows its steps and goes close to the buildings, which must stay solid then.
+	const bool bNavigating = IsNavigationRouteActive();
 	int32 SortOrder = 0;
 	for (APolyBuilding* Building : Generator->GetAllBuildings())
 	{
@@ -872,7 +888,7 @@ void ANavPlayerController::UpdateBuildingTransparency()
 		// Made transparent from the Building panel wins over everything; otherwise the camera distance decides, if see-through is on at all.
 		const float Opacity = bMadeTransparent
 			? CampusRevealNearOpacity
-			: (bCampusSeeThroughEnabled
+			: (bCampusSeeThroughEnabled && !bNavigating
 				? FMath::GetMappedRangeValueClamped(
 					FVector2D(CampusRevealFar, CampusRevealNear),
 					FVector2D(1.0f, CampusRevealNearOpacity),
@@ -883,7 +899,8 @@ void ANavPlayerController::UpdateBuildingTransparency()
 
 		if (FCampusPreviewRooms* Preview = CampusPreview.Find(Building->BuildingId))
 		{
-			const bool bShowRooms = bCampusPreviewAllowed && (bMadeTransparent || Opacity < CampusRevealRoomsBelowOpacity + (Preview->bShown ? CampusRevealHysteresis : 0.f));
+			const bool bShowRooms = bCampusPreviewAllowed && !Building->IsHidden()
+				&& (bMadeTransparent || Opacity < CampusRevealRoomsBelowOpacity + (Preview->bShown ? CampusRevealHysteresis : 0.f));
 			if (Preview->bShown != bShowRooms || Preview->AppliedFloor != RoomFloor)
 			{
 				Preview->bShown = bShowRooms;
@@ -928,6 +945,11 @@ int32 ANavPlayerController::CountShownCampusRoomsForTests(const FString& Buildin
 		}
 	}
 	return Shown;
+}
+
+bool ANavPlayerController::IsNavigationRouteActive() const
+{
+	return NavigationPanel && !NavigationPanel->GetRoutePoints().IsEmpty() && NavigationPanel->IsRouteGuidanceVisible();
 }
 
 void ANavPlayerController::SetCampusSeeThroughEnabled(bool bEnabled)
@@ -997,6 +1019,7 @@ void ANavPlayerController::ToggleDrawRoomMode()
 	ExitAddDoorMode();
 	ExitConnectorMode();
 
+	CancelNavigationPicking();
 	bDrawRoomMode = true;
 	OnDrawRoomModeChanged.Broadcast(true);
 	OnEditModeChanged.Broadcast();
@@ -1041,6 +1064,7 @@ void ANavPlayerController::ToggleDrawWallMode()
 	ExitAddDoorMode();
 	ExitConnectorMode();
 
+	CancelNavigationPicking();
 	bDrawWallMode = true;
 	OnDrawWallModeChanged.Broadcast(true);
 	OnEditModeChanged.Broadcast();
@@ -1121,6 +1145,7 @@ void ANavPlayerController::ToggleSelectMode()
 	ExitAddDoorMode();
 	ExitConnectorMode();
 
+	CancelNavigationPicking();
 	bSelectMode = true;
 	OnSelectModeChanged.Broadcast(true);
 	OnEditModeChanged.Broadcast();
@@ -1191,6 +1216,7 @@ void ANavPlayerController::TogglePrefabRoomMode(int32 ShapeId)
 	ExitAddDoorMode();
 	ExitConnectorMode();
 
+	CancelNavigationPicking();
 	ActivePrefabShape = ShapeId;
 	OnEditModeChanged.Broadcast();
 	UE_LOG(LogTemp, Warning, TEXT("Prefab room placement ON (shape %d): click the 2D canvas to place, press the same key again to stop"), ShapeId);
@@ -1261,6 +1287,7 @@ void ANavPlayerController::ToggleConnectorMode(EInteriorNavNodeType Type)
 	ExitPrefabRoomMode();
 	ExitAddDoorMode();
 
+	CancelNavigationPicking();
 	ActiveConnectorType = RequestedType;
 	OnEditModeChanged.Broadcast();
 	UE_LOG(LogTemp, Warning, TEXT("Connector placement ON (type %d): click the 2D canvas to place, press the same key again to stop"), RequestedType);
@@ -1289,6 +1316,37 @@ void ANavPlayerController::ExitAddDoorMode()
 		OnEditModeChanged.Broadcast();
 		UE_LOG(LogTemp, Warning, TEXT("Add-door mode OFF"));
 	}
+}
+
+void ANavPlayerController::CancelNavigationPicking()
+{
+	if (NavigationPanel && NavigationPanel->IsSelectingPoint())
+	{
+		NavigationPanel->CancelSelection();
+	}
+}
+
+void ANavPlayerController::ExitAllMouseTools()
+{
+	if (bBuildMode)
+	{
+		CancelBuilding();
+		bBuildMode = false;
+		OnBuildModeChanged.Broadcast(false);
+	}
+	if (bShapeTestMode)
+	{
+		bShapeTestMode = false;
+		OnShapeModeChanged.Broadcast(false);
+	}
+	if (bDrawRoomMode || bDrawWallMode)
+	{
+		ExitDrawRoomMode();
+	}
+	ExitSelectMode();
+	ExitPrefabRoomMode();
+	ExitAddDoorMode();
+	ExitConnectorMode();
 }
 
 void ANavPlayerController::ToggleAddDoorMode()
@@ -1327,6 +1385,7 @@ void ANavPlayerController::ToggleAddDoorMode()
 	ExitPrefabRoomMode();
 	ExitConnectorMode();
 
+	CancelNavigationPicking();
 	bAddDoorMode = true;
 	OnEditModeChanged.Broadcast();
 	UE_LOG(LogTemp, Warning, TEXT("Add-door mode ON (floor %d): click a wall edge on the 2D canvas to add a door, Esc/K to exit"), InteriorGen->GetActiveFloor());
@@ -1504,7 +1563,7 @@ void ANavPlayerController::FinishBuilding(const FString& CustomId, const FString
 	{
 		NextNewBuildingIndex++;
 	}
-	bHasUnsavedChanges = true;
+	MarkBuildingCreated(NewBuilding);
 	FlushPersistentDebugLines(GetWorld());
 	PendingFootprint.Reset();
 	OnFootprintPointCountChanged.Broadcast(0);
@@ -1562,6 +1621,7 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 
 void ANavPlayerController::SelectRoom(const FString& RoomId)
 {
+	if (SelectedRoomId != RoomId) FinishRotationGesture();
 	SelectEntrance(FString());
 	// Tracked (rather than an early-return once SelectedRoomId itself is unchanged) so
 	// RefreshSelectionHighlight still fires when this call's only real effect was clearing a
@@ -1598,6 +1658,7 @@ void ANavPlayerController::SelectRoom(const FString& RoomId)
 
 void ANavPlayerController::SelectDoor(const FString& RoomId, const FString& DoorId)
 {
+	FinishRotationGesture();
 	SelectEntrance(FString());
 	if (!SelectedRoomId.IsEmpty())
 	{
@@ -1618,6 +1679,7 @@ void ANavPlayerController::SelectDoor(const FString& RoomId, const FString& Door
 
 void ANavPlayerController::SelectConnector(const FString& GroupId)
 {
+	if (SelectedConnectorGroupId != GroupId) FinishRotationGesture();
 	SelectEntrance(FString());
 	// See SelectRoom's own comment on why this is tracked rather than an early return.
 	bool bChanged = false;
@@ -2014,7 +2076,7 @@ bool ANavPlayerController::DeleteSelection()
 	if (!SelectedEntranceId.IsEmpty())
 	{
 		const FString Id = SelectedEntranceId;
-		if (!InteriorGen || !InteriorGen->RemoveEntrance(Id))
+		if (!InteriorGen || !InteriorGen->RemoveEntrance(Id, &SelectedEntranceSourceBuildingId))
 		{
 			return false;
 		}
@@ -2063,12 +2125,12 @@ bool ANavPlayerController::AddEntranceAtFootprintPosition(const FVector2D& Footp
 
 bool ANavPlayerController::SelectEntranceNear(const FVector2D& FootprintPoint, float ToleranceFootprintUnits)
 {
-	const FString Id = InteriorGen ? InteriorGen->FindEntranceNear(FootprintPoint, ToleranceFootprintUnits) : FString();
-	if (Id.IsEmpty())
+	const auto* Entrance = InteriorGen ? InteriorGen->FindEntranceNear(FootprintPoint, ToleranceFootprintUnits) : nullptr;
+	if (!Entrance)
 	{
 		return false;
 	}
-	SelectEntrance(Id);
+	SelectEntrance(Entrance->Id, Entrance->SourceBuildingId);
 	return true;
 }
 
@@ -2078,19 +2140,21 @@ FString ANavPlayerController::GetBuildingDisplayName(const FString& BuildingId) 
 	return Building && !Building->BuildingName.IsEmpty() ? Building->BuildingName : BuildingId;
 }
 
-const FInteriorEntrance* ANavPlayerController::FindEntrance(const FString& Id) const
+const FInteriorEntrance* ANavPlayerController::GetSelectedEntrance() const
 {
-	return InteriorGen ? InteriorGen->FindEntranceById(Id) : nullptr;
+	return InteriorGen && !SelectedEntranceId.IsEmpty()
+		? InteriorGen->FindEntranceById(SelectedEntranceId, &SelectedEntranceSourceBuildingId) : nullptr;
 }
 
-void ANavPlayerController::SelectEntrance(const FString& EntranceId)
+void ANavPlayerController::SelectEntrance(const FString& EntranceId, const FString& SourceBuildingId)
 {
-	if (EntranceId == SelectedEntranceId)
+	if (EntranceId == SelectedEntranceId && SourceBuildingId == SelectedEntranceSourceBuildingId)
 	{
 		return;
 	}
 	if (!EntranceId.IsEmpty())
 	{
+		FinishRotationGesture();
 		// A door in the outer wall is selected on its own, like a room, a door or a connector.
 		if (!SelectedRoomId.IsEmpty())
 		{
@@ -2110,6 +2174,7 @@ void ANavPlayerController::SelectEntrance(const FString& EntranceId)
 		}
 	}
 	SelectedEntranceId = EntranceId;
+	SelectedEntranceSourceBuildingId = SourceBuildingId;
 	OnSelectedEntranceChanged.Broadcast(SelectedEntranceId);
 }
 
@@ -2518,7 +2583,7 @@ APolyBuilding* ANavPlayerController::CreateRectangleBuilding(const FString& Id, 
 	}
 	else
 	{
-		bHasUnsavedChanges = true;
+		MarkBuildingCreated(Result);
 	}
 	return Result;
 }
@@ -2540,7 +2605,7 @@ APolyBuilding* ANavPlayerController::CreateRegularPolygonBuilding(const FString&
 	}
 	else
 	{
-		bHasUnsavedChanges = true;
+		MarkBuildingCreated(Result);
 	}
 	return Result;
 }
@@ -2601,141 +2666,89 @@ FString ANavPlayerController::BrowseForBuildingDataFile()
 
 int32 ANavPlayerController::LoadBuildingDataFromPath(const FString& FilePath)
 {
-	SetInteriorInspectionEnabled(false);
-	if (!Generator)
-	{
-		UE_LOG(LogTemp, Error, TEXT("LoadBuildingDataFromPath: no BuildingGenerator found in the level"));
-		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."), EActionFailureSeverity::Warning);
-		return 0;
-	}
-
-	if (FilePath.IsEmpty())
-	{
-		OnActionFailed.Broadcast(TEXT("No file selected - click Browse first."), EActionFailureSeverity::Warning);
-		return 0;
-	}
-	// A file that cannot be loaded is found out here, before anything is cleared: what is open stays open.
-	FString Problem;
-	if (!ABuildingGenerator::IsLoadableProjectFile(FilePath, Problem))
-	{
-		OnActionFailed.Broadcast(Problem, EActionFailureSeverity::Critical);
-		return 0;
-	}
-	if (NavigationPanel)
-	{
-		NavigationPanel->ClearAll();
-		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
-	}
-
-	if (InteriorGen)
-	{
-		InteriorGen->ClearLoadedInterior();
-	}
-	Generator->ClearAllBuildings();
-	// A previous database-loaded project could have left roads/POIs/context buildings behind -
-	// LoadBuildingsFromFile (below) has no concept of any of them, so nothing else would clear them.
-	Generator->ClearAllRoadsAndPOIs();
-	Generator->ClearAllContextBuildings();
-	// ClearAllBuildings() just destroyed whatever SelectedBuilding was pointing at - same reasoning as
-	// StartNewProject's own reset, just missing here until now (SelectBuildingUnderCursor/
-	// GetSelectedBuildingId would otherwise dereference a stale pointer if called right after an Open).
-	SelectedBuilding = nullptr;
-
-	const int32 Count = Generator->LoadBuildingsFromFile(FilePath);
-	UE_LOG(LogTemp, Warning, TEXT("LoadBuildingDataFromPath: loaded %d buildings from %s"), Count, *FilePath);
-	if (Count == 0 && !ABuildingGenerator::IsEmptyProjectFile(FilePath))
-	{
-		OnActionFailed.Broadcast(TEXT("No buildings were loaded from that file - check that it matches the expected JSON format."), EActionFailureSeverity::Critical);
-	}
-	else
-	{
-		// This file is now what Ctrl+S saves back to. (A project that was just created has no buildings yet and is
-		// still a good file.)
-		CurrentProjectFilePath = FilePath;
-		bHasUnsavedChanges = false;
-		FocusCameraOnAllBuildings();
-	}
-	// Rebuild the campus X-ray interior preview after loading buildings.
-	BuildCampusInteriorPreview();
-	return Count;
+	return FMath::Max(0, LoadBuildingData(FilePath, false));
 }
 
 int32 ANavPlayerController::LoadBuildingDataFromDatabase(const FString& DatabasePath)
 {
-	SetInteriorInspectionEnabled(false);
-	if (!Generator)
-	{
-		UE_LOG(LogTemp, Error, TEXT("LoadBuildingDataFromDatabase: no BuildingGenerator found in the level"));
-		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."), EActionFailureSeverity::Warning);
-		return 0;
-	}
-
-	if (DatabasePath.IsEmpty())
-	{
-		OnActionFailed.Broadcast(TEXT("No database file selected."), EActionFailureSeverity::Warning);
-		return 0;
-	}
-	// Same as for a project file: a database that cannot be loaded leaves what is open as it is.
-	FString Problem;
-	if (!ABuildingGenerator::IsLoadableDatabase(DatabasePath, Problem))
-	{
-		OnActionFailed.Broadcast(Problem, EActionFailureSeverity::Critical);
-		return 0;
-	}
-	if (NavigationPanel)
-	{
-		NavigationPanel->ClearAll();
-		NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
-	}
-
-	if (InteriorGen)
-	{
-		InteriorGen->ClearLoadedInterior();
-	}
-	Generator->ClearAllBuildings();
-	SelectedBuilding = nullptr;
-
-	const int32 Count = Generator->LoadBuildingsFromDatabase(DatabasePath);
-	UE_LOG(LogTemp, Warning, TEXT("LoadBuildingDataFromDatabase: loaded %d buildings from %s"), Count, *DatabasePath);
-	if (Count == 0)
-	{
-		OnActionFailed.Broadcast(TEXT("No buildings were loaded from that database - check that it has 'buildings'/'building_nodes' tables."), EActionFailureSeverity::Critical);
-	}
-	else
-	{
-		// Deliberately NOT setting CurrentProjectFilePath to DatabasePath - Ctrl+S writes JSON via
-		// SaveBuildingsToFile, and pointing that at the .db file would overwrite it with JSON text.
-		// It is emptied, too: left as it was it would still be the JSON file opened before, and Ctrl+S would write the
-		// campus of this database into it.
-		// A database-loaded project has no "file to save back to" yet; the existing Save-As flow
-		// (whatever prompts for a path when CurrentProjectFilePath is empty) is what should kick in if
-		// the user wants to persist it - interiors drawn afterward still save fine once they do, since
-		// SaveBuildingsToFile serializes whatever APolyBuilding actors currently exist regardless of
-		// how they were spawned.
-		bHasUnsavedChanges = false;
-		CurrentProjectFilePath.Empty();
-		// Best-effort, first-look visualization (see LoadRoadsAndPOIsFromDatabase's own comment on
-		// scope) - a failure here shouldn't block the buildings that DID load from showing up.
-		Generator->LoadRoadsAndPOIsFromDatabase(DatabasePath);
-		Generator->LoadContextBuildingsFromDatabase(DatabasePath);
-		FocusCameraOnAllBuildings();
-	}
-	BuildCampusInteriorPreview();
-	return Count;
+	return FMath::Max(0, LoadBuildingData(DatabasePath, true));
 }
 
 int32 ANavPlayerController::LoadBuildingDataFromPathOrDatabase(const FString& FilePath)
 {
-	if (FPaths::GetExtension(FilePath).Equals(TEXT("db"), ESearchCase::IgnoreCase))
+	return FMath::Max(0, LoadBuildingData(FilePath, FPaths::GetExtension(FilePath).Equals(TEXT("db"), ESearchCase::IgnoreCase)));
+}
+
+bool ANavPlayerController::TryLoadBuildingDataFromPathOrDatabase(const FString& FilePath)
+{
+	return LoadBuildingData(FilePath, FPaths::GetExtension(FilePath).Equals(TEXT("db"), ESearchCase::IgnoreCase)) != INDEX_NONE;
+}
+
+int32 ANavPlayerController::LoadBuildingData(const FString& FilePath, bool bDatabase)
+{
+	if (!Generator)
 	{
-		return LoadBuildingDataFromDatabase(FilePath);
+		UE_LOG(LogTemp, Error, TEXT("LoadBuildingData: no BuildingGenerator found in the level"));
+		OnActionFailed.Broadcast(TEXT("No BuildingGenerator found in the level."), EActionFailureSeverity::Warning);
+		return INDEX_NONE;
 	}
-	return LoadBuildingDataFromPath(FilePath);
+	if (FilePath.IsEmpty())
+	{
+		OnActionFailed.Broadcast(TEXT("No file selected."), EActionFailureSeverity::Warning);
+		return INDEX_NONE;
+	}
+
+	FString Problem;
+	const int32 Count = Generator->ReplaceBuildingsFromPath(FilePath, bDatabase, [this]()
+	{
+		// A tool in use (a footprint half drawn, a room or a connector being placed, clicking the map for a place) belongs to the
+		// project that is going away, and its points are in that project's units.
+		ExitAllMouseTools();
+		CancelNavigationPicking();
+		SetInteriorInspectionEnabled(false);
+		if (InteriorGen && !InteriorGen->GetLoadedBuildingId().IsEmpty())
+		{
+			RestoreExteriorCameraView();
+		}
+		if (NavigationPanel)
+		{
+			NavigationPanel->ClearAll();
+			NavigationPanel->SetVisibility(ESlateVisibility::Collapsed);
+		}
+		SelectedBuilding = nullptr;
+	}, Problem);
+	if (Count == INDEX_NONE)
+	{
+		OnActionFailed.Broadcast(Problem, EActionFailureSeverity::Critical);
+		return INDEX_NONE;
+	}
+
+	// Ctrl+S writes JSON, so a database-backed project starts without a save path.
+	CurrentProjectFilePath = bDatabase ? FString() : FilePath;
+	UnsavedBuildings.Reset();
+	BuildingReveal.Reset();
+	bHasUnsavedChanges = false;
+	if (bDatabase)
+	{
+		Generator->LoadRoadsAndPOIsFromDatabase(FilePath);
+		Generator->LoadContextBuildingsFromDatabase(FilePath);
+	}
+	FocusCameraOnAllBuildings();
+	BuildCampusInteriorPreview();
+	return Count;
 }
 
 void ANavPlayerController::StartNewProject()
 {
+	FinishRotationGesture();
+	ExitAllMouseTools();
+	CancelNavigationPicking();
 	SetInteriorInspectionEnabled(false);
+	SetIn3DPreviewMode(false);
+	ClearCampusInteriorPreview();
+	bCampusPreviewAllowed = true;
+	BuildingReveal.Reset();
+	UnsavedBuildings.Reset();
 	if (NavigationPanel)
 	{
 		NavigationPanel->ClearAll();
@@ -3733,6 +3746,7 @@ void ANavPlayerController::OnLeftMouseDown3DEdit()
 	SetIgnoreLookInput(true);
 
 	bIsDragging3DRoom = true;
+	Dragging3DRoom = Room;
 	Dragging3DRoomId = Room->RoomId;
 	DragStart3DRoomFootprint = Room->GetFootprint();
 	DragStart3DFootprintPosition = StartFootprintPosition;
@@ -3748,7 +3762,8 @@ void ANavPlayerController::OnLeftMouseUp3DEdit()
 
 	bIsDragging3DRoom = false;
 	SetIgnoreLookInput(false);
-	CommitRoomMove(Dragging3DRoomId, DragStart3DRoomFootprint);
+	if (Dragging3DRoom.IsValid()) CommitRoomMove(Dragging3DRoomId, DragStart3DRoomFootprint);
+	Dragging3DRoom.Reset();
 	Dragging3DRoomId.Empty();
 	DragStart3DRoomFootprint.Reset();
 }
@@ -4194,19 +4209,32 @@ bool ANavPlayerController::CreateNewProject(const FString& Name, const FString& 
 		return false;
 	}
 
+	const auto Project = MakeShared<FJsonObject>();
+	Project->SetNumberField(TEXT("version"), ABuildingGenerator::BasicProjectFileVersion);
+	Project->SetStringField(TEXT("projectName"), TrimmedName);
+	const FString TrimmedDescription = Description.TrimStartAndEnd();
+	if (!TrimmedDescription.IsEmpty()) Project->SetStringField(TEXT("description"), TrimmedDescription);
+	Project->SetArrayField(TEXT("buildings"), {});
+	FString Text;
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(FilePath), true);
-	StartNewProject();
-	Generator->SetProjectInfo(TrimmedName, Description.TrimStartAndEnd());
-	if (!SaveCurrentProjectAs(FilePath))
+	if (!FJsonSerializer::Serialize(Project, TJsonWriterFactory<>::Create(&Text)) || !ProjectFile::WriteText(FilePath, Text, false))
 	{
 		OutError = TEXT("The project file could not be written - check that the Data folder can be written to.");
 		return false;
 	}
+	if (LoadBuildingData(FilePath, false) == INDEX_NONE)
+	{
+		OutError = TEXT("The project file was created but could not be opened.");
+		return false;
+	}
+	NextNewBuildingIndex = 1;
+	OnProjectSaved.Broadcast();
 	return true;
 }
 
 void ANavPlayerController::RestoreExteriorCameraView()
 {
+	FinishRotationGesture();
 	// Leaving interior editing entirely (any Back path) needs to unwind 3D preview mode first if it
 	// was left active - otherwise SetOtherBuildingsHidden(true)'s hide never gets undone (every other
 	// building stays hidden even back on the exterior cluster view) and SetIgnoreMoveInput/
@@ -4266,24 +4294,25 @@ void ANavPlayerController::RestoreExteriorCameraView()
 	}
 	SelectRoom(FString());
 
-	if (!bHasSavedCameraView)
+	if (bHasSavedCameraView)
 	{
-		return;
+		if (APawn* ControlledPawn = GetPawn())
+		{
+			ControlledPawn->SetActorLocationAndRotation(SavedCameraLocation, SavedCameraRotation);
+			SetControlRotation(SavedCameraRotation);
+		}
+		bHasSavedCameraView = false;
 	}
 
-	if (APawn* ControlledPawn = GetPawn())
+	if (!bCampusPreviewAllowed)
 	{
-		ControlledPawn->SetActorLocationAndRotation(SavedCameraLocation, SavedCameraRotation);
-		SetControlRotation(SavedCameraRotation);
+		bCampusPreviewAllowed = true;
+		BuildCampusInteriorPreview();
 	}
-	// Restore all campus preview rooms when returning to exterior view.
-	SetCampusInteriorPreviewVisible(true);
-	bHasSavedCameraView = false;
 }
 
 bool ANavPlayerController::SaveCurrentProject()
 {
-	OnBeforeProjectSave.Broadcast();
 	if (!Generator)
 	{
 		UE_LOG(LogTemp, Error, TEXT("SaveCurrentProject: no BuildingGenerator found in the level"));
@@ -4291,36 +4320,22 @@ bool ANavPlayerController::SaveCurrentProject()
 		return false;
 	}
 
-	if (CurrentProjectFilePath.IsEmpty())
+	const bool bNewerFormat = Generator->GetLoadedFileVersion() > ABuildingGenerator::ProjectFileVersion;
+	if (CurrentProjectFilePath.IsEmpty() || bNewerFormat)
 	{
-		// No file yet (e.g. a brand-new session) - ask where to save, same dialog Open uses.
-		const FString ChosenPath = BrowseForSaveLocation();
-		if (ChosenPath.IsEmpty())
+		if (bNewerFormat)
 		{
-			// User cancelled the dialog - not a failure, nothing to report.
-			return false;
+			OnActionFailed.Broadcast(TEXT("This project uses a newer format. Choose a different file name to save a compatible copy."), EActionFailureSeverity::Warning);
 		}
-		return SaveCurrentProjectAs(ChosenPath);
+		return SaveCurrentProjectToNewLocation();
 	}
+	return SaveCurrentProjectAs(CurrentProjectFilePath);
+}
 
-	if (InteriorGen)
-	{
-		InteriorGen->SyncInteriorToBuildingGenerator();
-	}
-
-	const bool bSuccess = Generator->SaveBuildingsToFile(CurrentProjectFilePath);
-	if (bSuccess)
-	{
-		Generator->RefreshBuildingBaselines();
-		bHasUnsavedChanges = false;
-		UE_LOG(LogTemp, Warning, TEXT("Saved to %s"), *CurrentProjectFilePath);
-		OnProjectSaved.Broadcast();
-	}
-	else
-	{
-		OnActionFailed.Broadcast(TEXT("Could not save - see the Output Log for details."), EActionFailureSeverity::Critical);
-	}
-	return bSuccess;
+bool ANavPlayerController::SaveCurrentProjectToNewLocation()
+{
+	const FString Path = BrowseForSaveLocation();
+	return !Path.IsEmpty() && SaveCurrentProjectAs(Path);
 }
 
 FString ANavPlayerController::BrowseForSaveLocation()
@@ -4348,10 +4363,12 @@ FString ANavPlayerController::BrowseForSaveLocation()
 	}
 
 	TArray<FString> OutFiles;
+	// Opens in the folder the projects live in (the project library lists it, and Open starts there too), not wherever the system dialog was
+	// last: it is an absolute path, which the native dialog needs in a packaged build.
 	const bool bPicked = DesktopPlatform->SaveFileDialog(
 		ParentWindowHandle,
 		TEXT("Save building data"),
-		TEXT(""),
+		GetProjectsDirectory(),
 		TEXT("NewProject.json"),
 		TEXT("JSON files (*.json)|*.json"),
 		EFileDialogFlags::None,
@@ -4369,6 +4386,12 @@ FString ANavPlayerController::BrowseForSaveLocation()
 
 bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
 {
+	FinishRotationGesture();
+	if (bIsDragging3DRoom) OnLeftMouseUp3DEdit();
+	for (TObjectIterator<UInteriorFloorPlanWidget> It; It; ++It)
+	{
+		if (It->GetWorld() == GetWorld() && It->GetOwningPlayer() == this) It->FinishEditDrag();
+	}
 	OnBeforeProjectSave.Broadcast();
 	if (!Generator)
 	{
@@ -4388,10 +4411,12 @@ bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
 		InteriorGen->SyncInteriorToBuildingGenerator();
 	}
 
-	const bool bSuccess = Generator->SaveBuildingsToFile(FilePath);
+	FString Problem;
+	const bool bSuccess = Generator->SaveBuildingsToFile(FilePath, Problem);
 	if (bSuccess)
 	{
 		Generator->RefreshBuildingBaselines();
+		UnsavedBuildings.Reset();
 		CurrentProjectFilePath = FilePath;
 		bHasUnsavedChanges = false;
 		UE_LOG(LogTemp, Warning, TEXT("Saved to %s"), *FilePath);
@@ -4399,18 +4424,122 @@ bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
 	}
 	else
 	{
-		OnActionFailed.Broadcast(TEXT("Could not save - see the Output Log for details."), EActionFailureSeverity::Critical);
+		OnActionFailed.Broadcast(Problem.IsEmpty() ? TEXT("Could not save - see the Output Log for details.") : Problem, EActionFailureSeverity::Critical);
 	}
 	return bSuccess;
 }
 
+void ANavPlayerController::BindGameWindowCloseGuard(UGameViewportClient* Viewport)
+{
+	if (!Viewport || Viewport->OnWindowCloseRequested().IsBound()) return;
+	GuardedGameViewport = Viewport;
+	Viewport->OnWindowCloseRequested().BindUObject(this, &ANavPlayerController::HandleGameWindowCloseRequested);
+}
+
+void ANavPlayerController::UnbindGameWindowCloseGuard()
+{
+	if (auto* Viewport = GuardedGameViewport.Get(); Viewport && Viewport->OnWindowCloseRequested().IsBoundToObject(this))
+	{
+		Viewport->OnWindowCloseRequested().Unbind();
+	}
+	GuardedGameViewport.Reset();
+	if (auto* Dialog = WindowCloseDialog.Get()) Dialog->RemoveFromParent();
+	WindowCloseDialog.Reset();
+}
+
+bool ANavPlayerController::HandleGameWindowCloseRequested()
+{
+	if (!HasUnsavedChanges()) return true;
+	if (!WindowCloseDialog.IsValid())
+	{
+		if (auto* Dialog = CreateWidget<UConfirmDialogWidget>(this, UConfirmDialogWidget::StaticClass()))
+		{
+			WindowCloseDialog = Dialog;
+			Dialog->OnSaveAndLeave.AddUniqueDynamic(this, &ANavPlayerController::SaveAndCloseGameWindow);
+			Dialog->OnDiscardAndLeave.AddUniqueDynamic(this, &ANavPlayerController::DiscardAndCloseGameWindow);
+			Dialog->OnCancel.AddUniqueDynamic(this, &ANavPlayerController::CancelGameWindowClose);
+			Dialog->AddToViewport(1000);
+		}
+	}
+	return false;
+}
+
+void ANavPlayerController::SaveAndCloseGameWindow()
+{
+	const bool bSaved = SaveCurrentProject();
+	WindowCloseDialog.Reset();
+	if (bSaved) CloseGameWindow();
+}
+
+void ANavPlayerController::DiscardAndCloseGameWindow()
+{
+	WindowCloseDialog.Reset();
+	DiscardUnsavedChanges();
+	if (!HasUnsavedChanges()) CloseGameWindow();
+}
+
+void ANavPlayerController::CancelGameWindowClose()
+{
+	WindowCloseDialog.Reset();
+}
+
+void ANavPlayerController::CloseGameWindow()
+{
+	if (auto* Viewport = GuardedGameViewport.Get())
+	{
+		if (auto Window = Viewport->GetWindow()) Window->RequestDestroyWindow();
+	}
+}
+
+void ANavPlayerController::MarkBuildingCreated(APolyBuilding* Building)
+{
+	UnsavedBuildings.Add(Building);
+	bHasUnsavedChanges = true;
+}
+
 void ANavPlayerController::DiscardUnsavedChanges()
 {
+	SetInteriorInspectionEnabled(false);
+	SetIn3DPreviewMode(false);
+	if (InteriorGen)
+	{
+		InteriorGen->ClearLoadedInterior();
+	}
+	for (auto It = UnsavedBuildings.CreateIterator(); It; ++It)
+	{
+		APolyBuilding* Building = It->Get();
+		if (!Building)
+		{
+			It.RemoveCurrent();
+		}
+		else if (Generator && Generator->RemoveBuilding(*Building))
+		{
+			if (SelectedBuilding == Building)
+			{
+				SelectedBuilding = nullptr;
+				OnBuildingSelected.Broadcast(FString());
+			}
+			BuildingReveal.Remove(Building->BuildingId);
+			It.RemoveCurrent();
+		}
+	}
 	if (Generator)
 	{
 		Generator->RestoreBuildingBaselines();
 	}
-	bHasUnsavedChanges = false;
+	if (!bCampusPreviewAllowed)
+	{
+		RestoreExteriorCameraView();
+	}
+	else
+	{
+		BuildCampusInteriorPreview();
+	}
+	bHasUnsavedChanges = !UnsavedBuildings.IsEmpty();
+	if (bHasUnsavedChanges)
+	{
+		OnActionFailed.Broadcast(TEXT("Some new buildings could not be discarded."), EActionFailureSeverity::Warning);
+	}
 }
 
 void ANavPlayerController::SaveCurrentProjectKeyHandler()
@@ -4495,6 +4624,9 @@ void ANavPlayerController::CopyInteriorKeyHandler()
 
 	CopiedRoomId = Room->RoomId;
 	CopiedRoomFootprint = Room->GetFootprint();
+	CopiedRoomOpenings = Room->GetOpenings();
+	CopiedRoomScale = GetBuildingScale();
+	bCopiedRoomClosed = Room->IsClosedLoop();
 	CopiedRoomName = Room->RoomName;
 	CopiedRoomTags = Room->RoomTags;
 	CopiedRoomType = Room->RoomType;
@@ -4588,7 +4720,11 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 			}
 		}
 
-		bHasUnsavedChanges = true;
+		MarkBuildingCreated(NewBuilding);
+		if (bCampusPreviewAllowed && CopiedBuildingInterior.IsValid())
+		{
+			BuildCampusInteriorPreview();
+		}
 
 		UE_LOG(LogTemp, Log,
 			TEXT("Pasted whole building: %s"),
@@ -4602,6 +4738,7 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 	}
 
 	TArray<FVector2D> NewFootprint = CopiedRoomFootprint;
+	for (FVector2D& Point : NewFootprint) Point *= CopiedRoomScale / GetBuildingScale();
 	bool bFoundPastePosition = false;
 	// Move the pasted copy slightly so it does not sit exactly on top.
 	const FVector2D CursorScreenPosition = FSlateApplication::Get().GetCursorPos();
@@ -4651,7 +4788,7 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 		break;
 	}
 	FString CreateError;
-	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprintWithTags(
+	AInteriorRoom* NewRoom = bCopiedRoomClosed ? InteriorGen->CreateRoomFromFootprintWithTags(
 		NewFootprint,
 		FString(),                 // Empty = generate a new unique ID
 		CopiedRoomName,
@@ -4660,8 +4797,9 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 		/*bAllowOverlap=*/false,
 		CreateError,
 		CopiedRoomTags,
-		CopiedRoomType
-	);
+		CopiedRoomType,
+		CopiedRoomOpenings
+	) : InteriorGen->CreateWallFromPoints(NewFootprint, FString(), CreateError, CopiedRoomOpenings, CopiedRoomName);
 
 	if (NewRoom)
 	{
@@ -4702,6 +4840,7 @@ int32 ANavPlayerController::LoadInteriorInternal(const FString& BuildingId, bool
 		return -1;
 	}
 
+	FinishRotationGesture();
 	// Switching straight to a different building's interior (e.g. via the building switcher) while
 	// still in 3D preview mode for the PREVIOUS building would otherwise leave that previous building
 	// hidden forever (SetOtherBuildingsHidden's hide never gets undone) and move/look input still
@@ -4737,7 +4876,7 @@ int32 ANavPlayerController::LoadInteriorInternal(const FString& BuildingId, bool
 		InteriorGen->SyncInteriorToBuildingGenerator();
 	}
 	// Hide campus preview rooms while editing an individual building.
-	SetCampusInteriorPreviewVisible(false);
+	HideCampusInteriorPreview();
 	const int32 Result = InteriorGen->LoadInteriorForBuilding(BuildingId);
 	if (Result < 0)
 	{
@@ -5105,6 +5244,7 @@ void ANavPlayerController::Tick(float DeltaSeconds)
 		return;
 	}
 
+	if (bIsDragging3DRoom && (!IsInputKeyDown(EKeys::LeftMouseButton) || !Dragging3DRoom.IsValid())) OnLeftMouseUp3DEdit();
 	if (bIsDragging3DRoom)
 	{
 		FHitResult Hit;
@@ -5216,10 +5356,11 @@ void ANavPlayerController::BeginRotationGestureIfNeeded()
 		return;
 	}
 
-	for (const AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
+	for (AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
 	{
 		if (Room && Room->RoomId == SelectedRoomId)
 		{
+			RotationRoom = Room;
 			RotationStartFootprint = Room->GetFootprint();
 			break;
 		}
@@ -5229,21 +5370,27 @@ void ANavPlayerController::BeginRotationGestureIfNeeded()
 void ANavPlayerController::EndRotationGestureIfFinished()
 {
 	if (bInteriorInspectionEnabled) return;
-	if (!bRotatingCCW && !bRotatingCW &&
-		!SelectedConnectorGroupId.IsEmpty() &&
-		InteriorGen)
+	if (!bRotatingCCW && !bRotatingCW) CommitRotationGesture();
+}
+
+void ANavPlayerController::FinishRotationGesture()
+{
+	if (!bRotatingCCW && !bRotatingCW) return;
+	bRotatingCCW = bRotatingCW = false;
+	CommitRotationGesture();
+}
+
+void ANavPlayerController::CommitRotationGesture()
+{
+	if (AInteriorRoom* Room = RotationRoom.Get(); Room && InteriorGen && InteriorGen->GetRoomById(Room->RoomId) == Room)
+	{
+		InteriorGen->CommitRoomRotation(Room->RoomId, RotationStartFootprint);
+	}
+	else if (InteriorGen && !SelectedConnectorGroupId.IsEmpty())
 	{
 		InteriorGen->RecordHistorySnapshot();
-		return;
 	}
-	// Only commit once both keys are up - releasing one while the other is still held just means
-	// switching direction mid-gesture, not the end of it.
-	if (bRotatingCCW || bRotatingCW || SelectedRoomId.IsEmpty() || !InteriorGen || RotationStartFootprint.Num() == 0)
-	{
-		return;
-	}
-
-	InteriorGen->CommitRoomRotation(SelectedRoomId, RotationStartFootprint);
+	RotationRoom.Reset();
 	RotationStartFootprint.Reset();
 }
 
@@ -5320,6 +5467,10 @@ void ANavPlayerController::ConfirmShapeTest()
 	if (!NewBuilding)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Could not create building - see error above. Edit the id in test_shape_params.json and try again."));
+	}
+	else
+	{
+		MarkBuildingCreated(NewBuilding);
 	}
 }
 
@@ -5418,11 +5569,47 @@ void ANavPlayerController::PlayQuitConfirmSound()
 	PlayShortSoundEffect(TEXT("quit_confirm.wav"));
 }
 
+void ANavPlayerController::PlayDirectionsSound()
+{
+	++DirectionsSoundRequests;
+	if (!bDirectionsSoundEnabled)
+	{
+		return;
+	}
+
+	PlayShortSoundEffect(TEXT("UI_Dull_08.wav"));
+}
+
+void ANavPlayerController::PlayNextInstructionSound()
+{
+	++NextInstructionSoundRequests;
+	if (!bNextInstructionSoundEnabled)
+	{
+		return;
+	}
+
+	PlayShortSoundEffect(TEXT("UI_Dull_05.wav"));
+}
+
+void ANavPlayerController::PlayArrivalSound()
+{
+	++ArrivalSoundRequests;
+	if (!bArrivalSoundEnabled)
+	{
+		return;
+	}
+
+	PlayShortSoundEffect(TEXT("UI_Place_2.wav"));
+}
+
 void ANavPlayerController::SetAllUiSoundsEnabled(bool bEnabled)
 {
 	bButtonClickSoundEnabled = bEnabled;
 	bBuildingSelectSoundEnabled = bEnabled;
 	bQuitConfirmSoundEnabled = bEnabled;
+	bDirectionsSoundEnabled = bEnabled;
+	bArrivalSoundEnabled = bEnabled;
+	bNextInstructionSoundEnabled = bEnabled;
 }
 
 void ANavPlayerController::SetMasterVolume(float NewVolume)

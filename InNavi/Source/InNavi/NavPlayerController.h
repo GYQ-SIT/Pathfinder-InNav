@@ -137,6 +137,11 @@ public:
 
 	// Used by the 2D floor plan while a navigation endpoint is armed.
 	bool IsSelectingNavigationPoint() const;
+	// The mouse has one use at a time: turning on one of the tools that click the map (build, draw a room or a wall, select, add a
+	// door, a room shape, a connector) ends the clicking for a Start, Destination or stops, and turning that on ends all the tools.
+	// The one turned on last wins; each button follows through its own change delegate.
+	void CancelNavigationPicking();
+	void ExitAllMouseTools();
 	void SelectNavigationPoint(FVector2D FootprintPosition, int32 Floor);
 	// The click that sets a navigation point on the exterior screen: the spot of the ground under the cursor (see
 	// UNavigationPanelWidget::SelectOutdoorGroundPoint).
@@ -319,8 +324,7 @@ public:
 
 	// Loads a buildings.json-format file from an explicit path (typically one
 	// BrowseForBuildingDataFile just returned) the same way the startup buildings.json is loaded.
-	// Clears out whatever was already spawned first, so buildings left over from a previous New/Open
-	// in this session don't stick around alongside the new file.
+	// Replaces the open project only after the incoming buildings load successfully.
 	// On success, this also becomes the file SaveCurrentProject (Ctrl+S) writes back to.
 	// Returns how many buildings were spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
@@ -328,9 +332,8 @@ public:
 
 	// Second, database-backed way to load exterior buildings - see
 	// ABuildingGenerator::LoadBuildingsFromDatabase for the schema/coordinate-conversion details.
-	// Same clear-first behavior as LoadBuildingDataFromPath, but does NOT set CurrentProjectFilePath
-	// (see its own comment for why) - a database-loaded project needs an explicit Save As before
-	// Ctrl+S has anywhere to write. Returns how many buildings were spawned.
+	// A database-loaded project needs an explicit Save As before Ctrl+S has anywhere to write.
+	// Returns how many buildings were spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingDataFromDatabase(const FString& DatabasePath);
 
@@ -342,6 +345,9 @@ public:
 	// were spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingDataFromPathOrDatabase(const FString& FilePath);
+
+	// Reports success even when the opened project is empty.
+	bool TryLoadBuildingDataFromPathOrDatabase(const FString& FilePath);
 
 	// ABuildingGenerator::GetScale() pass-through, defaulting to 1 if no BuildingGenerator is placed
 	// in the level - what any footprint-space size/distance constant (snap tolerance, prefab room
@@ -398,15 +404,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Building")
 	bool HasUnsavedChanges() const { return bHasUnsavedChanges; }
 
-	// What the confirm dialog's "Discard" button calls, right before it navigates away (Back to
-	// exterior, Back to start screen, etc.): puts every building that was opened for editing back to how
-	// it was at the last save/open - floor count (the exterior shell's height), name and interior data
-	// (see ABuildingGenerator::RestoreBuildingBaselines) - and clears the unsaved-changes flag, so the very
-	// next unrelated navigation does not wrongly prompt again. Edits to the live interior itself are
-	// already gone once it is left (they only reach the building data on a save), so callers must leave or
-	// reload the interior afterwards; this does not touch the interior that is currently loaded. Only
-	// buildings that were opened for editing are covered - it never reloads the project, so it stays cheap
-	// however big the database is.
+	// Closes the live interior, restores edited buildings and removes buildings created since the last save.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void DiscardUnsavedChanges();
 
@@ -416,6 +414,7 @@ public:
 	// Returns true on success; false if the user cancelled the dialog or the save failed.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	bool SaveCurrentProject();
+	bool SaveCurrentProjectToNewLocation();
 
 	// Opens the OS "save file" dialog and returns the path picked (empty if cancelled). Doesn't save
 	// anything - SaveCurrentProject already calls this automatically when needed, so most UI never
@@ -722,9 +721,9 @@ public:
 	bool AddEntranceAtFootprintPosition(const FVector2D& FootprintPoint, float ToleranceFootprintUnits);
 	// Selects the active floor's outer-wall door near FootprintPoint (so Delete removes it); false if none is that close.
 	bool SelectEntranceNear(const FVector2D& FootprintPoint, float ToleranceFootprintUnits);
-	void SelectEntrance(const FString& EntranceId);
+	void SelectEntrance(const FString& EntranceId, const FString& SourceBuildingId = FString());
 	const FString& GetSelectedEntranceId() const { return SelectedEntranceId; }
-	const FInteriorEntrance* FindEntrance(const FString& Id) const;
+	const FInteriorEntrance* GetSelectedEntrance() const;
 	// A building's name as the user has set it (its id if it has none) - what to show instead of an id.
 	FString GetBuildingDisplayName(const FString& BuildingId) const;
 
@@ -1152,6 +1151,28 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void SetQuitConfirmSoundEnabled(bool bEnabled) { bQuitConfirmSoundEnabled = bEnabled; }
 
+	// The phone app's "Get directions": plays Data/Audio/UI_Dull_08.wav once the route page has opened for the start and the destination
+	// that were chosen (see UMobileAppWidget::SendSheetEvent). Its own flag; SetAllUiSoundsEnabled(false) mutes it too. Fire-and-forget
+	// like the other short effects; a missing or unreadable file is silent.
+	void PlayDirectionsSound();
+	bool IsDirectionsSoundEnabled() const { return bDirectionsSoundEnabled; }
+	void SetDirectionsSoundEnabled(bool bEnabled) { bDirectionsSoundEnabled = bEnabled; }
+	// Tests: how many times the phone app asked for the sound, whether it was muted or not.
+	int32 GetDirectionsSoundRequestsForTests() const { return DirectionsSoundRequests; }
+
+	// The phone app's "Next instruction" button (every instruction but the last): plays Data/Audio/UI_Dull_05.wav. Same rules as above.
+	void PlayNextInstructionSound();
+	bool IsNextInstructionSoundEnabled() const { return bNextInstructionSoundEnabled; }
+	void SetNextInstructionSoundEnabled(bool bEnabled) { bNextInstructionSoundEnabled = bEnabled; }
+	int32 GetNextInstructionSoundRequestsForTests() const { return NextInstructionSoundRequests; }
+
+	// The phone app's "I have arrived" button (the last instruction's button): plays Data/Audio/UI_Place_2.wav as the arrival page opens.
+	// Same rules as PlayDirectionsSound.
+	void PlayArrivalSound();
+	bool IsArrivalSoundEnabled() const { return bArrivalSoundEnabled; }
+	void SetArrivalSoundEnabled(bool bEnabled) { bArrivalSoundEnabled = bEnabled; }
+	int32 GetArrivalSoundRequestsForTests() const { return ArrivalSoundRequests; }
+
 	// Backs the Audio panel's "Mute All" checkbox - sets all three UI-sound flags
 	// (click/select/quit-confirm) to bEnabled at once, e.g. SetAllUiSoundsEnabled(false) to mute
 	// everything in one call. Deliberately doesn't track "what was on before" - un-muting always turns
@@ -1179,6 +1200,11 @@ public:
 	// Whether the camera distance reveals buildings at all. Off, every building stays solid, except the ones made transparent from the Building
 	// panel (see SetBuildingMadeTransparent): those come first.
 	bool IsCampusSeeThroughEnabled() const { return bCampusSeeThroughEnabled; }
+	// Whether a route is being gone through: one has been found and is shown. The camera follows its steps, which takes it close to
+	// the buildings, so for as long as this is true the buildings do not fade with the camera distance (UpdateBuildingTransparency);
+	// when the route is cleared, changed or hidden they go back to what the see-through settings say. A building made transparent from
+	// the Building panel stays as it was made.
+	bool IsNavigationRouteActive() const;
 	void SetCampusSeeThroughEnabled(bool bEnabled);
 
 	// Tests: makes the preview rooms of the campus (done when a project is loaded), and counts the rooms of one building that are showing.
@@ -1199,12 +1225,32 @@ protected:
 	virtual void Tick(float DeltaSeconds) override;
 
 private:
+	void BindGameWindowCloseGuard(class UGameViewportClient* Viewport);
+	void UnbindGameWindowCloseGuard();
+	bool HandleGameWindowCloseRequested();
+	void CloseGameWindow();
+	UFUNCTION()
+	void SaveAndCloseGameWindow();
+	UFUNCTION()
+	void DiscardAndCloseGameWindow();
+	UFUNCTION()
+	void CancelGameWindowClose();
+	TWeakObjectPtr<class UGameViewportClient> GuardedGameViewport;
+	TWeakObjectPtr<class UConfirmDialogWidget> WindowCloseDialog;
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FProjectWindowCloseTest;
+	friend class FProjectSaveDuringDragTest;
+#endif
+
+	void MarkBuildingCreated(APolyBuilding* Building);
+	TSet<TWeakObjectPtr<APolyBuilding>> UnsavedBuildings;
+	int32 LoadBuildingData(const FString& FilePath, bool bDatabase);
 	// Campus-wide X-ray interior preview.
 	// These actors are separate from the editable interior rooms.
 	void BuildCampusInteriorPreview();
 	void ClearCampusInteriorPreview();
-	// Allows (true) or stops (false) the preview rooms from showing; while allowed, UpdateBuildingTransparency decides per building.
-	void SetCampusInteriorPreviewVisible(bool bVisible);
+	// Hide the campus previews while an individual interior is open.
+	void HideCampusInteriorPreview();
 
 	// The preview rooms of one building. The rooms are actors of the world (it keeps them alive), so they are only watched here.
 	struct FCampusPreviewRooms
@@ -1311,8 +1357,11 @@ private:
 	// same drag-start/drag-end split as MoveRoom/CommitRoomMove, but for a key-hold gesture instead
 	// of a mouse drag.
 	TArray<FVector2D> RotationStartFootprint;
+	TWeakObjectPtr<AInteriorRoom> RotationRoom;
 	void BeginRotationGestureIfNeeded();
 	void EndRotationGestureIfFinished();
+	void FinishRotationGesture();
+	void CommitRotationGesture();
 
 	// Backspace handler - wraps DeleteSelection() because key bindings require a void() signature.
 	void DeleteSelectionKeyHandler();
@@ -1340,6 +1389,7 @@ private:
 	// See HasUnsavedChanges above.
 	bool bHasUnsavedChanges = false;
 	FString SelectedEntranceId;
+	FString SelectedEntranceSourceBuildingId;
 
 	bool bBuildMode = false;
 	TArray<FVector2D> PendingFootprint;
@@ -1368,6 +1418,9 @@ private:
 	FString SelectedRoomId;
 	FString CopiedRoomId;
 	TArray<FVector2D> CopiedRoomFootprint;
+	TArray<FInteriorOpening> CopiedRoomOpenings;
+	float CopiedRoomScale = 1.f;
+	bool bCopiedRoomClosed = true;
 	FString CopiedRoomName;
 	TArray<FString> CopiedRoomTags;
 	bool bHasCopiedRoom = false;
@@ -1626,6 +1679,7 @@ private:
 	void OnLeftMouseDown3DEdit();
 	void OnLeftMouseUp3DEdit();
 	bool bIsDragging3DRoom = false;
+	TWeakObjectPtr<AInteriorRoom> Dragging3DRoom;
 	FString Dragging3DRoomId;
 	TArray<FVector2D> DragStart3DRoomFootprint;
 	FVector2D DragStart3DFootprintPosition = FVector2D::ZeroVector;
@@ -1728,6 +1782,14 @@ private:
 
 	// See IsQuitConfirmSoundEnabled/SetQuitConfirmSoundEnabled's own comment.
 	bool bQuitConfirmSoundEnabled = true;
+
+	// See PlayDirectionsSound and PlayArrivalSound.
+	bool bDirectionsSoundEnabled = true;
+	int32 DirectionsSoundRequests = 0;
+	bool bArrivalSoundEnabled = true;
+	int32 ArrivalSoundRequests = 0;
+	bool bNextInstructionSoundEnabled = true;
+	int32 NextInstructionSoundRequests = 0;
 
 	// See GetMasterVolume/SetMasterVolume's own comment.
 	float MasterVolume = 1.f;

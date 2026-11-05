@@ -17,11 +17,11 @@ What it checks, and why (each rule exists because of something that went wrong o
 Usage: python3 scripts/lint.py [--root DIR]    Exit status 1 when anything is found.
 """
 import argparse
-import json
 import os
 import re
 import subprocess
 import sys
+from validate_schema import decode_json
 
 SKIP_DIRS = {".git", "node_modules", "Intermediate", "Binaries", "Saved", "DerivedDataCache", "Build", "site", "Content"}
 TEXT_SUFFIXES = {".cpp", ".h", ".cs", ".md", ".json", ".yml", ".yaml", ".mjs", ".ini", ".uplugin", ".uproject", ".txt"}
@@ -88,7 +88,7 @@ def main():
 
         if suffix in (".json", ".uplugin", ".uproject"):
             try:
-                json.loads(text)
+                decode_json(text)
             except ValueError as error:
                 problem("json", relative, 0, f"does not parse: {error}")
 

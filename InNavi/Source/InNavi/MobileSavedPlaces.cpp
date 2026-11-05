@@ -1,4 +1,5 @@
 #include "MobileSavedPlaces.h"
+#include "ProjectFile.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -8,52 +9,39 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
-bool FMobileSavedPlaces::Toggle(const FString& PlaceId)
+bool FMobileSavedPlaces::Toggle(const FString& PlaceId, bool* OutPersisted)
 {
-	if (Remove(PlaceId))
-	{
-		return false;
-	}
-	Add(PlaceId);
-	return true;
+	const bool bPersisted = Contains(PlaceId) ? Remove(PlaceId) : Add(PlaceId);
+	if (OutPersisted) *OutPersisted = bPersisted;
+	return Contains(PlaceId);
 }
 
-void FMobileSavedPlaces::Add(const FString& PlaceId)
+bool FMobileSavedPlaces::Add(const FString& PlaceId)
 {
-	if (PlaceId.IsEmpty())
-	{
-		return;
-	}
-	Order.Remove(PlaceId);
-	Order.Insert(PlaceId, 0);
-	Changed();
+	if (PlaceId.IsEmpty()) return false;
+	auto NewOrder = Order;
+	NewOrder.Remove(PlaceId);
+	NewOrder.Insert(PlaceId, 0);
+	return Commit(MoveTemp(NewOrder));
 }
 
 bool FMobileSavedPlaces::Remove(const FString& PlaceId)
 {
-	if (Order.Remove(PlaceId) == 0)
-	{
-		return false;
-	}
-	Changed();
-	return true;
+	auto NewOrder = Order;
+	return NewOrder.Remove(PlaceId) != 0 && Commit(MoveTemp(NewOrder));
 }
 
-void FMobileSavedPlaces::Clear()
+bool FMobileSavedPlaces::Clear()
 {
-	if (!Order.IsEmpty())
-	{
-		Order.Reset();
-		Changed();
-	}
+	return Order.IsEmpty() || Commit({});
 }
 
-void FMobileSavedPlaces::Changed()
+bool FMobileSavedPlaces::Commit(TArray<FString> NewOrder)
 {
-	if (!Path.IsEmpty())
-	{
-		Save();
-	}
+	Swap(Order, NewOrder);
+	if (Path.IsEmpty() || Save()) return true;
+	Swap(Order, NewOrder);
+	return false;
 }
 
 void FMobileSavedPlaces::UseFile(const FString& InPath)
@@ -106,8 +94,7 @@ bool FMobileSavedPlaces::Save() const
 	Root->SetArrayField(TEXT("saved"), Saved);
 	FString Text;
 	const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Text);
-	FJsonSerializer::Serialize(Root, Writer);
-	return FFileHelper::SaveStringToFile(Text, *Path);
+	return FJsonSerializer::Serialize(Root, Writer) && ProjectFile::WriteText(Path, Text);
 }
 
 FString FMobileSavedPlaces::DefaultFile()

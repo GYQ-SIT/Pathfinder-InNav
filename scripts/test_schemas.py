@@ -66,6 +66,10 @@ class ProjectSchema(unittest.TestCase):
     def test_a_floor_below_the_ground(self):
         self.expect(lambda d: d["buildings"][0]["interior"]["floors"][0].update(level=0), ".level", "below the minimum")
 
+    def test_floor_count_and_authored_level_have_an_upper_bound(self):
+        self.expect(lambda d: d["buildings"][0].update(floorCount=201), ".floorCount", "above the maximum")
+        self.expect(lambda d: d["buildings"][0]["interior"]["floors"][0].update(level=201), ".level", "above the maximum")
+
     def test_an_opening_of_a_kind_that_does_not_exist(self):
         self.expect(lambda d: d["buildings"][0]["interior"]["floors"][0]["rooms"][0]["openings"][0].update(type="gate"), "'gate' is not one of")
 

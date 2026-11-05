@@ -472,12 +472,12 @@ void UNavigationDockPanelWidget::AssignSlots(const UNavigationPanelWidget& Nav)
 	int32 SlotIndex = 0;
 	for (int32 Row = 0; Row < Count && SlotIndex < MaxSlots; ++Row)
 	{
-		// The row a stop is added in is just before the destination.
-		if (Row == Count - 1 && bAddingStop && SlotIndex < MaxSlots - 1)
-		{
-			SlotRow[SlotIndex++] = PendingRow;
-		}
 		SlotRow[SlotIndex++] = Row;
+	}
+	// The row a place is added in is after the destination: what is picked there becomes the destination, and the one before it a stop.
+	if (bAddingStop && SlotIndex < MaxSlots)
+	{
+		SlotRow[SlotIndex++] = PendingRow;
 	}
 }
 
@@ -501,7 +501,7 @@ void UNavigationDockPanelWidget::HandleSlotButton(int32 SlotIndex, bool bPick)
 		}
 		return;
 	}
-	// The crosshair: click the map for this place. The start and the destination each, and the row a stop is being added in.
+	// The crosshair: click the map for this place. The start and the destination each, and the row a place is being added in.
 	if (Row == PendingRow)
 	{
 		Nav->ToggleSelectStops();
@@ -528,9 +528,9 @@ void UNavigationDockPanelWidget::HandleSlotChosen(int32 SlotIndex, const FString
 	const int32 Row = SlotRow[SlotIndex];
 	if (Row == PendingRow)
 	{
-		// A stop from the list; the row stays open, empty, for the next (the repaint of the new stop refills it). A stop that was not added
-		// leaves the choice on the row, which is cleared.
-		if (!Nav->AddStopToRoom(Item) && PlaceCombos.IsValidIndex(SlotIndex))
+		// A place from the list, added after the destination; the row stays open, empty, for the next (the repaint refills the rows). A place
+		// that was not added leaves the choice on the row, which is cleared.
+		if (!Nav->AddPlaceToRoom(Item) && PlaceCombos.IsValidIndex(SlotIndex))
 		{
 			PlaceCombos[SlotIndex]->ClearSelection();
 		}
@@ -541,7 +541,19 @@ void UNavigationDockPanelWidget::HandleSlotChosen(int32 SlotIndex, const FString
 	{
 		return;
 	}
-	Nav->SetPlaceToRoom(Row, Item);
+	if (!Nav->SetPlaceToRoom(Row, Item) && PlaceCombos.IsValidIndex(SlotIndex))
+	{
+		// The place was refused (a private room, a place next to an identical one, no usable point): the row keeps what it had, and shows it.
+		const FString Current = Nav->GetPlaceText(Row);
+		if (Current.IsEmpty())
+		{
+			PlaceCombos[SlotIndex]->ClearSelection();
+		}
+		else
+		{
+			PlaceCombos[SlotIndex]->SetSelectedOption(Current);
+		}
+	}
 }
 
 void UNavigationDockPanelWidget::OnPlanTabClicked()

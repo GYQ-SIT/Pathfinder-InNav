@@ -17,11 +17,11 @@ class INNAVI_API UMobileSavedPageWidget : public UUserWidget
 
 public:
 	void SetSource(IMobileNavSource* InSource);
-	// The saved places' ids, newest first. An id the source does not know any more is left out.
+	// The saved places' ids, newest first. Unknown places can still be removed.
 	void SetSaved(const TArray<FString>& InIds);
 
 	void SetOnPlaceChosen(TFunction<void(const FMobilePlace&)> InCallback) { OnPlaceChosen = MoveTemp(InCallback); }
-	void SetOnRemove(TFunction<void(const FMobilePlace&)> InCallback) { OnRemove = MoveTemp(InCallback); }
+	void SetOnRemove(TFunction<void(const FString&)> InCallback) { OnRemove = MoveTemp(InCallback); }
 
 	// A tap on a place's row, and on its Remove.
 	void ChoosePlace(const FString& PlaceId);
@@ -53,5 +53,5 @@ private:
 	bool bEmptyShown = false;
 
 	TFunction<void(const FMobilePlace&)> OnPlaceChosen;
-	TFunction<void(const FMobilePlace&)> OnRemove;
+	TFunction<void(const FString&)> OnRemove;
 };

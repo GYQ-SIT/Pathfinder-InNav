@@ -5,10 +5,84 @@
 
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
+#include "InteriorRoom.h"
 #include "PolyBuilding.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/Paths.h"
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationUnavailableStopTest, "InNavi.Navigation.UnavailableStop",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationUnavailableStopTest::RunTest(const FString& Parameters)
+{
+	auto* World = UWorld::CreateWorld(EWorldType::Game, false);
+	auto* Generator = World->SpawnActor<ABuildingGenerator>();
+	auto* Interior = World->SpawnActor<AInteriorGenerator>();
+	Interior->DispatchBeginPlay();
+	Generator->SpawnBuildingFromData(TEXT("Waypoints"), TEXT("Waypoints"), {{0,0}, {1600,0}, {1600,800}, {0,800}}, 1, 300, {0,0});
+	Interior->LoadInteriorForBuilding(TEXT("Waypoints"));
+	FString Error;
+	TestNotNull(TEXT("the waypoint room exists"), Interior->CreateRoomFromFootprint(
+		{{500,200}, {900,200}, {900,600}, {500,600}}, TEXT("Stop"), TEXT("Stop"), true, false, false, Error));
+	auto* Panel = NewObject<UNavigationPanelWidget>();
+	Panel->SetNavigationContext(Generator, Interior);
+	Panel->ToggleSelectStart(); Panel->SelectPoint({200,100}, 1);
+	Panel->ToggleSelectDestination(); Panel->SelectPoint({1400,100}, 1);
+	const auto Options = Panel->GetSelectableRooms();
+	if (TestEqual(TEXT("the waypoint can be selected"), Options.Num(), 1))
+	{
+		TestTrue(TEXT("the user requests a stop"), Panel->AddStopToRoom(Options[0].GetDisplayLabel()));
+		TestTrue(TEXT("the room is then deleted"), Interior->DeleteRoom(TEXT("Stop")));
+		Panel->RequestFindRoute();
+		TestTrue(TEXT("a shortened route is refused"), Panel->GetRoutePoints().IsEmpty());
+		TestEqual(TEXT("the stop remains visible for correction"), Panel->GetPlaceCount(), 3);
+		TestTrue(TEXT("the reason is shown"), Panel->GetDisplayStatusMessage().Contains(TEXT("unavailable")));
+		Panel->RemoveStop(0);
+		Panel->RequestFindRoute();
+		TestFalse(TEXT("the user can explicitly remove the stop and route"), Panel->GetRoutePoints().IsEmpty());
+	}
+	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationConcaveRoomPickerTest, "InNavi.Navigation.ConcaveRoomPicker",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationConcaveRoomPickerTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	auto* Generator = World->SpawnActor<ABuildingGenerator>();
+	auto* Interior = World->SpawnActor<AInteriorGenerator>();
+	Interior->DispatchBeginPlay();
+	const FString BuildingId = TEXT("Concave");
+	const double Unit = 1.0 / Generator->GetScale();
+	Generator->SpawnBuildingFromData(BuildingId, BuildingId,
+		{{0, 0}, {800 * Unit, 0}, {800 * Unit, 800 * Unit}, {0, 800 * Unit}}, 1, 300.f, {0, 0});
+	Interior->LoadInteriorForBuilding(BuildingId);
+	TArray<FVector2D> Footprint = {{100, 100}, {700, 100}, {700, 700}, {550, 700}, {550, 250}, {250, 250}, {250, 700}, {100, 700}};
+	for (auto& Point : Footprint) Point *= Unit;
+	FString Error;
+	const auto* Room = Interior->CreateRoomFromFootprint(Footprint, TEXT("U"), TEXT("U room"), true, false, false, Error);
+	if (TestNotNull(TEXT("the U-shaped room is authored"), Room))
+	{
+		auto* Panel = NewObject<UNavigationPanelWidget>();
+		Panel->SetNavigationContext(Generator, Interior);
+		const auto Rooms = Panel->GetSelectableRooms();
+		if (TestEqual(TEXT("the room is listed"), Rooms.Num(), 1))
+		{
+			const auto InsideRoom = [Unit](FVector2D Point)
+			{
+				Point /= Unit;
+				return Point.X > 100 && Point.X < 700 && Point.Y > 100 && Point.Y < 700
+					&& (Point.X < 250 || Point.X > 550 || Point.Y < 250);
+			};
+			TestFalse(TEXT("the area centroid is in the cutout"), InsideRoom(Rooms[0].Centroid));
+			TestTrue(TEXT("the destination can be selected by name"), Panel->SetDestinationToRoom(Rooms[0].GetDisplayLabel()));
+			TestTrue(TEXT("the route endpoint is inside the room"), InsideRoom(Panel->GetDestination().Position));
+		}
+	}
+	World->DestroyWorld(false);
+	return true;
+}
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationPanelOutdoorPresentationTest,
 	"InNavi.Navigation.PersonBOutdoorPresentation",
@@ -64,7 +138,8 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationPanelOutdoorPresentationTest,
 		TestTrue(TEXT("Directions explain entering the building"), Directions.Contains(TEXT("Enter the building")));
 		TestTrue(TEXT("Directions explain the floor transition"), Directions.Contains(TEXT("stairs")));
 
-		Panel->ToggleSelectDestination();
+		// Destination picking is still on after the last click: the next click changes the Destination again.
+		TestEqual(TEXT("Picking the Destination goes on after a click"), Panel->GetSelectionMode(), ENavigationSelectionMode::Destination);
 		Panel->SelectPoint(FVector2D(110.f, 350.f), 1);
 		TestTrue(TEXT("Changing an endpoint clears the old route"), Panel->GetRoutePoints().IsEmpty());
 		TestTrue(TEXT("Changing an endpoint asks for a new route"),
@@ -273,7 +348,8 @@ bool FNavigationJourneyTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Stops picked by clicking the map: the mode stays on for as many as are wanted, and it does not fight the other ways of picking.
+// Places picked by clicking the map: each goes after the Destination (the Destination becomes a stop), the mode stays on for as many
+// as are wanted, and it does not fight the other ways of picking.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationClickStopsTest,
 	"InNavi.Navigation.MultiStop.ClickStops",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
@@ -299,20 +375,23 @@ bool FNavigationClickStopsTest::RunTest(const FString& Parameters)
 		return false;
 	}
 
-	// Clicks do nothing until the mode is on; then each adds a stop and the mode stays on.
+	// Clicks do nothing until the mode is on; then each is added after the Destination and the mode stays on.
 	Panel->SelectPoint(Vestibule.Centroid, 1);
 	TestTrue(TEXT("no stop without the mode"), Panel->GetStops().IsEmpty());
 	Panel->ToggleSelectStops();
 	TestEqual(TEXT("the mode is on"), Panel->GetSelectionMode(), ENavigationSelectionMode::Stop);
 	TestTrue(TEXT("and says what to do"), Panel->GetDisplayStatusMessage().Contains(TEXT("add stops")));
 	Panel->SelectPoint(Vestibule.Centroid, 1);
+	TestTrue(TEXT("with no Destination set, the first click becomes the Destination"), Panel->HasDestination() && Panel->GetStops().IsEmpty());
 	Panel->SelectPoint(Upstairs.Centroid, 2);
-	TestEqual(TEXT("two clicks, two stops"), Panel->GetStops().Num(), 2);
+	TestEqual(TEXT("the second takes the Destination, and the one before it is a stop"), Panel->GetStops().Num(), 1);
+	Panel->SelectPoint(Cut.Centroid, 1);
+	TestEqual(TEXT("the third: two stops, the last click is the Destination"), Panel->GetStops().Num(), 2);
 	TestEqual(TEXT("the mode stays on for the next"), Panel->GetSelectionMode(), ENavigationSelectionMode::Stop);
 	TestTrue(TEXT("a stop picked on the map has no name from the list, so it says where it is"),
 		Panel->GetStops()[0].RoomOptionLabel.IsEmpty() && Panel->GetStopLabel(0).Contains(TEXT("spot")) && Panel->GetStopLabel(1).Contains(TEXT("Floor 2")));
 	TestTrue(TEXT("the stop has a building and a world position"), Panel->GetStops()[1].Point.bHasWorldPosition && Panel->GetStops()[1].Point.BuildingId == TEXT("E2"));
-	Panel->SelectPoint(Upstairs.Centroid, 2);
+	Panel->SelectPoint(Cut.Centroid, 1);
 	TestEqual(TEXT("the same place again is refused"), Panel->GetStops().Num(), 2);
 
 	// A stop added from the list does not end the clicking, and the other way round.
@@ -338,17 +417,18 @@ bool FNavigationClickStopsTest::RunTest(const FString& Parameters)
 	Panel->ToggleSelectDestination();
 	Panel->ToggleSelectStops();
 	TestEqual(TEXT("and picking stops replaces picking the Destination"), Panel->GetSelectionMode(), ENavigationSelectionMode::Stop);
-	TestFalse(TEXT("which has not been set"), Panel->HasDestination());
+	TestTrue(TEXT("which is as it was"), Panel->HasDestination());
 	Panel->CancelSelection();
 
 	// A journey of the stops that were clicked: the Start through them back to the Start.
 	Panel->ClearAll();
 	Panel->SetStartToRoom(Lab.GetDisplayLabel());
-	Panel->SetDestinationToRoom(Lab.GetDisplayLabel());
+	Panel->SetDestinationToRoom(Vestibule.GetDisplayLabel());
 	Panel->ToggleSelectStops();
-	Panel->SelectPoint(Vestibule.Centroid, 1);
 	Panel->SelectPoint(Upstairs.Centroid, 2);
+	Panel->SelectPoint(Lab.Centroid, 1);
 	Panel->CancelSelection();
+	TestEqual(TEXT("the Destinations before the last click are the stops, in order"), Panel->GetStops().Num(), 2);
 	Panel->RequestFindRoute();
 	TestFalse(TEXT("found"), Panel->DidLastFindRouteFail());
 	TestEqual(TEXT("three legs"), Panel->GetRouteLegs().Num(), 3);
@@ -359,6 +439,7 @@ bool FNavigationClickStopsTest::RunTest(const FString& Parameters)
 	// At the limit the mode ends by itself, and cannot be turned on.
 	Panel->ClearAll();
 	for (int32 I = 0; I < UNavigationPanelWidget::MaxRouteStops - 1; ++I) Panel->AddStopToRoom((I % 2 == 0 ? Lab : Vestibule).GetDisplayLabel());
+	Panel->SetDestinationToRoom(Upstairs.GetDisplayLabel());
 	Panel->ToggleSelectStops();
 	TestEqual(TEXT("one more fits"), Panel->GetSelectionMode(), ENavigationSelectionMode::Stop);
 	Panel->SelectPoint(Cut.Centroid, 1);

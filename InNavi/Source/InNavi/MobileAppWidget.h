@@ -191,6 +191,7 @@ public:
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+	virtual void NativeDestruct() override;
 	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
@@ -237,6 +238,8 @@ private:
 	void ApplyDeviceSafeArea();
 	// Makes the look of the preferences the open one, and asks for the pages to be built again if they were built in another.
 	void SyncAppearance();
+	// The volume of the app's sounds: what the controller plays them at.
+	void ApplyVolume(float Volume);
 	void QueueAppearanceRebuild();
 	void RefreshSheetPage();
 	void PositionSheet();
@@ -252,6 +255,10 @@ private:
 	USizeBox* PhoneSize = nullptr;
 	UPROPERTY()
 	UCanvasPanel* Phone = nullptr;
+	UPROPERTY()
+	UBorder* StorageError = nullptr;
+	float StorageErrorSeconds = 0.f;
+	void ShowStorageError();
 	UPROPERTY()
 	UBorder* SheetBorder = nullptr;
 	UPROPERTY()
@@ -343,6 +350,8 @@ private:
 	// Which step of the route the person is on while walking (0-based).
 	int32 NavStepIndex = 0;
 	FMobileRoute CurrentRoute;
+	FMobileRouteRequest ActiveRouteRequest;
+	TUniquePtr<IMobileRouteJob> PendingRoute;
 	FMobileRoutePreferences RoutePreferences;
 	// Where "My location" is for the route (the prototype lets the person say which building and level they are on).
 	FString MyLocationBuildingId;

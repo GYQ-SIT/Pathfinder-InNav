@@ -36,14 +36,45 @@ if (-not $release) {
 }
 
 $name = Split-Path -Leaf $Zip
-foreach ($asset in $release.assets | Where-Object { $_.name -eq $name }) {
-    Write-Host "Replacing the asset $name"
-    Invoke-RestMethod -Method Delete -Headers $headers -Uri "$api/releases/assets/$($asset.id)" | Out-Null
-}
+$existing = $release.assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
+$suffix = [guid]::NewGuid().ToString('N')
+$uploadName = if ($existing) { "replacement-$suffix.zip" } else { $name }
 # curl streams the file; Invoke-RestMethod would read a package of hundreds of MB into memory first.
-$upload = "https://uploads.github.com/repos/$Repo/releases/$($release.id)/assets?name=$name"
+$upload = "https://uploads.github.com/repos/$Repo/releases/$($release.id)/assets?name=$([uri]::EscapeDataString($uploadName))"
 $size = (Get-Item $Zip).Length
 Write-Host ("Uploading {0} ({1:N0} MB)" -f $name, ($size / 1MB))
-& curl.exe --silent --show-error --fail --retry 3 -X POST -H "Authorization: Bearer $Token" -H 'Content-Type: application/zip' -H 'Accept: application/vnd.github+json' --data-binary "@$Zip" $upload | Out-Null
+$response = & curl.exe --silent --show-error --fail --retry 3 -X POST -H "Authorization: Bearer $Token" -H 'Content-Type: application/zip' -H 'Accept: application/vnd.github+json' --data-binary "@$Zip" $upload
 if ($LASTEXITCODE -ne 0) { throw "Upload failed ($LASTEXITCODE)." }
+$replacement = ($response -join "`n") | ConvertFrom-Json
+if (!$replacement.id -or $replacement.state -ne 'uploaded' -or [long]$replacement.size -ne $size) {
+    throw 'GitHub did not confirm a complete upload.'
+}
+
+function Rename-ReleaseAsset($Asset, [string]$NewName) {
+    $body = @{ name = $NewName } | ConvertTo-Json
+    Invoke-RestMethod -Method Patch -Headers $headers -Uri "$api/releases/assets/$($Asset.id)" -Body $body -ContentType 'application/json' | Out-Null
+}
+
+if ($existing) {
+    # Keep the original download until a complete replacement exists. Keep a downloadable backup
+    # during the two renames so a failure at either step can be rolled back without re-uploading.
+    try {
+        Rename-ReleaseAsset $existing "backup-$suffix.zip"
+        Rename-ReleaseAsset $replacement $name
+    } catch {
+        $renameError = $_
+        try {
+            Rename-ReleaseAsset $existing $name
+            Invoke-RestMethod -Method Delete -Headers $headers -Uri "$api/releases/assets/$($replacement.id)" | Out-Null
+        } catch {
+            Write-Warning "Could not finish rollback. Inspect the replacement and backup assets on the release before retrying."
+        }
+        throw $renameError
+    }
+    try {
+        Invoke-RestMethod -Method Delete -Headers $headers -Uri "$api/releases/assets/$($existing.id)" | Out-Null
+    } catch {
+        Write-Warning "The replacement is published. The backup asset could not be removed."
+    }
+}
 Write-Host "Done: $($release.html_url)"

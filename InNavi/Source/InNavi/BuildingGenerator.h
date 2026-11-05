@@ -15,6 +15,7 @@ class AStaticMeshActor;
 class FJsonObject;
 
 DECLARE_MULTICAST_DELEGATE(FOnBuildingNavigationLayoutChanged);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnProjectBuildingRemoved, const FString&);
 
 UCLASS()
 class INNAVI_API ABuildingGenerator : public AActor
@@ -24,6 +25,7 @@ class INNAVI_API ABuildingGenerator : public AActor
 public:
 	ABuildingGenerator();
 	FOnBuildingNavigationLayoutChanged OnNavigationLayoutChanged;
+	FOnProjectBuildingRemoved OnBuildingRemoved;
 	uint64 GetNavigationRevision() const { return NavigationRevision; }
 
 	// Spawns one building directly from already-parsed data. Used both by JSON loading
@@ -64,6 +66,8 @@ public:
 	int32 LoadBuildingsFromFile(const FString& FilePath);
 	// Same loader for a detached in-memory project (mobile navigation never writes a temporary project file).
 	int32 LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& RootObject);
+	// For a private routing world that needs footprints and authored data without exterior meshes.
+	void UseNavigationGeometryOnly() { bNavigationGeometryOnly = true; }
 
 	// Second, database-backed way to load exterior buildings - queries a SQLite file (schema:
 	// buildings(building_id, building_type), building_nodes(building_id, node_id, sequence, lat,
@@ -79,7 +83,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingsFromDatabase(const FString& DatabasePath);
 
-	// Loads roads (as flat ribbon actors) and points of interest (as small marker actors) from the
+	// Loads roads (as flat ribbon actors; the database's points of interest are not loaded) from the
 	// SAME database LoadBuildingsFromDatabase reads buildings from - must be called AFTER a
 	// successful LoadBuildingsFromDatabase(DatabasePath) using that exact same path, since it reuses
 	// that call's own lat/lon reference point (see bHasDatabaseRefPoint) so roads/POIs/buildings all
@@ -223,6 +227,7 @@ public:
 	// first so in-progress edits aren't lost. Returns true on success.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	bool SaveBuildingsToFile(const FString& FilePath) const;
+	bool SaveBuildingsToFile(const FString& FilePath, FString& OutProblem) const;
 
 	// The project's own name and description, written to the file's top level as "projectName" and
 	// "description" and read back by LoadBuildingsFromFile. Empty for a file made before they existed.
@@ -231,7 +236,11 @@ public:
 	// The format version written into every project file as "version". A file from before it existed has none and is read as
 	// version 0, which is the same format as 1. Raise this when the format changes in a way an older reader would misread, and
 	// convert older files in LoadBuildingsFromFile by the version it reports here.
-	static constexpr int32 ProjectFileVersion = 1;
+	// 1 is a project of buildings and their interiors; 2 is one that also holds the map around the campus (roads, places of interest and
+	// the buildings around it, as saved from a map database). A project is written as 2 only when it has such a map, so an older build, which
+	// would drop the map when it saves, knows from the number that it is not the format it writes (it opens the file and asks for a new name).
+	static constexpr int32 BasicProjectFileVersion = 1;
+	static constexpr int32 ProjectFileVersion = 2;
 	int32 GetLoadedFileVersion() const { return LoadedFileVersion; }
 	const FString& GetProjectDescription() const { return ProjectDescription; }
 	void SetProjectInfo(const FString& Name, const FString& Description)
@@ -240,14 +249,9 @@ public:
 		ProjectDescription = Description;
 	}
 
-	// True if the file is a valid project that just has no buildings yet - what "New project" writes. Loading
-	// such a file spawns nothing, so a spawned count of 0 alone cannot tell it from a broken file.
-	static bool IsEmptyProjectFile(const FString& FilePath);
-	// Whether LoadBuildingsFromFile can make buildings of this file: it reads, is JSON, has a "buildings" list, and that list is
-	// empty (a new project) or has a building with an outline. When not, OutProblem says why. Checked before the scene is cleared.
-	static bool IsLoadableProjectFile(const FString& FilePath, FString& OutProblem);
-	// Whether LoadBuildingsFromDatabase can make the campus of this map database (it opens and has campus buildings).
-	static bool IsLoadableDatabase(const FString& DatabasePath, FString& OutProblem);
+	// Stage the new buildings before changing the live project. BeforeReplace runs only after a successful load,
+	// while the caller can still close the old interior. Returns INDEX_NONE on failure, or a count (zero for an empty JSON project).
+	int32 ReplaceBuildingsFromPath(const FString& Path, bool bDatabase, TFunctionRef<void()> BeforeReplace, FString& OutProblem);
 
 	// The raw "interior" JSON sub-object associated with a building id, as loaded from (or to be
 	// written into) the combined project file - not interpreted here, that's InteriorGenerator's
@@ -271,26 +275,21 @@ public:
 	// edge there is long enough for the opening.
 	bool MakeMirrorOfEntrance(const FString& SourceBuildingId, const FInteriorEntrance& Source, const FString& OnBuildingId, FInteriorEntrance& OutMirror) const;
 	// Takes one saved door out of a building's interior data (also what removes the mirror of it from the building next door).
-	bool RemoveStoredEntrance(const FString& BuildingId, const FString& EntranceId);
+	bool RemoveStoredEntrance(const FString& BuildingId, const FString& EntranceId, TSharedPtr<FJsonObject>* OutRemoved = nullptr);
+	bool RestoreStoredEntrance(const FString& BuildingId, const TSharedPtr<FJsonObject>& Entrance);
 	// Cuts every building's outer wall to match its doors, its own and the mirrored ones.
 	void RefreshWallOpenings();
 
 	// --- "Discard unsaved changes" ---
-	// Editing a building's interior changes things that live on the building itself (its floor count -
-	// the exterior shell's height - and its name) as well as its interior data. To be able to throw those
-	// edits away without reloading the whole project (a database can be huge), a small baseline is kept
-	// for each building that has been opened for editing: just those three things, not the project.
-	//
-	// Captures the building's current state as its baseline, unless one is already kept (so entering the
-	// same building twice does not overwrite what the last save/open left behind). Call right before a
-	// building's interior is opened.
+	// Capture the floor count, name, type and interior data on the first edit of a building.
+	// Reopening the interior keeps the existing baseline until the next save.
 	void CaptureBuildingBaseline(const FString& BuildingId);
 
 	// Re-captures every kept baseline from the current state - call after a successful save, which is
 	// what the baselines are meant to represent.
 	void RefreshBuildingBaselines();
 
-	// Puts every building that has a baseline back to it (floor count, name, interior data). Buildings
+	// Puts every building that has a baseline back to it. Buildings
 	// that no longer exist are skipped. Does not touch the live InteriorGenerator - callers leave or
 	// reload the interior afterwards.
 	void RestoreBuildingBaselines();
@@ -303,6 +302,7 @@ public:
 	// (LoadBuildingsFromFile only adds - it never removes what's already there on its own).
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void ClearAllBuildings();
+	bool RemoveBuilding(APolyBuilding& Building);
 
 private:
 	void HandleBuildingFloorCountChanged(APolyBuilding* Building);
@@ -317,6 +317,9 @@ private:
 	void NotifyNavigationLayoutChanged();
 	float Scale = 1.f;
 	TSet<FString> UsedBuildingIds;
+	TSet<FString> RemovedBuildingIds;
+	friend class AInteriorGenerator;
+	TSharedPtr<FJsonObject> WithoutRemovedBuildingLinks(const TSharedPtr<FJsonObject>& Interior) const;
 
 	// LoadBuildingsFromDatabase's fallback FloorCount/FloorHeight - the buildings/building_nodes
 	// schema has no floor data at all (it's OSM footprint+type only), unlike buildings.json's
@@ -333,10 +336,12 @@ private:
 	{
 		int32 FloorCount = 1;
 		FString Name;
+		FString Type;
 		bool bHadInterior = false;
 		FString InteriorJson; // the interior data serialized, so later edits to the live object cannot reach it
 	};
 	TMap<FString, FBuildingBaseline> BuildingBaselines;
+	bool bNavigationGeometryOnly = false;
 	bool CaptureBuildingBaselineInto(const FString& BuildingId, FBuildingBaseline& Out) const;
 	FString BuildingFilterText;
 	TArray<FString> BuildingFilterWords;
@@ -349,6 +354,8 @@ private:
 	FString ProjectName;
 	FString ProjectDescription;
 	int32 LoadedFileVersion = 0;
+	mutable FString ProjectRevisionPath;
+	mutable FString ProjectRevision;
 
 	// The lat/lon centroid LoadBuildingsFromDatabase projects around, stashed so
 	// LoadRoadsAndPOIsFromDatabase can project roads/POIs into that exact same local-meters space
@@ -371,6 +378,26 @@ private:
 
 	UPROPERTY()
 	TArray<AActor*> SpawnedContextBuildingActors;
+
+	// The map around the campus as a project file keeps it: the roads, the places of interest and the buildings around the campus, in
+	// world units (a file's footprint units times Scale). They are recorded as they are spawned, from the map database or from a project
+	// file, and written back by SaveBuildingsToFile ("roads", "pois", "contextBuildings") so a project saved from a database is complete.
+	struct FSceneryRoad
+	{
+		FString HighwayType;
+		TArray<FVector2D> Points;
+	};
+	struct FSceneryContextBuilding
+	{
+		FString BuildingType;
+		TArray<FVector2D> Footprint;
+	};
+	TArray<FSceneryRoad> SceneryRoads;
+	TArray<FSceneryContextBuilding> SceneryContextBuildings;
+	bool SpawnRoad(const FString& HighwayType, const TArray<FVector2D>& WorldPoints);
+	bool SpawnContextBuilding(const FString& BuildingType, const TArray<FVector2D>& WorldFootprint);
+	// The roads, places and buildings around the campus of a project file's JSON (all optional: an older file has none).
+	void LoadSceneryFromJson(const TSharedPtr<FJsonObject>& RootObject);
 
 	// Whether the filter panel shows the other (non-campus) buildings: SetNonCampusBuildingsVisible.
 	bool bNonCampusBuildingsVisible = true;

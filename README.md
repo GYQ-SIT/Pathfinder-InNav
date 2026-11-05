@@ -13,10 +13,10 @@ build, reading project data and routes through a mobile data adapter).
 
 - `README.md` — this file
 - `.gitignore` — UnrealEngine template, plus signing keys, packaging output and personal test files
-- `.github/workflows/` — CI: `build-windows.yml` (builds the editor from a clean checkout, runs the MSVC static analysis and every
+- `.github/workflows/` — CI: `build-windows.yml` (builds the editor from a clean checkout of `main`, runs the MSVC static analysis and every
   automation test, on a self-hosted Windows runner), `lint.yml` (JSON, secrets, configuration, headers and document links; GitHub-hosted), `release-windows.yml` (a pushed tag builds the Windows
   package and publishes it as a release),
-  `validate-json.yml` (every `InNavi/Data/*.json` parses), `deploy-wiki.yml` (publishes `docs/`)
+  `validate-json.yml` (checks JSON under `InNavi/Data` on a GitHub-hosted runner), `deploy-wiki.yml` (publishes `docs/`)
 - `scripts/` — `lint.py` (the repository checks of `lint.yml`), `check-analysis.ps1` and `check-test-report.ps1` (turn the analysis log and
   the test report into a pass or a fail), `package-windows.ps1`, `smoke-test-package.ps1` and `publish-release.ps1` (the release build,
   see Releases below), `install-layout-validator.mjs` (installs the plugin package)
@@ -76,7 +76,7 @@ See `docs/design/interior-editor-guide.md` for the full control list and workflo
 data, geometry, doors, connectors and room reachability, with clickable findings and JSON
 report export. Findings never block editing or saving. See
 [`docs/design/layout-validator.md`](docs/design/layout-validator.md) for usage and headless file validation.
-The reusable plugin is versioned as `1.0.0` and distributed through GitHub Packages. See its
+The reusable plugin is versioned and distributed through GitHub Packages. See its
 [package README](InNavi/Plugins/InNaviLayoutValidator/README.md) for exact-version installation,
 and the [M2 evidence](docs/design/layout-validator-m2-compliance.md) for the D1–D5 mapping.
 

@@ -397,6 +397,8 @@ private:
 
 	UFUNCTION()
 	void OnFileLoadClicked();
+	UFUNCTION()
+	void OnFileSaveAsClicked();
 
 	// File > Generate floor: fills the floor being edited with rooms along its outer wall and a core beside each door (one undo step).
 	UFUNCTION()

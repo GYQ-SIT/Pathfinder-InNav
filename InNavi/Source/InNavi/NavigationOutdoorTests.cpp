@@ -356,9 +356,10 @@ bool FNavigationOutdoorClickStopsTest::RunTest(const FString& Parameters)
 
 	Nav->ToggleSelectStops();
 	Nav->SelectOutdoorGroundPoint(FVector2D(1100, 100), false);
-	TestEqual(TEXT("a spot next to C is a stop"), Nav->GetStops().Num(), 1);
-	TestEqual(TEXT("in C"), Nav->GetStops()[0].BuildingId, FString(TEXT("C")));
-	TestTrue(TEXT("outside, with a world position"), Nav->GetStops()[0].Point.Floor == UNavigationPanelWidget::OutdoorFloor && Nav->GetStops()[0].Point.bHasWorldPosition);
+	TestEqual(TEXT("a spot next to C goes after the Destination, which becomes a stop"), Nav->GetStops().Num(), 1);
+	TestEqual(TEXT("the stop is the Destination from before"), Nav->GetStops()[0].RoomOptionLabel, Options[1].GetDisplayLabel());
+	TestEqual(TEXT("the spot is the Destination, in C"), Nav->GetDestination().BuildingId, FString(TEXT("C")));
+	TestTrue(TEXT("outside, with a world position"), Nav->GetDestination().Floor == UNavigationPanelWidget::OutdoorFloor && Nav->GetDestination().bHasWorldPosition);
 	TestEqual(TEXT("the mode stays on"), Nav->GetSelectionMode(), ENavigationSelectionMode::Stop);
 	Nav->SelectOutdoorGroundPoint(FVector2D(150, 100), false);
 	TestEqual(TEXT("inside a building is refused, and nothing is added"), Nav->GetStops().Num(), 1);
@@ -368,10 +369,10 @@ bool FNavigationOutdoorClickStopsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("another spot is the second stop"), Nav->GetStops().Num(), 2);
 	Nav->CancelSelection();
 
-	TestTrue(TEXT("a spot outside says where it is"), Nav->GetStopLabel(0).Contains(TEXT("outside")));
+	TestTrue(TEXT("a spot outside says where it is"), Nav->GetStopLabel(1).Contains(TEXT("outside")));
 	Nav->RequestFindRoute();
 	TestEqual(TEXT("three legs"), Nav->GetRouteLegs().Num(), 3);
-	TestTrue(TEXT("outside at both ends"), RunsBetween(Nav->GetRoutePoints(), TEXT("A"), TEXT("B")));
+	TestTrue(TEXT("outside at both ends: from A's door to the last spot, next to A"), RunsBetween(Nav->GetRoutePoints(), TEXT("A"), TEXT("A")));
 	return true;
 }
 

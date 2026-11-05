@@ -77,6 +77,14 @@ namespace InNaviValidationTests
         TestTrue(TEXT("duplicate floor levels"), Has(ValidateProject(Root), TEXT("FLOOR_DUPLICATE")));
         Root = Project(); Root->RemoveField(TEXT("version"));
         TestFalse(TEXT("legacy files without versions are accepted"), ValidateProject(Root).HasErrors());
+        Root->SetNumberField(TEXT("scale"), 0.000001);
+        TestTrue(TEXT("a scale that the editor cannot load fails validation"), ValidateProject(Root).HasErrors());
+        int32 FullCheckpoints = 0;
+        ValidateProject(Project(), [&FullCheckpoints] { ++FullCheckpoints; return false; });
+        int32 Checkpoints = 0;
+        const auto Cancelled = ValidateProject(Project(), [&Checkpoints] { return ++Checkpoints >= 12; });
+        TestTrue(TEXT("the data scan stops before completing"), Checkpoints >= 12 && Checkpoints < FullCheckpoints);
+        TestTrue(TEXT("a cancelled scan does not publish a report"), Cancelled.Fingerprint.IsEmpty() && Cancelled.Issues.IsEmpty());
         return true;
     }
 
@@ -98,6 +106,31 @@ namespace InNaviValidationTests
         Openings.Add(MakeShared<FJsonValueObject>(Other)); Room(Root)->SetArrayField(TEXT("openings"), Openings);
         TestTrue(TEXT("overlapping openings are reported"), Has(ValidateProject(Root), TEXT("OPENING_OVERLAP")));
         TestFalse(TEXT("overlap is advisory"), ValidateProject(Root).HasErrors());
+
+        Root = Project();
+        auto Rooms = Floor(Root)->GetArrayField(TEXT("rooms"));
+        auto OtherRoom = MakeShared<FJsonObject>();
+        OtherRoom->SetStringField(TEXT("id"), TEXT("Adjacent"));
+        Rooms.Add(MakeShared<FJsonValueObject>(OtherRoom));
+        Floor(Root)->SetArrayField(TEXT("rooms"), Rooms);
+        auto SetOutline = [&](std::initializer_list<FVector2D> Outline)
+        {
+            TArray<TSharedPtr<FJsonValue>> Points;
+            for (const FVector2D& Point : Outline)
+            {
+                Points.Add(MakeShared<FJsonValueArray>(TArray<TSharedPtr<FJsonValue>>{
+                    MakeShared<FJsonValueNumber>(Point.X), MakeShared<FJsonValueNumber>(Point.Y)}));
+            }
+            OtherRoom->SetArrayField(TEXT("footprint"), Points);
+        };
+        SetOutline({{400, 400}, {400, 100}, {100, 100}, {100, 400}});
+        TestTrue(TEXT("identical area is found with different winding and start vertex"), Has(ValidateProject(Root), TEXT("ROOM_OVERLAP")));
+        SetOutline({{200, 100}, {500, 100}, {500, 400}, {200, 400}});
+        TestTrue(TEXT("overlap is found along collinear edges"), Has(ValidateProject(Root), TEXT("ROOM_OVERLAP")));
+        SetOutline({{400, 100}, {500, 100}, {500, 400}, {400, 400}});
+        TestFalse(TEXT("a shared edge alone is allowed"), Has(ValidateProject(Root), TEXT("ROOM_OVERLAP")));
+        SetOutline({{400, 400}, {500, 400}, {500, 500}, {400, 500}});
+        TestFalse(TEXT("a shared corner alone is allowed"), Has(ValidateProject(Root), TEXT("ROOM_OVERLAP")));
         return true;
     }
 
@@ -197,6 +230,8 @@ namespace InNaviValidationTests
         auto* Status=Cast<UTextBlock>(Panel->FindContentWidget(TEXT("Txt_ValidationStatus")));
         TestTrue(TEXT("stale warning visible"),Status&&Status->GetText().ToString().Contains(TEXT("Layout changed")));
         auto* Exterior=NewObject<UEditScreenWidget>(); Exterior->Initialize(); Exterior->TakeWidget(); Exterior->SetOwningPlayer(PC);
+        TestNotNull(TEXT("interior File menu exposes Save As"), Screen->FindScreenWidget(TEXT("Btn_FileSaveAs")));
+        TestNotNull(TEXT("exterior File menu exposes Save As"), Exterior->FindScreenWidget(TEXT("Btn_FileSaveAs")));
         TestNotNull(TEXT("exterior validation panel"),Exterior->GetValidationPanelForTests());
         TestTrue(TEXT("exterior registered"),Exterior->GetDockHost()->IsPanelRegistered(ExteriorDock::Validation));
         FDockLayout Old; Old.DockPanelToEdge(InteriorDock::Toolbar, EDockSide::Left);

@@ -3,12 +3,11 @@ name: Build, analyse and test (Windows)
 # Runs on the team's own self-hosted Windows runner (has UE5.8 + Visual Studio already installed) - the team12 Ubuntu VM can't do this
 # (wrong OS/underpowered). The checks that need no Unreal Engine are in lint.yml, on a GitHub-hosted runner.
 #
-# A pull request is merged only when this passes: the editor builds from a clean checkout (all the code in one unity build, which is where
+# The main branch is checked on the persistent Unreal runner. Pull requests run the hosted lint and JSON workflows.
+# The editor builds from a clean checkout (all the code in one unity build, which is where
 # a name used twice in two files shows up), the product code has no finding of the MSVC static analyser, and every automation test passes.
 on:
   push:
-    branches: [main]
-  pull_request:
     branches: [main]
   workflow_dispatch:
 
@@ -22,8 +21,11 @@ concurrency:
 
 jobs:
   build:
+    if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, windows]
     timeout-minutes: 120
+    env:
+      AUTOMATION_REPORT: InNavi/Saved/AutomationReport-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
 
@@ -33,14 +35,12 @@ jobs:
           registry-url: https://npm.pkg.github.com
           scope: '@gyq-sit'
 
-      - name: Install the exact released Unreal plugin source
+      - name: Verify the layout validator source version
         shell: cmd
         run: |
           call npm ci --ignore-scripts
           if errorlevel 1 exit /b 1
-          node scripts/install-layout-validator.mjs --check
-          if errorlevel 1 exit /b 1
-          node scripts/install-layout-validator.mjs
+          node scripts/install-layout-validator.mjs --check --allow-unreleased
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -62,14 +62,14 @@ jobs:
       - name: Automation tests (all of InNavi.*)
         shell: cmd
         run: |
-          "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -unattended -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests InNavi; Quit" -ReportExportPath="%GITHUB_WORKSPACE%\InNavi\Saved\AutomationReport"
+          "C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" "%GITHUB_WORKSPACE%\InNavi\InNavi.uproject" -unattended -nullrhi -nosplash -nosound -ExecCmds="Automation RunTests InNavi; Quit" -ReportExportPath="%GITHUB_WORKSPACE%/%AUTOMATION_REPORT%"
 
       # The editor exits with a failure code when a test fails, so this step has to run then too: it is the one that lists which tests failed
       # and why (the log of the editor itself is not in the log of the job).
       - name: Check the test report (lists the tests that failed)
         if: ${{ !cancelled() }}
         shell: cmd
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check-test-report.ps1 -Report "%GITHUB_WORKSPACE%\InNavi\Saved\AutomationReport" -MinimumTests 150
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts\check-test-report.ps1 -Report "%AUTOMATION_REPORT%" -MinimumTests 150
 
       - name: Keep the test report and the performance measurements
         if: always()
@@ -77,7 +77,7 @@ jobs:
         with:
           name: test-report-and-performance
           path: |
-            InNavi/Saved/AutomationReport
+            ${{ env.AUTOMATION_REPORT }}
             InNavi/Saved/Performance
           if-no-files-found: warn
           retention-days: 30

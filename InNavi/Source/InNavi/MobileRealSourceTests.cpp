@@ -7,6 +7,7 @@
 #include "MobileSearchPageWidget.h"
 #include "MobileMapWidget.h"
 #include "MobilePlacePageWidget.h"
+#include "MobileRoutePageWidget.h"
 #include "InteriorRoom.h"
 #include "LayoutValidationSession.h"
 #include "LayoutValidation.h"
@@ -14,6 +15,7 @@
 #include "Components/Button.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
+#include "HAL/PlatformProcess.h"
 #include "Misc/FileHelper.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/Paths.h"
@@ -141,6 +143,94 @@ bool FMobileRealRouteTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRealLegacyFloorsTest, "InNavi.Mobile.Source.RealLegacyFloorsAndDuplicateIdentity", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileRealLegacyFloorsTest::RunTest(const FString& Parameters)
+{
+	MobileRealTests::FProjectFiles Files;
+	Files.Building()->SetNumberField(TEXT("floorCount"), 1);
+	FMobileRealSource Legacy(Files.Write());
+	const auto Places = MobileRealTests::Places(Legacy);
+	if (!TestEqual(TEXT("both authored levels are indexed"), Places.Num(), 2)) return false;
+	FMobileRouteRequest Request;
+	Request.FromPlaceId = Places[0].Id;
+	Request.ToPlaceId = Places[1].Id;
+	TestTrue(TEXT("routing uses the expanded legacy shell"), Legacy.FindRoute(Request).bFound);
+	const FString SharedId = TEXT("0123456789abcdef0123456789abcdef");
+	Files.Room(0)->SetStringField(TEXT("navigationId"), SharedId);
+	Files.Room(1)->SetStringField(TEXT("navigationId"), SharedId);
+	const auto Report = LayoutValidation::ValidateProject(Files.Root);
+	TestTrue(TEXT("duplicate stable IDs are flagged"), Report.Issues.ContainsByPredicate([](const auto& Issue)
+	{
+		return Issue.Rule == TEXT("NAVIGATION_ID_DUPLICATE");
+	}));
+	FMobileRealSource Conflicted(Files.Write());
+	const auto ConflictedPlaces = MobileRealTests::Places(Conflicted);
+	if (!TestEqual(TEXT("the conflict hides neither room"), ConflictedPlaces.Num(), 2)) return false;
+	TestNotEqual(TEXT("the fallback room identities differ"), ConflictedPlaces[0].Id, ConflictedPlaces[1].Id);
+	Request.FromPlaceId = ConflictedPlaces[0].Id;
+	Request.ToPlaceId = ConflictedPlaces[1].Id;
+	TestTrue(TEXT("the rooms can still be routed using distinct fallback identities"), Conflicted.FindRoute(Request).bFound);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRealNarrowRoomTest, "InNavi.Mobile.Source.NarrowRoom", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileRealNarrowRoomTest::RunTest(const FString& Parameters)
+{
+	MobileRealTests::FProjectFiles Files;
+	auto Room = Files.Room(0);
+	auto SetWidth = [&](int32 Width)
+	{
+		TArray<TSharedPtr<FJsonValue>> Footprint;
+		for (const FVector2D& Point : TArray<FVector2D>{{100, 100}, {100.0 + Width, 100}, {100.0 + Width, 600}, {100, 600}})
+		{
+			Footprint.Add(MakeShared<FJsonValueArray>(TArray<TSharedPtr<FJsonValue>>{
+				MakeShared<FJsonValueNumber>(Point.X), MakeShared<FJsonValueNumber>(Point.Y)}));
+		}
+		Room->SetArrayField(TEXT("footprint"), Footprint);
+	};
+	SetWidth(75);
+	const auto Opening = Room->GetArrayField(TEXT("openings"))[0]->AsObject();
+	Opening->SetNumberField(TEXT("edgeIndex"), 1);
+	Opening->SetNumberField(TEXT("offset"), 150);
+	FMobileRealSource Source(Files.Write());
+	const auto Places = MobileRealTests::Places(Source);
+	if (!TestEqual(TEXT("both rooms are indexed"), Places.Num(), 2)) return false;
+	FMobileRouteRequest Request;
+	Request.FromPlaceId = Places[1].Id;
+	Request.ToPlaceId = Places[0].Id;
+	TestTrue(TEXT("the planner finds a route into a narrow room even when both centroids fail"), Source.FindRoute(Request).bFound);
+	SetWidth(50);
+	Room->SetArrayField(TEXT("openings"), {});
+	FMobileRealSource TooNarrow(Files.Write());
+	TestFalse(TEXT("the fallback still refuses a room with insufficient clearance"), TooNarrow.FindRoute(Request).bFound);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRealRestrictedTest, "InNavi.Mobile.Source.RestrictedRooms", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileRealRestrictedTest::RunTest(const FString& Parameters)
+{
+	MobileRealTests::FProjectFiles Files;
+	for (const bool bPrivate : {true, false})
+	{
+		Files.Room(1)->SetStringField(TEXT("access"), bPrivate ? TEXT("private") : TEXT("public"));
+		Files.Room(1)->SetBoolField(TEXT("requireKey"), !bPrivate);
+		FMobileRealSource Source(Files.Write());
+		const auto Places = MobileRealTests::Places(Source);
+		if (!TestEqual(TEXT("both rooms remain listed"), Places.Num(), 2)) return false;
+		TestTrue(TEXT("the public room remains available"), Places[0].bAvailable);
+		TestFalse(TEXT("the restricted room is marked unavailable"), Places[1].bAvailable);
+		FMobileRouteRequest Request;
+		Request.FromPlaceId = Places[0].Id;
+		Request.ToPlaceId = Places[1].Id;
+		auto Route = Source.FindRoute(Request);
+		TestTrue(TEXT("directions explain why a restricted destination is refused"), !Route.bFound && Route.Error.Contains(TEXT("restricted")));
+		Swap(Request.FromPlaceId, Request.ToPlaceId);
+		Route = Source.FindRoute(Request);
+		TestTrue(TEXT("directions also refuse a restricted start"), !Route.bFound && Route.Error.Contains(TEXT("restricted")));
+	}
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRealCampusTest, "InNavi.Mobile.Source.RealCampusRoutes", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FMobileRealCampusTest::RunTest(const FString& Parameters)
 {
@@ -186,10 +276,30 @@ bool FMobileRealScreenTest::RunTest(const FString& Parameters)
 	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
 	UMobileAppWidget* Screen = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
 	if (!TestNotNull(TEXT("mobile screen"), Screen)) { World->DestroyWorld(false); return false; }
-	Screen->SetSource(Source); Screen->TakeWidget(); Screen->SetActiveTab(UMobileAppWidget::ETab::Directory);
+	Screen->SetSource(Source);
+	const auto Slate = Screen->TakeWidget();
+	Screen->SetActiveTab(UMobileAppWidget::ETab::Directory);
 	TestFalse(TEXT("real Explore does not show mock-location text"), Screen->GetExplorePage()->IsDataNoteShown());
 	Screen->ShowPlace(Places[2]); Screen->SendSheetEvent(EMobileSheetEvent::DirectionsRequested);
-	if (TestTrue(TEXT("unchanged route page consumes the real source"), Screen->GetCurrentRoute().bFound))
+	TestFalse(TEXT("the route is still pending when the button handler returns"), Screen->GetCurrentRoute().bFound);
+	TestTrue(TEXT("the page shows that calculation is pending"), Screen->GetRoutePage()->GetErrorString().Contains(TEXT("Finding route")));
+	Screen->SendSheetEvent(EMobileSheetEvent::NavigationStarted);
+	TestTrue(TEXT("a pending route cannot start navigation"), Screen->GetFlow().GetState() == EMobileSheetState::Route);
+
+	FMobileRouteRequest Changed;
+	Changed.FromPlaceId = Changed.ToPlaceId = Places[2].Id;
+	Screen->ApplyRouteRequest(Changed);
+	Slate->Tick(FGeometry(), FPlatformTime::Seconds(), 0.f);
+	TestTrue(TEXT("the latest request supersedes the original job"), Screen->GetCurrentRoute().Error.Contains(TEXT("already at")));
+	Changed.FromPlaceId = Places[0].Id;
+	Screen->ApplyRouteRequest(Changed);
+	const double Deadline = FPlatformTime::Seconds() + 5.0;
+	while (!Screen->GetCurrentRoute().bFound && Screen->GetCurrentRoute().Error.IsEmpty() && FPlatformTime::Seconds() < Deadline)
+	{
+		Slate->Tick(FGeometry(), FPlatformTime::Seconds(), 0.f);
+		FPlatformProcess::SleepNoStats(0.001f);
+	}
+	if (TestTrue(TEXT("the real route completes across ticks"), Screen->GetCurrentRoute().bFound))
 	{
 		Screen->SendSheetEvent(EMobileSheetEvent::NavigationStarted);
 		bool bSawOutside = false;
@@ -204,6 +314,52 @@ bool FMobileRealScreenTest::RunTest(const FString& Parameters)
 	Screen->RebuildForAppearance();
 	TestTrue(TEXT("appearance rebuild retains the real provider"), Screen->GetSource() == &Source.Get());
 	World->DestroyWorld(false);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRoomBookmarkIdentityTest, "InNavi.Mobile.Source.RoomBookmarkIdentity", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileRoomBookmarkIdentityTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	Fixture.Interior->ClearLoadedInterior();
+	Fixture.Generator->ClearAllBuildings();
+	const double Unit = 1.0 / Fixture.Generator->GetScale();
+	const FString BuildingId = TEXT("Bookmarks");
+	Fixture.Generator->SpawnBuildingFromData(BuildingId, BuildingId,
+		{{0, 0}, {1000 * Unit, 0}, {1000 * Unit, 800 * Unit}, {0, 800 * Unit}}, 1, 300, {0, 0});
+	Fixture.Interior->LoadInteriorForBuilding(BuildingId);
+	const auto Create = [&](const FString& Name, double Left)
+	{
+		FString Error;
+		return Fixture.Interior->CreateRoomFromFootprint(
+			{{Left * Unit, 100 * Unit}, {(Left + 300) * Unit, 100 * Unit},
+			{(Left + 300) * Unit, 400 * Unit}, {Left * Unit, 400 * Unit}}, FString(), Name, true, false, false, Error);
+	};
+	const auto* Original = Create(TEXT("Original"), 100);
+	if (!TestNotNull(TEXT("original room exists"), Original)) return false;
+	const FString RoomId = Original->RoomId;
+	MobileRealTests::FProjectFiles Files;
+	const FString Path = Files.Directory / TEXT("bookmarks.json");
+	const auto Save = [&]()
+	{
+		Fixture.Interior->SyncInteriorToBuildingGenerator();
+		return Fixture.Generator->SaveBuildingsToFile(Path);
+	};
+	TestTrue(TEXT("the first project is saved"), Save());
+	FMobileRealSource Before(Path);
+	const auto FirstPlaces = MobileRealTests::Places(Before);
+	if (!TestEqual(TEXT("the original room appears in mobile"), FirstPlaces.Num(), 1)) return false;
+	TestTrue(TEXT("the editor can delete the room"), Fixture.Interior->DeleteRoom(RoomId));
+	const auto* Replacement = Create(TEXT("Replacement"), 500);
+	if (!TestNotNull(TEXT("replacement room exists"), Replacement)) return false;
+	TestEqual(TEXT("the editor reuses the display ID"), Replacement->RoomId, RoomId);
+	TestTrue(TEXT("the changed project is saved"), Save());
+	FMobileRealSource After(Path);
+	FMobilePlace Place;
+	TestFalse(TEXT("the old bookmark cannot resolve to the replacement"), After.FindPlace(FirstPlaces[0].Id, Place));
+	const auto SecondPlaces = MobileRealTests::Places(After);
+	if (TestEqual(TEXT("the replacement is indexed"), SecondPlaces.Num(), 1))
+		TestNotEqual(TEXT("the replacement has a separate persisted identity"), SecondPlaces[0].Id, FirstPlaces[0].Id);
 	return true;
 }
 

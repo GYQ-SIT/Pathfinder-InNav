@@ -37,6 +37,13 @@ struct FInteriorEntrance
 
 namespace InteriorEntrances
 {
+	inline constexpr double MaxLinkDistanceWorldUnits = 250.0;
+
+	inline bool AreElevationsAligned(double First, double Second)
+	{
+		return FMath::IsNearlyEqual(First, Second, 1.0);
+	}
+
 	inline FInteriorEntrance FromJson(const TSharedPtr<FJsonObject>& Object)
 	{
 		FInteriorEntrance Entrance;

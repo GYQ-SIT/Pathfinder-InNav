@@ -1,5 +1,7 @@
 #include "LayoutValidation.h"
 
+#include "CompGeom/PolygonTriangulation.h"
+#include "Containers/StaticArray.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Misc/FileHelper.h"
@@ -123,10 +125,54 @@ namespace LayoutValidation
             TArray<int32> Floors;
         };
         struct FReference { FContext Context; FString Input, Target; };
-        struct FRoomShape { FContext Context; TArray<FVector2D> Points; };
+        struct FRoomShape
+        {
+            FContext Context;
+            FBox2D Bounds{ForceInit};
+            TArray<TStaticArray<FVector2D, 3>> Triangles;
+
+            FRoomShape(const FContext& InContext, const TArray<FVector2D>& Points) : Context(InContext)
+            {
+                for (const FVector2D& Point : Points) Bounds += Point;
+                TArray<UE::Geometry::FIndex3i> Indices;
+                PolygonTriangulation::TriangulateSimplePolygon(Points, Indices);
+                for (const auto& Triangle : Indices)
+                {
+                    const FVector2D A = Points[Triangle.A], B = Points[Triangle.B], C = Points[Triangle.C];
+                    const double Area = Cross(A, B, C);
+                    if (FMath::Abs(Area) > Epsilon)
+                    {
+                        Triangles.Add(Area > 0 ? TStaticArray<FVector2D, 3>{A, B, C} : TStaticArray<FVector2D, 3>{A, C, B});
+                    }
+                }
+            }
+        };
+
+        bool RoomAreasOverlap(const FRoomShape& A, const FRoomShape& B)
+        {
+            if (!A.Bounds.Intersect(B.Bounds)) return false;
+            // A separating edge also rules out triangles that only share an edge or vertex.
+            auto HasSeparatingEdge = [](const auto& One, const auto& Other)
+            {
+                for (int32 I = 0; I < 3; ++I)
+                {
+                    const FVector2D From = One[I], To = One[(I + 1) % 3];
+                    if (FMath::Max3(Cross(From, To, Other[0]), Cross(From, To, Other[1]), Cross(From, To, Other[2])) <= Epsilon)
+                        return true;
+                }
+                return false;
+            };
+            for (const auto& First : A.Triangles) for (const auto& Second : B.Triangles)
+            {
+                if (!HasSeparatingEdge(First, Second) && !HasSeparatingEdge(Second, First)) return true;
+            }
+            return false;
+        }
 
         struct FReader
         {
+            explicit FReader(TFunctionRef<bool()> InShouldCancel) : ShouldCancel(InShouldCancel) {}
+            TFunctionRef<bool()> ShouldCancel;
             FReport Report;
             FContext C;
 
@@ -205,6 +251,7 @@ namespace LayoutValidation
                 double Area = 0;
                 for (int32 I = 0; I < Edges; ++I)
                 {
+                    if (ShouldCancel()) return {};
                     const auto A = Points[I], B = Points[(I + 1) % Points.Num()];
                     if (A.Equals(B, Epsilon)) Issue(TEXT("GEOMETRY_ZERO_EDGE"), TEXT("The footprint contains a zero-length edge."), TEXT("Remove repeated adjacent points."));
                     Area += A.X * B.Y - B.X * A.Y;
@@ -225,6 +272,7 @@ namespace LayoutValidation
                 const int32 Edges = bClosed ? Points.Num() : FMath::Max(0, Points.Num() - 1);
                 for (int32 I = 0; I < Edges; ++I)
                 {
+                    if (ShouldCancel()) return;
                     const auto A = Points[I], B = Points[(I + 1) % Points.Num()];
                     bFits &= Inside((A + B) * 0.5, Boundary);
                     for (int32 J = 0; J < Boundary.Num(); ++J) bFits &= !Crosses(A, B, Boundary[J], Boundary[(J + 1) % Boundary.Num()]);
@@ -251,7 +299,7 @@ namespace LayoutValidation
             {
                 const auto Base = C;
                 TSet<int32> FloorIds;
-                TSet<FString> RoomIds, NodeIds, EntranceIds;
+                TSet<FString> RoomIds, NavigationIds, NodeIds, EntranceIds;
                 TArray<FNode> Nodes;
                 TArray<FReference> References;
                 TArray<FRoomShape> Shapes;
@@ -259,6 +307,7 @@ namespace LayoutValidation
                 if (Floors.IsEmpty()) Issue(TEXT("INTERIOR_UNAUTHORED"), TEXT("This building has no authored floors."), TEXT("Author its interior before checking room reachability."), ESeverity::Info);
                 for (int32 I = 0; I < Floors.Num(); ++I)
                 {
+                    if (ShouldCancel()) return;
                     C = Base; C.Kind = EObjectKind::Floor; C.Path = Base.Path + FString::Printf(TEXT(".floors[%d]"), I);
                     const auto Floor = Object(Floors[I]); if (!Floor) continue;
                     C.Floor = Integer(Floor, TEXT("level"), 1);
@@ -270,13 +319,24 @@ namespace LayoutValidation
                     const auto Rooms = Array(Floor, TEXT("rooms"));
                     for (int32 R = 0; R < Rooms.Num(); ++R)
                     {
+                        if (ShouldCancel()) return;
                         C = FloorContext; C.Kind = EObjectKind::Room; C.Path += FString::Printf(TEXT(".rooms[%d]"), R);
                         const auto Room = Object(Rooms[R]); if (!Room) continue;
                         Id(Room, RoomIds); String(Room, TEXT("name")); String(Room, TEXT("roomType")); String(Room, TEXT("access")); Boolean(Room, TEXT("requireKey"), false);
+                        const FString NavigationId = String(Room, TEXT("navigationId"));
+                        if (!NavigationId.IsEmpty())
+                        {
+                            if (NavigationIds.Contains(NavigationId))
+                                Issue(TEXT("NAVIGATION_ID_DUPLICATE"), TEXT("Multiple rooms share the same mobile place ID."), TEXT("Assign a unique navigationId to each room."), ESeverity::Warning);
+                            NavigationIds.Add(NavigationId);
+                        }
                         const bool bClosed = Boolean(Room, TEXT("closed"), true);
-                        const auto Points = Shape(Room, bClosed); Containment(Points, bClosed, Boundary);
+                        const int32 IssuesBeforeShape = Report.Issues.Num();
+                        const auto Points = Shape(Room, bClosed);
+                        if (ShouldCancel()) return;
+                        if (bClosed && Report.Issues.Num() == IssuesBeforeShape) Shapes.Emplace(C, Points);
+                        Containment(Points, bClosed, Boundary);
                         const auto RoomContext = C;
-                        if (bClosed && Points.Num() >= 3) Shapes.Add({ RoomContext, Points });
                         TSet<FString> OpeningIds;
                         const auto Openings = Array(Room, TEXT("openings"));
                         for (int32 O = 0; O < Openings.Num(); ++O)
@@ -287,6 +347,7 @@ namespace LayoutValidation
                         // Overlaps are advisory: the authoring tools allow intentional overlap.
                         for (int32 O = 0; O < Openings.Num(); ++O) for (int32 P = O + 1; P < Openings.Num(); ++P)
                         {
+                            if (ShouldCancel()) return;
                             if (!Openings[O].IsValid() || !Openings[P].IsValid() || Openings[O]->Type != EJson::Object || Openings[P]->Type != EJson::Object) continue;
                             const auto A = Openings[O]->AsObject(), B = Openings[P]->AsObject();
                             int32 EA = 0, EB = 0; double OA = 0, OB = 0, WA = 0, WB = 0;
@@ -325,18 +386,9 @@ namespace LayoutValidation
                 }
                 for (int32 A = 0; A < Shapes.Num(); ++A) for (int32 B = A + 1; B < Shapes.Num(); ++B)
                 {
+                    if (ShouldCancel()) return;
                     if (Shapes[A].Context.Floor != Shapes[B].Context.Floor) continue;
-                    const auto& PA = Shapes[A].Points; const auto& PB = Shapes[B].Points;
-                    auto StrictInside = [](FVector2D P, const TArray<FVector2D>& Polygon)
-                    {
-                        for (int32 E = 0; E < Polygon.Num(); ++E) if (On(P, Polygon[E], Polygon[(E + 1) % Polygon.Num()])) return false;
-                        return Inside(P, Polygon);
-                    };
-                    bool bOverlap = PA == PB;
-                    for (auto P : PA) bOverlap |= StrictInside(P, PB);
-                    for (auto P : PB) bOverlap |= StrictInside(P, PA);
-                    for (int32 I = 0; I < PA.Num(); ++I) for (int32 J = 0; J < PB.Num(); ++J) bOverlap |= Crosses(PA[I], PA[(I + 1) % PA.Num()], PB[J], PB[(J + 1) % PB.Num()]);
-                    if (bOverlap)
+                    if (RoomAreasOverlap(Shapes[A], Shapes[B]))
                     {
                         C = Shapes[A].Context;
                         Issue(TEXT("ROOM_OVERLAP"), TEXT("Room footprint overlaps ") + Shapes[B].Context.Id + TEXT("."), TEXT("Review the overlap; keep it if it is intentional."), ESeverity::Warning);
@@ -351,6 +403,7 @@ namespace LayoutValidation
                 }
                 for (const auto& Node : Nodes)
                 {
+                    if (ShouldCancel()) return;
                     C = Node.Context;
                     for (int32 Level : Node.Floors) if (!FloorIds.Contains(Level)) Issue(TEXT("CONNECTOR_FLOOR_MISSING"), TEXT("A connector refers to an unauthored floor."), TEXT("Author that floor or update the connector's served floors."));
                     if (Node.Type.IsEmpty() || Node.Type == TEXT("pathnode") || Node.Group.IsEmpty()) continue; // The planner supports legacy ungrouped connectors.
@@ -394,11 +447,17 @@ namespace LayoutValidation
 
     FReport ValidateProject(const TSharedPtr<FJsonObject>& Project)
     {
+        return ValidateProject(Project, [] { return false; });
+    }
+
+    FReport ValidateProject(const TSharedPtr<FJsonObject>& Project, TFunctionRef<bool()> ShouldCancel)
+    {
         using namespace Private;
-        FReader Reader;
+        if (ShouldCancel()) return {};
+        FReader Reader(ShouldCancel);
         if (!Project) { Reader.Invalid(TEXT("project object")); return Reader.Report; }
         const double Scale = Reader.Number(Project, TEXT("scale"), 1);
-        if (Scale <= 0) Reader.Invalid(TEXT("positive project scale"));
+        if (Scale <= KINDA_SMALL_NUMBER || Scale > TNumericLimits<float>::Max()) Reader.Invalid(TEXT("supported project scale"));
         if (Reader.Number(Project, TEXT("floorHeight"), 300) <= 0) Reader.Invalid(TEXT("floorHeight"));
         const int32 Version = Reader.Integer(Project, TEXT("version"), 0);
         if (Version < 0) Reader.Invalid(TEXT("version"));
@@ -408,6 +467,7 @@ namespace LayoutValidation
         TMap<FString, TSharedPtr<FJsonObject>> ById;
         for (int32 B = 0; B < Buildings.Num(); ++B)
         {
+            if (ShouldCancel()) return {};
             Reader.C = {}; Reader.C.Kind = EObjectKind::Building; Reader.C.Path = FString::Printf(TEXT("$.buildings[%d]"), B);
             const auto Building = Reader.Object(Buildings[B]); if (!Building) continue;
             Reader.Id(Building, Ids); Reader.C.Building = Reader.C.Id;
@@ -416,7 +476,7 @@ namespace LayoutValidation
             ById.Add(Reader.C.Building, Building);
             Reader.String(Building, TEXT("name"), true);
             const int32 Count = Reader.Integer(Building, TEXT("floorCount"), 10);
-            if (Count < 1 || Reader.Number(Building, TEXT("floorHeight"), Reader.Number(Project, TEXT("floorHeight"), 300)) <= 0) Reader.Invalid(TEXT("building floor dimensions"));
+            if (Count < 1 || Count > MaxBuildingFloors || Reader.Number(Building, TEXT("floorHeight"), Reader.Number(Project, TEXT("floorHeight"), 300)) <= 0) Reader.Invalid(TEXT("building floor dimensions"));
             const auto Boundary = Reader.Shape(Building, true);
             if (const auto Offset = Building->Values.Find(TEXT("offset"))) Reader.XY(*Offset);
             const auto Interior = Building->Values.Find(TEXT("interior"));
@@ -430,6 +490,7 @@ namespace LayoutValidation
         // Resolve link references after indexing every building. A reciprocal saved entrance is not required.
         for (int32 B = 0; B < Buildings.Num(); ++B)
         {
+            if (ShouldCancel()) return {};
             if (!Buildings[B].IsValid() || Buildings[B]->Type != EJson::Object) continue;
             const auto Building = Buildings[B]->AsObject();
             const TSharedPtr<FJsonObject>* Interior = nullptr;
@@ -448,6 +509,7 @@ namespace LayoutValidation
                 Reader.Issue(TEXT("ENTRANCE_BUILDING_MISSING"), TEXT("Link entrance refers to a missing building: ") + Target, TEXT("Choose an existing neighbouring building."));
             }
         }
+        if (ShouldCancel()) return {};
         Reader.Report.Fingerprint = Fingerprint(Project);
         Reader.Report.Sort();
         return Reader.Report;

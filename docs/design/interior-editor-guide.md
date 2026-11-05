@@ -53,8 +53,7 @@ defaults refer to them by name; a database cannot be duplicated. A database card
 The 3D building-cluster view (before entering any building's interior) has its own top
 menu bar, same look as the interior editor's:
 
-- **File** — **New**/**Load**, same behavior and unsaved-changes check as the interior
-  editor's own File menu below.
+- **File** — **New** and **Load** prompt about unsaved changes. **Save As** saves to a path you choose, including when the original file changed on disk.
 - **Window** — **Audio** (see Audio panel below), **Map** (see Map panel below),
   **Building**, **Debug** and **Navigation** (see Navigation panel below), plus **Reset Layout**.
 - **Camera** — the free-fly camera's controls, in a dropdown: **Reset**, the typed move
@@ -150,9 +149,9 @@ left out as inert placeholder blocks.
 Pinned across the very top of the interior editor screen.
 
 - **Save** — same as `Ctrl+S`, left of File.
-- **File** — **New** clears everything and starts a blank project; **Generate floor** fills the
-  current floor (see below); **Load** opens the
-  OS file picker for an existing `buildings.json` or `.db`. New and Load check for unsaved
+- **File** — **New** starts a blank project, **Generate floor** fills the current floor,
+  and **Load** opens the OS file picker for an existing `buildings.json` or `.db`.
+  **Save As** writes the current project to a path you choose. New and Load check for unsaved
   changes first and prompt to save/discard/cancel, exactly like leaving to the
   exterior does.
 - **Window** — a checklist of the eight dockable panels (Toolbar/Floor/Properties/
@@ -329,7 +328,7 @@ toggling a category affects everything in it at once.
 
 Editing a layout clears its displayed route and cancels any search in progress. This includes live room and door drags,
 walls, connectors, floors, building changes and undo/redo. Press **Find Route** again after the edit. Room-based places are
-resolved by their saved IDs before replanning, so moved rooms get updated positions and deleted rooms are cleared.
+resolved by their saved IDs before replanning. Moved rooms get updated positions. If a place is unavailable, the editor asks you to replace or remove it before planning again.
 Changing the viewed floor/building or saving does not itself clear a route.
 
 Desktop and real-data mobile directions use the same instruction generator: straight stretches are grouped, with walking
@@ -347,8 +346,9 @@ Destination has to be set. Each place is a row with a letter or number (A and B 
 its leg on the map), a dropdown, and, on the ends, a **+** button to pick the place by clicking the map (green for the Start, red for
 the Destination while it waits for the click). Click a row's number to choose it, then **Up** / **Down** move it along the list
 (an empty end takes a place that moves onto it) and **Remove** empties an end or removes a stop. **+ Add stop** opens an empty
-row before the Destination: pick a place from its dropdown, or press its **+** and click places on the map, one after another
-(Esc or **Done** ends it). Up to 8 stops. **Reverse** turns the list round. **Clear Route** empties the list and the route.
+row after the Destination: pick a place from its dropdown, or press its **+** and click places on the map, one after another
+(Esc or **Done** ends it). What is picked becomes the new Destination and the one before it the last stop; with no Destination set
+it just becomes the Destination. Up to 8 stops. **Reverse** turns the list round. **Clear Route** empties the list and the route.
 
 **Inside a building.** The dropdowns list the open building's rooms across every floor, written as "Room name (Floor N)" (no id; the
 id can still be searched). Picking a room marks its centre; or press the **+** of the Start or Destination and click a point on
@@ -393,7 +393,7 @@ Route** hides or restores the route lines, direction arrows, markers and written
 ### Audio panel
 
 Hidden by default (Window > Audio to show it). Lists every wav file under
-`InNavi/Data/Audio/` with its own **Play** button — click to start it,
+`InNavi/Data/Audio/` with its own **Play** button. Playback accepts WAV files up to 64 MiB. Click to start a file,
 click again while it's playing to see it highlighted green; **Stop All** halts
 everything at once. Multiple files can play together (e.g. background music plus an
 effect). A **Button Click Sound** checkbox mutes/unmutes the short click sound every

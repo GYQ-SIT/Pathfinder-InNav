@@ -6,5 +6,6 @@ public class InNaviLayoutValidator : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PublicDependencyModuleNames.AddRange(new[] { "Core", "CoreUObject", "Json" });
+        PrivateDependencyModuleNames.Add("GeometryCore");
     }
 }

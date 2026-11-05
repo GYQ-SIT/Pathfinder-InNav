@@ -3,11 +3,14 @@
 #include "BuildingGenerator.h"
 #include "BuildingInfoPanelWidget.h"
 #include "EditScreenWidget.h"
+#include "InteriorRoom.h"
 #include "MapPanelWidget.h"
 #include "PolyBuilding.h"
 #include "UiTestFixture.h"
 
 #include "GameFramework/DefaultPawn.h"
+#include "EngineUtils.h"
+#include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
 
 namespace SeeThroughTests
@@ -24,6 +27,57 @@ namespace SeeThroughTests
 		// Changing the setting to what it is already still makes the controller look at the camera again.
 		Controller->SetCampusSeeThroughEnabled(Controller->IsCampusSeeThroughEnabled());
 	}
+}
+
+// While a route is being gone through the camera follows its steps and goes close to the buildings: they stay solid then, and fade with the
+// distance again when the route is hidden or cleared.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSeeThroughNavigationTest, "InNavi.Building.SeeThrough.NavigationKeepsBuildingsSolid", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSeeThroughNavigationTest::RunTest(const FString& Parameters)
+{
+	using namespace SeeThroughTests;
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	ADefaultPawn* Pawn = Fixture.World->SpawnActor<ADefaultPawn>();
+	Controller->Possess(Pawn);
+	APolyBuilding* E2 = Fixture.Generator->FindBuildingById(TEXT("E2"));
+	if (!TestNotNull(TEXT("E2"), E2) || !TestTrue(TEXT("a pawn to be the camera"), Controller->GetPawn() != nullptr))
+	{
+		return false;
+	}
+	Controller->BuildCampusInteriorPreviewForTests();
+	PutCameraAbove(Controller, E2, 500.f);
+	TestNearlyEqual(TEXT("close to the building, with no route, it is clear"), E2->GetBuildingOpacity(), ClearOpacity, 0.01f);
+	TestFalse(TEXT("no route is being gone through"), Controller->IsNavigationRouteActive());
+
+	// A route is found: the camera is as close as before, but the building is solid.
+	FNavigationRouteResult Route;
+	FNavigationRoutePoint A, B;
+	A.BuildingId = TEXT("E2"); A.Floor = 1; A.Position = FVector2D(50.f, 50.f);
+	B = A; B.Position = FVector2D(80.f, 80.f);
+	Route.Points = { A, B };
+	Fixture.Nav->ApplyRouteResult(Route);
+	TestTrue(TEXT("a route is being gone through"), Controller->IsNavigationRouteActive());
+	PutCameraAbove(Controller, E2, 500.f);
+	TestNearlyEqual(TEXT("with a route the building stays solid"), E2->GetBuildingOpacity(), 1.f, 0.01f);
+	TestEqual(TEXT("and its rooms stay out of sight"), Controller->CountShownCampusRoomsForTests(TEXT("E2")), 0);
+
+	// A building the user made transparent is theirs to decide: it stays clear.
+	Controller->SetBuildingMadeTransparent(TEXT("E2"), true);
+	TestNearlyEqual(TEXT("made transparent it is clear with a route too"), E2->GetBuildingOpacity(), ClearOpacity, 0.01f);
+	Controller->SetBuildingMadeTransparent(TEXT("E2"), false);
+
+	// Hidden or cleared: the distance decides again.
+	Fixture.Nav->SetRouteGuidanceVisible(false);
+	PutCameraAbove(Controller, E2, 500.f);
+	TestNearlyEqual(TEXT("with the route hidden the close building is clear"), E2->GetBuildingOpacity(), ClearOpacity, 0.01f);
+	Fixture.Nav->SetRouteGuidanceVisible(true);
+	PutCameraAbove(Controller, E2, 500.f);
+	TestNearlyEqual(TEXT("shown again, it is solid"), E2->GetBuildingOpacity(), 1.f, 0.01f);
+	Fixture.Nav->RequestClearRoute();
+	PutCameraAbove(Controller, E2, 500.f);
+	TestFalse(TEXT("the route is cleared: none is being gone through"), Controller->IsNavigationRouteActive());
+	TestNearlyEqual(TEXT("and the close building is clear again"), E2->GetBuildingOpacity(), ClearOpacity, 0.01f);
+	return true;
 }
 
 // The camera distance reveals a building and its rooms; the switch for every building turns that off; a building made transparent from
@@ -179,6 +233,31 @@ bool FSeeThroughPanelsTest::RunTest(const FString& Parameters)
 	Map->MoveRevealNearSliderForTests(50.f);
 	TestNearlyEqual(TEXT("moving the near slider sets the near distance"), Controller->GetCampusRevealNearDistance(), 5000.f, 0.1f);
 	TestNearlyEqual(TEXT("the far slider is pushed out with it"), Map->GetRevealFarSliderForTests(), 51.f, 0.5f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSeeThroughPreviewLifecycleTest, "InNavi.Building.SeeThrough.PreviewLifecycle", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSeeThroughPreviewLifecycleTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	Controller->Possess(Fixture.World->SpawnActor<ADefaultPawn>());
+	Controller->BuildCampusInteriorPreviewForTests();
+	Controller->SetBuildingMadeTransparent(TEXT("E2"), true);
+	const int32 Before = Controller->CountShownCampusRoomsForTests(TEXT("E2"));
+	if (!TestTrue(TEXT("the campus preview shows E2's rooms"), Before > 0)) return false;
+	Controller->LoadInteriorForBuilding(TEXT("E2"));
+	TestTrue(TEXT("a room is deleted"), Controller->DeleteRoom(TEXT("E2-01-02")));
+	const FString Path = FPaths::ProjectSavedDir() / TEXT("AutomationTemp") / (FGuid::NewGuid().ToString() + TEXT(".json"));
+	TestTrue(TEXT("the edited layout saves"), Controller->SaveCurrentProjectAs(Path));
+	Controller->RestoreExteriorCameraView();
+	TestEqual(TEXT("the exterior shows the saved rooms"), Controller->CountShownCampusRoomsForTests(TEXT("E2")), Before - 1);
+	Controller->SetCampusBuildingsVisible(false);
+	Controller->SetBuildingMadeTransparent(TEXT("E2"), true);
+	TestEqual(TEXT("hiding the shell hides its preview rooms"), Controller->CountShownCampusRoomsForTests(TEXT("E2")), 0);
+	Controller->StartNewProject();
+	TestFalse(TEXT("New clears preview actors"), static_cast<bool>(TActorIterator<AInteriorRoom>(Fixture.World)));
+	IFileManager::Get().Delete(*Path);
 	return true;
 }
 

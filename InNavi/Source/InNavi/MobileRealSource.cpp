@@ -1,6 +1,7 @@
 #include "MobileRealSource.h"
 
 #include "Algo/Reverse.h"
+#include "Async/Async.h"
 
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
@@ -36,10 +37,12 @@ namespace MobileRealData
 		FRouteWorld()
 		{
 			if (!GEngine) return;
-			World = UWorld::CreateWorld(EWorldType::Game, false);
+			const auto Init = UWorld::InitializationValues().CreatePhysicsScene(false).CreateNavigation(false).CreateAISystem(false);
+			World = UWorld::CreateWorld(EWorldType::Game, false, NAME_None, nullptr, true, ERHIFeatureLevel::Num, &Init);
 			if (!World) return;
 			GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
 			Generator = World->SpawnActor<ABuildingGenerator>();
+			if (Generator) Generator->UseNavigationGeometryOnly();
 			Interior = World->SpawnActor<AInteriorGenerator>();
 			if (Interior) Interior->DispatchBeginPlay();
 		}
@@ -136,6 +139,40 @@ struct FMobileRealSource::FProject
 	TMap<FString, TMap<int32, FMobileLevelMap>> Maps;
 	TMap<FString, TArray<FVector2D>> RoomShapes;
 	FMobileCampusMap Campus;
+	TSharedFuture<bool> Validation;
+};
+
+class FMobileRealSource::FRouteJob final : public IMobileRouteJob
+{
+public:
+	explicit FRouteJob(FMobileRoute Failure) : EarlyResult(MoveTemp(Failure)) {}
+	FRouteJob(TSharedPtr<FProject> Project, FMobilePlace InDestination, FMobilePlace InStart, const FMobileRouteRequest& InRequest)
+		: ProjectData(MoveTemp(Project)), Destination(MoveTemp(InDestination)), Start(MoveTemp(InStart)), Request(InRequest)
+	{
+		if (!ProjectData->Validation.IsValid())
+		{
+			// The project JSON is immutable. Only the data validator runs on the worker.
+			ProjectData->Validation = Async(EAsyncExecution::ThreadPool, [Json = ProjectData->Json]()
+			{
+				return !LayoutValidation::ValidateProject(Json).HasErrors();
+			}).Share();
+		}
+	}
+
+	bool Step(double BudgetSeconds, FMobileRoute& OutRoute) override;
+
+private:
+	FMobileRoute BuildRoute(const FNavigationRouteResult& Planned) const;
+	TSharedPtr<FProject> ProjectData;
+	FMobilePlace Destination;
+	FMobilePlace Start;
+	FMobileRouteRequest Request;
+	TOptional<FMobileRoute> EarlyResult;
+	TUniquePtr<MobileRealData::FRouteWorld> Context;
+	TSharedPtr<FJsonObject> StagedProject;
+	int32 NextBuilding = 0;
+	FNavigationRoutePoint To;
+	TUniquePtr<FNavigationRouteJob> Planner;
 };
 
 FMobileRealSource::~FMobileRealSource() = default;
@@ -237,34 +274,61 @@ void FMobileRealSource::IndexProject(FProject& Project)
 		if (RawId.IsEmpty() || Outline.Num() < 3 || Project.RawBuildingIds.Contains(BuildingId)) continue;
 		FMobileBuilding Building; Building.Id = BuildingId; Building.Name = String(Json, TEXT("name"), RawId);
 		if (Building.Name.IsEmpty()) Building.Name = RawId;
-		const int32 Count = FMath::Clamp(static_cast<int32>(Number(Json, TEXT("floorCount"), 10)), 1, 1000);
+		const double FloorCount = Number(Json, TEXT("floorCount"), 10);
+		if (FloorCount < 1 || FloorCount > LayoutValidation::MaxBuildingFloors || FloorCount != FMath::FloorToDouble(FloorCount)) continue;
 		const auto Interior = Child(Json, TEXT("interior"));
+		const auto& Floors = Array(Interior, TEXT("floors"));
+		int32 Count = static_cast<int32>(FloorCount);
+		TMap<FString, int32> NavigationIdCounts;
+		for (const auto& FloorValue : Floors)
+		{
+			const auto Floor = Object(FloorValue);
+			const double Level = Number(Floor, TEXT("level"), 1);
+			if (Level >= 1 && Level <= LayoutValidation::MaxBuildingFloors && Level == FMath::FloorToDouble(Level))
+				Count = FMath::Max(Count, static_cast<int32>(Level));
+			for (const auto& RoomValue : Array(Floor, TEXT("rooms")))
+			{
+				const FString Id = String(Object(RoomValue), TEXT("navigationId"));
+				if (!Id.IsEmpty()) ++NavigationIdCounts.FindOrAdd(Id);
+			}
+		}
+		// The editor expands legacy shells to include authored upper floors. Normalize the mobile
+		// snapshot too, so the catalogue, validation and the route world's floor count agree.
+		if (Count > FloorCount && (!Json->HasField(TEXT("floorCount")) || Json->HasTypedField<EJson::Number>(TEXT("floorCount"))))
+			Json->SetNumberField(TEXT("floorCount"), Count);
 		auto& Maps = Project.Maps.Add(BuildingId);
 		for (int32 Level = 1; Level <= Count; ++Level)
 		{
 			FMobileLevel Label; Label.Level = Level; Label.Label = FString::Printf(TEXT("L%d"), Level); Building.Levels.Add(Label);
 			FMobileLevelMap Map; Map.BuildingId = BuildingId; Map.Level = Level; Map.Outline = Outline; Map.bHasEntrance = false;
 			TSharedPtr<FJsonObject> Floor;
-			for (const auto& F : Array(Interior, TEXT("floors"))) if (Number(Object(F), TEXT("level"), 1) == Level) { Floor = Object(F); break; }
+			for (const auto& F : Floors) if (Number(Object(F), TEXT("level"), 1) == Level) { Floor = Object(F); break; }
 			for (const auto& RoomValue : Array(Floor, TEXT("rooms")))
 			{
 				const auto Room = Object(RoomValue);
 				bool bClosed = true; if (Room) Room->TryGetBoolField(TEXT("closed"), bClosed);
 				const auto Shape = Polygon(Room); const FString RoomId = String(Room, TEXT("id"));
 				if (!bClosed || Shape.Num() < 3 || FMath::Abs(Area(Shape)) < KINDA_SMALL_NUMBER || RoomId.IsEmpty()) continue;
-				const FString PlaceId = BuildingId + FString::Printf(TEXT("/level/%d/room/"), Level) + Escape(RoomId);
+				const FString NavigationId = String(Room, TEXT("navigationId"));
+				const FString PlaceId = NavigationIdCounts.FindRef(NavigationId) != 1
+					? BuildingId + FString::Printf(TEXT("/level/%d/room/"), Level) + Escape(RoomId)
+					: BuildingId + TEXT("/room/") + Escape(NavigationId);
 				if (Project.RoomShapes.Contains(PlaceId)) continue;
 				Project.RoomShapes.Add(PlaceId, Shape);
 				FMobileMapRoom MapRoom; MapRoom.Polygon = Shape; MapRoom.Name = String(Room, TEXT("name"), RoomId);
 				if (MapRoom.Name.IsEmpty()) MapRoom.Name = RoomId;
 				const FString Type = RoomTypes::Normalize(String(Room, TEXT("roomType")));
 				MapRoom.Category = Category(Type);
+				bool bRequiresKey = false;
+				Room->TryGetBoolField(TEXT("requireKey"), bRequiresKey);
+				MapRoom.bAvailable = String(Room, TEXT("access")) != TEXT("private") && !bRequiresKey;
 				if (Type != TEXT("Corridor") && Type != TEXT("Storage"))
 				{
 					MapRoom.PlaceId = PlaceId;
 					FMobilePlace Place; Place.Id = PlaceId; Place.Name = MapRoom.Name; // The room id is an internal one, not a door number: no code (it is still searched, below).
 					Place.SiteId = Project.Site.Id; Place.BuildingId = BuildingId; Place.BuildingName = Building.Name;
 					Place.Level = Level; Place.LevelLabel = Label.Label; Place.RoomType = Type; Place.Category = MapRoom.Category;
+					Place.bAvailable = MapRoom.bAvailable;
 					Place.Position = InteriorPoint(Shape); Place.Description = String(Room, TEXT("description"));
 					for (const auto& Tag : Array(Room, TEXT("tags"))) { FString Text; if (Tag && Tag->TryGetString(Text)) Place.Tags.Add(Text); }
 					Project.SearchText.Add(PlaceId, (Place.Name + TEXT(" ") + RoomId + TEXT(" ") + RawId + TEXT(" ") + Building.Name
@@ -369,29 +433,88 @@ FMobileCampusMap FMobileRealSource::GetCampusMap(const FString& SiteId)
 
 FMobileRoute FMobileRealSource::FindRoute(const FMobileRouteRequest& Request)
 {
+	auto Job = BeginRoute(Request);
+	FMobileRoute Route;
+	while (!Job->Step(TNumericLimits<double>::Max(), Route)) {}
+	return Route;
+}
+
+TUniquePtr<IMobileRouteJob> FMobileRealSource::BeginRoute(const FMobileRouteRequest& Request)
+{
 	using namespace MobileRealData;
+	const auto Failed = [](const TCHAR* Reason) { return MakeUnique<FRouteJob>(Failure(Reason)); };
 	FMobilePlace Destination, Start;
-	if (!FindPlace(Request.ToPlaceId, Destination)) return Failure(TEXT("Choose a destination that exists in this project."));
+	if (!FindPlace(Request.ToPlaceId, Destination)) return Failed(TEXT("Choose a destination that exists in this project."));
+	if (!Destination.bAvailable) return Failed(TEXT("The destination room is restricted."));
 	if (!Request.FromPlaceId.IsEmpty())
 	{
-		if (!FindPlace(Request.FromPlaceId, Start)) return Failure(TEXT("The starting place is no longer in the project."));
-		if (Start.SiteId != Destination.SiteId) return Failure(TEXT("Choose a start and destination in the same project."));
-		if (Start.Id == Destination.Id) return Failure(TEXT("You are already at this destination."));
+		if (!FindPlace(Request.FromPlaceId, Start)) return Failed(TEXT("The starting place is no longer in the project."));
+		if (Start.SiteId != Destination.SiteId) return Failed(TEXT("Choose a start and destination in the same project."));
+		if (!Start.bAvailable) return Failed(TEXT("The starting room is restricted."));
+		if (Start.Id == Destination.Id) return Failed(TEXT("You are already at this destination."));
 	}
-	auto& Project = *ProjectForSite(Destination.SiteId);
-	if (LayoutValidation::ValidateProject(Project.Json).HasErrors()) return Failure(TEXT("This project contains invalid layout data. Correct it in the layout editor before finding routes."));
-	FRouteWorld Context;
-	if (!Context.IsReady() || Context.Generator->LoadBuildingsFromJson(Project.Json) != Project.Buildings.Num())
-		return Failure(TEXT("The project could not be prepared for navigation."));
-	FNavigationRoutePoint To; To.BuildingId = Project.RawBuildingIds.FindChecked(Destination.BuildingId); To.Floor = Destination.Level;
-	if (!FNavigationRoutePlanner::FindRoomDestination(*Context.Generator, *Context.Interior, To.BuildingId, To.Floor, Project.RoomShapes.FindChecked(Destination.Id), To.Position))
-		return Failure(TEXT("No destination with enough wall clearance could be found inside this room."));
+	const auto* Project = Projects.FindByPredicate([&](const auto& Item) { return Item->Site.Id == Destination.SiteId; });
+	return MakeUnique<FRouteJob>(*Project, MoveTemp(Destination), MoveTemp(Start), Request);
+}
+
+bool FMobileRealSource::FRouteJob::Step(double BudgetSeconds, FMobileRoute& OutRoute)
+{
+	using namespace MobileRealData;
+	const auto Fail = [&](const TCHAR* Reason)
+	{
+		OutRoute = Failure(Reason);
+		return true;
+	};
+	if (EarlyResult)
+	{
+		OutRoute = MoveTemp(EarlyResult.GetValue());
+		return true;
+	}
+	if (Planner)
+	{
+		if (!Planner->Step(BudgetSeconds)) return false;
+		const auto& Planned = Planner->GetResult();
+		if (!Planner->Succeeded()) return Fail(Planned.Error.IsEmpty() ? TEXT("No route is available with these lift, stairs and escalator choices.") : *Planned.Error);
+		if (Planned.Points.Num() < 2) return Fail(TEXT("The planner returned no walkable route."));
+		OutRoute = BuildRoute(Planned);
+		return true;
+	}
+
+	const auto& Project = *ProjectData;
+	const auto& Buildings = Array(Project.Json, TEXT("buildings"));
+	if (!Context)
+	{
+		if (!Project.Validation.IsReady() && BudgetSeconds != TNumericLimits<double>::Max()) return false;
+		if (!Project.Validation.Get()) return Fail(TEXT("This project contains invalid layout data. Correct it in the layout editor before finding routes."));
+		if (Buildings.Num() != Project.Buildings.Num()) return Fail(TEXT("The project could not be prepared for navigation."));
+		Context = MakeUnique<FRouteWorld>();
+		if (!Context->IsReady()) return Fail(TEXT("The project could not be prepared for navigation."));
+		StagedProject = MakeShared<FJsonObject>(*Project.Json);
+		return false;
+	}
+	if (NextBuilding < Buildings.Num())
+	{
+		const double Deadline = FPlatformTime::Seconds() + BudgetSeconds;
+		do
+		{
+			StagedProject->SetArrayField(TEXT("buildings"), { Buildings[NextBuilding++] });
+			if (Context->Generator->LoadBuildingsFromJson(StagedProject) != 1)
+				return Fail(TEXT("The project could not be prepared for navigation."));
+		}
+		while (NextBuilding < Buildings.Num() && FPlatformTime::Seconds() < Deadline);
+		return false;
+	}
+
+	To.BuildingId = Project.RawBuildingIds.FindChecked(Destination.BuildingId);
+	To.Floor = Destination.Level;
+	if (!FNavigationRoutePlanner::FindRoomDestination(*Context->Generator, *Context->Interior, To.BuildingId, To.Floor, Project.RoomShapes.FindChecked(Destination.Id), To.Position))
+		return Fail(TEXT("No destination with enough wall clearance could be found inside this room."));
 	FNavigationRoutePoint From;
 	if (!Start.Id.IsEmpty())
 	{
 		From.BuildingId = Project.RawBuildingIds.FindChecked(Start.BuildingId); From.Floor = Start.Level;
-		if (!FNavigationRoutePlanner::FindRoomDestination(*Context.Generator, *Context.Interior, From.BuildingId, From.Floor, Project.RoomShapes.FindChecked(Start.Id), From.Position))
-			return Failure(TEXT("No starting point with enough wall clearance could be found inside this room."));
+		if (!FNavigationRoutePlanner::FindRoomDestination(*Context->Generator, *Context->Interior, From.BuildingId, From.Floor, Project.RoomShapes.FindChecked(Start.Id), From.Position))
+			return Fail(TEXT("No starting point with enough wall clearance could be found inside this room."));
 	}
 	else
 	{
@@ -401,15 +524,20 @@ FMobileRoute FMobileRealSource::FindRoute(const FMobileRouteRequest& Request)
 		int32 Level = Request.MyLocationLevel;
 		if (!Project.Maps.FindChecked(BuildingId).Contains(Level)) Level = Building.Levels[0].Level;
 		const auto& Map = Project.Maps.FindChecked(BuildingId).FindChecked(Level);
-		if (!Map.bHasEntrance) return Failure(TEXT("This level has no mapped entrance or navigation node. Choose a room as your starting point."));
+		if (!Map.bHasEntrance) return Fail(TEXT("This level has no mapped entrance or navigation node. Choose a room as your starting point."));
 		From.BuildingId = Project.RawBuildingIds.FindChecked(BuildingId); From.Floor = Level; From.Position = Map.Entrance;
 	}
 	FNavigationRoutePreferences Preferences; Preferences.bAllowLift = Request.Preferences.bAllowLift;
 	Preferences.bAllowStairs = Request.Preferences.bAllowStairs; Preferences.bAllowEscalator = Request.Preferences.bAllowEscalator;
-	FNavigationRouteResult Planned;
-	if (!FNavigationRoutePlanner::FindCampusRoute(*Context.Generator, *Context.Interior, From, To, Planned, Preferences))
-		return Failure(Planned.Error.IsEmpty() ? TEXT("No route is available with these lift, stairs and escalator choices.") : Planned.Error);
-	if (Planned.Points.Num() < 2) return Failure(TEXT("The planner returned no walkable route."));
+	Planner = MakeUnique<FNavigationRouteJob>(*Context->Generator, *Context->Interior, From, To, Preferences);
+	StagedProject.Reset();
+	return false;
+}
+
+FMobileRoute FMobileRealSource::FRouteJob::BuildRoute(const FNavigationRouteResult& Planned) const
+{
+	using namespace MobileRealData;
+	const auto& Project = *ProjectData;
 	FMobileRoute Result; Result.bFound = true;
 	auto MobileId = [&](const FString& Raw) { return Project.Site.Id + TEXT("/building/") + Escape(Raw); };
 	auto BuildingName = [&](const FString& Raw)

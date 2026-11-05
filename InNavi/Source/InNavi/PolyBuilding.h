@@ -39,12 +39,13 @@ public:
 	// each. Offset shifts the whole building in the XY plane (in the same units as the footprint,
 	// before scale). Footprint/Scale/Offset/FloorCount/FloorHeight are cached so the mesh can be
 	// regenerated later (see SetFloorCount) without needing them passed in again.
-	void BuildFromFootprint(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, int32 FloorCount, float FloorHeight);
+	void BuildFromFootprint(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, int32 FloorCount, float FloorHeight,
+		bool bBuildMesh = true);
 
 	// Changes floor count and regenerates the exterior mesh at the new height. This is how the
 	// interior editor's "Add floor" (or remove floor) stays in sync with the exterior shell -
 	// interior floor count is the source of truth, this just re-extrudes to match it.
-	// NewFloorCount must be >= 1; smaller values are clamped.
+	// NewFloorCount is clamped to the supported floor range.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void SetFloorCount(int32 NewFloorCount);
 
@@ -117,6 +118,7 @@ public:
 	float BuildingHeight;
 
 private:
+	bool bBuildExteriorMesh = true;
 	// Regenerates the mesh sections from the cached footprint/scale/offset and current
 	// FloorCount/FloorHeight. Called by both BuildFromFootprint and SetFloorCount.
 	void RebuildMesh();

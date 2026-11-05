@@ -2,6 +2,7 @@
 
 
 #include "PolyBuilding.h"
+#include "LayoutValidation.h"
 #include "PolygonGeometryUtils.h"
 #include "ProceduralMeshComponent.h"
 #include "KismetProceduralMeshLibrary.h"
@@ -21,7 +22,8 @@ APolyBuilding::APolyBuilding()
 	BuildingHeight = 0.f;
 }
 
-void APolyBuilding::BuildFromFootprint(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, int32 InFloorCount, float InFloorHeight)
+void APolyBuilding::BuildFromFootprint(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, int32 InFloorCount, float InFloorHeight,
+	bool bBuildMesh)
 {
 	if (Footprint.Num() < 3)
 	{
@@ -30,10 +32,11 @@ void APolyBuilding::BuildFromFootprint(const TArray<FVector2D>& Footprint, float
 	}
 
 	CachedFootprint = Footprint;
+	bBuildExteriorMesh = bBuildMesh;
 	CachedScale = Scale;
 	BuildingOffset = Offset;
 	const int32 PreviousFloorCount = FloorCount;
-	FloorCount = FMath::Max(1, InFloorCount);
+	FloorCount = FMath::Clamp(InFloorCount, 1, LayoutValidation::MaxBuildingFloors);
 	FloorHeight = InFloorHeight;
 
 	RebuildMesh();
@@ -49,7 +52,7 @@ void APolyBuilding::SetFloorCount(int32 NewFloorCount)
 	}
 
 	const int32 PreviousFloorCount = FloorCount;
-	FloorCount = FMath::Max(1, NewFloorCount);
+	FloorCount = FMath::Clamp(NewFloorCount, 1, LayoutValidation::MaxBuildingFloors);
 	RebuildMesh();
 	if (FloorCount != PreviousFloorCount) OnFloorCountChanged.Broadcast(this);
 }
@@ -59,6 +62,7 @@ void APolyBuilding::RebuildMesh()
 	const int32 N = CachedFootprint.Num();
 	const float Height = FloorCount * FloorHeight;
 	BuildingHeight = Height;
+	if (!bBuildExteriorMesh) return;
 
 	// Build the transformed 2D footprint (offset + scale)
 	TArray<FVector2D> Poly2D;

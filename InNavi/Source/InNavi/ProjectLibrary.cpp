@@ -1,4 +1,5 @@
 #include "ProjectLibrary.h"
+#include "ProjectFile.h"
 
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
@@ -27,14 +28,14 @@ namespace
 		return FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), OutRoot) && OutRoot.IsValid();
 	}
 
-	bool WriteProjectJson(const FString& FilePath, const TSharedRef<FJsonObject>& Root)
+	bool WriteProjectJson(const FString& FilePath, const TSharedRef<FJsonObject>& Root, bool bReplace)
 	{
 		FString Text;
 		if (!FJsonSerializer::Serialize(Root, TJsonWriterFactory<>::Create(&Text)))
 		{
 			return false;
 		}
-		return FFileHelper::SaveStringToFile(Text, *FilePath);
+		return ProjectFile::WriteText(FilePath, Text, bReplace);
 	}
 
 	// How many buildings a database holds: the campus ones (tagged "university"), which are the ones the editor opens.
@@ -184,7 +185,7 @@ bool ProjectLibrary::Duplicate(const FProjectLibraryEntry& Entry, const FString&
 		return false;
 	}
 	Root->SetStringField(TEXT("projectName"), CopyName);
-	if (!WriteProjectJson(CopyPath, Root.ToSharedRef()))
+	if (!WriteProjectJson(CopyPath, Root.ToSharedRef(), false))
 	{
 		OutError = TEXT("The copy could not be written - check that the Data folder can be written to.");
 		return false;
@@ -214,6 +215,12 @@ bool ProjectLibrary::Rename(const FProjectLibraryEntry& Entry, const FString& Ne
 		OutError = TEXT("The name needs at least one letter or number.");
 		return false;
 	}
+	const ProjectFile::FMutationLock Lock;
+	if (!Lock.IsValid())
+	{
+		OutError = TEXT("Another editor is changing a project. Try again.");
+		return false;
+	}
 	const bool bSameFile = FPaths::GetCleanFilename(NewPath).Equals(Entry.FileName, ESearchCase::IgnoreCase);
 	if (!bSameFile && IFileManager::Get().FileExists(*NewPath))
 	{
@@ -227,16 +234,19 @@ bool ProjectLibrary::Rename(const FProjectLibraryEntry& Entry, const FString& Ne
 		return false;
 	}
 	Root->SetStringField(TEXT("projectName"), Name);
-	if (!WriteProjectJson(NewPath, Root.ToSharedRef()))
+	if (!WriteProjectJson(bSameFile ? Entry.FilePath : NewPath, Root.ToSharedRef(), bSameFile))
 	{
 		OutError = TEXT("The project file could not be written - check that the Data folder can be written to.");
 		return false;
 	}
-	if (!bSameFile)
+	if (!bSameFile && !IFileManager::Get().Delete(*Entry.FilePath, true, false, true))
 	{
-		IFileManager::Get().Delete(*Entry.FilePath);
+		OutError = IFileManager::Get().Delete(*NewPath, true, false, true)
+			? TEXT("The original project could not be removed. The rename was rolled back.")
+			: TEXT("The original project could not be removed and the renamed copy could not be cleaned up. Both files may be present.");
+		return false;
 	}
-	OutNewPath = NewPath;
+	OutNewPath = bSameFile ? Entry.FilePath : NewPath;
 	return true;
 }
 
@@ -247,6 +257,12 @@ bool ProjectLibrary::SoftDelete(const FProjectLibraryEntry& Entry, const FString
 	if (Entry.bIsSample)
 	{
 		OutError = TEXT("The sample files that come with the project cannot be deleted.");
+		return false;
+	}
+	const ProjectFile::FMutationLock Lock;
+	if (!Lock.IsValid())
+	{
+		OutError = TEXT("Another editor is changing a project. Try again.");
 		return false;
 	}
 	if (!IFileManager::Get().FileExists(*Entry.FilePath))
@@ -264,7 +280,7 @@ bool ProjectLibrary::SoftDelete(const FProjectLibraryEntry& Entry, const FString
 		const FString Suffix = Attempt == 0 ? Stamp : FString::Printf(TEXT("%s-%d"), *Stamp, Attempt + 1);
 		Target = DeletedFolder / FString::Printf(TEXT("%s (deleted %s).%s"), *FPaths::GetBaseFilename(Entry.FileName), *Suffix, *FPaths::GetExtension(Entry.FileName));
 	}
-	if (!IFileManager::Get().Move(*Target, *Entry.FilePath))
+	if (!ProjectFile::MoveWithoutReplacement(Entry.FilePath, Target))
 	{
 		OutError = TEXT("The project file could not be moved - it may be open in another program.");
 		return false;

@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 
 // What kind of building a building is: one value from a fixed list, like a room's type (RoomTypes.h). Stored in a project
-// file as "buildingType" (left out when it is Other, so older files load unchanged). The same list colours and filters the
+// file as "buildingType" (a file without it, from before types, reads as Other). The same list colours and filters the
 // buildings of the map database.
 //
 // Colour is how a type is shown for now. APolyBuilding and AContextBuildingActor each read it in one place (ApplyBodyColor),

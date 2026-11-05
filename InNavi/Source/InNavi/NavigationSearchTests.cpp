@@ -82,6 +82,7 @@ bool FNavigationRoomTagsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Cleared tags are empty"), Fixture.Interior->GetRoomTags(Id).IsEmpty());
 	const TArray<FVector2D> CopyFootprint = Fixture.Interior->GetRoomById(Id)->GetFootprint();
 	Fixture.Interior->SetActiveFloor(Options[0].Floor);
+	if (!TestTrue(TEXT("The old room is removed to free its footprint"), Fixture.Interior->DeleteRoom(Id))) return false;
 	FString CreationError;
 	AInteriorRoom* Copy = Fixture.Interior->CreateRoomFromFootprintWithTags(CopyFootprint, TEXT("Tags-Copy-Test"),
 		TEXT("Tags copy"), true, false, true, CreationError, { TEXT("copied-tag") });
@@ -144,6 +145,7 @@ bool FNavigationRoomTypeTest::RunTest(const FString& Parameters)
 
 	const TArray<FVector2D> CopyFootprint = Fixture.Interior->GetRoomById(Id)->GetFootprint();
 	Fixture.Interior->SetActiveFloor(Options[0].Floor);
+	if (!TestTrue(TEXT("The old room is removed to free its footprint"), Fixture.Interior->DeleteRoom(Id))) return false;
 	FString CreationError;
 	AInteriorRoom* Copy = Fixture.Interior->CreateRoomFromFootprintWithTags(CopyFootprint, TEXT("Type-Copy-Test"),
 		TEXT("Type copy"), true, false, true, CreationError, {}, TEXT("Toilet"));

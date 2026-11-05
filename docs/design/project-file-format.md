@@ -64,6 +64,13 @@ A complete file to open and read is `docs/test-data/entrance-test-2-with-doors.j
 | `floorHeight` | number > 0 | Height of one floor, in cm, for buildings that do not say their own | 300 |
 | `projectName`, `description` | string | What the project library shows | empty |
 | `buildings` | array | **Required.** The buildings | - |
+| `contextBuildings` | array | The buildings around the campus of a map database, shown as blocks on the map. Each is `{ "buildingType", "footprint": [[x, y], ...] }`, in footprint units | none |
+| `roads` | array | The roads of a map database. Each is `{ "highway", "points": [[x, y], ...] }`: `highway` is the road's own kind in the database (primary, residential, footway ...), which sets its width and colour | none |
+| `pois` | array | Not written any more and not shown: a file saved by an earlier build may have it (`{ "poiType", "position": [x, y] }`), and it is read past | none |
+
+A project made by opening a map database (a `.db` file) and saving it keeps all of it: the campus `buildings` with their types, and the
+`contextBuildings` and `roads` around them, so the saved file shows the same map as the database did (without the places of interest). A project
+drawn in the editor has neither.
 
 **A building** (`buildings[]`)
 
@@ -73,7 +80,7 @@ A complete file to open and read is `docs/test-data/entrance-test-2-with-doors.j
 | `name` | string | **Required.** Shown to people | - |
 | `footprint` | array of `[x, y]`, at least 3 | **Required.** The outline, in footprint units. Edge *i* runs from point *i* to point *i* + 1 (the last to the first) | the building is skipped (a warning in the log) |
 | `offset` | `[x, y]` | Where the building stands among the others, in footprint units | `[0, 0]` |
-| `buildingType` | string | One of the types of the editor (`BuildingTypes.h`: University, School, Residential, Commercial, Public, Transport, Utility, Other); the colour and the filter of the building on the map. A value that is not on the list reads as Other | Other |
+| `buildingType` | string | One of the types of the editor (`BuildingTypes.h`: University, School, Residential, Commercial, Public, Transport, Utility, Other); the colour and the filter of the building on the map. Always written (Other too). A value that is not on the list reads as Other | Other |
 | `floorCount` | integer >= 1 | How many floors | 10 |
 | `floorHeight` | number > 0 | In cm | the file's |
 | `interior` | object | The floors and doors of the building (below) | an empty building |
@@ -116,19 +123,22 @@ worked out, not stored.
 
 ## Versions
 
-The file says which format wrote it (`version`, **1** now), and every build reads older files:
+The file says which format wrote it (`version`, **2** now for a project with the map around the campus, **1** for any other), and every build reads older files:
 
 - A file **without** `version` was made before versions existed. It is the same format as 1 and is read as it is.
 - A file with a **newer** version than the build knows is read as well as it can be, with a warning in the log; fields that build does not know are ignored.
 - **Adding** an optional field does not change the version: older builds ignore it and older files simply do not have it (the defaults above apply).
 - **Changing what a field means**, removing one, or making an optional one required **raises the version**, and the loader keeps reading the older one (converting it as it loads). The change
   is written down here, in the list below, in the same commit.
-- Saving always writes the current version, so opening an old file and saving it is the conversion.
+- Saving writes the version the project needs: **2** when it holds the map around the campus (`contextBuildings`, `roads`), **1** otherwise. Opening an old file and saving it is the conversion.
+- A build that reads only version 1 and opens a version 2 file still shows the buildings, but it would not write the map back. A build that knows the check
+  asks for a new file name instead of saving over it, so the map is not lost.
 
 | Version | What it is |
 |---------|-----------|
 | 0 | Files saved before `version` existed. The same layout as 1; they may lack the optional fields that were added later (for example `projectName`, `description`, `entrances`, `rotationDegrees`, `sizeScale`), and the defaults above apply |
-| 1 | The current format |
+| 1 | Buildings, interiors and the doors in the outer wall |
+| 2 | Version 1 and the map around the campus: `contextBuildings` and `roads` at the top of the file. Written only when the project has them |
 
 `InNavi.Project.FileVersion` (in `NewProjectTests.cpp`) checks that a project says its version and that files without one, or with a newer one, still open; saving and loading again gives
 back what was saved.

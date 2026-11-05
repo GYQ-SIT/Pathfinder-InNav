@@ -307,10 +307,7 @@ void UProjectLibraryWidget::OpenProject(const FProjectLibraryEntry& Entry)
 		return;
 	}
 	ShowMessage(FString());
-	// A failed load is reported through OnActionFailed (shown under the header). A project with no buildings yet loads
-	// as zero buildings but becomes the current file, which counts as opened.
-	const int32 Count = PC->LoadBuildingDataFromPathOrDatabase(Entry.FilePath);
-	if (Count > 0 || PC->GetCurrentProjectFilePath() == Entry.FilePath)
+	if (PC->TryLoadBuildingDataFromPathOrDatabase(Entry.FilePath))
 	{
 		GoToEditScreen();
 	}

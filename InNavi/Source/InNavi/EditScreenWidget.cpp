@@ -288,6 +288,8 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		FileNewButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnFileNewClicked);
 		UButton* FileLoadButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileLoad"), TEXT("Load"));
 		FileLoadButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnFileLoadClicked);
+		UButton* FileSaveAsButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileSaveAs"), TEXT("Save As"));
+		FileSaveAsButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnFileSaveAsClicked);
 
 		WindowMenuDropdown = ConstructDropdown(TEXT("Pnl_WindowDropdown"), EditMenuBarLeftMargin + EditSaveButtonWidth + EditMenuButtonWidth);
 		UVerticalBox* WindowDropdownStack = Cast<UVerticalBox>(WindowMenuDropdown->GetContent());
@@ -913,6 +915,12 @@ void UEditScreenWidget::HandleFileNewCancel()
 	// Nothing to do - the dialog already removed itself.
 }
 
+void UEditScreenWidget::OnFileSaveAsClicked()
+{
+	CloseMenuDropdowns();
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) PC->SaveCurrentProjectToNewLocation();
+}
+
 void UEditScreenWidget::OnFileLoadClicked()
 {
 	CloseMenuDropdowns();
@@ -930,8 +938,10 @@ void UEditScreenWidget::OnFileLoadClicked()
 	}
 	if (!PC->HasUnsavedChanges())
 	{
-		PC->LoadBuildingDataFromPathOrDatabase(FilePath);
-		HandleBuildingSelected(FString());
+		if (PC->TryLoadBuildingDataFromPathOrDatabase(FilePath))
+		{
+			HandleBuildingSelected(FString());
+		}
 		return;
 	}
 	PendingLoadFilePath = FilePath;
@@ -948,23 +958,22 @@ void UEditScreenWidget::HandleFileLoadSave()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		if (!PC->SaveCurrentProject())
+		if (PC->SaveCurrentProject() && PC->TryLoadBuildingDataFromPathOrDatabase(PendingLoadFilePath))
 		{
-			return;
+			HandleBuildingSelected(FString());
 		}
-		PC->LoadBuildingDataFromPathOrDatabase(PendingLoadFilePath);
 	}
-	HandleBuildingSelected(FString());
 }
 
 void UEditScreenWidget::HandleFileLoadDiscard()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		PC->DiscardUnsavedChanges();
-		PC->LoadBuildingDataFromPathOrDatabase(PendingLoadFilePath);
+		if (PC->TryLoadBuildingDataFromPathOrDatabase(PendingLoadFilePath))
+		{
+			HandleBuildingSelected(FString());
+		}
 	}
-	HandleBuildingSelected(FString());
 }
 
 void UEditScreenWidget::HandleFileLoadCancel()

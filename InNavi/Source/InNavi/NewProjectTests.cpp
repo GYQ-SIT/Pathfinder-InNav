@@ -81,6 +81,12 @@ bool FNewProjectCreateTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("with its name"), Fixture.Generator->GetProjectName(), FString(TEXT("Campus Navigation")));
 	TestEqual(TEXT("and its description"), Fixture.Generator->GetProjectDescription(), FString(TEXT("Demo of the flow")));
 
+	// A file in place of the destination directory forces the creation write to fail.
+	Controller->SetProjectsDirectoryOverrideForTests(File);
+	TestFalse(TEXT("creation fails when its directory cannot be written"), Controller->CreateNewProject(TEXT("Blocked"), FString(), Error));
+	TestEqual(TEXT("a failed creation keeps the current file"), Controller->GetCurrentProjectFilePath(), File);
+	TestEqual(TEXT("and keeps the current project"), Fixture.Generator->GetProjectName(), FString(TEXT("Campus Navigation")));
+
 	// A project saved with buildings keeps its name too.
 	Controller->StartNewProject();
 	TestEqual(TEXT("a fresh New starts without a name"), Fixture.Generator->GetProjectName(), FString());
@@ -164,12 +170,12 @@ bool FProjectFileVersionTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("the file is valid JSON"), FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Root) && Root.IsValid());
 	if (Root.IsValid())
 	{
-		TestEqual(TEXT("it holds the current version"), (int32)Root->GetNumberField(TEXT("version")), ABuildingGenerator::ProjectFileVersion);
+		TestEqual(TEXT("it holds the version of a project without a map"), (int32)Root->GetNumberField(TEXT("version")), ABuildingGenerator::BasicProjectFileVersion);
 	}
 	Fixture.Interior->ClearLoadedInterior();
 	Fixture.Generator->ClearAllBuildings();
 	TestTrue(TEXT("the saved file loads"), Fixture.Generator->LoadBuildingsFromFile(Saved) > 0);
-	TestEqual(TEXT("and reads back as it"), Fixture.Generator->GetLoadedFileVersion(), ABuildingGenerator::ProjectFileVersion);
+	TestEqual(TEXT("and reads back as it"), Fixture.Generator->GetLoadedFileVersion(), ABuildingGenerator::BasicProjectFileVersion);
 
 	// A file from a newer build still opens (it is read as well as it can be).
 	const FString Future = Directory / TEXT("future.json");

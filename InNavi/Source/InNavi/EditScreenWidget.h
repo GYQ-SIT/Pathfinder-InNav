@@ -175,6 +175,8 @@ private:
 
 	UFUNCTION()
 	void OnFileLoadClicked();
+	UFUNCTION()
+	void OnFileSaveAsClicked();
 
 	UFUNCTION()
 	void HandleFileNewSave();

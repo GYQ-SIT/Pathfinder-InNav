@@ -15,6 +15,24 @@ if (pkg.version !== pin || descriptor.VersionName !== pin) throw Error('Installe
 const targetArg = process.argv.indexOf('--destination');
 const destination = targetArg < 0 ? join(root, 'InNavi/Plugins/InNaviLayoutValidator') : resolve(process.argv[targetArg + 1]);
 const checkOnly = process.argv.includes('--check');
+const allowUnreleased = process.argv.includes('--allow-unreleased');
+if (allowUnreleased && !checkOnly) throw Error('--allow-unreleased requires --check');
+const localDescriptor = await readFile(join(destination, 'InNaviLayoutValidator.uplugin'), 'utf8').then(JSON.parse, error => {
+  if (error.code !== 'ENOENT') throw error;
+  return null;
+});
+if (localDescriptor && localDescriptor.VersionName !== pin) {
+  const localVersion = localDescriptor.VersionName;
+  const localPackage = JSON.parse(await readFile(join(destination, 'package.json'), 'utf8'));
+  const versionParts = /^\d+\.\d+\.\d+$/.test(localVersion) ? localVersion.split('.').map(Number) : [];
+  const pinnedParts = pin.split('.').map(Number);
+  const difference = versionParts.findIndex((part, index) => part !== pinnedParts[index]);
+  if (allowUnreleased && localPackage.version === localVersion && difference >= 0 && versionParts[difference] > pinnedParts[difference]) {
+    console.log(`Using checked-in ${name}@${localVersion} while the registry consumer pins ${pin}`);
+    process.exit(0);
+  }
+  throw Error(`Plugin destination is at ${localVersion}; installing or verifying ${pin} here would use a different version`);
+}
 const files = ['InNaviLayoutValidator.uplugin', 'Source', 'README.md', 'CHANGELOG.md', 'Examples', 'package.json'];
 async function manifest(base, items = files) {
   const result = {};
@@ -42,6 +60,7 @@ if (checkOnly) {
   const stage = destination + '.install-stage';
   await mkdir(stage, { recursive: false });
   const replaced = [];
+  let keepRecoveryFiles = false;
   try {
     for (const item of files) await cp(join(source, item), join(stage, item), { recursive: true });
     for (const item of files) {
@@ -53,11 +72,20 @@ if (checkOnly) {
       await rename(join(stage, item), old);
     }
   } catch (error) {
+    const recoveryErrors = [];
     for (const {item, existed} of replaced.reverse()) {
-      await rm(join(destination, item), { recursive: true, force: true });
-      if (existed) await rename(join(stage, item + '.previous'), join(destination, item));
+      try {
+        await rm(join(destination, item), { recursive: true, force: true });
+        if (existed) await rename(join(stage, item + '.previous'), join(destination, item));
+      } catch (recoveryError) {
+        recoveryErrors.push(recoveryError);
+      }
+    }
+    if (recoveryErrors.length) {
+      keepRecoveryFiles = true;
+      throw new AggregateError([error, ...recoveryErrors], 'Plugin rollback was incomplete; remaining originals are in ' + stage);
     }
     throw error;
-  } finally { await rm(stage, { recursive: true, force: true }); }
+  } finally { if (!keepRecoveryFiles) await rm(stage, { recursive: true, force: true }); }
   console.log(`Installed ${name}@${pin} into ${destination}`);
 }

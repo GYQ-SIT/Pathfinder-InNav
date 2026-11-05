@@ -1,9 +1,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Async/Future.h"
 #include "LayoutValidation.h"
 #include "Containers/Ticker.h"
 #include "UObject/Object.h"
+#include <atomic>
 #include "LayoutValidationSession.generated.h"
 
 class ABuildingGenerator;
@@ -44,7 +46,8 @@ public:
     static TSharedRef<FJsonObject> Capture(const ABuildingGenerator& Buildings, const AInteriorGenerator& Interior);
     virtual void BeginDestroy() override;
 private:
-    void BeginValidate(const FString& ScopeBuildingId);
+    void BeginValidate(const FString& ScopeBuildingId, bool bAsync);
+    void BeginRouteChecks();
     void FinishValidate();
     // After an issue has been viewed: the layout is now written a little differently (see the definition); brings the report up to date.
     void RefreshAfterViewing();
@@ -55,7 +58,12 @@ private:
     int32 DataIssueCount = 0;
     void StopTicker();
     bool TickValidate(float DeltaTime);
+    void CancelDataCheck();
     TSharedPtr<FNavigationLayoutCheck> Check;
+    TFuture<LayoutValidation::FReport> DataCheck;
+    TSharedPtr<std::atomic<bool>> DataCheckCancelled;
+    uint64 BuildingRevision = 0;
+    uint64 InteriorRevision = 0;
     FString RunScope;
     bool bRunning = false;
     FTSTicker::FDelegateHandle TickHandle;

@@ -189,9 +189,9 @@ The numbers are measured, on the data of the repository, in `performance.md` (re
 
 | What | How | Where |
 |------|-----|-------|
-| Build, static analysis, tests | every push and pull request to `main`: a clean-checkout build (adaptive unity off), MSVC `/analyze` with a failing check on a finding in the product code, every automation test with a failing check on the report | `.github/workflows/build-windows.yml`, a self-hosted Windows runner |
+| Build, static analysis, tests | Every push to `main` runs a clean-checkout build with adaptive unity disabled, MSVC `/analyze`, and every automation test. | `.github/workflows/build-windows.yml`, a self-hosted Windows runner |
 | Lint | JSON, secrets, configuration in code, headers, links of the documents | `.github/workflows/lint.yml`, GitHub-hosted; `scripts/lint.py` |
-| JSON data | every `InNavi/Data/*.json` parses | `.github/workflows/validate-json.yml`, the team12 VM runner |
+| JSON data | JSON files under `InNavi/Data` parse, including subdirectories | `.github/workflows/validate-json.yml`, a GitHub-hosted runner |
 | Release build | a tag `m<n>-build-<k>` packages the Windows build, starts it once as a smoke test and publishes it as a GitHub release | `.github/workflows/release-windows.yml`, `scripts/package-windows.ps1` |
 | Plugin package | a tag `innavi-layout-validator-v<x.y.z>` publishes the source package to GitHub Packages; the product installs the exact pinned version | `.github/workflows/publish-layout-validator.yml`, `package.json` |
 | Documentation (the team wiki) | every push to `main` that changes `docs/` rebuilds the MkDocs site and publishes it | `.github/workflows/deploy-wiki.yml`; **http://51.79.240.111:5000/** |

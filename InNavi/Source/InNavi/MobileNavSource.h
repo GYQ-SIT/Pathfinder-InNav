@@ -225,6 +225,14 @@ struct FMobileRoute
 	TArray<FMobileRoutePoint> Points;
 };
 
+class INNAVI_API IMobileRouteJob
+{
+public:
+	virtual ~IMobileRouteJob() = default;
+	// Returns true once OutRoute is ready. Run on the game thread.
+	virtual bool Step(double BudgetSeconds, FMobileRoute& OutRoute) = 0;
+};
+
 class INNAVI_API IMobileNavSource
 {
 public:
@@ -241,6 +249,8 @@ public:
 	// False if there is no such place.
 	virtual bool FindPlace(const FString& PlaceId, FMobilePlace& OutPlace) = 0;
 	virtual FMobileRoute FindRoute(const FMobileRouteRequest& Request) = 0;
+	// Sources that can answer immediately can leave this empty and use FindRoute.
+	virtual TUniquePtr<IMobileRouteJob> BeginRoute(const FMobileRouteRequest& Request) { return nullptr; }
 	// A level of a building as a floor plan; false if the site has no such level.
 	virtual bool GetLevelMap(const FString& BuildingId, int32 Level, FMobileLevelMap& OutMap) = 0;
 	// The site from above (a single building site has just that building).

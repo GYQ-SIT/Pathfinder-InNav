@@ -102,8 +102,8 @@ These are standard deliverables required of all teams. Owners TBD.
 | R01 | GitHub repository & workflow (branches, PRs, clean structure) | Repo organized; PR-based workflow in use | Not reviewed this pass |
 | R02 | Jira project & backlog (Epics → Stories/Tasks with owners) | Epics for T01–T04 with stories and assignees | Not reviewed this pass |
 | R03 | Architecture (system design + tech stack) | `docs/architecture.md` with diagram | Exists; **v1.0 (2026-10-28)** adds the layers (UI, application, services, data access, stored data), the boundary between them, the delivery pipeline and the measured numbers, with an owner for each component; v0.2 (2026-10-23) brought it in line with what is built (own route planner instead of a NavMesh, the dock UI, doors between buildings, the phone app) |
-| R04 | Automated build (CI) | Build runs automatically on push | **Done for the build, not for the package** — on every push and pull request to `main`, `.github/workflows/build-windows.yml` (a self-hosted Windows runner) builds `InNaviEditor` (Win64 Development) from a clean checkout as one unity build, runs the MSVC static analysis over the C++ and fails on any finding in the product code, then runs the tests (R05). `lint.yml` (GitHub-hosted) checks JSON, secrets, configuration, headers and document links; `validate-json.yml` and `deploy-wiki.yml` run on the team12 VM runner (`team12-ovh-vm`). Pushing a tag `m<n>-build-<k>` runs `release-windows.yml`, which packages the Windows build, starts it once as a smoke test and publishes it as a GitHub release (see `README.md`, "Releases"). The Windows checks wait ("Queued") whenever the machine hosting the runner is off (see "CI/CD" note below) |
-| R05 | Automated checks / tests | At least basic checks run in CI | **Done** — CI runs **every** UE automation test (`InNavi.*`, about 165: the dock layout, the editor, the route planner and campus routing, the navigation panel, the phone app and its data interface, the layout validator, and the `InNavi.Performance` measurements) and fails the pull request when one fails or fewer than 150 ran (`scripts/check-test-report.ps1`; the editor itself exits 0 either way). The report and the performance measurements are kept with each run as an artifact. Budgets and numbers: `docs/performance.md` |
+| R04 | Automated build (CI) | Build runs automatically on push | Each push to `main` runs the Windows editor build, MSVC static analysis and Unreal tests on the self-hosted runner. Pull requests run lint and JSON validation on GitHub-hosted runners. The team12 VM publishes the wiki, and pushing a release tag runs packaging and the Windows smoke test. |
+| R05 | Automated checks / tests | At least basic checks run in CI | The Windows workflow runs all `InNavi.*` automation tests and fails if any fail or fewer than 150 complete. It retains the report and performance measurements as artifacts. See `docs/performance.md` for budgets and measurements. |
 | R06 | Reproducible dev environment | README lets a teammate clone, set up, and run | `README.md` has real build/run/test steps, how to try the phone app, and the repository layout; `docs/test-data/` has a project to try doors and campus routes with |
 | R07 | Working technical proof of concept | Core risks demonstrated running (see T01–T04) | T01–T04 all demonstrated (T04 confirmed 2026-09-25) |
 | R08 | Basic error handling | App does not crash on bad/empty input | Interior editor validates most inputs (bounds/overlap/wall-collision checks, unsaved-changes prompts) - not audited team-wide |
@@ -115,12 +115,11 @@ These are standard deliverables required of all teams. Owners TBD.
 Ubuntu 24.04) is confirmed too underpowered/wrong-platform to compile this UE5 Windows
 project (no Windows toolchain, likely not enough RAM even if it had one), so
 the compile step runs on a self-hosted runner on a capable Windows PC
-(`.github/workflows/build-windows.yml`, added 2026-09-30: it builds `InNaviEditor` on every push and pull request to `main`).
-The check waits in the queue while that PC (or its runner) is off. A tag also builds the release package there (`release-windows.yml`). (It also builds with adaptive unity off, so the code is compiled as it is on a clean checkout: that found two helper functions named `Write` that could not be built together, now renamed.)
-What the VM *is* now doing: it runs a registered self-hosted Actions runner
-(`team12-ovh-vm`, installed as a systemd service so it survives reboots/disconnects) that
-handles lightweight checks not requiring UE5 - currently JSON validation
-(`.github/workflows/validate-json.yml`) when `InNavi/Data/*.json` changes in a push to `main` or a pull request; it also publishes the wiki (`deploy-wiki.yml`, on every push to `main` that changes `docs/` or `mkdocs.yml`). Access is
+(`.github/workflows/build-windows.yml` builds `InNaviEditor` on pushes to `main`).
+The check waits in the queue while that PC (or its runner) is off. The release workflow verifies that the milestone tag points to a commit on `main` before the Windows runner builds that exact commit. Run manual releases from `main`. Restrict who can create or move release tags and who can run jobs on the persistent Windows runner, since GitHub can load older workflow definitions from tags pointing to older commits.
+The VM runs a registered self-hosted Actions runner
+(`team12-ovh-vm`, installed as a systemd service) for wiki publishing from `main`.
+JSON validation runs on a GitHub-hosted runner for data changes on `main` and pull requests. VM access is
 via a shared `team12` SSH login (see `FullStack_OVH_team12.pdf` - team-shared per DigiPen,
 not to be shared outside the team) using key-based auth.
 

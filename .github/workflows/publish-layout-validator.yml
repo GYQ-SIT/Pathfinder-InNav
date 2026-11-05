@@ -32,11 +32,12 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Resolve consumer lock and verify installed source
         run: |
-          npm install --ignore-scripts
+          VERSION=$(node -p 'require("./InNavi/Plugins/InNaviLayoutValidator/package.json").version')
+          npm install --ignore-scripts --save-exact "@gyq-sit/innavi-layout-validator@$VERSION"
           node scripts/install-layout-validator.mjs --check
           mkdir -p registry-artifacts
-          cp package-lock.json registry-artifacts/
-          npm pack @gyq-sit/innavi-layout-validator@$(node -p 'require("./package.json").dependencies["@gyq-sit/innavi-layout-validator"]') --ignore-scripts --pack-destination registry-artifacts
+          cp package.json package-lock.json registry-artifacts/
+          npm pack "@gyq-sit/innavi-layout-validator@$VERSION" --ignore-scripts --pack-destination registry-artifacts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4

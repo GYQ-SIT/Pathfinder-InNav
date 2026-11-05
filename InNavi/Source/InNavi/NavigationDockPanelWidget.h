@@ -82,7 +82,7 @@ public:
 	void HandleSlotButton(int32 SlotIndex, bool bPick);
 	void HandleSlotChosen(int32 SlotIndex, const FString& Item, ESelectInfo::Type SelectionType);
 
-	// How many rows the list can show: the start, the most stops, a row to add a stop in, and the destination.
+	// How many rows the list can show: the start, the most stops, the destination, and a row to add a place in (after the destination).
 	static constexpr int32 MaxSlots = 11;
 
 protected:

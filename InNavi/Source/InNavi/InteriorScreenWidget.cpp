@@ -635,6 +635,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		FileNewButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileNewClicked);
 		UButton* FileLoadButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileLoad"), TEXT("Load"));
 		FileLoadButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileLoadClicked);
+		UButton* FileSaveAsButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileSaveAs"), TEXT("Save As"));
+		FileSaveAsButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileSaveAsClicked);
 		UButton* FileGenerateFloorButton = AddDropdownButtonRow(FileDropdownStack, TEXT("Btn_FileGenerateFloor"), TEXT("Generate floor"));
 		FileGenerateFloorButton->SetToolTip(MakeToolTipWidget(TEXT("Fill this floor with rooms along its outer wall and a core beside each door")));
 		FileGenerateFloorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFileGenerateFloorClicked);
@@ -2278,7 +2280,7 @@ void UInteriorScreenWidget::HandleSelectedEntranceChanged(FString EntranceId)
 		return;
 	}
 
-	const FInteriorEntrance* Entrance = PC->FindEntrance(EntranceId);
+	const FInteriorEntrance* Entrance = PC->GetSelectedEntrance();
 	if (!Entrance)
 	{
 		return;
@@ -3202,8 +3204,14 @@ void UInteriorScreenWidget::HandleSwitchBuildingDiscard()
 	SaveDockLayoutToDisk();
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
+		const FString PreviousBuildingId = PC->GetLoadedBuildingId();
 		PC->DiscardUnsavedChanges();
-		PC->LoadInteriorForBuildingAfterDiscard(PendingBuildingId);
+		if (PC->LoadInteriorForBuildingAfterDiscard(PendingBuildingId) < 0 &&
+			PC->LoadInteriorForBuildingAfterDiscard(PreviousBuildingId) < 0)
+		{
+			GoToEditScreen();
+			return;
+		}
 	}
 	RefreshAfterBuildingSwitch();
 }
@@ -3706,6 +3714,12 @@ void UInteriorScreenWidget::OnFileGenerateFloorClicked()
 	}
 }
 
+void UInteriorScreenWidget::OnFileSaveAsClicked()
+{
+	CloseMenuDropdowns();
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) PC->SaveCurrentProjectToNewLocation();
+}
+
 void UInteriorScreenWidget::OnFileLoadClicked()
 {
 	CloseMenuDropdowns();
@@ -3726,9 +3740,10 @@ void UInteriorScreenWidget::OnFileLoadClicked()
 
 	if (!PC->HasUnsavedChanges())
 	{
-		PC->RestoreExteriorCameraView();
-		PC->LoadBuildingDataFromPathOrDatabase(FilePath);
-		GoToEditScreen();
+		if (PC->TryLoadBuildingDataFromPathOrDatabase(FilePath))
+		{
+			GoToEditScreen();
+		}
 		return;
 	}
 
@@ -3746,25 +3761,22 @@ void UInteriorScreenWidget::HandleFileLoadSave()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		if (!PC->SaveCurrentProject())
+		if (PC->SaveCurrentProject() && PC->TryLoadBuildingDataFromPathOrDatabase(PendingLoadFilePath))
 		{
-			return;
+			GoToEditScreen();
 		}
-		PC->RestoreExteriorCameraView();
-		PC->LoadBuildingDataFromPathOrDatabase(PendingLoadFilePath);
 	}
-	GoToEditScreen();
 }
 
 void UInteriorScreenWidget::HandleFileLoadDiscard()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
-		PC->DiscardUnsavedChanges();
-		PC->RestoreExteriorCameraView();
-		PC->LoadBuildingDataFromPathOrDatabase(PendingLoadFilePath);
+		if (PC->TryLoadBuildingDataFromPathOrDatabase(PendingLoadFilePath))
+		{
+			GoToEditScreen();
+		}
 	}
-	GoToEditScreen();
 }
 
 void UInteriorScreenWidget::HandleFileLoadCancel()
