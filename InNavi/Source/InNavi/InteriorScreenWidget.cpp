@@ -1,6 +1,7 @@
 #include "InteriorScreenWidget.h"
 #include "DockHostUMG.h"
 #include "InteriorDockLayout.h"
+#include "DockSharedPanels.h"
 #include "NavigationSearchUtils.h"
 #include "InteriorDoorColors.h"
 #include "InteriorEntrance.h"
@@ -1436,6 +1437,9 @@ void UInteriorScreenWidget::InitializeDockLayout()
 	}
 
 	InteriorDock::LoadLayout(*DockHost->GetLayout(), GetCanvasSize());
+	// The panels this screen has in common with the exterior one (Audio, Map, ...) are where that screen left them.
+	DockSharedPanels::ApplyPublished(*DockHost->GetLayout());
+	bSharedPanelsTaken = true;
 	DockHost->NotifyLayoutChanged();
 	RefreshWindowMenuChecks();
 }
@@ -1470,6 +1474,10 @@ void UInteriorScreenWidget::CancelNavigationPickIfNavigationHidden()
 
 void UInteriorScreenWidget::HandleDockLayoutChanged()
 {
+	if (bSharedPanelsTaken && DockHost)
+	{
+		DockSharedPanels::Publish(*DockHost->GetLayout());
+	}
 	RefreshWindowMenuChecks();
 }
 

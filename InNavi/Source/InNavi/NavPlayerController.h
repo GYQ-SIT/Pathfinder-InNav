@@ -1180,6 +1180,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void SetAllUiSoundsEnabled(bool bEnabled);
 
+	// Whether the sounds were all muted at once (Mute All) and are still all off: what the Audio panel's Mute All box shows when a screen builds
+	// it. Turning one of the three sounds back on by itself ends it.
+	bool AreAllUiSoundsMuted() const { return bUiSoundsMuted && !bButtonClickSoundEnabled && !bBuildingSelectSoundEnabled && !bQuitConfirmSoundEnabled; }
+
 	// Multiplies the volume of every sound this class plays (the Audio panel's own file playback and
 	// all three short UI effects) - see PlayWavFile, which applies this to every UAudioComponent it
 	// creates. Clamped to [0, 1]. Live-updates every currently-playing ActiveAudioPlaybacks entry too,
@@ -1782,6 +1786,9 @@ private:
 
 	// See IsQuitConfirmSoundEnabled/SetQuitConfirmSoundEnabled's own comment.
 	bool bQuitConfirmSoundEnabled = true;
+
+	// See AreAllUiSoundsMuted.
+	bool bUiSoundsMuted = false;
 
 	// See PlayDirectionsSound and PlayArrivalSound.
 	bool bDirectionsSoundEnabled = true;

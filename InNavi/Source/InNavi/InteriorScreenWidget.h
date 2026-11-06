@@ -1040,4 +1040,7 @@ private:
 	TArray<float> DockPanelWidths;
 
 	bool bDockLayoutInitialized = false;
+	// Set once the layout has taken over the shared panels' places from the other screen (see DockSharedPanels.h); a change of the layout
+	// before that must not publish the places it had on its own.
+	bool bSharedPanelsTaken = false;
 };

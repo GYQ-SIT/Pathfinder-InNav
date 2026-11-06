@@ -12,6 +12,7 @@
 #include "ConfirmDialogWidget.h"
 #include "DockHostUMG.h"
 #include "ExteriorDockLayout.h"
+#include "DockSharedPanels.h"
 #include "InteriorScreenWidget.h"
 #include "NavPlayerController.h"
 #include "StartScreenWidget.h"
@@ -1089,6 +1090,9 @@ void UEditScreenWidget::InitializeDockLayout()
 	}
 
 	ExteriorDock::LoadLayout(*DockHost->GetLayout(), GetCanvasSize());
+	// The panels this screen has in common with the interior one (Audio, Map, ...) are where that screen left them.
+	DockSharedPanels::ApplyPublished(*DockHost->GetLayout());
+	bSharedPanelsTaken = true;
 	DockHost->NotifyLayoutChanged();
 	RefreshWindowMenuChecks();
 	if (AudioPanelWidget)
@@ -1128,6 +1132,10 @@ void UEditScreenWidget::HandleDockPanelClosed(FName Panel)
 
 void UEditScreenWidget::HandleDockLayoutChanged()
 {
+	if (bSharedPanelsTaken && DockHost)
+	{
+		DockSharedPanels::Publish(*DockHost->GetLayout());
+	}
 	RefreshWindowMenuChecks();
 }
 

@@ -5604,6 +5604,7 @@ void ANavPlayerController::PlayArrivalSound()
 
 void ANavPlayerController::SetAllUiSoundsEnabled(bool bEnabled)
 {
+	bUiSoundsMuted = !bEnabled;
 	bButtonClickSoundEnabled = bEnabled;
 	bBuildingSelectSoundEnabled = bEnabled;
 	bQuitConfirmSoundEnabled = bEnabled;

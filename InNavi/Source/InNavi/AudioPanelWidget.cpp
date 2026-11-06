@@ -120,6 +120,11 @@ void UAudioPanelWidget::Refresh()
 		{
 			QuitConfirmSoundCheckbox->SetIsChecked(PC->IsQuitConfirmSoundEnabled());
 		}
+		// Mute All is a state of the controller too: built unticked, it showed "not muted" on the screen opened after muting.
+		if (MuteAllCheckbox)
+		{
+			MuteAllCheckbox->SetIsChecked(PC->AreAllUiSoundsMuted());
+		}
 		if (VolumeSlider)
 		{
 			VolumeSlider->SetValue(PC->GetMasterVolume());
