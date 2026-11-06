@@ -787,6 +787,10 @@ void UEditScreenWidget::GoToStartScreen()
 	// user is back at the initial page with no editor UI left to stop it from.
 	PC->StopAllAudio();
 
+	// Going back to the start screen closes the project (the person has just saved it or discarded it, or it had no changes): nothing of it stays
+	// in the scene behind the start screen, or in the controller for the next New / Open to meet.
+	PC->CloseProject();
+
 	if (UStartScreenWidget* Screen = CreateWidget<UStartScreenWidget>(PC, UStartScreenWidget::StaticClass()))
 	{
 		Screen->AddToViewport();

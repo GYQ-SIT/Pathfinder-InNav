@@ -110,6 +110,46 @@ bool FDatabaseProjectKeepsEverythingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// Closing the project (going back to the start screen) leaves nothing of it: not the buildings, the roads or the buildings around the campus in
+// the scene, not the file path, the unsaved-changes flag, the open interior or the navigation places; and the next project opens clean.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDatabaseProjectCloseTest, "InNavi.Project.CloseProject", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FDatabaseProjectCloseTest::RunTest(const FString& Parameters)
+{
+	using namespace DatabaseProjectTests;
+	FNavigationSearchFixture Fixture;
+	const FString Database = FPaths::ProjectDir() / TEXT("Data/map_extended.db");
+	ANavPlayerController* Controller = Fixture.MakeController();
+	ABuildingGenerator* Generator = Fixture.Generator;
+	if (!TestTrue(TEXT("the database is opened"), Controller->LoadBuildingDataFromPathOrDatabase(Database) > 0))
+	{
+		return false;
+	}
+	const FMapSnapshot Opened = Describe(Fixture.World, *Generator);
+	TestTrue(TEXT("there is a campus, buildings around it and roads"), Opened.CampusTypes.Num() > 0 && Opened.ContextTypes.Num() > 0 && Opened.Roads > 0);
+	Controller->CreateRectangleBuilding(TEXT("CLOSE-1"), TEXT("Drawn"), FVector2D(0.0, 0.0), 400.f, 400.f, 0.f, 2, 300.f);
+	TestTrue(TEXT("a building was drawn: unsaved changes"), Controller->HasUnsavedChanges());
+	Fixture.Nav->ToggleSelectDestination();
+
+	Controller->CloseProject();
+	const FMapSnapshot Closed = Describe(Fixture.World, *Generator);
+	TestTrue(TEXT("no building is left"), Closed.CampusTypes.IsEmpty() && Generator->GetAllBuildings().IsEmpty());
+	TestTrue(TEXT("none around the campus"), Closed.ContextTypes.IsEmpty());
+	TestEqual(TEXT("no road"), Closed.Roads, 0);
+	TestFalse(TEXT("no unsaved changes"), Controller->HasUnsavedChanges());
+	TestTrue(TEXT("no file"), Controller->GetCurrentProjectFilePath().IsEmpty());
+	TestTrue(TEXT("no interior open"), Controller->GetLoadedBuildingId().IsEmpty());
+	TestTrue(TEXT("nothing is being picked on the map"), !Fixture.Nav->IsSelectingPoint());
+	TestTrue(TEXT("and the navigation places are empty"), !Fixture.Nav->HasStart() && !Fixture.Nav->HasDestination() && Fixture.Nav->GetPlaceCount() == 2);
+
+	// The next project opens clean: the same as the first time, not on top of the old one.
+	TestTrue(TEXT("the database is opened again"), Controller->LoadBuildingDataFromPathOrDatabase(Database) > 0);
+	const FMapSnapshot Again = Describe(Fixture.World, *Generator);
+	TestEqual(TEXT("with the same campus"), Text(Again.CampusTypes), Text(Opened.CampusTypes));
+	TestEqual(TEXT("and the same buildings around it"), Text(Again.ContextTypes), Text(Opened.ContextTypes));
+	TestEqual(TEXT("and the same roads"), Again.Roads, Opened.Roads);
+	return true;
+}
+
 // The map of a project file is read with care: a point that is not two numbers is left out (not read as 0), a road needs two points and a
 // building around the campus three, and opening a project ends the tools of the one that was open.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FDatabaseProjectCarefulReadTest, "InNavi.Project.Database.MapIsReadWithCare", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)

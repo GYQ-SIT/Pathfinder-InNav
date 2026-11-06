@@ -365,6 +365,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void StartNewProject();
 
+	// Closes the project that is open: the same clearing as StartNewProject (every building, interior, road and building around the campus
+	// destroyed; selection, navigation, tools, undo history, file path and unsaved-changes flag reset), for the screens that go back to the start
+	// screen. Call it only once the person has chosen to leave (saved or discarded): it throws the open project away.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void CloseProject();
+
 	// The folder project files live in (InNavi/Data, as an absolute path) - where New project writes its file and where
 	// the Open dialog starts.
 	FString GetProjectsDirectory() const;
@@ -1542,6 +1548,9 @@ private:
 	// initial FocusCameraOnBuilding and to re-frame when the active floor changes (see
 	// RepositionCameraToActiveFloor).
 	void PositionCameraForFloor(APolyBuilding* Building, int32 Level);
+
+	// What StartNewProject and CloseProject share: everything of the open project, gone.
+	void ClearProjectState();
 
 	// Re-runs PositionCameraForFloor for whichever building/floor is currently loaded - called after
 	// SetActiveFloor/AddFloor/RemoveFloor so the camera follows floor changes made while already

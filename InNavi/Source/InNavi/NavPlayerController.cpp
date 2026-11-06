@@ -2740,6 +2740,22 @@ int32 ANavPlayerController::LoadBuildingData(const FString& FilePath, bool bData
 
 void ANavPlayerController::StartNewProject()
 {
+	ClearProjectState();
+	FocusCameraOnAllBuildings();
+
+	UE_LOG(LogTemp, Warning, TEXT("Started a new, blank project"));
+}
+
+void ANavPlayerController::CloseProject()
+{
+	ClearProjectState();
+	FocusCameraOnAllBuildings();
+
+	UE_LOG(LogTemp, Warning, TEXT("Closed the project"));
+}
+
+void ANavPlayerController::ClearProjectState()
+{
 	FinishRotationGesture();
 	ExitAllMouseTools();
 	CancelNavigationPicking();
@@ -2784,10 +2800,6 @@ void ANavPlayerController::StartNewProject()
 	SelectedDoorId.Empty();
 	PendingRoomFootprint.Reset();
 	SelectedBuilding = nullptr;
-
-	FocusCameraOnAllBuildings();
-
-	UE_LOG(LogTemp, Warning, TEXT("Started a new, blank project"));
 }
 
 void ANavPlayerController::FocusCameraOnBuilding(APolyBuilding* Building)

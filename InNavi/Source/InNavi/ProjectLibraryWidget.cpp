@@ -419,6 +419,11 @@ void UProjectLibraryWidget::GoBack()
 	{
 		return;
 	}
+	// The library is reached from the start screen: going back leaves no project open.
+	if (ANavPlayerController* NavController = Cast<ANavPlayerController>(PC))
+	{
+		NavController->CloseProject();
+	}
 	if (UStartScreenWidget* Start = CreateWidget<UStartScreenWidget>(PC, UStartScreenWidget::StaticClass()))
 	{
 		Start->AddToViewport();
