@@ -223,6 +223,9 @@ private:
 	UFUNCTION()
 	void OnRoomSizeTextChanged(const FText& Text);
 	UFUNCTION()
+	void OnRoomSizeTextCommitted(const FText& Text, ETextCommit::Type CommitType);
+	bool ApplyRoomDimensions();
+	UFUNCTION()
 	void OnResizeStepChanged(float Value);
 	bool bRoomSizeDirty = false;
 	bool bUpdatingRoomBounds = false;

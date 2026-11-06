@@ -23,6 +23,13 @@ static const FVector2D FloorPlanResizeDirections[] = {
 	{-1,-1}, {0,-1}, {1,-1}, {1,0}, {1,1}, {0,1}, {-1,1}, {-1,0}
 };
 
+static TArray<FVector2D> FloorPlanHandleDirections(FVector2D Size)
+{
+	if (FMath::IsNearlyZero(Size.X)) return {{0,-1}, {0,1}};
+	if (FMath::IsNearlyZero(Size.Y)) return {{-1,0}, {1,0}};
+	return TArray<FVector2D>(FloorPlanResizeDirections, UE_ARRAY_COUNT(FloorPlanResizeDirections));
+}
+
 TArray<FVector2D> UInteriorFloorPlanWidget::GetResizeHandles(FVector2D WidgetSize) const
 {
 	TArray<FVector2D> Handles;
@@ -30,9 +37,10 @@ TArray<FVector2D> UInteriorFloorPlanWidget::GetResizeHandles(FVector2D WidgetSiz
 	const APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
 	FVector2D Position, Size, Origin;
 	float PixelsPerUnit = 0;
-	if (!Building || !PlayerController->GetSelectedRoomBounds(Position, Size) || Size.X <= 0 || Size.Y <= 0) return Handles;
+	if (!Building || !PlayerController->GetSelectedRoomBounds(Position, Size) || Size.GetMax() <= 0) return Handles;
+	if (bIsResizingRoom) { Position = ResizePreviewPosition; Size = ResizePreviewSize; }
 	ComputeViewTransform(WidgetSize, Origin, PixelsPerUnit);
-	for (const FVector2D& Direction : FloorPlanResizeDirections)
+	for (const FVector2D& Direction : FloorPlanHandleDirections(Size))
 	{
 		const FVector2D Point = Position + Size * 0.5 + FVector2D(Direction.X * Size.X, Direction.Y * Size.Y) * 0.5;
 		Handles.Add(WidgetSize * 0.5 + ((Point + Building->BuildingOffset) * Generator->GetScale() - Origin) * PixelsPerUnit);
@@ -61,12 +69,18 @@ void UInteriorFloorPlanWidget::ResizeAtLocalPosition(FVector2D LocalPosition, FV
 		PlayerController->GetSelectedRoomId() != DraggingRoomId || InteriorGen->GetActiveFloor() != DragFloor ||
 		InteriorGen->GetLoadedBuildingId() != DragBuildingId) return;
 	const FVector2D Point = LocalPositionToFootprintPoint(LocalPosition, WidgetSize);
-	const FVector2D Direction = FloorPlanResizeDirections[ResizeHandleIndex];
-	FVector2D Size = ResizeStartSize;
-	if (Direction.X != 0) Size.X = (Point.X - ResizeCenter.X) * Direction.X * 2;
-	if (Direction.Y != 0) Size.Y = (Point.Y - ResizeCenter.Y) * Direction.Y * 2;
-	if (Size.X <= 0 || Size.Y <= 0 || Size.Equals(FBox2D(DragTarget->GetFootprint()).GetSize(), 1e-6)) return;
-	bResizeChanged |= PlayerController->ResizeRoomDuringDrag(DraggingRoomId, Size);
+	FVector2D Min = ResizeStartPosition, Max = ResizeStartPosition + ResizeStartSize;
+	const float Minimum = InteriorEditing::MinimumDimensionCm / PlayerController->GetBuildingScale();
+	const bool bRoom = DragTarget->IsClosedLoop();
+	const double MinX = bRoom || FMath::IsNearlyZero(ResizeStartSize.Y) || ResizeStartSize.Y < Minimum ? Minimum : UE_KINDA_SMALL_NUMBER;
+	const double MinY = bRoom || FMath::IsNearlyZero(ResizeStartSize.X) || ResizeStartSize.X < Minimum ? Minimum : UE_KINDA_SMALL_NUMBER;
+	if (ResizeDirection.X > 0) Max.X = FMath::Max(Point.X, Min.X + MinX);
+	if (ResizeDirection.X < 0) Min.X = FMath::Min(Point.X, Max.X - MinX);
+	if (ResizeDirection.Y > 0) Max.Y = FMath::Max(Point.Y, Min.Y + MinY);
+	if (ResizeDirection.Y < 0) Min.Y = FMath::Min(Point.Y, Max.Y - MinY);
+	ResizePreviewPosition = Min;
+	ResizePreviewSize = Max - Min;
+	bResizeChanged = !ResizePreviewPosition.Equals(ResizeStartPosition, 1e-6) || !ResizePreviewSize.Equals(ResizeStartSize, 1e-6);
 }
 
 void UInteriorFloorPlanWidget::NativeConstruct()
@@ -179,10 +193,11 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 				if (FVector2D::DistSquared(LocalPosition, Handles[Index]) > 81.0) continue;
 				FVector2D Position;
 				if (!PlayerController->GetSelectedRoomBounds(Position, ResizeStartSize)) break;
-				ResizeCenter = Position + ResizeStartSize * 0.5;
+				ResizeStartPosition = ResizePreviewPosition = Position;
+				ResizePreviewSize = ResizeStartSize;
 				bIsResizingRoom = true;
 				bResizeChanged = false;
-				ResizeHandleIndex = Index;
+				ResizeDirection = FloorPlanHandleDirections(ResizeStartSize)[Index];
 				DraggingRoomId = PlayerController->GetSelectedRoomId();
 				DragTarget = InteriorGen->GetRoomById(DraggingRoomId);
 				DragStartRoomFootprint = DragTarget->GetFootprint();
@@ -347,8 +362,9 @@ void UInteriorFloorPlanWidget::FinishEditDrag()
 	if (bIsResizingRoom)
 	{
 		bIsResizingRoom = false;
-		if (bResizeChanged && InteriorGen && DragTarget.IsValid() && InteriorGen->GetLoadedBuildingId() == DragBuildingId)
-			InteriorGen->RecordHistorySnapshot();
+		if (bResizeChanged && InteriorGen && DragTarget.IsValid() && PlayerController && PlayerController->IsInSelectMode() &&
+			PlayerController->GetSelectedRoomId() == DraggingRoomId && InteriorGen->GetActiveFloor() == DragFloor && InteriorGen->GetLoadedBuildingId() == DragBuildingId)
+			PlayerController->ResizeRoomToBounds(DraggingRoomId, ResizePreviewPosition, ResizePreviewSize);
 	}
 	if (bIsDraggingDoor)
 	{
@@ -1465,10 +1481,21 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox")), ESlateDrawEffect::None, FLinearColor(0.2f, 0.7f, 1.f));
 	}
 	TArray<FVector2D> Preview = GetPrefabPreview();
+	if (bIsResizingRoom && DragTarget.IsValid())
+	{
+		Preview.Reserve(DragStartRoomFootprint.Num() + 1);
+		for (const FVector2D& Point : DragStartRoomFootprint)
+		{
+			const FVector2D Offset = Point - ResizeStartPosition;
+			Preview.Add(ResizePreviewPosition + FVector2D(
+				FMath::IsNearlyZero(ResizeStartSize.X) ? 0.0 : Offset.X * ResizePreviewSize.X / ResizeStartSize.X,
+				FMath::IsNearlyZero(ResizeStartSize.Y) ? 0.0 : Offset.Y * ResizePreviewSize.Y / ResizeStartSize.Y));
+		}
+	}
 	if (!Preview.IsEmpty())
 	{
 		for (FVector2D& Point : Preview) Point = WorldToLocal((Point + Building->BuildingOffset) * Scale);
-		Preview.Add(Preview[0]);
+		if (!bIsResizingRoom || (DragTarget.IsValid() && DragTarget->IsClosedLoop())) Preview.Add(Preview[0]);
 		FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 9, AllottedGeometry.ToPaintGeometry(), Preview,
 			ESlateDrawEffect::None, FLinearColor(1.f, 0.6f, 0.f), true, 3.f);
 	}

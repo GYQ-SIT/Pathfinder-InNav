@@ -45,6 +45,8 @@ class INNAVI_API UNavigationPlaceCombo : public UComboBoxString
 public:
 	void Setup(UNavigationDockPanelWidget* InPanel, int32 InSlot);
 	void SetSearchText(const FString& Query);
+	const FString& GetSearchText() const { return SearchQuery; }
+	void RefreshPlaceOptions(const TArray<FString>& Labels, const FString& Current);
 	int32 GetFilteredOptionCount() const { return FilteredOptions.Num(); }
 	FString GetFilteredOption(int32 Index) const { return FilteredOptions.IsValidIndex(Index) ? *FilteredOptions[Index] : FString(); }
 	virtual void ReleaseSlateResources(bool bReleaseChildren) override;
@@ -56,6 +58,7 @@ private:
 	UFUNCTION()
 	void HandleChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
 	friend struct FEditorInteractionTestAccess;
+	friend struct FEditorFeedbackTestAccess;
 	void SearchChanged(const FText& Text);
 	void SearchCommitted(const FText& Text, ETextCommit::Type CommitType);
 	FReply HandleSearchKey(const FGeometry& Geometry, const FKeyEvent& Event);
@@ -65,6 +68,7 @@ private:
 	TWeakObjectPtr<UNavigationDockPanelWidget> Panel;
 	int32 SlotIndex = INDEX_NONE;
 	TArray<TSharedPtr<FString>> FilteredOptions;
+	FString SearchQuery;
 	TSharedPtr<class SEditableTextBox> SearchField;
 	FEditableTextBoxStyle SearchStyle;
 	TSharedPtr<SListView<TSharedPtr<FString>>> SearchResults;

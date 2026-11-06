@@ -797,11 +797,13 @@ public:
 
 	// Rescales a room/wall to fit new Width (X) / Depth (Y) dimensions, keeping it centered where
 	// it is (see AInteriorGenerator::ResizeRoom) - general-purpose, explicit-id version. See also
-	// GrowSelectedRoom/ShrinkSelectedRoom. Not wired into UMG yet.
+	// GrowSelectedRoom/ShrinkSelectedRoom and the Properties width/depth fields.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth);
-	// Drag previews validate every size but create a single undo entry when committed.
+	// Applies an intermediate size without recording history; callers must commit their undo entry.
 	bool ResizeRoomDuringDrag(const FString& RoomId, FVector2D Size);
+	// Commits the anchored bounds from a handle's outline preview, with validation and one undo entry.
+	bool ResizeRoomToBounds(const FString& RoomId, FVector2D Position, FVector2D Size);
 	float GetRoomResizeStepMetres() const { return RoomResizeStepMetres; }
 	void SetRoomResizeStepMetres(float Metres);
 	float GetConnectorResizeStepPercent() const { return ConnectorScaleStep * 100.f; }
@@ -1173,6 +1175,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void SetQuitConfirmSoundEnabled(bool bEnabled) { bQuitConfirmSoundEnabled = bEnabled; }
 
+	UFUNCTION(BlueprintPure, Category = "Audio")
+	bool IsActionFailureSoundEnabled() const { return bActionFailureSoundEnabled; }
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void SetActionFailureSoundEnabled(bool bEnabled) { bActionFailureSoundEnabled = bEnabled; }
+
 	// The phone app's "Get directions": plays Data/Audio/UI_Dull_08.wav once the route page has opened for the start and the destination
 	// that were chosen (see UMobileAppWidget::SendSheetEvent). Its own flag; SetAllUiSoundsEnabled(false) mutes it too. Fire-and-forget
 	// like the other short effects; a missing or unreadable file is silent.
@@ -1203,8 +1210,8 @@ public:
 	void SetAllUiSoundsEnabled(bool bEnabled);
 
 	// Whether the sounds were all muted at once (Mute All) and are still all off: what the Audio panel's Mute All box shows when a screen builds
-	// it. Turning one of the three sounds back on by itself ends it.
-	bool AreAllUiSoundsMuted() const { return bUiSoundsMuted && !bButtonClickSoundEnabled && !bBuildingSelectSoundEnabled && !bQuitConfirmSoundEnabled; }
+	// it. Turning any individual sound back on ends it.
+	bool AreAllUiSoundsMuted() const { return bUiSoundsMuted && !bButtonClickSoundEnabled && !bBuildingSelectSoundEnabled && !bQuitConfirmSoundEnabled && !bActionFailureSoundEnabled && !bDirectionsSoundEnabled && !bNextInstructionSoundEnabled && !bArrivalSoundEnabled; }
 
 	// Multiplies the volume of every sound this class plays (the Audio panel's own file playback and
 	// all three short UI effects) - see PlayWavFile, which applies this to every UAudioComponent it
@@ -1252,10 +1259,11 @@ protected:
 
 private:
 	friend struct FEditorInteractionTestAccess;
+	friend struct FEditorFeedbackTestAccess;
 	UFUNCTION()
 	void HandleActionFailureSound(FString Reason, EActionFailureSeverity Severity);
 	bool bActionFailureSoundEnabled = true;
-	float RoomResizeStepMetres = 0.5f;
+	float RoomResizeStepMetres = InteriorEditing::DefaultResizeStepMetres;
 
 	void BindGameWindowCloseGuard(class UGameViewportClient* Viewport);
 	void UnbindGameWindowCloseGuard();

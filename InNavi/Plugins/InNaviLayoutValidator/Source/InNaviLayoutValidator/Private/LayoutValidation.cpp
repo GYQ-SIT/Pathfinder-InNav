@@ -257,7 +257,7 @@ namespace LayoutValidation
                     Area += A.X * B.Y - B.X * A.Y;
                     for (int32 J = I + 2; J < Edges; ++J)
                     {
-                        if (bClosed && I == 0 && J == Edges - 1) continue;
+                        if ((bClosed || Points[0].Equals(Points.Last(), Epsilon)) && I == 0 && J == Edges - 1) continue;
                         if (Touches(A, B, Points[J], Points[(J + 1) % Points.Num()]))
                         { Issue(TEXT("GEOMETRY_SELF_INTERSECTION"), TEXT("Non-adjacent footprint edges intersect."), TEXT("Redraw the intersecting edges."), bClosed ? ESeverity::Error : ESeverity::Warning); break; }
                     }

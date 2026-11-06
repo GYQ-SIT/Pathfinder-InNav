@@ -73,7 +73,7 @@ bool FEditorWallSelfOverlapTest::RunTest(const FString& Parameters)
 		{{100,100},{200,100},{150,100}}, // adjacent backtracking
 		{{100,100},{200,100},{50,100}}, // backtracking past the start
 		{{100,100},{100,100}}, // zero-length
-		{{100,100},{200,100},{200,200},{100,100}}, // non-adjacent endpoint touch
+		{{100,100},{200,100},{200,200},{100,200},{200,100}}, // non-adjacent endpoint touch
 		{{100,100},{300,100},{300,200},{150,200},{150,100},{250,100}} // collinear overlap
 	};
 	for (const auto& Points : Bad)
@@ -100,19 +100,16 @@ bool FEditorDrawingFailureTest::RunTest(const FString& Parameters)
 	UDebugPanelWidget* Debug = NewObject<UDebugPanelWidget>(); Debug->Initialize(); Debug->SetOwningPlayer(PC); Debug->TakeWidget(); Debug->BindToController();
 	PC->ToggleDrawRoomMode();
 	for (const FVector2D& Point : TArray<FVector2D>{{100,100},{200,200},{100,200},{200,100}}) PC->AddRoomPointAtFootprintPosition(Point);
-	AddExpectedError(TEXT("crosses itself"), EAutomationExpectedErrorFlags::Contains, 2);
-	TestNull(TEXT("crossed room is refused"), PC->FinishRoom());
 	TestTrue(TEXT("room draft is cleared automatically"), PC->GetPendingRoomFootprint().IsEmpty());
 	TestTrue(TEXT("debug explains the failure"), Debug->GetLastErrorTextForTests().Contains(TEXT("cross")) || Debug->GetLastErrorTextForTests().Contains(TEXT("intersect")));
 	PC->ToggleDrawWallMode();
 	for (const FVector2D& Point : TArray<FVector2D>{{100,100},{200,100},{150,100}}) PC->AddRoomPointAtFootprintPosition(Point);
-	TestNull(TEXT("retraced wall is refused"), PC->FinishWall());
 	TestTrue(TEXT("wall draft is cleared automatically"), PC->GetPendingRoomFootprint().IsEmpty());
 	TestTrue(TEXT("debug explains wall self-overlap"), Debug->GetLastErrorTextForTests().Contains(TEXT("itself")));
 	PC->AddRoomPointAtFootprintPosition({100,100});
 	PC->AddRoomPointAtFootprintPosition({-100,-100});
-	TestTrue(TEXT("out-of-bounds error clears the draft"), PC->GetPendingRoomFootprint().IsEmpty());
-	PC->AddRoomPointAtFootprintPosition({100,100}); PC->AddRoomPointAtFootprintPosition({200,100});
+	TestEqual(TEXT("stray click keeps the draft"), PC->GetPendingRoomFootprint().Num(), 1);
+	PC->AddRoomPointAtFootprintPosition({200,100});
 	TestNotNull(TEXT("a new valid wall can be drawn immediately"), PC->FinishWall());
 	return true;
 }

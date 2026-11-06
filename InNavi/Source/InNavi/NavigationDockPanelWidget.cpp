@@ -68,40 +68,13 @@ namespace
 		return Row == 0 ? StartColor : (Row == Count - 1 ? DestinationColor : UNavigationRouteVisualization::LegColor2D(Row - 1));
 	}
 
-	// The letter or number a place is known by: A and B at the ends, 1, 2 ... between.
+	// A/B for a two-place route; A then 1, 2 ... for a route with additional places.
 	FString PlaceBadge(int32 Row, int32 Count)
 	{
-		return Row == 0 ? FString(TEXT("A")) : (Row == Count - 1 ? FString(TEXT("B")) : FString::FromInt(Row));
+		return Row == 0 ? FString(TEXT("A")) : (Count == 2 ? FString(TEXT("B")) : FString::FromInt(Row));
 	}
 
 	using FRoomOption = UNavigationPanelWidget::FNavigationRoomOption;
-
-	// Fills a dropdown with the places the search matches, and puts what the row shows back as its first entry and chosen (ClearOptions
-	// wipes it, but does not touch the navigation state): a place can be in another building, or picked on the map, and is then not
-	// in the list.
-	void FillPlaceCombo(UComboBoxString* Combo, const TArray<FRoomOption>& Matches, const FString& Current)
-	{
-		Combo->ClearOptions();
-		if (!Current.IsEmpty())
-		{
-			Combo->AddOption(Current);
-		}
-		for (const FRoomOption& Option : Matches)
-		{
-			if (Option.GetDisplayLabel() != Current)
-			{
-				Combo->AddOption(Option.GetDisplayLabel());
-			}
-		}
-		if (!Current.IsEmpty())
-		{
-			Combo->SetSelectedOption(Current);
-		}
-		else
-		{
-			Combo->ClearSelection();
-		}
-	}
 }
 
 void UNavigationPlaceButton::Setup(UNavigationDockPanelWidget* InPanel, int32 InSlot, bool bInPick)
@@ -171,7 +144,7 @@ TSharedRef<SWidget> UNavigationPlaceCombo::RebuildWidget()
 			})
 		]);
 	MyComboBox->SetMenuContentWidgetToFocus(SearchField);
-	SetSearchText(FString());
+	SetSearchText(SearchQuery);
 	return Result;
 }
 
@@ -184,13 +157,47 @@ void UNavigationPlaceCombo::ReleaseSlateResources(bool bReleaseChildren)
 
 void UNavigationPlaceCombo::SetSearchText(const FString& Query)
 {
-	FilteredOptions.Reset();
-	if (Panel.IsValid())
+	const TArray<FString> Labels = Panel.IsValid() ? Panel->SearchPlaces(Query) : TArray<FString>();
+	const bool bNewQuery = Query != SearchQuery;
+	bool bSame = Labels.Num() == FilteredOptions.Num();
+	for (int32 I = 0; bSame && I < Labels.Num(); ++I) bSame = Labels[I] == *FilteredOptions[I];
+	FString Highlighted;
+	if (SearchResults.IsValid() && !SearchResults->GetSelectedItems().IsEmpty()) Highlighted = *SearchResults->GetSelectedItems()[0];
+	SearchQuery = Query;
+	if (!bSame)
 	{
-		for (const FString& Label : Panel->SearchPlaces(Query)) FilteredOptions.Add(MakeShared<FString>(Label));
+		FilteredOptions.Reset();
+		for (const FString& Label : Labels) FilteredOptions.Add(MakeShared<FString>(Label));
 	}
-	if (SearchResults.IsValid()) { SearchResults->ClearSelection(); SearchResults->RequestListRefresh(); }
-	if (SearchField.IsValid() && SearchField->GetText().ToString() != Query) SearchField->SetText(FText::FromString(Query));
+	if (SearchResults.IsValid() && (!bSame || bNewQuery))
+	{
+		SearchResults->ClearSelection();
+		if (!bNewQuery) for (const auto& Option : FilteredOptions) if (*Option == Highlighted) SearchResults->SetSelection(Option, ESelectInfo::OnNavigation);
+		SearchResults->RequestListRefresh();
+	}
+	if (SearchField.IsValid() && SearchField->GetText().ToString() != SearchQuery) SearchField->SetText(FText::FromString(SearchQuery));
+}
+
+void UNavigationPlaceCombo::RefreshPlaceOptions(const TArray<FString>& Labels, const FString& Current)
+{
+	TArray<FString> Desired;
+	if (!Current.IsEmpty()) Desired.Add(Current);
+	for (const FString& Label : Labels) if (Label != Current) Desired.Add(Label);
+	bool bSame = Desired.Num() == GetOptionCount();
+	for (int32 I = 0; bSame && I < Desired.Num(); ++I) bSame = Desired[I] == GetOptionAtIndex(I);
+	const bool bWasOpen = MyComboBox.IsValid() && MyComboBox->IsOpen();
+	if (!bSame)
+	{
+		ClearOptions();
+		for (const FString& Label : Desired) AddOption(Label);
+	}
+	if (Current != GetSelectedOption())
+	{
+		if (Current.IsEmpty()) ClearSelection();
+		else SetSelectedOption(Current);
+	}
+	SetSearchText(SearchQuery);
+	if (bWasOpen && MyComboBox.IsValid() && !MyComboBox->IsOpen()) MyComboBox->SetIsOpen(true);
 }
 
 void UNavigationPlaceCombo::SearchChanged(const FText& Text)
@@ -235,7 +242,7 @@ FReply UNavigationPlaceCombo::HandleSearchKey(const FGeometry& Geometry, const F
 
 TSharedRef<ITableRow> UNavigationPlaceCombo::GenerateSearchRow(TSharedPtr<FString> Item, const TSharedRef<STableViewBase>& Owner)
 {
-	return SNew(STableRow<TSharedPtr<FString>>, Owner).Padding(4.f)[HandleGenerateWidget(Item)];
+	return SNew(STableRow<TSharedPtr<FString>>, Owner).bAllowPreselectedItemActivation(true).Padding(4.f)[HandleGenerateWidget(Item)];
 }
 
 void UNavigationPlaceCombo::ChooseSearchResult(TSharedPtr<FString> Item, ESelectInfo::Type SelectionType)
@@ -911,7 +918,7 @@ void UNavigationDockPanelWidget::RefreshDisplay()
 		const bool bEnd = Row == 0 || Row == Count - 1;
 		BadgeTexts[SlotIndex]->SetText(FText::FromString(bPending ? FString(TEXT("+")) : PlaceBadge(Row, Count)));
 		Paint(BadgeButtons[SlotIndex], bPending ? PendingColor : PlaceColor(Row, Count));
-		RoleTexts[SlotIndex]->SetText(FText::FromString(bPending ? FString(TEXT("Add a stop")) : Nav->GetPlaceRole(Row)));
+		RoleTexts[SlotIndex]->SetText(FText::FromString(bPending ? FString(TEXT("Add a stop")) : (Row > 0 && Count > 2 ? FString::FromInt(Row) : Nav->GetPlaceRole(Row))));
 		FieldBorders[SlotIndex]->SetBrushColor(Row == SelectedRow ? FLinearColor::White : FLinearColor::Transparent);
 		// The crosshair is for the ends and the row being added; a stop is replaced from the list, or removed and added again.
 		PickButtons[SlotIndex]->SetVisibility(bEnd || bPending ? ESlateVisibility::Visible : ESlateVisibility::Hidden);
@@ -1096,6 +1103,8 @@ void UNavigationDockPanelWidget::RefreshRoomDropdowns()
 	}
 	AssignSlots(*Nav);
 	const TArray<FRoomOption> Matches = Nav->SearchDestinations(FString());
+	TArray<FString> Labels;
+	for (const FRoomOption& Option : Matches) Labels.Add(Option.GetDisplayLabel());
 	for (int32 SlotIndex = 0; SlotIndex < MaxSlots; ++SlotIndex)
 	{
 		const int32 Row = SlotRow[SlotIndex];
@@ -1104,8 +1113,7 @@ void UNavigationDockPanelWidget::RefreshRoomDropdowns()
 			continue;
 		}
 		const FString Current = Row >= 0 ? Nav->GetPlaceText(Row) : FString();
-		FillPlaceCombo(PlaceCombos[SlotIndex], Matches, Current);
-		PlaceCombos[SlotIndex]->SetSearchText(FString());
+		PlaceCombos[SlotIndex]->RefreshPlaceOptions(Labels, Current);
 		PlaceCombos[SlotIndex]->SetIsEnabled(true);
 	}
 }

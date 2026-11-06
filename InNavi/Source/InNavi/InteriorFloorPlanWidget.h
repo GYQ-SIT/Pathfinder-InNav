@@ -56,14 +56,17 @@ protected:
 
 private:
 	friend struct FEditorInteractionTestAccess;
+	friend struct FEditorFeedbackTestAccess;
 	TArray<FVector2D> GetResizeHandles(FVector2D WidgetSize) const;
 	TArray<FVector2D> GetPrefabPreview() const;
 	bool IsPrefabDragValid() const;
 	void ResizeAtLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize);
 	bool bIsResizingRoom = false;
 	bool bResizeChanged = false;
-	int32 ResizeHandleIndex = INDEX_NONE;
-	FVector2D ResizeCenter = FVector2D::ZeroVector;
+	FVector2D ResizeDirection = FVector2D::ZeroVector;
+	FVector2D ResizeStartPosition = FVector2D::ZeroVector;
+	FVector2D ResizePreviewPosition = FVector2D::ZeroVector;
+	FVector2D ResizePreviewSize = FVector2D::ZeroVector;
 	FVector2D ResizeStartSize = FVector2D::ZeroVector;
 	bool bIsDraggingPrefab = false;
 	FVector2D PrefabStartLocal = FVector2D::ZeroVector;

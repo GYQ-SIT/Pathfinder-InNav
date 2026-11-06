@@ -5,6 +5,7 @@ Versions follow Semantic Versioning. Changes to exported report types or tool in
 ## 1.1.0
 
 - Add cancellable data validation, report duplicate mobile place IDs, and enforce the editor's supported scale range.
+- Allow a simple open-wall path to return to its starting point without reporting its closing joint as a self-intersection.
 
 ## 1.0.1
 

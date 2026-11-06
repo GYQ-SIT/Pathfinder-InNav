@@ -55,6 +55,7 @@
 #include "Components/WrapBoxSlot.h"
 #include "Engine/Texture2D.h"
 #include "Misc/FileHelper.h"
+#include "Misc/DefaultValueHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
@@ -1127,6 +1128,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		RoomHeightBox->SetIsReadOnly(false);
 		RoomWidthBox->OnTextChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoomSizeTextChanged);
 		RoomHeightBox->OnTextChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoomSizeTextChanged);
+		RoomWidthBox->OnTextCommitted.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoomSizeTextCommitted);
+		RoomHeightBox->OnTextCommitted.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoomSizeTextCommitted);
 		RoomNameColumn->AddChildToVerticalBox(SizeRow);
 
 		RoomTagsFields = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RoomTagsFields"));
@@ -2502,23 +2505,7 @@ void UInteriorScreenWidget::HandleSelectedRoomChanged(FString RoomId)
 
 void UInteriorScreenWidget::OnApplyRoomClicked()
 {
-	if (bRoomSizeDirty)
-	{
-		ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
-		double Width = 0, Depth = 0;
-		if (!PC) return;
-		if (!RoomWidthBox || !RoomHeightBox ||
-			!LexTryParseString(Width, *RoomWidthBox->GetText().ToString().TrimStartAndEnd()) ||
-			!LexTryParseString(Depth, *RoomHeightBox->GetText().ToString().TrimStartAndEnd()) ||
-			!FMath::IsFinite(Width) || !FMath::IsFinite(Depth) || Width <= 0 || Depth <= 0)
-		{
-			PC->OnActionFailed.Broadcast(TEXT("Room width and depth must be positive numbers in metres."), EActionFailureSeverity::Warning);
-			return;
-		}
-		if (!PC->ResizeRoom(PC->GetSelectedRoomId(), Width * 100.0 / PC->GetBuildingScale(), Depth * 100.0 / PC->GetBuildingScale())) return;
-		bRoomSizeDirty = false;
-		RefreshRoomBoundsFields();
-	}
+	if (!ApplyRoomDimensions()) return;
 	// Save changes: the name and the tags in one go. Both boxes are read first - changing the name refreshes the panel from the
 	// room, which would put the old tags back in the tags box before they were saved.
 	const FString NewName = RoomNameTextBox ? RoomNameTextBox->GetText().ToString() : FString();
@@ -2591,8 +2578,8 @@ void UInteriorScreenWidget::RefreshRoomBoundsFields()
 	FVector2D Position = FVector2D::ZeroVector, Size = FVector2D::ZeroVector;
 	const bool bHave = PC && PC->GetSelectedRoomBounds(Position, Size);
 	const bool bReadOnly = !bHave || PC->IsInteriorInspectionEnabled() || (PC->IsIn3DPreviewMode() && !PC->IsIn3DEditMode());
-	if (RoomWidthBox) RoomWidthBox->SetIsReadOnly(bReadOnly);
-	if (RoomHeightBox) RoomHeightBox->SetIsReadOnly(bReadOnly);
+	if (RoomWidthBox) RoomWidthBox->SetIsReadOnly(bReadOnly || (!PC->IsSelectedRoomClosedLoop() && FMath::IsNearlyZero(Size.X)));
+	if (RoomHeightBox) RoomHeightBox->SetIsReadOnly(bReadOnly || (!PC->IsSelectedRoomClosedLoop() && FMath::IsNearlyZero(Size.Y)));
 	auto Show = [bHave](UEditableTextBox* Box, double Value)
 	{
 		if (Box)
@@ -2612,6 +2599,47 @@ void UInteriorScreenWidget::RefreshRoomBoundsFields()
 		Show(RoomWidthBox, Size.X * MetresPerUnit);
 		Show(RoomHeightBox, Size.Y * MetresPerUnit);
 	}
+}
+
+// Unlike LexTryParseString(double), require the whole field to be a decimal number.
+static bool InteriorScreen_ParseDimension(const FString& Input, double& Value)
+{
+	const FString Text = Input.TrimStartAndEnd();
+	if (Text.IsEmpty()) return false;
+	for (const TCHAR C : Text) if (!FChar::IsDigit(C) && C != '.' && C != '+' && C != '-' && C != 'e' && C != 'E') return false;
+	return FDefaultValueHelper::ParseDouble(Text, Value) && FMath::IsFinite(Value);
+}
+
+bool UInteriorScreenWidget::ApplyRoomDimensions()
+{
+	if (!bRoomSizeDirty) return true;
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC) return false;
+	if (BoundsRoomId != PC->GetSelectedRoomId()) { bRoomSizeDirty = false; RefreshRoomBoundsFields(); return false; }
+	double Width = 0, Depth = 0;
+	const bool bRoom = PC->IsSelectedRoomClosedLoop();
+	if (!RoomWidthBox || !RoomHeightBox ||
+		!InteriorScreen_ParseDimension(RoomWidthBox->GetText().ToString(), Width) ||
+		!InteriorScreen_ParseDimension(RoomHeightBox->GetText().ToString(), Depth) || Width < 0 || Depth < 0 ||
+		(bRoom ? (Width < 0.5 || Depth < 0.5) : FMath::Max(Width, Depth) < 0.5))
+	{
+		PC->OnActionFailed.Broadcast(TEXT("Enter numeric dimensions in metres. Rooms need at least 0.5 m on each side; straight walls keep their zero dimension."), EActionFailureSeverity::Warning);
+		return false;
+	}
+	FVector2D Position, Current;
+	const FVector2D Size(Width * 100.0 / PC->GetBuildingScale(), Depth * 100.0 / PC->GetBuildingScale());
+	if (!PC->GetSelectedRoomBounds(Position, Current)) return false;
+	if (!Current.Equals(Size, 1e-6) && !PC->ResizeRoom(PC->GetSelectedRoomId(), Size.X, Size.Y)) return false;
+	bRoomSizeDirty = false;
+	RefreshRoomBoundsFields();
+	return true;
+}
+
+void UInteriorScreenWidget::OnRoomSizeTextCommitted(const FText& Text, ETextCommit::Type CommitType)
+{
+	if (bUpdatingRoomBounds) return;
+	if (CommitType == ETextCommit::OnEnter || CommitType == ETextCommit::OnUserMovedFocus) ApplyRoomDimensions();
+	else if (CommitType == ETextCommit::OnCleared) { bRoomSizeDirty = false; RefreshRoomBoundsFields(); }
 }
 
 void UInteriorScreenWidget::OnRoomSizeTextChanged(const FText& Text)
