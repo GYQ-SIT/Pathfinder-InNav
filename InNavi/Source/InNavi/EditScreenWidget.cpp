@@ -1141,6 +1141,11 @@ void UEditScreenWidget::HandleDockLayoutChanged()
 
 void UEditScreenWidget::RefreshWindowMenuChecks()
 {
+	// See UInteriorScreenWidget::RefreshWindowMenuChecks.
+	if (bSharedPanelsTaken && DockHost)
+	{
+		DockSharedPanels::Publish(*DockHost->GetLayout());
+	}
 	auto Sync = [this](UCheckBox* Checkbox, FName Panel)
 	{
 		if (Checkbox)
@@ -1170,6 +1175,11 @@ void UEditScreenWidget::ResetDockLayout()
 
 void UEditScreenWidget::SaveDockLayoutToDisk() const
 {
+	// See UInteriorScreenWidget::SaveDockLayoutToDisk.
+	if (bSharedPanelsTaken && DockHost)
+	{
+		DockSharedPanels::Publish(*DockHost->GetLayout());
+	}
 	// Extents are stored as fractions of the canvas size, so saving against a guessed size (a widget that
 	// never got on screen, e.g. in a test) would write a layout that restores far too big or small.
 	FVector2D Size;

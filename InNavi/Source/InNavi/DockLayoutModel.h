@@ -214,6 +214,21 @@ public:
 
 	bool FloatPanel(FName Panel, const FVector2D& Position, const FVector2D& Size);
 
+	// Puts a copy of Tree (its splits, tab groups, tab order and ratios) in a new floating window at Position / Size. Its panels are first taken
+	// out of wherever they are in this layout, and are no longer hidden. False (layout unchanged) when Tree holds no panel.
+	bool PlaceFloatingTree(const FDockNode& Tree, const FVector2D& Position, const FVector2D& Size);
+
+	// Makes the edge area Side a copy of Tree, Extent thick. The panels of Tree are first taken out of wherever else they are, and are no longer
+	// hidden. Panels the area had that are not in Tree are lost: the caller uses this only when the area holds nothing else.
+	bool PlaceAreaTree(EDockSide Side, const FDockNode& Tree, float Extent);
+
+	// The panels of a tree in order, and a short text of its shape ("V(T[Audio]|T[Navigation])", H for a row, V for a column) to tell whether
+	// two arrangements are the same.
+	static TArray<FName> PanelsOfTree(const FDockNode& Tree);
+	static FString DescribeTree(const FDockNode& Tree);
+	// A copy of a tree that shares nothing with the layout it came from.
+	static TSharedPtr<FDockNode> CloneTree(const FDockNode& Tree);
+
 	// Removes Panel from the layout but remembers where it was.
 	bool HidePanel(FName Panel);
 

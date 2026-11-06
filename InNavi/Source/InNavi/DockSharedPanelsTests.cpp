@@ -105,8 +105,70 @@ bool FDockSharedPanelsTest::RunTest(const FString& Parameters)
 		Interior.ShowPanel(InteriorDock::Navigation, EDockSide::Bottom);
 		Apply(Exterior, Capture(Interior, Shared), Shared);
 		const FState BuildingAfter = Capture(Exterior, Own);
-		TestTrue(TEXT("Building stays where it was"), BuildingBefore.Contains(ExteriorDock::Building) && BuildingAfter.Contains(ExteriorDock::Building)
-			&& DockSharedPanelsTests::SamePlace(BuildingBefore[ExteriorDock::Building], BuildingAfter[ExteriorDock::Building]));
+		TestTrue(TEXT("Building stays where it was"), BuildingBefore.Panels.Contains(ExteriorDock::Building) && BuildingAfter.Panels.Contains(ExteriorDock::Building)
+			&& DockSharedPanelsTests::SamePlace(BuildingBefore.Panels[ExteriorDock::Building], BuildingAfter.Panels[ExteriorDock::Building]));
+	}
+
+	// A floating window of shared panels is taken over whole: Audio above Navigation on one screen is Audio above Navigation on the other, not two
+	// tabs, and the other way round.
+	{
+		FDockLayout Interior, Exterior;
+		InteriorDock::BuildDefaultLayout(Interior);
+		ExteriorDock::BuildDefaultLayout(Exterior);
+		Interior.ShowPanel(InteriorDock::Audio, EDockSide::Bottom);
+		Interior.FloatPanel(InteriorDock::Audio, FVector2D(60.0, 40.0), FVector2D(340.0, 420.0));
+		Interior.ShowPanel(InteriorDock::Navigation, EDockSide::Right);
+		Interior.DockPanel(InteriorDock::Navigation, InteriorDock::Audio, EDockDropZone::Bottom);
+		Exterior.ShowPanel(ExteriorDock::Navigation, EDockSide::Right);
+		Exterior.FloatPanel(ExteriorDock::Navigation, FVector2D(300.0, 200.0), FVector2D(380.0, 440.0));
+		Exterior.ShowPanel(ExteriorDock::Audio, EDockSide::Bottom);
+		Exterior.DockPanel(ExteriorDock::Audio, ExteriorDock::Navigation, EDockDropZone::Center);
+		const FString InteriorShape = FDockLayout::DescribeTree(*Interior.GetFloating()[0].Root);
+		TestTrue(TEXT("the interior has them one above the other"), InteriorShape.StartsWith(TEXT("V(")));
+		TestTrue(TEXT("the exterior has them as tabs"), FDockLayout::DescribeTree(*Exterior.GetFloating()[0].Root).StartsWith(TEXT("T[")));
+
+		TestTrue(TEXT("the exterior takes the window over"), Apply(Exterior, Capture(Interior, Shared), Shared));
+		TestEqual(TEXT("one floating window, not two"), Exterior.GetFloating().Num(), 1);
+		if (Exterior.GetFloating().Num() == 1)
+		{
+			TestEqual(TEXT("with the interior's arrangement"), FDockLayout::DescribeTree(*Exterior.GetFloating()[0].Root), InteriorShape);
+			TestTrue(TEXT("at its place and size"), Exterior.GetFloating()[0].Position.Equals(FVector2D(60.0, 40.0), 1.0) && Exterior.GetFloating()[0].Size.Equals(FVector2D(340.0, 420.0), 1.0));
+		}
+		TestTrue(TEXT("the layout is valid"), DockSharedPanelsTests::Valid(Exterior));
+		TestFalse(TEXT("nothing is left to change"), Apply(Exterior, Capture(Interior, Shared), Shared));
+
+		// And back: the exterior's tabs become the interior's.
+		Exterior.FloatPanel(ExteriorDock::Audio, FVector2D(10.0, 10.0), FVector2D(300.0, 300.0));
+		Exterior.DockPanel(ExteriorDock::Navigation, ExteriorDock::Audio, EDockDropZone::Center);
+		TestTrue(TEXT("the interior takes the tabs over"), Apply(Interior, Capture(Exterior, Shared), Shared));
+		TestEqual(TEXT("one window"), Interior.GetFloating().Num(), 1);
+		if (Interior.GetFloating().Num() == 1)
+		{
+			TestTrue(TEXT("as tabs"), FDockLayout::DescribeTree(*Interior.GetFloating()[0].Root).StartsWith(TEXT("T[")));
+		}
+		TestTrue(TEXT("the layout is valid"), DockSharedPanelsTests::Valid(Interior));
+	}
+
+	// An edge area of shared panels only is taken over whole too; one with a panel of its own is not replaced.
+	{
+		FDockLayout Interior, Exterior;
+		InteriorDock::BuildDefaultLayout(Interior);
+		ExteriorDock::BuildDefaultLayout(Exterior);
+		Interior.ShowPanel(InteriorDock::Audio, EDockSide::Bottom);
+		Interior.ShowPanel(InteriorDock::Debug, EDockSide::Bottom);
+		Interior.DockPanel(InteriorDock::Debug, InteriorDock::Audio, EDockDropZone::Right);
+		Exterior.ShowPanel(ExteriorDock::Audio, EDockSide::Bottom);
+		Exterior.FloatPanel(ExteriorDock::Audio, FVector2D(50.0, 50.0), FVector2D(300.0, 300.0));
+		const FString BottomShape = FDockLayout::DescribeTree(*Interior.GetAreaRoot(EDockSide::Bottom));
+		TestTrue(TEXT("the interior has Audio and Debug side by side below"), BottomShape.StartsWith(TEXT("H(")));
+		TestTrue(TEXT("the exterior takes the area over"), Apply(Exterior, Capture(Interior, Shared), Shared));
+		TestTrue(TEXT("Audio and Debug are docked below, side by side"), Exterior.GetAreaRoot(EDockSide::Bottom).IsValid()
+			&& FDockLayout::DescribeTree(*Exterior.GetAreaRoot(EDockSide::Bottom)) == BottomShape);
+		TestEqual(TEXT("and no window floats any more"), Exterior.GetFloating().Num(), 0);
+		TestTrue(TEXT("the layout is valid"), DockSharedPanelsTests::Valid(Exterior));
+		// The right edge holds Building (the exterior's own) with Navigation: that area is not replaced.
+		FDockLocation BuildingLocation;
+		TestTrue(TEXT("Building is still docked on the right"), Exterior.FindPanel(ExteriorDock::Building, BuildingLocation) && BuildingLocation.Kind == FDockLocation::EKind::Area && BuildingLocation.Side == EDockSide::Right);
 	}
 
 	// What the screen left is kept for the next one.
