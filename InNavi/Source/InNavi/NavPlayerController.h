@@ -156,6 +156,14 @@ public:
 	void SetPointerOverUICallback(const UObject* ScreenOwner, TFunction<bool(const FVector2D&)> Callback);
 	void ClearPointerOverUICallback(const UObject* ScreenOwner);
 
+	// The start screen and the project library have no project to work on: while one is up, the keyboard shortcuts (B, P, Ctrl+S, Ctrl+V...)
+	// do nothing, so a key cannot save an empty scene or paste into nothing. Like the callback above, the owner is the screen, so a screen
+	// being torn down never unblocks the one that replaced it. Releases still pass, so no key stays held.
+	void BlockKeyShortcuts(const UObject* ScreenOwner);
+	void UnblockKeyShortcuts(const UObject* ScreenOwner);
+	bool AreKeyShortcutsBlocked() const;
+	virtual bool InputKey(const FInputKeyEventArgs& Params) override;
+
 	// Step by step navigation can need the other screen: a step outside is shown on the exterior screen (the campus), a step inside a
 	// building on the interior screen. The screen that is up registers this; FollowNavigationStep asks it first, and it returns true
 	// when it has handed over to the other screen (which then follows the step itself when it comes up).
@@ -364,6 +372,12 @@ public:
 	// still be sitting in the level.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void StartNewProject();
+
+	// Closes the project that is open: the same clearing as StartNewProject (every building, interior, road and building around the campus
+	// destroyed; selection, navigation, tools, undo history, file path and unsaved-changes flag reset), for the screens that go back to the start
+	// screen. Call it only once the person has chosen to leave (saved or discarded): it throws the open project away.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void CloseProject();
 
 	// The folder project files live in (InNavi/Data, as an absolute path) - where New project writes its file and where
 	// the Open dialog starts.
@@ -1188,6 +1202,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void SetAllUiSoundsEnabled(bool bEnabled);
 
+	// Whether the sounds were all muted at once (Mute All) and are still all off: what the Audio panel's Mute All box shows when a screen builds
+	// it. Turning one of the three sounds back on by itself ends it.
+	bool AreAllUiSoundsMuted() const { return bUiSoundsMuted && !bButtonClickSoundEnabled && !bBuildingSelectSoundEnabled && !bQuitConfirmSoundEnabled; }
+
 	// Multiplies the volume of every sound this class plays (the Audio panel's own file playback and
 	// all three short UI effects) - see PlayWavFile, which applies this to every UAudioComponent it
 	// creates. Clamped to [0, 1]. Live-updates every currently-playing ActiveAudioPlaybacks entry too,
@@ -1254,6 +1272,7 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FProjectWindowCloseTest;
 	friend class FProjectSaveDuringDragTest;
+	friend class FDatabaseProjectCloseTest;
 #endif
 
 	void MarkBuildingCreated(APolyBuilding* Building);
@@ -1299,6 +1318,7 @@ private:
 	TObjectPtr<UMobileSplashWidget> MobileSplash;
 
 	TWeakObjectPtr<const UObject> PointerOverUIOwner;
+	TWeakObjectPtr<const UObject> KeyShortcutsBlockOwner;
 	TWeakObjectPtr<const UObject> NavigationStepScreenOwner;
 	TFunction<bool(const FNavigationRoutePoint&)> NavigationStepScreenCallback;
 	bool bHandingOverStep = false;
@@ -1553,6 +1573,9 @@ private:
 	// RepositionCameraToActiveFloor).
 	void PositionCameraForFloor(APolyBuilding* Building, int32 Level);
 
+	// What StartNewProject and CloseProject share: everything of the open project, gone.
+	void ClearProjectState();
+
 	// Re-runs PositionCameraForFloor for whichever building/floor is currently loaded - called after
 	// SetActiveFloor/AddFloor/RemoveFloor so the camera follows floor changes made while already
 	// inside interior editing. No-op if nothing is loaded.
@@ -1796,6 +1819,9 @@ private:
 
 	// See IsQuitConfirmSoundEnabled/SetQuitConfirmSoundEnabled's own comment.
 	bool bQuitConfirmSoundEnabled = true;
+
+	// See AreAllUiSoundsMuted.
+	bool bUiSoundsMuted = false;
 
 	// See PlayDirectionsSound and PlayArrivalSound.
 	bool bDirectionsSoundEnabled = true;

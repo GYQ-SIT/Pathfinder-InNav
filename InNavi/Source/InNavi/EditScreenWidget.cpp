@@ -12,6 +12,7 @@
 #include "ConfirmDialogWidget.h"
 #include "DockHostUMG.h"
 #include "ExteriorDockLayout.h"
+#include "DockSharedPanels.h"
 #include "InteriorScreenWidget.h"
 #include "NavPlayerController.h"
 #include "StartScreenWidget.h"
@@ -786,6 +787,10 @@ void UEditScreenWidget::GoToStartScreen()
 	// user is back at the initial page with no editor UI left to stop it from.
 	PC->StopAllAudio();
 
+	// Going back to the start screen closes the project (the person has just saved it or discarded it, or it had no changes): nothing of it stays
+	// in the scene behind the start screen, or in the controller for the next New / Open to meet.
+	PC->CloseProject();
+
 	if (UStartScreenWidget* Screen = CreateWidget<UStartScreenWidget>(PC, UStartScreenWidget::StaticClass()))
 	{
 		Screen->AddToViewport();
@@ -1089,6 +1094,9 @@ void UEditScreenWidget::InitializeDockLayout()
 	}
 
 	ExteriorDock::LoadLayout(*DockHost->GetLayout(), GetCanvasSize());
+	// The panels this screen has in common with the interior one (Audio, Map, ...) are where that screen left them.
+	DockSharedPanels::ApplyPublished(*DockHost->GetLayout());
+	bSharedPanelsTaken = true;
 	DockHost->NotifyLayoutChanged();
 	RefreshWindowMenuChecks();
 	if (AudioPanelWidget)
@@ -1128,11 +1136,20 @@ void UEditScreenWidget::HandleDockPanelClosed(FName Panel)
 
 void UEditScreenWidget::HandleDockLayoutChanged()
 {
+	if (bSharedPanelsTaken && DockHost)
+	{
+		DockSharedPanels::Publish(*DockHost->GetLayout());
+	}
 	RefreshWindowMenuChecks();
 }
 
 void UEditScreenWidget::RefreshWindowMenuChecks()
 {
+	// See UInteriorScreenWidget::RefreshWindowMenuChecks.
+	if (bSharedPanelsTaken && DockHost)
+	{
+		DockSharedPanels::Publish(*DockHost->GetLayout());
+	}
 	auto Sync = [this](UCheckBox* Checkbox, FName Panel)
 	{
 		if (Checkbox)
@@ -1162,6 +1179,11 @@ void UEditScreenWidget::ResetDockLayout()
 
 void UEditScreenWidget::SaveDockLayoutToDisk() const
 {
+	// See UInteriorScreenWidget::SaveDockLayoutToDisk.
+	if (bSharedPanelsTaken && DockHost)
+	{
+		DockSharedPanels::Publish(*DockHost->GetLayout());
+	}
 	// Extents are stored as fractions of the canvas size, so saving against a guessed size (a widget that
 	// never got on screen, e.g. in a test) would write a layout that restores far too big or small.
 	FVector2D Size;

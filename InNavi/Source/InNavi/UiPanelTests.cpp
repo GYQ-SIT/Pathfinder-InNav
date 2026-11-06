@@ -18,6 +18,42 @@
 #include "Components/Slider.h"
 #include "Misc/AutomationTest.h"
 
+// Mute All is a state of the controller: a screen that opens after it was ticked shows it ticked (it was built unticked, whatever was muted).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiAudioPanelMuteStateTest, "InNavi.UI.Panels.AudioMuteAllSurvivesTheScreen", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FUiAudioPanelMuteStateTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	auto Open = [&]() -> UAudioPanelWidget*
+	{
+		UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>();
+		Screen->Initialize(); Screen->TakeWidget(); Screen->SetOwningPlayer(Controller);
+		UAudioPanelWidget* Panel = Screen->GetAudioPanelForTests();
+		if (Panel) Panel->Refresh();
+		return Panel;
+	};
+	auto Box = [](UAudioPanelWidget* Panel, const TCHAR* Name) { return Panel ? Cast<UCheckBox>(Panel->FindContentWidget(Name)) : nullptr; };
+
+	Controller->SetAllUiSoundsEnabled(false);
+	UAudioPanelWidget* Panel = Open();
+	if (!TestNotNull(TEXT("the panel"), Panel)) return false;
+	TestTrue(TEXT("muted: the screen that opens shows Mute All ticked"), Box(Panel, TEXT("Chk_AudioMuteAll"))->IsChecked());
+	TestFalse(TEXT("and the three sounds unticked"), Box(Panel, TEXT("Chk_AudioClickSound"))->IsChecked() || Box(Panel, TEXT("Chk_AudioSelectSound"))->IsChecked() || Box(Panel, TEXT("Chk_AudioQuitConfirmSound"))->IsChecked());
+
+	Controller->SetAllUiSoundsEnabled(true);
+	Panel = Open();
+	TestFalse(TEXT("not muted: Mute All is unticked"), Box(Panel, TEXT("Chk_AudioMuteAll"))->IsChecked());
+	TestTrue(TEXT("and the three sounds ticked"), Box(Panel, TEXT("Chk_AudioClickSound"))->IsChecked() && Box(Panel, TEXT("Chk_AudioSelectSound"))->IsChecked() && Box(Panel, TEXT("Chk_AudioQuitConfirmSound"))->IsChecked());
+
+	// One sound turned back on by itself ends the muting.
+	Controller->SetAllUiSoundsEnabled(false);
+	Controller->SetButtonClickSoundEnabled(true);
+	Panel = Open();
+	TestFalse(TEXT("with one sound on again, Mute All is unticked"), Box(Panel, TEXT("Chk_AudioMuteAll"))->IsChecked());
+	TestTrue(TEXT("and that sound is ticked"), Box(Panel, TEXT("Chk_AudioClickSound"))->IsChecked());
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiAudioPanelTest, "InNavi.UI.Panels.Audio", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FUiAudioPanelTest::RunTest(const FString& Parameters)
 {

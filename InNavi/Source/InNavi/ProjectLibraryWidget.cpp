@@ -135,9 +135,19 @@ TSharedRef<SWidget> UProjectLibraryWidget::RebuildWidget()
 	return Super::RebuildWidget();
 }
 
+void UProjectLibraryWidget::BlockClicksToTheScene()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetPointerOverUICallback(this, [](const FVector2D&) { return true; });
+		PC->BlockKeyShortcuts(this);
+	}
+}
+
 void UProjectLibraryWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	BlockClicksToTheScene();
 	for (UButton* Button : { BackButton, NewButton })
 	{
 		if (Button)
@@ -177,6 +187,8 @@ void UProjectLibraryWidget::NativeDestruct()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->OnActionFailed.RemoveDynamic(this, &UProjectLibraryWidget::HandleActionFailed);
+		PC->ClearPointerOverUICallback(this);
+		PC->UnblockKeyShortcuts(this);
 	}
 	Super::NativeDestruct();
 }
@@ -408,6 +420,11 @@ void UProjectLibraryWidget::GoBack()
 	if (!PC)
 	{
 		return;
+	}
+	// The library is reached from the start screen: going back leaves no project open.
+	if (ANavPlayerController* NavController = Cast<ANavPlayerController>(PC))
+	{
+		NavController->CloseProject();
 	}
 	if (UStartScreenWidget* Start = CreateWidget<UStartScreenWidget>(PC, UStartScreenWidget::StaticClass()))
 	{

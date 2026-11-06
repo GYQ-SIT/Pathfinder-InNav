@@ -1,6 +1,7 @@
 #include "InteriorScreenWidget.h"
 #include "DockHostUMG.h"
 #include "InteriorDockLayout.h"
+#include "DockSharedPanels.h"
 #include "NavigationSearchUtils.h"
 #include "InteriorDoorColors.h"
 #include "InteriorEntrance.h"
@@ -1450,6 +1451,9 @@ void UInteriorScreenWidget::InitializeDockLayout()
 	}
 
 	InteriorDock::LoadLayout(*DockHost->GetLayout(), GetCanvasSize());
+	// The panels this screen has in common with the exterior one (Audio, Map, ...) are where that screen left them.
+	DockSharedPanels::ApplyPublished(*DockHost->GetLayout());
+	bSharedPanelsTaken = true;
 	DockHost->NotifyLayoutChanged();
 	RefreshWindowMenuChecks();
 }
@@ -1484,11 +1488,21 @@ void UInteriorScreenWidget::CancelNavigationPickIfNavigationHidden()
 
 void UInteriorScreenWidget::HandleDockLayoutChanged()
 {
+	if (bSharedPanelsTaken && DockHost)
+	{
+		DockSharedPanels::Publish(*DockHost->GetLayout());
+	}
 	RefreshWindowMenuChecks();
 }
 
 void UInteriorScreenWidget::RefreshWindowMenuChecks()
 {
+	// Every change of the layout by the screen itself ends here (the Window menu, a closed panel, the first arrangement), and the dock host does
+	// not report those: the shared panels are published from here as well as from the changes a person makes with the mouse.
+	if (bSharedPanelsTaken && DockHost)
+	{
+		DockSharedPanels::Publish(*DockHost->GetLayout());
+	}
 	auto Sync = [this](UCheckBox* Checkbox, EDockPanelId Id)
 	{
 		if (Checkbox)
@@ -1864,6 +1878,11 @@ const TCHAR* UInteriorScreenWidget::GetDockPanelName(EDockPanelId Id)
 
 void UInteriorScreenWidget::SaveDockLayoutToDisk() const
 {
+	// The screen is about to be left (or the layout has just been changed): what the next screen takes over is this.
+	if (bSharedPanelsTaken && DockHost)
+	{
+		DockSharedPanels::Publish(*DockHost->GetLayout());
+	}
 	// Sizes are stored as fractions of the canvas, so a layout saved against a guessed size (a screen that never got on screen,
 	// as in a headless test) would replace the user's own with one that restores far too big or small.
 	FVector2D Size;
