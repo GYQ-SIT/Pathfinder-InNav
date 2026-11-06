@@ -140,6 +140,7 @@ void UProjectLibraryWidget::BlockClicksToTheScene()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->SetPointerOverUICallback(this, [](const FVector2D&) { return true; });
+		PC->BlockKeyShortcuts(this);
 	}
 }
 
@@ -187,6 +188,7 @@ void UProjectLibraryWidget::NativeDestruct()
 	{
 		PC->OnActionFailed.RemoveDynamic(this, &UProjectLibraryWidget::HandleActionFailed);
 		PC->ClearPointerOverUICallback(this);
+		PC->UnblockKeyShortcuts(this);
 	}
 	Super::NativeDestruct();
 }

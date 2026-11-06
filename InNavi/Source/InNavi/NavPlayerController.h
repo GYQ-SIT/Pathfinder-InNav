@@ -156,6 +156,14 @@ public:
 	void SetPointerOverUICallback(const UObject* ScreenOwner, TFunction<bool(const FVector2D&)> Callback);
 	void ClearPointerOverUICallback(const UObject* ScreenOwner);
 
+	// The start screen and the project library have no project to work on: while one is up, the keyboard shortcuts (B, P, Ctrl+S, Ctrl+V...)
+	// do nothing, so a key cannot save an empty scene or paste into nothing. Like the callback above, the owner is the screen, so a screen
+	// being torn down never unblocks the one that replaced it. Releases still pass, so no key stays held.
+	void BlockKeyShortcuts(const UObject* ScreenOwner);
+	void UnblockKeyShortcuts(const UObject* ScreenOwner);
+	bool AreKeyShortcutsBlocked() const;
+	virtual bool InputKey(const FInputKeyEventArgs& Params) override;
+
 	// Step by step navigation can need the other screen: a step outside is shown on the exterior screen (the campus), a step inside a
 	// building on the interior screen. The screen that is up registers this; FollowNavigationStep asks it first, and it returns true
 	// when it has handed over to the other screen (which then follows the step itself when it comes up).
@@ -1250,6 +1258,7 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FProjectWindowCloseTest;
 	friend class FProjectSaveDuringDragTest;
+	friend class FDatabaseProjectCloseTest;
 #endif
 
 	void MarkBuildingCreated(APolyBuilding* Building);
@@ -1295,6 +1304,7 @@ private:
 	TObjectPtr<UMobileSplashWidget> MobileSplash;
 
 	TWeakObjectPtr<const UObject> PointerOverUIOwner;
+	TWeakObjectPtr<const UObject> KeyShortcutsBlockOwner;
 	TWeakObjectPtr<const UObject> NavigationStepScreenOwner;
 	TFunction<bool(const FNavigationRoutePoint&)> NavigationStepScreenCallback;
 	bool bHandingOverStep = false;

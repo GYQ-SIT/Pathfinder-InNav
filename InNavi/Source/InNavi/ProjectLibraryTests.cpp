@@ -333,4 +333,34 @@ bool FStartScreensBlockTheSceneTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// The same screens have no project: the keyboard shortcuts do nothing under them (Ctrl+S would save an empty scene, Ctrl+V paste into nothing),
+// and a screen that is torn down never unblocks the one that replaced it.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStartScreensBlockShortcutsTest, "InNavi.UI.StartScreensBlockKeyShortcuts", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FStartScreensBlockShortcutsTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	TestFalse(TEXT("shortcuts work to begin with"), Controller->AreKeyShortcutsBlocked());
+
+	UStartScreenWidget* Start = NewObject<UStartScreenWidget>();
+	Start->Initialize();
+	const TSharedRef<SWidget> StartSlate = Start->TakeWidget();
+	Start->SetOwningPlayer(Controller);
+	Start->BlockClicksToTheScene();
+	TestTrue(TEXT("the start screen blocks them"), Controller->AreKeyShortcutsBlocked());
+	TestFalse(TEXT("a key press does not reach the shortcuts"), Controller->InputKey(FInputKeyEventArgs::CreateSimulated(EKeys::P, IE_Pressed, 1.f)));
+	TestFalse(TEXT("nor a held Ctrl+S"), Controller->InputKey(FInputKeyEventArgs::CreateSimulated(EKeys::S, IE_Repeat, 1.f)));
+
+	UProjectLibraryWidget* Library = NewObject<UProjectLibraryWidget>();
+	Library->Initialize();
+	const TSharedRef<SWidget> LibrarySlate = Library->TakeWidget();
+	Library->SetOwningPlayer(Controller);
+	Library->BlockClicksToTheScene();
+	Controller->UnblockKeyShortcuts(Start);
+	TestTrue(TEXT("the start screen going away does not unblock the library"), Controller->AreKeyShortcutsBlocked());
+	Controller->UnblockKeyShortcuts(Library);
+	TestFalse(TEXT("the library going away gives the shortcuts back"), Controller->AreKeyShortcutsBlocked());
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

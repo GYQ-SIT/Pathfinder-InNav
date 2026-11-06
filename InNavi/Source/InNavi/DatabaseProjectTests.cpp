@@ -129,6 +129,10 @@ bool FDatabaseProjectCloseTest::RunTest(const FString& Parameters)
 	Controller->CreateRectangleBuilding(TEXT("CLOSE-1"), TEXT("Drawn"), FVector2D(0.0, 0.0), 400.f, 400.f, 0.f, 2, 300.f);
 	TestTrue(TEXT("a building was drawn: unsaved changes"), Controller->HasUnsavedChanges());
 	Fixture.Nav->ToggleSelectDestination();
+	Controller->bHasCopiedRoom = true;
+	Controller->CopiedRoomId = TEXT("COPIED");
+	Controller->bHasCopiedBuilding = true;
+	Controller->CopiedBuildingId = TEXT("COPIED");
 
 	Controller->CloseProject();
 	const FMapSnapshot Closed = Describe(Fixture.World, *Generator);
@@ -138,6 +142,7 @@ bool FDatabaseProjectCloseTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("no unsaved changes"), Controller->HasUnsavedChanges());
 	TestTrue(TEXT("no file"), Controller->GetCurrentProjectFilePath().IsEmpty());
 	TestTrue(TEXT("no interior open"), Controller->GetLoadedBuildingId().IsEmpty());
+	TestFalse(TEXT("nothing copied is left to paste"), Controller->bHasCopiedBuilding || Controller->bHasCopiedRoom);
 	TestTrue(TEXT("nothing is being picked on the map"), !Fixture.Nav->IsSelectingPoint());
 	TestTrue(TEXT("and the navigation places are empty"), !Fixture.Nav->HasStart() && !Fixture.Nav->HasDestination() && Fixture.Nav->GetPlaceCount() == 2);
 

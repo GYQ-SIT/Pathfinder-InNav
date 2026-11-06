@@ -2786,6 +2786,20 @@ void ANavPlayerController::ClearProjectState()
 	bHasUnsavedChanges = false;
 	NextNewBuildingIndex = 1;
 
+	// What was copied (a room, a whole building) belongs to the project that is gone: Ctrl+V in the next one pastes nothing.
+	bHasCopiedRoom = false;
+	CopiedRoomId.Empty();
+	CopiedRoomFootprint.Reset();
+	CopiedRoomOpenings.Reset();
+	CopiedRoomName.Empty();
+	CopiedRoomTags.Reset();
+	CopiedRoomType.Empty();
+	bHasCopiedBuilding = false;
+	CopiedBuildingId.Empty();
+	CopiedBuildingName.Empty();
+	CopiedBuildingFootprint.Reset();
+	CopiedBuildingInterior.Reset();
+
 	// Defensively reset any in-progress mode/selection state too, in case New is ever reachable
 	// mid-edit rather than only from the start screen.
 	bBuildMode = false;
@@ -3720,6 +3734,34 @@ void ANavPlayerController::ClearPointerOverUICallback(const UObject* ScreenOwner
 		PointerOverUIOwner = nullptr;
 		PointerOverUICallback = nullptr;
 	}
+}
+
+void ANavPlayerController::BlockKeyShortcuts(const UObject* ScreenOwner)
+{
+	KeyShortcutsBlockOwner = ScreenOwner;
+}
+
+void ANavPlayerController::UnblockKeyShortcuts(const UObject* ScreenOwner)
+{
+	if (KeyShortcutsBlockOwner.Get() == ScreenOwner)
+	{
+		KeyShortcutsBlockOwner = nullptr;
+	}
+}
+
+bool ANavPlayerController::AreKeyShortcutsBlocked() const
+{
+	return KeyShortcutsBlockOwner.IsValid();
+}
+
+bool ANavPlayerController::InputKey(const FInputKeyEventArgs& Params)
+{
+	// Mouse buttons and the wheel have their own guards (IsPointerOverUI); a release always passes.
+	if (AreKeyShortcutsBlocked() && Params.Event != IE_Released && !Params.Key.IsMouseButton())
+	{
+		return false;
+	}
+	return Super::InputKey(Params);
 }
 
 bool ANavPlayerController::IsPointerOverUI() const
