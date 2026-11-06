@@ -467,9 +467,27 @@ TSharedRef<SWidget> UStartScreenWidget::RebuildWidget()
 	return Super::RebuildWidget();
 }
 
+void UStartScreenWidget::BlockClicksToTheScene()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetPointerOverUICallback(this, [](const FVector2D&) { return true; });
+	}
+}
+
+void UStartScreenWidget::NativeDestruct()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->ClearPointerOverUICallback(this);
+	}
+	Super::NativeDestruct();
+}
+
 void UStartScreenWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	BlockClicksToTheScene();
 
 	if (NewButton)
 	{

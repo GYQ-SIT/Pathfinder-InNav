@@ -135,9 +135,18 @@ TSharedRef<SWidget> UProjectLibraryWidget::RebuildWidget()
 	return Super::RebuildWidget();
 }
 
+void UProjectLibraryWidget::BlockClicksToTheScene()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetPointerOverUICallback(this, [](const FVector2D&) { return true; });
+	}
+}
+
 void UProjectLibraryWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	BlockClicksToTheScene();
 	for (UButton* Button : { BackButton, NewButton })
 	{
 		if (Button)
@@ -177,6 +186,7 @@ void UProjectLibraryWidget::NativeDestruct()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->OnActionFailed.RemoveDynamic(this, &UProjectLibraryWidget::HandleActionFailed);
+		PC->ClearPointerOverUICallback(this);
 	}
 	Super::NativeDestruct();
 }

@@ -4,6 +4,7 @@
 #include "ProjectLibrary.h"
 #include "ProjectFile.h"
 #include "ProjectLibraryWidget.h"
+#include "StartScreenWidget.h"
 #include "UiTestFixture.h"
 
 #include "Components/Button.h"
@@ -300,6 +301,35 @@ bool FProjectLibraryWidgetTest::RunTest(const FString& Parameters)
 	}
 
 	IFileManager::Get().DeleteDirectory(*Folder, false, true);
+	return true;
+}
+
+// The start screen and the project library cover the 3D scene, where the buildings of the project that was open still stand: a click on them
+// must not reach it (it selected a building, and played the sound of that). The controller is told the pointer is over the screen everywhere.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FStartScreensBlockTheSceneTest, "InNavi.UI.StartScreensBlockClicksToTheScene", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FStartScreensBlockTheSceneTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	TestFalse(TEXT("no screen covers the scene to begin with"), Controller->IsPointerOverUI());
+
+	UStartScreenWidget* Start = NewObject<UStartScreenWidget>();
+	Start->Initialize();
+	const TSharedRef<SWidget> StartSlate = Start->TakeWidget();
+	Start->SetOwningPlayer(Controller);
+	Start->BlockClicksToTheScene();
+	TestTrue(TEXT("the start screen covers the scene: a click on it is not a click on a building"), Controller->IsPointerOverUI());
+
+	UProjectLibraryWidget* Library = NewObject<UProjectLibraryWidget>();
+	Library->Initialize();
+	const TSharedRef<SWidget> LibrarySlate = Library->TakeWidget();
+	Library->SetOwningPlayer(Controller);
+	Controller->ClearPointerOverUICallback(Start);
+	TestFalse(TEXT("leaving the start screen gives the scene its clicks back"), Controller->IsPointerOverUI());
+	Library->BlockClicksToTheScene();
+	TestTrue(TEXT("the project library covers it too"), Controller->IsPointerOverUI());
+	Controller->ClearPointerOverUICallback(Library);
+	TestFalse(TEXT("and gives them back"), Controller->IsPointerOverUI());
 	return true;
 }
 

@@ -32,6 +32,8 @@ public:
 	// Asks first, then moves the file into the Data/Deleted folder (see ProjectLibrary::SoftDelete).
 	void DeleteProject(const FProjectLibraryEntry& Entry);
 	void GoBack();
+	// A click on this screen must not reach the 3D scene behind it (see UStartScreenWidget::BlockClicksToTheScene).
+	void BlockClicksToTheScene();
 
 	// Tests.
 	int32 GetShownCardCountForTests() const { return Cards.Num(); }
