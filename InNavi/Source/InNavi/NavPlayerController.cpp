@@ -68,6 +68,7 @@ ANavPlayerController::ANavPlayerController()
 	SelectedBuilding = nullptr;
 	Generator = nullptr;
 	InteriorGen = nullptr;
+	OnActionFailed.AddUniqueDynamic(this, &ANavPlayerController::HandleActionFailureSound);
 }
 void ANavPlayerController::ClearCampusInteriorPreview()
 {
@@ -492,7 +493,7 @@ void ANavPlayerController::SetupInputComponent()
 	// Not "D" - DefaultPawn's free-fly movement already uses WASD, so "D" would double up as
 	// "strafe right" every time this mode gets toggled.
 	InputComponent->BindKey(EKeys::K, IE_Pressed, this, &ANavPlayerController::ToggleAddDoorMode);
-	InputComponent->BindKey(EKeys::BackSpace, IE_Pressed, this, &ANavPlayerController::DeleteSelectionKeyHandler);
+	InputComponent->BindKey(EKeys::Delete, IE_Pressed, this, &ANavPlayerController::DeleteSelectionKeyHandler);
 	InputComponent->BindKey(EKeys::One, IE_Pressed, this, &ANavPlayerController::TogglePrefabRectangleMode);
 	InputComponent->BindKey(EKeys::Two, IE_Pressed, this, &ANavPlayerController::TogglePrefabTriangleMode);
 	InputComponent->BindKey(EKeys::Three, IE_Pressed, this, &ANavPlayerController::TogglePrefabCircleMode);
@@ -1150,7 +1151,7 @@ void ANavPlayerController::ToggleSelectMode()
 	OnSelectModeChanged.Broadcast(true);
 	OnEditModeChanged.Broadcast();
 
-	UE_LOG(LogTemp, Warning, TEXT("Select mode ON (floor %d): click a room/wall on the 2D canvas to select it (Backspace deletes, =/- resizes), Esc/Q to exit"), InteriorGen->GetActiveFloor());
+	UE_LOG(LogTemp, Warning, TEXT("Select mode ON (floor %d): click a room/wall on the 2D canvas to select it (Delete deletes, =/- resizes), Esc/Q to exit"), InteriorGen->GetActiveFloor());
 }
 
 void ANavPlayerController::ToggleRoomColours()
@@ -1219,7 +1220,7 @@ void ANavPlayerController::TogglePrefabRoomMode(int32 ShapeId)
 	CancelNavigationPicking();
 	ActivePrefabShape = ShapeId;
 	OnEditModeChanged.Broadcast();
-	UE_LOG(LogTemp, Warning, TEXT("Prefab room placement ON (shape %d): click the 2D canvas to place, press the same key again to stop"), ShapeId);
+	UE_LOG(LogTemp, Warning, TEXT("Prefab room placement ON (shape %d): click for the default size or drag to size a room; press the same key again to stop"), ShapeId);
 }
 
 void ANavPlayerController::TogglePrefabRectangleMode()
@@ -1409,7 +1410,7 @@ FString ANavPlayerController::AddDoorToWall(const FString& RoomId, int32 EdgeInd
 	{
 		bHasUnsavedChanges = true;
 		// Selected immediately, like PlacePrefabRoomAt does for rooms, so it can be deleted right
-		// away with Backspace if it's wrong.
+		// away with Delete if it's wrong.
 		SelectDoor(RoomId, NewDoorId);
 	}
 	return NewDoorId;
@@ -1590,6 +1591,7 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 			if (!IsPointInPolygon(FootprintPoint, Building->GetFootprint()))
 			{
 				UE_LOG(LogTemp, Warning, TEXT("Click inside the building's outline to add a point, not outside it"));
+				CancelRoom();
 				OnActionFailed.Broadcast(TEXT("Click inside the building's outline, not outside it."), EActionFailureSeverity::Warning);
 				return;
 			}
@@ -2261,6 +2263,7 @@ void ANavPlayerController::DeleteSelectionKeyHandler()
 bool ANavPlayerController::ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth)
 {
 	if (bInteriorInspectionEnabled) return false;
+	if (bIsIn3DPreviewMode && !bIsIn3DEditMode) return false;
 	if (!InteriorGen)
 	{
 		OnActionFailed.Broadcast(TEXT("No InteriorGenerator placed in the level."), EActionFailureSeverity::Warning);
@@ -2319,6 +2322,11 @@ float ANavPlayerController::GetBuildingScale() const
 
 AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter)
 {
+	return PlacePrefabRoomInBounds(FootprintCenter, FVector2D::ZeroVector);
+}
+
+AInteriorRoom* ANavPlayerController::PlacePrefabRoomInBounds(FVector2D FootprintCenter, FVector2D FootprintSize)
+{
 	if (bInteriorInspectionEnabled) return nullptr;
 	if (ActivePrefabShape == 0)
 	{
@@ -2344,7 +2352,29 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter
 		}
 	}
 
-	// Default sizes are deliberately small - ResizeRoom (below) is how they grow from here. Expressed
+	const TArray<FVector2D> Footprint = BuildPrefabRoomFootprint(FootprintCenter, FootprintSize);
+	if (Footprint.IsEmpty())
+	{
+		OnActionFailed.Broadcast(TEXT("Drag a room with a positive width and depth."), EActionFailureSeverity::Warning);
+		return nullptr;
+	}
+	FString CreateError;
+	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(Footprint, FString(), FString(), true, false, /*bAllowOverlap=*/false, CreateError);
+	if (!NewRoom)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Could not place the prefab room: %s"), *CreateError);
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not place the room there - %s"), *CreateError), EActionFailureSeverity::Warning);
+		return nullptr;
+	}
+	bHasUnsavedChanges = true;
+	SelectRoom(NewRoom->RoomId);
+	OnInteriorContentChanged.Broadcast();
+	return NewRoom;
+}
+
+TArray<FVector2D> ANavPlayerController::BuildPrefabRoomFootprint(FVector2D FootprintCenter, FVector2D FootprintSize) const
+{
+	// Default sizes are deliberately small - ResizeRoom is how they grow from here. Expressed
 	// as a fixed WORLD size (cm) divided by the building's own Scale, not a bare footprint-unit
 	// constant - footprint-space is pre-scale, so a bare constant here would produce a room 10x too
 	// big for a database-loaded building (Scale=100) versus a hand-authored JSON one (Scale=10). See
@@ -2388,24 +2418,20 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter
 		break;
 	}
 	default:
-		return nullptr;
+		return {};
 	}
-	
-	FString CreateError;
-	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(Footprint, FString(), FString(), true, false, /*bAllowOverlap=*/false, CreateError);
-	if (!NewRoom)
+	if (FootprintSize != FVector2D::ZeroVector)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Could not place the prefab room: %s"), *CreateError);
-		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not place the room there - %s"), *CreateError), EActionFailureSeverity::Warning);
-		return nullptr;
+		if (!FMath::IsFinite(FootprintSize.X) || !FMath::IsFinite(FootprintSize.Y) || FootprintSize.X <= 0 || FootprintSize.Y <= 0) return {};
+		const FBox2D Bounds(Footprint);
+		const FVector2D Size = Bounds.GetSize();
+		for (FVector2D& Point : Footprint)
+		{
+			const FVector2D Offset = Point - Bounds.GetCenter();
+			Point = FootprintCenter + FVector2D(Offset.X * FootprintSize.X / Size.X, Offset.Y * FootprintSize.Y / Size.Y);
+		}
 	}
-
-	bHasUnsavedChanges = true;
-	// Selecting it immediately means =/- (or a future resize UI) can act on it right away without
-	// an extra click.
-	SelectRoom(NewRoom->RoomId);
-	OnInteriorContentChanged.Broadcast();
-	return NewRoom;
+	return Footprint;
 }
 
 FString ANavPlayerController::PlaceConnectorAt(FVector2D FootprintPosition)
@@ -2480,7 +2506,9 @@ AInteriorRoom* ANavPlayerController::FinishRoom(const FString& RoomId, const FSt
 	if (PendingRoomFootprint.Num() < 3)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Need at least 3 points to finish a room (have %d)"), PendingRoomFootprint.Num());
-		OnActionFailed.Broadcast(FString::Printf(TEXT("Need at least 3 points to finish a room (have %d)."), PendingRoomFootprint.Num()), EActionFailureSeverity::Warning);
+		const int32 Count = PendingRoomFootprint.Num();
+		CancelRoom();
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Need at least 3 points to finish a room (have %d)."), Count), EActionFailureSeverity::Warning);
 		return nullptr;
 	}
 
@@ -2496,9 +2524,8 @@ AInteriorRoom* ANavPlayerController::FinishRoom(const FString& RoomId, const FSt
 
 	if (!NewRoom)
 	{
-		// Spawn was rejected - keep the drawn points and preview so the user can see what's there;
-		// Esc cancels.
-		UE_LOG(LogTemp, Warning, TEXT("Could not finish this room: %s Press Esc to discard and redraw."), *CreateError);
+		CancelRoom();
+		UE_LOG(LogTemp, Warning, TEXT("Could not finish this room: %s"), *CreateError);
 		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not create the room - %s"), *CreateError), EActionFailureSeverity::Warning);
 		return nullptr;
 	}
@@ -2529,7 +2556,9 @@ AInteriorRoom* ANavPlayerController::FinishWall(const FString& WallId)
 	if (PendingRoomFootprint.Num() < 2)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Need at least 2 points to finish a wall (have %d)"), PendingRoomFootprint.Num());
-		OnActionFailed.Broadcast(FString::Printf(TEXT("Need at least 2 points to finish a wall (have %d)."), PendingRoomFootprint.Num()), EActionFailureSeverity::Warning);
+		const int32 Count = PendingRoomFootprint.Num();
+		CancelWall();
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Need at least 2 points to finish a wall (have %d)."), Count), EActionFailureSeverity::Warning);
 		return nullptr;
 	}
 
@@ -2545,9 +2574,8 @@ AInteriorRoom* ANavPlayerController::FinishWall(const FString& WallId)
 
 	if (!NewWall)
 	{
-		// Spawn was rejected - keep the drawn points and preview so the user can see what's there;
-		// Esc cancels.
-		UE_LOG(LogTemp, Warning, TEXT("Could not finish this wall: %s Press Esc to discard and redraw."), *CreateError);
+		CancelWall();
+		UE_LOG(LogTemp, Warning, TEXT("Could not finish this wall: %s"), *CreateError);
 		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not create the wall - %s"), *CreateError), EActionFailureSeverity::Warning);
 		return nullptr;
 	}
@@ -5163,12 +5191,25 @@ void ANavPlayerController::RemoveActiveInteriorFloor()
 
 void ANavPlayerController::GrowSelectedRoom()
 {
-	NudgeSelectedRoomSize(20.f);
+	NudgeSelectedRoomSize(RoomResizeStepMetres * 100.f / GetBuildingScale());
 }
 
 void ANavPlayerController::ShrinkSelectedRoom()
 {
-	NudgeSelectedRoomSize(-20.f);
+	NudgeSelectedRoomSize(-RoomResizeStepMetres * 100.f / GetBuildingScale());
+}
+
+void ANavPlayerController::SetRoomResizeStepMetres(float Metres)
+{
+	if (FMath::IsFinite(Metres) && Metres > 0.f) RoomResizeStepMetres = Metres;
+}
+
+bool ANavPlayerController::ResizeRoomDuringDrag(const FString& RoomId, FVector2D Size)
+{
+	if (bInteriorInspectionEnabled || (bIsIn3DPreviewMode && !bIsIn3DEditMode) || !InteriorGen) return false;
+	if (!InteriorGen->ResizeRoom(RoomId, Size.X, Size.Y, false)) return false;
+	bHasUnsavedChanges = true;
+	return true;
 }
 
 void ANavPlayerController::NudgeSelectedRoomSize(float Delta)
@@ -5183,7 +5224,7 @@ void ANavPlayerController::NudgeSelectedRoomSize(float Delta)
 
 	// Grow/Shrink work on whichever kind of thing is currently selected - a connector (elevator/
 	// stairs/escalator) has no width/depth of its own, just a uniform SizeScale multiplier, so this
-	// branches off to a completely different code path (Delta's 20-unit convention below doesn't
+	// branches off to a completely different code path (the room step in metres below doesn't
 	// apply there at all - ConnectorScaleStep is its own, separate step size).
 	if (!SelectedConnectorGroupId.IsEmpty() && InteriorGen)
 	{
@@ -5223,8 +5264,9 @@ void ANavPlayerController::NudgeSelectedRoomSize(float Delta)
 			MaxPoint.Y = FMath::Max(MaxPoint.Y, Point.Y);
 		}
 
-		const float NewWidth = FMath::Max(10.f, (MaxPoint.X - MinPoint.X) + Delta);
-		const float NewDepth = FMath::Max(10.f, (MaxPoint.Y - MinPoint.Y) + Delta);
+		const float MinSize = 10.f / GetBuildingScale();
+		const float NewWidth = FMath::Max(MinSize, (MaxPoint.X - MinPoint.X) + Delta);
+		const float NewDepth = FMath::Max(MinSize, (MaxPoint.Y - MinPoint.Y) + Delta);
 		ResizeRoom(SelectedRoomId, NewWidth, NewDepth);
 		return;
 	}
@@ -5604,12 +5646,18 @@ void ANavPlayerController::PlayArrivalSound()
 
 void ANavPlayerController::SetAllUiSoundsEnabled(bool bEnabled)
 {
+	bActionFailureSoundEnabled = bEnabled;
 	bButtonClickSoundEnabled = bEnabled;
 	bBuildingSelectSoundEnabled = bEnabled;
 	bQuitConfirmSoundEnabled = bEnabled;
 	bDirectionsSoundEnabled = bEnabled;
 	bArrivalSoundEnabled = bEnabled;
 	bNextInstructionSoundEnabled = bEnabled;
+}
+
+void ANavPlayerController::HandleActionFailureSound(FString Reason, EActionFailureSeverity Severity)
+{
+	if (bActionFailureSoundEnabled) PlayShortSoundEffect(TEXT("UI_Off-Route.wav"));
 }
 
 void ANavPlayerController::SetMasterVolume(float NewVolume)

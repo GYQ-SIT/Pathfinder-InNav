@@ -729,7 +729,7 @@ public:
 
 	// Removes every floor's node for the currently-selected connector (see
 	// AInteriorGenerator::DeleteConnectorGroup) and clears the selection. Bound as part of
-	// DeleteSelection (Backspace). No-op (returns false) if no connector is selected.
+	// DeleteSelection (Delete). No-op (returns false) if no connector is selected.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool DeleteSelectedConnector();
 
@@ -764,7 +764,7 @@ public:
 
 	// Deletes whichever is currently selected - a door takes priority if one is selected (see
 	// SelectDoor), otherwise a selected room/wall (see SelectRoom) - and clears the corresponding
-	// selection. Bound to the Backspace key for now. No-op (returns false) if nothing is selected.
+	// selection. Bound to the Delete key for now. No-op (returns false) if nothing is selected.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool DeleteSelection();
 
@@ -786,6 +786,12 @@ public:
 	// GrowSelectedRoom/ShrinkSelectedRoom. Not wired into UMG yet.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth);
+	// Drag previews validate every size but create a single undo entry when committed.
+	bool ResizeRoomDuringDrag(const FString& RoomId, FVector2D Size);
+	float GetRoomResizeStepMetres() const { return RoomResizeStepMetres; }
+	void SetRoomResizeStepMetres(float Metres);
+	float GetConnectorResizeStepPercent() const { return ConnectorScaleStep * 100.f; }
+	void SetConnectorResizeStepPercent(float Percent) { if (FMath::IsFinite(Percent) && Percent > 0) ConnectorScaleStep = Percent / 100.f; }
 
 	// Moves a room/wall to a new footprint (see AInteriorGenerator::MoveRoom) - what the 2D floor
 	// plan canvas's select-mode drag handler calls while dragging a selected room, recomputing the
@@ -856,6 +862,8 @@ public:
 	// (returns nullptr) if no prefab shape is currently armed.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	AInteriorRoom* PlacePrefabRoomAt(FVector2D FootprintCenter);
+	AInteriorRoom* PlacePrefabRoomInBounds(FVector2D FootprintCenter, FVector2D FootprintSize);
+	TArray<FVector2D> BuildPrefabRoomFootprint(FVector2D FootprintCenter, FVector2D FootprintSize = FVector2D::ZeroVector) const;
 
 	// Connector (elevator/stairs/escalator) placement: 4/5/6 (for now, not wired into UMG yet) each
 	// arm a different type - while armed, clicking the 2D floor plan canvas places one there (see
@@ -1056,7 +1064,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	bool SetLoadedBuildingName(const FString& NewName);
 
-	// Grow/shrink whatever's currently selected - a room by a fixed 20-unit nudge, or a connector
+	// Grow/shrink whatever's currently selected - a room by the configured step in metres, or a connector
 	// (elevator/stairs/escalator) by a SizeScale multiplier step (see NudgeSelectedRoomSize, which
 	// despite the name handles both - kept the room-era name since it's already bound to =/- and the
 	// Toolbar panel's Gizmos Grow/Shrink buttons). Move itself is intentionally NOT supported for a
@@ -1225,6 +1233,12 @@ protected:
 	virtual void Tick(float DeltaSeconds) override;
 
 private:
+	friend struct FEditorInteractionTestAccess;
+	UFUNCTION()
+	void HandleActionFailureSound(FString Reason, EActionFailureSeverity Severity);
+	bool bActionFailureSoundEnabled = true;
+	float RoomResizeStepMetres = 0.5f;
+
 	void BindGameWindowCloseGuard(class UGameViewportClient* Viewport);
 	void UnbindGameWindowCloseGuard();
 	bool HandleGameWindowCloseRequested();
@@ -1344,7 +1358,7 @@ private:
 
 	// See NudgeSelectedRoomSize's connector branch - AInteriorGenerator::ScaleConnectorGroup's own
 	// SizeScale multiplier, not an absolute unit size like a room's Delta.
-	static constexpr float ConnectorScaleStep = 0.1f;
+	float ConnectorScaleStep = 0.1f;
 
 	static constexpr float RotationDegreesPerSecond = 90.f;
 	// No OnActionFailed broadcast on failure - called every tick while a rotation key is held,
@@ -1363,7 +1377,7 @@ private:
 	void FinishRotationGesture();
 	void CommitRotationGesture();
 
-	// Backspace handler - wraps DeleteSelection() because key bindings require a void() signature.
+	// Delete handler - wraps DeleteSelection() because key bindings require a void() signature.
 	void DeleteSelectionKeyHandler();
 
 	UPROPERTY()

@@ -165,7 +165,7 @@ public:
 	// shape. Returns false if no room with that id exists, or its current bounding box is
 	// degenerate (zero width or depth - can't compute a scale factor from that).
 	UFUNCTION(BlueprintCallable, Category = "Interior")
-	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth);
+	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth, bool bRecordHistory = true);
 
 	// Rotates a room/wall's footprint by DeltaDegrees around its own bounding-box center (positive
 	// = counter-clockwise). Rejects (no-op, returns false) if the rotated footprint would extend

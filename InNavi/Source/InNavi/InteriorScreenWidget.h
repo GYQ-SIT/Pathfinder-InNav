@@ -220,6 +220,17 @@ private:
 
 	UFUNCTION()
 	void OnApplyRoomClicked();
+	UFUNCTION()
+	void OnRoomSizeTextChanged(const FText& Text);
+	UFUNCTION()
+	void OnResizeStepChanged(float Value);
+	bool bRoomSizeDirty = false;
+	bool bUpdatingRoomBounds = false;
+	FString BoundsRoomId;
+	UPROPERTY()
+	class USpinBox* ResizeStepBox = nullptr;
+	UPROPERTY()
+	UTextBlock* ResizeStepLabel = nullptr;
 
 	// Shown/populated whenever the selected connector (elevator/stairs/escalator) changes (see
 	// ANavPlayerController::OnSelectedConnectorChanged), hidden when deselected (empty GroupId).

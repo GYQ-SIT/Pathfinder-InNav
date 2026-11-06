@@ -1156,6 +1156,37 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprintWithTags(const TArray<
 	return Room;
 }
 
+// An open wall may bend, but may not cross, touch a non-adjacent segment, or double back along itself.
+static bool InteriorGen_WallSelfIntersects(const TArray<FVector2D>& Points)
+{
+	constexpr double Tolerance = 1e-5;
+	for (int32 i = 0; i < Points.Num(); ++i)
+	{
+		if (!FMath::IsFinite(Points[i].X) || !FMath::IsFinite(Points[i].Y)) return true;
+		if (i + 1 >= Points.Num()) break;
+		const FVector2D A = Points[i], B = Points[i + 1];
+		if (FVector2D::Distance(A, B) <= Tolerance) return true;
+		for (int32 j = i + 1; j + 1 < Points.Num(); ++j)
+		{
+			const FVector2D C = Points[j], D = Points[j + 1];
+			if (j == i + 1)
+			{
+				// Adjacent segments share B; only an overlap beyond that joint is invalid.
+				if (FVector2D::DotProduct(B - A, D - C) < 0 &&
+					(InteriorGen_DistancePointToSegment2D(D, A, B) <= Tolerance ||
+					 InteriorGen_DistancePointToSegment2D(A, C, D) <= Tolerance)) return true;
+				continue;
+			}
+			if (InteriorGen_SegmentsIntersect(A, B, C, D) ||
+				InteriorGen_DistancePointToSegment2D(A, C, D) <= Tolerance ||
+				InteriorGen_DistancePointToSegment2D(B, C, D) <= Tolerance ||
+				InteriorGen_DistancePointToSegment2D(C, A, B) <= Tolerance ||
+				InteriorGen_DistancePointToSegment2D(D, A, B) <= Tolerance) return true;
+		}
+	}
+	return false;
+}
+
 AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>& Points, const FString& WallId, FString& OutError)
 {
 	return CreateWallFromPoints(Points, WallId, OutError, {}, FString());
@@ -1193,6 +1224,11 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 	{
 		UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: needs at least 2 points (has %d)"), Points.Num());
 		OutError = TEXT("A wall needs at least 2 points.");
+		return nullptr;
+	}
+	if (InteriorGen_WallSelfIntersects(Points))
+	{
+		OutError = TEXT("The wall crosses or overlaps itself, or contains an invalid or repeated point.");
 		return nullptr;
 	}
 	if (!IsFootprintFullyInsidePolygon(Points, Building->GetFootprint(), false))
@@ -1807,7 +1843,7 @@ bool AInteriorGenerator::DeleteRoom(const FString& RoomId)
 	return false;
 }
 
-bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth)
+bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth, bool bRecordHistory)
 {
 	if (!FMath::IsFinite(NewWidth) || !FMath::IsFinite(NewDepth) || NewWidth <= 0.f || NewDepth <= 0.f)
 	{
@@ -1884,7 +1920,8 @@ bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float
 				return false;
 			}
 			UE_LOG(LogTemp, Warning, TEXT("Resized %s to %.1f x %.1f"), *RoomId, NewWidth, NewDepth);
-			RecordHistorySnapshot();
+			if (bRecordHistory) RecordHistorySnapshot();
+			else NotifyNavigationLayoutChanged();
 			return true;
 		}
 	}

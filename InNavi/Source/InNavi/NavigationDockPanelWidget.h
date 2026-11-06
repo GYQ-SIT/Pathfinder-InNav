@@ -5,6 +5,7 @@
 #include "Components/Button.h"
 #include "Components/ComboBoxString.h"
 #include "Types/SlateEnums.h"
+#include "Widgets/Views/SListView.h"
 #include "NavigationDockPanelWidget.generated.h"
 
 class UBorder;
@@ -43,13 +44,30 @@ class INNAVI_API UNavigationPlaceCombo : public UComboBoxString
 
 public:
 	void Setup(UNavigationDockPanelWidget* InPanel, int32 InSlot);
+	void SetSearchText(const FString& Query);
+	int32 GetFilteredOptionCount() const { return FilteredOptions.Num(); }
+	FString GetFilteredOption(int32 Index) const { return FilteredOptions.IsValidIndex(Index) ? *FilteredOptions[Index] : FString(); }
+	virtual void ReleaseSlateResources(bool bReleaseChildren) override;
+
+protected:
+	virtual TSharedRef<SWidget> RebuildWidget() override;
 
 private:
 	UFUNCTION()
 	void HandleChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+	friend struct FEditorInteractionTestAccess;
+	void SearchChanged(const FText& Text);
+	void SearchCommitted(const FText& Text, ETextCommit::Type CommitType);
+	FReply HandleSearchKey(const FGeometry& Geometry, const FKeyEvent& Event);
+	void ChooseSearchResult(TSharedPtr<FString> Item, ESelectInfo::Type SelectionType);
+	TSharedRef<ITableRow> GenerateSearchRow(TSharedPtr<FString> Item, const TSharedRef<STableViewBase>& Owner);
 
 	TWeakObjectPtr<UNavigationDockPanelWidget> Panel;
 	int32 SlotIndex = INDEX_NONE;
+	TArray<TSharedPtr<FString>> FilteredOptions;
+	TSharedPtr<class SEditableTextBox> SearchField;
+	FEditableTextBoxStyle SearchStyle;
+	TSharedPtr<SListView<TSharedPtr<FString>>> SearchResults;
 };
 
 // The Navigation dock panel, shared by the interior editor and the exterior screen. It has two views. Plan is where the route is
@@ -81,6 +99,7 @@ public:
 	// What the buttons and dropdowns of the rows tell the panel (see UNavigationPlaceButton, UNavigationPlaceCombo).
 	void HandleSlotButton(int32 SlotIndex, bool bPick);
 	void HandleSlotChosen(int32 SlotIndex, const FString& Item, ESelectInfo::Type SelectionType);
+	TArray<FString> SearchPlaces(const FString& Query) const;
 
 	// How many rows the list can show: the start, the most stops, the destination, and a row to add a place in (after the destination).
 	static constexpr int32 MaxSlots = 11;
@@ -122,8 +141,6 @@ private:
 	UFUNCTION()
 	void OnStepModeClicked();
 	UFUNCTION()
-	void HandleSearchChanged(const FText& Text);
-	UFUNCTION()
 	UWidget* HandleGenerateComboBoxItem(FString Item);
 
 	// Which place each row of the list shows: a row of the route, PendingRow for the row a stop is being added in, or INDEX_NONE for a
@@ -148,10 +165,6 @@ private:
 	// ---- Plan ----
 	UPROPERTY()
 	UTextBlock* ContextText = nullptr;
-	UPROPERTY()
-	UEditableTextBox* DestinationSearchBox = nullptr;
-	UPROPERTY()
-	UTextBlock* DestinationSearchResultsText = nullptr;
 	UPROPERTY()
 	TArray<TObjectPtr<USizeBox>> SlotSizes;
 	UPROPERTY()
