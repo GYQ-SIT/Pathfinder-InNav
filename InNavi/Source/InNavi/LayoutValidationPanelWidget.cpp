@@ -74,7 +74,10 @@ TSharedRef<SWidget> ULayoutValidationPanelWidget::RebuildWidget()
 }
 UWidget* ULayoutValidationPanelWidget::GenerateComboItem(FString Value)
 {
-    auto* Text = WidgetTree->ConstructWidget<UTextBlock>(); Text->SetText(FText::FromString(Value)); ApplyStandardFont(Text); Text->SetAutoWrapText(true); return Text;
+    auto* Text = WidgetTree->ConstructWidget<UTextBlock>(); Text->SetText(FText::FromString(Value)); ApplyStandardFont(Text); Text->SetAutoWrapText(true);
+    // Slate keeps only its own widget, not this one: keep it alive (the newest 400 are far more than are ever on screen).
+    RetainedComboItems.Add(Text); if (RetainedComboItems.Num() > 400) RetainedComboItems.RemoveAt(0, RetainedComboItems.Num() - 400);
+    return Text;
 }
 ULayoutValidationSession* ULayoutValidationPanelWidget::Session() const
 {

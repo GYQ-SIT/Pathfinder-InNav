@@ -402,5 +402,27 @@ namespace InNaviValidationTests
         TestEqual(TEXT("unsaved edits in A are preserved by normal switching"),FirstRoom->GetStringField(TEXT("name")),FString(TEXT("Unsaved room name")));
         return true;
     }
+    // Regression: opening the Validation panel crashed at random (access violation while drawing). The items its combo boxes generate were held only by Slate, so a
+    // garbage collection freed them while they were on screen. They must survive a collection, on the exterior screen as well as the interior one.
+    IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPanelComboItemsSurviveGc, "InNavi.LayoutValidation.ComboItemsSurviveGarbageCollection", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+    bool FPanelComboItemsSurviveGc::RunTest(const FString& Parameters)
+    {
+        FFixture Fixture;
+        auto* Exterior=NewObject<UEditScreenWidget>(); Exterior->AddToRoot(); Exterior->Initialize(); Exterior->TakeWidget(); Exterior->SetOwningPlayer(Fixture.Controller);
+        bool bOk=true;
+        auto* Panel=Exterior->GetValidationPanelForTests();
+        if (!TestNotNull(TEXT("exterior validation panel"),Panel)) bOk=false;
+        for (const TCHAR* Id : { TEXT("Cbx_ValidationScope"), TEXT("Cbx_ValidationSeverity") })
+        {
+            auto* Combo=Panel?Cast<UComboBoxString>(Panel->FindContentWidget(Id)):nullptr;
+            if (!TestNotNull(Id,Combo)) { bOk=false; continue; }
+            TArray<TWeakObjectPtr<UWidget>> Items;
+            for (int32 I=0;I<3;++I) Items.Add(Combo->OnGenerateWidgetEvent.Execute(TEXT("Item")));
+            CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
+            for (const auto& Item : Items) TestTrue(*FString::Printf(TEXT("%s: a generated item survives garbage collection"),Id),Item.IsValid());
+        }
+        Exterior->RemoveFromRoot();
+        return bOk;
+    }
 }
 #endif
