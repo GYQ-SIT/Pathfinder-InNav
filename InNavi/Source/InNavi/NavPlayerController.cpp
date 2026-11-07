@@ -5684,10 +5684,10 @@ void ANavPlayerController::PlayQuitConfirmSound()
 	PlayShortSoundEffect(TEXT("quit_confirm.wav"));
 }
 
-void ANavPlayerController::PlayDirectionsSound()
+void ANavPlayerController::PlayStartNavigationSound()
 {
-	++DirectionsSoundRequests;
-	if (!bDirectionsSoundEnabled)
+	++StartNavigationSoundRequests;
+	if (!bStartNavigationSoundEnabled)
 	{
 		return;
 	}
@@ -5724,7 +5724,7 @@ void ANavPlayerController::SetAllUiSoundsEnabled(bool bEnabled)
 	bButtonClickSoundEnabled = bEnabled;
 	bBuildingSelectSoundEnabled = bEnabled;
 	bQuitConfirmSoundEnabled = bEnabled;
-	bDirectionsSoundEnabled = bEnabled;
+	bStartNavigationSoundEnabled = bEnabled;
 	bArrivalSoundEnabled = bEnabled;
 	bNextInstructionSoundEnabled = bEnabled;
 }

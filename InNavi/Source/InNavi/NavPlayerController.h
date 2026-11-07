@@ -1180,14 +1180,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void SetActionFailureSoundEnabled(bool bEnabled) { bActionFailureSoundEnabled = bEnabled; }
 
-	// The phone app's "Get directions": plays Data/Audio/UI_Dull_08.wav once the route page has opened for the start and the destination
-	// that were chosen (see UMobileAppWidget::SendSheetEvent). Its own flag; SetAllUiSoundsEnabled(false) mutes it too. Fire-and-forget
-	// like the other short effects; a missing or unreadable file is silent.
-	void PlayDirectionsSound();
-	bool IsDirectionsSoundEnabled() const { return bDirectionsSoundEnabled; }
-	void SetDirectionsSoundEnabled(bool bEnabled) { bDirectionsSoundEnabled = bEnabled; }
+	// The phone app's "Start navigation": plays Data/Audio/UI_Dull_08.wav once the walk has begun, as the first instruction opens (see
+	// UMobileAppWidget::SendSheetEvent). "Get directions" itself is silent. Its own flag; SetAllUiSoundsEnabled(false) mutes it too.
+	// Fire-and-forget like the other short effects; a missing or unreadable file is silent.
+	void PlayStartNavigationSound();
+	bool IsStartNavigationSoundEnabled() const { return bStartNavigationSoundEnabled; }
+	void SetStartNavigationSoundEnabled(bool bEnabled) { bStartNavigationSoundEnabled = bEnabled; }
 	// Tests: how many times the phone app asked for the sound, whether it was muted or not.
-	int32 GetDirectionsSoundRequestsForTests() const { return DirectionsSoundRequests; }
+	int32 GetStartNavigationSoundRequestsForTests() const { return StartNavigationSoundRequests; }
 
 	// The phone app's "Next instruction" button (every instruction but the last): plays Data/Audio/UI_Dull_05.wav. Same rules as above.
 	void PlayNextInstructionSound();
@@ -1196,7 +1196,7 @@ public:
 	int32 GetNextInstructionSoundRequestsForTests() const { return NextInstructionSoundRequests; }
 
 	// The phone app's "I have arrived" button (the last instruction's button): plays Data/Audio/UI_Place_2.wav as the arrival page opens.
-	// Same rules as PlayDirectionsSound.
+	// Same rules as PlayStartNavigationSound.
 	void PlayArrivalSound();
 	bool IsArrivalSoundEnabled() const { return bArrivalSoundEnabled; }
 	void SetArrivalSoundEnabled(bool bEnabled) { bArrivalSoundEnabled = bEnabled; }
@@ -1211,7 +1211,7 @@ public:
 
 	// Whether the sounds were all muted at once (Mute All) and are still all off: what the Audio panel's Mute All box shows when a screen builds
 	// it. Turning any individual sound back on ends it.
-	bool AreAllUiSoundsMuted() const { return bUiSoundsMuted && !bButtonClickSoundEnabled && !bBuildingSelectSoundEnabled && !bQuitConfirmSoundEnabled && !bActionFailureSoundEnabled && !bDirectionsSoundEnabled && !bNextInstructionSoundEnabled && !bArrivalSoundEnabled; }
+	bool AreAllUiSoundsMuted() const { return bUiSoundsMuted && !bButtonClickSoundEnabled && !bBuildingSelectSoundEnabled && !bQuitConfirmSoundEnabled && !bActionFailureSoundEnabled && !bStartNavigationSoundEnabled && !bNextInstructionSoundEnabled && !bArrivalSoundEnabled; }
 
 	// Multiplies the volume of every sound this class plays (the Audio panel's own file playback and
 	// all three short UI effects) - see PlayWavFile, which applies this to every UAudioComponent it
@@ -1831,9 +1831,9 @@ private:
 	// See AreAllUiSoundsMuted.
 	bool bUiSoundsMuted = false;
 
-	// See PlayDirectionsSound and PlayArrivalSound.
-	bool bDirectionsSoundEnabled = true;
-	int32 DirectionsSoundRequests = 0;
+	// See PlayStartNavigationSound and PlayArrivalSound.
+	bool bStartNavigationSoundEnabled = true;
+	int32 StartNavigationSoundRequests = 0;
 	bool bArrivalSoundEnabled = true;
 	int32 ArrivalSoundRequests = 0;
 	bool bNextInstructionSoundEnabled = true;
