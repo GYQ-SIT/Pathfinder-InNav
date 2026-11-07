@@ -1195,7 +1195,7 @@ static bool InteriorGen_WallSelfIntersects(const TArray<FVector2D>& Points)
 	return false;
 }
 
-bool AInteriorGenerator::ValidateWallPath(const TArray<FVector2D>& Points, FString& OutError) const
+bool AInteriorGenerator::ValidateWallPath(const TArray<FVector2D>& Points, FString& OutError, bool bDrawingRoom) const
 {
 	OutError.Empty();
 	const APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
@@ -1203,12 +1203,12 @@ bool AInteriorGenerator::ValidateWallPath(const TArray<FVector2D>& Points, FStri
 	if (Points.IsEmpty()) return true;
 	if (InteriorGen_WallSelfIntersects(Points))
 	{
-		OutError = TEXT("The wall crosses or overlaps itself, or contains an invalid or repeated point.");
+		OutError = bDrawingRoom ? TEXT("The room outline crosses or overlaps itself, or contains an invalid or repeated point.") : TEXT("The wall crosses or overlaps itself, or contains an invalid or repeated point.");
 		return false;
 	}
 	if (!IsFootprintFullyInsidePolygon(Points, Building->GetFootprint(), false))
 	{
-		OutError = TEXT("The wall extends outside the building's outline.");
+		OutError = bDrawingRoom ? TEXT("The room outline extends outside the building's outline.") : TEXT("The wall extends outside the building's outline.");
 		return false;
 	}
 
@@ -1880,7 +1880,7 @@ bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float
 
 bool AInteriorGenerator::ResizeRoomToBounds(const FString& RoomId, FVector2D Position, FVector2D Size, bool bRecordHistory)
 {
-	const float NewWidth = Size.X, NewDepth = Size.Y;
+	const double NewWidth = Size.X, NewDepth = Size.Y;
 	if (!FMath::IsFinite(Position.X) || !FMath::IsFinite(Position.Y)) return false;
 	if (!FMath::IsFinite(NewWidth) || !FMath::IsFinite(NewDepth) || NewWidth < 0.f || NewDepth < 0.f)
 	{
@@ -1911,8 +1911,8 @@ bool AInteriorGenerator::ResizeRoomToBounds(const FString& RoomId, FVector2D Pos
 				MaxPoint.Y = FMath::Max(MaxPoint.Y, Point.Y);
 			}
 
-			const float OldWidth = MaxPoint.X - MinPoint.X;
-			const float OldDepth = MaxPoint.Y - MinPoint.Y;
+			const double OldWidth = MaxPoint.X - MinPoint.X;
+			const double OldDepth = MaxPoint.Y - MinPoint.Y;
 			const float MinSize = InteriorEditing::MinimumDimensionCm / (Generator ? Generator->GetScale() : 1.f);
 			const bool bZeroX = OldWidth < KINDA_SMALL_NUMBER, bZeroY = OldDepth < KINDA_SMALL_NUMBER;
 			if (Room->IsClosedLoop())
@@ -1924,8 +1924,8 @@ bool AInteriorGenerator::ResizeRoomToBounds(const FString& RoomId, FVector2D Pos
 				if ((bZeroX && !FMath::IsNearlyZero(NewWidth)) || (bZeroY && !FMath::IsNearlyZero(NewDepth)) ||
 					(!bZeroX && NewWidth <= 0) || (!bZeroY && NewDepth <= 0) || FMath::Max(NewWidth, NewDepth) < MinSize - UE_SMALL_NUMBER) return false;
 			}
-			const float ScaleX = bZeroX ? 1.f : NewWidth / OldWidth;
-			const float ScaleY = bZeroY ? 1.f : NewDepth / OldDepth;
+			const double ScaleX = bZeroX ? 1.0 : NewWidth / OldWidth;
+			const double ScaleY = bZeroY ? 1.0 : NewDepth / OldDepth;
 
 			TArray<FVector2D> NewFootprint;
 			NewFootprint.Reserve(OldFootprint.Num());

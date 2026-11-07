@@ -11,6 +11,8 @@
 #include "Components/EditableTextBox.h"
 #include "Components/TextBlock.h"
 #include "Components/AudioComponent.h"
+#include "Components/Button.h"
+#include "Components/ComboBoxString.h"
 #include "Misc/AutomationTest.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/Input/SEditableTextBox.h"
@@ -18,6 +20,7 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Input/HittestGrid.h"
 #include "Rendering/DrawElements.h"
+#include "Widgets/SBoxPanel.h"
 
 struct FEditorFeedbackTestAccess
 {
@@ -124,9 +127,9 @@ bool FEditorFeedbackSizeCommit::RunTest(const FString& Parameters)
 		auto* ScreenWidget=Screen(PC); FScriptDelegate Selected; Selected.BindUFunction(ScreenWidget,TEXT("HandleSelectedRoomChanged")); PC->OnSelectedRoomChanged.AddUnique(Selected);
 		PC->ToggleSelectMode(); PC->SelectRoom(TEXT("Wall"));
 		auto* Width=Cast<UEditableTextBox>(ScreenWidget->FindScreenWidget(TEXT("Txt_RoomWidth")));
-		auto* Depth=Cast<UEditableTextBox>(ScreenWidget->FindScreenWidget(TEXT("Txt_RoomHeight")));
-		if (!Width||!Depth) return false;
-		auto* Length=bVertical?Depth:Width; auto* Zero=bVertical?Width:Depth;
+		auto* LengthField=Cast<UEditableTextBox>(ScreenWidget->FindScreenWidget(TEXT("Txt_RoomLength")));
+		if (!Width||!LengthField) return false;
+		auto* Length=bVertical?LengthField:Width; auto* Zero=bVertical?Width:LengthField;
 		TestTrue(TEXT("zero dimension stays read-only"),Zero->GetIsReadOnly());
 		Type(Length,TEXT("3")); Length->OnTextCommitted.Broadcast(Length->GetText(),ETextCommit::OnEnter);
 		FVector2D Pos,Size; PC->GetSelectedRoomBounds(Pos,Size);
@@ -142,6 +145,87 @@ bool FEditorFeedbackSizeCommit::RunTest(const FString& Parameters)
 		TestEqual(TEXT("straight wall has endpoint handles"),FEditorFeedbackTestAccess::Handles(Plan(F,PC)).Num(),2);
 		PC->OnSelectedRoomChanged.Remove(Selected);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorFeedbackDimensionRecovery,"InNavi.EditorUX.Feedback.DimensionRecoveryAndPrecision",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FEditorFeedbackDimensionRecovery::RunTest(const FString& Parameters)
+{
+	using namespace EditorFeedbackTests;
+	FNavigationSearchFixture F; Prepare(F); auto* PC=F.MakeController(); FString Error;
+	if (!TestNotNull(TEXT("room"),F.Interior->CreateRoomFromFootprint({{400,400},{800.123456789,400},{800.123456789,699.123456789},{400,699.123456789}},TEXT("Fields"),TEXT("Original"),true,false,false,Error))) return false;
+	auto* W=Screen(PC); FScriptDelegate Selected; Selected.BindUFunction(W,TEXT("HandleSelectedRoomChanged")); PC->OnSelectedRoomChanged.AddUnique(Selected);
+	PC->ToggleSelectMode(); PC->SelectRoom(TEXT("Fields"));
+	auto* Width=Cast<UEditableTextBox>(W->FindScreenWidget(TEXT("Txt_RoomWidth")));
+	auto* Length=Cast<UEditableTextBox>(W->FindScreenWidget(TEXT("Txt_RoomLength")));
+	auto* Label=Cast<UTextBlock>(W->FindScreenWidget(TEXT("Txt_RoomLengthLabel")));
+	auto* Name=Cast<UEditableTextBox>(W->FindScreenWidget(TEXT("Txt_RoomName")));
+	auto* Tags=Cast<UEditableTextBox>(W->FindScreenWidget(TEXT("Txt_RoomTags")));
+	auto* TypeBox=Cast<UComboBoxString>(W->FindScreenWidget(TEXT("Cmb_RoomType")));
+	auto* Save=Cast<UButton>(W->FindScreenWidget(TEXT("Btn_ApplyRoom")));
+	if (!Width||!Length||!Label||!Name||!Tags||!TypeBox||!Save) return false;
+	TestEqual(TEXT("vertical dimension is labelled length"),Label->GetText().ToString(),FString(TEXT("LENGTH (m)")));
+	TestFalse(TEXT("Enter retains width focus for corrections"),Width->GetClearKeyboardFocusOnCommit());
+	TestFalse(TEXT("Enter retains length focus for corrections"),Length->GetClearKeyboardFocusOnCommit());
+	const FString OriginalWidth=Width->GetText().ToString(), OriginalLength=Length->GetText().ToString();
+	const TArray<FVector2D> Original=F.Interior->GetRoomById(TEXT("Fields"))->GetFootprint();
+	for (auto* Box : {Width,Length})
+	{
+		Type(Box,TEXT("ad")); Box->OnTextCommitted.Broadcast(Box->GetText(),ETextCommit::OnEnter);
+		TestEqual(TEXT("Enter retains invalid text for correction"),Box->GetText().ToString(),FString(TEXT("ad")));
+		Box->OnTextCommitted.Broadcast(Box->GetText(),ETextCommit::OnUserMovedFocus);
+		PC->SelectRoom(TEXT("Fields"));
+		TestEqual(TEXT("failed blur restores width on the same room"),Width->GetText().ToString(),OriginalWidth);
+		TestEqual(TEXT("failed blur restores length on the same room"),Length->GetText().ToString(),OriginalLength);
+		TestTrue(TEXT("invalid commit leaves geometry unchanged"),F.Interior->GetRoomById(TEXT("Fields"))->GetFootprint()==Original);
+	}
+	// A failing size must not swallow the other properties from the same Save click.
+	Type(Width,TEXT("ad")); Name->SetText(FText::FromString(TEXT("Renamed"))); Tags->SetText(FText::FromString(TEXT("follow-up, precision")));
+	const FString NewType=TypeBox->GetOptionAtIndex(1); TypeBox->SetSelectedOption(NewType); Save->OnClicked.Broadcast();
+	TestEqual(TEXT("name saves despite invalid size"),PC->GetSelectedRoomName(),FString(TEXT("Renamed")));
+	TestTrue(TEXT("tags save despite invalid size"),PC->GetSelectedRoomTags().Contains(TEXT("precision")));
+	TestEqual(TEXT("type saves despite invalid size"),PC->GetSelectedRoomType(),NewType);
+	FVector2D Position, Before, After; PC->GetSelectedRoomBounds(Position,Before);
+	TestTrue(TEXT("the displayed length has less precision than geometry"),FMath::Abs(FCString::Atod(*OriginalLength)*100.0-Before.Y)>1e-8);
+	Type(Width,TEXT("4.5")); Width->OnTextCommitted.Broadcast(Width->GetText(),ETextCommit::OnEnter); PC->GetSelectedRoomBounds(Position,After);
+	TestTrue(TEXT("width-only commit preserves exact length"),FMath::IsNearlyEqual(After.Y,Before.Y,1e-8));
+	Before=After; Type(Length,TEXT("3.5")); Length->OnTextCommitted.Broadcast(Length->GetText(),ETextCommit::OnUserMovedFocus); PC->GetSelectedRoomBounds(Position,After);
+	TestTrue(TEXT("length-only commit preserves exact width"),FMath::IsNearlyEqual(After.X,Before.X,1e-8));
+	// A valid resize also triggers refreshes: read all metadata before attempting it.
+	Type(Width,TEXT("4.75")); Name->SetText(FText::FromString(TEXT("Resize and rename"))); Tags->SetText(FText::FromString(TEXT("together"))); Save->OnClicked.Broadcast();
+	TestEqual(TEXT("name survives successful resize refresh"),PC->GetSelectedRoomName(),FString(TEXT("Resize and rename")));
+	TestTrue(TEXT("tags survive successful resize refresh"),PC->GetSelectedRoomTags().Contains(TEXT("together")));
+	PC->OnSelectedRoomChanged.Remove(Selected);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorFeedbackDimensionFocus,"InNavi.EditorUX.Rendered.DimensionFieldFocus",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FEditorFeedbackDimensionFocus::RunTest(const FString& Parameters)
+{
+	if (FParse::Param(FCommandLine::Get(),TEXT("nullrhi"))) { AddWarning(TEXT("Run with rendering enabled to check native field focus events.")); return true; }
+	using namespace EditorFeedbackTests;
+	FNavigationSearchFixture F; Prepare(F); auto* PC=F.MakeController(); auto* W=Screen(PC); FString Error;
+	if (!TestNotNull(TEXT("room"),F.Interior->CreateRoomFromFootprint({{400,400},{600,400},{600,600},{400,600}},TEXT("Focus"),TEXT("Focus"),true,false,false,Error))) return false;
+	FScriptDelegate Selected; Selected.BindUFunction(W,TEXT("HandleSelectedRoomChanged")); PC->OnSelectedRoomChanged.AddUnique(Selected);
+	PC->ToggleSelectMode(); PC->SelectRoom(TEXT("Focus"));
+	auto* Width=Cast<UEditableTextBox>(W->FindScreenWidget(TEXT("Txt_RoomWidth")));
+	auto* Length=Cast<UEditableTextBox>(W->FindScreenWidget(TEXT("Txt_RoomLength")));
+	if (!Width||!Length) return false;
+	auto Host=SNew(SWindow).Title(FText::FromString(TEXT("Dimension field verification"))).ClientSize(FVector2D(600,200))
+		[SNew(SVerticalBox)+SVerticalBox::Slot().AutoHeight()[Width->TakeWidget()]+SVerticalBox::Slot().AutoHeight()[Length->TakeWidget()]];
+	FSlateApplication::Get().AddWindow(Host,true); SlateFrames();
+	for (auto* Box : {Width,Length})
+	{
+		const FString RealSize=Box->GetText().ToString();
+		FSlateApplication::Get().SetKeyboardFocus(Box->TakeWidget(),EFocusCause::Mouse); SlateFrames(); Type(Box,TEXT("ad"));
+		FSlateApplication::Get().ProcessKeyDownEvent(FKeyEvent(EKeys::Enter,FModifierKeysState(),0,false,0,0)); SlateFrames();
+		TestEqual(TEXT("native Enter keeps invalid text"),Box->GetText().ToString(),FString(TEXT("ad")));
+		auto* Other=Box==Width?Length:Width;
+		FSlateApplication::Get().SetKeyboardFocus(Other->TakeWidget(),EFocusCause::Mouse); SlateFrames();
+		TestEqual(TEXT("native focus loss restores real size"),Box->GetText().ToString(),RealSize);
+	}
+	FSlateApplication::Get().RequestDestroyWindow(Host); SlateFrames();
+	PC->OnSelectedRoomChanged.Remove(Selected);
 	return true;
 }
 

@@ -102,10 +102,12 @@ bool FEditorDrawingFailureTest::RunTest(const FString& Parameters)
 	for (const FVector2D& Point : TArray<FVector2D>{{100,100},{200,200},{100,200},{200,100}}) PC->AddRoomPointAtFootprintPosition(Point);
 	TestTrue(TEXT("room draft is cleared automatically"), PC->GetPendingRoomFootprint().IsEmpty());
 	TestTrue(TEXT("debug explains the failure"), Debug->GetLastErrorTextForTests().Contains(TEXT("cross")) || Debug->GetLastErrorTextForTests().Contains(TEXT("intersect")));
+	TestTrue(TEXT("room error identifies a room outline"), Debug->GetLastErrorTextForTests().Contains(TEXT("room outline")));
 	PC->ToggleDrawWallMode();
 	for (const FVector2D& Point : TArray<FVector2D>{{100,100},{200,100},{150,100}}) PC->AddRoomPointAtFootprintPosition(Point);
 	TestTrue(TEXT("wall draft is cleared automatically"), PC->GetPendingRoomFootprint().IsEmpty());
 	TestTrue(TEXT("debug explains wall self-overlap"), Debug->GetLastErrorTextForTests().Contains(TEXT("itself")));
+	TestTrue(TEXT("wall error still identifies a wall"), Debug->GetLastErrorTextForTests().Contains(TEXT("wall")));
 	PC->AddRoomPointAtFootprintPosition({100,100});
 	PC->AddRoomPointAtFootprintPosition({-100,-100});
 	TestEqual(TEXT("stray click keeps the draft"), PC->GetPendingRoomFootprint().Num(), 1);
@@ -184,12 +186,12 @@ bool FEditorResizeTest::RunTest(const FString& Parameters)
 	FScriptDelegate Selected; Selected.BindUFunction(Screen,TEXT("HandleSelectedRoomChanged")); PC->OnSelectedRoomChanged.AddUnique(Selected);
 	PC->SelectRoom(FString()); PC->SelectRoom(TEXT("Size"));
 	auto* Width = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_RoomWidth")));
-	auto* Depth = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_RoomHeight")));
+	auto* LengthField = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_RoomLength")));
 	auto* Save = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_ApplyRoom")));
-	if (!TestNotNull(TEXT("width field"),Width) || !TestNotNull(TEXT("depth field"),Depth) || !TestNotNull(TEXT("save"),Save)) return false;
+	if (!TestNotNull(TEXT("width field"),Width) || !TestNotNull(TEXT("depth field"),LengthField) || !TestNotNull(TEXT("save"),Save)) return false;
 	TestFalse(TEXT("width is editable"), Width->GetIsReadOnly());
 	Width->SetText(FText::FromString(TEXT("8.5"))); Width->OnTextChanged.Broadcast(Width->GetText());
-	Depth->SetText(FText::FromString(TEXT("6.25"))); Depth->OnTextChanged.Broadcast(Depth->GetText());
+	LengthField->SetText(FText::FromString(TEXT("6.25"))); LengthField->OnTextChanged.Broadcast(LengthField->GetText());
 	Save->OnClicked.Broadcast(); PC->GetSelectedRoomBounds(Position,After);
 	TestTrue(TEXT("typed dimensions are applied in metres"), After.Equals(FVector2D(850,625)/PC->GetBuildingScale(),0.01));
 	Width->SetText(FText::FromString(TEXT("-2"))); Width->OnTextChanged.Broadcast(Width->GetText());

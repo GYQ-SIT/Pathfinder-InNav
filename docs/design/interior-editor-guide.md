@@ -257,7 +257,7 @@ Headed **Properties**, with a small tag saying what is selected (ROOM, WALL, DOO
 the section heading reads "Nothing selected"; selecting a room, door, or connector fills it in. Fields have small-capital
 labels over dark fields, and every kind ends with a red **Delete ...** button (the same as `Delete`) and **Save changes**.
 
-- **Room / wall**: **ROOM NAME**, then **X POSITION**, **Y POSITION**, **WIDTH (m)** and **DEPTH (m)** - the room's bounding box. Position is read-only; width and depth can be typed and applied with **Save changes** - and (rooms only) **ROOM TYPE** and **SEARCH TAGS**.
+- **Room / wall**: **ROOM NAME**, then **X POSITION**, **Y POSITION**, **WIDTH (m)** and **LENGTH (m)** - the room's bounding box. Position is read-only; width and length apply on Enter, leaving the field, or **Save changes** - and (rooms only) **ROOM TYPE** and **SEARCH TAGS**.
   The type is one value picked from a fixed list (Classroom, Lecture hall, Lab, Office, Study area, Meeting room,
   Canteen, Toilet, Lift lobby, Corridor, Storage, Other; the list lives in `RoomTypes.h`) and is shown in the tag at the
   top of the panel; a room with no type is **Other**. Tags are a free comma-separated list (for example
@@ -546,9 +546,11 @@ arbitrary files under `Data/Audio/` on demand (background music, effects, etc.).
 
 Use **Delete** to remove a selected object; Backspace is for editing text. The free-fly camera descends with **C** and ascends with **Space** or **E**. Holding Ctrl suppresses camera movement while using editor shortcuts.
 
-The Toolbar has a **Grow / shrink step (m)** control. With a connector selected, it becomes **Scale step (%)**. The room step defaults to **0.5 m** (previously 20 footprint units), with a **0.5 m minimum room dimension or wall span**. Room **WIDTH (m)** and **DEPTH (m)** apply on Enter, leaving the field, or **Save changes**. Straight walls keep their zero dimension and allow their length to be edited. In 2D Select mode, drag a blue handle to resize with the opposite side fixed; straight walls have two endpoint handles. An orange outline previews the size, and the mesh is rebuilt once on release. Each drag is one undo step and respects the building outline, other objects, connectors and doors.
+The Toolbar has a **Grow / shrink step (m)** control. With a connector selected, it becomes **Scale step (%)**. The room step defaults to **0.5 m** (previously 20 footprint units), with a **0.5 m minimum room dimension or wall span**. Room **WIDTH (m)** and **LENGTH (m)** apply on Enter, leaving the field, or **Save changes**. Straight walls keep their zero dimension and allow their length to be edited. In 2D Select mode, drag a blue handle to resize with the opposite side fixed; straight walls have two endpoint handles. An orange outline previews the size, and the mesh is rebuilt once on release. Each drag is one undo step and respects the building outline, other objects, connectors and doors.
 
 For rectangle, triangle and circle prefabs, click for the default size or drag between opposite corners for a custom bounding box. The orange outline previews the footprint; release to place it, or press Esc to cancel.
+
+An invalid size stays in the field after Enter so it can be corrected. Leaving the field restores the actual dimensions after reporting the error. **Save changes** still applies the name, tags and type when the size is invalid. Editing one dimension preserves the exact size of the other, even when its displayed value is rounded.
 
 Drawing validates each new segment immediately. Overlap or geometry constraints clear the current drawing and show the reason in **Debug > Last Error**. A stray click outside the building is ignored and keeps the current points. Walls may form a simple loop by returning to their start; crossing, retracing and other non-adjacent touches are rejected. **Audio > Error Sound** independently controls error feedback using the existing `UI_Off-Route.wav`; it is included in **Mute All** and follows the controller between screens.
 

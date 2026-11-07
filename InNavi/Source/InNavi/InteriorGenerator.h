@@ -144,7 +144,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	AInteriorRoom* CreateWallFromPoints(const TArray<FVector2D>& Points, const FString& WallId, FString& OutError);
 	// Also accepts a partial path (one point) for validation while drawing. A simple loop may end at its start.
-	bool ValidateWallPath(const TArray<FVector2D>& Points, FString& OutError) const;
+	bool ValidateWallPath(const TArray<FVector2D>& Points, FString& OutError, bool bDrawingRoom = false) const;
 	AInteriorRoom* CreateWallFromPoints(const TArray<FVector2D>& Points, const FString& WallId, FString& OutError,
 		TArray<FInteriorOpening> CopiedOpenings, const FString& WallName);
 

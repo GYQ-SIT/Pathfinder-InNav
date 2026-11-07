@@ -230,6 +230,8 @@ private:
 	bool bRoomSizeDirty = false;
 	bool bUpdatingRoomBounds = false;
 	FString BoundsRoomId;
+	FString DisplayedRoomWidth;
+	FString DisplayedRoomLength;
 	UPROPERTY()
 	class USpinBox* ResizeStepBox = nullptr;
 	UPROPERTY()
@@ -732,7 +734,7 @@ private:
 	UPROPERTY()
 	UEditableTextBox* RoomWidthBox = nullptr;
 	UPROPERTY()
-	UEditableTextBox* RoomHeightBox = nullptr;
+	UEditableTextBox* RoomLengthBox = nullptr;
 	// Every box the Properties panel puts in a SizeBox so its width follows the panel (see RefreshDockPanelContentWidths).
 	UPROPERTY()
 	TArray<USizeBox*> PropertiesWidthBoxes;

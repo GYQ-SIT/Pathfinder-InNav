@@ -1617,7 +1617,7 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 	TArray<FVector2D> Candidate = PendingRoomFootprint;
 	Candidate.Add(FootprintPoint);
 	FString ConstraintError;
-	if (InteriorGen && !InteriorGen->ValidateWallPath(Candidate, ConstraintError))
+	if (InteriorGen && !InteriorGen->ValidateWallPath(Candidate, ConstraintError, bDrawRoomMode))
 	{
 		CancelRoom();
 		OnActionFailed.Broadcast(FString::Printf(TEXT("Unable to draw this outline - %s"), *ConstraintError), EActionFailureSeverity::Warning);
@@ -2362,7 +2362,7 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomInBounds(FVector2D Footprint
 	const TArray<FVector2D> Footprint = BuildPrefabRoomFootprint(FootprintCenter, FootprintSize);
 	if (Footprint.IsEmpty())
 	{
-		OnActionFailed.Broadcast(TEXT("Drag a room with a positive width and depth."), EActionFailureSeverity::Warning);
+		OnActionFailed.Broadcast(TEXT("Drag a room with a positive width and length."), EActionFailureSeverity::Warning);
 		return nullptr;
 	}
 	FString CreateError;
