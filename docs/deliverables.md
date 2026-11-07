@@ -84,7 +84,7 @@ The work of Milestone 2 is in these epics of the Jira project **PAT** (each has 
 
 | Epic | Owner (epic) | What it is |
 |------|--------------|------------|
-| [PAT-135](https://digipen-team-pathfinder.atlassian.net/browse/PAT-135) M2: CI/CD and release build | Yongqi | Build, static analysis and tests on every push and pull request; lint; tag-triggered release build |
+| [PAT-135](https://digipen-team-pathfinder.atlassian.net/browse/PAT-135) M2: CI/CD and release build | Yongqi | Build, static analysis and tests on every push to `main`; lint and JSON checks on every pull request; tag-triggered release build |
 | [PAT-139](https://digipen-team-pathfinder.atlassian.net/browse/PAT-139) M2: Performance measurement | Yongqi | Budgets and measured numbers, frame-rate statistics, the graph cache, the readings on the demo machine |
 | [PAT-145](https://digipen-team-pathfinder.atlassian.net/browse/PAT-145) M2: Data format, schemas and documentation | Yongqi | Project file format and schemas, prototype data out of the code, architecture v1.0 |
 | [PAT-149](https://digipen-team-pathfinder.atlassian.net/browse/PAT-149) M2: Layout validator plugin | Ong Wei Song | The versioned plugin package and its tool registry |

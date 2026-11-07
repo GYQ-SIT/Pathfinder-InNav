@@ -5,7 +5,7 @@ Team **Pathfinder** · Project **InNavi** · CSD3401 / UXG3400 (Fall 2026)
 An Unreal Engine application that adds an interior layer to the school's 3D model:
 select a building, author or import its interior layout, generate a schematic 3D
 interior, and navigate - inside a building, across floors, between buildings and across the
-open ground between them. An Android phone app (a test build, on made-up data for now) shows
+open ground between them. An Android phone app (a test build, on real project data and routes) shows
 the same places and routes on a phone.
 
 ## Pages
