@@ -54,6 +54,7 @@
 #include "Components/WrapBox.h"
 #include "Components/WrapBoxSlot.h"
 #include "Engine/Texture2D.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Misc/FileHelper.h"
 #include "Misc/DefaultValueHelper.h"
 #include "Misc/Paths.h"
@@ -1126,7 +1127,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		AddBoundsCell(SizeRow, TEXT("Txt_RoomLength"), TEXT("LENGTH (m)"), RoomLengthBox, false);
 		RoomWidthBox->SetIsReadOnly(false);
 		RoomLengthBox->SetIsReadOnly(false);
-		// Enter commits without clearing focus (which would trigger OnCleared and discard invalid text).
+		// Clear focus explicitly only after a successful Enter commit, preserving invalid input for correction.
 		RoomWidthBox->SetClearKeyboardFocusOnCommit(false);
 		RoomLengthBox->SetClearKeyboardFocusOnCommit(false);
 		RoomWidthBox->OnTextChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoomSizeTextChanged);
@@ -2649,7 +2650,11 @@ bool UInteriorScreenWidget::ApplyRoomDimensions()
 void UInteriorScreenWidget::OnRoomSizeTextCommitted(const FText& Text, ETextCommit::Type CommitType)
 {
 	if (bUpdatingRoomBounds) return;
-	if (CommitType == ETextCommit::OnEnter) ApplyRoomDimensions();
+	if (CommitType == ETextCommit::OnEnter)
+	{
+		if (ApplyRoomDimensions() && FSlateApplication::IsInitialized())
+			FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::Cleared);
+	}
 	else if (CommitType == ETextCommit::OnUserMovedFocus)
 	{
 		if (!ApplyRoomDimensions()) { bRoomSizeDirty = false; RefreshRoomBoundsFields(); }

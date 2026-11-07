@@ -218,11 +218,22 @@ bool FEditorFeedbackDimensionFocus::RunTest(const FString& Parameters)
 	{
 		const FString RealSize=Box->GetText().ToString();
 		FSlateApplication::Get().SetKeyboardFocus(Box->TakeWidget(),EFocusCause::Mouse); SlateFrames(); Type(Box,TEXT("ad"));
+		const auto EditingFocus=FSlateApplication::Get().GetKeyboardFocusedWidget();
+		TestTrue(TEXT("dimension field has editing focus"),EditingFocus.IsValid());
 		FSlateApplication::Get().ProcessKeyDownEvent(FKeyEvent(EKeys::Enter,FModifierKeysState(),0,false,0,0)); SlateFrames();
 		TestEqual(TEXT("native Enter keeps invalid text"),Box->GetText().ToString(),FString(TEXT("ad")));
+		TestTrue(TEXT("invalid Enter keeps keyboard focus"),FSlateApplication::Get().GetKeyboardFocusedWidget()==EditingFocus);
 		auto* Other=Box==Width?Length:Width;
 		FSlateApplication::Get().SetKeyboardFocus(Other->TakeWidget(),EFocusCause::Mouse); SlateFrames();
 		TestEqual(TEXT("native focus loss restores real size"),Box->GetText().ToString(),RealSize);
+		FSlateApplication::Get().SetKeyboardFocus(Box->TakeWidget(),EFocusCause::Mouse); SlateFrames(); Type(Box,TEXT("3"));
+		FSlateApplication::Get().ProcessKeyDownEvent(FKeyEvent(EKeys::Enter,FModifierKeysState(),0,false,0,0)); SlateFrames();
+		TestFalse(TEXT("valid Enter releases keyboard focus"),FSlateApplication::Get().GetKeyboardFocusedWidget().IsValid());
+		FVector2D Position, Size; PC->GetSelectedRoomBounds(Position,Size);
+		TestTrue(TEXT("valid Enter applies the edited dimension"),FMath::IsNearlyEqual(Box==Width?Size.X:Size.Y,300.0,0.01));
+		const FString Committed=Box->GetText().ToString();
+		FSlateApplication::Get().ProcessKeyCharEvent(FCharacterEvent('q',FModifierKeysState(),0,false)); SlateFrames();
+		TestEqual(TEXT("shortcut characters no longer type into committed field"),Box->GetText().ToString(),Committed);
 	}
 	FSlateApplication::Get().RequestDestroyWindow(Host); SlateFrames();
 	PC->OnSelectedRoomChanged.Remove(Selected);

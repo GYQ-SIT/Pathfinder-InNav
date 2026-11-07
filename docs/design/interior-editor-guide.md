@@ -550,7 +550,7 @@ The Toolbar has a **Grow / shrink step (m)** control. With a connector selected,
 
 For rectangle, triangle and circle prefabs, click for the default size or drag between opposite corners for a custom bounding box. The orange outline previews the footprint; release to place it, or press Esc to cancel.
 
-An invalid size stays in the field after Enter so it can be corrected. Leaving the field restores the actual dimensions after reporting the error. **Save changes** still applies the name, tags and type when the size is invalid. Editing one dimension preserves the exact size of the other, even when its displayed value is rounded.
+An invalid size stays in the field with keyboard focus after Enter so it can be corrected. A successful Enter commit releases focus so editor shortcuts work immediately. Leaving the field restores the actual dimensions after reporting the error. **Save changes** still applies the name, tags and type when the size is invalid. Editing one dimension preserves the exact size of the other, even when its displayed value is rounded.
 
 Drawing validates each new segment immediately. Overlap or geometry constraints clear the current drawing and show the reason in **Debug > Last Error**. A stray click outside the building is ignored and keeps the current points. Walls may form a simple loop by returning to their start; crossing, retracing and other non-adjacent touches are rejected. **Audio > Error Sound** independently controls error feedback using the existing `UI_Off-Route.wav`; it is included in **Mute All** and follows the controller between screens.
 
