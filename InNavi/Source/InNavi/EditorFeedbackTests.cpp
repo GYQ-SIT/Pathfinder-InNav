@@ -16,6 +16,8 @@
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/SWindow.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Input/HittestGrid.h"
+#include "Rendering/DrawElements.h"
 
 struct FEditorFeedbackTestAccess
 {
@@ -33,6 +35,18 @@ struct FEditorFeedbackTestAccess
 	static auto First(UNavigationPlaceCombo* C) { return C->FilteredOptions[0]; }
 	static FString PopupQuery(UNavigationPlaceCombo* C) { return C->SearchField->GetText().ToString(); }
 	static AActor* AudioOwner(ANavPlayerController* PC) { return PC->AudioActor; }
+	static TArray<FVector2f> PaintPreview(UInteriorFloorPlanWidget* W)
+	{
+		// Call the real paint path even under -nullrhi, so CI covers preview draw-element generation.
+		auto Window = SNew(SWindow).ClientSize(FVector2D(1000,1000));
+		FHittestGrid HitTest;
+		FPaintArgs Args(&Window.Get(), HitTest, FVector2D::ZeroVector, 0.0, 1.f/60.f);
+		FSlateWindowElementList Elements(Window);
+		W->NativePaint(Args, Geometry(), FSlateRect(0,0,1000,1000), Elements, 0, FWidgetStyle(), true);
+		for (const auto& Line : Elements.GetUncachedDrawElements().Get<(uint8)EElementType::ET_Line>())
+			if (Line.GetLayer() == 9) return Line.GetPoints();
+		return {};
+	}
 };
 
 namespace EditorFeedbackTests
@@ -54,6 +68,48 @@ namespace EditorFeedbackTests
 	}
 	void Type(UEditableTextBox* Box,const TCHAR* Value) { Box->SetText(FText::FromString(Value)); Box->OnTextChanged.Broadcast(Box->GetText()); }
 	void SlateFrames() { for (int32 I=0; I<3; ++I) { FSlateApplication::Get().Tick(); FPlatformProcess::Sleep(0.02f); } }
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorFeedbackPreviewPaint,"InNavi.EditorUX.Feedback.PreviewNativePaint",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FEditorFeedbackPreviewPaint::RunTest(const FString& Parameters)
+{
+	using namespace EditorFeedbackTests;
+	for (int32 Shape=1; Shape<=3; ++Shape)
+	{
+		FNavigationSearchFixture F; Prepare(F); auto* PC=F.MakeController(); auto* W=Plan(F,PC);
+		if (Shape==1) PC->TogglePrefabRectangleMode();
+		else if (Shape==2) PC->TogglePrefabTriangleMode();
+		else PC->TogglePrefabCircleMode();
+		FEditorFeedbackTestAccess::Down(W,{400,400});
+		for (bool bDragged : {false,true})
+		{
+			if (bDragged) FEditorFeedbackTestAccess::Move(W,{550,550});
+			const auto Painted=FEditorFeedbackTestAccess::PaintPreview(W);
+			const int32 Expected=PC->BuildPrefabRoomFootprint({500,500}).Num()+1;
+			TestEqual(TEXT("NativePaint emits the complete prefab outline on click and drag"),Painted.Num(),Expected);
+			if (Painted.Num()>1) TestTrue(TEXT("painted prefab outline is closed"),Painted[0].Equals(Painted.Last()));
+			TestTrue(TEXT("painting a prefab preview does not place a room"),F.Interior->GetRoomsOnFloor(1).IsEmpty());
+		}
+	}
+	for (bool bClosed : {true,false})
+	{
+		FNavigationSearchFixture F; Prepare(F); auto* PC=F.MakeController(); auto* W=Plan(F,PC); FString Error;
+		const TArray<FVector2D> Points=bClosed?TArray<FVector2D>{{400,400},{600,400},{600,600},{400,600}}:TArray<FVector2D>{{400,500},{600,500}};
+		auto* Room=bClosed?F.Interior->CreateRoomFromFootprint(Points,TEXT("Paint"),TEXT("Paint"),true,false,false,Error):F.Interior->CreateWallFromPoints(Points,TEXT("Paint"),Error);
+		if (!TestNotNull(TEXT("resize target"),Room)) return false;
+		PC->ToggleSelectMode(); PC->SelectRoom(TEXT("Paint"));
+		const auto Handles=FEditorFeedbackTestAccess::Handles(W);
+		if (!TestTrue(TEXT("resize handles exist"),!Handles.IsEmpty())) return false;
+		FEditorFeedbackTestAccess::Down(W,Handles.Last());
+		const auto Initial=FEditorFeedbackTestAccess::PaintPreview(W);
+		FEditorFeedbackTestAccess::Move(W,Handles.Last()+FVector2D(-20,20));
+		const auto Painted=FEditorFeedbackTestAccess::PaintPreview(W);
+		TestEqual(TEXT("NativePaint emits the resized outline"),Painted.Num(),Points.Num()+(bClosed?1:0));
+		if (Painted.Num()>1) TestEqual(TEXT("only room resize previews close their outline"),Painted[0].Equals(Painted.Last()),bClosed);
+		TestTrue(TEXT("paint reflects the changed preview size"),Initial!=Painted);
+		TestTrue(TEXT("painting resize previews leaves room geometry unchanged"),Room->GetFootprint()==Points);
+	}
+	return true;
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorFeedbackSizeCommit,"InNavi.EditorUX.Feedback.SizeCommitAndStraightWalls",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)

@@ -1495,7 +1495,11 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 	if (!Preview.IsEmpty())
 	{
 		for (FVector2D& Point : Preview) Point = WorldToLocal((Point + Building->BuildingOffset) * Scale);
-		if (!bIsResizingRoom || (DragTarget.IsValid() && DragTarget->IsClosedLoop())) Preview.Add(Preview[0]);
+		if (!bIsResizingRoom || (DragTarget.IsValid() && DragTarget->IsClosedLoop()))
+		{
+			const FVector2D First = Preview[0];
+			Preview.Add(First);
+		}
 		FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 9, AllottedGeometry.ToPaintGeometry(), Preview,
 			ESlateDrawEffect::None, FLinearColor(1.f, 0.6f, 0.f), true, 3.f);
 	}
