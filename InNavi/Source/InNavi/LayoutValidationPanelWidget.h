@@ -67,6 +67,8 @@ private:
     UPROPERTY() UProgressBar* Progress = nullptr;
     UPROPERTY() UButton* ExportButton = nullptr;
     UPROPERTY() USizeBox* BodySize = nullptr;
+    // The items the two combo boxes generate are held only by Slate, which does not keep a UObject alive: without this the garbage collector frees them while they are still on screen.
+    UPROPERTY() TArray<TObjectPtr<UWidget>> RetainedComboItems;
     float ContentWidth = 260.f;
     float PollElapsed = 0.f;
     bool bExterior = false;
