@@ -267,6 +267,7 @@ void ANavPlayerController::BuildCampusInteriorPreview()
 void ANavPlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+	OnActionFailed.AddUniqueDynamic(this, &ANavPlayerController::HandleActionFailureSound);
 
 	bShowMouseCursor = true;
 	bEnableClickEvents = true;
@@ -492,7 +493,7 @@ void ANavPlayerController::SetupInputComponent()
 	// Not "D" - DefaultPawn's free-fly movement already uses WASD, so "D" would double up as
 	// "strafe right" every time this mode gets toggled.
 	InputComponent->BindKey(EKeys::K, IE_Pressed, this, &ANavPlayerController::ToggleAddDoorMode);
-	InputComponent->BindKey(EKeys::BackSpace, IE_Pressed, this, &ANavPlayerController::DeleteSelectionKeyHandler);
+	InputComponent->BindKey(EKeys::Delete, IE_Pressed, this, &ANavPlayerController::DeleteSelectionKeyHandler);
 	InputComponent->BindKey(EKeys::One, IE_Pressed, this, &ANavPlayerController::TogglePrefabRectangleMode);
 	InputComponent->BindKey(EKeys::Two, IE_Pressed, this, &ANavPlayerController::TogglePrefabTriangleMode);
 	InputComponent->BindKey(EKeys::Three, IE_Pressed, this, &ANavPlayerController::TogglePrefabCircleMode);
@@ -1150,7 +1151,7 @@ void ANavPlayerController::ToggleSelectMode()
 	OnSelectModeChanged.Broadcast(true);
 	OnEditModeChanged.Broadcast();
 
-	UE_LOG(LogTemp, Warning, TEXT("Select mode ON (floor %d): click a room/wall on the 2D canvas to select it (Backspace deletes, =/- resizes), Esc/Q to exit"), InteriorGen->GetActiveFloor());
+	UE_LOG(LogTemp, Warning, TEXT("Select mode ON (floor %d): click a room/wall on the 2D canvas to select it (Delete deletes, =/- resizes), Esc/Q to exit"), InteriorGen->GetActiveFloor());
 }
 
 void ANavPlayerController::ToggleRoomColours()
@@ -1409,7 +1410,7 @@ FString ANavPlayerController::AddDoorToWall(const FString& RoomId, int32 EdgeInd
 	{
 		bHasUnsavedChanges = true;
 		// Selected immediately, like PlacePrefabRoomAt does for rooms, so it can be deleted right
-		// away with Backspace if it's wrong.
+		// away with Delete if it's wrong.
 		SelectDoor(RoomId, NewDoorId);
 	}
 	return NewDoorId;
@@ -1613,6 +1614,15 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 		}
 	}
 
+	TArray<FVector2D> Candidate = PendingRoomFootprint;
+	Candidate.Add(FootprintPoint);
+	FString ConstraintError;
+	if (InteriorGen && !InteriorGen->ValidateWallPath(Candidate, ConstraintError, bDrawRoomMode))
+	{
+		CancelRoom();
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Unable to draw this outline - %s"), *ConstraintError), EActionFailureSeverity::Warning);
+		return;
+	}
 	PendingRoomFootprint.Add(FootprintPoint);
 	OnRoomPointCountChanged.Broadcast(PendingRoomFootprint.Num());
 
@@ -2260,7 +2270,7 @@ void ANavPlayerController::DeleteSelectionKeyHandler()
 
 bool ANavPlayerController::ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth)
 {
-	if (bInteriorInspectionEnabled) return false;
+	if (bInteriorInspectionEnabled || (bIsIn3DPreviewMode && !bIsIn3DEditMode)) return false;
 	if (!InteriorGen)
 	{
 		OnActionFailed.Broadcast(TEXT("No InteriorGenerator placed in the level."), EActionFailureSeverity::Warning);
@@ -2319,6 +2329,11 @@ float ANavPlayerController::GetBuildingScale() const
 
 AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter)
 {
+	return PlacePrefabRoomInBounds(FootprintCenter, FVector2D::ZeroVector);
+}
+
+AInteriorRoom* ANavPlayerController::PlacePrefabRoomInBounds(FVector2D FootprintCenter, FVector2D FootprintSize)
+{
 	if (bInteriorInspectionEnabled) return nullptr;
 	if (ActivePrefabShape == 0)
 	{
@@ -2344,7 +2359,29 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter
 		}
 	}
 
-	// Default sizes are deliberately small - ResizeRoom (below) is how they grow from here. Expressed
+	const TArray<FVector2D> Footprint = BuildPrefabRoomFootprint(FootprintCenter, FootprintSize);
+	if (Footprint.IsEmpty())
+	{
+		OnActionFailed.Broadcast(TEXT("Drag a room with a positive width and length."), EActionFailureSeverity::Warning);
+		return nullptr;
+	}
+	FString CreateError;
+	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(Footprint, FString(), FString(), true, false, /*bAllowOverlap=*/false, CreateError);
+	if (!NewRoom)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Could not place the prefab room: %s"), *CreateError);
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not place the room there - %s"), *CreateError), EActionFailureSeverity::Warning);
+		return nullptr;
+	}
+	bHasUnsavedChanges = true;
+	SelectRoom(NewRoom->RoomId);
+	OnInteriorContentChanged.Broadcast();
+	return NewRoom;
+}
+
+TArray<FVector2D> ANavPlayerController::BuildPrefabRoomFootprint(FVector2D FootprintCenter, FVector2D FootprintSize) const
+{
+	// Default sizes are deliberately small - ResizeRoom is how they grow from here. Expressed
 	// as a fixed WORLD size (cm) divided by the building's own Scale, not a bare footprint-unit
 	// constant - footprint-space is pre-scale, so a bare constant here would produce a room 10x too
 	// big for a database-loaded building (Scale=100) versus a hand-authored JSON one (Scale=10). See
@@ -2388,24 +2425,20 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomAt(FVector2D FootprintCenter
 		break;
 	}
 	default:
-		return nullptr;
+		return {};
 	}
-	
-	FString CreateError;
-	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(Footprint, FString(), FString(), true, false, /*bAllowOverlap=*/false, CreateError);
-	if (!NewRoom)
+	if (FootprintSize != FVector2D::ZeroVector)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Could not place the prefab room: %s"), *CreateError);
-		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not place the room there - %s"), *CreateError), EActionFailureSeverity::Warning);
-		return nullptr;
+		if (!FMath::IsFinite(FootprintSize.X) || !FMath::IsFinite(FootprintSize.Y) || FootprintSize.X <= 0 || FootprintSize.Y <= 0) return {};
+		const FBox2D Bounds(Footprint);
+		const FVector2D Size = Bounds.GetSize();
+		for (FVector2D& Point : Footprint)
+		{
+			const FVector2D Offset = Point - Bounds.GetCenter();
+			Point = FootprintCenter + FVector2D(Offset.X * FootprintSize.X / Size.X, Offset.Y * FootprintSize.Y / Size.Y);
+		}
 	}
-
-	bHasUnsavedChanges = true;
-	// Selecting it immediately means =/- (or a future resize UI) can act on it right away without
-	// an extra click.
-	SelectRoom(NewRoom->RoomId);
-	OnInteriorContentChanged.Broadcast();
-	return NewRoom;
+	return Footprint;
 }
 
 FString ANavPlayerController::PlaceConnectorAt(FVector2D FootprintPosition)
@@ -2492,13 +2525,14 @@ AInteriorRoom* ANavPlayerController::FinishRoom(const FString& RoomId, const FSt
 	}
 
 	FString CreateError;
-	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(PendingRoomFootprint, RoomId, RoomName, bIsPublic, bRequiresKey, /*bAllowOverlap=*/false, CreateError);
+	TArray<FVector2D> Footprint = PendingRoomFootprint;
+	if (Footprint.Num() > 3 && Footprint.Last().Equals(Footprint[0], 1e-5)) Footprint.Pop();
+	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(Footprint, RoomId, RoomName, bIsPublic, bRequiresKey, /*bAllowOverlap=*/false, CreateError);
 
 	if (!NewRoom)
 	{
-		// Spawn was rejected - keep the drawn points and preview so the user can see what's there;
-		// Esc cancels.
-		UE_LOG(LogTemp, Warning, TEXT("Could not finish this room: %s Press Esc to discard and redraw."), *CreateError);
+		CancelRoom();
+		UE_LOG(LogTemp, Warning, TEXT("Could not finish this room: %s"), *CreateError);
 		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not create the room - %s"), *CreateError), EActionFailureSeverity::Warning);
 		return nullptr;
 	}
@@ -2545,9 +2579,8 @@ AInteriorRoom* ANavPlayerController::FinishWall(const FString& WallId)
 
 	if (!NewWall)
 	{
-		// Spawn was rejected - keep the drawn points and preview so the user can see what's there;
-		// Esc cancels.
-		UE_LOG(LogTemp, Warning, TEXT("Could not finish this wall: %s Press Esc to discard and redraw."), *CreateError);
+		CancelWall();
+		UE_LOG(LogTemp, Warning, TEXT("Could not finish this wall: %s"), *CreateError);
 		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not create the wall - %s"), *CreateError), EActionFailureSeverity::Warning);
 		return nullptr;
 	}
@@ -2740,6 +2773,22 @@ int32 ANavPlayerController::LoadBuildingData(const FString& FilePath, bool bData
 
 void ANavPlayerController::StartNewProject()
 {
+	ClearProjectState();
+	FocusCameraOnAllBuildings();
+
+	UE_LOG(LogTemp, Warning, TEXT("Started a new, blank project"));
+}
+
+void ANavPlayerController::CloseProject()
+{
+	ClearProjectState();
+	FocusCameraOnAllBuildings();
+
+	UE_LOG(LogTemp, Warning, TEXT("Closed the project"));
+}
+
+void ANavPlayerController::ClearProjectState()
+{
 	FinishRotationGesture();
 	ExitAllMouseTools();
 	CancelNavigationPicking();
@@ -2770,6 +2819,20 @@ void ANavPlayerController::StartNewProject()
 	bHasUnsavedChanges = false;
 	NextNewBuildingIndex = 1;
 
+	// What was copied (a room, a whole building) belongs to the project that is gone: Ctrl+V in the next one pastes nothing.
+	bHasCopiedRoom = false;
+	CopiedRoomId.Empty();
+	CopiedRoomFootprint.Reset();
+	CopiedRoomOpenings.Reset();
+	CopiedRoomName.Empty();
+	CopiedRoomTags.Reset();
+	CopiedRoomType.Empty();
+	bHasCopiedBuilding = false;
+	CopiedBuildingId.Empty();
+	CopiedBuildingName.Empty();
+	CopiedBuildingFootprint.Reset();
+	CopiedBuildingInterior.Reset();
+
 	// Defensively reset any in-progress mode/selection state too, in case New is ever reachable
 	// mid-edit rather than only from the start screen.
 	bBuildMode = false;
@@ -2784,10 +2847,6 @@ void ANavPlayerController::StartNewProject()
 	SelectedDoorId.Empty();
 	PendingRoomFootprint.Reset();
 	SelectedBuilding = nullptr;
-
-	FocusCameraOnAllBuildings();
-
-	UE_LOG(LogTemp, Warning, TEXT("Started a new, blank project"));
 }
 
 void ANavPlayerController::FocusCameraOnBuilding(APolyBuilding* Building)
@@ -3708,6 +3767,34 @@ void ANavPlayerController::ClearPointerOverUICallback(const UObject* ScreenOwner
 		PointerOverUIOwner = nullptr;
 		PointerOverUICallback = nullptr;
 	}
+}
+
+void ANavPlayerController::BlockKeyShortcuts(const UObject* ScreenOwner)
+{
+	KeyShortcutsBlockOwner = ScreenOwner;
+}
+
+void ANavPlayerController::UnblockKeyShortcuts(const UObject* ScreenOwner)
+{
+	if (KeyShortcutsBlockOwner.Get() == ScreenOwner)
+	{
+		KeyShortcutsBlockOwner = nullptr;
+	}
+}
+
+bool ANavPlayerController::AreKeyShortcutsBlocked() const
+{
+	return KeyShortcutsBlockOwner.IsValid();
+}
+
+bool ANavPlayerController::InputKey(const FInputKeyEventArgs& Params)
+{
+	// Mouse buttons and the wheel have their own guards (IsPointerOverUI); a release always passes.
+	if (AreKeyShortcutsBlocked() && Params.Event != IE_Released && !Params.Key.IsMouseButton())
+	{
+		return false;
+	}
+	return Super::InputKey(Params);
 }
 
 bool ANavPlayerController::IsPointerOverUI() const
@@ -5163,12 +5250,37 @@ void ANavPlayerController::RemoveActiveInteriorFloor()
 
 void ANavPlayerController::GrowSelectedRoom()
 {
-	NudgeSelectedRoomSize(20.f);
+	NudgeSelectedRoomSize(RoomResizeStepMetres * 100.f / GetBuildingScale());
 }
 
 void ANavPlayerController::ShrinkSelectedRoom()
 {
-	NudgeSelectedRoomSize(-20.f);
+	NudgeSelectedRoomSize(-RoomResizeStepMetres * 100.f / GetBuildingScale());
+}
+
+void ANavPlayerController::SetRoomResizeStepMetres(float Metres)
+{
+	if (FMath::IsFinite(Metres) && Metres > 0.f) RoomResizeStepMetres = Metres;
+}
+
+bool ANavPlayerController::ResizeRoomDuringDrag(const FString& RoomId, FVector2D Size)
+{
+	if (bInteriorInspectionEnabled || (bIsIn3DPreviewMode && !bIsIn3DEditMode) || !InteriorGen) return false;
+	if (!InteriorGen->ResizeRoom(RoomId, Size.X, Size.Y, false)) return false;
+	bHasUnsavedChanges = true;
+	return true;
+}
+
+bool ANavPlayerController::ResizeRoomToBounds(const FString& RoomId, FVector2D Position, FVector2D Size)
+{
+	if (bInteriorInspectionEnabled || (bIsIn3DPreviewMode && !bIsIn3DEditMode) || !InteriorGen) return false;
+	if (!InteriorGen->ResizeRoomToBounds(RoomId, Position, Size))
+	{
+		OnActionFailed.Broadcast(TEXT("Unable to resize: keep a minimum size of 0.5 m and leave space for walls, doors and connectors."), EActionFailureSeverity::Warning);
+		return false;
+	}
+	bHasUnsavedChanges = true;
+	return true;
 }
 
 void ANavPlayerController::NudgeSelectedRoomSize(float Delta)
@@ -5223,8 +5335,11 @@ void ANavPlayerController::NudgeSelectedRoomSize(float Delta)
 			MaxPoint.Y = FMath::Max(MaxPoint.Y, Point.Y);
 		}
 
-		const float NewWidth = FMath::Max(10.f, (MaxPoint.X - MinPoint.X) + Delta);
-		const float NewDepth = FMath::Max(10.f, (MaxPoint.Y - MinPoint.Y) + Delta);
+		const float Minimum = InteriorEditing::MinimumDimensionCm / GetBuildingScale();
+		const FVector2D OldSize = MaxPoint - MinPoint;
+		const float Factor = FMath::Max(Minimum, OldSize.GetMax() + Delta) / FMath::Max(static_cast<float>(OldSize.GetMax()), UE_SMALL_NUMBER);
+		const float NewWidth = Room->IsClosedLoop() ? FMath::Max(Minimum, static_cast<float>(OldSize.X) + Delta) : OldSize.X * Factor;
+		const float NewDepth = Room->IsClosedLoop() ? FMath::Max(Minimum, static_cast<float>(OldSize.Y) + Delta) : OldSize.Y * Factor;
 		ResizeRoom(SelectedRoomId, NewWidth, NewDepth);
 		return;
 	}
@@ -5569,10 +5684,10 @@ void ANavPlayerController::PlayQuitConfirmSound()
 	PlayShortSoundEffect(TEXT("quit_confirm.wav"));
 }
 
-void ANavPlayerController::PlayDirectionsSound()
+void ANavPlayerController::PlayStartNavigationSound()
 {
-	++DirectionsSoundRequests;
-	if (!bDirectionsSoundEnabled)
+	++StartNavigationSoundRequests;
+	if (!bStartNavigationSoundEnabled)
 	{
 		return;
 	}
@@ -5604,10 +5719,12 @@ void ANavPlayerController::PlayArrivalSound()
 
 void ANavPlayerController::SetAllUiSoundsEnabled(bool bEnabled)
 {
+	bActionFailureSoundEnabled = bEnabled;
+	bUiSoundsMuted = !bEnabled;
 	bButtonClickSoundEnabled = bEnabled;
 	bBuildingSelectSoundEnabled = bEnabled;
 	bQuitConfirmSoundEnabled = bEnabled;
-	bDirectionsSoundEnabled = bEnabled;
+	bStartNavigationSoundEnabled = bEnabled;
 	bArrivalSoundEnabled = bEnabled;
 	bNextInstructionSoundEnabled = bEnabled;
 }
@@ -5701,4 +5818,9 @@ void ANavPlayerController::PruneFinishedAudioPlaybacks()
 		Playback.AudioComponent->DestroyComponent();
 		ActiveAudioPlaybacks.RemoveAt(i);
 	}
+}
+
+void ANavPlayerController::HandleActionFailureSound(FString Reason, EActionFailureSeverity Severity)
+{
+	if (bActionFailureSoundEnabled) PlayShortSoundEffect(TEXT("UI_Off-Route.wav"));
 }

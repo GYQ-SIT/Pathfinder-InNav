@@ -19,6 +19,70 @@
 #include "Styling/CoreStyle.h"
 #include "Engine/Texture2D.h"
 
+static const FVector2D FloorPlanResizeDirections[] = {
+	{-1,-1}, {0,-1}, {1,-1}, {1,0}, {1,1}, {0,1}, {-1,1}, {-1,0}
+};
+
+static TArray<FVector2D> FloorPlanHandleDirections(FVector2D Size)
+{
+	if (FMath::IsNearlyZero(Size.X)) return {{0,-1}, {0,1}};
+	if (FMath::IsNearlyZero(Size.Y)) return {{-1,0}, {1,0}};
+	return TArray<FVector2D>(FloorPlanResizeDirections, UE_ARRAY_COUNT(FloorPlanResizeDirections));
+}
+
+TArray<FVector2D> UInteriorFloorPlanWidget::GetResizeHandles(FVector2D WidgetSize) const
+{
+	TArray<FVector2D> Handles;
+	if (!PlayerController || !InteriorGen || !Generator || !PlayerController->IsInSelectMode() || PlayerController->IsInteriorInspectionEnabled()) return Handles;
+	const APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	FVector2D Position, Size, Origin;
+	float PixelsPerUnit = 0;
+	if (!Building || !PlayerController->GetSelectedRoomBounds(Position, Size) || Size.GetMax() <= 0) return Handles;
+	if (bIsResizingRoom) { Position = ResizePreviewPosition; Size = ResizePreviewSize; }
+	ComputeViewTransform(WidgetSize, Origin, PixelsPerUnit);
+	for (const FVector2D& Direction : FloorPlanHandleDirections(Size))
+	{
+		const FVector2D Point = Position + Size * 0.5 + FVector2D(Direction.X * Size.X, Direction.Y * Size.Y) * 0.5;
+		Handles.Add(WidgetSize * 0.5 + ((Point + Building->BuildingOffset) * Generator->GetScale() - Origin) * PixelsPerUnit);
+	}
+	return Handles;
+}
+
+bool UInteriorFloorPlanWidget::IsPrefabDragValid() const
+{
+	return bIsDraggingPrefab && PlayerController && InteriorGen && PlayerController->IsInPrefabRoomMode() &&
+		PlayerController->GetActivePrefabShape() == PrefabShape && InteriorGen->GetActiveFloor() == DragFloor &&
+		InteriorGen->GetLoadedBuildingId() == DragBuildingId;
+}
+
+TArray<FVector2D> UInteriorFloorPlanWidget::GetPrefabPreview() const
+{
+	if (!IsPrefabDragValid()) return {};
+	if (!bPrefabWasDragged) return PlayerController->BuildPrefabRoomFootprint(PrefabStart);
+	const FBox2D Bounds(TArray<FVector2D>{PrefabStart, PrefabEnd});
+	return PlayerController->BuildPrefabRoomFootprint(Bounds.GetCenter(), Bounds.GetSize());
+}
+
+void UInteriorFloorPlanWidget::ResizeAtLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize)
+{
+	if (!DragTarget.IsValid() || !PlayerController || !InteriorGen || !PlayerController->IsInSelectMode() ||
+		PlayerController->GetSelectedRoomId() != DraggingRoomId || InteriorGen->GetActiveFloor() != DragFloor ||
+		InteriorGen->GetLoadedBuildingId() != DragBuildingId) return;
+	const FVector2D Point = LocalPositionToFootprintPoint(LocalPosition, WidgetSize);
+	FVector2D Min = ResizeStartPosition, Max = ResizeStartPosition + ResizeStartSize;
+	const float Minimum = InteriorEditing::MinimumDimensionCm / PlayerController->GetBuildingScale();
+	const bool bRoom = DragTarget->IsClosedLoop();
+	const double MinX = bRoom || FMath::IsNearlyZero(ResizeStartSize.Y) || ResizeStartSize.Y < Minimum ? Minimum : UE_KINDA_SMALL_NUMBER;
+	const double MinY = bRoom || FMath::IsNearlyZero(ResizeStartSize.X) || ResizeStartSize.X < Minimum ? Minimum : UE_KINDA_SMALL_NUMBER;
+	if (ResizeDirection.X > 0) Max.X = FMath::Max(Point.X, Min.X + MinX);
+	if (ResizeDirection.X < 0) Min.X = FMath::Min(Point.X, Max.X - MinX);
+	if (ResizeDirection.Y > 0) Max.Y = FMath::Max(Point.Y, Min.Y + MinY);
+	if (ResizeDirection.Y < 0) Min.Y = FMath::Min(Point.Y, Max.Y - MinY);
+	ResizePreviewPosition = Min;
+	ResizePreviewSize = Max - Min;
+	bResizeChanged = !ResizePreviewPosition.Equals(ResizeStartPosition, 1e-6) || !ResizePreviewSize.Equals(ResizeStartSize, 1e-6);
+}
+
 void UInteriorFloorPlanWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
@@ -123,6 +187,24 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 
 		if (PlayerController->IsInSelectMode())
 		{
+			const TArray<FVector2D> Handles = GetResizeHandles(InGeometry.GetLocalSize());
+			for (int32 Index = 0; Index < Handles.Num(); ++Index)
+			{
+				if (FVector2D::DistSquared(LocalPosition, Handles[Index]) > 81.0) continue;
+				FVector2D Position;
+				if (!PlayerController->GetSelectedRoomBounds(Position, ResizeStartSize)) break;
+				ResizeStartPosition = ResizePreviewPosition = Position;
+				ResizePreviewSize = ResizeStartSize;
+				bIsResizingRoom = true;
+				bResizeChanged = false;
+				ResizeDirection = FloorPlanHandleDirections(ResizeStartSize)[Index];
+				DraggingRoomId = PlayerController->GetSelectedRoomId();
+				DragTarget = InteriorGen->GetRoomById(DraggingRoomId);
+				DragStartRoomFootprint = DragTarget->GetFootprint();
+				DragFloor = InteriorGen->GetActiveFloor();
+				DragBuildingId = InteriorGen->GetLoadedBuildingId();
+				return FReply::Handled().CaptureMouse(TakeWidget());
+			}
 			FString DoorRoomId;
 			FString DoorId;
 			int32 DoorEdgeIndex = INDEX_NONE;
@@ -202,9 +284,15 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 
 		if (PlayerController->IsInPrefabRoomMode())
 		{
-			const FVector2D FootprintCenter = LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize());
-			PlayerController->PlacePrefabRoomAt(FootprintCenter);
-			return FReply::Handled();
+			if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty()) return FReply::Handled();
+			bIsDraggingPrefab = true;
+			bPrefabWasDragged = false;
+			PrefabStartLocal = LocalPosition;
+			PrefabStart = PrefabEnd = LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize());
+			PrefabShape = PlayerController->GetActivePrefabShape();
+			DragFloor = InteriorGen->GetActiveFloor();
+			DragBuildingId = InteriorGen->GetLoadedBuildingId();
+			return FReply::Handled().CaptureMouse(TakeWidget());
 		}
 
 		if (PlayerController->IsInConnectorMode())
@@ -224,6 +312,29 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 
 FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsDraggingPrefab)
+	{
+		if (IsPrefabDragValid())
+		{
+			const FVector2D Local = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+			PrefabEnd = LocalPositionToFootprintPoint(Local, InGeometry.GetLocalSize());
+			bPrefabWasDragged |= FVector2D::DistSquared(Local, PrefabStartLocal) > 36.0;
+			if (bPrefabWasDragged)
+			{
+				const FBox2D Bounds(TArray<FVector2D>{PrefabStart, PrefabEnd});
+				PlayerController->PlacePrefabRoomInBounds(Bounds.GetCenter(), Bounds.GetSize());
+			}
+			else PlayerController->PlacePrefabRoomAt(PrefabStart);
+		}
+		bIsDraggingPrefab = false;
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsResizingRoom)
+	{
+		ResizeAtLocalPosition(InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition()), InGeometry.GetLocalSize());
+		FinishEditDrag();
+		return FReply::Handled().ReleaseMouseCapture();
+	}
 	if (InMouseEvent.GetEffectingButton() == EKeys::RightMouseButton && bIsPanning)
 	{
 		bIsPanning = false;
@@ -247,6 +358,14 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 
 void UInteriorFloorPlanWidget::FinishEditDrag()
 {
+	bIsDraggingPrefab = false;
+	if (bIsResizingRoom)
+	{
+		bIsResizingRoom = false;
+		if (bResizeChanged && InteriorGen && DragTarget.IsValid() && PlayerController && PlayerController->IsInSelectMode() &&
+			PlayerController->GetSelectedRoomId() == DraggingRoomId && InteriorGen->GetActiveFloor() == DragFloor && InteriorGen->GetLoadedBuildingId() == DragBuildingId)
+			PlayerController->ResizeRoomToBounds(DraggingRoomId, ResizePreviewPosition, ResizePreviewSize);
+	}
 	if (bIsDraggingDoor)
 	{
 		bIsDraggingDoor = false;
@@ -269,6 +388,30 @@ void UInteriorFloorPlanWidget::NativeOnMouseCaptureLost(const FCaptureLostEvent&
 
 FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
+	if (bIsDraggingPrefab)
+	{
+		if (!IsPrefabDragValid() || !InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+		{
+			bIsDraggingPrefab = false;
+			return FReply::Handled().ReleaseMouseCapture();
+		}
+		const FVector2D Local = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+		PrefabEnd = LocalPositionToFootprintPoint(Local, InGeometry.GetLocalSize());
+		bPrefabWasDragged |= FVector2D::DistSquared(Local, PrefabStartLocal) > 36.0;
+		return FReply::Handled();
+	}
+	if (bIsResizingRoom)
+	{
+		if (!InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton) || !DragTarget.IsValid() || !PlayerController || !InteriorGen ||
+			!PlayerController->IsInSelectMode() || PlayerController->GetSelectedRoomId() != DraggingRoomId ||
+			InteriorGen->GetActiveFloor() != DragFloor || InteriorGen->GetLoadedBuildingId() != DragBuildingId)
+		{
+			FinishEditDrag();
+			return FReply::Handled().ReleaseMouseCapture();
+		}
+		ResizeAtLocalPosition(InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition()), InGeometry.GetLocalSize());
+		return FReply::Handled();
+	}
 	if (bIsDraggingDoor)
 	{
 		// Same defensive check as panning below - a mouse-up that doesn't reach this widget
@@ -362,6 +505,7 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 
 FReply UInteriorFloorPlanWidget::NativeOnMouseWheel(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
+	if (bIsDraggingPrefab || bIsResizingRoom) return FReply::Handled();
 	constexpr float ZoomStep = 0.1f;
 	constexpr float MinZoom = 0.2f;
 	constexpr float MaxZoom = 5.f;
@@ -1330,5 +1474,34 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 8, AllottedGeometry.ToPaintGeometry(), Ring, ESlateDrawEffect::None, FLinearColor::Yellow, true, 3.f);
 		}
 	}
-	return LayerId + 9;
+	for (const FVector2D& Handle : GetResizeHandles(WidgetSize))
+	{
+		FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 9,
+			AllottedGeometry.ToPaintGeometry(FVector2f(10,10), FSlateLayoutTransform(Handle - FVector2D(5,5))),
+			FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox")), ESlateDrawEffect::None, FLinearColor(0.2f, 0.7f, 1.f));
+	}
+	TArray<FVector2D> Preview = GetPrefabPreview();
+	if (bIsResizingRoom && DragTarget.IsValid())
+	{
+		Preview.Reserve(DragStartRoomFootprint.Num() + 1);
+		for (const FVector2D& Point : DragStartRoomFootprint)
+		{
+			const FVector2D Offset = Point - ResizeStartPosition;
+			Preview.Add(ResizePreviewPosition + FVector2D(
+				FMath::IsNearlyZero(ResizeStartSize.X) ? 0.0 : Offset.X * ResizePreviewSize.X / ResizeStartSize.X,
+				FMath::IsNearlyZero(ResizeStartSize.Y) ? 0.0 : Offset.Y * ResizePreviewSize.Y / ResizeStartSize.Y));
+		}
+	}
+	if (!Preview.IsEmpty())
+	{
+		for (FVector2D& Point : Preview) Point = WorldToLocal((Point + Building->BuildingOffset) * Scale);
+		if (!bIsResizingRoom || (DragTarget.IsValid() && DragTarget->IsClosedLoop()))
+		{
+			const FVector2D First = Preview[0];
+			Preview.Add(First);
+		}
+		FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 9, AllottedGeometry.ToPaintGeometry(), Preview,
+			ESlateDrawEffect::None, FLinearColor(1.f, 0.6f, 0.f), true, 3.f);
+	}
+	return LayerId + 10;
 }

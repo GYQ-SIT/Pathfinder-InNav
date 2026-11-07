@@ -101,6 +101,9 @@ namespace InNaviValidationTests
         Root = Project(); Room(Root)->SetBoolField(TEXT("closed"), false); Room(Root)->SetArrayField(TEXT("openings"), {});
         auto Points = Room(Root)->GetArrayField(TEXT("footprint")); Points.SetNum(2); Room(Root)->SetArrayField(TEXT("footprint"), Points);
         TestFalse(TEXT("a two-point open wall is valid"), ValidateProject(Root).HasErrors());
+		Root = Project(); Room(Root)->SetBoolField(TEXT("closed"), false); Room(Root)->SetArrayField(TEXT("openings"), {});
+		auto Loop = Room(Root)->GetArrayField(TEXT("footprint")); const auto First = Loop[0]; Loop.Add(First); Room(Root)->SetArrayField(TEXT("footprint"), Loop);
+		TestFalse(TEXT("an explicit wall loop is not a self-intersection"), Has(ValidateProject(Root), TEXT("GEOMETRY_SELF_INTERSECTION")));
         Root = Project(); auto Openings = Room(Root)->GetArrayField(TEXT("openings"));
         auto Other = MakeShared<FJsonObject>(); Other->SetStringField(TEXT("id"), TEXT("D2")); Other->SetNumberField(TEXT("edgeIndex"), 0); Other->SetNumberField(TEXT("offset"), 110); Other->SetNumberField(TEXT("width"), 100);
         Openings.Add(MakeShared<FJsonValueObject>(Other)); Room(Root)->SetArrayField(TEXT("openings"), Openings);

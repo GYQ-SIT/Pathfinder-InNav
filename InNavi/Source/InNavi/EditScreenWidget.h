@@ -326,6 +326,8 @@ private:
 	UDockHostWidget* DockHost = nullptr;
 
 	bool bDockLayoutInitialized = false;
+	// See UInteriorScreenWidget::bSharedPanelsTaken.
+	bool bSharedPanelsTaken = false;
 
 	// The canvas size the layout was last known to be arranged for - kept so the layout can still be saved
 	// while the widget is being torn down (its geometry is no longer reliable by then).

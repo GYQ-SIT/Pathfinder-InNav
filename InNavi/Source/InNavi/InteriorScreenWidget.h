@@ -220,6 +220,22 @@ private:
 
 	UFUNCTION()
 	void OnApplyRoomClicked();
+	UFUNCTION()
+	void OnRoomSizeTextChanged(const FText& Text);
+	UFUNCTION()
+	void OnRoomSizeTextCommitted(const FText& Text, ETextCommit::Type CommitType);
+	bool ApplyRoomDimensions();
+	UFUNCTION()
+	void OnResizeStepChanged(float Value);
+	bool bRoomSizeDirty = false;
+	bool bUpdatingRoomBounds = false;
+	FString BoundsRoomId;
+	FString DisplayedRoomWidth;
+	FString DisplayedRoomLength;
+	UPROPERTY()
+	class USpinBox* ResizeStepBox = nullptr;
+	UPROPERTY()
+	UTextBlock* ResizeStepLabel = nullptr;
 
 	// Shown/populated whenever the selected connector (elevator/stairs/escalator) changes (see
 	// ANavPlayerController::OnSelectedConnectorChanged), hidden when deselected (empty GroupId).
@@ -718,7 +734,7 @@ private:
 	UPROPERTY()
 	UEditableTextBox* RoomWidthBox = nullptr;
 	UPROPERTY()
-	UEditableTextBox* RoomHeightBox = nullptr;
+	UEditableTextBox* RoomLengthBox = nullptr;
 	// Every box the Properties panel puts in a SizeBox so its width follows the panel (see RefreshDockPanelContentWidths).
 	UPROPERTY()
 	TArray<USizeBox*> PropertiesWidthBoxes;
@@ -1040,4 +1056,7 @@ private:
 	TArray<float> DockPanelWidths;
 
 	bool bDockLayoutInitialized = false;
+	// Set once the layout has taken over the shared panels' places from the other screen (see DockSharedPanels.h); a change of the layout
+	// before that must not publish the places it had on its own.
+	bool bSharedPanelsTaken = false;
 };

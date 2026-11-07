@@ -61,6 +61,8 @@ TSharedRef<SWidget> UAudioPanelWidget::RebuildWidget()
 		SelectSoundCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UAudioPanelWidget::OnSelectSoundCheckChanged);
 		QuitConfirmSoundCheckbox = AddCheckRow(Stack, TEXT("Chk_AudioQuitConfirmSound"), TEXT("Confirm Dialog Sound"), true);
 		QuitConfirmSoundCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UAudioPanelWidget::OnQuitConfirmSoundCheckChanged);
+		ErrorSoundCheckbox = AddCheckRow(Stack, TEXT("Chk_AudioErrorSound"), TEXT("Error Sound"), true);
+		ErrorSoundCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UAudioPanelWidget::OnErrorSoundCheckChanged);
 		// Checked = everything muted, so it starts unchecked (nothing is muted at first).
 		MuteAllCheckbox = AddCheckRow(Stack, TEXT("Chk_AudioMuteAll"), TEXT("Mute All"), false);
 		MuteAllCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UAudioPanelWidget::OnMuteAllCheckChanged);
@@ -119,6 +121,12 @@ void UAudioPanelWidget::Refresh()
 		if (QuitConfirmSoundCheckbox)
 		{
 			QuitConfirmSoundCheckbox->SetIsChecked(PC->IsQuitConfirmSoundEnabled());
+		}
+		// Mute All is a state of the controller too: built unticked, it showed "not muted" on the screen opened after muting.
+		if (ErrorSoundCheckbox) ErrorSoundCheckbox->SetIsChecked(PC->IsActionFailureSoundEnabled());
+		if (MuteAllCheckbox)
+		{
+			MuteAllCheckbox->SetIsChecked(PC->AreAllUiSoundsMuted());
 		}
 		if (VolumeSlider)
 		{
@@ -209,6 +217,7 @@ void UAudioPanelWidget::OnClickSoundCheckChanged(bool bIsChecked)
 	if (ANavPlayerController* PC = GetController())
 	{
 		PC->SetButtonClickSoundEnabled(bIsChecked);
+		if (MuteAllCheckbox) MuteAllCheckbox->SetIsChecked(PC->AreAllUiSoundsMuted());
 	}
 }
 
@@ -217,6 +226,7 @@ void UAudioPanelWidget::OnSelectSoundCheckChanged(bool bIsChecked)
 	if (ANavPlayerController* PC = GetController())
 	{
 		PC->SetBuildingSelectSoundEnabled(bIsChecked);
+		if (MuteAllCheckbox) MuteAllCheckbox->SetIsChecked(PC->AreAllUiSoundsMuted());
 	}
 }
 
@@ -225,6 +235,7 @@ void UAudioPanelWidget::OnQuitConfirmSoundCheckChanged(bool bIsChecked)
 	if (ANavPlayerController* PC = GetController())
 	{
 		PC->SetQuitConfirmSoundEnabled(bIsChecked);
+		if (MuteAllCheckbox) MuteAllCheckbox->SetIsChecked(PC->AreAllUiSoundsMuted());
 	}
 }
 
@@ -247,6 +258,16 @@ void UAudioPanelWidget::OnMuteAllCheckChanged(bool bIsChecked)
 	if (QuitConfirmSoundCheckbox)
 	{
 		QuitConfirmSoundCheckbox->SetIsChecked(!bIsChecked);
+	}
+	if (ErrorSoundCheckbox) ErrorSoundCheckbox->SetIsChecked(!bIsChecked);
+}
+
+void UAudioPanelWidget::OnErrorSoundCheckChanged(bool bIsChecked)
+{
+	if (ANavPlayerController* PC = GetController())
+	{
+		PC->SetActionFailureSoundEnabled(bIsChecked);
+		if (MuteAllCheckbox) MuteAllCheckbox->SetIsChecked(PC->AreAllUiSoundsMuted());
 	}
 }
 

@@ -927,15 +927,16 @@ void UMobileAppWidget::SendSheetEvent(EMobileSheetEvent Event)
 		{
 			PendingRoute.Reset();
 		}
-		// Get directions, taken: the route page is up for the start and the destination chosen, and the phone says so. The same on arriving
-		// ("I have arrived" on the last instruction), with the sound of the place.
-		if (Event == EMobileSheetEvent::DirectionsRequested || Event == EMobileSheetEvent::ArrivedAtDestination)
+		// Start navigation, taken: the phone says so as the first instruction opens. Get directions is silent: it only shows the route (people
+		// look at it, or add stops, before setting off). The same sound-on-taking on arriving ("I have arrived" on the last instruction),
+		// with the sound of the place.
+		if (Event == EMobileSheetEvent::NavigationStarted || Event == EMobileSheetEvent::ArrivedAtDestination)
 		{
 			if (ANavPlayerController* Controller = GetOwningPlayer<ANavPlayerController>())
 			{
-				if (Event == EMobileSheetEvent::DirectionsRequested)
+				if (Event == EMobileSheetEvent::NavigationStarted)
 				{
-					Controller->PlayDirectionsSound();
+					Controller->PlayStartNavigationSound();
 				}
 				else
 				{

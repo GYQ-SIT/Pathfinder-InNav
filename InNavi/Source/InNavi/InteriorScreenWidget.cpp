@@ -1,6 +1,7 @@
 #include "InteriorScreenWidget.h"
 #include "DockHostUMG.h"
 #include "InteriorDockLayout.h"
+#include "DockSharedPanels.h"
 #include "NavigationSearchUtils.h"
 #include "InteriorDoorColors.h"
 #include "InteriorEntrance.h"
@@ -45,6 +46,7 @@
 #include "Components/SizeBox.h"
 #include "Components/SizeBoxSlot.h"
 #include "Components/Slider.h"
+#include "Components/SpinBox.h"
 #include "Components/Spacer.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -52,7 +54,9 @@
 #include "Components/WrapBox.h"
 #include "Components/WrapBoxSlot.h"
 #include "Engine/Texture2D.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Misc/FileHelper.h"
+#include "Misc/DefaultValueHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
@@ -334,7 +338,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		};
 
 		AddToolGroupLabel(TEXT("Txt_GroupSelect"), TEXT("SELECT"));
-		SelectModeButton = AddToolRow(TEXT("Select_Mode_Button"), TEXT("Icon_Select"), TEXT("Select"), TEXT("Q"), TEXT("Select Mode [Q] (click a room, door, or connector to select it; drag to move it; Backspace to delete)"));
+		SelectModeButton = AddToolRow(TEXT("Select_Mode_Button"), TEXT("Icon_Select"), TEXT("Select"), TEXT("Q"), TEXT("Select Mode [Q] (click a room, door, or connector to select it; drag to move it; Delete to delete)"));
 		SelectModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSelectModeClicked);
 
 		AddToolGroupLabel(TEXT("Txt_GroupDraw"), TEXT("DRAW & PLACE"));
@@ -366,6 +370,15 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		GrowRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnGrowRoomClicked);
 		ShrinkRoomButton = AddToolRow(TEXT("Btn_ShrinkRoom"), TEXT("Icon_DecreaseSize"), TEXT("Shrink"), TEXT("-"), TEXT("Shrink (decrease the selected room's size)"));
 		ShrinkRoomButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnShrinkRoomClicked);
+		ResizeStepLabel = StartStyle::Text(WidgetTree, TEXT("Txt_ResizeStep"), TEXT("Grow / shrink step (m)"), 11.f, FLinearColor::White);
+		LeftSidebar->AddChildToVerticalBox(ResizeStepLabel);
+		ResizeStepBox = WidgetTree->ConstructWidget<USpinBox>(USpinBox::StaticClass(), TEXT("RoomResizeStep"));
+		ResizeStepBox->SetMinValue(0.01f);
+		ResizeStepBox->SetMaxValue(100.f);
+		ResizeStepBox->SetDelta(0.1f);
+		ResizeStepBox->SetValue(0.5f);
+		ResizeStepBox->OnValueChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnResizeStepChanged);
+		LeftSidebar->AddChildToVerticalBox(ResizeStepBox);
 		RotateCCWButton = AddToolRow(TEXT("Btn_RotateCCW"), TEXT("Icon_RotateCCW"), TEXT("Rotate left"), TEXT("9"), TEXT("Rotate Left (hold to keep rotating the selected room counter-clockwise)"));
 		RotateCCWButton->OnPressed.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCCWPressed);
 		RotateCCWButton->OnReleased.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRotateCCWReleased);
@@ -1093,7 +1106,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		StyleField(RoomNameTextBox, false);
 		RoomNameColumn->AddChildToVerticalBox(RoomNameTextBox);
 
-		// Where the room is and how big: its bounding box, read-only (it follows the room as it is dragged or resized).
+		// Position stays read-only; size fields edit the bounding box in metres.
 		auto AddBoundsCell = [this, &AddFieldLabel, &StyleField](UHorizontalBox* Row, const TCHAR* Name, const TCHAR* Label, UEditableTextBox*& OutBox, bool bFirstInRow)
 		{
 			UVerticalBox* Cell = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), FName(FString(Name) + TEXT("Cell")));
@@ -1110,8 +1123,17 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		AddBoundsCell(PositionRow, TEXT("Txt_RoomY"), TEXT("Y POSITION"), RoomYBox, false);
 		RoomNameColumn->AddChildToVerticalBox(PositionRow);
 		UHorizontalBox* SizeRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RoomSizeRow"));
-		AddBoundsCell(SizeRow, TEXT("Txt_RoomWidth"), TEXT("WIDTH"), RoomWidthBox, true);
-		AddBoundsCell(SizeRow, TEXT("Txt_RoomHeight"), TEXT("HEIGHT"), RoomHeightBox, false);
+		AddBoundsCell(SizeRow, TEXT("Txt_RoomWidth"), TEXT("WIDTH (m)"), RoomWidthBox, true);
+		AddBoundsCell(SizeRow, TEXT("Txt_RoomLength"), TEXT("LENGTH (m)"), RoomLengthBox, false);
+		RoomWidthBox->SetIsReadOnly(false);
+		RoomLengthBox->SetIsReadOnly(false);
+		// Clear focus explicitly only after a successful Enter commit, preserving invalid input for correction.
+		RoomWidthBox->SetClearKeyboardFocusOnCommit(false);
+		RoomLengthBox->SetClearKeyboardFocusOnCommit(false);
+		RoomWidthBox->OnTextChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoomSizeTextChanged);
+		RoomLengthBox->OnTextChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoomSizeTextChanged);
+		RoomWidthBox->OnTextCommitted.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoomSizeTextCommitted);
+		RoomLengthBox->OnTextCommitted.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoomSizeTextCommitted);
 		RoomNameColumn->AddChildToVerticalBox(SizeRow);
 
 		RoomTagsFields = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RoomTagsFields"));
@@ -1436,6 +1458,9 @@ void UInteriorScreenWidget::InitializeDockLayout()
 	}
 
 	InteriorDock::LoadLayout(*DockHost->GetLayout(), GetCanvasSize());
+	// The panels this screen has in common with the exterior one (Audio, Map, ...) are where that screen left them.
+	DockSharedPanels::ApplyPublished(*DockHost->GetLayout());
+	bSharedPanelsTaken = true;
 	DockHost->NotifyLayoutChanged();
 	RefreshWindowMenuChecks();
 }
@@ -1470,11 +1495,21 @@ void UInteriorScreenWidget::CancelNavigationPickIfNavigationHidden()
 
 void UInteriorScreenWidget::HandleDockLayoutChanged()
 {
+	if (bSharedPanelsTaken && DockHost)
+	{
+		DockSharedPanels::Publish(*DockHost->GetLayout());
+	}
 	RefreshWindowMenuChecks();
 }
 
 void UInteriorScreenWidget::RefreshWindowMenuChecks()
 {
+	// Every change of the layout by the screen itself ends here (the Window menu, a closed panel, the first arrangement), and the dock host does
+	// not report those: the shared panels are published from here as well as from the changes a person makes with the mouse.
+	if (bSharedPanelsTaken && DockHost)
+	{
+		DockSharedPanels::Publish(*DockHost->GetLayout());
+	}
 	auto Sync = [this](UCheckBox* Checkbox, EDockPanelId Id)
 	{
 		if (Checkbox)
@@ -1593,6 +1628,14 @@ void UInteriorScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 		}
 	}
 	RefreshSaveIndicator();
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>(); PC && ResizeStepBox)
+	{
+		const bool bConnector = !PC->GetSelectedConnectorGroupId().IsEmpty();
+		const FString Label = bConnector ? TEXT("Scale step (%)") : TEXT("Grow / shrink step (m)");
+		if (ResizeStepLabel && ResizeStepLabel->GetText().ToString() != Label) ResizeStepLabel->SetText(FText::FromString(Label));
+		const float Step = bConnector ? PC->GetConnectorResizeStepPercent() : PC->GetRoomResizeStepMetres();
+		if (!FMath::IsNearlyEqual(ResizeStepBox->GetValue(), Step)) ResizeStepBox->SetValue(Step);
+	}
 	if (RoomFieldsBox && RoomFieldsBox->GetVisibility() == ESlateVisibility::Visible)
 	{
 		RefreshRoomBoundsFields();
@@ -1842,6 +1885,11 @@ const TCHAR* UInteriorScreenWidget::GetDockPanelName(EDockPanelId Id)
 
 void UInteriorScreenWidget::SaveDockLayoutToDisk() const
 {
+	// The screen is about to be left (or the layout has just been changed): what the next screen takes over is this.
+	if (bSharedPanelsTaken && DockHost)
+	{
+		DockSharedPanels::Publish(*DockHost->GetLayout());
+	}
 	// Sizes are stored as fractions of the canvas, so a layout saved against a guessed size (a screen that never got on screen,
 	// as in a headless test) would replace the user's own with one that restores far too big or small.
 	FVector2D Size;
@@ -1880,7 +1928,7 @@ void UInteriorScreenWidget::HandleBeforeProjectSave()
 		const bool bTagsChanged = RoomTagsTextBox && NavigationSearch::ParseTags(RoomTagsTextBox->GetText().ToString()) != PC->GetSelectedRoomTags();
 		const bool bTypeChanged = PC->IsSelectedRoomClosedLoop() && RoomTypeComboBox && !RoomTypeComboBox->GetSelectedOption().IsEmpty()
 			&& RoomTypeComboBox->GetSelectedOption() != PC->GetSelectedRoomType();
-		if (bNameChanged || bTagsChanged || bTypeChanged)
+		if (bNameChanged || bTagsChanged || bTypeChanged || bRoomSizeDirty)
 		{
 			OnApplyRoomClicked();
 		}
@@ -2461,11 +2509,15 @@ void UInteriorScreenWidget::HandleSelectedRoomChanged(FString RoomId)
 
 void UInteriorScreenWidget::OnApplyRoomClicked()
 {
-	// Save changes: the name and the tags in one go. Both boxes are read first - changing the name refreshes the panel from the
-	// room, which would put the old tags back in the tags box before they were saved.
+	// Capture every property before resizing or renaming can refresh the panel.
 	const FString NewName = RoomNameTextBox ? RoomNameTextBox->GetText().ToString() : FString();
 	const FString NewTags = RoomTagsTextBox ? RoomTagsTextBox->GetText().ToString() : FString();
 	const FString NewType = RoomTypeComboBox ? RoomTypeComboBox->GetSelectedOption() : FString();
+	if (!ApplyRoomDimensions())
+	{
+		bRoomSizeDirty = false;
+		RefreshRoomBoundsFields();
+	}
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		if (RoomTypeComboBox)
@@ -2527,13 +2579,19 @@ void UInteriorScreenWidget::OnDeleteSelectionClicked()
 void UInteriorScreenWidget::RefreshRoomBoundsFields()
 {
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	const FString RoomId = PC ? PC->GetSelectedRoomId() : FString();
+	if (RoomId != BoundsRoomId) { bRoomSizeDirty = false; BoundsRoomId = RoomId; }
+	TGuardValue<bool> Updating(bUpdatingRoomBounds, true);
 	FVector2D Position = FVector2D::ZeroVector, Size = FVector2D::ZeroVector;
 	const bool bHave = PC && PC->GetSelectedRoomBounds(Position, Size);
+	const bool bReadOnly = !bHave || PC->IsInteriorInspectionEnabled() || (PC->IsIn3DPreviewMode() && !PC->IsIn3DEditMode());
+	if (RoomWidthBox) RoomWidthBox->SetIsReadOnly(bReadOnly || (!PC->IsSelectedRoomClosedLoop() && FMath::IsNearlyZero(Size.X)));
+	if (RoomLengthBox) RoomLengthBox->SetIsReadOnly(bReadOnly || (!PC->IsSelectedRoomClosedLoop() && FMath::IsNearlyZero(Size.Y)));
 	auto Show = [bHave](UEditableTextBox* Box, double Value)
 	{
 		if (Box)
 		{
-			const FString Text = bHave ? FString::FromInt(FMath::RoundToInt(Value)) : FString();
+			const FString Text = bHave ? FString::SanitizeFloat(Value) : FString();
 			if (Box->GetText().ToString() != Text)
 			{
 				Box->SetText(FText::FromString(Text));
@@ -2542,8 +2600,82 @@ void UInteriorScreenWidget::RefreshRoomBoundsFields()
 	};
 	Show(RoomXBox, Position.X);
 	Show(RoomYBox, Position.Y);
-	Show(RoomWidthBox, Size.X);
-	Show(RoomHeightBox, Size.Y);
+	if (!bRoomSizeDirty)
+	{
+		const double MetresPerUnit = PC ? PC->GetBuildingScale() / 100.0 : 1.0;
+		Show(RoomWidthBox, Size.X * MetresPerUnit);
+		Show(RoomLengthBox, Size.Y * MetresPerUnit);
+		DisplayedRoomWidth = RoomWidthBox ? RoomWidthBox->GetText().ToString() : FString();
+		DisplayedRoomLength = RoomLengthBox ? RoomLengthBox->GetText().ToString() : FString();
+	}
+}
+
+// Unlike LexTryParseString(double), require the whole field to be a decimal number.
+static bool InteriorScreen_ParseDimension(const FString& Input, double& Value)
+{
+	const FString Text = Input.TrimStartAndEnd();
+	if (Text.IsEmpty()) return false;
+	for (const TCHAR C : Text) if (!FChar::IsDigit(C) && C != '.' && C != '+' && C != '-' && C != 'e' && C != 'E') return false;
+	return FDefaultValueHelper::ParseDouble(Text, Value) && FMath::IsFinite(Value);
+}
+
+bool UInteriorScreenWidget::ApplyRoomDimensions()
+{
+	if (!bRoomSizeDirty) return true;
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC) return false;
+	if (BoundsRoomId != PC->GetSelectedRoomId()) { bRoomSizeDirty = false; RefreshRoomBoundsFields(); return false; }
+	FVector2D Position, Current;
+	if (!PC->GetSelectedRoomBounds(Position, Current)) return false;
+	const double MetresPerUnit = PC->GetBuildingScale() / 100.0;
+	double Width = Current.X * MetresPerUnit, Length = Current.Y * MetresPerUnit;
+	const bool bRoom = PC->IsSelectedRoomClosedLoop();
+	if (!RoomWidthBox || !RoomLengthBox ||
+		(RoomWidthBox->GetText().ToString() != DisplayedRoomWidth && !InteriorScreen_ParseDimension(RoomWidthBox->GetText().ToString(), Width)) ||
+		(RoomLengthBox->GetText().ToString() != DisplayedRoomLength && !InteriorScreen_ParseDimension(RoomLengthBox->GetText().ToString(), Length)) || Width < 0 || Length < 0 ||
+		(bRoom ? (Width < 0.5 || Length < 0.5) : FMath::Max(Width, Length) < 0.5))
+	{
+		PC->OnActionFailed.Broadcast(TEXT("Enter numeric dimensions in metres. Rooms need at least 0.5 m on each side; straight walls keep their zero dimension."), EActionFailureSeverity::Warning);
+		return false;
+	}
+	FVector2D Size = Current;
+	if (RoomWidthBox->GetText().ToString() != DisplayedRoomWidth) Size.X = Width / MetresPerUnit;
+	if (RoomLengthBox->GetText().ToString() != DisplayedRoomLength) Size.Y = Length / MetresPerUnit;
+	if (!Current.Equals(Size, 1e-6) && !PC->ResizeRoomToBounds(PC->GetSelectedRoomId(), Position + (Current - Size) * 0.5, Size)) return false;
+	bRoomSizeDirty = false;
+	RefreshRoomBoundsFields();
+	return true;
+}
+
+void UInteriorScreenWidget::OnRoomSizeTextCommitted(const FText& Text, ETextCommit::Type CommitType)
+{
+	if (bUpdatingRoomBounds) return;
+	if (CommitType == ETextCommit::OnEnter)
+	{
+		if (ApplyRoomDimensions() && FSlateApplication::IsInitialized())
+			FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::Cleared);
+	}
+	else if (CommitType == ETextCommit::OnUserMovedFocus)
+	{
+		if (!ApplyRoomDimensions()) { bRoomSizeDirty = false; RefreshRoomBoundsFields(); }
+	}
+	else if (CommitType == ETextCommit::OnCleared) { bRoomSizeDirty = false; RefreshRoomBoundsFields(); }
+}
+
+void UInteriorScreenWidget::OnRoomSizeTextChanged(const FText& Text)
+{
+	if (!bUpdatingRoomBounds) bRoomSizeDirty =
+		(RoomWidthBox && RoomWidthBox->GetText().ToString() != DisplayedRoomWidth) ||
+		(RoomLengthBox && RoomLengthBox->GetText().ToString() != DisplayedRoomLength);
+}
+
+void UInteriorScreenWidget::OnResizeStepChanged(float Value)
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (PC->GetSelectedConnectorGroupId().IsEmpty()) PC->SetRoomResizeStepMetres(Value);
+		else PC->SetConnectorResizeStepPercent(Value);
+	}
 }
 
 void UInteriorScreenWidget::HandleSelectedConnectorChanged(FString GroupId)

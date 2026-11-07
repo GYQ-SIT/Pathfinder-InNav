@@ -14,6 +14,11 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Widgets/Input/SEditableTextBox.h"
+#include "Widgets/Input/SComboBox.h"
+#include "Widgets/Layout/SBox.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/Text/STextBlock.h"
 
 namespace
 {
@@ -63,40 +68,13 @@ namespace
 		return Row == 0 ? StartColor : (Row == Count - 1 ? DestinationColor : UNavigationRouteVisualization::LegColor2D(Row - 1));
 	}
 
-	// The letter or number a place is known by: A and B at the ends, 1, 2 ... between.
+	// A/B for a two-place route; A then 1, 2 ... for a route with additional places.
 	FString PlaceBadge(int32 Row, int32 Count)
 	{
-		return Row == 0 ? FString(TEXT("A")) : (Row == Count - 1 ? FString(TEXT("B")) : FString::FromInt(Row));
+		return Row == 0 ? FString(TEXT("A")) : (Count == 2 ? FString(TEXT("B")) : FString::FromInt(Row));
 	}
 
 	using FRoomOption = UNavigationPanelWidget::FNavigationRoomOption;
-
-	// Fills a dropdown with the places the search matches, and puts what the row shows back as its first entry and chosen (ClearOptions
-	// wipes it, but does not touch the navigation state): a place can be in another building, or picked on the map, and is then not
-	// in the list.
-	void FillPlaceCombo(UComboBoxString* Combo, const TArray<FRoomOption>& Matches, const FString& Current)
-	{
-		Combo->ClearOptions();
-		if (!Current.IsEmpty())
-		{
-			Combo->AddOption(Current);
-		}
-		for (const FRoomOption& Option : Matches)
-		{
-			if (Option.GetDisplayLabel() != Current)
-			{
-				Combo->AddOption(Option.GetDisplayLabel());
-			}
-		}
-		if (!Current.IsEmpty())
-		{
-			Combo->SetSelectedOption(Current);
-		}
-		else
-		{
-			Combo->ClearSelection();
-		}
-	}
 }
 
 void UNavigationPlaceButton::Setup(UNavigationDockPanelWidget* InPanel, int32 InSlot, bool bInPick)
@@ -128,6 +106,159 @@ void UNavigationPlaceCombo::HandleChanged(FString SelectedItem, ESelectInfo::Typ
 	{
 		Panel->HandleSlotChosen(SlotIndex, SelectedItem, SelectionType);
 	}
+}
+
+TSharedRef<SWidget> UNavigationPlaceCombo::RebuildWidget()
+{
+	TSharedRef<SWidget> Result = Super::RebuildWidget();
+	SearchStyle = StartStyle::Field(13.f);
+	MyComboBox->SetMenuContent(
+		SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight().Padding(4.f)
+		[
+			SAssignNew(SearchField, SEditableTextBox)
+			.Style(&SearchStyle)
+			.HintText(FText::FromString(TEXT("Search name, ID or tag")))
+			.OnTextChanged_UObject(this, &UNavigationPlaceCombo::SearchChanged)
+			.OnTextCommitted_UObject(this, &UNavigationPlaceCombo::SearchCommitted)
+			.OnKeyDownHandler_UObject(this, &UNavigationPlaceCombo::HandleSearchKey)
+		]
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SNew(SBox).MaxDesiredHeight(300.f).MinDesiredWidth(180.f)
+			[
+				SAssignNew(SearchResults, SListView<TSharedPtr<FString>>)
+				.ListItemsSource(&FilteredOptions)
+				.SelectionMode(ESelectionMode::Single)
+				.OnGenerateRow_UObject(this, &UNavigationPlaceCombo::GenerateSearchRow)
+				.OnSelectionChanged_UObject(this, &UNavigationPlaceCombo::ChooseSearchResult)
+				.OnKeyDownHandler_UObject(this, &UNavigationPlaceCombo::HandleSearchKey)
+			]
+		]
+		+ SVerticalBox::Slot().AutoHeight().Padding(6.f)
+		[
+			SNew(STextBlock).Text(FText::FromString(TEXT("No matching places")))
+			.Visibility_Lambda([WeakThis = TWeakObjectPtr<UNavigationPlaceCombo>(this)]
+			{
+				return WeakThis.IsValid() && WeakThis->FilteredOptions.IsEmpty() ? EVisibility::Visible : EVisibility::Collapsed;
+			})
+		]);
+	MyComboBox->SetMenuContentWidgetToFocus(SearchField);
+	SetSearchText(SearchQuery);
+	return Result;
+}
+
+void UNavigationPlaceCombo::ReleaseSlateResources(bool bReleaseChildren)
+{
+	Super::ReleaseSlateResources(bReleaseChildren);
+	SearchResults.Reset();
+	SearchField.Reset();
+}
+
+void UNavigationPlaceCombo::SetSearchText(const FString& Query)
+{
+	const TArray<FString> Labels = Panel.IsValid() ? Panel->SearchPlaces(Query) : TArray<FString>();
+	const bool bNewQuery = Query != SearchQuery;
+	bool bSame = Labels.Num() == FilteredOptions.Num();
+	for (int32 I = 0; bSame && I < Labels.Num(); ++I) bSame = Labels[I] == *FilteredOptions[I];
+	FString Highlighted;
+	if (SearchResults.IsValid() && !SearchResults->GetSelectedItems().IsEmpty()) Highlighted = *SearchResults->GetSelectedItems()[0];
+	SearchQuery = Query;
+	if (!bSame)
+	{
+		FilteredOptions.Reset();
+		for (const FString& Label : Labels) FilteredOptions.Add(MakeShared<FString>(Label));
+	}
+	if (SearchResults.IsValid() && (!bSame || bNewQuery))
+	{
+		SearchResults->ClearSelection();
+		if (!bNewQuery) for (const auto& Option : FilteredOptions) if (*Option == Highlighted) SearchResults->SetSelection(Option, ESelectInfo::OnNavigation);
+		SearchResults->RequestListRefresh();
+	}
+	if (SearchField.IsValid() && SearchField->GetText().ToString() != SearchQuery) SearchField->SetText(FText::FromString(SearchQuery));
+}
+
+void UNavigationPlaceCombo::RefreshPlaceOptions(const TArray<FString>& Labels, const FString& Current)
+{
+	TArray<FString> Desired;
+	if (!Current.IsEmpty()) Desired.Add(Current);
+	for (const FString& Label : Labels) if (Label != Current) Desired.Add(Label);
+	bool bSame = Desired.Num() == GetOptionCount();
+	for (int32 I = 0; bSame && I < Desired.Num(); ++I) bSame = Desired[I] == GetOptionAtIndex(I);
+	const bool bWasOpen = MyComboBox.IsValid() && MyComboBox->IsOpen();
+	if (!bSame)
+	{
+		ClearOptions();
+		for (const FString& Label : Desired) AddOption(Label);
+	}
+	if (Current != GetSelectedOption())
+	{
+		if (Current.IsEmpty()) ClearSelection();
+		else SetSelectedOption(Current);
+	}
+	SetSearchText(SearchQuery);
+	if (bWasOpen && MyComboBox.IsValid() && !MyComboBox->IsOpen()) MyComboBox->SetIsOpen(true);
+}
+
+void UNavigationPlaceCombo::SearchChanged(const FText& Text)
+{
+	SetSearchText(Text.ToString());
+}
+
+void UNavigationPlaceCombo::SearchCommitted(const FText& Text, ETextCommit::Type CommitType)
+{
+	if (CommitType != ETextCommit::OnEnter || FilteredOptions.IsEmpty()) return;
+	const auto Selected = SearchResults.IsValid() ? SearchResults->GetSelectedItems() : TArray<TSharedPtr<FString>>();
+	ChooseSearchResult(Selected.IsEmpty() ? FilteredOptions[0] : Selected[0], ESelectInfo::OnKeyPress);
+}
+
+FReply UNavigationPlaceCombo::HandleSearchKey(const FGeometry& Geometry, const FKeyEvent& Event)
+{
+	const FKey Key = Event.GetKey();
+	if (Key == EKeys::Escape)
+	{
+		if (MyComboBox.IsValid()) MyComboBox->SetIsOpen(false);
+		return FReply::Handled();
+	}
+	if (Key == EKeys::Enter)
+	{
+		SearchCommitted(FText(), ETextCommit::OnEnter);
+		return FReply::Handled();
+	}
+	if ((Key == EKeys::Up || Key == EKeys::Down) && SearchResults.IsValid())
+	{
+		const auto Selected = SearchResults->GetSelectedItems();
+		const int32 OldIndex = Selected.IsEmpty() ? INDEX_NONE : FilteredOptions.IndexOfByKey(Selected[0]);
+		if (!FilteredOptions.IsEmpty())
+		{
+			const int32 Index = FMath::Clamp(OldIndex == INDEX_NONE ? 0 : OldIndex + (Key == EKeys::Down ? 1 : -1), 0, FilteredOptions.Num() - 1);
+			SearchResults->SetSelection(FilteredOptions[Index], ESelectInfo::OnNavigation);
+			SearchResults->RequestScrollIntoView(FilteredOptions[Index]);
+		}
+		return FReply::Handled();
+	}
+	return FReply::Unhandled();
+}
+
+TSharedRef<ITableRow> UNavigationPlaceCombo::GenerateSearchRow(TSharedPtr<FString> Item, const TSharedRef<STableViewBase>& Owner)
+{
+	return SNew(STableRow<TSharedPtr<FString>>, Owner).bAllowPreselectedItemActivation(true).Padding(4.f)[HandleGenerateWidget(Item)];
+}
+
+void UNavigationPlaceCombo::ChooseSearchResult(TSharedPtr<FString> Item, ESelectInfo::Type SelectionType)
+{
+	if (!Item.IsValid() || SelectionType == ESelectInfo::OnNavigation || SelectionType == ESelectInfo::Direct) return;
+	// The filtered list has its own string pointers. Select the original option so Slate, UMG and
+	// GetSelectedIndex agree, including after the route is cleared and the same place is picked again.
+	int32 Index = FindOptionIndex(*Item);
+	if (Index == INDEX_NONE) { AddOption(*Item); Index = FindOptionIndex(*Item); }
+	const TSharedPtr<FString> Option = Options[Index];
+	if (MyComboBox.IsValid())
+	{
+		MyComboBox->SetSelectedItem(Option);
+		MyComboBox->SetIsOpen(false);
+	}
+	HandleSelectionChanged(Option, SelectionType);
 }
 
 TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
@@ -213,19 +344,6 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 		// ==== Plan ====
 		ContextText = MakeText(TEXT("Txt_NavContext"), 12.f, MutedColor);
 		AddToStack(PlanBox, ContextText, 8.f);
-
-		// One search box narrows every dropdown of the list, across every floor of the open building (or every main door outside).
-		DestinationSearchBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_DestinationSearch"));
-		ApplyStandardFont(DestinationSearchBox);
-		DestinationSearchBox->SetWidgetStyle(StartStyle::Field(13.f));
-		DestinationSearchBox->SetHintText(FText::FromString(TEXT("Search by name, ID or tag")));
-		DestinationSearchBox->OnTextChanged.AddUniqueDynamic(this, &UNavigationDockPanelWidget::HandleSearchChanged);
-		USizeBox* SearchSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Txt_DestinationSearchSize"));
-		SearchSize->SetWidthOverride(ContentWidth);
-		SearchSize->SetContent(DestinationSearchBox);
-		AddToStack(PlanBox, SearchSize, 4.f);
-		DestinationSearchResultsText = MakeText(TEXT("Txt_DestinationSearchResults"), 12.f, FLinearColor::White);
-		AddToStack(PlanBox, DestinationSearchResultsText, 8.f);
 
 		// The places, one row each. The rows are made once, and what each shows is set by RefreshDisplay.
 		UVerticalBox* Places = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Box_NavPlaces"));
@@ -445,13 +563,6 @@ void UNavigationDockPanelWidget::SetContentWidth(float Width)
 	{
 		SlotSizes[SlotIndex]->SetWidthOverride(Width);
 		ComboSizes[SlotIndex]->SetWidthOverride(FMath::Max(60.f, Width - BadgeSize - PickWidth - 2.f * RowGap));
-	}
-	if (UWidget* Parent = DestinationSearchBox ? DestinationSearchBox->GetParent() : nullptr)
-	{
-		if (USizeBox* SearchSize = Cast<USizeBox>(Parent))
-		{
-			SearchSize->SetWidthOverride(Width);
-		}
 	}
 	for (UProgressBar* Bar : { FindRouteProgress, StepProgress })
 	{
@@ -807,7 +918,7 @@ void UNavigationDockPanelWidget::RefreshDisplay()
 		const bool bEnd = Row == 0 || Row == Count - 1;
 		BadgeTexts[SlotIndex]->SetText(FText::FromString(bPending ? FString(TEXT("+")) : PlaceBadge(Row, Count)));
 		Paint(BadgeButtons[SlotIndex], bPending ? PendingColor : PlaceColor(Row, Count));
-		RoleTexts[SlotIndex]->SetText(FText::FromString(bPending ? FString(TEXT("Add a stop")) : Nav->GetPlaceRole(Row)));
+		RoleTexts[SlotIndex]->SetText(FText::FromString(bPending ? FString(TEXT("Add a stop")) : (Row > 0 && Count > 2 ? FString::FromInt(Row) : Nav->GetPlaceRole(Row))));
 		FieldBorders[SlotIndex]->SetBrushColor(Row == SelectedRow ? FLinearColor::White : FLinearColor::Transparent);
 		// The crosshair is for the ends and the row being added; a stop is replaced from the list, or removed and added again.
 		PickButtons[SlotIndex]->SetVisibility(bEnd || bPending ? ESlateVisibility::Visible : ESlateVisibility::Hidden);
@@ -991,9 +1102,9 @@ void UNavigationDockPanelWidget::RefreshRoomDropdowns()
 		return;
 	}
 	AssignSlots(*Nav);
-	// One search narrows every list.
-	const FString Query = DestinationSearchBox ? DestinationSearchBox->GetText().ToString() : FString();
-	const TArray<FRoomOption> Matches = Nav->SearchDestinations(Query);
+	const TArray<FRoomOption> Matches = Nav->SearchDestinations(FString());
+	TArray<FString> Labels;
+	for (const FRoomOption& Option : Matches) Labels.Add(Option.GetDisplayLabel());
 	for (int32 SlotIndex = 0; SlotIndex < MaxSlots; ++SlotIndex)
 	{
 		const int32 Row = SlotRow[SlotIndex];
@@ -1002,22 +1113,18 @@ void UNavigationDockPanelWidget::RefreshRoomDropdowns()
 			continue;
 		}
 		const FString Current = Row >= 0 ? Nav->GetPlaceText(Row) : FString();
-		FillPlaceCombo(PlaceCombos[SlotIndex], Matches, Current);
-		PlaceCombos[SlotIndex]->SetIsEnabled(!Matches.IsEmpty());
-	}
-	if (DestinationSearchResultsText)
-	{
-		DestinationSearchResultsText->SetText(FText::FromString(Matches.IsEmpty()
-			? TEXT("No matching places. Try another name or tag.")
-			: (Nav->IsOutdoorMode()
-				? FString::Printf(TEXT("%d main doors on the campus."), Matches.Num())
-				: FString::Printf(TEXT("%d rooms in this building."), Matches.Num()))));
+		PlaceCombos[SlotIndex]->RefreshPlaceOptions(Labels, Current);
+		PlaceCombos[SlotIndex]->SetIsEnabled(true);
 	}
 }
 
-void UNavigationDockPanelWidget::HandleSearchChanged(const FText& Text)
+TArray<FString> UNavigationDockPanelWidget::SearchPlaces(const FString& Query) const
 {
-	RefreshRoomDropdowns();
+	TArray<FString> Labels;
+	const ANavPlayerController* PC = GetController();
+	const UNavigationPanelWidget* Nav = PC ? PC->GetNavigationPanel() : nullptr;
+	if (Nav) for (const FRoomOption& Option : Nav->SearchDestinations(Query)) Labels.Add(Option.GetDisplayLabel());
+	return Labels;
 }
 
 UWidget* UNavigationDockPanelWidget::HandleGenerateComboBoxItem(FString Item)

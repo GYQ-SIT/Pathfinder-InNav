@@ -74,12 +74,19 @@ try {
     ) | Set-Content -Encoding UTF8 (Join-Path $root 'BUILD-INFO.txt')
 
     Write-Host "== Zipping to $zip"
-    # Windows tar chooses the ZIP format from the temporary file's extension.
-    & tar.exe -a -c -f $temporaryZip -C $root .
+    # Windows tar chooses the ZIP format from the temporary file's extension. The top-level items are named one by one: with "-C $root ." every
+    # entry is stored as "./InNavi.exe", and Windows Explorer shows a ZIP like that as empty (the release of m2-build-6 looked empty when it was
+    # opened by double click, though the files were inside).
+    $top = @(Get-ChildItem -LiteralPath $root -Force | ForEach-Object Name)
+    & tar.exe -a -c -f $temporaryZip -C $root @top
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $temporaryZip -PathType Leaf)) { throw 'Zipping failed.' }
-    $entries = & tar.exe -t -f $temporaryZip | ForEach-Object { $_ -replace '^\./', '' }
+    $names = @(& tar.exe -t -f $temporaryZip)
+    $entries = @($names | ForEach-Object { $_ -replace '^\./', '' })
     if ($LASTEXITCODE -ne 0 -or $entries -notcontains 'InNavi.exe' -or $entries -notcontains 'InNavi/Data/buildings.json') {
         throw 'The ZIP is incomplete.'
+    }
+    if (@($names | Where-Object { $_ -eq '.' -or $_ -eq './' -or $_.StartsWith('./') }).Count -gt 0) {
+        throw 'The ZIP has entries that start with "./": Windows Explorer would show it as empty.'
     }
 
     if ([IO.File]::Exists($zip)) { [IO.File]::Replace($temporaryZip, $zip, $backup) }

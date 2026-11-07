@@ -55,6 +55,28 @@ protected:
 	virtual FReply NativeOnMouseWheel(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 
 private:
+	friend struct FEditorInteractionTestAccess;
+	friend struct FEditorFeedbackTestAccess;
+	TArray<FVector2D> GetResizeHandles(FVector2D WidgetSize) const;
+	TArray<FVector2D> GetPrefabPreview() const;
+	bool IsPrefabDragValid() const;
+	void ResizeAtLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize);
+	bool bIsResizingRoom = false;
+	bool bResizeChanged = false;
+	FVector2D ResizeDirection = FVector2D::ZeroVector;
+	FVector2D ResizeStartPosition = FVector2D::ZeroVector;
+	FVector2D ResizePreviewPosition = FVector2D::ZeroVector;
+	FVector2D ResizePreviewSize = FVector2D::ZeroVector;
+	FVector2D ResizeStartSize = FVector2D::ZeroVector;
+	bool bIsDraggingPrefab = false;
+	FVector2D PrefabStartLocal = FVector2D::ZeroVector;
+	FVector2D PrefabStart = FVector2D::ZeroVector;
+	FVector2D PrefabEnd = FVector2D::ZeroVector;
+	bool bPrefabWasDragged = false;
+	int32 PrefabShape = 0;
+	int32 DragFloor = 0;
+	FString DragBuildingId;
+
 	// The view is auto-framed to fit the loaded building's footprint into WidgetSize (with a
 	// margin), centered - shared by NativePaint (to draw) and LocalPositionToFootprintPoint (to
 	// invert a click), so a click always lands exactly where it visually appears.

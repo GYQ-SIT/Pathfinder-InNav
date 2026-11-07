@@ -1156,6 +1156,93 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprintWithTags(const TArray<
 	return Room;
 }
 
+// An open wall may bend, but may not cross, touch a non-adjacent segment, or double back along itself.
+static bool InteriorGen_WallSelfIntersects(const TArray<FVector2D>& Points)
+{
+	constexpr double Tolerance = 1e-5;
+	for (int32 i = 0; i < Points.Num(); ++i)
+	{
+		if (!FMath::IsFinite(Points[i].X) || !FMath::IsFinite(Points[i].Y)) return true;
+		if (i + 1 >= Points.Num()) break;
+		const FVector2D A = Points[i], B = Points[i + 1];
+		if (FVector2D::Distance(A, B) <= Tolerance) return true;
+		for (int32 j = i + 1; j + 1 < Points.Num(); ++j)
+		{
+			const FVector2D C = Points[j], D = Points[j + 1];
+			if (i == 0 && j + 1 == Points.Num() - 1 && D.Equals(A, Tolerance))
+			{
+				// Closing a loop shares its first joint. It must not retrace either adjoining segment.
+				if (FVector2D::DotProduct(A - C, B - A) < 0 &&
+					(InteriorGen_DistancePointToSegment2D(B, C, A) <= Tolerance ||
+					 InteriorGen_DistancePointToSegment2D(C, A, B) <= Tolerance)) return true;
+				continue;
+			}
+			if (j == i + 1)
+			{
+				// Adjacent segments share B; only an overlap beyond that joint is invalid.
+				if (FVector2D::DotProduct(B - A, D - C) < 0 &&
+					(InteriorGen_DistancePointToSegment2D(D, A, B) <= Tolerance ||
+					 InteriorGen_DistancePointToSegment2D(A, C, D) <= Tolerance)) return true;
+				continue;
+			}
+			if (InteriorGen_SegmentsIntersect(A, B, C, D) ||
+				InteriorGen_DistancePointToSegment2D(A, C, D) <= Tolerance ||
+				InteriorGen_DistancePointToSegment2D(B, C, D) <= Tolerance ||
+				InteriorGen_DistancePointToSegment2D(C, A, B) <= Tolerance ||
+				InteriorGen_DistancePointToSegment2D(D, A, B) <= Tolerance) return true;
+		}
+	}
+	return false;
+}
+
+bool AInteriorGenerator::ValidateWallPath(const TArray<FVector2D>& Points, FString& OutError, bool bDrawingRoom) const
+{
+	OutError.Empty();
+	const APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+	if (!Building || !FloorInfoByLevel.Contains(ActiveFloor)) { OutError = TEXT("No active building floor is available."); return false; }
+	if (Points.IsEmpty()) return true;
+	if (InteriorGen_WallSelfIntersects(Points))
+	{
+		OutError = bDrawingRoom ? TEXT("The room outline crosses or overlaps itself, or contains an invalid or repeated point.") : TEXT("The wall crosses or overlaps itself, or contains an invalid or repeated point.");
+		return false;
+	}
+	if (!IsFootprintFullyInsidePolygon(Points, Building->GetFootprint(), false))
+	{
+		OutError = bDrawingRoom ? TEXT("The room outline extends outside the building's outline.") : TEXT("The wall extends outside the building's outline.");
+		return false;
+	}
+
+	// Same overlap/connector-block checks CreateRoomFromFootprint runs for a closed room, adapted for
+	// an open polyline (bClosedLoop=false throughout - DoFootprintsOverlap/DoesFootprintBlockConnector
+	// both already support open loops, this was simply never wired up here before) - a wall previously
+	// had no geometric validation at all, so it could be drawn straight through an existing room,
+	// another wall, or an elevator/stairs/escalator shaft.
+	if (const FInteriorRoomList* ExistingRooms = RoomsByFloor.Find(ActiveFloor))
+	{
+		for (const AInteriorRoom* Other : ExistingRooms->Rooms)
+		{
+			if (!Other) continue;
+			const auto& Outline = Other->GetFootprint();
+			bool bInside = Points.Num() == 1 && Other->IsClosedLoop() && InteriorGen_IsPointInPolygon(Points[0], Outline);
+			for (int32 Edge = 0; bInside && Edge < Outline.Num(); ++Edge)
+				if (InteriorGen_DistancePointToSegment2D(Points[0], Outline[Edge], Outline[(Edge + 1) % Outline.Num()]) <= 1e-5) bInside = false;
+			if (bInside || DoFootprintsOverlap(Points, false, Outline, Other->IsClosedLoop(), OverlapToleranceWorldUnits / Generator->GetScale()))
+			{
+				OutError = FString::Printf(TEXT("It overlaps an existing room/wall ('%s')."), *Other->RoomId);
+				return false;
+			}
+		}
+	}
+
+	if (DoesFootprintBlockConnector(Points, /*bClosedLoop=*/false, ActiveFloor))
+	{
+		OutError = TEXT("It would cut through an elevator/stairs/escalator.");
+		return false;
+	}
+
+	return true;
+}
+
 AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>& Points, const FString& WallId, FString& OutError)
 {
 	return CreateWallFromPoints(Points, WallId, OutError, {}, FString());
@@ -1195,34 +1282,9 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 		OutError = TEXT("A wall needs at least 2 points.");
 		return nullptr;
 	}
-	if (!IsFootprintFullyInsidePolygon(Points, Building->GetFootprint(), false))
+	if (!ValidateWallPath(Points, OutError))
 	{
-		OutError = TEXT("The wall extends outside the building's outline.");
-		return nullptr;
-	}
-
-	// Same overlap/connector-block checks CreateRoomFromFootprint runs for a closed room, adapted for
-	// an open polyline (bClosedLoop=false throughout - DoFootprintsOverlap/DoesFootprintBlockConnector
-	// both already support open loops, this was simply never wired up here before) - a wall previously
-	// had no geometric validation at all, so it could be drawn straight through an existing room,
-	// another wall, or an elevator/stairs/escalator shaft.
-	if (const FInteriorRoomList* ExistingRooms = RoomsByFloor.Find(ActiveFloor))
-	{
-		for (const AInteriorRoom* Other : ExistingRooms->Rooms)
-		{
-			if (Other && DoFootprintsOverlap(Points, false, Other->GetFootprint(), Other->IsClosedLoop(), OverlapToleranceWorldUnits / Generator->GetScale()))
-			{
-				UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: wall overlaps existing room/wall '%s'"), *Other->RoomId);
-				OutError = FString::Printf(TEXT("It overlaps an existing room/wall ('%s')."), *Other->RoomId);
-				return nullptr;
-			}
-		}
-	}
-
-	if (DoesFootprintBlockConnector(Points, /*bClosedLoop=*/false, ActiveFloor))
-	{
-		UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: wall would cut through an elevator/stairs/escalator"));
-		OutError = TEXT("It would cut through an elevator/stairs/escalator.");
+		if (OutError.Contains(TEXT("overlaps an existing"))) UE_LOG(LogTemp, Error, TEXT("CreateWallFromPoints: wall overlaps existing room/wall"));
 		return nullptr;
 	}
 
@@ -1807,9 +1869,20 @@ bool AInteriorGenerator::DeleteRoom(const FString& RoomId)
 	return false;
 }
 
-bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth)
+bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth, bool bRecordHistory)
 {
-	if (!FMath::IsFinite(NewWidth) || !FMath::IsFinite(NewDepth) || NewWidth <= 0.f || NewDepth <= 0.f)
+	const AInteriorRoom* Room = GetRoomById(RoomId);
+	if (!Room || Room->GetFootprint().IsEmpty()) return false;
+	const FBox2D Bounds(Room->GetFootprint());
+	const FVector2D Size(NewWidth, NewDepth);
+	return ResizeRoomToBounds(RoomId, Bounds.GetCenter() - Size * 0.5, Size, bRecordHistory);
+}
+
+bool AInteriorGenerator::ResizeRoomToBounds(const FString& RoomId, FVector2D Position, FVector2D Size, bool bRecordHistory)
+{
+	const double NewWidth = Size.X, NewDepth = Size.Y;
+	if (!FMath::IsFinite(Position.X) || !FMath::IsFinite(Position.Y)) return false;
+	if (!FMath::IsFinite(NewWidth) || !FMath::IsFinite(NewDepth) || NewWidth < 0.f || NewDepth < 0.f)
 	{
 		return false;
 	}
@@ -1838,23 +1911,27 @@ bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float
 				MaxPoint.Y = FMath::Max(MaxPoint.Y, Point.Y);
 			}
 
-			const float OldWidth = MaxPoint.X - MinPoint.X;
-			const float OldDepth = MaxPoint.Y - MinPoint.Y;
-			if (OldWidth < KINDA_SMALL_NUMBER || OldDepth < KINDA_SMALL_NUMBER)
+			const double OldWidth = MaxPoint.X - MinPoint.X;
+			const double OldDepth = MaxPoint.Y - MinPoint.Y;
+			const float MinSize = InteriorEditing::MinimumDimensionCm / (Generator ? Generator->GetScale() : 1.f);
+			const bool bZeroX = OldWidth < KINDA_SMALL_NUMBER, bZeroY = OldDepth < KINDA_SMALL_NUMBER;
+			if (Room->IsClosedLoop())
 			{
-				UE_LOG(LogTemp, Error, TEXT("ResizeRoom: '%s' has a degenerate bounding box"), *RoomId);
-				return false;
+				if (bZeroX || bZeroY || NewWidth < MinSize - UE_SMALL_NUMBER || NewDepth < MinSize - UE_SMALL_NUMBER) return false;
 			}
-
-			const FVector2D Center = (MinPoint + MaxPoint) * 0.5f;
-			const float ScaleX = NewWidth / OldWidth;
-			const float ScaleY = NewDepth / OldDepth;
+			else
+			{
+				if ((bZeroX && !FMath::IsNearlyZero(NewWidth)) || (bZeroY && !FMath::IsNearlyZero(NewDepth)) ||
+					(!bZeroX && NewWidth <= 0) || (!bZeroY && NewDepth <= 0) || FMath::Max(NewWidth, NewDepth) < MinSize - UE_SMALL_NUMBER) return false;
+			}
+			const double ScaleX = bZeroX ? 1.0 : NewWidth / OldWidth;
+			const double ScaleY = bZeroY ? 1.0 : NewDepth / OldDepth;
 
 			TArray<FVector2D> NewFootprint;
 			NewFootprint.Reserve(OldFootprint.Num());
 			for (const FVector2D& Point : OldFootprint)
 			{
-				NewFootprint.Add(Center + FVector2D((Point.X - Center.X) * ScaleX, (Point.Y - Center.Y) * ScaleY));
+				NewFootprint.Add(Position + FVector2D((Point.X - MinPoint.X) * ScaleX, (Point.Y - MinPoint.Y) * ScaleY));
 			}
 
 			APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
@@ -1884,7 +1961,8 @@ bool AInteriorGenerator::ResizeRoom(const FString& RoomId, float NewWidth, float
 				return false;
 			}
 			UE_LOG(LogTemp, Warning, TEXT("Resized %s to %.1f x %.1f"), *RoomId, NewWidth, NewDepth);
-			RecordHistorySnapshot();
+			if (bRecordHistory) RecordHistorySnapshot();
+			else NotifyNavigationLayoutChanged();
 			return true;
 		}
 	}

@@ -156,6 +156,14 @@ public:
 	void SetPointerOverUICallback(const UObject* ScreenOwner, TFunction<bool(const FVector2D&)> Callback);
 	void ClearPointerOverUICallback(const UObject* ScreenOwner);
 
+	// The start screen and the project library have no project to work on: while one is up, the keyboard shortcuts (B, P, Ctrl+S, Ctrl+V...)
+	// do nothing, so a key cannot save an empty scene or paste into nothing. Like the callback above, the owner is the screen, so a screen
+	// being torn down never unblocks the one that replaced it. Releases still pass, so no key stays held.
+	void BlockKeyShortcuts(const UObject* ScreenOwner);
+	void UnblockKeyShortcuts(const UObject* ScreenOwner);
+	bool AreKeyShortcutsBlocked() const;
+	virtual bool InputKey(const FInputKeyEventArgs& Params) override;
+
 	// Step by step navigation can need the other screen: a step outside is shown on the exterior screen (the campus), a step inside a
 	// building on the interior screen. The screen that is up registers this; FollowNavigationStep asks it first, and it returns true
 	// when it has handed over to the other screen (which then follows the step itself when it comes up).
@@ -364,6 +372,12 @@ public:
 	// still be sitting in the level.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void StartNewProject();
+
+	// Closes the project that is open: the same clearing as StartNewProject (every building, interior, road and building around the campus
+	// destroyed; selection, navigation, tools, undo history, file path and unsaved-changes flag reset), for the screens that go back to the start
+	// screen. Call it only once the person has chosen to leave (saved or discarded): it throws the open project away.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void CloseProject();
 
 	// The folder project files live in (InNavi/Data, as an absolute path) - where New project writes its file and where
 	// the Open dialog starts.
@@ -729,7 +743,7 @@ public:
 
 	// Removes every floor's node for the currently-selected connector (see
 	// AInteriorGenerator::DeleteConnectorGroup) and clears the selection. Bound as part of
-	// DeleteSelection (Backspace). No-op (returns false) if no connector is selected.
+	// DeleteSelection (Delete). No-op (returns false) if no connector is selected.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool DeleteSelectedConnector();
 
@@ -764,7 +778,7 @@ public:
 
 	// Deletes whichever is currently selected - a door takes priority if one is selected (see
 	// SelectDoor), otherwise a selected room/wall (see SelectRoom) - and clears the corresponding
-	// selection. Bound to the Backspace key for now. No-op (returns false) if nothing is selected.
+	// selection. Bound to the Delete key for now. No-op (returns false) if nothing is selected.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool DeleteSelection();
 
@@ -783,9 +797,17 @@ public:
 
 	// Rescales a room/wall to fit new Width (X) / Depth (Y) dimensions, keeping it centered where
 	// it is (see AInteriorGenerator::ResizeRoom) - general-purpose, explicit-id version. See also
-	// GrowSelectedRoom/ShrinkSelectedRoom. Not wired into UMG yet.
+	// GrowSelectedRoom/ShrinkSelectedRoom and the Properties width/depth fields.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth);
+	// Applies an intermediate size without recording history; callers must commit their undo entry.
+	bool ResizeRoomDuringDrag(const FString& RoomId, FVector2D Size);
+	// Commits the anchored bounds from a handle's outline preview, with validation and one undo entry.
+	bool ResizeRoomToBounds(const FString& RoomId, FVector2D Position, FVector2D Size);
+	float GetRoomResizeStepMetres() const { return RoomResizeStepMetres; }
+	void SetRoomResizeStepMetres(float Metres);
+	float GetConnectorResizeStepPercent() const { return ConnectorScaleStep * 100.f; }
+	void SetConnectorResizeStepPercent(float Percent) { if (FMath::IsFinite(Percent) && Percent > 0) ConnectorScaleStep = Percent / 100.f; }
 
 	// Moves a room/wall to a new footprint (see AInteriorGenerator::MoveRoom) - what the 2D floor
 	// plan canvas's select-mode drag handler calls while dragging a selected room, recomputing the
@@ -856,6 +878,8 @@ public:
 	// (returns nullptr) if no prefab shape is currently armed.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	AInteriorRoom* PlacePrefabRoomAt(FVector2D FootprintCenter);
+	AInteriorRoom* PlacePrefabRoomInBounds(FVector2D FootprintCenter, FVector2D FootprintSize);
+	TArray<FVector2D> BuildPrefabRoomFootprint(FVector2D FootprintCenter, FVector2D FootprintSize = FVector2D::ZeroVector) const;
 
 	// Connector (elevator/stairs/escalator) placement: 4/5/6 (for now, not wired into UMG yet) each
 	// arm a different type - while armed, clicking the 2D floor plan canvas places one there (see
@@ -1056,7 +1080,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	bool SetLoadedBuildingName(const FString& NewName);
 
-	// Grow/shrink whatever's currently selected - a room by a fixed 20-unit nudge, or a connector
+	// Grow/shrink whatever's currently selected - a room by the configured step in metres, or a connector
 	// (elevator/stairs/escalator) by a SizeScale multiplier step (see NudgeSelectedRoomSize, which
 	// despite the name handles both - kept the room-era name since it's already bound to =/- and the
 	// Toolbar panel's Gizmos Grow/Shrink buttons). Move itself is intentionally NOT supported for a
@@ -1151,14 +1175,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void SetQuitConfirmSoundEnabled(bool bEnabled) { bQuitConfirmSoundEnabled = bEnabled; }
 
-	// The phone app's "Get directions": plays Data/Audio/UI_Dull_08.wav once the route page has opened for the start and the destination
-	// that were chosen (see UMobileAppWidget::SendSheetEvent). Its own flag; SetAllUiSoundsEnabled(false) mutes it too. Fire-and-forget
-	// like the other short effects; a missing or unreadable file is silent.
-	void PlayDirectionsSound();
-	bool IsDirectionsSoundEnabled() const { return bDirectionsSoundEnabled; }
-	void SetDirectionsSoundEnabled(bool bEnabled) { bDirectionsSoundEnabled = bEnabled; }
+	UFUNCTION(BlueprintPure, Category = "Audio")
+	bool IsActionFailureSoundEnabled() const { return bActionFailureSoundEnabled; }
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void SetActionFailureSoundEnabled(bool bEnabled) { bActionFailureSoundEnabled = bEnabled; }
+
+	// The phone app's "Start navigation": plays Data/Audio/UI_Dull_08.wav once the walk has begun, as the first instruction opens (see
+	// UMobileAppWidget::SendSheetEvent). "Get directions" itself is silent. Its own flag; SetAllUiSoundsEnabled(false) mutes it too.
+	// Fire-and-forget like the other short effects; a missing or unreadable file is silent.
+	void PlayStartNavigationSound();
+	bool IsStartNavigationSoundEnabled() const { return bStartNavigationSoundEnabled; }
+	void SetStartNavigationSoundEnabled(bool bEnabled) { bStartNavigationSoundEnabled = bEnabled; }
 	// Tests: how many times the phone app asked for the sound, whether it was muted or not.
-	int32 GetDirectionsSoundRequestsForTests() const { return DirectionsSoundRequests; }
+	int32 GetStartNavigationSoundRequestsForTests() const { return StartNavigationSoundRequests; }
 
 	// The phone app's "Next instruction" button (every instruction but the last): plays Data/Audio/UI_Dull_05.wav. Same rules as above.
 	void PlayNextInstructionSound();
@@ -1167,7 +1196,7 @@ public:
 	int32 GetNextInstructionSoundRequestsForTests() const { return NextInstructionSoundRequests; }
 
 	// The phone app's "I have arrived" button (the last instruction's button): plays Data/Audio/UI_Place_2.wav as the arrival page opens.
-	// Same rules as PlayDirectionsSound.
+	// Same rules as PlayStartNavigationSound.
 	void PlayArrivalSound();
 	bool IsArrivalSoundEnabled() const { return bArrivalSoundEnabled; }
 	void SetArrivalSoundEnabled(bool bEnabled) { bArrivalSoundEnabled = bEnabled; }
@@ -1179,6 +1208,10 @@ public:
 	// all three back on, rather than restoring whatever subset was on before muting.
 	UFUNCTION(BlueprintCallable, Category = "Audio")
 	void SetAllUiSoundsEnabled(bool bEnabled);
+
+	// Whether the sounds were all muted at once (Mute All) and are still all off: what the Audio panel's Mute All box shows when a screen builds
+	// it. Turning any individual sound back on ends it.
+	bool AreAllUiSoundsMuted() const { return bUiSoundsMuted && !bButtonClickSoundEnabled && !bBuildingSelectSoundEnabled && !bQuitConfirmSoundEnabled && !bActionFailureSoundEnabled && !bStartNavigationSoundEnabled && !bNextInstructionSoundEnabled && !bArrivalSoundEnabled; }
 
 	// Multiplies the volume of every sound this class plays (the Audio panel's own file playback and
 	// all three short UI effects) - see PlayWavFile, which applies this to every UAudioComponent it
@@ -1225,6 +1258,13 @@ protected:
 	virtual void Tick(float DeltaSeconds) override;
 
 private:
+	friend struct FEditorInteractionTestAccess;
+	friend struct FEditorFeedbackTestAccess;
+	UFUNCTION()
+	void HandleActionFailureSound(FString Reason, EActionFailureSeverity Severity);
+	bool bActionFailureSoundEnabled = true;
+	float RoomResizeStepMetres = InteriorEditing::DefaultResizeStepMetres;
+
 	void BindGameWindowCloseGuard(class UGameViewportClient* Viewport);
 	void UnbindGameWindowCloseGuard();
 	bool HandleGameWindowCloseRequested();
@@ -1240,6 +1280,7 @@ private:
 #if WITH_DEV_AUTOMATION_TESTS
 	friend class FProjectWindowCloseTest;
 	friend class FProjectSaveDuringDragTest;
+	friend class FDatabaseProjectCloseTest;
 #endif
 
 	void MarkBuildingCreated(APolyBuilding* Building);
@@ -1285,6 +1326,7 @@ private:
 	TObjectPtr<UMobileSplashWidget> MobileSplash;
 
 	TWeakObjectPtr<const UObject> PointerOverUIOwner;
+	TWeakObjectPtr<const UObject> KeyShortcutsBlockOwner;
 	TWeakObjectPtr<const UObject> NavigationStepScreenOwner;
 	TFunction<bool(const FNavigationRoutePoint&)> NavigationStepScreenCallback;
 	bool bHandingOverStep = false;
@@ -1344,7 +1386,7 @@ private:
 
 	// See NudgeSelectedRoomSize's connector branch - AInteriorGenerator::ScaleConnectorGroup's own
 	// SizeScale multiplier, not an absolute unit size like a room's Delta.
-	static constexpr float ConnectorScaleStep = 0.1f;
+	float ConnectorScaleStep = 0.1f;
 
 	static constexpr float RotationDegreesPerSecond = 90.f;
 	// No OnActionFailed broadcast on failure - called every tick while a rotation key is held,
@@ -1363,7 +1405,7 @@ private:
 	void FinishRotationGesture();
 	void CommitRotationGesture();
 
-	// Backspace handler - wraps DeleteSelection() because key bindings require a void() signature.
+	// Delete handler - wraps DeleteSelection() because key bindings require a void() signature.
 	void DeleteSelectionKeyHandler();
 
 	UPROPERTY()
@@ -1538,6 +1580,9 @@ private:
 	// initial FocusCameraOnBuilding and to re-frame when the active floor changes (see
 	// RepositionCameraToActiveFloor).
 	void PositionCameraForFloor(APolyBuilding* Building, int32 Level);
+
+	// What StartNewProject and CloseProject share: everything of the open project, gone.
+	void ClearProjectState();
 
 	// Re-runs PositionCameraForFloor for whichever building/floor is currently loaded - called after
 	// SetActiveFloor/AddFloor/RemoveFloor so the camera follows floor changes made while already
@@ -1783,9 +1828,12 @@ private:
 	// See IsQuitConfirmSoundEnabled/SetQuitConfirmSoundEnabled's own comment.
 	bool bQuitConfirmSoundEnabled = true;
 
-	// See PlayDirectionsSound and PlayArrivalSound.
-	bool bDirectionsSoundEnabled = true;
-	int32 DirectionsSoundRequests = 0;
+	// See AreAllUiSoundsMuted.
+	bool bUiSoundsMuted = false;
+
+	// See PlayStartNavigationSound and PlayArrivalSound.
+	bool bStartNavigationSoundEnabled = true;
+	int32 StartNavigationSoundRequests = 0;
 	bool bArrivalSoundEnabled = true;
 	int32 ArrivalSoundRequests = 0;
 	bool bNextInstructionSoundEnabled = true;

@@ -74,6 +74,26 @@ namespace
 		return Copy;
 	}
 
+	// A copy of a tree with ids of its own: the copy goes into another layout, whose ids it must not share.
+	TSharedPtr<FDockNode> CloneNodeWithNewIds(const FDockNode& Src, int32& NextId)
+	{
+		TSharedPtr<FDockNode> Copy = MakeShared<FDockNode>();
+		Copy->Id = NextId++;
+		Copy->Type = Src.Type;
+		Copy->Orientation = Src.Orientation;
+		Copy->Ratios = Src.Ratios;
+		Copy->Tabs = Src.Tabs;
+		Copy->ActiveTab = Src.ActiveTab;
+		for (const TSharedPtr<FDockNode>& Child : Src.Children)
+		{
+			if (Child.IsValid())
+			{
+				Copy->Children.Add(CloneNodeWithNewIds(*Child, NextId));
+			}
+		}
+		return Copy;
+	}
+
 	// A panel may appear only once in the whole layout. Keeps the first occurrence.
 	void DedupeTabs(const TSharedPtr<FDockNode>& Node, TSet<FName>& Seen)
 	{
@@ -1153,6 +1173,86 @@ bool FDockLayout::FloatPanel(FName Panel, const FVector2D& Position, const FVect
 	W.Position = Position;
 	W.Size = Size;
 	Floating.Add(W);
+	Normalize();
+	return true;
+}
+
+TArray<FName> FDockLayout::PanelsOfTree(const FDockNode& Tree)
+{
+	TArray<FName> Panels;
+	CollectPanels(Tree, Panels);
+	return Panels;
+}
+
+FString FDockLayout::DescribeTree(const FDockNode& Tree)
+{
+	if (Tree.IsTabGroup())
+	{
+		TArray<FString> Names;
+		for (const FName Tab : Tree.Tabs)
+		{
+			Names.Add(Tab.ToString());
+		}
+		return TEXT("T[") + FString::Join(Names, TEXT(",")) + TEXT("]");
+	}
+	TArray<FString> Parts;
+	for (const TSharedPtr<FDockNode>& Child : Tree.Children)
+	{
+		if (Child.IsValid())
+		{
+			Parts.Add(DescribeTree(*Child));
+		}
+	}
+	return FString(Tree.Orientation == EDockOrientation::Horizontal ? TEXT("H(") : TEXT("V(")) + FString::Join(Parts, TEXT("|")) + TEXT(")");
+}
+
+TSharedPtr<FDockNode> FDockLayout::CloneTree(const FDockNode& Tree)
+{
+	int32 NextId = 1;
+	return CloneNodeWithNewIds(Tree, NextId);
+}
+
+bool FDockLayout::PlaceFloatingTree(const FDockNode& Tree, const FVector2D& Position, const FVector2D& Size)
+{
+	const TArray<FName> Panels = PanelsOfTree(Tree);
+	if (Panels.IsEmpty())
+	{
+		return false;
+	}
+	for (const FName Panel : Panels)
+	{
+		RemovePanelTab(Panel);
+		HiddenHints.Remove(Panel);
+	}
+	// What the removal left empty goes before the copy is added.
+	Normalize();
+
+	FDockFloatingWindow W;
+	W.Root = CloneNodeWithNewIds(Tree, NextNodeId);
+	W.Position = Position;
+	W.Size = Size;
+	Floating.Add(W);
+	Normalize();
+	return true;
+}
+
+bool FDockLayout::PlaceAreaTree(EDockSide Side, const FDockNode& Tree, float Extent)
+{
+	const TArray<FName> Panels = PanelsOfTree(Tree);
+	if (Panels.IsEmpty())
+	{
+		return false;
+	}
+	for (const FName Panel : Panels)
+	{
+		RemovePanelTab(Panel);
+		HiddenHints.Remove(Panel);
+	}
+	Areas[(int32)Side].Root.Reset();
+	Normalize();
+
+	Areas[(int32)Side].Root = CloneNodeWithNewIds(Tree, NextNodeId);
+	Areas[(int32)Side].Extent = Extent > 0.f ? Extent : DefaultExtent[(int32)Side];
 	Normalize();
 	return true;
 }

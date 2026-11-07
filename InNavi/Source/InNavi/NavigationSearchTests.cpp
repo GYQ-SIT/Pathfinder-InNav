@@ -6,6 +6,7 @@
 #include "MapPanelWidget.h"
 #include "UiTestFixture.h"
 #include "NavigationPanelWidget.h"
+#include "NavigationDockPanelWidget.h"
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
@@ -208,11 +209,10 @@ bool FNavigationSearchControlsTest::RunTest(const FString& Parameters)
 	Controller->OnSelectedRoomChanged.AddUnique(Selection);
 	UEditableTextBox* TagsBox = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_RoomTags")));
 	UButton* ApplyTags = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_ApplyRoom"))); // Save changes: the name and the tags
-	UEditableTextBox* Search = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_DestinationSearch")));
-	UComboBoxString* Destinations = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_NavPlace1")));
-	UComboBoxString* Starts = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cbx_NavPlace0")));
+	UNavigationPlaceCombo* Destinations = Cast<UNavigationPlaceCombo>(Screen->FindScreenWidget(TEXT("Cbx_NavPlace1")));
+	UNavigationPlaceCombo* Starts = Cast<UNavigationPlaceCombo>(Screen->FindScreenWidget(TEXT("Cbx_NavPlace0")));
 	if (!TestNotNull(TEXT("Tags field exists"), TagsBox) || !TestNotNull(TEXT("Apply tags exists"), ApplyTags)
-		|| !TestNotNull(TEXT("Destination search exists"), Search) || !TestNotNull(TEXT("Destination results exist"), Destinations)
+		|| !TestNotNull(TEXT("Searchable destination exists"), Destinations)
 		|| !TestNotNull(TEXT("Start dropdown exists"), Starts)) return false;
 	auto Options = Fixture.Nav->GetSelectableRooms();
 	APolyBuilding* Building = Fixture.Generator->FindBuildingById(TEXT("E2"));
@@ -253,18 +253,17 @@ bool FNavigationSearchControlsTest::RunTest(const FString& Parameters)
 	Starts->SetSelectedOption(Room.GetDisplayLabel());
 	Starts->OnSelectionChanged.Broadcast(Room.GetDisplayLabel(), ESelectInfo::OnMouseClick);
 	const int32 StartOptionCount = Starts->GetOptionCount();
-	TypeText(Search, TEXT("PRESENTATION-TAG"));
-	// The one search box narrows the Start list too; the Start that was picked stays shown and set.
-	TestTrue(TEXT("Typing narrows the Start options as well"), Starts->GetOptionCount() < StartOptionCount);
+	Destinations->SetSearchText(TEXT("PRESENTATION-TAG"));
+	TestEqual(TEXT("Searching Destination leaves Start options alone"), Starts->GetOptionCount(), StartOptionCount);
 	TestEqual(TEXT("Typing keeps the Start selection"), Starts->GetSelectedOption(), Room.GetDisplayLabel());
 	TestTrue(TEXT("Typing keeps the actual Start endpoint"), Fixture.Nav->HasStart());
-	TestEqual(TEXT("Typing filters the actual destination dropdown"), Destinations->GetOptionCount(), 1);
+	TestEqual(TEXT("Typing filters the actual destination dropdown"), Destinations->GetFilteredOptionCount(), 1);
 	Destinations->OnSelectionChanged.Broadcast(Room.GetDisplayLabel(), ESelectInfo::OnMouseClick);
 	TestTrue(TEXT("Picking a result sets a real destination"), Fixture.Nav->HasDestination() && Fixture.Nav->WasDestinationSetViaDropdown());
-	TypeText(Search, TEXT("no-match-736"));
-	TestTrue(TEXT("No-results state disables dropdown without losing destination"), !Destinations->GetIsEnabled() && Fixture.Nav->HasDestination());
-	TypeText(Search, TEXT(""));
-	TestEqual(TEXT("Clearing search restores rooms"), Destinations->GetOptionCount(), Fixture.Nav->GetSelectableRooms().Num());
+	Destinations->SetSearchText(TEXT("no-match-736"));
+	TestTrue(TEXT("No matches leaves the field usable without losing destination"), Destinations->GetFilteredOptionCount() == 0 && Destinations->GetIsEnabled() && Fixture.Nav->HasDestination());
+	Destinations->SetSearchText(TEXT(""));
+	TestEqual(TEXT("Clearing search restores rooms"), Destinations->GetFilteredOptionCount(), Fixture.Nav->GetSelectableRooms().Num());
 	Controller->OnSelectedRoomChanged.Remove(Selection);
 	Controller->OnInteriorContentChanged.Remove(Content);
 

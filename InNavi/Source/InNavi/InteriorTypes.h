@@ -7,6 +7,12 @@
 
 class AInteriorConnectorMarker;
 
+namespace InteriorEditing
+{
+	inline constexpr float MinimumDimensionCm = 50.f;
+	inline constexpr float DefaultResizeStepMetres = 0.5f;
+}
+
 UENUM(BlueprintType)
 enum class EInteriorOpeningType : uint8
 {

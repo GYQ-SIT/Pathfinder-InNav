@@ -21,9 +21,15 @@ class INNAVI_API UStartScreenWidget : public UUserWidget
 public:
 	UStartScreenWidget(const FObjectInitializer& ObjectInitializer);
 
+	// The whole screen is in front of the 3D scene (the buildings of the project that was open are still in it): a click on it must not reach
+	// the scene, where it selected a building and played the building-select sound. Tells the controller that the pointer is over this screen
+	// everywhere.
+	void BlockClicksToTheScene();
+
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
 
 private:
 	UFUNCTION()

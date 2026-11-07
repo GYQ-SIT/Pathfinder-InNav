@@ -43,7 +43,9 @@ private:
 	void OnSelectSoundCheckChanged(bool bIsChecked);
 	UFUNCTION()
 	void OnQuitConfirmSoundCheckChanged(bool bIsChecked);
-	// Checked means everything is muted (the opposite sense of the three check boxes above); the three follow.
+	UFUNCTION()
+	void OnErrorSoundCheckChanged(bool bIsChecked);
+	// Checked means every UI sound is muted; the individual sound checkboxes follow.
 	UFUNCTION()
 	void OnMuteAllCheckChanged(bool bIsChecked);
 	UFUNCTION()
@@ -57,6 +59,8 @@ private:
 	UCheckBox* SelectSoundCheckbox = nullptr;
 	UPROPERTY()
 	UCheckBox* QuitConfirmSoundCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* ErrorSoundCheckbox = nullptr;
 	UPROPERTY()
 	UCheckBox* MuteAllCheckbox = nullptr;
 	UPROPERTY()

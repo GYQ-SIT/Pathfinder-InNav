@@ -230,7 +230,7 @@ tool that is active is highlighted in blue. Four groups:
 
 - **SELECT** - the select tool (`Q`): click a room (anywhere in its body, not just
   the outline), a door marker, or a connector marker to select it; drag to move it;
-  `Backspace` to delete.
+  `Delete` to delete.
 - **DRAW & PLACE** - draw a custom room (`P`, click points then `Enter`, `Esc` cancels), draw a
   standalone wall (`L`, same mechanic), or place a prefab rectangle/triangle/circle
   room (`1`/`2`/`3`) centered on the next click.
@@ -255,10 +255,9 @@ up/down). **+ Add** and **Delete floor** do the same as `F`/`X`; Delete floor tu
 
 Headed **Properties**, with a small tag saying what is selected (ROOM, WALL, DOOR or CONNECTOR). With nothing selected
 the section heading reads "Nothing selected"; selecting a room, door, or connector fills it in. Fields have small-capital
-labels over dark fields, and every kind ends with a red **Delete ...** button (the same as `Backspace`) and **Save changes**.
+labels over dark fields, and every kind ends with a red **Delete ...** button (the same as `Delete`) and **Save changes**.
 
-- **Room / wall**: **ROOM NAME**, then **X POSITION**, **Y POSITION**, **WIDTH** and **HEIGHT** - the room's bounding box,
-  read-only, following the room as you drag or resize it - and (rooms only) **ROOM TYPE** and **SEARCH TAGS**.
+- **Room / wall**: **ROOM NAME**, then **X POSITION**, **Y POSITION**, **WIDTH (m)** and **LENGTH (m)** - the room's bounding box. Position is read-only; width and length apply on Enter, leaving the field, or **Save changes** - and (rooms only) **ROOM TYPE** and **SEARCH TAGS**.
   The type is one value picked from a fixed list (Classroom, Lecture hall, Lab, Office, Study area, Meeting room,
   Canteen, Toilet, Lift lobby, Corridor, Storage, Other; the list lives in `RoomTypes.h`) and is shown in the tag at the
   top of the panel; a room with no type is **Other**. Tags are a free comma-separated list (for example
@@ -288,7 +287,7 @@ Nothing can be made out of the wrong place: the reason for a refusal shows in th
 floor and wall. A door is a gap in the 3D outer wall on its floor (on both buildings for a link door). On the 2D plan a main door is a
 green mark on the outline and a link door a blue one; in Select mode click one (it turns yellow), and the Properties panel says
 **Main door** or **Link door**, its floor and where it leads (for a link door the building, and when it was opened from that building).
-Backspace or Delete removes it. Doors are saved in the building's `interior.entrances` (an optional list, so older files load as
+Delete removes it. Doors are saved in the building's `interior.entrances` (an optional list, so older files load as
 before) and covered by undo. **Route-finding uses them**: a link door joins two buildings' floors, and a main door joins a building to the outside, so a route can go from one building to another, over a link door or out through the main doors and back in (see the Navigation panel).
 
 
@@ -352,7 +351,7 @@ it just becomes the Destination. Up to 8 stops. **Reverse** turns the list round
 
 **Inside a building.** The dropdowns list the open building's rooms across every floor, written as "Room name (Floor N)" (no id; the
 id can still be searched). Picking a room marks its centre; or press the **+** of the Start or Destination and click a point on
-the floor plan (or on the floor in the 3D view) instead. The **one search box above the list filters every dropdown** by room name,
+the floor plan (or on the floor in the 3D view) instead. Each dropdown contains its own search field, filtering that row by room name,
 id, tag or room type (every word must match, ignoring case); a place you have already picked stays shown even when the search
 hides it.
 
@@ -482,7 +481,7 @@ clicking in the 3D view instead of the 2D canvas:
   own room, same as 2D). Click empty space to deselect.
 - **Move** — drag a selected room to reposition it (connectors are rotate/scale only,
   never dragged, same restriction as 2D).
-- **Resize**/**Rotate**/**Delete** — same `=`/`-`, hold `9`/`0`, and Backspace
+- **Resize**/**Rotate**/**Delete** — same `=`/`-`, hold `9`/`0`, and Delete
   shortcuts as 2D, now actually work in 3D Edit mode (they're inert in View mode, even
   if something was selected before switching to it).
 - **Draw Room**/**Draw Wall**/prefab shapes/**Add Door**/elevator-stairs-escalator
@@ -532,8 +531,6 @@ arbitrary files under `Data/Audio/` on demand (background music, effects, etc.).
 
 ## Known gaps / not built yet
 
-- Grow/Shrink is still a fixed 20-unit nudge, not a typed Length/Width or drag-to-resize
-  interaction.
 - No dedicated tool for a plain path node (only elevator/stairs/escalator have a
   placement tool right now).
 - No "3D Preview" floating thumbnail overlaid on the 2D view (the mockup's own stretch
@@ -544,3 +541,17 @@ arbitrary files under `Data/Audio/` on demand (background music, effects, etc.).
 - The 3D route visualization is plain persistent debug lines/spheres, not a proper mesh
   - a route redraw (e.g. picking a new Start point) also clears any in-progress
   draw-room/wall point markers in 3D if the two happen to overlap in time.
+
+## Editor sizing and input
+
+Use **Delete** to remove a selected object; Backspace is for editing text. The free-fly camera descends with **C** and ascends with **Space** or **E**. Holding Ctrl suppresses camera movement while using editor shortcuts.
+
+The Toolbar has a **Grow / shrink step (m)** control. With a connector selected, it becomes **Scale step (%)**. The room step defaults to **0.5 m** (previously 20 footprint units), with a **0.5 m minimum room dimension or wall span**. Room **WIDTH (m)** and **LENGTH (m)** apply on Enter, leaving the field, or **Save changes**. Straight walls keep their zero dimension and allow their length to be edited. In 2D Select mode, drag a blue handle to resize with the opposite side fixed; straight walls have two endpoint handles. An orange outline previews the size, and the mesh is rebuilt once on release. Each drag is one undo step and respects the building outline, other objects, connectors and doors.
+
+For rectangle, triangle and circle prefabs, click for the default size or drag between opposite corners for a custom bounding box. The orange outline previews the footprint; release to place it, or press Esc to cancel.
+
+An invalid size stays in the field with keyboard focus after Enter so it can be corrected. A successful Enter commit releases focus so editor shortcuts work immediately. Leaving the field restores the actual dimensions after reporting the error. **Save changes** still applies the name, tags and type when the size is invalid. Editing one dimension preserves the exact size of the other, even when its displayed value is rounded.
+
+Drawing validates each new segment immediately. Overlap or geometry constraints clear the current drawing and show the reason in **Debug > Last Error**. A stray click outside the building is ignored and keeps the current points. Walls may form a simple loop by returning to their start; crossing, retracing and other non-adjacent touches are rejected. **Audio > Error Sound** independently controls error feedback using the existing `UI_Off-Route.wav`; it is included in **Mute All** and follows the controller between screens.
+
+Search inside each Start, Destination or stop dropdown by name, ID or tag. An empty result leaves the field usable so the query can be changed. Queries are retained when the options refresh. Adding a stop appends a new destination; when there are more than two places, every row after Start is numbered **1, 2, ...** in visit order, including the final destination.

@@ -186,6 +186,7 @@ void ANavPlayerController::TickInteriorInspection()
 
 void ANavPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	OnActionFailed.RemoveDynamic(this, &ANavPlayerController::HandleActionFailureSound);
 	UnbindGameWindowCloseGuard();
 	SetInteriorInspectionEnabled(false);
 	Super::EndPlay(EndPlayReason);

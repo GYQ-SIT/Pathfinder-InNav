@@ -143,6 +143,8 @@ public:
 	// CreateRoomFromFootprint's own comment.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	AInteriorRoom* CreateWallFromPoints(const TArray<FVector2D>& Points, const FString& WallId, FString& OutError);
+	// Also accepts a partial path (one point) for validation while drawing. A simple loop may end at its start.
+	bool ValidateWallPath(const TArray<FVector2D>& Points, FString& OutError, bool bDrawingRoom = false) const;
 	AInteriorRoom* CreateWallFromPoints(const TArray<FVector2D>& Points, const FString& WallId, FString& OutError,
 		TArray<FInteriorOpening> CopiedOpenings, const FString& WallName);
 
@@ -162,10 +164,11 @@ public:
 	// X, NewDepth along Y, same pre-scale units as everything else), keeping it centered where it
 	// currently is. Works for any room/wall regardless of how it was created (prefab or freehand) -
 	// it's a bounding-box stretch of whatever points are already there, not tied to a particular
-	// shape. Returns false if no room with that id exists, or its current bounding box is
-	// degenerate (zero width or depth - can't compute a scale factor from that).
+	// shape. Straight walls preserve their zero dimension. Rooms need at least 0.5 m per axis;
+	// open walls need a span of at least 0.5 m. Invalid or obstructed dimensions are rejected.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
-	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth);
+	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth, bool bRecordHistory = true);
+	bool ResizeRoomToBounds(const FString& RoomId, FVector2D Position, FVector2D Size, bool bRecordHistory = true);
 
 	// Rotates a room/wall's footprint by DeltaDegrees around its own bounding-box center (positive
 	// = counter-clockwise). Rejects (no-op, returns false) if the rotated footprint would extend
