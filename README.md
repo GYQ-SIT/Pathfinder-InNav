@@ -82,7 +82,7 @@ and the [M2 evidence](docs/design/layout-validator-m2-compliance.md) for the D1â
 
 ## Running the tests
 
-About 165 automation tests (`InNavi.*`), including the measurements of `InNavi.Performance` (see
+More than 240 automation tests (`InNavi.*`), including the measurements of `InNavi.Performance` (see
 [`docs/performance.md`](docs/performance.md) for the budgets and the numbers). With the editor closed:
 
 ```bash
@@ -90,9 +90,19 @@ UnrealEditor-Cmd.exe InNavi/InNavi.uproject -ExecCmds="Automation RunTests InNav
 ```
 
 (`UnrealEditor-Cmd.exe` is in `Engine/Binaries/Win64` of the Unreal install.) A part can be run on its own, e.g. `InNavi.Mobile` or
-`InNavi.Navigation`. Windows CI runs **all** of them, and fails the pull request when one fails (the editor exits 0 either way, so
-`scripts/check-test-report.ps1` reads the report). Before a pull request, `python scripts/lint.py` runs the repository checks of `lint.yml`
+`InNavi.Navigation`. The Windows CI job runs **all** of them on every push to `main` and fails when one fails (the editor exits 0 either way, so
+`scripts/check-test-report.ps1` reads the report); a pull request gets the hosted lint and JSON checks only, so run the tests (and the
+static analysis, see below) on your own machine before opening one. Before a pull request, `python scripts/lint.py` runs the repository checks of `lint.yml`
 on your own machine. The report and the performance measurements of every CI run are kept with it as a downloadable artifact.
+
+The static analysis is the editor build with the MSVC analyser, then a check of its log (the editor closed):
+
+```bash
+Build.bat InNaviEditor Win64 Development -Project="<repo>\InNavi\InNavi.uproject" -WaitMutex -DisableAdaptiveUnity -StaticAnalyzer=Default -StaticAnalyzerOutputType=Text > analysis.log
+powershell -File scripts\check-analysis.ps1 -Log analysis.log
+```
+
+(`Build.bat` is in `Engine/Build/BatchFiles` of the Unreal install.) It fails on a finding in the product code; findings in the test files are listed but do not count.
 
 ## Releases
 
@@ -116,7 +126,7 @@ built and signed separately (`docs/android-signing.md`).
 The backlog is the Jira project **PAT** (<https://digipen-team-pathfinder.atlassian.net/jira/software/projects/PAT/list>): every piece of work is a story under an
 epic with an owner, and the epics of the four technical deliverables are named in `docs/deliverables.md`. So that anyone can follow who did what:
 
-- **Branch** from `main`, named for what it is (`YQ_nav_panel`), and open a **pull request**; CI (build, analysis, tests, lint) has to be green before it is merged.
+- **Branch** from `main`, named for what it is (`YQ_nav_panel`), and open a **pull request**; the lint and JSON checks have to be green before it is merged, and you run the tests and the static analysis yourself first (the Windows build, analysis and tests run on `main` after the merge).
 - **Name the Jira issue** in the pull request (the template asks for it) and start each commit message with its key when there is one: `PAT-123 Short summary`.
 - **One owner per story**; a pull request that closes a story says so, and the story is moved to Done when it is merged.
 - Do not commit personal files (your own `buildings.json` edits, saved layouts); `lint.py` also fails on keys and addresses in the source.
@@ -125,7 +135,7 @@ epic with an owner, and the epics of the four technical deliverables are named i
 
 Desktop 60 FPS or more, phone 30 FPS or more; the campus loads in under 3 s, an interior opens in under 0.5 s, a route between buildings
 takes under 1 s (p95). The measured numbers, the machine they were taken on, and the one place that is still slow (the first route in
-the largest, ten-floor building takes about 6 s while it builds the graph of the building; the next ones take about 20 ms) are in [`docs/performance.md`](docs/performance.md). The Debug panel (Window > Debug) shows
+the largest, ten-floor building takes about 0.9 s while it builds the graph of the building; the next ones take about 20 ms) are in [`docs/performance.md`](docs/performance.md). The Debug panel (Window > Debug) shows
 the frame rate while you use the app: the average, the 1 % low and the slowest frame of the last ten seconds.
 
 ## The phone app
