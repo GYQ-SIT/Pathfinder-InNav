@@ -162,6 +162,47 @@ These are measurements of the development processes on this machine, not package
 automation suite and the fresh memory-only run passed. The process sampler was also checked for normal sampling, an exceeded limit,
 a missing PID and premature process exit.
 
+### Unreal Insights desktop capture — 2026-11-11
+
+Captured the rendered desktop application at approximately **23:02–23:04 SGT**, using **Unreal Insights 5.8.2 Memory Insights**.
+The application was `UnrealEditor.exe -game`, **Development**, at **1280x720**, with D3D12 SM6 rendering enabled (no `-nullrhi`).
+The machine was Windows with an **AMD Ryzen 7 7700**, **16 GiB installed RAM** (15.15 GiB visible to Windows).
+This run includes the editor executable's runtime and development facilities; it is not a packaged Shipping measurement.
+
+Tracing was enabled from process startup with `-trace=default,memory -tracefile="<capture-directory>/desktop.utrace"`.
+After the start screen settled, the in-game console command `Trace.Bookmark StartScreenIdle` marked the first checkpoint.
+The project library then opened `map_extended.db`; after its **29 editable buildings, 407 context buildings and 1,359 road actors**
+loaded, `Trace.Bookmark CampusIdle` marked the second checkpoint. The application was closed normally to finish the trace.
+
+Unreal Insights analyzed the completed trace and exported both checkpoints using its **live allocations** query (`aAf`):
+
+```text
+MemoryInsights.ExportAllocs -Rule=aAf -BookmarkA=StartScreenIdle -Output="<capture-directory>/start-screen-live.csv" -Columns=Size,Tag
+MemoryInsights.ExportAllocs -Rule=aAf -BookmarkA=CampusIdle -Output="<capture-directory>/campus-live.csv" -Columns=Size,Tag
+```
+
+These commands were supplied in a response file through `-ExecOnAnalysisCompleteCmd="@=<response-file>"`, with
+`-OpenTraceFile="<capture-directory>/desktop.utrace" -AutoQuit`. Neither export had a result-count limit. The CSV row counts
+were checked against the successful export counts in the Insights analysis log, and each CSV's integer `Size` column was summed.
+
+| Desktop checkpoint | Time in trace | Exported live allocations | Sum of exported allocation sizes |
+|--------------------|---------------|---------------------------|----------------------------------|
+| Start screen idle | 75.27 s | 4,239,453 | 18,900,054,698 bytes / **18,024.50 MiB** |
+| Full campus loaded, exterior editor idle | 141.43 s | 4,386,518 | 18,976,041,854 bytes / **18,096.96 MiB** |
+
+**Metric and quality limits:** these are **provisional, unfiltered traced-allocation totals**, across both System memory and Video
+memory roots. They include virtual/reserved allocations and heap bookkeeping. They are **not resident RAM, private committed memory,
+or a physical GPU-memory reading**; a sum exceeding the machine's installed RAM does not mean that much physical RAM was in use.
+For example, the start-screen export contains 4,113,093,848 bytes tagged `LiveCoding` and 3,271,925,760 bytes tagged `ProgramSize`.
+The analysis reported **49 heap-event errors and 9 free-event errors**, with recovery of missing events; each checkpoint export
+contains **35 zero-size rows**. Both exports completed successfully, but these totals should not be treated as a validated memory
+requirement or a leak verdict. The earlier process-counter table measures a different metric and remains separate.
+
+The [measurement record](measurements/desktop-memory-insights-2026-11-11.json) contains exact totals, counts, conditions, trace/CSV
+SHA-256 hashes and quality notes. The raw 3,481,748,451-byte trace, CSV exports, response file and analysis log are retained locally
+under `InNavi/Saved/Performance/MemoryInsights-20261111/` (git-ignored). This capture covers the start screen and exterior campus;
+interior editing and routing were not included in this Insights run.
+
 ## The machine that runs the CI is slower
 
 The same tests on the laptop that runs the CI (the build workflow, 2026-10-30) gave: the whole campus loaded 3.8 s (p95), generating the ten
