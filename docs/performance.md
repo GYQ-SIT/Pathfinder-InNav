@@ -203,6 +203,63 @@ SHA-256 hashes and quality notes. The raw 3,481,748,451-byte trace, CSV exports,
 under `InNavi/Saved/Performance/MemoryInsights-20261111/` (git-ignored). This capture covers the start screen and exterior campus;
 interior editing and routing were not included in this Insights run.
 
+## Phone memory usage — 2026-11-11
+
+Measured the installed **mobile-test-3 release, version 1.4 (version code 5)** on a **Google Pixel 9 Pro XL**,
+using `adb shell dumpsys meminfo -d <pid>` over USB. The installed APK's SHA-256 matched the published release:
+`6c101c94eee5bb13cb355acf8436b62ac1eb2abf884dac0b718dfe65873e4b54`.
+This is the Android ARM64 **Development**, ASTC, distribution-signed build from commit
+`52eb8f69b273f7ba8b87fa57673226be7eac3862`, rather than a Shipping build.
+
+The phone reported **Android 17 / API 37**, Tensor G4, a **1344x2992** physical screen at density **480**, and
+**15,957,128 KiB** of OS-visible RAM (15.22 GiB). It was connected by USB and charging.
+The capture ran from **23:48:54 to 23:56:54 SGT** on 2026-11-11.
+
+There was one force-stop and fresh launch before the first Explore reading, followed by the states below in order, without
+restarting the app, clearing its data or forcing garbage collection. Each state has **five foreground samples**, with a requested
+five-second pause between samples; ADB commands add time, so each window took approximately 23–24 seconds.
+The main activity process (PID 22406) and a detached, same-name, same-UID companion (PID 22446) stayed alive throughout.
+Both were captured sequentially for each sample, giving **35 samples and 70 process reports**. The companion's role was not
+independently identified.
+
+All table values are **MiB** (Android's reported kB divided by 1024). **Combined PSS** sums `TOTAL PSS` for both processes.
+[Android's dumpsys documentation](https://developer.android.com/tools/dumpsys) defines PSS as accounting for each process's share
+of shared pages. RSS counts shared pages in full, so only the **main process's RSS** is reported here; it is not added to PSS.
+Graphics rows and swap PSS are also not added to `TOTAL PSS`.
+
+| Foreground state, in capture order | Samples | Combined PSS median | Combined PSS maximum | Main RSS median |
+|------------------------------------|---------|---------------------|----------------------|-----------------|
+| Explore after fresh launch | 5 | 1,192.53 | 1,192.58 | 1,332.59 |
+| Authored project, Block E2 L1, 2D directory | 5 | 1,191.85 | 1,192.95 | 1,332.46 |
+| Same floor, 3D directory | 5 | 1,161.02 | 1,161.30 | 1,301.49 |
+| Route result, My location to E2-01-01 | 5 | 1,001.31 | 1,035.34 | 1,141.76 |
+| Active guidance, step 1 of 3 on the same 16 m route | 5 | 1,002.65 | 1,002.70 | 1,143.10 |
+| Campus overview, 29 building footprints | 5 | 1,166.30 | 1,166.52 | 1,306.75 |
+| Explore after using maps and navigation | 5 | 1,164.64 | 1,164.69 | 1,305.07 |
+
+The **largest sampled combined PSS was 1,192.95 MiB (about 1.17 GiB)**. The largest sampled main-process RSS was
+**1,333.56 MiB**, a separate metric. Combined swap PSS medians were approximately **0.06 MiB**.
+These are snapshots from one phone and one sequential session, not a continuous startup/route-calculation peak or an endurance
+test for leaks. The route was a short same-floor route; cross-floor and campus routes were not sampled. The initial 2D-directory
+window overlapped read-only installed-APK hash verification, which may affect file caches. Shared-page accounting, graphics,
+caches and OS activity can also change the readings, so differences between states do not establish their individual memory costs.
+
+To repeat the capture, identify the current activity process and any same-package companion before sampling; PIDs change each run:
+
+```text
+adb shell am force-stop com.teampathfinder.innavi
+adb shell am start -W -n com.teampathfinder.innavi/com.epicgames.unreal.GameActivity
+adb shell ps -A -o UID,PID,PPID,NAME
+adb shell dumpsys meminfo -d <main-pid>
+adb shell dumpsys meminfo -d <companion-pid>
+```
+
+Keep the app in the foreground, open each state above and let it settle, then capture both processes five times with a five-second
+pause between pairs of reports. The [measurement record](measurements/mobile-memory-dumpsys-2026-11-11.json) contains all
+per-sample counters, summaries, build/device details and raw-report SHA-256 hashes. Raw reports, the capture script and screenshots
+are retained locally in `InNavi/Saved/MobileMemory-20261111/` (git-ignored). These PSS readings measure a different quantity from
+the desktop Insights allocation totals above and should not be compared directly.
+
 ## The machine that runs the CI is slower
 
 The same tests on the laptop that runs the CI (the build workflow, 2026-10-30) gave: the whole campus loaded 3.8 s (p95), generating the ten
