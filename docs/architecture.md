@@ -1,209 +1,262 @@
-# System Architecture (v1.0)
+# System Architecture (v1.1)
 
 > Team **Pathfinder** · Project **InNavi**
 > Owned by: **Tech Lead.** This is the `Architecture` technical deliverable.
-> v0.1 (2026-09-30) was the design before implementation. v0.2 (2026-10-23) brought it in line with what was built. **v1.0 (2026-10-28)**
-> adds the **layers** (section 4), the boundaries between them and who owns each (sections 4 and 8), the delivery pipeline (section 7), and
-> the measured numbers behind the risks (section 6). It describes the code as it is on `main`; when the code changes, this page changes with it.
-
----
+> Reviewed **2026-11-11**, against `main` through **c3e7755**. This revision reviews the implementation and commits after
+> **422538f** (2026-11-05), the previous change to this page, and corrects older descriptions that no longer match the code.
+> v0.1 (2026-09-30) described the proposed design; v0.2 (2026-10-23) described the implemented system;
+> v1.0 (2026-10-28) introduced the layers and delivery model. v1.1 documents current project lifecycle, persistence,
+> shared panels, responsive UI, validation execution, navigation/editor interactions, mobile audio and delivery safeguards.
 
 ## 1. Overview
 
-InNavi is a **standalone Unreal Engine runtime application**. Everything happens at
-runtime, inside the packaged application — not in the UE editor:
+InNavi is a **standalone Unreal Engine runtime application**, with a Windows desktop editor/navigation experience and an Android phone UI.
+The application's layout editing and navigation run inside the packaged product. Unreal Editor is used for development and automation.
+There is no application backend, shared online session or runtime network service for project data and routing.
 
-1. The user loads the campus model and selects a building.
-2. The user enters interior data (rooms, floors, connectors, doors in the outer wall) through an in-app editor, or has a floor generated.
-3. The data is saved/loaded as **JSON** (a project file that carries its format version; every field is in `design/project-file-format.md` and in the JSON Schema `schemas/project.schema.json`, which CI and the tests check).
-4. The interior is **procedurally generated at runtime** from that JSON.
-5. The user navigates: inside the building, across floors, between buildings (over link doors, or out through main doors and back in)
-   and across the open ground between them, through any number of stops, one step at a time.
+The desktop flow is **start screen / project library → exterior campus screen → interior editor**. The exterior screen selects buildings
+and plans campus routes; the interior screen edits floors on a 2D plan or in a 3D preview. Both screens expose navigation and shared tools.
+The phone UI runs from the same codebase (`-MobileApp` previews it on desktop) and uses the real project-data adapter by default.
 
-The desktop application has two screens: the **exterior screen** (the campus in 3D, where a building is selected and routes
-between buildings can be planned) and the **interior editor** (a building's floors in 2D, or a 3D preview, where interior data is
-authored and routes inside it are planned). A separate **Android phone app** shows the same places and routes on a phone.
+The campus is reconstructed from data rather than requiring one pre-modelled campus mesh. `BuildingGenerator` loads JSON projects or
+SQLite campus footprints. Geographic coordinates are projected into a common local metre frame and scaled to Unreal centimetres.
+`PolyBuilding` creates procedural building surfaces; roads and surrounding buildings are separate scenery actors. Database building heights
+use default floor settings until authored data supplies more detail. `InteriorGenerator` creates rooms, openings and connectors from the
+stored or currently edited interior. The result is a schematic layout, not a surveyed architectural model.
 
 ## 2. Technology stack
 
-One technology for each concern; this table is what every other document names.
+| Concern | Implementation |
+| --- | --- |
+| Engine and language | Unreal Engine 5.8; C++ |
+| Runtime modules | Product module `InNavi`; reusable Runtime plugin `InNaviLayoutValidator` |
+| Development-only module | `InNaviValidationTools`, an Editor module for headless file validation; excluded from packaged games |
+| UI | UMG and Slate; current screen layouts are constructed in C++ through `RebuildWidget()`, with a custom dock system |
+| Blueprint involvement | Existing `WBP_*` and test assets remain. The default `TestingMap` references the startup widget; core logic and native screen implementations are C++. The project is not Blueprint-free |
+| Geometry | Runtime procedural mesh components for building/interior geometry; separate road and context-building actors |
+| Storage | Versioned JSON projects and local preferences/layouts; SQLite campus database via SQLiteCore |
+| Navigation | `FNavigationRoutePlanner`: visibility graph over actual boundaries, walls, openings and connectors, searched with Dijkstra; no Unreal NavMesh dependency |
+| Package distribution | Native Unreal plugin distributed as an npm source package through GitHub Packages; compiled by UnrealBuildTool |
+| Delivery | GitHub Actions; hosted Linux checks, self-hosted Windows Unreal builds/releases, self-hosted Linux wiki deployment |
+| Documentation | Markdown under `docs/`, built with MkDocs |
+| Targets | Windows desktop; Android ARM64 devices and x86_64 emulators |
 
-| Concern | Choice |
-|---------|--------|
-| Engine | Unreal Engine 5.8 |
-| Core logic | C++ (one module, `InNavi`, and one plugin, `InNaviLayoutValidator`) |
-| UI & interaction | UMG, built entirely in pure C++ (`RebuildWidget()`), not the Blueprint Widget Designer; our own dock system for the panels |
-| Data format | JSON (project files: buildings, interiors, doors), SQLite (real-world campus data - a second, additional loading path) |
-| Route finding | Our own planner (`FNavigationRoutePlanner`): a visibility graph over the real wall, door and connector geometry, searched with Dijkstra. Not Unreal's NavMesh |
-| Packages | The layout validator is an Unreal plugin, published as a versioned source package to GitHub Packages (npm) and installed by exact version |
-| CI/CD | GitHub Actions: a self-hosted Windows runner (build, static analysis, tests, release package) and GitHub-hosted / VM runners (lint, JSON check, wiki) |
-| Documentation | Markdown in `docs/`, published as a MkDocs site (the team wiki) |
-| Target platform | Windows desktop (the editor and the desktop app); Android phones (the phone app, 64-bit ARM, plus x86_64 for PC emulators) |
+[toolchain-decision.md](toolchain-decision.md) records technology-selection rationale; [configuration.md](configuration.md) records settings and their locations.
 
-> Full rationale for each of these - and for libraries/plugins and AI tools, which
-> this table leaves out - is recorded in `toolchain-decision.md`, not duplicated here.
+## 3. System components
 
-## 3. System modules
+| Component | Responsibility and main code |
+| --- | --- |
+| Campus / project data (T01, T02) | `BuildingGenerator`: JSON/SQLite loading, building identity/types, scenery and project serialization; `ProjectLibrary` and `ProjectFile`: file operations |
+| Interior authoring and generation (T02, T03) | `InteriorGenerator`, `InteriorRoom`, `InteriorEntrance`, connector markers and `FloorLayout`; room/door/floor CRUD, geometry checks, generated floors, undo/redo and interior snapshots |
+| Application session | `NavPlayerController`: active project/building, input tools, selections, dirty/file state, camera, inspection and audio; `NavGameMode` uses the shortcut-aware `NavCameraPawn` |
+| Navigation (T04) | `NavigationPanelWidget` owns places, route jobs and guided steps; `NavigationRoutePlanner` owns routing; `NavigationInstructions` supplies shared guidance; dock UI and route visualisation present the results |
+| Desktop UI | Start/project-library screens, `EditScreenWidget`, `InteriorScreenWidget`, dock host/model, shared panels and responsive DPI rule |
+| Validation | Plugin supplies JSON/data/geometry rules and tool registration; product `LayoutValidationSession` supplies snapshots, navigation diagnostics, report lifecycle, focus and export |
+| Mobile | `Mobile*Widget` screens consume `IMobileNavSource`; `FMobileRealSource` adapts project data and campus routing, while `FMobileMockSource` retains the prototype |
 
-The system is built from the four technical deliverables (see `deliverables.md`),
-each mapped to one product feature, plus the phone app that reads their data:
+## 4. Responsibilities and dependencies
 
-| Module | Deliverable | Feature | Responsibility |
-|--------|-------------|---------|----------------|
-| Model Import & Selection | T01 | F01 | Import campus model; runtime click/ray-cast to select a building |
-| Building Data Editor & JSON I/O | T02 | F02 | UMG editor to enter interior data (2D plan, 3D preview, doors, floor generator); dockable panels; save/load as JSON |
-| Procedural Interior Generator | T03 | F03 | Read JSON; spawn schematic interior at runtime; record connectors as nodes |
-| Indoor Navigation System | T04 | F04 | Plan routes (through stops) over the generated geometry, across floors, between buildings and outdoors; show them as numbered steps, one step at a time, and on the 2D and 3D maps |
-| Layout Validator (plugin) | - | - | Read-only checks of a project's data, geometry, doors, connectors and reachability; a reusable package |
-| Phone app | T04 stretch | - | Android screens (Explore, Directory, Saved, Profile) over one data interface, `IMobileNavSource`; on cached project data and campus routes; `-MobileMock` retains the prototype |
-
-## 4. Layers
-
-The code is in five layers. A layer uses the one below it and never one above it, and a UI class never decides what a route is, nor
-reads a file. This is the rule that code review checks, and the folder is flat (`InNavi/Source/InNavi/`), so the layers are named here.
+The following are **responsibility groups**, not a strictly enforced one-way import hierarchy. In particular, the mobile data adapter calls
+the planner, the planner reads generator geometry, and some UI/controller code coordinates serialization and local files. A diagram arrow
+means **uses or coordinates**, not exclusive ownership. The folder `InNavi/Source/InNavi/` is mostly flat.
 
 ```mermaid
 flowchart TD
-    User([User])
-
-    subgraph L1[1 UI - what is drawn, what is clicked]
-        Screens[Screens: StartScreen, EditScreen exterior, InteriorScreen]
-        Dock[Dock system: DockLayoutModel, DockHostWidget]
-        Panels[Panels: Navigation, Map, Audio, Debug, Validation, Layers, Floor, Properties]
-        Plan[Drawings: InteriorFloorPlan, route visualization]
-        PhoneUI[Phone screens: Mobile*Widget]
-    end
-
-    subgraph L2[2 Application - what the user is doing]
-        PC[NavPlayerController: input, modes, camera, Isolate]
-        NavState[NavigationPanelWidget: places, route, steps - no UI of its own]
-        Session[LayoutValidationSession]
-    end
-
-    subgraph L3[3 Services - the rules]
-        Planner[FNavigationRoutePlanner: graph, solver, sliced route job]
-        Gen[AInteriorGenerator, FloorLayout: rooms, doors, connectors, floors]
-        Check[InNaviLayoutValidator plugin: LayoutValidation, tool registry]
-    end
-
-    subgraph L4[4 Data access - adapters, one per source]
-        Loader[BuildingGenerator: project JSON loader and saver, SQLite loader]
-        Lib[ProjectLibrary: the project files on disk]
-        Source{{IMobileNavSource}}
-        Real[FMobileRealSource]
-        Mock[FMobileMockSource]
-    end
-
-    subgraph L5[5 Stored data]
-        JSON[(Project file, versioned JSON)]
-        DB[(Campus database, SQLite)]
-        Files[(Layouts, audio, settings)]
-    end
-
-    User --> Screens
-    Screens --> Dock --> Panels
-    Screens --> Plan
-    User --> PhoneUI
-    Panels --> PC
-    Panels --> NavState
-    Plan --> PC
-    PhoneUI --> Source
-    PC --> NavState
-    PC --> Session
-    NavState --> Planner
-    PC --> Gen
-    Session --> Check
+    Screens[Desktop screens and dock panels] --> PC[NavPlayerController]
+    Screens --> Dock[DockLayoutModel and DockSharedPanels]
+    Screens --> Nav[NavigationPanelWidget]
+    Screens --> Host[PluginToolHost]
+    Screens --> DPI[InNaviDPIScalingRule]
+    PC --> Nav
+    PC --> Gen[InteriorGenerator and FloorLayout]
+    PC --> Data[BuildingGenerator]
+    PC --> Session[LayoutValidationSession]
+    Nav --> Planner[NavigationRoutePlanner]
+    Nav --> Guidance[NavigationInstructions and route visualisation]
     Planner --> Gen
-    Check --> Gen
-    Gen --> Loader
-    Loader --> Lib
-    Lib --> JSON
-    Loader --> DB
-    Loader --> Files
-    Source --> Real
-    Source --> Mock
+    Planner --> Data
+    Session --> Gen
+    Session --> Data
+    Session --> Planner
+    Session --> Plugin[InNaviLayoutValidator rules and reports]
+    Host --> Registry[LayoutToolRegistry and UI adapter contract]
+    Plugin --> Registry
+    Gen --> Data
+    Data --> Files[ProjectFile and ProjectLibrary]
+    Data --> DB[(SQLite campus database)]
+    Files --> JSON[(Project JSON)]
+    Phone[Mobile widgets] --> Source[IMobileNavSource]
+    Source --> Real[FMobileRealSource]
+    Source --> Mock[FMobileMockSource]
+    Real --> Data
     Real --> Planner
-    Real --> Loader
+    Phone --> Prefs[MobilePreferences and MobileSavedPlaces]
+    Prefs --> Files
 ```
 
-| Layer | What is in it (`InNavi/Source/InNavi/`) | May use |
-|-------|-----------------------------------------|---------|
-| 1 UI | `StartScreenWidget`, `EditScreenWidget`, `InteriorScreenWidget`; `DockLayoutModel`, `DockHostWidget` and the panels (`NavigationDockPanelWidget`, `MapPanelWidget`, `AudioPanelWidget`, `DebugPanelWidget`, `LayoutValidationPanelWidget`); `InteriorFloorPlanWidget`; `NavigationRouteVisualization`; the `Mobile*Widget` screens | layers 2 and 3 through the controller and the data interface |
-| 2 Application | `NavPlayerController` (input, modes, camera), `NavigationPanelWidget` (the places, the route and its steps; no UI of its own), `LayoutValidationSession`, `PluginToolHost` | layer 3 |
-| 3 Services | `NavigationRoutePlanner` (graph, solver, the route job that runs a little each frame), `InteriorGenerator`, `FloorLayout` (pure geometry), the `InNaviLayoutValidator` plugin (`LayoutValidation`, `LayoutToolRegistry`) | layer 4 |
-| 4 Data access | `BuildingGenerator` (project file and database loaders and the saver), `ProjectLibrary`, `IMobileNavSource` with `FMobileRealSource` and `FMobileMockSource` | layer 5 |
-| 5 Stored data | the project JSON files, `map_extended.db`, the dock layouts, the audio files | - |
+The reusable plugin does **not** depend on `InteriorGenerator`, game actors or UnrealEd. The product captures data and combines plugin
+findings with its own routing diagnostics. Its standalone consumer demonstrates data/geometry validation without the product. Another
+Unreal project must provide compatible layout JSON and its own navigation/UI integration; the complete InNavi panel is not a universal
+room validator for arbitrary games. `PluginToolHost` discovers providers through `LayoutToolRegistry`; `[InNavi.ToolPanels]` chooses the
+product's panel adapter. See [the validator design](design/layout-validator.md) and the plugin's README/examples.
 
-**The boundary.** The product is one process on one machine: there is **no server and no network call**, so what other products call
-"the API" is, here, **the interface between the UI and the layers below it**:
+### 4.1 Desktop state, docking and responsive presentation
 
-- For the phone app that interface is `IMobileNavSource` (sites, buildings, places, floor plans, routes). It has two implementations
-  (the real project data and the prototype's mock data) and a contract test that every implementation must pass (`MobileNavSourceContract`),
-  so a screen can be tested against either and a third source could be added without touching a screen.
-- For tools the interface is `LayoutToolRegistry` in the plugin, through which the editor discovers the validator's menu and panel.
-- The desktop screens reach the services through `NavPlayerController` and `NavigationPanelWidget`, never directly.
+Each editor screen keeps its own layout file. `DockSharedPanels` transfers the shared **Audio, Map, Debug, Navigation and Validation**
+placements between screens within the application session. Visibility, docking/floating and geometry follow the user. Containers made
+entirely of shared panels transfer their full split/tab tree, order and ratios; shared panels mixed with screen-specific panels transfer
+individually. Screens publish state on layout/menu changes and when leaving, then apply it after loading their own layout.
 
-**Data adapters.** Each source of data has exactly one adapter that turns it into the common form the services use: the project JSON
-and the campus database are read by `BuildingGenerator`; the phone app reads through `FMobileRealSource`. A new source (a different
-campus database, a live feed) is a new adapter; the planner and the screens do not change.
+`UInNaviDPIScalingRule`, selected by `DefaultEngine.ini`, fits the desktop's 1920×1080 design to both viewport dimensions:
+`max(0.01, 0.77 × min(width / 1920, height / 1080))`. At 1080p the reference scale remains 0.77. Android/iOS and desktop `-MobileApp`
+retain 0.77 and the phone-specific layout; invalid/zero viewport sizes use the reference scale. `StartStyle::DesignToUi` converts design
+pixels to UI units. Dock calculations use UI-space sizes, and clamp the computed floating-window rectangles inside the workspace without
+overwriting the saved placement, allowing a larger window to restore the user's arrangement. This covers menus, dialogs and the library
+as well as the editor screens (`DesktopResponsiveTests`).
 
-## 5. Data flow
+Start and project-library screens register full-window pointer coverage through `SetPointerOverUICallback` and own a keyboard-shortcut
+block. The controller drops shortcut key presses while these screens cover the scene, while allowing releases and mouse events through.
+Mouse tools and navigation picking are mutually exclusive via `ExitAllMouseTools` / `CancelNavigationPicking`. `NavCameraPawn` avoids
+Ctrl-descent conflicts and suppresses movement while Ctrl shortcuts are held. Input and drawing state belong to the controller, not the
+particular dock panel currently showing them.
 
-A single end-to-end cycle:
+Returning to Start after the save/discard decision calls `CloseProject`. The shared `ClearProjectState` path removes buildings, scenery,
+loaded interiors/history, selections, navigation places/routes, file/dirty state and copied room/building data. A new project uses the same
+cleanup path, preventing the previous project or clipboard from leaking into the next session.
 
-1. **Select** — user clicks a building (T01); the target building is passed on.
-2. **Author** — user enters interior data in the UMG editor (T02): rooms, room types,
-   floors, corridors, connectors (elevators/stairs/escalators) and doors in the outer wall
-   (main doors, and link doors to the building next door) - or fills a floor with a generated layout.
-3. **Persist** — T02 serializes the data to a **JSON** project file (and can reload it).
-4. **Generate** — T03 reads the JSON and spawns the schematic interior at runtime
-   (walls, doors, corridors, stairs). Elevators/doors are recorded as
-   **input/output nodes** describing connections between floors.
-5. **Navigate** — T04 builds a visibility graph from the geometry, the connector nodes and the doors in
-   the outer walls, and searches it. The user sets a list of places (a room, a building's main door,
-   or a point on the floor plan or the ground; the first is the Start, the last the Destination, any between are stops); T04 computes
-   the route leg by leg - including floor changes, link doors between buildings and the open ground - and shows it as numbered steps
-   and on the maps, one step at a time, with the view (and the screen: inside, outside, inside) following the step.
-   (e.g. L1 → elevator → L8 → target room; or building A → link door → building B → stairs → floor 3).
+### 4.2 Editing and 3D inspection
 
-The connector nodes and doors produced in steps 2-4 are the contract between generation (T03) and
-navigation (T04): the generator must emit them consistently for routing to work.
+`InteriorFloorPlanWidget` handles plan-space gestures; geometry mutations go through controller/generator operations with boundary,
+overlap, opening and connector checks. Prefabs support click defaults and drag-sized previews. Resize handles anchor the opposite side,
+update an outline during movement and commit the mesh once on release, with one undo step. Straight walls preserve their zero axis.
+Width/length fields retain exact unedited dimensions rather than applying their rounded display values. Invalid Enter commits retain text
+and focus; successful commits release focus; invalid blur commits restore dimensions. Invalid size does not discard pending name/tag/type
+changes. Drawing checks each added segment; constraint failures clear the draft and publish a reason, while stray outside clicks preserve
+it. Simple wall loops are permitted; crossings and retracing are rejected. See [the editor guide](design/interior-editor-guide.md) for controls and units.
 
-The phone app does not read any of this itself. Its screens ask `IMobileNavSource` for sites, buildings, places, floor plans and routes;
-`FMobileRealSource` answers from cached project snapshots and the campus planner (see `mobile-real-data-guide.md`).
+`InteriorBuildingPreviewPivot` and controller inspection code implement Isolate & Rotate: temporarily transform the building, interiors,
+connectors and route graphics together around the base pivot. Inspection suppresses editing and restores camera, floor and visibility
+state afterward. The inspection transform does not change persisted layout coordinates. Navigation disables building see-through while
+presenting the route.
 
-## 6. Main technical risks
+### 4.3 Navigation and scheduling
 
-The numbers are measured, on the data of the repository, in `performance.md` (reproducible: `Automation RunTests InNavi.Performance`).
+`NavigationPanelWidget` is application state despite its name; `NavigationDockPanelWidget` is its view. Adding a stop appends a new
+final destination and makes the old destination the preceding stop; routes with additional places number every row after Start.
+Each place combo combines search and selection, retains its query through option refreshes, and supports keyboard and mouse selection.
+Start/destination picking remains active until toggled off or replaced by another mouse tool.
 
-| Risk | Why it matters | Status |
-|------|----------------|--------|
-| School model import into UE | If the model does not import cleanly, nothing downstream works | **Resolved**: the SIT Punggol campus loads (footprints from `buildings.json`, the real map from the SQLite database): 29 campus buildings, 407 others, 1,824 roads and points of interest in **1.8 s** |
-| Runtime dynamic NavMesh | Interior is generated at runtime, so the NavMesh must rebuild at runtime (not editor-baked) | **Avoided**: routing does not use a NavMesh; the planner reads the generated geometry directly each time |
-| Cross-floor routing via NavLinks | Vertical connections are the hard part of the navigation | **Resolved**: connectors (`ConnectorGroupId`) join floors in the planner's graph; between buildings too (link doors) |
-| Route-finding speed | Many walls and floors make the visibility graph slow | **Measured**: a route between three buildings takes **2 ms**, on the phone interface **13 ms** (p95). **Reduced**: in the largest building the editor makes (175 x 64 m, ten floors, 225 rooms) the **first** route takes **0.9 s** (it was 6.0 s before the vertices were joined on several threads), because the graph of the building (4,391 vertices joined in pairs) has to be built; the graph is then kept until the building changes, so the next routes take **20 ms** and validating again 0.17 s. The graph is the same for every leg of a trip, so a trip through several buildings builds it once (`NavigationRoutePlanner.cpp`, `InNavi.Navigation.GraphCache.*`). The first runs a little each frame with a progress bar and a Cancel button, so the editor keeps its frame rate |
-| Mobile performance | Runtime generation + pathfinding may be heavy on mobile | **Checked** for the phone app on a Samsung Galaxy S24+ (steady 60 fps) and on emulators; those measurements used mock data; performance with real project routing still needs a rebuilt-device check |
-| Real data on the phone | The project file has to reach the phone and the planner has to run there | **Implemented** (`FMobileRealSource`, tested through the same contract as the mock source; the desktop data interface is measured in `performance.md`); a check of the installed build on the phone is still to do (see `mobile-real-data-guide.md`) |
+The planner uses walls/openings, walkable representative room destinations, grouped floor connectors and main/link entrances, including
+link-floor elevation checks. Private/key-required room restrictions and connector preferences apply. Layout revisions invalidate active
+routes and cached graph data; moved endpoints refresh and unavailable/deleted stops are exposed for correction rather than silently
+substituted. `NavigationInstructions` keeps desktop and mobile distance/turn/door/building/floor wording consistent.
 
-## 7. Delivery
+The reusable campus graph is keyed by geometry, doors, connectors, entrances, scale and routing preferences. It is shared between route
+legs and validation until inputs change. Pairwise graph joining uses parallel work over geometry data; it does not turn the entire route
+request into an asynchronous actor operation. Desktop route jobs advance in budgeted game-thread slices with progress and cancellation;
+mobile `BeginRoute` jobs are also advanced across frames and superseded requests are cancelled. Synchronous route APIs remain available
+for tests and command-line consumers. Initial graph construction, loading and generation can still cause noticeable latency.
 
-| What | How | Where |
-|------|-----|-------|
-| Build, static analysis, tests | Every push to `main` runs a clean-checkout build with adaptive unity disabled, MSVC `/analyze`, and every automation test. | `.github/workflows/build-windows.yml`, a self-hosted Windows runner |
-| Lint | JSON, secrets, configuration in code, headers, links of the documents | `.github/workflows/lint.yml`, GitHub-hosted; `scripts/lint.py` |
-| JSON data | JSON files under `InNavi/Data` parse, including subdirectories | `.github/workflows/validate-json.yml`, a GitHub-hosted runner |
-| Release build | a tag `m<n>-build-<k>` packages the Windows build, starts it once as a smoke test and publishes it as a GitHub release | `.github/workflows/release-windows.yml`, `scripts/package-windows.ps1` |
-| Plugin package | a tag `innavi-layout-validator-v<x.y.z>` publishes the source package to GitHub Packages; the product installs the exact pinned version | `.github/workflows/publish-layout-validator.yml`, `package.json` |
-| Documentation (the team wiki) | every push to `main` that changes `docs/` rebuilds the MkDocs site and publishes it | `.github/workflows/deploy-wiki.yml`; **http://51.79.240.111:5000/** |
+### 4.4 Validation execution and object lifetime
 
-Configuration (all of it is listed in `configuration.md`): what the application reads from its folder (the campus database, the click sounds, the default dock layouts) is in
-`InNavi/Data/`; the choices a run can make are command-line flags (`-MobileApp`, `-MobileMock`, `-MobileProject=`, see `README.md`) and
-Unreal's own `InNavi/Config/*.ini`. No address, key or password is written in the source: `scripts/lint.py` fails the build when one is.
-The signing key of the phone app is never in the repository (`docs/android-signing.md`).
+A controller-owned `LayoutValidationSession` shares one report between the two screens. `StartValidate` captures detached JSON including
+applied unsaved interior edits, then runs plugin data/geometry checks on the thread pool with an atomic cancellation flag. Workers do not
+read live UObjects. If those checks pass, product `FNavigationLayoutCheck` performs entrance-based reachability using the campus graph in
+budgeted game-thread steps driven by the core ticker. The synchronous `Validate` entry point remains available.
+
+Changing/closing the project invalidates an in-flight run; navigation is reported skipped and the result stale. Cancel/destruction signals
+the worker and stops the ticker/job; cancellation leaves no completed report. Fingerprints/revisions detect stale completed reports;
+stale reports cannot focus old objects or be exported. `Show on plan` explicitly navigates to an issue; export writes a unique JSON report
+under `Saved/Validation/`. Validation is advisory and never auto-repairs the layout or blocks saving. Reachability means one tested room
+destination is reachable from an exterior entry, not physical accessibility certification.
+
+Slate references do not root UObjects. `LayoutValidationPanelWidget` therefore retains generated combo-item widgets through UPROPERTY
+references (a bounded newest-item list), matching the other combo implementations. Painting tests exercise actual preview draw elements;
+rendered tests cover native input/focus separately from headless state tests.
+
+### 4.5 Mobile data and audio
+
+`IMobileNavSource` isolates the screens from site storage and route construction. Real data is the default; `-MobileMock` explicitly
+selects prototype data, and missing real data does not silently substitute mock routes. `-MobileProject=` overrides the editor snapshot;
+otherwise an editor preview can use current applied unsaved data, or the adapter scans shipped `Data/` and local `Saved/MobileProjects/`
+projects. Filename-based site identity and site/building/floor/room IDs prevent cross-project collisions. The adapter caches detached
+snapshots and owns private routing worlds; browsing another site does not switch the editor's active building. Preferences and saved
+places are local app state, with failed writes reported and in-memory changes rolled back; unavailable saved places can be removed.
+
+`NavPlayerController` owns short-effect enable flags, playback and master volume. Error feedback binds `OnActionFailed` in `BeginPlay`
+and unbinds in `EndPlay`; Error Sound is independent and included in Mute All. Controller mute state survives screen replacement. The
+phone plays effects on **Start navigation**, **Next instruction** and **I have arrived**; **Get directions** only opens the planned route.
+Profile volume updates playback and persists in `MobilePreferences.json`. `WavFileLoader` validates chunks and bounds file reads to 64 MiB.
+
+## 5. Project data flow and persistence
+
+1. **Open:** JSON or SQLite is staged and checked before replacing the live project. Failed imports preserve current data and save destination.
+2. **Load/generate:** `BuildingGenerator` owns campus footprints/types and scenery. `InteriorGenerator` loads one active building's interior;
+   other buildings retain stored interior snapshots. Floors/rooms/openings/connectors produce runtime geometry and routing inputs.
+3. **Edit:** Commands update live state and undo/redo history; applied unsaved data is visible to navigation, validation and mobile preview.
+4. **Save / Save As:** The active interior and campus state serialize to JSON. Plain projects write format **1**; projects with map scenery
+   write format **2**, the highest currently supported format. Version 2 preserves `buildingType`, `contextBuildings` and `roads`.
+   POI spheres are no longer created and old `pois` arrays are ignored. A database project initially has no JSON save path.
+5. **Navigate / validate:** Both consume the current applied state; edits invalidate routes, caches and validation snapshots.
+6. **Close:** Save/discard is resolved before project state is cleared. Window-close handling also protects unsaved work.
+
+`ProjectFile::FMutationLock` coordinates desktop save/rename/trash mutations using a system-wide critical section. `ProjectFile::WriteText`
+writes and closes a unique sibling temporary file in UTF-8 before replacement; failed publication preserves the previous destination.
+No-replacement moves avoid overwriting another project. `ProjectLibrary` and the generator use these helpers; stale/missing source-file
+checks prevent overwriting a file changed outside the session. Newer-format input is preserved by saving to a compatible copy instead of
+silently overwriting it. Save dialogs start in `Data/`. These are local-file protections, not a collaborative database transaction system.
+
+See [the project-file format](design/project-file-format.md), [its schema](schemas/project.schema.json) and `ProjectFile.h/.cpp` for format and write contracts. Older projects
+remain supported, including sparse authored floor levels; supported floor counts/levels are bounded to 200. Navigation/validation object
+identity uses scoped IDs, with duplicate door/connector/mobile-place conflicts repaired or diagnosed by the relevant loader/validator.
+
+## 6. Performance and remaining risks
+
+[performance.md](performance.md) records **dated measurements**, machines and reproduction commands; they are not new measurements for this document
+revision. Its historical campus load figure included POI markers that the current renderer no longer spawns. Do not treat that old object
+count as the current scene composition. Automation writes fresh measurements to `Saved/Performance/` when run.
+
+| Concern | Current design and evidence |
+| --- | --- |
+| Initial campus load / interior generation | SQLite/JSON loading and procedural geometry remain local work and can hitch; performance tests cover campus load, interior open/generation and validation on representative data |
+| Cold route graph | Pairwise joining still scales roughly quadratically with graph vertices. Parallel joining and graph reuse reduce cost but do not remove the cold-build wait. Historical desktop measurements after the 2026-10-31 optimisation were about 0.9 s cold and 20 ms cached; results vary by machine and layout |
+| Stale routes and validation | Revisions, detached snapshots, cancellation and stale-report guards prevent outdated results from being used after edits; there is no live multi-user synchronisation |
+| Real-data mobile performance | `performance.md` records a 2026-10-31 Galaxy S24+ Development build on real projects at the 60 FPS cap across tested scenarios, with one 121 ms first-route frame. This is device/build-specific evidence, not a measurement of every later APK |
+| Imported layout quality | Geometry and scoped IDs are checked; unavailable route candidates and missing exterior entries are reported explicitly. The database does not supply authored room interiors automatically |
+| UI lifetime and resizing | UPROPERTY-owned generated widgets, paint-path tests, responsive DPI sizing and bounded floating rectangles address the observed crash and off-screen-panel failure modes |
+
+`[RouteTiming]` records work/wait time, graph size and cache reuse per route leg. See `NavigationInvalidationTests`, `RobustnessTests`,
+`DatabaseProjectTests`, `DesktopResponsiveTests`, `EditorFeedbackTests` and `LayoutValidationTests` for the associated regression coverage.
+
+## 7. Delivery and verification
+
+| Work | Trigger, runner and safeguards |
+| --- | --- |
+| Hosted checks | Pull requests and pushes to `main`: `lint.yml` and `validate-json.yml` check repository content, schema/data cases and publishing-script tests; PRs do not run the self-hosted Unreal build |
+| Unreal build / analysis / automation | `build-windows.yml` on `main` pushes or eligible manual runs; self-hosted Windows. Clean-checkout Development editor build with adaptive unity disabled; MSVC analysis checked for product warnings/errors; all `InNavi.*` editor-context tests run with `-nullrhi` and their report is checked for failures/incomplete runs |
+| Windows release | Milestone tags or manual tag selection. Hosted verification checks tag syntax and ancestry on `main`; Windows checks out the exact verified commit, packages/cooks, starts the package for a smoke test and publishes it |
+| Release asset protection | `package-windows.ps1` verifies ZIP contents, uses Explorer-compatible top-level entry names (no `./` entries), and `publish-release.ps1` protects the previous download until replacement checks succeed. Runner scripts use `cmd` and explicit PowerShell execution-policy bypass |
+| Plugin package | `publish-layout-validator.yml` publishes a matching versioned source package to GitHub Packages, resolves the consumer pin/lock and verifies its source; native code is built by UnrealBuildTool |
+| Wiki | `deploy-wiki.yml` runs on `main` documentation/configuration changes or a manual run, on the self-hosted Linux wiki runner. MkDocs builds to staging; `publish-wiki.py` swaps directories when possible and otherwise replaces contents inside the writable web root |
+
+The checked-in plugin descriptor/package are **1.1.1**; the root consumer dependency/lockfile still pin **1.0.0**. Build/release checks use
+`install-layout-validator.mjs --check --allow-unreleased`: matching versions must match installed package source; a newer checked-in
+version is permitted before publication. This distinction does not assert that 1.1.1 has been published. Package access uses CI credentials.
+
+Headless CI checks state and preview draw-element generation, but rendered input tests (`InNavi.EditorUX.Rendered.*`) explicitly require
+an additional run **without `-nullrhi`**. Client-context live-audio checks require `-game` and audio enabled. The default headless editor run
+does not prove native focus handling or audible playback. Documentation changes need lint, local-link and site-build verification rather
+than rebuilding the C++ application. Test counts and performance results should be taken from the run's report, not inferred from this page.
+
+Runtime configuration lives in `InNavi/Config`, shipped data in `InNavi/Data`, and writable app data under `Saved/`. No project-data backend
+or runtime authentication is required; build/package credentials and Android signing keys are separate delivery concerns. Detailed settings
+and wiki access are in [configuration.md](configuration.md); Android installation/signing are in [android-install.md](android-install.md) and [android-signing.md](android-signing.md).
 
 ## 8. Component ownership
 
-Ownership is tracked per deliverable in `deliverables.md`. As of 2026-10-28:
+Accountable owners follow [deliverables.md](deliverables.md); the table below retains the recorded ownership allocation.
+Contributions and fixes can cross these boundaries and do not reassign ownership.
 
 | Component | Layer | Owner |
 |-----------|-------|-------|
