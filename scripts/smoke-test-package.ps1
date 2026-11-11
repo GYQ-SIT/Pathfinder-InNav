@@ -20,16 +20,25 @@ try {
         if (-not (Test-Path (Join-Path $work $needed))) { throw "The package is missing $needed." }
     }
     $log = Join-Path $work 'smoke.log'
-    $process = Start-Process -FilePath $exe -ArgumentList @('-nullrhi', '-unattended', '-nosplash', '-nosound', "-abslog=`"$log`"", '-ExecCmds="quit"') -PassThru -WindowStyle Hidden
+    $marker = Join-Path $work 'smoke-ready.txt'
+    $shipping = Test-Path (Join-Path $work 'InNavi\Binaries\Win64\InNavi-Win64-Shipping.exe')
+    $exitArgument = if ($shipping) { '-InNaviSmokeTest' } else { '-ExecCmds="quit"' }
+    $process = Start-Process -FilePath $exe -ArgumentList @('-nullrhi', '-unattended', '-nosplash', '-nosound', "-abslog=`"$log`"", $exitArgument, "-InNaviSmokeResult=`"$marker`"") -PassThru -WindowStyle Hidden
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
         $process.Kill()
         throw "InNavi.exe did not close within $TimeoutSeconds s."
     }
     $text = if (Test-Path $log) { Get-Content -Raw $log } else { '' }
     if ($process.ExitCode -ne 0) { throw "InNavi.exe closed with exit code $($process.ExitCode)." }
+    if ($shipping -and (-not (Test-Path $marker) -or (Get-Content $marker -Raw).Trim() -ne 'ready')) { throw 'Shipping app did not report a ready game world.' }
     if ($text -match 'Fatal error|Assertion failed|Unhandled Exception') { throw 'The log of the start has a crash in it.' }
     Write-Host "The package starts and closes cleanly (exit code 0, $((Get-Item $log -ErrorAction SilentlyContinue).Length) bytes of log)."
 }
 finally {
-    Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+    $resolvedWork = [IO.Path]::GetFullPath($work)
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar)
+    if ([IO.Path]::GetDirectoryName($resolvedWork).Equals($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and
+        [IO.Path]::GetFileName($resolvedWork).StartsWith('innavi-smoke-', [StringComparison]::Ordinal)) {
+        Remove-Item -LiteralPath $resolvedWork -Recurse -Force -ErrorAction SilentlyContinue
+    } else { throw "Unsafe smoke-test cleanup path: $resolvedWork" }
 }

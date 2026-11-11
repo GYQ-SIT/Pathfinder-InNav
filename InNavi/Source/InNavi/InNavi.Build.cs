@@ -23,7 +23,11 @@ public class InNavi : ModuleRules
 		// enabled in InNavi.uproject's Plugins list (EnabledByDefault: false upstream).
 		PrivateDependencyModuleNames.AddRange(new string[] { "ApplicationCore", "Slate", "SlateCore", "SQLiteCore" });
 		// The native file dialog exists on desktop only (the phone app has no import or save-as).
-		if (Target.IsInPlatformGroup(UnrealPlatformGroup.Desktop))
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			PublicSystemLibraries.AddRange(new string[] { "ole32.lib", "shell32.lib", "uuid.lib" });
+		}
+		else if (Target.IsInPlatformGroup(UnrealPlatformGroup.Desktop))
 		{
 			PrivateDependencyModuleNames.Add("DesktopPlatform");
 		}

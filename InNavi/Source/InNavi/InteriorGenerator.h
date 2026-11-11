@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "HistorySnapshotText.h"
 #include "GameFramework/Actor.h"
 #include "InteriorEntrance.h"
 #include "InteriorTypes.h"
@@ -389,6 +390,7 @@ protected:
 	void HandleBuildingRemoved(const FString& BuildingId);
 
 private:
+	friend class FCompressedInteriorHistoryTest;
 	// Builds a JSON object matching the "interior" schema (floors[].{wallHeight,wallThickness,
 	// rooms[],navNodes[]}) from the currently loaded building's live state. Used by
 	// SyncInteriorToBuildingGenerator.
@@ -472,7 +474,7 @@ private:
 
 	struct FInteriorHistorySnapshot
 	{
-		FString Json;
+		FHistorySnapshotText Json;
 		int32 FloorCount = 1;
 		// An edit to another building is recorded on the transition into this snapshot.
 		FString EntranceOwnerId;

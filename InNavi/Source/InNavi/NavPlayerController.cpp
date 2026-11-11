@@ -31,7 +31,8 @@
 #include "Serialization/JsonWriter.h"
 #include "ProjectFile.h"
 #include "Serialization/JsonSerializer.h"
-#if PLATFORM_DESKTOP
+#include "DesktopProjectFileDialog.h"
+#if PLATFORM_DESKTOP && !PLATFORM_WINDOWS
 #include "DesktopPlatformModule.h"
 #include "IDesktopPlatform.h"
 #endif
@@ -103,166 +104,175 @@ void ANavPlayerController::HideCampusInteriorPreview()
 
 void ANavPlayerController::BuildCampusInteriorPreview()
 {
+	// Project load, edits and discard invalidate the visual cache. Unrevealed interiors stay as data only.
 	ClearCampusInteriorPreview();
+	UpdateBuildingTransparency();
+}
 
-	if (!Generator || !GetWorld())
+void ANavPlayerController::EnsureCampusInteriorPreview(APolyBuilding* Building, int32 RoomFloor)
+{
+	if (!IsValid(Building) || !Generator || !GetWorld())
 	{
 		return;
 	}
 
-	int32 TotalRooms = 0;
-
-	for (APolyBuilding* Building : Generator->GetAllBuildings())
+	FCampusPreviewRooms& BuildingPreview = CampusPreview.FindOrAdd(Building->BuildingId);
+	if (BuildingPreview.bAllFloorsBuilt || (RoomFloor > 0 && BuildingPreview.BuiltFloors.Contains(RoomFloor)))
 	{
-		if (!IsValid(Building))
+		return;
+	}
+
+	const TSharedPtr<FJsonObject> InteriorData = Generator->GetInteriorDataForBuilding(Building->BuildingId);
+	const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
+	if (!InteriorData.IsValid() || !InteriorData->TryGetArrayField(TEXT("floors"), Floors))
+	{
+		BuildingPreview.bAllFloorsBuilt = true;
+		return;
+	}
+
+	int32 TotalRooms = 0;
+	for (const TSharedPtr<FJsonValue>& FloorValue : *Floors)
+	{
+		const TSharedPtr<FJsonObject> Floor = FloorValue->AsObject();
+
+		if (!Floor.IsValid())
 		{
 			continue;
 		}
 
-		const TSharedPtr<FJsonObject> InteriorData =
-			Generator->GetInteriorDataForBuilding(Building->BuildingId);
+		int32 Level = 1;
+		Floor->TryGetNumberField(TEXT("level"), Level);
+		if ((RoomFloor > 0 && RoomFloor != Level) || BuildingPreview.BuiltFloors.Contains(Level))
+		{
+			continue;
+		}
+		BuildingPreview.BuiltFloors.Add(Level);
 
-		FCampusPreviewRooms& BuildingPreview = CampusPreview.FindOrAdd(Building->BuildingId);
 
-		const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
+		float WallHeight = 280.f;
+		float WallThickness = 20.f;
 
-		if (!InteriorData.IsValid() ||
-			!InteriorData->TryGetArrayField(TEXT("floors"), Floors))
+		Floor->TryGetNumberField(TEXT("wallHeight"), WallHeight);
+		Floor->TryGetNumberField(TEXT("wallThickness"), WallThickness);
+
+		const TArray<TSharedPtr<FJsonValue>>* Rooms = nullptr;
+
+		if (!Floor->TryGetArrayField(TEXT("rooms"), Rooms))
 		{
 			continue;
 		}
 
-		for (const TSharedPtr<FJsonValue>& FloorValue : *Floors)
+		for (const TSharedPtr<FJsonValue>& RoomValue : *Rooms)
 		{
-			const TSharedPtr<FJsonObject> Floor = FloorValue->AsObject();
+			const TSharedPtr<FJsonObject> RoomData =
+				RoomValue->AsObject();
 
-			if (!Floor.IsValid())
+			if (!RoomData.IsValid())
 			{
 				continue;
 			}
 
-			int32 Level = 1;
-			Floor->TryGetNumberField(TEXT("level"), Level);
+			const TArray<TSharedPtr<FJsonValue>>* Points = nullptr;
 
-			float WallHeight = 280.f;
-			float WallThickness = 20.f;
-
-			Floor->TryGetNumberField(TEXT("wallHeight"), WallHeight);
-			Floor->TryGetNumberField(TEXT("wallThickness"), WallThickness);
-
-			const TArray<TSharedPtr<FJsonValue>>* Rooms = nullptr;
-
-			if (!Floor->TryGetArrayField(TEXT("rooms"), Rooms))
+			if (!RoomData->TryGetArrayField(TEXT("footprint"), Points))
 			{
 				continue;
 			}
 
-			for (const TSharedPtr<FJsonValue>& RoomValue : *Rooms)
+			TArray<FVector2D> Footprint;
+
+			for (const TSharedPtr<FJsonValue>& PointValue : *Points)
 			{
-				const TSharedPtr<FJsonObject> RoomData =
-					RoomValue->AsObject();
+				const TArray<TSharedPtr<FJsonValue>>* Pair = nullptr;
 
-				if (!RoomData.IsValid())
+				if (PointValue.IsValid() &&
+					PointValue->TryGetArray(Pair) &&
+					Pair->Num() >= 2)
 				{
-					continue;
+					Footprint.Add(FVector2D(
+						(*Pair)[0]->AsNumber(),
+						(*Pair)[1]->AsNumber()
+					));
 				}
+			}
 
-				const TArray<TSharedPtr<FJsonValue>>* Points = nullptr;
+			bool bClosedLoop = true;
+			RoomData->TryGetBoolField(TEXT("closed"), bClosedLoop);
 
-				if (!RoomData->TryGetArrayField(TEXT("footprint"), Points))
-				{
-					continue;
-				}
+			if (Footprint.Num() < (bClosedLoop ? 3 : 2))
+			{
+				continue;
+			}
 
-				TArray<FVector2D> Footprint;
-
-				for (const TSharedPtr<FJsonValue>& PointValue : *Points)
-				{
-					const TArray<TSharedPtr<FJsonValue>>* Pair = nullptr;
-
-					if (PointValue.IsValid() &&
-						PointValue->TryGetArray(Pair) &&
-						Pair->Num() >= 2)
-					{
-						Footprint.Add(FVector2D(
-							(*Pair)[0]->AsNumber(),
-							(*Pair)[1]->AsNumber()
-						));
-					}
-				}
-
-				bool bClosedLoop = true;
-				RoomData->TryGetBoolField(TEXT("closed"), bClosedLoop);
-
-				if (Footprint.Num() < (bClosedLoop ? 3 : 2))
-				{
-					continue;
-				}
-
-				AInteriorRoom* PreviewRoom =
-					GetWorld()->SpawnActor<AInteriorRoom>(
-						FVector::ZeroVector,
-						FRotator::ZeroRotator
-					);
-
-				if (!IsValid(PreviewRoom))
-				{
-					continue;
-				}
-
-				RoomData->TryGetStringField(
-					TEXT("id"), PreviewRoom->RoomId);
-
-				RoomData->TryGetStringField(
-					TEXT("name"), PreviewRoom->RoomName);
-
-				PreviewRoom->FloorLevel = Level;
-
-				// Preview only: do not interfere with building selection.
-				PreviewRoom->SetActorEnableCollision(false);
-
-				const float FloorBaseZ =
-					(Level - 1) * Building->GetFloorHeight();
-
-				TArray<FInteriorOpening> PreviewOpenings;
-
-				PreviewRoom->BuildWalls(
-					Footprint,
-					Generator->GetScale(),
-					Building->BuildingOffset,
-					FloorBaseZ,
-					WallHeight,
-					WallThickness,
-					PreviewOpenings,
-					bClosedLoop
+			AInteriorRoom* PreviewRoom =
+				GetWorld()->SpawnActor<AInteriorRoom>(
+					FVector::ZeroVector,
+					FRotator::ZeroRotator
 				);
 
-				PreviewRoom->SetActorEnableCollision(false);
-
-				// Out of sight until the camera is close enough for UpdateBuildingTransparency to show them.
-				PreviewRoom->SetActorHiddenInGame(true);
-
-				// Drawn after the walls of the buildings whatever the camera does, so the rooms and the walls around them do not trade places.
-				// The see-through sort order of rooms: after the walls of every building (those count from 0).
-				constexpr int32 CampusRoomSortPriority = 1000;
-				TArray<UPrimitiveComponent*> RoomParts;
-				PreviewRoom->GetComponents(RoomParts);
-				for (UPrimitiveComponent* RoomPart : RoomParts)
-				{
-					RoomPart->SetTranslucentSortPriority(CampusRoomSortPriority);
-				}
-
-				BuildingPreview.Rooms.Add(PreviewRoom);
-				++TotalRooms;
+			if (!IsValid(PreviewRoom))
+			{
+				continue;
 			}
+
+			RoomData->TryGetStringField(
+				TEXT("id"), PreviewRoom->RoomId);
+
+			RoomData->TryGetStringField(
+				TEXT("name"), PreviewRoom->RoomName);
+
+			PreviewRoom->FloorLevel = Level;
+
+			// Preview only: do not interfere with building selection.
+			PreviewRoom->SetActorEnableCollision(false);
+
+			const float FloorBaseZ =
+				(Level - 1) * Building->GetFloorHeight();
+
+			TArray<FInteriorOpening> PreviewOpenings;
+
+			PreviewRoom->BuildWalls(
+				Footprint,
+				Generator->GetScale(),
+				Building->BuildingOffset,
+				FloorBaseZ,
+				WallHeight,
+				WallThickness,
+				PreviewOpenings,
+				bClosedLoop
+			);
+
+			PreviewRoom->SetActorEnableCollision(false);
+
+			// Out of sight until the camera is close enough for UpdateBuildingTransparency to show them.
+			PreviewRoom->SetActorHiddenInGame(true);
+
+			// Drawn after the walls of the buildings whatever the camera does, so the rooms and the walls around them do not trade places.
+			// The see-through sort order of rooms: after the walls of every building (those count from 0).
+			constexpr int32 CampusRoomSortPriority = 1000;
+			TArray<UPrimitiveComponent*> RoomParts;
+			PreviewRoom->GetComponents(RoomParts);
+			for (UPrimitiveComponent* RoomPart : RoomParts)
+			{
+				RoomPart->SetTranslucentSortPriority(CampusRoomSortPriority);
+			}
+
+			BuildingPreview.Rooms.Add(PreviewRoom);
+			++TotalRooms;
 		}
 	}
 
-	UE_LOG(LogTemp, Warning,
-		TEXT("[Campus XRay] Created %d preview rooms"),
-		TotalRooms);
-
-	UpdateBuildingTransparency();
+	if (RoomFloor > 0)
+	{
+		// Also remember a requested floor that has no authored rooms.
+		BuildingPreview.BuiltFloors.Add(RoomFloor);
+	}
+	else
+	{
+		BuildingPreview.bAllFloorsBuilt = true;
+	}
+	UE_LOG(LogTemp, Log, TEXT("[Campus XRay] Created %d preview rooms for %s (floor %d)"),
+		TotalRooms, *Building->BuildingId, RoomFloor);
 }
 void ANavPlayerController::BeginPlay()
 {
@@ -898,10 +908,17 @@ void ANavPlayerController::UpdateBuildingTransparency()
 
 		Building->SetBuildingOpacity(Opacity);
 
+		const FCampusPreviewRooms* ExistingPreview = CampusPreview.Find(Building->BuildingId);
+		const bool bWasShown = ExistingPreview && ExistingPreview->bShown;
+		const bool bShowRooms = bCampusPreviewAllowed && !Building->IsHidden()
+			&& (bMadeTransparent || Opacity < CampusRevealRoomsBelowOpacity + (bWasShown ? CampusRevealHysteresis : 0.f));
+		if (bShowRooms)
+		{
+			EnsureCampusInteriorPreview(Building, RoomFloor);
+		}
+
 		if (FCampusPreviewRooms* Preview = CampusPreview.Find(Building->BuildingId))
 		{
-			const bool bShowRooms = bCampusPreviewAllowed && !Building->IsHidden()
-				&& (bMadeTransparent || Opacity < CampusRevealRoomsBelowOpacity + (Preview->bShown ? CampusRevealHysteresis : 0.f));
 			if (Preview->bShown != bShowRooms || Preview->AppliedFloor != RoomFloor)
 			{
 				Preview->bShown = bShowRooms;
@@ -946,6 +963,19 @@ int32 ANavPlayerController::CountShownCampusRoomsForTests(const FString& Buildin
 		}
 	}
 	return Shown;
+}
+
+int32 ANavPlayerController::CountCachedCampusRoomsForTests(const FString& BuildingId) const
+{
+	int32 Cached = 0;
+	if (const FCampusPreviewRooms* Preview = CampusPreview.Find(BuildingId))
+	{
+		for (const TWeakObjectPtr<AInteriorRoom>& Room : Preview->Rooms)
+		{
+			if (Room.IsValid()) ++Cached;
+		}
+	}
+	return Cached;
 }
 
 bool ANavPlayerController::IsNavigationRouteActive() const
@@ -2645,7 +2675,18 @@ APolyBuilding* ANavPlayerController::CreateRegularPolygonBuilding(const FString&
 
 FString ANavPlayerController::BrowseForBuildingDataFile()
 {
-#if !PLATFORM_DESKTOP
+#if PLATFORM_WINDOWS
+	const void* ParentWindowHandle = nullptr;
+	if (FSlateApplication::IsInitialized())
+	{
+		const TSharedPtr<SWindow> Window = FSlateApplication::Get().GetActiveTopLevelWindow();
+		if (Window && Window->GetNativeWindow()) ParentWindowHandle = Window->GetNativeWindow()->GetOSWindowHandle();
+	}
+	FString Path, Error;
+	DesktopProjectFileDialog::Pick(ParentWindowHandle, GetProjectsDirectory(), false, Path, Error);
+	if (!Error.IsEmpty()) OnActionFailed.Broadcast(Error, EActionFailureSeverity::Warning);
+	return Path;
+#elif !PLATFORM_DESKTOP
 	// The native file dialog exists on desktop only; the phone app has no import.
 	OnActionFailed.Broadcast(TEXT("Could not open the file picker on this system."), EActionFailureSeverity::Warning);
 	return FString();
@@ -4427,7 +4468,18 @@ bool ANavPlayerController::SaveCurrentProjectToNewLocation()
 
 FString ANavPlayerController::BrowseForSaveLocation()
 {
-#if !PLATFORM_DESKTOP
+#if PLATFORM_WINDOWS
+	const void* ParentWindowHandle = nullptr;
+	if (FSlateApplication::IsInitialized())
+	{
+		const TSharedPtr<SWindow> Window = FSlateApplication::Get().GetActiveTopLevelWindow();
+		if (Window && Window->GetNativeWindow()) ParentWindowHandle = Window->GetNativeWindow()->GetOSWindowHandle();
+	}
+	FString Path, Error;
+	DesktopProjectFileDialog::Pick(ParentWindowHandle, GetProjectsDirectory(), true, Path, Error);
+	if (!Error.IsEmpty()) OnActionFailed.Broadcast(Error, EActionFailureSeverity::Warning);
+	return Path;
+#elif !PLATFORM_DESKTOP
 	OnActionFailed.Broadcast(TEXT("Could not open the save dialog on this system."), EActionFailureSeverity::Warning);
 	return FString();
 #else

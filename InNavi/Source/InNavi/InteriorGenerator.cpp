@@ -84,12 +84,13 @@ void AInteriorGenerator::HandleBuildingRemoved(const FString& BuildingId)
 			Snapshot.RemovedEntrance.Reset();
 		}
 		TSharedPtr<FJsonObject> Data;
-		if (!FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Snapshot.Json), Data)) continue;
+		FString Json;
+		if (!Snapshot.Json.Read(Json) || !FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Json), Data)) continue;
 		const auto Updated = Generator->WithoutRemovedBuildingLinks(Data);
 		if (Updated == Data) continue;
 		FString Text;
 		if (FJsonSerializer::Serialize(Updated.ToSharedRef(), TJsonWriterFactory<>::Create(&Text)))
-			Snapshot.Json = MoveTemp(Text);
+			Snapshot.Json.Set(MoveTemp(Text));
 	}
 }
 
@@ -3342,8 +3343,8 @@ void AInteriorGenerator::RecordHistorySnapshotInternal(const FString& EntranceOw
 	Snapshot.FloorCount = Building->GetFloorCount();
 	Snapshot.EntranceOwnerId = EntranceOwnerId;
 	Snapshot.RemovedEntrance = MoveTemp(RemovedEntrance);
-	TSharedRef<TJsonWriter<>> Writer =
-		TJsonWriterFactory<>::Create(&Snapshot.Json);
+	FString Json;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Json);
 
 	if (!FJsonSerializer::Serialize(InteriorObject, Writer))
 	{
@@ -3356,7 +3357,7 @@ void AInteriorGenerator::RecordHistorySnapshotInternal(const FString& EntranceOw
 	if (!Snapshot.RemovedEntrance && HistoryIndex >= 0 &&
 		InteriorHistory.IsValidIndex(HistoryIndex) &&
 		InteriorHistory[HistoryIndex].FloorCount == Snapshot.FloorCount &&
-		InteriorHistory[HistoryIndex].Json == Snapshot.Json)
+		InteriorHistory[HistoryIndex].Json.Equals(Json))
 	{
 		return;
 	}
@@ -3370,6 +3371,7 @@ void AInteriorGenerator::RecordHistorySnapshotInternal(const FString& EntranceOw
 			InteriorHistory.Num() - HistoryIndex - 1);
 	}
 
+	Snapshot.Json.Set(MoveTemp(Json));
 	InteriorHistory.Add(MoveTemp(Snapshot));
 	HistoryIndex = InteriorHistory.Num() - 1;
 	NotifyNavigationLayoutChanged();
@@ -3409,9 +3411,15 @@ bool AInteriorGenerator::RestoreHistorySnapshot(int32 TargetIndex)
 
 	const FInteriorHistorySnapshot& Snapshot = InteriorHistory[TargetIndex];
 
+	FString Json;
+	if (!Snapshot.Json.Read(Json))
+	{
+		UE_LOG(LogTemp, Error, TEXT("History: could not decompress snapshot"));
+		return false;
+	}
 	TSharedPtr<FJsonObject> RestoredInterior;
 	TSharedRef<TJsonReader<>> Reader =
-		TJsonReaderFactory<>::Create(Snapshot.Json);
+		TJsonReaderFactory<>::Create(Json);
 
 	if (!FJsonSerializer::Deserialize(Reader, RestoredInterior) ||
 		!RestoredInterior.IsValid())

@@ -1,4 +1,6 @@
 #include "MapPanelWidget.h"
+#include "DesktopRenderingSubsystem.h"
+#include "Engine/GameInstance.h"
 
 #include "BuildingTypes.h"
 #include "MapBuildingRowWidget.h"
@@ -146,6 +148,7 @@ TSharedRef<SWidget> UMapPanelWidget::RebuildWidget()
 		{
 			// The interior editor: just the road check boxes.
 			AddRoadRows(Stack);
+			AddRenderingControls(Stack);
 			return Super::RebuildWidget();
 		}
 
@@ -303,6 +306,7 @@ TSharedRef<SWidget> UMapPanelWidget::RebuildWidget()
 		NoteText->SetAutoWrapText(true);
 		Note->SetContent(NoteText);
 		Stack->AddChildToVerticalBox(WrapInPanelWidth(Note))->SetPadding(FMargin(0.f, 14.f * DesignToUi, 0.f, 0.f));
+		AddRenderingControls(Stack);
 	}
 	return Super::RebuildWidget();
 }
@@ -315,7 +319,7 @@ void UMapPanelWidget::SetContentWidth(float Width)
 	}
 	ContentWidth = Width;
 	// Every SizeBox the panel put its controls in follows the panel's width.
-	TArray<UWidget*> Controls = { BuildingSearchBox, BuildingFilterResultsText, BuildingList, FiltersFrame, RoadsFrame, ViewFrame };
+	TArray<UWidget*> Controls = { BuildingSearchBox, BuildingFilterResultsText, BuildingList, FiltersFrame, RoadsFrame, ViewFrame, RenderingPresetButton };
 	// The controls inside the frames are narrower than the panel by what the frames take.
 	TArray<UWidget*> InnerControls = { ResetBuildingFiltersButton, AllSeeThroughButton, RevealFarSlider, RevealNearSlider };
 	if (WidgetTree)
@@ -359,6 +363,7 @@ void UMapPanelWidget::SetContentWidth(float Width)
 
 void UMapPanelWidget::Refresh()
 {
+	RefreshRenderingControls();
 	if (!bShowBuildingFilters)
 	{
 		return;
@@ -724,6 +729,7 @@ void UMapPanelWidget::ApplyBuildingFilters()
 
 void UMapPanelWidget::RefreshBuildingFilterDisplayIfChanged()
 {
+	RefreshRenderingControls();
 	ANavPlayerController* PC = GetController();
 	if (PC && BuildingList && (DisplayedBuildingResultsRevision != PC->GetBuildingResultsRevision() || DisplayedSelectedBuildingId != SelectedBuildingId()))
 	{
@@ -822,4 +828,46 @@ void UMapPanelWidget::OnResetBuildingFiltersClicked()
 	RefreshBuildingTypeChecks();
 	bUpdatingBuildingFilters = false;
 	ApplyBuildingFilters();
+}
+
+void UMapPanelWidget::AddRenderingControls(UVerticalBox* Stack)
+{
+#if PLATFORM_DESKTOP
+	using namespace StartStyle;
+	RenderingPresetButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_RenderingPreset"));
+	RenderingPresetButton->SetStyle(SecondaryButton());
+	RenderingPresetLabel = Text(WidgetTree, TEXT("Txt_RenderingPreset"), TEXT("Rendering: Standard"), 11.f, FLinearColor::White, true);
+	RenderingPresetLabel->SetAutoWrapText(true);
+	RenderingPresetLabel->SetJustification(ETextJustify::Center);
+	UBorder* RenderingPadding = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	RenderingPadding->SetBrushColor(FLinearColor::Transparent);
+	RenderingPadding->SetPadding(FMargin(8.f * DesignToUi));
+	RenderingPadding->SetContent(RenderingPresetLabel);
+	RenderingPresetButton->SetContent(RenderingPadding);
+	RenderingPresetButton->SetToolTipText(FText::FromString(TEXT("Switch between lightweight and standard lighting, reflections and shadows.")));
+	RenderingPresetButton->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::OnRenderingPresetClicked);
+	RenderingPresetButton->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::PlayButtonClickSound);
+	Stack->AddChildToVerticalBox(WrapInPanelWidth(RenderingPresetButton))->SetPadding(FMargin(0.f, 14.f * DesignToUi, 0.f, 0.f));
+	RefreshRenderingControls();
+#endif
+}
+
+void UMapPanelWidget::RefreshRenderingControls()
+{
+	if (!RenderingPresetButton || !RenderingPresetLabel) return;
+	const auto* Rendering = GetGameInstance() ? GetGameInstance()->GetSubsystem<UDesktopRenderingSubsystem>() : nullptr;
+	const int8 Preset = Rendering && Rendering->IsAvailable() ? (Rendering->IsLightweight() ? 1 : 0) : -1;
+	if (Preset == DisplayedRenderingPreset) return;
+	DisplayedRenderingPreset = Preset;
+	RenderingPresetButton->SetIsEnabled(Rendering && Rendering->IsAvailable());
+	RenderingPresetLabel->SetText(FText::FromString(Rendering && Rendering->IsLightweight() ? TEXT("Rendering: Lightweight") : TEXT("Rendering: Standard")));
+}
+
+void UMapPanelWidget::OnRenderingPresetClicked()
+{
+	if (auto* Rendering = GetGameInstance() ? GetGameInstance()->GetSubsystem<UDesktopRenderingSubsystem>() : nullptr)
+	{
+		Rendering->SetLightweight(!Rendering->IsLightweight());
+	}
+	RefreshRenderingControls();
 }

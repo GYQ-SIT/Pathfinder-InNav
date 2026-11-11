@@ -4,6 +4,10 @@
 #include "FrameStats.h"
 #include "LayoutValidationSession.h"
 #include "MobileRealSource.h"
+#include "EditScreenWidget.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
+#include "Engine/GameViewportClient.h"
+#include "EngineUtils.h"
 #include "PolyBuilding.h"
 #include "NavigationRoutePlanner.h"
 #include "Dom/JsonObject.h"
@@ -492,6 +496,172 @@ bool FPerformanceFrameStatsTest::RunTest(const FString& Parameters)
 	for (int32 Frame = 0; Frame < 1200; ++Frame) Long.AddFrame(1.0 / 120.0);
 	TestTrue(TEXT("old slow frames have left the window"), FMath::IsNearlyEqual(Long.AverageFps(), 120.0, 0.5) && Long.MinFps() > 100.0);
 	TestTrue(TEXT("and the text says what it shows"), Long.ToText().Contains(TEXT("avg")) && Long.ToText().Contains(TEXT("1% low")));
+	return true;
+}
+
+// Opt-in rendered-app comparison: run alone with -game, never as an editor fixture or with -nullrhi.
+namespace PerformanceTests
+{
+	class FCampusPreviewMemoryCapture : public IAutomationLatentCommand
+	{
+	public:
+		FCampusPreviewMemoryCapture(FAutomationTestBase* InTest, const FString& InProject, const FString& InBuilding,
+			const FString& InVariant, const FString& InOutput)
+			: Test(InTest), Project(InProject), BuildingId(InBuilding), Variant(InVariant), Output(InOutput) {}
+
+		bool Update() override
+		{
+			const double Now = FPlatformTime::Seconds();
+			if (Now < NextAction) return false;
+			if (!Controller.IsValid())
+			{
+				for (const FWorldContext& Context : GEngine->GetWorldContexts())
+				{
+					if (Context.WorldType == EWorldType::Game && Context.World())
+					{
+						Controller = Cast<ANavPlayerController>(Context.World()->GetFirstPlayerController());
+						if (Controller.IsValid()) break;
+					}
+				}
+				if (!Controller.IsValid() || GIsEditor || FParse::Param(FCommandLine::Get(), TEXT("nullrhi")))
+				{
+					Test->AddError(TEXT("Campus preview capture requires a rendered -game desktop process."));
+					return true;
+				}
+				for (TActorIterator<ABuildingGenerator> It(Controller->GetWorld()); It; ++It) { Generator = *It; break; }
+				if (!Generator.IsValid()) { Test->AddError(TEXT("No app building generator.")); return true; }
+				TArray<UUserWidget*> Widgets;
+				UWidgetBlueprintLibrary::GetAllWidgetsOfClass(Controller.Get(), Widgets, UUserWidget::StaticClass(), true);
+				for (UUserWidget* Widget : Widgets) Widget->RemoveFromParent();
+				UEditScreenWidget* Screen = CreateWidget<UEditScreenWidget>(Controller.Get(), UEditScreenWidget::StaticClass());
+				if (!Screen) { Test->AddError(TEXT("Cannot create exterior screen.")); return true; }
+				Screen->AddToViewport();
+				Controller->SetCampusSeeThroughEnabled(false);
+				Controller->StartNewProject();
+				CollectGarbage(RF_NoFlags, true);
+				Data->SetStringField(TEXT("started_at_utc"), FDateTime::UtcNow().ToIso8601());
+				Data->SetStringField(TEXT("engine_version"), FEngineVersion::Current().ToString());
+				Data->SetStringField(TEXT("cpu"), FPlatformMisc::GetCPUBrand().TrimStartAndEnd());
+				Data->SetNumberField(TEXT("visible_physical_memory_bytes"), FPlatformMemory::GetConstants().TotalPhysical);
+				Data->SetNumberField(TEXT("process_id"), FPlatformProcess::GetCurrentProcessId());
+				Data->SetStringField(TEXT("project_file"), Project);
+				Data->SetStringField(TEXT("building_id"), BuildingId);
+				Data->SetStringField(TEXT("variant"), Variant);
+				const FIntPoint Viewport = GEngine->GameViewport->Viewport->GetSizeXY();
+				Data->SetNumberField(TEXT("viewport_width"), Viewport.X);
+				Data->SetNumberField(TEXT("viewport_height"), Viewport.Y);
+				Data->SetBoolField(TEXT("includes_editor_runtime"), true);
+				Data->SetBoolField(TEXT("null_rhi"), false);
+				Data->SetNumberField(TEXT("settle_seconds_per_phase"), 5);
+				Data->SetNumberField(TEXT("sample_interval_seconds"), 0.5);
+				Data->SetNumberField(TEXT("samples_per_phase"), 10);
+				Data->SetStringField(TEXT("scope"), TEXT("Rendered UnrealEditor.exe -game Development, 1280x720; Windows process working set and private committed bytes, not dedicated GPU memory. One explicit GC before empty baseline; normal rendering/engine GC continues during capture."));
+				NextAction = Now + 5.0;
+				return false;
+			}
+
+			static const TCHAR* Names[] = { TEXT("empty_baseline"), TEXT("campus_opaque"), TEXT("selected_floor_1"), TEXT("selected_building_all_floors") };
+			auto Sample = MakeShared<FJsonObject>();
+			const FPlatformMemoryStats Stats = FPlatformMemory::GetStats();
+			Sample->SetStringField(TEXT("phase"), Names[Phase]);
+			Sample->SetStringField(TEXT("measured_at_utc"), FDateTime::UtcNow().ToIso8601());
+			Sample->SetNumberField(TEXT("resident_bytes"), Stats.UsedPhysical);
+			Sample->SetNumberField(TEXT("private_committed_bytes"), Stats.UsedVirtual);
+			int32 Cached = 0, Shown = 0;
+			for (APolyBuilding* Building : Generator->GetAllBuildings())
+			{
+				Cached += Controller->CountCachedCampusRoomsForTests(Building->BuildingId);
+				Shown += Controller->CountShownCampusRoomsForTests(Building->BuildingId);
+			}
+			Sample->SetNumberField(TEXT("cached_preview_rooms"), Cached);
+			Sample->SetNumberField(TEXT("shown_preview_rooms"), Shown);
+			Samples.Add(MakeShared<FJsonValueObject>(Sample));
+			if (++PhaseSamples < 10) { NextAction = Now + 0.5; return false; }
+			Test->AddInfo(FString::Printf(TEXT("Preview memory %s: cached %d, shown %d, resident %.2f MiB, private %.2f MiB"),
+				Names[Phase], Cached, Shown, Stats.UsedPhysical / 1048576.0, Stats.UsedVirtual / 1048576.0));
+			PhaseSamples = 0;
+			if (++Phase == 4)
+			{
+				Data->SetNumberField(TEXT("schema_version"), 1);
+				Data->SetArrayField(TEXT("samples"), Samples);
+				FString Json;
+				IFileManager::Get().MakeDirectory(*FPaths::GetPath(Output), true);
+				Test->TestTrue(TEXT("preview memory capture saved"), FJsonSerializer::Serialize(Data, TJsonWriterFactory<>::Create(&Json))
+					&& FFileHelper::SaveStringToFile(Json, *Output));
+				return true;
+			}
+			if (Phase == 1)
+			{
+				if (!Test->TestTrue(TEXT("benchmark project loaded"), Controller->LoadBuildingDataFromPathOrDatabase(Project) > 0)) return true;
+				if (!Test->TestNotNull(TEXT("benchmark building exists"), Generator->FindBuildingById(BuildingId))) return true;
+				int32 AuthoredRooms = 0;
+				for (APolyBuilding* Building : Generator->GetAllBuildings())
+				{
+					const auto Interior = Generator->GetInteriorDataForBuilding(Building->BuildingId);
+					const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
+					if (!Interior || !Interior->TryGetArrayField(TEXT("floors"), Floors)) continue;
+					for (const auto& Floor : *Floors)
+					{
+						const TArray<TSharedPtr<FJsonValue>>* Rooms = nullptr;
+						if (Floor->AsObject()->TryGetArrayField(TEXT("rooms"), Rooms)) AuthoredRooms += Rooms->Num();
+					}
+				}
+				Data->SetNumberField(TEXT("authored_rooms"), AuthoredRooms);
+				Data->SetNumberField(TEXT("editable_buildings"), Generator->GetAllBuildings().Num());
+				int32 Created = 0;
+				for (APolyBuilding* Building : Generator->GetAllBuildings()) Created += Controller->CountCachedCampusRoomsForTests(Building->BuildingId);
+				Test->TestEqual(TEXT("opaque preview count matches the compiled variant"), Created, Variant == TEXT("eager") ? AuthoredRooms : 0);
+			}
+			else if (Phase == 2)
+			{
+				Controller->SetBuildingRoomFloor(BuildingId, 1);
+				Controller->SetBuildingMadeTransparent(BuildingId, true);
+			}
+			else Controller->SetBuildingRoomFloor(BuildingId, 0);
+			NextAction = FPlatformTime::Seconds() + 5.0;
+			return false;
+		}
+	private:
+		FAutomationTestBase* Test;
+		FString Project, BuildingId, Variant, Output;
+		TWeakObjectPtr<ANavPlayerController> Controller;
+		TWeakObjectPtr<ABuildingGenerator> Generator;
+		TSharedRef<FJsonObject> Data = MakeShared<FJsonObject>();
+		TArray<TSharedPtr<FJsonValue>> Samples;
+		double NextAction = 0.0;
+		int32 Phase = 0, PhaseSamples = 0;
+	};
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPerformanceCampusPreviewMemoryTest, "InNavi.Performance.CampusPreviewMemory",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)
+bool FPerformanceCampusPreviewMemoryTest::RunTest(const FString& Parameters)
+{
+	FString PreparedProject;
+	if (FParse::Value(FCommandLine::Get(), TEXT("PreviewMemoryPrepare="), PreparedProject))
+	{
+		FNavigationSearchFixture Fixture;
+		Fixture.Interior->ClearLoadedInterior();
+		Fixture.Generator->ClearAllBuildings();
+		PerformanceTests::BuildTenFloors(Fixture, TEXT("MEMORY"), *this);
+		TestTrue(TEXT("generated benchmark project saved"), Fixture.Generator->SaveBuildingsToFile(PreparedProject));
+		return true;
+	}
+	FString Project, Building, Variant, Output;
+	if (!FParse::Value(FCommandLine::Get(), TEXT("PreviewMemoryProject="), Project))
+	{
+		AddInfo(TEXT("Opt-in rendered-app capture: supply PreviewMemoryProject, PreviewMemoryBuilding, PreviewMemoryVariant and PreviewMemoryOutput; see docs/performance.md."));
+		return true;
+	}
+	if (!FParse::Value(FCommandLine::Get(), TEXT("PreviewMemoryBuilding="), Building)
+		|| !FParse::Value(FCommandLine::Get(), TEXT("PreviewMemoryVariant="), Variant)
+		|| !FParse::Value(FCommandLine::Get(), TEXT("PreviewMemoryOutput="), Output)
+		|| (Variant != TEXT("eager") && Variant != TEXT("lazy")))
+	{
+		AddError(TEXT("Missing/invalid preview memory capture parameters."));
+		return false;
+	}
+	AddCommand(new PerformanceTests::FCampusPreviewMemoryCapture(this, Project, Building, Variant, Output));
 	return true;
 }
 

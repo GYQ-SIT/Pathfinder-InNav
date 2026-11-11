@@ -162,6 +162,97 @@ These are measurements of the development processes on this machine, not package
 automation suite and the fresh memory-only run passed. The process sampler was also checked for normal sampling, an exceeded limit,
 a missing PID and premature process exit.
 
+### Campus interior previews
+
+Campus X-ray room actors and meshes are created only when the existing camera-distance or per-building transparency rules reveal
+them. Choosing a single floor creates only that floor's preview; All floors creates any remaining floors. Opaque or filtered-out
+buildings keep their interiors as project data until revealed. Multiple buildings can still show interiors at the same time.
+
+Created previews stay cached for quick floor switching and repeat visits. The existing refresh paths invalidate the cache after
+interior editing, discard and project replacement, so the next reveal uses current data. New/Close destroys the previews.
+This avoids allocations for unrevealed interiors; it does not impose a memory limit on previously visited previews. First reveal
+still pays the mesh-construction cost. The `InNavi.Building.SeeThrough.*` automation tests check allocation on demand, cache reuse,
+visibility and the edit/save lifecycle. The earlier desktop tables and Insights capture predate this optimization.
+
+### Preview RAM comparison — 2026-11-12
+
+Compared the original eager preview algorithms with the optimized lazy algorithms on **Windows 11, Ryzen 7 7700, 16 GiB RAM,
+RTX 4070**, using **UnrealEditor.exe -game, Development, D3D12 SM6, 1280x720, capped at 30 FPS**. Rendering was enabled.
+The capture ran **01:03–01:17 SGT**. This is a controlled rendered-app workload with the native exterior screen, not a packaged
+Shipping measurement. Both builds used the same harness and data; the baseline restored the two original preview functions
+verbatim from `8e5bb6e` while retaining the common cache-struct fields and the unused optimized helper.
+
+There were **14 fresh app processes and 560 memory samples**: three eager/lazy pairs for the shipped six-building, nine-room
+authored project; three pairs for a generated ten-floor, 225-room building; and one pair for the footprint-only campus database
+(29 editable buildings, 407 context buildings, 1,359 road actors, no authored preview rooms). Pilot runs were excluded.
+The generated project was saved once, then the identical file was loaded in every run; generation and its undo history were
+outside the measured process. Execution order was reversed for the second pair of each repeated workload.
+
+For each process and state, take the median of ten samples and subtract that process's empty-app median. The table reports
+**eager growth minus lazy growth**, then the median and range across paired runs. **Positive means lower measured growth in
+the lazy build; negative means higher growth.** Resident memory is the Windows working set, including shared resident pages.
+Private committed memory is a separate counter; neither measures dedicated GPU memory. Values below are **MiB**.
+
+| Workload / state | Cached preview rooms, eager → lazy | Pairs | Resident difference, median [range] | Private committed difference, median |
+|------------------|------------------------------------|-------|------------------------------------|--------------------------------------|
+| Shipped authored project, opaque | 9 → 0 | 3 | -3.56 [-13.03, +0.80] | -15.22 |
+| Shipped authored project, E2 floor 1 revealed | 9 → 3 | 3 | -2.29 [-14.44, +4.62] | -10.73 |
+| Generated 225-room building, opaque | 225 → 0 | 3 | +13.13 [+12.05, +16.91] | +25.24 |
+| Generated building, floor 1 revealed | 225 → 22 | 3 | +9.36 [+2.74, +11.10] | +17.76 |
+| Footprint-only campus, opaque control | 0 → 0 | 1 | +10.11 [single pair] | +3.71 |
+
+**Interpretation:** the large generated case showed modest lower memory growth, but these results do **not establish a general
+or precisely attributable RAM saving**. The no-room control differed by 10.11 MiB while opaque and up to 22.27 MiB in later
+states despite having no preview room actors in either build. The small authored project did not show a consistent resident-RAM
+reduction, and its private committed growth was higher in the lazy build. After revealing all floors of the generated building,
+both builds retained 225 previews, yet a 9.34 MiB median resident difference remained. Allocation history, renderer/allocator
+caches and OS/run variation contribute to the observed differences; the control is a different workload with only one pair,
+so its difference cannot simply be subtracted as a noise correction.
+
+The confirmed improvement is avoiding unused preview actors and meshes until reveal. Previously visited previews remain cached.
+These short snapshots can miss transient peaks and do not measure a leak or establish a RAM budget. A packaged build with longer
+steady-state windows and more control repetitions would be needed before claiming a reliable end-user RAM reduction.
+The [measurement record](measurements/desktop-campus-preview-ram-2026-11-12.json) includes all 560 samples, per-run summaries,
+paired differences, source/input/DLL hashes and limitations. Raw reports, comparison sources, DLLs, runner and logs are retained
+locally in `InNavi/Saved/CampusPreviewMemory-20261112/` (git-ignored). The optimized source and DLL were restored after comparison.
+
+### Reproduce the preview comparison
+
+`InNavi.Performance.CampusPreviewMemory` is an opt-in capture of the rendered desktop app, not the headless data fixture.
+It opens the native exterior screen in the actual game world, clears the project, and samples an empty-app baseline. It then loads
+the chosen project with camera-distance see-through disabled, reveals floor 1 of one building, and reveals all floors of that
+building. Each phase settles for five seconds, then takes ten process-memory samples with a requested 500 ms interval while
+rendering continues. There is one explicit GC before the empty baseline; normal engine GC continues afterward.
+
+Run it alone in a fresh `UnrealEditor.exe -game` Development process, with rendering enabled:
+
+```powershell
+$engine = 'C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64'
+$project = Join-Path $PWD 'InNavi/InNavi.uproject'
+$data = Join-Path $PWD 'InNavi/Data/buildings.json'
+$output = Join-Path $PWD 'InNavi/Saved/Performance/preview-memory-lazy.json'
+& "$engine\UnrealEditor.exe" $project -game -d3d12 -windowed -ResX=1280 -ResY=720 -ForceRes -unattended -nosplash -nosound -NoVSync `
+  "-PreviewMemoryProject=$data" -PreviewMemoryBuilding=E2 -PreviewMemoryVariant=lazy "-PreviewMemoryOutput=$output" `
+  '-ExecCmds=t.MaxFPS 30,Automation RunTests InNavi.Performance.CampusPreviewMemory; Quit'
+```
+
+`PreviewMemoryVariant` labels and checks the compiled implementation; it does **not** switch implementations. For the baseline
+comparison, compile the original `BuildCampusInteriorPreview` and `UpdateBuildingTransparency` functions from `8e5bb6e`, keeping
+the same measurement harness and room-count helper, and use `-PreviewMemoryVariant=eager`. Restore the optimized functions for
+the lazy capture. Keep all other build/runtime settings and project data identical, and alternate execution order across repeats.
+The baseline retains the same cache-struct fields and the unused optimized helper, isolating the two original preview algorithms.
+
+For a generated large interior, first create one input file and reuse it for both variants:
+
+```powershell
+$generated = Join-Path $PWD 'InNavi/Saved/Performance/preview-memory-ten-floor.json'
+& "$engine\UnrealEditor-Cmd.exe" $project -unattended -nullrhi -nosplash -nosound "-PreviewMemoryPrepare=$generated" `
+  '-ExecCmds=Automation RunTests InNavi.Performance.CampusPreviewMemory; Quit'
+```
+
+Then use that file as `PreviewMemoryProject` and `-PreviewMemoryBuilding=MEMORY` in the rendered capture command.
+Without these opt-in parameters, the test reports instructions and does not run the capture during the normal suite.
+
 ### Unreal Insights desktop capture — 2026-11-11
 
 Captured the rendered desktop application at approximately **23:02–23:04 SGT**, using **Unreal Insights 5.8.2 Memory Insights**.

@@ -8,7 +8,8 @@ param(
     [Parameter(Mandatory = $true)][string]$Name,
     [Parameter(Mandatory = $true)][string]$OutputDir,
     [string]$UnrealRoot = $(if ($env:UE_ROOT) { $env:UE_ROOT } else { 'C:\Program Files\Epic Games\UE_5.8' }),
-    [string]$Version = ''
+    [string]$Version = '',
+    [ValidateSet('Development', 'Shipping')][string]$Configuration = 'Development'
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -29,7 +30,7 @@ $zip = Join-Path $output "$Name.zip"
 $published = $false
 try {
     Write-Host "== Packaging $Name (this cooks the project: it takes a while)"
-    & $runUat BuildCookRun "-project=$project" -noP4 -platform=Win64 -clientconfig=Development -build -cook -stage -pak -prereqs -archive "-archivedirectory=$archive" -utf8output
+    & $runUat BuildCookRun "-project=$project" -noP4 -platform=Win64 "-clientconfig=$Configuration" -build -cook -stage -pak -prereqs -archive "-archivedirectory=$archive" -utf8output
     if ($LASTEXITCODE -ne 0) { throw "BuildCookRun failed ($LASTEXITCODE)." }
 
     $root = Join-Path $archive 'Windows'
@@ -60,13 +61,16 @@ try {
     Copy-Item (Join-Path $repo 'docs\test-data\*.json') $samples
 
     $commit = (& git -C $repo rev-parse --short HEAD).Trim()
+    $sourceState = if (@(& git -C $repo status --porcelain).Count) { 'modified working tree' } else { 'clean' }
     @(
         "InNavi - Team Pathfinder"
         "Build:   $Name"
         "Version: $(if ($Version) { $Version } else { 'n/a' })"
         "Commit:  $commit"
+        "Source:  $sourceState"
         "Date:    $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm')) UTC"
         "Engine:  Unreal Engine 5.8, Windows 11 (64-bit)"
+        "Config:  $Configuration"
         ""
         "Run InNavi.exe. The campus loads from InNavi\Data\map_extended.db."
         "SampleProjects\ has projects to open with File > Load (three buildings with doors, and campus routes)."

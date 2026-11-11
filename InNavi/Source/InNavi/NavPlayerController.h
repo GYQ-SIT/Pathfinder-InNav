@@ -1240,9 +1240,10 @@ public:
 	bool IsNavigationRouteActive() const;
 	void SetCampusSeeThroughEnabled(bool bEnabled);
 
-	// Tests: makes the preview rooms of the campus (done when a project is loaded), and counts the rooms of one building that are showing.
+	// Tests: refreshes the lazy campus previews and counts visible or cached room actors.
 	void BuildCampusInteriorPreviewForTests() { BuildCampusInteriorPreview(); }
 	int32 CountShownCampusRoomsForTests(const FString& BuildingId) const;
+	int32 CountCachedCampusRoomsForTests(const FString& BuildingId) const;
 
 	// What the Building panel does to one building. Made transparent, a building is as clear as it gets whatever the distance and its
 	// rooms show. RoomFloor is the one floor whose rooms show while the rooms of the building show at all (0 = every floor).
@@ -1286,9 +1287,10 @@ private:
 	void MarkBuildingCreated(APolyBuilding* Building);
 	TSet<TWeakObjectPtr<APolyBuilding>> UnsavedBuildings;
 	int32 LoadBuildingData(const FString& FilePath, bool bDatabase);
-	// Campus-wide X-ray interior preview.
-	// These actors are separate from the editable interior rooms.
+	// Campus X-ray previews are separate from editable rooms. Refresh invalidates stale actors;
+	// the visibility update creates only the buildings/floors currently being revealed.
 	void BuildCampusInteriorPreview();
+	void EnsureCampusInteriorPreview(APolyBuilding* Building, int32 RoomFloor);
 	void ClearCampusInteriorPreview();
 	// Hide the campus previews while an individual interior is open.
 	void HideCampusInteriorPreview();
@@ -1297,6 +1299,9 @@ private:
 	struct FCampusPreviewRooms
 	{
 		TArray<TWeakObjectPtr<AInteriorRoom>> Rooms;
+		// Keep revealed floors for quick switching, including empty floors so they are not retried every frame.
+		TSet<int32> BuiltFloors;
+		bool bAllFloorsBuilt = false;
 		bool bShown = false;
 		// The floor whose rooms are shown now (0 = all); -1 = not set yet.
 		int32 AppliedFloor = -1;
