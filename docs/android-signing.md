@@ -3,13 +3,13 @@
 Every Android app must be signed. The phone checks the signature when it installs the app, and when an update is installed over an older version it only accepts it if both were signed
 with the **same key**. We use one key for the whole team, so a build made on any team computer installs over a build made on any other, with no uninstall in between.
 
-**One-off exception: `mobile-test-2` was signed with a separate key**, not the team key described below. Its certificate SHA-256 is `D6:B7:32:F0:9A:A2:72:AD:57:35:32:3F:4A:96:7B:31:30:64:07:FA:67:86:B7:4F:41:BD:A6:B3:A1:AA:2E:68`. It was built on one computer, with its own keystore, so it cannot update, and cannot be updated by, a build signed with the team key.
+**Exceptions: `mobile-test-2` and `mobile-test-3` use a separate key**, not the team key described below. Its certificate SHA-256 is `D6:B7:32:F0:9A:A2:72:AD:57:35:32:3F:4A:96:7B:31:30:64:07:FA:67:86:B7:4F:41:BD:A6:B3:A1:AA:2E:68`. Build 3 deliberately reuses build 2's keystore, so it updates build 2 in place. Neither can update, or be updated by, a build signed with the team key.
 
-**Every build after `mobile-test-2` is signed with the team key.** Anyone who installed `mobile-test-2` has to **uninstall it once** (Android reports a signature conflict otherwise; uninstalling also removes the saved places and preferences). From then on updates install over each other as usual. The separate key is therefore **not needed** for later builds, and building from `main` or any branch never needs it: which key signs a build is decided only by the builder's own ignored `Saved/Config/Android/Engine.ini` (see "Getting set up" below), not by anything in Git. Only publishing an update *of `mobile-test-2` itself* would need the separate key; we do not plan to.
+**The team key remains the default for other releases.** Switching between the team key and the test-build-2/3 key requires uninstalling the other build (Android reports a signature conflict otherwise); uninstalling removes saved places and preferences. Which key signs a build is decided by the builder's own ignored `Saved/Config/Android/Engine.ini` (see "Getting set up" below), not by the Git branch. To reproduce test build 3, use the existing test-build-2 keystore and its protected credentials; do not generate a replacement key.
 
-Where the separate key is kept: on the computer that built `mobile-test-2`, under `%LOCALAPPDATA%/InNavSigning/mobile-test-2/`, with its password protected for that Windows user in `password.dpapi`. It is not backed up in the team password manager, because nothing depends on it. Neither that key nor its passwords belong in Git or release assets.
+Where the separate key is kept: on the computer that built `mobile-test-2`, under `%LOCALAPPDATA%/InNavSigning/mobile-test-2/`, with its password protected for that Windows user in `password.dpapi`. Updates to test builds 2 and 3 depend on retaining this key. Neither that key nor its passwords belong in Git or release assets.
 
-Give each build you hand out a higher **Android version code** than the one before it (`StoreVersion` in `Config/DefaultEngine.ini`; `mobile-test-2` is 2, so the next one is 3 or more).
+Give each build you hand out a higher **Android version code** than the one before it (`StoreVersion` in `Config/DefaultEngine.ini`; `mobile-test-2` is 2 and `mobile-test-3` is 5).
 
 The key is **a secret**. It is never in the repository, and never pasted in chat, tickets or the wiki. Whoever has it can publish an "update" of InNav that phones will accept.
 
@@ -70,7 +70,7 @@ The `mobile-test-2` build computer keeps its SDK/JDK/NDK environment paths in `%
 %LOCALAPPDATA%\Android\Sdk\build-tools\36.0.0\apksigner.bat verify --verbose --print-certs InNavi-arm64.apk
 ```
 
-It should say `Verifies` and show the team certificate above, for `mobile-test-1` and every build after `mobile-test-2`. Only the one-off `mobile-test-2` APK shows `D6:B7:32:F0:9A:A2:72:AD:57:35:32:3F:4A:96:7B:31:30:64:07:FA:67:86:B7:4F:41:BD:A6:B3:A1:AA:2E:68`. A debug-signed build shows a certificate named "Android Debug".
+It should say `Verifies`. Team-signed builds, including `mobile-test-1`, show the team certificate above. `mobile-test-2` and `mobile-test-3` show `D6:B7:32:F0:9A:A2:72:AD:57:35:32:3F:4A:96:7B:31:30:64:07:FA:67:86:B7:4F:41:BD:A6:B3:A1:AA:2E:68`. A debug-signed build shows a certificate named "Android Debug" and must not be mistaken for either release key.
 
 ## One file or two
 

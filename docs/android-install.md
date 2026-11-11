@@ -7,13 +7,13 @@ This is for teammates who want to **try the phone app** on their own phone. You 
 
 - An **Android phone, Android 8 or newer** (API 26+), with a **64-bit ARM** processor. Nearly every phone from the last several years is. There is **no iPhone version**.
 - Enough free space for the APK and the installed app's data.
-- The file **`InNavi-arm64.apk`** (one file; the game's data is inside it). It is not in git because it is big. Download it from the **mobile-test-2 pre-release on the repository's Releases page**
-  (<https://github.com/GYQ-SIT/Pathfinder-InNav/releases>, "Assets" -> `InNavi-arm64.apk`). The repository is private, so you must be **signed in to GitHub** with an account that can see it;
+- The file **`InNavi-arm64.apk`** (one file; the game's data is inside it). It is not in git because it is big. Download it from the **[mobile-test-3 pre-release](https://github.com/GYQ-SIT/Pathfinder-InNav/releases/tag/mobile-test-3)**
+  ("Assets" -> `InNavi-arm64.apk`). The repository is private, so you must be **signed in to GitHub** with an account that can see it;
   if the phone's browser does not let you sign in or download, download the file on a computer and send it to the phone (USB cable, a cloud drive or a chat app).
 
-**Mobile test build 2 (version 1.1, Android version code 2)** reads packaged project files and uses the real campus route planner. Its sites, buildings, room names and maps follow the authored data. Positioning is still a manual building/level choice; there is no automatic indoor tracking. See [the real-data guide](mobile-real-data-guide.md) for the available data and test cases.
+**Mobile test build 3 (version 1.4, Android version code 5)** reads packaged project files and uses the real campus route planner. It includes the fading startup logo and app icon, navigation/arrival sounds and the Profile volume control, map-label improvements, and the current routing and project-data fixes. Positioning is still a manual building/level choice; there is no automatic indoor tracking. See [the real-data guide](mobile-real-data-guide.md) for the available data and test cases.
 
-This is a **one-off, separately signed release**, with a different key from `mobile-test-1`. If Android reports a signature conflict, uninstall the old app first, then install this APK. Uninstalling removes the old app's saved places and preferences. The old release remains available separately. **Builds after this one are signed with the team key again, so if you installed `mobile-test-2` you will have to uninstall it once more** before installing the next one; after that, updates install over each other.
+**Updating:** `mobile-test-3` uses the **same signing key as `mobile-test-2`**, so it installs over test build 2 and keeps its saved places and preferences. It uses a different key from `mobile-test-1` and team-key builds. If Android reports a signature conflict with one of those builds, switching requires uninstalling the old app; uninstalling removes that app's saved places and preferences. Keep the older release if you need to retain that local data. The signing certificate SHA-256 for test builds 2 and 3 is `D6:B7:32:F0:9A:A2:72:AD:57:35:32:3F:4A:96:7B:31:30:64:07:FA:67:86:B7:4F:41:BD:A6:B3:A1:AA:2E:68`.
 
 ## Install
 
@@ -48,7 +48,7 @@ You should see **Explore** with sites from the packaged project library (`buildi
 
 ## Updating and removing
 
-- Builds signed with the same key can update each other and keep saved data. `mobile-test-2` is the one exception (a one-off, separately signed APK): it cannot update the team-key `mobile-test-1`, and later team-key builds cannot update it. Uninstall the other one first if Android reports a signature conflict.
+- Builds signed with the same key and a higher version code can update each other and keep saved data. `mobile-test-2` and `mobile-test-3` share a separate key: build 3 updates build 2, but neither can update the team-key `mobile-test-1`. Switching between those signing-key families requires uninstalling the other build and removes its local app data.
 - To **remove** the app: press and hold its icon -> App info -> Uninstall. This also deletes the saved places and settings.
 
 ## Reporting a problem
