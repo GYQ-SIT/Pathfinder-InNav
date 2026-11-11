@@ -181,10 +181,15 @@ so you can press them repeatedly). Clicking anywhere else closes it.
 
 ## UI scale
 
-Every screen's UI is drawn at a fixed 0.77 scale, whatever the window size (set in
-`Config/DefaultEngine.ini`, `UIScaleCurve`) - so the editor, the packaged build and any
-resolution look the same, rather than the UI growing and shrinking with window height as
-Unreal's default does. A smaller window therefore shows less of the UI, not a smaller UI.
+The desktop UI scales automatically as the window is resized. The start screen, project
+library, dialogs and both editor screens use the existing 1920x1080 design as a reference:
+1080p keeps its original size, 720p scales it down, and 4K doubles it. Both width and height
+are considered so controls also fit narrower, taller and ultrawide windows. Bars and dock
+areas stretch to the window edges; floating panels stay inside the usable workspace.
+Resizing preserves your saved panel arrangement.
+
+This is configured by `UIScaleRule=Custom` and `CustomScalingRuleClass` in
+`Config/DefaultEngine.ini` (`InNaviDPIScalingRule`). The phone app keeps its own scaling.
 
 ## Dockable panels
 

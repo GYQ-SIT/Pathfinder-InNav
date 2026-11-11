@@ -19,8 +19,9 @@
 // project dialog), taken from the design team's page. Header-only and inline so that no two .cpp files of a unity build
 // each define their own copy.
 //
-// The page's sizes are browser pixels. The project's UI scale is 0.77 (see DefaultEngine.ini), so a size is multiplied by
-// DesignToUi to come out the same on screen; font sizes are points drawn at 96 DPI, 3/4 of a pixel size each.
+// The page's sizes are browser pixels at 1920x1080. Its reference UI scale is 0.77, so DesignToUi converts
+// design pixels to UI units; InNaviDPIScalingRule then fits those units to the viewport. Font sizes are points
+// drawn at 96 DPI, 3/4 of a pixel size each.
 namespace StartStyle
 {
 	inline constexpr float DesignToUi = 1.f / 0.77f;
