@@ -106,7 +106,61 @@ UnrealEditor-Cmd.exe InNavi/InNavi.uproject -ExecCmds="Automation RunTests InNav
 The measurements are in `InNavi/Saved/Performance/*.json`. The tests fail when a loose guard limit is broken (campus load 10 s, interior
 5 s, the first route in the largest building 45 s, a route between buildings 5 s, validating a building 45 s and a project 30 s), so a
 large slowdown is caught on the pull request that causes it. The limits are not the budgets above: they are set for the slowest machine the
-tests run on (see the next section).
+tests run on (see "The machine that runs the CI is slower" below).
+
+## Desktop memory usage
+
+`InNavi.Performance.MemoryUsage` measures process RAM (resident working set) and committed memory, in bytes, at these checkpoints:
+after garbage collection, with the real campus loaded, with a generated ten-floor interior, after the first route builds its graph,
+after eleven more routes reuse it, and after destroying the workload, clearing the graph cache and collecting garbage again.
+Each checkpoint includes its signed change from baseline. The JSON also records machine details, the engine version, whether the
+editor and `-nullrhi` were used, and the largest sampled values. Log messages use MiB (1,048,576 bytes).
+
+Run it in a fresh process for a comparable baseline, with the editor closed:
+
+```powershell
+& 'C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe' InNavi/InNavi.uproject '-ExecCmds=Automation RunTests InNavi.Performance.MemoryUsage; Quit' -unattended -nullrhi -nosplash -nosound -ReportExportPath=Saved/MemoryTests
+```
+
+The measurement is `InNavi/Saved/Performance/memory-usage.json`; the automation result is also checked in the normal Windows CI run.
+There is no assumed RAM budget: by default the test checks that its campus and route workloads succeeded, counters are available, and
+the report was saved. Add `-MemoryMaxGrowthMiB=512` to fail if the largest **sampled committed-memory increase over baseline** exceeds
+512 MiB. Choose a limit appropriate to the machine and build. Cleanup memory need not return to baseline because Unreal's allocators
+and asset caches can keep pages. That difference alone does not establish a leak.
+
+This automation measures a desktop **data workload inside Unreal Editor**, including its test harness. With `-nullrhi` it omits renderer
+resources. It is not the packaged app's footprint, and none of these counters measures dedicated GPU memory. Reported OS peaks cover
+the process's entire lifetime, including startup and any earlier tests; checkpoint maxima can miss temporary allocations between samples.
+
+For the actual rendered desktop app, open a packaged build and sample its running process:
+
+```powershell
+Get-Process InNavi* | Select-Object Id, ProcessName
+powershell -ExecutionPolicy Bypass -File scripts/measure-memory.ps1 -ProcessId 1234 -DurationSeconds 60 -Scenario 'Campus idle'
+```
+
+Replace `1234` with the running game's PID. If the package exposes both a small bootstrap `InNavi.exe` and an
+`InNavi-Win64-Shipping.exe` (or Development) process, select the latter. You can also sample an `UnrealEditor.exe -game` instance;
+label that result as a development run. Allow startup to settle, then use separate runs for campus idle, interior editing and route
+calculation so the scenario is clear. Interact with the app during sampling as needed.
+
+The sampler writes every sample and min/mean/max values for the working set and private committed bytes to
+`InNavi/Saved/Performance/desktop-process-memory.json`. Use `-OutputPath` to retain separate reports,
+`-IntervalMilliseconds` to change the default 500 ms interval, and `-MaxPrivateMiB` for an optional absolute private-memory limit.
+It fails on premature process exit or an exceeded limit, saves partial measurements if any exist, and leaves the target process running.
+Working set includes shared resident pages. OS lifetime peaks can predate the sampling window; sampled maxima can miss brief spikes.
+
+Local verification on 2026-11-11 (Windows, Unreal 5.8 Development; machine details in the automation JSON):
+
+| Run | Resident RAM / working set | Committed / private memory |
+|-----|----------------------------|----------------------------|
+| Fresh memory automation, baseline after GC, `-nullrhi` | 2,729.38 MiB | 2,541.30 MiB |
+| Same automation, largest checkpoint value | 2,765.64 MiB | 2,558.23 MiB (+16.93 MiB over baseline) |
+| Desktop Development start screen, rendering enabled, 1280x720, 30 samples over 15 s | sampled maximum 2,100.23 MiB | sampled maximum 5,360.41 MiB |
+
+These are measurements of the development processes on this machine, not packaged Shipping memory requirements. The full 265-test
+automation suite and the fresh memory-only run passed. The process sampler was also checked for normal sampling, an exceeded limit,
+a missing PID and premature process exit.
 
 ## The machine that runs the CI is slower
 
