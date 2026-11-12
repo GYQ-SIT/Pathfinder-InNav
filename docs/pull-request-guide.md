@@ -24,8 +24,11 @@ with the help of AI. **AI can write the code; the author and the reviewer still 
 The rules, short:
 
 - Never commit or push directly to `main`.
-- Never approve your own PR. One approval from another person is needed. (This is the team rule; GitHub enforces it once branch
-  protection is on for `main`.)
+- Never approve your own PR. One approval from another person is needed.
+- **GitHub enforces both.** Branch protection is on for `main` (the ruleset `protect-main`, since 2026-11-12). It requires a pull
+  request, one approval that is not from the person who pushed last (an earlier approval is dropped when new commits are pushed), and
+  the `lint` check to pass; it blocks force pushes and deleting `main`. It applies to everyone, the repository owner included: nobody can
+  bypass it. A direct push to `main` is rejected.
 - A PR does one thing. Small PRs get reviewed faster and better.
 - A PR you cannot explain is not ready, even if it works.
 
@@ -172,7 +175,8 @@ git push
 
 ### 9. Merge and clean up
 
-When the PR has an approval from someone else and the lint and JSON checks are green, the **author** presses **Merge pull request**
+When the PR has an approval from someone else and the `lint` check is green (the one check GitHub requires; the JSON check only runs
+when data files change), the **author** presses **Merge pull request**
 (the merge commit is what our history shows), then **Delete branch**. Then update your own machine:
 
 ```bash
@@ -207,7 +211,7 @@ start; as the reviewer, check the PR against this list and ask the author to cha
 |---|---|
 | `git push` is rejected | `git pull` first (or ask for help). Do **not** use `--force` to get around it. |
 | "This branch has conflicts" | Update your branch: `git checkout main`, `git pull`, `git checkout YQ_nav_panel`, `git merge main`. Fix the files marked with `<<<<<<<`, `git add` them, `git commit`, `git push`. If it is more than a few lines, ask. |
-| I committed to `main` by mistake | Do not push. Make a branch from it (`git checkout -b YQ_my_change`), then ask for help to put local `main` back. |
+| I committed to `main` by mistake | Do not push (GitHub would reject it). Make a branch from it (`git checkout -b YQ_my_change`), then ask for help to put local `main` back. |
 | I committed a personal file or a key | Tell the tech lead before you push. A key that was pushed must be replaced, even if the commit is removed later. |
 | The PR got big | Split it: one PR per story, and one story per piece you can explain in two minutes. |
 | Nobody reviews it | Ask in the team chat after two days; name the reviewer you chose. |
