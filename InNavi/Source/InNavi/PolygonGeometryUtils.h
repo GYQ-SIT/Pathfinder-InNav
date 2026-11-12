@@ -73,13 +73,18 @@ struct FWallCorner
 	// gentle bend (smooth), different on a sharp corner (a crisp edge). The minus side uses the negated values.
 	FVector2D PrevNormal = FVector2D::ZeroVector;
 	FVector2D NextNormal = FVector2D::ZeroVector;
+	// Whether the two walls may be joined here by a mitre. False where there is no wall on one side (the end of a free-standing wall) and
+	// where the wall turns straight back on itself (no mitre exists): both ends are then square, with a cap, and Offset is the plain
+	// half-thickness along the normal.
+	bool bJoin = false;
 };
 
 // One corner per vertex of Poly (its winding does not matter). A bend is smooth when it turns less than SmoothBelowDegrees and both
 // edges at it are no longer than SmoothMaxEdge (world units): a curved front is drawn as many short edges, a long straight wall must
-// not get a gradient across it. MaxMiter caps Offset at that many times the half thickness.
+// not get a gradient across it. MaxMiter caps Offset at that many times the half thickness. With bClosed false Poly is a chain that does
+// not come back to its start: its first and last vertex have only one edge and no join.
 void ComputeWallCorners(const TArray<FVector2D>& Poly, float HalfThickness, TArray<FWallCorner>& OutCorners,
-	float SmoothBelowDegrees = 40.f, float SmoothMaxEdge = 1500.f, float MaxMiter = 2.f);
+	float SmoothBelowDegrees = 40.f, float SmoothMaxEdge = 1500.f, float MaxMiter = 2.f, bool bClosed = true);
 
 // One end of a wall span: where it stands, the offset to its plus-side corner, the plus-side normal there, and whether the end is
 // closed with a cap (a door gap, a jamb) or runs on into the next span (a corner).
@@ -94,11 +99,36 @@ struct FWallEnd
 // A span that ends in the middle of an edge: a plain square end with a cap. Perp is the edge's own (-Dir.Y, Dir.X).
 FWallEnd MakePlainWallEnd(const FVector2D& Center, const FVector2D& Perp, float HalfThickness);
 // A span that ends at a polygon vertex and runs on into the next edge: the mitred corner, no cap. bStart is whether this is the
-// start of the span (the edge begins at the vertex) or its end.
+// start of the span (the edge begins at the vertex) or its end. Where the corner cannot be joined (Corner.bJoin is false) it is a plain
+// end with a cap instead.
 FWallEnd MakeCornerWallEnd(const FVector2D& Vertex, const FWallCorner& Corner, bool bStart);
 
 // Appends the stretch of wall between Start and End from Z0 to Z1: two long faces, top and bottom, and a cap at each end that asks for one.
 void AppendWallSpan(FShadedMesh& Mesh, const FWallEnd& Start, const FWallEnd& End, float Z0, float Z1);
+
+// One stretch of wall on an edge: between two distances along it and between two heights (a whole wall, the part beside a door, the
+// lintel above one, the sill under a window).
+struct FWallPiece
+{
+	float T0 = 0.f;
+	float T1 = 0.f;
+	float Z0 = 0.f;
+	float Z1 = 0.f;
+};
+
+// One edge of the wall, from vertex A to vertex B, and the pieces of wall that stand on it.
+struct FWallEdge
+{
+	FVector2D A = FVector2D::ZeroVector;
+	FVector2D B = FVector2D::ZeroVector;
+	TArray<FWallPiece> Pieces;
+};
+
+// Appends every piece of every edge. Edges[i] runs from vertex i to vertex i + 1 (back to vertex 0 after the last one when bClosed), and
+// Corners has one entry per vertex (ComputeWallCorners of the same points with the same bClosed). A piece that reaches a vertex is joined
+// to the wall of the next edge by the mitred corner only if that wall also reaches the vertex over the piece's whole height; where the
+// neighbour has a door, a window or no wall there, the piece ends square with a cap - without it there would be an open slit into the wall.
+void AppendWallEdges(FShadedMesh& Mesh, const TArray<FWallEdge>& Edges, const TArray<FWallCorner>& Corners, float HalfThickness, bool bClosed);
 
 // Appends the flat roof of a polygon at Z (faces up, normal straight up). Poly may wind either way.
 void AppendFlatCap(FShadedMesh& Mesh, const TArray<FVector2D>& Poly, float Z);

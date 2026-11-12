@@ -163,13 +163,22 @@ namespace
 
 	FVector2D PerpendicularOf(const FVector2D& Dir) { return FVector2D(-Dir.Y, Dir.X); }
 
-	// The nearest vertex before (Step = -1) or after (Step = +1) Index that is not at the same place, or INDEX_NONE.
-	int32 NeighbourVertex(const TArray<FVector2D>& Poly, int32 Index, int32 Step)
+	// The nearest vertex before (Step = -1) or after (Step = +1) Index that is not at the same place, or INDEX_NONE. A chain that is not
+	// closed ends at its first and last vertex instead of wrapping round.
+	int32 NeighbourVertex(const TArray<FVector2D>& Poly, int32 Index, int32 Step, bool bClosed = true)
 	{
 		const int32 N = Poly.Num();
 		for (int32 Taken = 1; Taken < N; ++Taken)
 		{
-			const int32 Candidate = ((Index + Step * Taken) % N + N) % N;
+			int32 Candidate = Index + Step * Taken;
+			if (bClosed)
+			{
+				Candidate = (Candidate % N + N) % N;
+			}
+			else if (Candidate < 0 || Candidate >= N)
+			{
+				return INDEX_NONE;
+			}
 			if (FVector2D::DistSquared(Poly[Candidate], Poly[Index]) > KINDA_SMALL_NUMBER)
 			{
 				return Candidate;
@@ -180,7 +189,7 @@ namespace
 }
 
 void ComputeWallCorners(const TArray<FVector2D>& Poly, float HalfThickness, TArray<FWallCorner>& OutCorners,
-	float SmoothBelowDegrees, float SmoothMaxEdge, float MaxMiter)
+	float SmoothBelowDegrees, float SmoothMaxEdge, float MaxMiter, bool bClosed)
 {
 	const int32 N = Poly.Num();
 	OutCorners.Reset();
@@ -188,10 +197,19 @@ void ComputeWallCorners(const TArray<FVector2D>& Poly, float HalfThickness, TArr
 
 	for (int32 i = 0; i < N; ++i)
 	{
-		const int32 Before = NeighbourVertex(Poly, i, -1);
-		const int32 After = NeighbourVertex(Poly, i, +1);
+		const int32 Before = NeighbourVertex(Poly, i, -1, bClosed);
+		const int32 After = NeighbourVertex(Poly, i, +1, bClosed);
+		FWallCorner& Corner = OutCorners[i];
+
 		if (Before == INDEX_NONE || After == INDEX_NONE)
 		{
+			// The end of a free-standing wall: one edge only, a square end with the edge's own normal.
+			if (Before != INDEX_NONE || After != INDEX_NONE)
+			{
+				const FVector2D Along = (Before != INDEX_NONE ? Poly[i] - Poly[Before] : Poly[After] - Poly[i]).GetSafeNormal();
+				Corner.Offset = PerpendicularOf(Along) * HalfThickness;
+				Corner.PrevNormal = Corner.NextNormal = PerpendicularOf(Along);
+			}
 			continue;
 		}
 
@@ -202,11 +220,11 @@ void ComputeWallCorners(const TArray<FVector2D>& Poly, float HalfThickness, TArr
 		const FVector2D N0 = PerpendicularOf(In / InLength);
 		const FVector2D N1 = PerpendicularOf(Out / OutLength);
 
-		FWallCorner& Corner = OutCorners[i];
 		const FVector2D Sum = N0 + N1;
 		if (Sum.SizeSquared() < 1.e-6f)
 		{
-			// The wall turns straight back on itself: no mitre exists, give each side its own square end.
+			// The wall turns straight back on itself: no mitre exists. Each side ends square with its own cap (bJoin stays false); the
+			// normals are those of the two edges, and MakeCornerWallEnd reads the edge's own normal for the end it builds.
 			Corner.Offset = N1 * HalfThickness;
 			Corner.PrevNormal = N0;
 			Corner.NextNormal = N1;
@@ -216,6 +234,7 @@ void ComputeWallCorners(const TArray<FVector2D>& Poly, float HalfThickness, TArr
 		const FVector2D Mitre = Sum.GetSafeNormal();
 		const float CosHalfTurn = FMath::Max(FVector2D::DotProduct(Mitre, N0), 1.f / FMath::Max(MaxMiter, 1.f));
 		Corner.Offset = Mitre * (HalfThickness / CosHalfTurn);
+		Corner.bJoin = true;
 
 		const float TurnDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector2D::DotProduct(N0, N1), -1.f, 1.f)));
 		const bool bSmooth = TurnDegrees < SmoothBelowDegrees && InLength <= SmoothMaxEdge && OutLength <= SmoothMaxEdge;
@@ -238,9 +257,18 @@ FWallEnd MakeCornerWallEnd(const FVector2D& Vertex, const FWallCorner& Corner, b
 {
 	FWallEnd End;
 	End.Center = Vertex;
-	End.Offset = Corner.Offset;
 	End.Normal = bStart ? Corner.NextNormal : Corner.PrevNormal;
-	End.bCap = false;
+	if (Corner.bJoin)
+	{
+		End.Offset = Corner.Offset;
+		End.bCap = false;
+	}
+	else
+	{
+		// Nothing to join: a square end of the edge's own thickness, closed with a cap.
+		End.Offset = End.Normal * Corner.Offset.Size();
+		End.bCap = true;
+	}
 	return End;
 }
 
@@ -278,6 +306,112 @@ void AppendWallSpan(FShadedMesh& Mesh, const FWallEnd& Start, const FWallEnd& En
 	{
 		const FVector N = ToVector3(Dir, 0.f);
 		AddFacingQuad(Mesh, ToVector3(EM, Z0), ToVector3(EP, Z0), ToVector3(EP, Z1), ToVector3(EM, Z1), N, N, N, N);
+	}
+}
+
+namespace
+{
+	// Whether the pieces of a neighbouring edge that touch one of its ends (its start if bAtStart, else its end) cover the whole height
+	// Z0..Z1 there.
+	bool WallReachesVertex(const FWallEdge& Neighbour, float NeighbourLength, bool bAtStart, float Z0, float Z1)
+	{
+		constexpr float Tolerance = 0.01f;
+		TArray<FWallPiece> Touching;
+		for (const FWallPiece& Piece : Neighbour.Pieces)
+		{
+			const bool bTouches = bAtStart ? Piece.T0 <= Tolerance : Piece.T1 >= NeighbourLength - Tolerance;
+			if (bTouches && Piece.T1 - Piece.T0 > Tolerance)
+			{
+				Touching.Add(Piece);
+			}
+		}
+		Touching.Sort([](const FWallPiece& L, const FWallPiece& R) { return L.Z0 < R.Z0; });
+
+		float Covered = Z0;
+		for (const FWallPiece& Piece : Touching)
+		{
+			if (Piece.Z1 <= Covered)
+			{
+				continue;
+			}
+			if (Piece.Z0 > Covered + Tolerance)
+			{
+				return false;
+			}
+			Covered = Piece.Z1;
+		}
+		return Covered >= Z1 - Tolerance;
+	}
+}
+
+void AppendWallEdges(FShadedMesh& Mesh, const TArray<FWallEdge>& Edges, const TArray<FWallCorner>& Corners, float HalfThickness, bool bClosed)
+{
+	const int32 NumEdges = Edges.Num();
+	const int32 NumVertices = Corners.Num();
+	if (NumEdges == 0 || NumVertices == 0)
+	{
+		return;
+	}
+
+	TArray<float> Lengths;
+	Lengths.SetNum(NumEdges);
+	for (int32 i = 0; i < NumEdges; ++i)
+	{
+		Lengths[i] = (Edges[i].B - Edges[i].A).Size();
+	}
+
+	// The nearest edge before (Step = -1) or after (Step = +1) one that has a length, or INDEX_NONE (a chain ends, it does not wrap).
+	auto NeighbourEdge = [&](int32 Edge, int32 Step) -> int32
+	{
+		for (int32 Taken = 1; Taken < NumEdges; ++Taken)
+		{
+			int32 Candidate = Edge + Step * Taken;
+			if (bClosed)
+			{
+				Candidate = (Candidate % NumEdges + NumEdges) % NumEdges;
+			}
+			else if (Candidate < 0 || Candidate >= NumEdges)
+			{
+				return INDEX_NONE;
+			}
+			if (Lengths[Candidate] > KINDA_SMALL_NUMBER)
+			{
+				return Candidate;
+			}
+		}
+		return INDEX_NONE;
+	};
+
+	for (int32 i = 0; i < NumEdges; ++i)
+	{
+		const float Length = Lengths[i];
+		if (Length <= KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+		const FVector2D Dir = (Edges[i].B - Edges[i].A) / Length;
+		const FVector2D Perp = PerpendicularOf(Dir);
+		const int32 Before = NeighbourEdge(i, -1);
+		const int32 After = NeighbourEdge(i, +1);
+		const int32 StartVertex = i;
+		const int32 EndVertex = (i + 1) % NumVertices;
+
+		for (const FWallPiece& Piece : Edges[i].Pieces)
+		{
+			if (Piece.T1 - Piece.T0 <= KINDA_SMALL_NUMBER || Piece.Z1 - Piece.Z0 <= KINDA_SMALL_NUMBER)
+			{
+				continue;
+			}
+			const bool bJoinStart = Piece.T0 <= KINDA_SMALL_NUMBER && Before != INDEX_NONE && Corners[StartVertex].bJoin
+				&& WallReachesVertex(Edges[Before], Lengths[Before], /*bAtStart=*/false, Piece.Z0, Piece.Z1);
+			const bool bJoinEnd = Piece.T1 >= Length - KINDA_SMALL_NUMBER && After != INDEX_NONE && Corners[EndVertex].bJoin
+				&& WallReachesVertex(Edges[After], Lengths[After], /*bAtStart=*/true, Piece.Z0, Piece.Z1);
+			const FWallEnd Start = bJoinStart ? MakeCornerWallEnd(Edges[i].A, Corners[StartVertex], /*bStart=*/true)
+				: MakePlainWallEnd(Edges[i].A + Dir * Piece.T0, Perp, HalfThickness);
+			const FWallEnd End = bJoinEnd ? MakeCornerWallEnd(Edges[i].B, Corners[EndVertex], /*bStart=*/false)
+				: MakePlainWallEnd(Edges[i].A + Dir * Piece.T1, Perp, HalfThickness);
+			AppendWallSpan(Mesh, Start, End, Piece.Z0, Piece.Z1);
+		}
 	}
 }
 

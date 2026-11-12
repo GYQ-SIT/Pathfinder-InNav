@@ -245,37 +245,32 @@ void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBot
 	TArray<FWallCorner> Corners;
 	ComputeWallCorners(Poly2D, HalfThickness, Corners);
 
-	FShadedMesh Mesh;
+	// The pieces of wall on every edge first, so that where two edges meet it is known whether the wall of both reaches the corner (a door
+	// beside a corner leaves one of them without wall there, and that end must be capped, not mitred).
+	TArray<FWallEdge> Edges;
+	Edges.SetNum(N);
 
 	for (int32 i = 0; i < N; i++)
 	{
-		const FVector2D& A2D = Poly2D[i];
-		const FVector2D& B2D = Poly2D[(i + 1) % N];
+		FWallEdge& Edge = Edges[i];
+		Edge.A = Poly2D[i];
+		Edge.B = Poly2D[(i + 1) % N];
 
-		const float EdgeLength = (B2D - A2D).Size();
+		const float EdgeLength = (Edge.B - Edge.A).Size();
 		if (EdgeLength <= KINDA_SMALL_NUMBER)
 		{
 			continue;
 		}
 
-		const FVector2D Dir = (B2D - A2D) / EdgeLength;
-		const FVector2D Perp(-Dir.Y, Dir.X);
-
-		// The stretch of this edge between two distances along it, between two heights. A stretch that reaches a vertex joins the corner
-		// there; one that ends inside the edge (beside a door) ends square, with a cap.
-		auto AddSegment = [&](float T0, float T1, float Z0, float Z1)
+		// The stretch of this edge between two distances along it, between two heights.
+		auto AddSegment = [&Edge](float T0, float T1, float Z0, float Z1)
 		{
-			if (T1 - T0 <= KINDA_SMALL_NUMBER || Z1 - Z0 <= KINDA_SMALL_NUMBER)
-			{
-				return;
-			}
-			const bool bFromVertex = T0 <= KINDA_SMALL_NUMBER;
-			const bool bToVertex = T1 >= EdgeLength - KINDA_SMALL_NUMBER;
-			const FWallEnd Start = bFromVertex ? MakeCornerWallEnd(A2D, Corners[i], /*bStart=*/true)
-				: MakePlainWallEnd(A2D + Dir * T0, Perp, HalfThickness);
-			const FWallEnd End = bToVertex ? MakeCornerWallEnd(B2D, Corners[(i + 1) % N], /*bStart=*/false)
-				: MakePlainWallEnd(A2D + Dir * T1, Perp, HalfThickness);
-			AppendWallSpan(Mesh, Start, End, Z0, Z1);
+			FWallPiece Piece;
+			Piece.T0 = T0;
+			Piece.T1 = T1;
+			Piece.Z0 = Z0;
+			Piece.Z1 = Z1;
+			Edge.Pieces.Add(Piece);
 		};
 
 		// Where this floor's openings cut this edge. The polygon may run the other way round from the footprint it was made from.
@@ -316,6 +311,9 @@ void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBot
 		}
 		AddSegment(Cursor, EdgeLength, ZBottom, ZTop);
 	}
+
+	FShadedMesh Mesh;
+	AppendWallEdges(Mesh, Edges, Corners, HalfThickness, /*bClosed=*/true);
 
 	TArray<FProcMeshTangent> Tangents;
 	TArray<FColor> VertexColors;

@@ -50,6 +50,25 @@ namespace SmoothGeometryTests
 		return Result;
 	}
 
+	// Every edge of a polygon as one piece of wall the whole height, the way AppendWallEdges is given them.
+	TArray<FWallEdge> FullHeightEdges(const TArray<FVector2D>& Poly, bool bClosed, float Height)
+	{
+		TArray<FWallEdge> Edges;
+		const int32 Count = bClosed ? Poly.Num() : Poly.Num() - 1;
+		for (int32 i = 0; i < Count; ++i)
+		{
+			FWallEdge Edge;
+			Edge.A = Poly[i];
+			Edge.B = Poly[(i + 1) % Poly.Num()];
+			FWallPiece Piece;
+			Piece.T1 = FVector2D::Distance(Edge.A, Edge.B);
+			Piece.Z1 = Height;
+			Edge.Pieces.Add(Piece);
+			Edges.Add(Edge);
+		}
+		return Edges;
+	}
+
 	// The whole wall ring of a polygon, as spans that run on into each other at the corners.
 	FShadedMesh WallRing(const TArray<FVector2D>& Poly, float HalfThickness, float Height)
 	{
@@ -346,6 +365,93 @@ bool FRoomWallRingTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("every face points the way its normals say"), FacesAgreeWithNormals(Vertices, Indices, Normals));
 
 	World->DestroyWorld(false);
+	return true;
+}
+
+// A door that starts at a corner leaves no wall there on that edge; the wall of the edge before must end square with a cap, not run into
+// an open mitred end (a slit into the wall).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWallDoorAtCornerTest, "InNavi.Geometry.WallDoorAtCorner", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FWallDoorAtCornerTest::RunTest(const FString& Parameters)
+{
+	using namespace SmoothGeometryTests;
+	const TArray<FVector2D> Poly = Square(1000.f);
+	TArray<FWallCorner> Corners;
+	ComputeWallCorners(Poly, 10.f, Corners);
+
+	// Without a door the corner is mitred and there is no cap: 4 edges x 16 vertices.
+	{
+		FShadedMesh Mesh;
+		AppendWallEdges(Mesh, FullHeightEdges(Poly, true, 300.f), Corners, 10.f, true);
+		TestEqual(TEXT("no door: one continuous ring, no cap"), Mesh.Vertices.Num(), 4 * 16);
+	}
+
+	// A door of 90 at the start of the second edge: the doorway is open up to 240, the lintel above it.
+	TArray<FWallEdge> Edges = FullHeightEdges(Poly, true, 300.f);
+	Edges[1].Pieces.Reset();
+	FWallPiece Wall; Wall.T0 = 90.f; Wall.T1 = 1000.f; Wall.Z0 = 0.f; Wall.Z1 = 300.f;
+	FWallPiece Lintel; Lintel.T0 = 0.f; Lintel.T1 = 90.f; Lintel.Z0 = 240.f; Lintel.Z1 = 300.f;
+	Edges[1].Pieces.Add(Wall);
+	Edges[1].Pieces.Add(Lintel);
+
+	FShadedMesh Mesh;
+	AppendWallEdges(Mesh, Edges, Corners, 10.f, true);
+	bool bCapAtCorner = false;
+	for (int32 i = 0; i < Mesh.Vertices.Num(); ++i)
+	{
+		// The first edge's end cap faces along the edge (+X), at the corner x = 1000, and reaches the ground.
+		bCapAtCorner |= Mesh.Normals[i].X > 0.99f && FMath::IsNearlyEqual(Mesh.Vertices[i].X, 1000.f, 0.05f) && FMath::IsNearlyZero(Mesh.Vertices[i].Z, 0.05f);
+	}
+	TestTrue(TEXT("the wall before a door at the corner ends with a cap"), bCapAtCorner);
+	TestTrue(TEXT("it ends square, 10 either side of the edge's own line"), HasVertexAt(Mesh.Vertices, FVector(1000, 10, 0)) && HasVertexAt(Mesh.Vertices, FVector(1000, -10, 0)));
+	TestTrue(TEXT("every face points the way its normals say"), FacesAgreeWithNormals(Mesh.Vertices, Mesh.Triangles, Mesh.Normals));
+	return true;
+}
+
+// A wall that turns straight back on itself has no mitre: both sides end square and nothing is twisted.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWallUTurnTest, "InNavi.Geometry.WallUTurn", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FWallUTurnTest::RunTest(const FString& Parameters)
+{
+	using namespace SmoothGeometryTests;
+	const TArray<FVector2D> Poly = { FVector2D(0, 0), FVector2D(1000, 0) };
+	TArray<FWallCorner> Corners;
+	ComputeWallCorners(Poly, 10.f, Corners);
+	TestFalse(TEXT("a U-turn cannot be joined"), Corners[0].bJoin || Corners[1].bJoin);
+
+	FShadedMesh Mesh;
+	AppendWallEdges(Mesh, FullHeightEdges(Poly, true, 300.f), Corners, 10.f, true);
+	bool bWithin = true;
+	for (const FVector& Vertex : Mesh.Vertices)
+	{
+		bWithin &= FMath::Abs(Vertex.Y) <= 10.05f && Vertex.X >= -0.05f && Vertex.X <= 1000.05f;
+	}
+	TestTrue(TEXT("both pieces stay within the wall's own thickness and length"), bWithin);
+	TestTrue(TEXT("every face points the way its normals say"), FacesAgreeWithNormals(Mesh.Vertices, Mesh.Triangles, Mesh.Normals));
+	return true;
+}
+
+// A free-standing wall is a chain: it does not wrap round, so a repeated first point cannot make its end mitre against the far end.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FWallOpenChainTest, "InNavi.Geometry.WallOpenChain", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FWallOpenChainTest::RunTest(const FString& Parameters)
+{
+	using namespace SmoothGeometryTests;
+	const TArray<FVector2D> Chain = { FVector2D(0, 0), FVector2D(0, 0), FVector2D(1000, 0), FVector2D(1000, 1000) };
+	TArray<FWallCorner> Corners;
+	ComputeWallCorners(Chain, 10.f, Corners, 40.f, 1500.f, 2.f, /*bClosed=*/false);
+	TestFalse(TEXT("the first vertex of a chain has nothing to join"), Corners[0].bJoin || Corners[1].bJoin);
+	TestFalse(TEXT("nor has the last"), Corners[3].bJoin);
+	TestTrue(TEXT("the corner between the two walls is joined"), Corners[2].bJoin);
+
+	FShadedMesh Mesh;
+	AppendWallEdges(Mesh, FullHeightEdges(Chain, false, 300.f), Corners, 10.f, false);
+	// The first wall runs along x from 0 to 1000 with square ends: nothing may poke out at its start.
+	bool bSquareStart = true;
+	for (const FVector& Vertex : Mesh.Vertices)
+	{
+		bSquareStart &= Vertex.X >= -0.05f;
+	}
+	TestTrue(TEXT("the start of the chain is square, not mitred against the far end"), bSquareStart);
+	TestEqual(TEXT("two walls: 16 each, a cap at each of the two free ends"), Mesh.Vertices.Num(), 2 * 16 + 2 * 4);
+	TestTrue(TEXT("every face points the way its normals say"), FacesAgreeWithNormals(Mesh.Vertices, Mesh.Triangles, Mesh.Normals));
 	return true;
 }
 

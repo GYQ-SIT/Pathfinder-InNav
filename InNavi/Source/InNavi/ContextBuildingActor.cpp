@@ -33,14 +33,18 @@ void AContextBuildingActor::BuildFromFootprint(const TArray<FVector2D>& Footprin
 
 	FShadedMesh Mesh;
 	const int32 NumPoints = Footprint.Num();
+	TArray<FWallEdge> Edges;
+	Edges.SetNum(NumPoints);
 	for (int32 Index = 0; Index < NumPoints; ++Index)
 	{
-		const int32 Next = (Index + 1) % NumPoints;
-		AppendWallSpan(Mesh,
-			MakeCornerWallEnd(Footprint[Index], Corners[Index], /*bStart=*/true),
-			MakeCornerWallEnd(Footprint[Next], Corners[Next], /*bStart=*/false),
-			0.f, HeightWorldUnits);
+		FWallPiece Piece;
+		Piece.T1 = FVector2D::Distance(Footprint[Index], Footprint[(Index + 1) % NumPoints]);
+		Piece.Z1 = HeightWorldUnits;
+		Edges[Index].A = Footprint[Index];
+		Edges[Index].B = Footprint[(Index + 1) % NumPoints];
+		Edges[Index].Pieces.Add(Piece);
 	}
+	AppendWallEdges(Mesh, Edges, Corners, WallThickness * 0.5f, /*bClosed=*/true);
 
 	// Flat roof cap, so the block doesn't look hollow/open from above.
 	AppendFlatCap(Mesh, Footprint, HeightWorldUnits);

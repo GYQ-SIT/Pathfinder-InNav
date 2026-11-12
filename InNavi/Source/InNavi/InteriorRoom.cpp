@@ -210,25 +210,27 @@ void AInteriorRoom::RebuildMesh()
 	// (ComputeWallCorners), so there is no notch on the outside of a corner and no cap inside the wall, and the normals are set here instead
 	// of being averaged afterwards. A free-standing wall (an open chain) has real ends there, with a cap.
 	TArray<FWallCorner> Corners;
-	ComputeWallCorners(Poly2D, HalfThickness, Corners);
-	FShadedMesh Mesh;
+	ComputeWallCorners(Poly2D, HalfThickness, Corners, /*SmoothBelowDegrees=*/40.f, /*SmoothMaxEdge=*/1500.f, /*MaxMiter=*/2.f, CachedClosedLoop);
 
 	// Closed (room): N points -> N edges, wrapping back to point 0. Open (standalone wall): N
 	// points -> N-1 edges, no closing edge.
 	const int32 NumEdges = CachedClosedLoop ? N : N - 1;
+
+	// The pieces of wall on every edge first, so that where two edges meet it is known whether the wall of both reaches the corner (a door
+	// beside a corner leaves one of them without wall there, and that end must be capped, not mitred).
+	TArray<FWallEdge> Edges;
+	Edges.SetNum(NumEdges);
 	for (int32 EdgeIndex = 0; EdgeIndex < NumEdges; EdgeIndex++)
 	{
-		const FVector2D& A2D = Poly2D[EdgeIndex];
-		const FVector2D& B2D = Poly2D[(EdgeIndex + 1) % N];
+		FWallEdge& Edge = Edges[EdgeIndex];
+		Edge.A = Poly2D[EdgeIndex];
+		Edge.B = Poly2D[(EdgeIndex + 1) % N];
 
-		const float EdgeLength = (B2D - A2D).Size();
+		const float EdgeLength = (Edge.B - Edge.A).Size();
 		if (EdgeLength <= KINDA_SMALL_NUMBER)
 		{
 			continue;
 		}
-
-		const FVector2D Dir = (B2D - A2D) / EdgeLength;
-		const FVector2D Perp(-Dir.Y, Dir.X);
 
 		TArray<const FInteriorOpening*> EdgeOpenings;
 		for (const FInteriorOpening& Opening : CachedOpenings)
@@ -242,24 +244,19 @@ void AInteriorRoom::RebuildMesh()
 
 		TArray<FWallSpan> Spans;
 		BuildWallSpansForEdge(EdgeLength, CachedWallHeight, EdgeOpenings, Spans);
-
-		// A span that reaches a vertex where the wall carries on joins the corner there; one that ends inside the edge (beside a door or
-		// window) or at the end of a free-standing wall ends square, with a cap.
-		const bool bStartJoins = CachedClosedLoop || EdgeIndex > 0;
-		const bool bEndJoins = CachedClosedLoop || EdgeIndex < NumEdges - 1;
-		const int32 NextIndex = (EdgeIndex + 1) % N;
-
 		for (const FWallSpan& Span : Spans)
 		{
-			const bool bFromVertex = bStartJoins && Span.XStart <= KINDA_SMALL_NUMBER;
-			const bool bToVertex = bEndJoins && Span.XEnd >= EdgeLength - KINDA_SMALL_NUMBER;
-			const FWallEnd Start = bFromVertex ? MakeCornerWallEnd(A2D, Corners[EdgeIndex], /*bStart=*/true)
-				: MakePlainWallEnd(A2D + Dir * Span.XStart, Perp, HalfThickness);
-			const FWallEnd End = bToVertex ? MakeCornerWallEnd(B2D, Corners[NextIndex], /*bStart=*/false)
-				: MakePlainWallEnd(A2D + Dir * Span.XEnd, Perp, HalfThickness);
-			AppendWallSpan(Mesh, Start, End, CachedFloorBaseZ + Span.ZBottom, CachedFloorBaseZ + Span.ZTop);
+			FWallPiece Piece;
+			Piece.T0 = Span.XStart;
+			Piece.T1 = Span.XEnd;
+			Piece.Z0 = CachedFloorBaseZ + Span.ZBottom;
+			Piece.Z1 = CachedFloorBaseZ + Span.ZTop;
+			Edge.Pieces.Add(Piece);
 		}
 	}
+
+	FShadedMesh Mesh;
+	AppendWallEdges(Mesh, Edges, Corners, HalfThickness, CachedClosedLoop);
 
 	TArray<FProcMeshTangent> Tangents;
 	TArray<FColor> VertexColors;
