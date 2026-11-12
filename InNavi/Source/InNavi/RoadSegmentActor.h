@@ -25,9 +25,10 @@ enum class ERoadCategory : uint8
 	Other
 };
 
-// Placeholder 3D geometry for one road read from ABuildingGenerator::LoadRoadsAndPOIsFromDatabase -
-// a flat ribbon strip following the road's own ordered points, same "world-space vertices baked
-// directly into the mesh, spawned at the origin" convention as AInteriorConnectorMarker/AInteriorRoom.
+// Flat geometry for one road read from ABuildingGenerator::LoadRoadsAndPOIsFromDatabase -
+// a ribbon with no thickness following the road's own ordered points (bends rounded, no shadow), same
+// "world-space vertices baked directly into the mesh, spawned at the origin" convention as
+// AInteriorConnectorMarker/AInteriorRoom.
 UCLASS()
 class INNAVI_API ARoadSegmentActor : public AActor
 {

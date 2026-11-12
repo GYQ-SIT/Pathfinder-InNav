@@ -23,68 +23,36 @@ void AContextBuildingActor::BuildFromFootprint(const TArray<FVector2D>& Footprin
 		return;
 	}
 
-	TArray<FVector> Vertices;
-	TArray<int32> Triangles;
-
-	// Walls - one thin box per edge (not a flat single-sided quad), same reasoning as
-	// ARoadSegmentActor::BuildRoad: a flat quad backface-culls invisible from whichever side a
+	// Walls: one continuous ring (see ComputeWallCorners and AppendWallSpan), not one thin box per edge - the boxes left a notch at every
+	// corner and were each shaded a little differently, so a curved front read as a row of pieces. The ring is a real thick wall, not a flat
+	// single-sided quad, for the same reason as ARoadSegmentActor used to give: a flat quad backface-culls invisible from whichever side a
 	// free-fly camera ends up on.
 	constexpr float WallThickness = 20.f;
+	TArray<FWallCorner> Corners;
+	ComputeWallCorners(Footprint, WallThickness * 0.5f, Corners);
+
+	FShadedMesh Mesh;
 	const int32 NumPoints = Footprint.Num();
 	for (int32 Index = 0; Index < NumPoints; ++Index)
 	{
-		const FVector2D& A = Footprint[Index];
-		const FVector2D& B = Footprint[(Index + 1) % NumPoints];
-		const float SegmentLength = (B - A).Size();
-		if (SegmentLength <= KINDA_SMALL_NUMBER)
-		{
-			continue;
-		}
-
-		const FVector2D Dir = (B - A) / SegmentLength;
-		const FVector2D Perp(-Dir.Y, Dir.X);
-		const FVector2D Inner0 = A - Perp * (WallThickness * 0.5f);
-		const FVector2D Inner1 = B - Perp * (WallThickness * 0.5f);
-		const FVector2D Outer0 = A + Perp * (WallThickness * 0.5f);
-		const FVector2D Outer1 = B + Perp * (WallThickness * 0.5f);
-
-		AppendWallBox(Vertices, Triangles,
-			FVector(Inner0.X, Inner0.Y, 0.f), FVector(Inner1.X, Inner1.Y, 0.f),
-			FVector(Outer0.X, Outer0.Y, 0.f), FVector(Outer1.X, Outer1.Y, 0.f),
-			FVector(Inner0.X, Inner0.Y, HeightWorldUnits), FVector(Inner1.X, Inner1.Y, HeightWorldUnits),
-			FVector(Outer0.X, Outer0.Y, HeightWorldUnits), FVector(Outer1.X, Outer1.Y, HeightWorldUnits));
+		const int32 Next = (Index + 1) % NumPoints;
+		AppendWallSpan(Mesh,
+			MakeCornerWallEnd(Footprint[Index], Corners[Index], /*bStart=*/true),
+			MakeCornerWallEnd(Footprint[Next], Corners[Next], /*bStart=*/false),
+			0.f, HeightWorldUnits);
 	}
 
 	// Flat roof cap, so the block doesn't look hollow/open from above.
-	TArray<int32> CapTriangles;
-	TriangulatePolygon(Footprint, CapTriangles);
-	const int32 CapVertexStart = Vertices.Num();
-	for (const FVector2D& Point : Footprint)
-	{
-		Vertices.Add(FVector(Point.X, Point.Y, HeightWorldUnits));
-	}
-	// CapTriangles is CCW (faces up); swap the last two indices per triangle to keep that up-facing
-	// winding once remapped into this mesh's own vertex buffer - same convention as
-	// APolyBuilding::BuildCapSection.
-	for (int32 Index = 0; Index < CapTriangles.Num(); Index += 3)
-	{
-		Triangles.Add(CapVertexStart + CapTriangles[Index]);
-		Triangles.Add(CapVertexStart + CapTriangles[Index + 2]);
-		Triangles.Add(CapVertexStart + CapTriangles[Index + 1]);
-	}
+	AppendFlatCap(Mesh, Footprint, HeightWorldUnits);
 
-	if (Triangles.Num() == 0)
+	if (Mesh.Triangles.Num() == 0)
 	{
 		return;
 	}
 
-	TArray<FVector> Normals;
-	TArray<FVector2D> UV0;
 	TArray<FProcMeshTangent> Tangents;
-	UKismetProceduralMeshLibrary::CalculateTangentsForMesh(Vertices, Triangles, UV0, Normals, Tangents);
-
 	TArray<FColor> VertexColors;
-	MeshComp->CreateMeshSection(0, Vertices, Triangles, Normals, UV0, VertexColors, Tangents, true);
+	MeshComp->CreateMeshSection(0, Mesh.Vertices, Mesh.Triangles, Mesh.Normals, Mesh.UV0, VertexColors, Tangents, true);
 
 	UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(
 		nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));

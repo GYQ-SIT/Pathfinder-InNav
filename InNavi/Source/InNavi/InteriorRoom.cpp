@@ -204,9 +204,14 @@ void AInteriorRoom::RebuildMesh()
 		Poly2D[i] = FVector2D((CachedFootprint[i].X + CachedOffset.X) * CachedScale, (CachedFootprint[i].Y + CachedOffset.Y) * CachedScale);
 	}
 
-	TArray<FVector> Vertices;
-	TArray<int32> Triangles;
 	const float HalfThickness = CachedWallThickness * 0.5f;
+
+	// The walls of a room are one continuous wall, not one box per edge: the spans of two edges meet at a mitred corner point
+	// (ComputeWallCorners), so there is no notch on the outside of a corner and no cap inside the wall, and the normals are set here instead
+	// of being averaged afterwards. A free-standing wall (an open chain) has real ends there, with a cap.
+	TArray<FWallCorner> Corners;
+	ComputeWallCorners(Poly2D, HalfThickness, Corners);
+	FShadedMesh Mesh;
 
 	// Closed (room): N points -> N edges, wrapping back to point 0. Open (standalone wall): N
 	// points -> N-1 edges, no closing edge.
@@ -238,45 +243,39 @@ void AInteriorRoom::RebuildMesh()
 		TArray<FWallSpan> Spans;
 		BuildWallSpansForEdge(EdgeLength, CachedWallHeight, EdgeOpenings, Spans);
 
+		// A span that reaches a vertex where the wall carries on joins the corner there; one that ends inside the edge (beside a door or
+		// window) or at the end of a free-standing wall ends square, with a cap.
+		const bool bStartJoins = CachedClosedLoop || EdgeIndex > 0;
+		const bool bEndJoins = CachedClosedLoop || EdgeIndex < NumEdges - 1;
+		const int32 NextIndex = (EdgeIndex + 1) % N;
+
 		for (const FWallSpan& Span : Spans)
 		{
-			const FVector2D Inner0 = A2D + Dir * Span.XStart - Perp * HalfThickness;
-			const FVector2D Inner1 = A2D + Dir * Span.XEnd   - Perp * HalfThickness;
-			const FVector2D Outer0 = A2D + Dir * Span.XStart + Perp * HalfThickness;
-			const FVector2D Outer1 = A2D + Dir * Span.XEnd   + Perp * HalfThickness;
-
-			const float ZBottom = CachedFloorBaseZ + Span.ZBottom;
-			const float ZTop = CachedFloorBaseZ + Span.ZTop;
-
-			AppendWallBox(Vertices, Triangles,
-				FVector(Inner0.X, Inner0.Y, ZBottom), FVector(Inner1.X, Inner1.Y, ZBottom),
-				FVector(Outer0.X, Outer0.Y, ZBottom), FVector(Outer1.X, Outer1.Y, ZBottom),
-				FVector(Inner0.X, Inner0.Y, ZTop),    FVector(Inner1.X, Inner1.Y, ZTop),
-				FVector(Outer0.X, Outer0.Y, ZTop),    FVector(Outer1.X, Outer1.Y, ZTop));
+			const bool bFromVertex = bStartJoins && Span.XStart <= KINDA_SMALL_NUMBER;
+			const bool bToVertex = bEndJoins && Span.XEnd >= EdgeLength - KINDA_SMALL_NUMBER;
+			const FWallEnd Start = bFromVertex ? MakeCornerWallEnd(A2D, Corners[EdgeIndex], /*bStart=*/true)
+				: MakePlainWallEnd(A2D + Dir * Span.XStart, Perp, HalfThickness);
+			const FWallEnd End = bToVertex ? MakeCornerWallEnd(B2D, Corners[NextIndex], /*bStart=*/false)
+				: MakePlainWallEnd(A2D + Dir * Span.XEnd, Perp, HalfThickness);
+			AppendWallSpan(Mesh, Start, End, CachedFloorBaseZ + Span.ZBottom, CachedFloorBaseZ + Span.ZTop);
 		}
 	}
 
-	TArray<FVector> Normals;
-	TArray<FVector2D> UV0;
 	TArray<FProcMeshTangent> Tangents;
-	UKismetProceduralMeshLibrary::CalculateTangentsForMesh(Vertices, Triangles, UV0, Normals, Tangents);
-
 	TArray<FColor> VertexColors;
-	MeshComp->CreateMeshSection(0, Vertices, Triangles, Normals, UV0, VertexColors, Tangents, true);
+	MeshComp->CreateMeshSection(0, Mesh.Vertices, Mesh.Triangles, Mesh.Normals, Mesh.UV0, VertexColors, Tangents, true);
 
 	if (!DynMaterial)
 	{
+		// An opaque material, like the floor's. The walls used M_BuildingTransparent at full opacity, but that material is translucent:
+		// it writes no depth, so the faces of the walls were painted in the order they sit in the mesh, and from above a nearer wall could
+		// be covered by a farther one - the wall looked hollow. The walls never fade (their opacity was always 1), so nothing is lost.
 		UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(
-			nullptr,
-			TEXT("/Game/ImageAssets/Materials/M_BuildingTransparent.M_BuildingTransparent")
-		);
+			nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
 
 		if (BaseMat)
 		{
 			DynMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
-
-			// Make interior walls fully visible
-			DynMaterial->SetScalarParameterValue(TEXT("Opacity"), 1.0f);
 
 			// Use a neutral light grey wall color
 			DynMaterial->SetVectorParameterValue(
@@ -355,7 +354,7 @@ void AInteriorRoom::RebuildMesh()
 		MeshComp->ClearMeshSection(1);
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("Built room %s: %d edges, %d verts"), *RoomId, N, Vertices.Num());
+	UE_LOG(LogTemp, Warning, TEXT("Built room %s: %d edges, %d verts"), *RoomId, N, Mesh.Vertices.Num());
 }
 
 FLinearColor AInteriorRoom::FloorColour() const

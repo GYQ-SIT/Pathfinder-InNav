@@ -122,3 +122,349 @@ void AppendWallBox(TArray<FVector>& Vertices, TArray<int32>& Triangles,
 	AddQuad(P000, P010, P110, P100); // bottom
 	AddQuad(P001, P101, P111, P011); // top
 }
+
+// ---- Smooth walls and flat roads (see the comment in the header) --------------------------------------------------------------------
+
+namespace
+{
+	// Adds the triangle A, B, C turned so the engine reads its face as pointing along Want. The engine takes the facing of a triangle as
+	// (P1 - P2) x (P0 - P2) (UKismetProceduralMeshLibrary::CalculateTangentsForMesh does the same), so the order is decided here by that
+	// rule instead of by hand: a face whose order is wrong is drawn inside out, which also turns its lighting the wrong way round.
+	void AddFacingTriangle(FShadedMesh& Mesh, int32 A, int32 B, int32 C, const FVector& Want)
+	{
+		const FVector& P0 = Mesh.Vertices[A];
+		const FVector& P1 = Mesh.Vertices[B];
+		const FVector& P2 = Mesh.Vertices[C];
+		const FVector Facing = (P1 - P2) ^ (P0 - P2);
+		if (FVector::DotProduct(Facing, Want) >= 0.f)
+		{
+			Mesh.AddTriangle(A, B, C);
+		}
+		else
+		{
+			Mesh.AddTriangle(A, C, B);
+		}
+	}
+
+	// One quad of four corners in order round it, each with its own normal; its facing is the sum of those normals.
+	void AddFacingQuad(FShadedMesh& Mesh, const FVector& P0, const FVector& P1, const FVector& P2, const FVector& P3,
+		const FVector& N0, const FVector& N1, const FVector& N2, const FVector& N3)
+	{
+		const int32 A = Mesh.AddVertex(P0, N0);
+		const int32 B = Mesh.AddVertex(P1, N1);
+		const int32 C = Mesh.AddVertex(P2, N2);
+		const int32 D = Mesh.AddVertex(P3, N3);
+		const FVector Want = N0 + N1 + N2 + N3;
+		AddFacingTriangle(Mesh, A, B, C, Want);
+		AddFacingTriangle(Mesh, A, C, D, Want);
+	}
+
+	FVector ToVector3(const FVector2D& V, float Z) { return FVector(V.X, V.Y, Z); }
+
+	FVector2D PerpendicularOf(const FVector2D& Dir) { return FVector2D(-Dir.Y, Dir.X); }
+
+	// The nearest vertex before (Step = -1) or after (Step = +1) Index that is not at the same place, or INDEX_NONE.
+	int32 NeighbourVertex(const TArray<FVector2D>& Poly, int32 Index, int32 Step)
+	{
+		const int32 N = Poly.Num();
+		for (int32 Taken = 1; Taken < N; ++Taken)
+		{
+			const int32 Candidate = ((Index + Step * Taken) % N + N) % N;
+			if (FVector2D::DistSquared(Poly[Candidate], Poly[Index]) > KINDA_SMALL_NUMBER)
+			{
+				return Candidate;
+			}
+		}
+		return INDEX_NONE;
+	}
+}
+
+void ComputeWallCorners(const TArray<FVector2D>& Poly, float HalfThickness, TArray<FWallCorner>& OutCorners,
+	float SmoothBelowDegrees, float SmoothMaxEdge, float MaxMiter)
+{
+	const int32 N = Poly.Num();
+	OutCorners.Reset();
+	OutCorners.SetNum(N);
+
+	for (int32 i = 0; i < N; ++i)
+	{
+		const int32 Before = NeighbourVertex(Poly, i, -1);
+		const int32 After = NeighbourVertex(Poly, i, +1);
+		if (Before == INDEX_NONE || After == INDEX_NONE)
+		{
+			continue;
+		}
+
+		const FVector2D In = Poly[i] - Poly[Before];
+		const FVector2D Out = Poly[After] - Poly[i];
+		const float InLength = In.Size();
+		const float OutLength = Out.Size();
+		const FVector2D N0 = PerpendicularOf(In / InLength);
+		const FVector2D N1 = PerpendicularOf(Out / OutLength);
+
+		FWallCorner& Corner = OutCorners[i];
+		const FVector2D Sum = N0 + N1;
+		if (Sum.SizeSquared() < 1.e-6f)
+		{
+			// The wall turns straight back on itself: no mitre exists, give each side its own square end.
+			Corner.Offset = N1 * HalfThickness;
+			Corner.PrevNormal = N0;
+			Corner.NextNormal = N1;
+			continue;
+		}
+
+		const FVector2D Mitre = Sum.GetSafeNormal();
+		const float CosHalfTurn = FMath::Max(FVector2D::DotProduct(Mitre, N0), 1.f / FMath::Max(MaxMiter, 1.f));
+		Corner.Offset = Mitre * (HalfThickness / CosHalfTurn);
+
+		const float TurnDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector2D::DotProduct(N0, N1), -1.f, 1.f)));
+		const bool bSmooth = TurnDegrees < SmoothBelowDegrees && InLength <= SmoothMaxEdge && OutLength <= SmoothMaxEdge;
+		Corner.PrevNormal = bSmooth ? Mitre : N0;
+		Corner.NextNormal = bSmooth ? Mitre : N1;
+	}
+}
+
+FWallEnd MakePlainWallEnd(const FVector2D& Center, const FVector2D& Perp, float HalfThickness)
+{
+	FWallEnd End;
+	End.Center = Center;
+	End.Offset = Perp * HalfThickness;
+	End.Normal = Perp;
+	End.bCap = true;
+	return End;
+}
+
+FWallEnd MakeCornerWallEnd(const FVector2D& Vertex, const FWallCorner& Corner, bool bStart)
+{
+	FWallEnd End;
+	End.Center = Vertex;
+	End.Offset = Corner.Offset;
+	End.Normal = bStart ? Corner.NextNormal : Corner.PrevNormal;
+	End.bCap = false;
+	return End;
+}
+
+void AppendWallSpan(FShadedMesh& Mesh, const FWallEnd& Start, const FWallEnd& End, float Z0, float Z1)
+{
+	if (Z1 - Z0 <= KINDA_SMALL_NUMBER || FVector2D::DistSquared(Start.Center, End.Center) <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	const FVector2D Dir = (End.Center - Start.Center).GetSafeNormal();
+	const FVector2D SP = Start.Center + Start.Offset; // plus side
+	const FVector2D SM = Start.Center - Start.Offset; // minus side
+	const FVector2D EP = End.Center + End.Offset;
+	const FVector2D EM = End.Center - End.Offset;
+	const FVector NS = ToVector3(Start.Normal, 0.f);
+	const FVector NE = ToVector3(End.Normal, 0.f);
+	const FVector Up(0.f, 0.f, 1.f);
+
+	// The two long faces. Their normals are the ones the caller chose, so a curved front can be blended and a straight one stay flat.
+	AddFacingQuad(Mesh, ToVector3(SP, Z0), ToVector3(EP, Z0), ToVector3(EP, Z1), ToVector3(SP, Z1), NS, NE, NE, NS);
+	AddFacingQuad(Mesh, ToVector3(SM, Z0), ToVector3(EM, Z0), ToVector3(EM, Z1), ToVector3(SM, Z1), -NS, -NE, -NE, -NS);
+
+	// Top and bottom.
+	AddFacingQuad(Mesh, ToVector3(SM, Z1), ToVector3(EM, Z1), ToVector3(EP, Z1), ToVector3(SP, Z1), Up, Up, Up, Up);
+	AddFacingQuad(Mesh, ToVector3(SM, Z0), ToVector3(EM, Z0), ToVector3(EP, Z0), ToVector3(SP, Z0), -Up, -Up, -Up, -Up);
+
+	// A cap only where the wall really ends: a door gap, a jamb. A corner has none, the next span carries on from the same points.
+	if (Start.bCap)
+	{
+		const FVector N = ToVector3(-Dir, 0.f);
+		AddFacingQuad(Mesh, ToVector3(SM, Z0), ToVector3(SP, Z0), ToVector3(SP, Z1), ToVector3(SM, Z1), N, N, N, N);
+	}
+	if (End.bCap)
+	{
+		const FVector N = ToVector3(Dir, 0.f);
+		AddFacingQuad(Mesh, ToVector3(EM, Z0), ToVector3(EP, Z0), ToVector3(EP, Z1), ToVector3(EM, Z1), N, N, N, N);
+	}
+}
+
+void AppendFlatCap(FShadedMesh& Mesh, const TArray<FVector2D>& Poly, float Z)
+{
+	if (Poly.Num() < 3)
+	{
+		return;
+	}
+
+	TArray<int32> Triangles;
+	TriangulatePolygon(Poly, Triangles);
+
+	const FVector Up(0.f, 0.f, 1.f);
+	const int32 First = Mesh.Vertices.Num();
+	for (const FVector2D& Point : Poly)
+	{
+		Mesh.AddVertex(ToVector3(Point, Z), Up);
+	}
+	for (int32 i = 0; i + 2 < Triangles.Num(); i += 3)
+	{
+		AddFacingTriangle(Mesh, First + Triangles[i], First + Triangles[i + 1], First + Triangles[i + 2], Up);
+	}
+}
+
+void SmoothPolyline(const TArray<FVector2D>& Points, float MaxCut, TArray<FVector2D>& OutPoints, float MinTurnDegrees)
+{
+	OutPoints.Reset();
+
+	// Points that sit on top of each other make a bend of no direction; leave them out.
+	TArray<FVector2D> Clean;
+	for (const FVector2D& Point : Points)
+	{
+		if (Clean.IsEmpty() || FVector2D::DistSquared(Clean.Last(), Point) > 0.01f)
+		{
+			Clean.Add(Point);
+		}
+	}
+	const bool bClosed = Clean.Num() >= 4 && FVector2D::DistSquared(Clean[0], Clean.Last()) <= 0.01f;
+	if (bClosed)
+	{
+		Clean.Pop();
+	}
+	const int32 N = Clean.Num();
+	if (N < 3 || MaxCut <= KINDA_SMALL_NUMBER)
+	{
+		OutPoints = Points;
+		return;
+	}
+
+	auto RoundBend = [&](const FVector2D& Before, const FVector2D& Bend, const FVector2D& After)
+	{
+		const FVector2D In = Bend - Before;
+		const FVector2D Out = After - Bend;
+		const float InLength = In.Size();
+		const float OutLength = Out.Size();
+		if (InLength <= KINDA_SMALL_NUMBER || OutLength <= KINDA_SMALL_NUMBER)
+		{
+			OutPoints.Add(Bend);
+			return;
+		}
+		const FVector2D InDir = In / InLength;
+		const FVector2D OutDir = Out / OutLength;
+		const float TurnDegrees = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector2D::DotProduct(InDir, OutDir), -1.f, 1.f)));
+		if (TurnDegrees < MinTurnDegrees)
+		{
+			OutPoints.Add(Bend);
+			return;
+		}
+
+		// An arc that starts Cut before the bend and ends Cut after it: a quadratic curve with the bend as its control point.
+		const float Cut = FMath::Min3(MaxCut, InLength * 0.5f, OutLength * 0.5f);
+		const FVector2D From = Bend - InDir * Cut;
+		const FVector2D To = Bend + OutDir * Cut;
+		const int32 Steps = FMath::Clamp(FMath::CeilToInt(TurnDegrees / 15.f), 2, 8);
+		for (int32 Step = 0; Step <= Steps; ++Step)
+		{
+			const float T = static_cast<float>(Step) / Steps;
+			const float U = 1.f - T;
+			OutPoints.Add(From * (U * U) + Bend * (2.f * U * T) + To * (T * T));
+		}
+	};
+
+	if (bClosed)
+	{
+		for (int32 i = 0; i < N; ++i)
+		{
+			RoundBend(Clean[(i + N - 1) % N], Clean[i], Clean[(i + 1) % N]);
+		}
+		const FVector2D LoopStart = OutPoints[0]; // a copy: adding an element of the array to itself may move it
+		OutPoints.Add(LoopStart);
+		return;
+	}
+
+	OutPoints.Add(Clean[0]);
+	for (int32 i = 1; i < N - 1; ++i)
+	{
+		RoundBend(Clean[i - 1], Clean[i], Clean[i + 1]);
+	}
+	OutPoints.Add(Clean.Last());
+}
+
+void AppendFlatRibbon(FShadedMesh& Mesh, const TArray<FVector2D>& Points, float HalfWidth, float Z, bool bTwoSided, bool bRoundEnds)
+{
+	TArray<FVector2D> Line;
+	for (const FVector2D& Point : Points)
+	{
+		if (Line.IsEmpty() || FVector2D::DistSquared(Line.Last(), Point) > 0.01f)
+		{
+			Line.Add(Point);
+		}
+	}
+	const bool bClosed = Line.Num() >= 4 && FVector2D::DistSquared(Line[0], Line.Last()) <= 0.01f;
+	if (bClosed)
+	{
+		Line.Pop();
+	}
+	const int32 N = Line.Num();
+	if (N < 2 || HalfWidth <= KINDA_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	const FVector Up(0.f, 0.f, 1.f);
+
+	// The two corners of the ribbon at every point: where the edges of the two pieces meeting there cross (the mitre).
+	TArray<FVector2D> Offsets;
+	Offsets.SetNum(N);
+	auto DirectionBetween = [&Line](int32 From, int32 To) { return (Line[To] - Line[From]).GetSafeNormal(); };
+	for (int32 i = 0; i < N; ++i)
+	{
+		const bool bHasBefore = bClosed || i > 0;
+		const bool bHasAfter = bClosed || i < N - 1;
+		const FVector2D PerpIn = bHasBefore ? PerpendicularOf(DirectionBetween((i + N - 1) % N, i)) : FVector2D::ZeroVector;
+		const FVector2D PerpOut = bHasAfter ? PerpendicularOf(DirectionBetween(i, (i + 1) % N)) : FVector2D::ZeroVector;
+		const FVector2D Sum = PerpIn + PerpOut;
+		if (!bHasBefore || !bHasAfter || Sum.SizeSquared() < 1.e-6f)
+		{
+			Offsets[i] = (bHasAfter ? PerpOut : PerpIn) * HalfWidth;
+		}
+		else
+		{
+			const FVector2D Mitre = Sum.GetSafeNormal();
+			Offsets[i] = Mitre * (HalfWidth / FMath::Max(FVector2D::DotProduct(Mitre, PerpIn), 0.5f));
+		}
+	}
+
+	// One copy of the ribbon faces up; a second faces down when it should be seen from below as well.
+	for (int32 Side = 0; Side < (bTwoSided ? 2 : 1); ++Side)
+	{
+		const FVector Normal = Side == 0 ? Up : -Up;
+		const int32 First = Mesh.Vertices.Num();
+		for (int32 i = 0; i < N; ++i)
+		{
+			Mesh.AddVertex(ToVector3(Line[i] + Offsets[i], Z), Normal);
+			Mesh.AddVertex(ToVector3(Line[i] - Offsets[i], Z), Normal);
+		}
+		const int32 Pieces = bClosed ? N : N - 1;
+		for (int32 i = 0; i < Pieces; ++i)
+		{
+			const int32 j = (i + 1) % N;
+			AddFacingTriangle(Mesh, First + 2 * i, First + 2 * i + 1, First + 2 * j + 1, Normal);
+			AddFacingTriangle(Mesh, First + 2 * i, First + 2 * j + 1, First + 2 * j, Normal);
+		}
+
+		if (bRoundEnds && !bClosed)
+		{
+			constexpr int32 DiscSteps = 6;
+			for (int32 End = 0; End < 2; ++End)
+			{
+				const int32 Point = End == 0 ? 0 : N - 1;
+				const FVector2D AlongRoad = End == 0 ? -DirectionBetween(0, 1) : DirectionBetween(N - 2, N - 1);
+				const FVector2D Across = Offsets[Point].GetSafeNormal();
+				const int32 Centre = Mesh.AddVertex(ToVector3(Line[Point], Z), Normal);
+				int32 Previous = INDEX_NONE;
+				for (int32 Step = 0; Step <= DiscSteps; ++Step)
+				{
+					const float Angle = UE_PI * Step / DiscSteps;
+					const FVector2D Rim = Line[Point] + (Across * FMath::Cos(Angle) + AlongRoad * FMath::Sin(Angle)) * HalfWidth;
+					const int32 Current = Mesh.AddVertex(ToVector3(Rim, Z), Normal);
+					if (Previous != INDEX_NONE)
+					{
+						AddFacingTriangle(Mesh, Centre, Previous, Current, Normal);
+					}
+					Previous = Current;
+				}
+			}
+		}
+	}
+}

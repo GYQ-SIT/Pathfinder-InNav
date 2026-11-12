@@ -885,7 +885,11 @@ bool ABuildingGenerator::SpawnRoad(const FString& HighwayType, const TArray<FVec
 	{
 		return false;
 	}
-	RoadActor->BuildRoad(WorldPoints, WidthMeters * Scale, /*WorldZ=*/2.f, Color);
+	// Roads are flat and cross each other. Where two lie in the same plane they fight for the same pixels, so each category sits a little
+	// above the one before it: the narrow paths are drawn over the wide roads they cross, never the other way round.
+	const float WorldZ = 2.f + 0.6f * static_cast<float>(Category == ERoadCategory::Primary ? 0 : Category == ERoadCategory::Secondary ? 1
+		: Category == ERoadCategory::Residential ? 2 : Category == ERoadCategory::Other ? 3 : Category == ERoadCategory::Cycleway ? 4 : 5);
+	RoadActor->BuildRoad(WorldPoints, WidthMeters * Scale, WorldZ, Color);
 	RoadActor->SetCategory(Category);
 	SpawnedRoadActors.Add(RoadActor);
 	SceneryRoads.Add({ HighwayType, WorldPoints });

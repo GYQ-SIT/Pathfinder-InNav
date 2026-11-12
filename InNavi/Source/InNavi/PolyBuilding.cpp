@@ -226,12 +226,14 @@ void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBot
 {
 	const int32 N = Poly2D.Num();
 
-	// A real box per edge (AppendWallBox, the same helper AInteriorRoom's own walls use), not a flat
-	// single-sided quad - a flat quad only has a normal facing one way, so the 3D preview camera
-	// (unlike the near-top-down 2D one, or the always-outside exterior-editor camera) would see
-	// straight through it the moment it ends up on the wrong side. ExteriorWallThickness matches
-	// AInteriorRoom's own default wall thickness so the exterior shell and the rooms it contains read
+	// A real thick wall, not a flat single-sided quad - a flat quad only has a normal facing one way, so the 3D preview camera (unlike the
+	// near-top-down 2D one, or the always-outside exterior-editor camera) would see straight through it the moment it ends up on the wrong
+	// side. ExteriorWallThickness matches AInteriorRoom's own default wall thickness so the exterior shell and the rooms it contains read
 	// as the same kind of wall.
+	//
+	// The ring is one continuous wall: the spans of two edges meet at a mitred corner point (ComputeWallCorners), so there is no notch on
+	// the outside of a corner, no cap inside the wall, and the normals are set here (smooth round a gentle bend, crisp at a real corner)
+	// instead of being averaged per box. That is what makes a curved front read as one surface and not as a row of pieces.
 	constexpr float ExteriorWallThickness = 20.f;
 	// The walls of buildings that touch lie in the same planes. A solid building (it writes depth) beside a see-through one (it does not) fights
 	// it for those pixels, which flickers. So while the building is see-through its walls are a little thinner and its top ring a little lower:
@@ -240,8 +242,10 @@ void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBot
 	const float HalfThickness = (bSolidLook ? ExteriorWallThickness : ExteriorWallThickness - 2.f * SeeThroughInset) * 0.5f;
 	const float ZTop = (bSolidLook || Level != FloorCount) ? FullZTop : FullZTop - SeeThroughInset;
 
-	TArray<FVector> Vertices;
-	TArray<int32> Triangles;
+	TArray<FWallCorner> Corners;
+	ComputeWallCorners(Poly2D, HalfThickness, Corners);
+
+	FShadedMesh Mesh;
 
 	for (int32 i = 0; i < N; i++)
 	{
@@ -257,24 +261,21 @@ void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBot
 		const FVector2D Dir = (B2D - A2D) / EdgeLength;
 		const FVector2D Perp(-Dir.Y, Dir.X);
 
-		// The stretch of this edge between two distances along it, between two heights.
+		// The stretch of this edge between two distances along it, between two heights. A stretch that reaches a vertex joins the corner
+		// there; one that ends inside the edge (beside a door) ends square, with a cap.
 		auto AddSegment = [&](float T0, float T1, float Z0, float Z1)
 		{
 			if (T1 - T0 <= KINDA_SMALL_NUMBER || Z1 - Z0 <= KINDA_SMALL_NUMBER)
 			{
 				return;
 			}
-			const FVector2D P0 = A2D + Dir * T0;
-			const FVector2D P1 = A2D + Dir * T1;
-			const FVector2D Inner0 = P0 - Perp * HalfThickness;
-			const FVector2D Inner1 = P1 - Perp * HalfThickness;
-			const FVector2D Outer0 = P0 + Perp * HalfThickness;
-			const FVector2D Outer1 = P1 + Perp * HalfThickness;
-			AppendWallBox(Vertices, Triangles,
-				FVector(Inner0.X, Inner0.Y, Z0), FVector(Inner1.X, Inner1.Y, Z0),
-				FVector(Outer0.X, Outer0.Y, Z0), FVector(Outer1.X, Outer1.Y, Z0),
-				FVector(Inner0.X, Inner0.Y, Z1), FVector(Inner1.X, Inner1.Y, Z1),
-				FVector(Outer0.X, Outer0.Y, Z1), FVector(Outer1.X, Outer1.Y, Z1));
+			const bool bFromVertex = T0 <= KINDA_SMALL_NUMBER;
+			const bool bToVertex = T1 >= EdgeLength - KINDA_SMALL_NUMBER;
+			const FWallEnd Start = bFromVertex ? MakeCornerWallEnd(A2D, Corners[i], /*bStart=*/true)
+				: MakePlainWallEnd(A2D + Dir * T0, Perp, HalfThickness);
+			const FWallEnd End = bToVertex ? MakeCornerWallEnd(B2D, Corners[(i + 1) % N], /*bStart=*/false)
+				: MakePlainWallEnd(A2D + Dir * T1, Perp, HalfThickness);
+			AppendWallSpan(Mesh, Start, End, Z0, Z1);
 		};
 
 		// Where this floor's openings cut this edge. The polygon may run the other way round from the footprint it was made from.
@@ -316,13 +317,9 @@ void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBot
 		AddSegment(Cursor, EdgeLength, ZBottom, ZTop);
 	}
 
-	TArray<FVector> Normals;
-	TArray<FVector2D> UV0;
 	TArray<FProcMeshTangent> Tangents;
-	UKismetProceduralMeshLibrary::CalculateTangentsForMesh(Vertices, Triangles, UV0, Normals, Tangents);
-
 	TArray<FColor> VertexColors;
-	MeshComp->CreateMeshSection(SectionIndex, Vertices, Triangles, Normals, UV0, VertexColors, Tangents, bCreateCollision);
+	MeshComp->CreateMeshSection(SectionIndex, Mesh.Vertices, Mesh.Triangles, Mesh.Normals, Mesh.UV0, VertexColors, Tangents, bCreateCollision);
 	MeshComp->SetMaterial(SectionIndex, WallMaterialNow());
 }
 
