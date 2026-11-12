@@ -11,7 +11,9 @@
 
 ## Checks
 
+- [ ] I read my own diff before opening this PR and can explain every change
 - [ ] CI is green (build, static analysis, tests, lint)
 - [ ] Tests added or changed for what changed
 - [ ] The documents that describe it are changed (`docs/`, `README.md`)
 - [ ] No personal files (my own `buildings.json`, saved layouts, keys) are in it
+- [ ] A reviewer who is not the author is chosen and told (see `docs/pull-request-guide.md`)

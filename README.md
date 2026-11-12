@@ -126,7 +126,7 @@ built and signed separately (`docs/android-signing.md`).
 The backlog is the Jira project **PAT** (<https://digipen-team-pathfinder.atlassian.net/jira/software/projects/PAT/list>): every piece of work is a story under an
 epic with an owner, and the epics of the four technical deliverables are named in `docs/deliverables.md`. So that anyone can follow who did what:
 
-- **Branch** from `main`, named for what it is (`YQ_nav_panel`), and open a **pull request**; the lint and JSON checks have to be green before it is merged, and you run the tests and the static analysis yourself first (the Windows build, analysis and tests run on `main` after the merge).
+- **Branch** from `main`, named for what it is (`YQ_nav_panel`), and open a **pull request** that **someone other than you reviews and approves** (step by step: [`docs/pull-request-guide.md`](docs/pull-request-guide.md)); the lint and JSON checks have to be green before it is merged, and you run the tests and the static analysis yourself first (the Windows build, analysis and tests run on `main` after the merge).
 - **Name the Jira issue** in the pull request (the template asks for it) and start each commit message with its key when there is one: `PAT-123 Short summary`.
 - **One owner per story**; a pull request that closes a story says so, and the story is moved to Done when it is merged.
 - Do not commit personal files (your own `buildings.json` edits, saved layouts); `lint.py` also fails on keys and addresses in the source.
