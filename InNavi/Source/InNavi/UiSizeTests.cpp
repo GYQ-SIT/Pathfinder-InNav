@@ -2,6 +2,8 @@
 
 #include "UiSize.h"
 #include "UiSizeSubsystem.h"
+#include "EditScreenWidget.h"
+#include "InteriorScreenWidget.h"
 #include "Engine/GameInstance.h"
 #include "Engine/UserInterfaceSettings.h"
 #include "Misc/AutomationTest.h"
@@ -46,7 +48,7 @@ bool FUiSizeStepsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiSizeAppliedTest, "InNavi.UiSize.ScalesTheWholeUi", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiSizeAppliedTest, "InNavi.UiSize.ScalesTheEditorScreensOnly", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FUiSizeAppliedTest::RunTest(const FString& Parameters)
 {
 	UUserInterfaceSettings* Settings = GetMutableDefault<UUserInterfaceSettings>();
@@ -58,15 +60,39 @@ bool FUiSizeAppliedTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("150 is one and a half"), UiSize::ToApplicationScale(150), 1.5f, 0.0001f);
 	TestEqual(TEXT("an out-of-range size is brought into range"), UiSize::ToApplicationScale(1000), 2.f, 0.0001f);
 
-	// The subsystem puts the size on top of the curve; no save, so the user's own setting is not touched.
 	UGameInstance* Instance = NewObject<UGameInstance>(GetTransientPackage());
 	UUiSizeSubsystem* Subsystem = NewObject<UUiSizeSubsystem>(Instance);
+	Subsystem->SetSavingEnabledForTests(false);
+	// The two editor screens themselves (their classes are concrete; UUserWidget is abstract). They are only told apart, not built or shown.
+	UEditScreenWidget* ExteriorScreen = NewObject<UEditScreenWidget>(GetTransientPackage());
+	UInteriorScreenWidget* InteriorScreen = NewObject<UInteriorScreenWidget>(GetTransientPackage());
+
+	// The start page and the project pages: no editor screen is on screen, so the size the user chose does not reach them.
 	Subsystem->SetPercent(125, /*bSave=*/false);
+	TestFalse(TEXT("with no editor screen the UI size is not applied"), Subsystem->IsApplied());
+	TestEqual(TEXT("and the UI scale is the curve alone (the start page)"), Settings->GetDPIScaleBasedOnSize(FIntPoint(1920, 1080)), Base, 0.0001f);
+
+	// An editor screen opens: the size reaches the whole UI, at any resolution.
+	Subsystem->EditorScreenOpened(ExteriorScreen);
+	TestTrue(TEXT("an editor screen on screen: applied"), Subsystem->IsApplied());
 	TestEqual(TEXT("the UI scale is the curve times the size"), Settings->GetDPIScaleBasedOnSize(FIntPoint(1920, 1080)), Base * 1.25f, 0.0001f);
 	TestEqual(TEXT("at any resolution"), Settings->GetDPIScaleBasedOnSize(FIntPoint(3840, 2160)), 1.8f * 1.25f, 0.001f);
 
-	Subsystem->SetPercent(UiSize::DefaultPercent, false);
-	TestEqual(TEXT("back to the default"), Settings->GetDPIScaleBasedOnSize(FIntPoint(1920, 1080)), Base, 0.0001f);
+	// Going from one editor screen to the other (the new one opens before the old one closes) never drops the size.
+	Subsystem->EditorScreenOpened(InteriorScreen);
+	Subsystem->EditorScreenClosed(ExteriorScreen);
+	TestEqual(TEXT("still applied on the other editor screen"), Settings->GetDPIScaleBasedOnSize(FIntPoint(1920, 1080)), Base * 1.25f, 0.0001f);
+
+	// Back to the start page: the last editor screen is gone, the size stops applying.
+	Subsystem->EditorScreenClosed(InteriorScreen);
+	TestFalse(TEXT("no editor screen: not applied"), Subsystem->IsApplied());
+	TestEqual(TEXT("and the start page is back to the curve alone"), Settings->GetDPIScaleBasedOnSize(FIntPoint(1920, 1080)), Base, 0.0001f);
+
+	// The size is kept meanwhile: the next editor screen gets it again.
+	TestEqual(TEXT("the size is still 125"), Subsystem->GetPercent(), 125);
+	Subsystem->EditorScreenOpened(ExteriorScreen);
+	TestEqual(TEXT("and applies to the next editor screen"), Settings->GetDPIScaleBasedOnSize(FIntPoint(1920, 1080)), Base * 1.25f, 0.0001f);
+	Subsystem->EditorScreenClosed(ExteriorScreen);
 
 	Settings->ApplicationScale = Original;
 	return true;

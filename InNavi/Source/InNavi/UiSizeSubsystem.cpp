@@ -5,6 +5,7 @@
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/UserInterfaceSettings.h"
+#include "Blueprint/UserWidget.h"
 #include "Engine/World.h"
 #include "Framework/Application/IInputProcessor.h"
 #include "Framework/Application/SlateApplication.h"
@@ -28,7 +29,8 @@ namespace
 		virtual bool HandleKeyDownEvent(FSlateApplication& SlateApp, const FKeyEvent& InKeyEvent) override
 		{
 			UUiSizeSubsystem* Subsystem = Owner.Get();
-			if (!Subsystem || !InKeyEvent.IsControlDown() || InKeyEvent.IsAltDown())
+			// Only in an editor screen: on the start page and the project pages the size does not apply, so the keys are left alone.
+			if (!Subsystem || !Subsystem->IsApplied() || !InKeyEvent.IsControlDown() || InKeyEvent.IsAltDown())
 			{
 				return false;
 			}
@@ -148,7 +150,33 @@ void UUiSizeSubsystem::Reset()
 	SetPercent(UiSize::DefaultPercent, bSaveEnabled);
 }
 
+void UUiSizeSubsystem::EditorScreenOpened(const UUserWidget* Screen)
+{
+	EditorScreens.Add(Screen);
+	ApplyToSettings();
+}
+
+void UUiSizeSubsystem::EditorScreenClosed(const UUserWidget* Screen)
+{
+	EditorScreens.Remove(Screen);
+	ApplyToSettings();
+}
+
+bool UUiSizeSubsystem::IsApplied() const
+{
+	for (const TWeakObjectPtr<const UUserWidget>& Screen : EditorScreens)
+	{
+		if (Screen.IsValid())
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 void UUiSizeSubsystem::ApplyToSettings() const
 {
-	GetMutableDefault<UUserInterfaceSettings>()->ApplicationScale = UiSize::ToApplicationScale(Percent);
+	// On an editor screen the size the user chose; anywhere else (the start page, the project pages) the project's own setting, as if there were no UI size.
+	const float Chosen = IsApplied() ? UiSize::ToApplicationScale(Percent) : 1.f;
+	GetMutableDefault<UUserInterfaceSettings>()->ApplicationScale = OriginalApplicationScale * Chosen;
 }

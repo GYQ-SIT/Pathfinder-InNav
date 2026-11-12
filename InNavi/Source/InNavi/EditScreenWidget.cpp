@@ -4,6 +4,7 @@
 #include "AudioPanelWidget.h"
 #include "DebugPanelWidget.h"
 #include "UiSizePanelWidget.h"
+#include "UiSizeSubsystem.h"
 #include "LayoutValidationPanelWidget.h"
 #include "PluginToolHost.h"
 #include "BuildingInfoPanelWidget.h"
@@ -474,6 +475,12 @@ void UEditScreenWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
+	// The UI size applies on the editor screens only (not on the start page or the project pages): this one is on screen now.
+	if (UUiSizeSubsystem* UiSizeSettings = UUiSizeSubsystem::Get(this))
+	{
+		UiSizeSettings->EditorScreenOpened(this);
+	}
+
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->OnBuildingSelected.AddUniqueDynamic(this, &UEditScreenWidget::HandleBuildingSelected);
@@ -530,6 +537,10 @@ void UEditScreenWidget::PlayButtonClickSound()
 
 void UEditScreenWidget::NativeDestruct()
 {
+	if (UUiSizeSubsystem* UiSizeSettings = UUiSizeSubsystem::Get(this))
+	{
+		UiSizeSettings->EditorScreenClosed(this);
+	}
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->OnBuildingSelected.RemoveDynamic(this, &UEditScreenWidget::HandleBuildingSelected);

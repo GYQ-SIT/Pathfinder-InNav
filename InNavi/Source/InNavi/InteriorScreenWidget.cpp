@@ -13,6 +13,7 @@
 #include "MapPanelWidget.h"
 #include "DebugPanelWidget.h"
 #include "UiSizePanelWidget.h"
+#include "UiSizeSubsystem.h"
 #include "UiToolTip.h"
 #include "LayoutValidationPanelWidget.h"
 #include "PluginToolHost.h"
@@ -1278,6 +1279,12 @@ void UInteriorScreenWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
+	// The UI size applies on the editor screens only (not on the start page or the project pages): this one is on screen now.
+	if (UUiSizeSubsystem* UiSizeSettings = UUiSizeSubsystem::Get(this))
+	{
+		UiSizeSettings->EditorScreenOpened(this);
+	}
+
 	if (BackButton)
 	{
 		BackButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnBackClicked);
@@ -1531,6 +1538,10 @@ void UInteriorScreenWidget::SyncDockPanelWidths()
 
 void UInteriorScreenWidget::NativeDestruct()
 {
+	if (UUiSizeSubsystem* UiSizeSettings = UUiSizeSubsystem::Get(this))
+	{
+		UiSizeSettings->EditorScreenClosed(this);
+	}
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->OnSelectedDoorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedDoorChanged);

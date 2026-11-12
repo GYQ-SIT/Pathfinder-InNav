@@ -194,8 +194,9 @@ UI Size** only shows or hides it, and it starts hidden): **-** and **+** step th
 150, 175 and 200 %, the framed box between them shows the size now, and **Default size** goes back to 100 %.
 There is no slider on purpose: every step rescales the whole UI and the panel moves under the mouse, so a
 dragged slider flickered. Hover a control to see what it does and its shortcut. **Ctrl +**, **Ctrl -** and
-**Ctrl 0** do the same anywhere in the program, and keep the panel up to date.
-The size applies at once to every screen and is remembered for the next run (`[InNavi.Display] UiSizePercent`
+**Ctrl 0** do the same on the editor screens, and keep the panel up to date. The start page and the project pages are not affected by
+the UI size (they follow the window size and nothing else), and the keys do nothing there.
+The size applies at once to both editor screens (the exterior one and the interior one) and is remembered for the next run (`[InNavi.Display] UiSizePercent`
 in `GameUserSettings.ini`). The plain `=`, `-` and `0` keys keep their uses (grow and shrink a room, rotate).
 The phone app is not affected: it keeps a fixed 0.77 (`Config/Android/AndroidEngine.ini`) and fits its own
 layout to the screen width.
