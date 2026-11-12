@@ -253,6 +253,88 @@ $generated = Join-Path $PWD 'InNavi/Saved/Performance/preview-memory-ten-floor.j
 Then use that file as `PreviewMemoryProject` and `-PreviewMemoryBuilding=MEMORY` in the rendered capture command.
 Without these opt-in parameters, the test reports instructions and does not run the capture during the normal suite.
 
+### Desktop preview collision and rejected scenery trial — 2026-11-13
+
+Campus interior previews now skip collision cooking: these visual-only actors already had collision disabled. Editable rooms
+retain collision for picking and walking. Geometry, openings, floor slabs, preview caching, project serialization and navigation
+data are unchanged. In the generated 225-room building, showing every floor now requests **zero preview collision sections**,
+compared with 450 previously (walls and floor slabs). A regression test checks matching visual geometry, retained editable-room
+collision, and collision-free preview rebuilds.
+
+A scenery-batching prototype was tested and **removed from the final implementation**. It reduced the real campus's 1,766
+scenery actors/components to 719, retaining all 1,359 roads and 407 context buildings, filters, colours and collision geometry.
+However, three paired Shipping runs showed **28.43 MiB more resident memory** and **45.83 MiB more private committed memory**
+while the campus was opaque (median of paired differences). Resident differences ranged from **6.08 to 51.54 MiB higher**;
+private committed differences ranged from **11.40 to 54.49 MiB higher**. Even after subtracting each process's empty baseline,
+the median increase was 13.23 MiB resident and 12.96 MiB committed. Median load time improved from 1,398 to 1,311 ms, which did
+not justify keeping it as a RAM optimization. Fewer actors alone did not establish a memory saving.
+
+The [prototype measurement record](measurements/desktop-scenery-memory-2026-11-13.json) retains all 480 samples from three
+pairs each for the campus and generated interior, source/input/executable hashes, frame summaries and the rejection decision.
+Prototype source, executable, reports, screenshots and runner remain locally in `InNavi/Saved/SceneryMemory-20261113/`.
+Prototype frame summaries used engine Tick DeltaTime, which may be clamped; their maxima are not wall-clock hitch measurements.
+
+The final collision-only comparison uses the same **Windows Shipping** executable in both modes, with D3D12 rendering,
+a 1280x720 viewport, the Lightweight preset and a 30 FPS cap. The reference mode adds `-LegacyPreviewCollision`; the default
+skips preview collision cooking. Scenery uses the existing renderer in both modes. Each fresh process has its own user directory.
+The generated ten-floor project has 225 rooms and no scenery. The three pairs alternate reference/optimized, optimized/reference,
+reference/optimized. Separate screenshot runs are excluded from memory statistics.
+
+The final source passed **272 automated tests**, and its rebuilt Shipping package passed the startup smoke test and a rendered
+225-room screenshot check. Measurements ran on **2026-11-13 SGT**, Windows 11, Ryzen 7 7700, with 15.15 GiB OS-visible RAM.
+The table shows the median of the three per-process phase medians, in **MiB**:
+
+| State | Resident before | Resident after | Private committed before | Private committed after |
+|-------|-----------------|----------------|--------------------------|-------------------------|
+| Empty-app baseline | 1,023.60 | 1,025.19 | 1,601.22 | 1,581.21 |
+| Generated project, opaque | 1,009.73 | 1,023.42 | 1,601.56 | 1,583.17 |
+| First floor, 22 preview rooms | 1,012.56 | 1,021.98 | 1,597.43 | 1,581.23 |
+| All floors, 225 preview rooms | 1,032.20 | 1,040.65 | 1,634.05 | 1,611.75 |
+
+**There is no demonstrated repeatable resident-RAM reduction.** The all-floor paired resident saving had a median of **−5.16 MiB**
+(range **−17.53 to +46.07 MiB**; a negative saving means higher usage). Subtracting each process's empty baseline gives a median
+saving of **5.24 MiB**, but a range of **−10.54 to +31.15 MiB**. All-floor private committed memory fell in every pair; after the
+same baseline adjustment, its saving was **7.09 MiB median**, range **4.31–29.53 MiB**. These are modest allocation savings,
+not evidence of a large reduction in the application's physical RAM requirement.
+
+For the narrower step from 22 to 225 visible rooms, the median paired reduction in additional resident usage was **23.60 MiB**
+(range **−4.95 to +26.31 MiB**); additional private committed usage fell by **14.03 MiB** (range **−5.35 to +24.80 MiB**).
+This step also includes rendering, caches and normal GC, and did not improve in every pair. Paired-difference medians need not
+equal the subtraction of the independent before/after medians in the table.
+
+There was no evident timing regression in this workload. Median project-load time was **10.54 ms before / 9.65 ms after**;
+that call parses the project and does not include subsequent preview creation. For the all-floor phase, median mean frame interval
+was **40.87 / 40.55 ms**, and median p95 was **46.51 / 46.37 ms**. These are capped, unattended capture conditions, not a guarantee
+of interactive FPS or performance on other machines.
+
+The [final measurement record](measurements/desktop-preview-collision-memory-2026-11-13.json) contains all **240 samples**, paired
+and baseline-adjusted statistics, frame summaries, source/input/executable/package hashes and hardware details. Raw reports,
+screenshots, scripts, both source variants and the final local Shipping ZIP are retained under
+`InNavi/Saved/SceneryMemory-20261113/` (git-ignored). No mobile RAM claim is made by this desktop comparison.
+
+The native `DesktopMemoryOutput` diagnostic opens the exterior editor, clears the project, and takes an empty baseline after
+one explicit GC. It then loads the project, shows floor 1, and shows all floors of one building. Each phase settles for five seconds
+before ten samples at a requested 500 ms interval. Normal engine GC continues. Loading time covers the synchronous project-load
+call. Final frame summaries use monotonic time between diagnostic ticks, including settling and transition hitches. The FPS cap
+makes this a regression check, not a rendering throughput benchmark. Working set and private committed memory are separate metrics.
+
+To reproduce an optimized capture from an unpacked Shipping package:
+
+```powershell
+$package = 'C:\path\to\unpacked\package'
+$app = Join-Path $package 'InNavi/Binaries/Win64/InNavi-Win64-Shipping.exe'
+$data = Join-Path $PWD 'InNavi/Saved/Performance/preview-memory-ten-floor.json'
+$output = Join-Path $PWD 'InNavi/Saved/Performance/preview-collision-optimized.json'
+$userDir = Join-Path $PWD 'InNavi/Saved/Performance/preview-collision-optimized-user'
+& $app -unattended -d3d12 -windowed -ResX=1280 -ResY=720 -ForceRes -nosplash -nosound -NoVSync `
+  -SaveToUserDir "-UserDir=$userDir" -DesktopRenderPreset=Lightweight `
+  "-DesktopMemoryProject=$data" -DesktopMemoryBuilding=MEMORY "-DesktopMemoryOutput=$output"
+```
+
+Prepare the generated project using the preview-comparison command above. For the reference capture, use fresh output/user paths
+and add `-LegacyPreviewCollision`. Do not enable `-DesktopMemoryScreenshots` in a memory run. The app writes its report and exits
+automatically. Short steady-state windows on one machine do not establish startup peaks, leaks or an app-wide average.
+
 ### Unreal Insights desktop capture — 2026-11-11
 
 Captured the rendered desktop application at approximately **23:02–23:04 SGT**, using **Unreal Insights 5.8.2 Memory Insights**.

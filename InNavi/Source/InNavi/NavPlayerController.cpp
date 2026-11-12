@@ -239,7 +239,8 @@ void ANavPlayerController::EnsureCampusInteriorPreview(APolyBuilding* Building, 
 				WallHeight,
 				WallThickness,
 				PreviewOpenings,
-				bClosedLoop
+				bClosedLoop,
+				FParse::Param(FCommandLine::Get(), TEXT("LegacyPreviewCollision"))
 			);
 
 			PreviewRoom->SetActorEnableCollision(false);
