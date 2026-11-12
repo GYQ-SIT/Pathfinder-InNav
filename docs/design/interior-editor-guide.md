@@ -189,6 +189,13 @@ build. Below 1080 it shrinks more slowly than the window (720 -> 0.62, 480 -> 0.
 still shows readable text and has more room for the panels. The phone app is not affected: it keeps a
 fixed 0.77 (`Config/Android/AndroidEngine.ini`) and fits its own layout to the screen width.
 
+When the screen's resolution is switched in the Windows display settings while the program runs, the
+program follows it: the engine itself leaves the window at its old size, so `UDisplayChangeSubsystem`
+waits for the change to settle and then resizes the window (a full-screen window becomes the size of the
+new screen; a windowed one is only made smaller if it no longer fits, and centred), and the UI scale
+follows the new window size. The same check runs once, two seconds after the start, for a program that
+was last run at another resolution. Resize is logged as `[Display] ...` in the log.
+
 ## Dockable panels
 
 Eight panels — **Toolbar**, **Floor**, **Properties**, **Layers**, **Navigation**,
