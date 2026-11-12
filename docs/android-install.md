@@ -8,8 +8,8 @@ This is for teammates who want to **try the phone app** on their own phone. You 
 - An **Android phone, Android 8 or newer** (API 26+), with a **64-bit ARM** processor. Nearly every phone from the last several years is. There is **no iPhone version**.
 - Enough free space for the APK and the installed app's data.
 - The file **`InNavi-arm64.apk`** (one file; the game's data is inside it). It is not in git because it is big. Download it from the **mobile-test-2 pre-release on the repository's Releases page**
-  (<https://github.com/GYQ-SIT/Pathfinder-InNav/releases>, "Assets" -> `InNavi-arm64.apk`). The repository is private, so you must be **signed in to GitHub** with an account that can see it;
-  if the phone's browser does not let you sign in or download, download the file on a computer and send it to the phone (USB cable, a cloud drive or a chat app).
+  (<https://github.com/GYQ-SIT/Pathfinder-InNav/releases>, "Assets" -> `InNavi-arm64.apk`). The repository is public, so no sign-in is needed;
+  if the phone's browser does not let you download, download the file on a computer and send it to the phone (USB cable, a cloud drive or a chat app).
 
 **Mobile test build 2 (version 1.1, Android version code 2)** reads packaged project files and uses the real campus route planner. Its sites, buildings, room names and maps follow the authored data. Positioning is still a manual building/level choice; there is no automatic indoor tracking. See [the real-data guide](mobile-real-data-guide.md) for the available data and test cases.
 

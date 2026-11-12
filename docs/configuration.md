@@ -21,7 +21,9 @@ CI**, and both are kept outside the repository.
 | Saved layouts and settings | `InNavi/Saved/` (never committed) | the files in `Data/DefaultLayouts/` | Where each screen's dock layout, the editor's settings and the phone app's local projects (`Saved/MobileProjects/`) are kept |
 | Dock panels added by a plugin | `[InNavi.ToolPanels]` in `InNavi/Config/DefaultGame.ini` | `Validation=/Script/InNavi.LayoutValidationPanelWidget` | Which widget class shows a tool's panel, found through the plugin's tool registry |
 | What is cooked and packaged | `[/Script/UnrealEd.ProjectPackagingSettings]` in `DefaultGame.ini` | `/Game/ImageAssets` always cooked, `../Data` staged | So the icons and the data folder are in a package |
-| UI scale | `UIScaleCurve` in `InNavi/Config/DefaultEngine.ini` | 0.77 at every window size | The look of the editor on a screen |
+| UI scale | `UIScaleCurve` in `InNavi/Config/DefaultEngine.ini` (the phone: `Config/Android/AndroidEngine.ini`) | 0.90 at a window 1080 high, growing with the window above that (1440 -> 1.20, 2160 -> 1.80) and shrinking more slowly below (720 -> 0.72); the phone keeps a fixed 0.77 | How big the editor's UI is on a screen of a given resolution |
+| UI size (the user's choice) | `UiSize.h`, `UUiSizeSubsystem`; saved in `GameUserSettings.ini` (`[InNavi.Display] UiSizePercent`) | 100 %; steps 80, 90, 100, 110, 125, 150, 175, 200 | the UI Size dock panel (Window > UI Size shows it), or Ctrl + / Ctrl - / Ctrl 0: scales the UI of the two editor screens on top of the curve above; the start page and the project pages are not scaled by it (Windows only) |
+| Screen resolution changes | `UDisplayChangeSubsystem` and `DisplayFit` in `InNavi/Source/InNavi/` | on Windows, in the packaged game only | When the resolution is switched in the Windows display settings, the game window is resized to the new screen (full screen) or made to fit it (windowed); the UI scale then follows the new window size |
 | Input | `InNavi/Config/DefaultInput.ini` | the click action and the keys | The mouse and keyboard mappings |
 
 ## Command-line flags (the phone app and its test runs)
@@ -58,5 +60,8 @@ If branch protection requires the Windows workflow on pull requests, update the 
 | `GITHUB_TOKEN` | created by GitHub for each run | in a log or a file |
 | Login of the team12 VM | the team's shared sheet from the course | in the repository |
 
-The repository is **private**. Do not make it public, and do not copy a key into a file in it: if one is ever committed, treat it as
-public, replace it, and rewrite the history.
+The repository is **public**: it was made public on 2026-11-12 for the course review, and because a free private repository cannot enforce
+branch protection. Anyone can read all of it, its whole history included, so do not copy a key, a password or a token into a file in it, and
+do not commit personal files. If a secret is ever committed, treat it as published, replace it, and rewrite the history.
+`python scripts/lint.py` checks for the usual patterns; the history was also scanned for secret patterns on 2026-11-12 and nothing was found
+(a pattern scan, not a guarantee).

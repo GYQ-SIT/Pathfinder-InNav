@@ -14,6 +14,8 @@ namespace ExteriorDock
 	INNAVI_API extern const FName Debug;
 	INNAVI_API extern const FName Validation;
 	INNAVI_API extern const FName Navigation;
+	// The UI Size panel (see UiSizePanelWidget.h); its name on screen is "UI Size".
+	INNAVI_API extern const FName UiSizePanel;
 
 	INNAVI_API const TArray<FName>& AllPanels();
 	INNAVI_API TSet<FName> KnownPanels();
@@ -21,7 +23,7 @@ namespace ExteriorDock
 	// Where a panel is docked the first time it is shown if there is no saved position for it.
 	INNAVI_API EDockSide DefaultSideFor(FName Panel);
 
-	// Map on the left edge and Building (the selected building) on the right, like the design page; Audio and Debug
+	// Map on the left edge and Building (the selected building) on the right, like the design page; Audio, Debug and UI Size
 	// (tabs of one group along the bottom) start hidden and remember that spot for when the Window menu shows them.
 	INNAVI_API void BuildDefaultLayout(FDockLayout& Layout);
 

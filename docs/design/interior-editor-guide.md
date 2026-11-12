@@ -181,15 +181,37 @@ so you can press them repeatedly). Clicking anywhere else closes it.
 
 ## UI scale
 
-Every screen's UI is drawn at a fixed 0.77 scale, whatever the window size (set in
-`Config/DefaultEngine.ini`, `UIScaleCurve`) - so the editor, the packaged build and any
-resolution look the same, rather than the UI growing and shrinking with window height as
-Unreal's default does. A smaller window therefore shows less of the UI, not a smaller UI.
+The UI follows the resolution of the window (the scale is chosen from the window's shortest side,
+`UIScaleCurve` in `Config/DefaultEngine.ini`): 0.90 at a window 1080 high, and above that it grows in step
+with the window (1440 -> 1.20, 2160 -> 1.80), so the UI takes the same share of the screen on a 1080p, a
+1440p and a 4K monitor, in the editor and in the packaged build. Below 1080 it shrinks more slowly than the
+window (720 -> 0.72, 480 -> 0.64), so a small window still shows readable text and has more room for the
+panels.
+
+**UI size.** On top of that the UI can be made bigger or smaller at any resolution, for a presentation or a
+small screen. It is the **UI Size** dock panel (a dock panel like the others, on both editor screens; **Window >
+UI Size** only shows or hides it, and it starts hidden): **-** and **+** step through 80, 90, 100, 110, 125,
+150, 175 and 200 %, the framed box between them shows the size now, and **Default size** goes back to 100 %.
+There is no slider on purpose: every step rescales the whole UI and the panel moves under the mouse, so a
+dragged slider flickered. Hover a control to see what it does and its shortcut. **Ctrl +**, **Ctrl -** and
+**Ctrl 0** do the same on the editor screens, and keep the panel up to date. The start page and the project pages are not affected by
+the UI size (they follow the window size and nothing else), and the keys do nothing there.
+The size applies at once to both editor screens (the exterior one and the interior one) and is remembered for the next run (`[InNavi.Display] UiSizePercent`
+in `GameUserSettings.ini`). The plain `=`, `-` and `0` keys keep their uses (grow and shrink a room, rotate).
+The phone app is not affected: it keeps a fixed 0.77 (`Config/Android/AndroidEngine.ini`) and fits its own
+layout to the screen width.
+
+When the screen's resolution is switched in the Windows display settings while the program runs, the
+program follows it: the engine itself leaves the window at its old size, so `UDisplayChangeSubsystem`
+waits for the change to settle and then resizes the window (a full-screen window becomes the size of the
+new screen; a windowed one is only made smaller if it no longer fits, and centred), and the UI scale
+follows the new window size. The same check runs once, two seconds after the start, for a program that
+was last run at another resolution. Resize is logged as `[Display] ...` in the log.
 
 ## Dockable panels
 
-Eight panels — **Toolbar**, **Floor**, **Properties**, **Layers**, **Navigation**,
-**Audio**, **Map**, **Debug** — sit in a Visual Studio / Unreal-style docking layout. The
+Nine panels — **Toolbar**, **Floor**, **Properties**, **Layers**, **Navigation**,
+**Audio**, **Map**, **Debug**, **UI Size** — sit in a Visual Studio / Unreal-style docking layout. The
 middle of the screen (the floor plan or the 3D view) is never part of the layout; panels
 dock around it, on the left, right, top or bottom edge, and sit on top of the canvas.
 

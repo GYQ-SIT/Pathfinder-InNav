@@ -19,11 +19,12 @@
 // project dialog), taken from the design team's page. Header-only and inline so that no two .cpp files of a unity build
 // each define their own copy.
 //
-// The page's sizes are browser pixels. The project's UI scale is 0.77 (see DefaultEngine.ini), so a size is multiplied by
-// DesignToUi to come out the same on screen; font sizes are points drawn at 96 DPI, 3/4 of a pixel size each.
+// The page's sizes are browser pixels. The project's UI scale is 0.90 at a window 1080 high (see DefaultEngine.ini; it follows the
+// window size from there), so a size is multiplied by DesignToUi to come out the same on screen at 1080 and to scale with the window
+// at any other size; font sizes are points drawn at 96 DPI, 3/4 of a pixel size each.
 namespace StartStyle
 {
-	inline constexpr float DesignToUi = 1.f / 0.77f;
+	inline constexpr float DesignToUi = 1.f / 0.90f;
 	inline constexpr float PixelsToFont = 0.75f;
 
 	inline FLinearColor Rgb(uint8 R, uint8 G, uint8 B, uint8 A = 255)
