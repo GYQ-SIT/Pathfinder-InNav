@@ -13,6 +13,7 @@
 #include "MapPanelWidget.h"
 #include "DebugPanelWidget.h"
 #include "UiSizePanelWidget.h"
+#include "UiToolTip.h"
 #include "LayoutValidationPanelWidget.h"
 #include "PluginToolHost.h"
 #include "ConfirmDialogWidget.h"
@@ -134,54 +135,8 @@ namespace
 
 UWidget* UInteriorScreenWidget::MakeToolTipWidget(const TCHAR* TooltipLabel)
 {
-	UTextBlock* TooltipText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-	TooltipText->SetText(FText::FromString(FString(TooltipLabel)));
-	TooltipText->SetColorAndOpacity(FSlateColor(FLinearColor::Black));
-	TooltipText->SetAutoWrapText(true);
-	// Left-justified text in a fixed-width box left a ragged, lopsided-looking gap on the
-	// right of every line shorter than the longest one - centering each wrapped line reads as
-	// a balanced block instead.
-	TooltipText->SetJustification(ETextJustify::Center);
-	FSlateFontInfo TooltipFont = TooltipText->GetFont();
-	TooltipFont.TypefaceFontName = TEXT("Regular"); // the default font style otherwise renders bold
-	TooltipText->SetFont(TooltipFont);
-
-	// Descriptions are full sentences now (how to actually use the mode, not just its name) -
-	// wide enough for about 7 words a line before wrapping, instead of stretching edge to
-	// edge. MaxDesiredWidth alone let the wrap collapse to one word per line (nothing gave
-	// AutoWrapText an actual width to wrap against) - WidthOverride is a hard width, so
-	// wrapping has something real to measure against.
-	USizeBox* TooltipSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-	TooltipSizeBox->SetWidthOverride(1000.f);
-	TooltipSizeBox->SetContent(TooltipText);
-
-	UBorder* TooltipBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-	TooltipBorder->SetBrushColor(FLinearColor::White);
-	TooltipBorder->SetPadding(FMargin(10.f, 6.f));
-	TooltipBorder->SetContent(TooltipSizeBox);
-
-	// UWidget::SetToolTip (below) builds its SToolTip with no border/background of its own
-	// (BorderImage(nullptr)), unlike the engine's native default tooltip (SetToolTipText),
-	// which has a soft drop shadow baked into its brush. Faking that here with a second,
-	// darker copy of the same box behind the real one, offset a few px down-right - an Overlay
-	// stretches every child to match its largest sibling by default, so the shadow layer ends
-	// up the same size as the real box even though it has no text of its own.
-	UBorder* ShadowBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-	ShadowBorder->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.35f));
-
-	// Overlay slots default to Left/Top, not Fill - without Fill on both, the empty shadow
-	// layer would just collapse to zero size instead of stretching to match its sibling.
-	UOverlay* TooltipOverlay = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass());
-	UOverlaySlot* ShadowSlot = TooltipOverlay->AddChildToOverlay(ShadowBorder);
-	ShadowSlot->SetHorizontalAlignment(HAlign_Fill);
-	ShadowSlot->SetVerticalAlignment(VAlign_Fill);
-	ShadowSlot->SetPadding(FMargin(3.f, 3.f, 0.f, 0.f));
-	UOverlaySlot* ForegroundSlot = TooltipOverlay->AddChildToOverlay(TooltipBorder);
-	ForegroundSlot->SetHorizontalAlignment(HAlign_Fill);
-	ForegroundSlot->SetVerticalAlignment(VAlign_Fill);
-	ForegroundSlot->SetPadding(FMargin(0.f, 0.f, 3.f, 3.f));
-
-	return TooltipOverlay;
+	// One hover hint for the whole UI: see UiToolTip.h.
+	return UiToolTip::Make(WidgetTree, FString(TooltipLabel));
 }
 
 TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()

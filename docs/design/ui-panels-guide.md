@@ -131,6 +131,14 @@ does not mention at its default spot.
 - A Debug-style panel that reads the controller must tolerate running before the screen has a
   controller (the base class `GetController()` falls back to the owning screen's player).
 
+## Hover hints
+
+Every button shows the same hover hint: a light card with a soft shadow, built by `UiToolTip::Make`
+([UiToolTip.h](../../InNavi/Source/InNavi/UiToolTip.h)); `SetToolTip(UiToolTip::Make(WidgetTree, Label))`. The label says what
+the control does and, in square brackets at the end, its shortcut: `Save [Ctrl+S]`. The card is as wide as its text up to
+`UiToolTip::MaxWidth` and a longer text wraps there. Put the explanation and the shortcut in the hint, not in text inside a panel
+(the UI Size panel has no help text); do not build a hint of your own.
+
 ## Control styling
 
 Every control takes its look from `StartScreenStyle.h` (namespace `StartStyle`), never from the

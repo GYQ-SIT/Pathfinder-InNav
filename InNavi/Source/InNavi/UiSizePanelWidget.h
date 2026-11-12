@@ -6,15 +6,17 @@
 #include "DockPanelContent.h"
 #include "UiSizePanelWidget.generated.h"
 
+class UBorder;
 class UButton;
 class USizeBox;
 class UTextBlock;
 class UUiSizeSubsystem;
 
-// The UI Size dock panel, shared by the interior editor and the exterior screen: smaller, the size now, larger, and back to the default. It
-// makes the whole UI bigger or smaller at any resolution (for a presentation or a small screen), on top of the scale the window size gives; the
-// state lives in UUiSizeSubsystem (see UiSize.h), so Ctrl + / Ctrl - / Ctrl 0 keep the panel up to date too. The Window menu only shows or hides
-// the panel, like every other panel.
+// The UI Size dock panel, shared by the interior editor and the exterior screen: smaller, the size now in a framed box, larger, and Default size. It
+// makes the whole UI bigger or smaller at any resolution (for a presentation or a small screen), on top of the scale the window size gives; the state
+// lives in UUiSizeSubsystem (see UiSize.h), so Ctrl + / Ctrl - / Ctrl 0 keep the panel up to date too. What each control does, and its shortcut, shows
+// in the hover hint every button of the UI has (UiToolTip.h), not as text in the panel. There is deliberately no slider: each step rescales the whole
+// UI, the panel moves under the mouse, and a dragged slider then flickers. The Window menu only shows or hides the panel, like every other panel.
 UCLASS()
 class INNAVI_API UUiSizePanelWidget : public UDockPanelContentWidget
 {
@@ -44,7 +46,7 @@ private:
 
 	// The subsystem that holds the size, or null where there is none (the phone, a test world).
 	UUiSizeSubsystem* GetSubsystem() const;
-	// Writes the size into the value text.
+	// Writes the size into the value box.
 	void RefreshValue();
 
 	UPROPERTY()
@@ -55,15 +57,11 @@ private:
 	UButton* ResetButton = nullptr;
 	UPROPERTY()
 	UTextBlock* ValueText = nullptr;
-	UPROPERTY()
-	UTextBlock* HelpText = nullptr;
-	// The size boxes SetContentWidth gives the panel's width to: the help text, the row of three controls, the reset button.
-	UPROPERTY()
-	USizeBox* HelpSizeBox = nullptr;
+	// The size boxes SetContentWidth gives the panel's width to: the row with the size, the Default size row.
 	UPROPERTY()
 	USizeBox* RowSizeBox = nullptr;
 	UPROPERTY()
-	USizeBox* ResetSizeBox = nullptr;
+	USizeBox* FooterSizeBox = nullptr;
 	UPROPERTY()
 	TObjectPtr<UUiSizeSubsystem> SubsystemForTests = nullptr;
 
