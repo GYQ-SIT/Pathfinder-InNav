@@ -1067,7 +1067,7 @@ FVector2D UEditScreenWidget::GetCanvasSize() const
 		return LastKnownCanvasSize;
 	}
 	// The screen has not been painted yet (the saved layout is loaded before that). The raw viewport is in screen pixels, but the
-	// layout works in UI units - pixels divided by the DPI scale (0.77 here) - so a layout loaded against the raw size would
+	// layout works in UI units - pixels divided by the DPI scale (it follows the window size, 0.77 at 1080) - so a layout loaded against the raw size would
 	// come out that much too small.
 	const FVector2D Viewport = UWidgetLayoutLibrary::GetViewportSize(this);
 	const float DpiScale = UWidgetLayoutLibrary::GetViewportScale(this);

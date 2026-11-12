@@ -181,10 +181,13 @@ so you can press them repeatedly). Clicking anywhere else closes it.
 
 ## UI scale
 
-Every screen's UI is drawn at a fixed 0.77 scale, whatever the window size (set in
-`Config/DefaultEngine.ini`, `UIScaleCurve`) - so the editor, the packaged build and any
-resolution look the same, rather than the UI growing and shrinking with window height as
-Unreal's default does. A smaller window therefore shows less of the UI, not a smaller UI.
+The UI follows the resolution of the window (the scale is chosen from the window's shortest side,
+`UIScaleCurve` in `Config/DefaultEngine.ini`): 0.77 at a window 1080 high, which is the size the screens
+were designed at, and above that it grows in step with the window (1440 -> 1.03, 2160 -> 1.54), so the UI
+takes the same share of the screen on a 1080p, a 1440p and a 4K monitor, in the editor and in the packaged
+build. Below 1080 it shrinks more slowly than the window (720 -> 0.62, 480 -> 0.55), so a small window
+still shows readable text and has more room for the panels. The phone app is not affected: it keeps a
+fixed 0.77 (`Config/Android/AndroidEngine.ini`) and fits its own layout to the screen width.
 
 ## Dockable panels
 

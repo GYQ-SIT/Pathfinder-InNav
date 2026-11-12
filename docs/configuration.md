@@ -21,7 +21,7 @@ CI**, and both are kept outside the repository.
 | Saved layouts and settings | `InNavi/Saved/` (never committed) | the files in `Data/DefaultLayouts/` | Where each screen's dock layout, the editor's settings and the phone app's local projects (`Saved/MobileProjects/`) are kept |
 | Dock panels added by a plugin | `[InNavi.ToolPanels]` in `InNavi/Config/DefaultGame.ini` | `Validation=/Script/InNavi.LayoutValidationPanelWidget` | Which widget class shows a tool's panel, found through the plugin's tool registry |
 | What is cooked and packaged | `[/Script/UnrealEd.ProjectPackagingSettings]` in `DefaultGame.ini` | `/Game/ImageAssets` always cooked, `../Data` staged | So the icons and the data folder are in a package |
-| UI scale | `UIScaleCurve` in `InNavi/Config/DefaultEngine.ini` | 0.77 at every window size | The look of the editor on a screen |
+| UI scale | `UIScaleCurve` in `InNavi/Config/DefaultEngine.ini` (the phone: `Config/Android/AndroidEngine.ini`) | 0.77 at a window 1080 high, growing with the window above that (1440 -> 1.03, 2160 -> 1.54) and shrinking more slowly below (720 -> 0.62); the phone keeps a fixed 0.77 | How big the editor's UI is on a screen of a given resolution |
 | Input | `InNavi/Config/DefaultInput.ini` | the click action and the keys | The mouse and keyboard mappings |
 
 ## Command-line flags (the phone app and its test runs)
