@@ -133,8 +133,9 @@ What a reviewer checks:
 3. **Is it correct?** Look for missed cases (empty list, first or last item, missing data), and for anything that could crash.
 4. **Tests.** Is there a test for the new behaviour? Does the test really fail without the change?
 5. **Docs.** If a document describes this part (`docs/`, `README.md`), is it updated?
-6. **Safety.** No personal files, keys or addresses; no generated files; no unrelated formatting changes.
-7. **Run it** when the change is visible or risky: check out the branch and try it.
+6. **UI.** If the change adds, changes or removes anything on screen, check it against "UI changes follow our global UI way" below, and ask the author to follow it. Do not approve a UI change that makes its own way of building a panel, a menu row or a style.
+7. **Safety.** No personal files, keys or addresses; no generated files; no unrelated formatting changes.
+8. **Run it** when the change is visible or risky: check out the branch and try it.
 
 ```bash
 git fetch
@@ -183,6 +184,23 @@ git branch -d YQ_nav_panel
 After the merge, check that the build on `main` stays green (the **Actions** tab). If it fails because of your change, fixing it comes
 first. Then move the Jira story to Done if the PR finished it.
 
+## UI changes follow our global UI way
+
+Every UI addition, change or removal is built the way the rest of the UI is built. As the author, read `docs/design/ui-panels-guide.md` before you
+start; as the reviewer, check the PR against this list and ask the author to change whatever does not follow it.
+
+- **A panel is a dock panel.** It subclasses `UDockPanelContentWidget`, is registered with the screen's dock host, and has one check box in the Window
+  menu that only shows or hides it. Nothing is added straight onto a screen's root canvas (the `InNavi.UI.Guard.*` tests fail if it is).
+- **Reuse, do not reinvent.** Build controls with the existing helpers and styles (`StartStyle::*`, `ApplyStandardFont`, the dropdown row helpers,
+  `AddCheckRow`, `PlayButtonClickSound` on every button). Give every control a stable name (`Btn_`, `Chk_`, `Txt_`, `Cbx_`, `Pnl_`) so tests can find it.
+- **Respect the sizes the helpers fix.** A button row of a dropdown is 120 wide, so its label is short ("Reset Layout"); a dock panel sizes its controls
+  from the width the dock gives it. Text wraps instead of running out of its box.
+- **Handlers live on the screen**, like every other menu row (`OnWindowXxxClicked`), and both editor screens (exterior and interior) are kept in step.
+- **Tested.** A new kind of control or rule comes with a test next to `InNavi.UI.Panels.*` in `UiPanelTests.cpp`; a check that measures the result
+  (Slate's own measure of the controls) is better than a note saying "looks fine". The whole `InNavi.UI.*` group passes.
+- **Documented.** The guide (`ui-panels-guide.md`) or `interior-editor-guide.md` says what the new thing does and where it starts.
+- **Shown.** The PR has a screenshot of the result. The reviewer looks at it too, instead of trusting the author's word.
+
 ## When something goes wrong
 
 | Problem | What to do |
@@ -203,6 +221,7 @@ first. Then move the Jira story to Done if the PR finished it.
 - [ ] `python scripts/lint.py` is green; the tests of my part ran
 - [ ] I read my own diff and can explain every block
 - [ ] No personal files, keys, debug code
+- [ ] If it touches the UI: it follows "UI changes follow our global UI way", `InNavi.UI.*` pass, a screenshot is in the PR
 - [ ] The template is filled in; a reviewer is chosen and told
 
 **Reviewer, before pressing "Approve":**
@@ -211,4 +230,5 @@ first. Then move the Jira story to Done if the PR finished it.
 - [ ] It matches the story; nothing extra
 - [ ] Edge cases, tests and docs looked at
 - [ ] I ran it, if it is visible or risky
+- [ ] A UI change follows "UI changes follow our global UI way" (dock panel, existing helpers and styles, handlers on the screen, both screens, tests, screenshot)
 - [ ] Every question I had is answered
