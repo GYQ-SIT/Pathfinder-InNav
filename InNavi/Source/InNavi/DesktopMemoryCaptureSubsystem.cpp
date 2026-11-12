@@ -4,6 +4,10 @@
 #include "BuildingGenerator.h"
 #include "NavPlayerController.h"
 #include "PolyBuilding.h"
+#include "RoadSegmentActor.h"
+#include "ContextBuildingActor.h"
+#include "InteriorRoom.h"
+#include "ProceduralMeshComponent.h"
 #include "EditScreenWidget.h"
 #include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Dom/JsonObject.h"
@@ -45,6 +49,8 @@ void UDesktopMemoryCaptureSubsystem::Initialize(FSubsystemCollectionBase& Collec
 void UDesktopMemoryCaptureSubsystem::Tick(float DeltaTime)
 {
 	const double Now = FPlatformTime::Seconds();
+	if (bStarted && LastFrameTime > 0) FrameMilliseconds.Add((Now - LastFrameTime) * 1000.0);
+	LastFrameTime = Now;
 	if (Now < NextAction) return;
 	if (!bStarted)
 	{
@@ -85,6 +91,9 @@ void UDesktopMemoryCaptureSubsystem::Tick(float DeltaTime)
 		Data->SetNumberField(TEXT("samples_per_phase"), 10);
 		Data->SetNumberField(TEXT("requested_interval_seconds"), 0.5);
 		Data->SetNumberField(TEXT("frame_rate_cap"), 30);
+		Data->SetStringField(TEXT("frame_time_source"), TEXT("monotonic_tick_interval"));
+		Data->SetBoolField(TEXT("scenery_batched"), false);
+		Data->SetBoolField(TEXT("legacy_preview_collision"), FParse::Param(FCommandLine::Get(), TEXT("LegacyPreviewCollision")));
 		if (!Project.IsEmpty())
 		{
 			TArray<UUserWidget*> Widgets;
@@ -104,11 +113,33 @@ void UDesktopMemoryCaptureSubsystem::Tick(float DeltaTime)
 	if (!Controller.IsValid() || !Generator.IsValid()) { Finish(TEXT("The captured world was closed.")); return; }
 	if (bAdvance)
 	{
+		if (!Samples.IsEmpty() && !FrameMilliseconds.IsEmpty())
+		{
+			auto Frames = MakeShared<FJsonObject>();
+			Frames->SetStringField(TEXT("phase"), Samples.Last()->AsObject()->GetStringField(TEXT("phase")));
+			FrameMilliseconds.Sort();
+			double Total = 0;
+			for (double Milliseconds : FrameMilliseconds) Total += Milliseconds;
+			Frames->SetNumberField(TEXT("count"), FrameMilliseconds.Num());
+			Frames->SetNumberField(TEXT("mean_ms"), Total / FrameMilliseconds.Num());
+			Frames->SetNumberField(TEXT("p95_ms"), FrameMilliseconds[FMath::Clamp(FMath::CeilToInt(FrameMilliseconds.Num() * 0.95) - 1, 0, FrameMilliseconds.Num() - 1)]);
+			Frames->SetNumberField(TEXT("max_ms"), FrameMilliseconds.Last());
+			FrameSummaries.Add(MakeShared<FJsonValueObject>(Frames));
+			FrameMilliseconds.Reset();
+		}
 		bAdvance = false;
 		if (Project.IsEmpty() || ++Phase == (HistoryMode.IsEmpty() ? 4 : 2)) { Finish(); return; }
 		if (Phase == 1)
 		{
+			const double LoadStart = FPlatformTime::Seconds();
 			if (Controller->LoadBuildingDataFromPathOrDatabase(Project) == 0 || !Generator->FindBuildingById(BuildingId)) { Finish(TEXT("Cannot load benchmark project/building.")); return; }
+			Data->SetNumberField(TEXT("project_load_ms"), (FPlatformTime::Seconds() - LoadStart) * 1000.0);
+			int32 Roads = 0, ContextBuildings = 0;
+			for (TActorIterator<ARoadSegmentActor> It(GetWorld()); It; ++It) ++Roads;
+			for (TActorIterator<AContextBuildingActor> It(GetWorld()); It; ++It) ++ContextBuildings;
+			Data->SetNumberField(TEXT("road_features"), Roads);
+			Data->SetNumberField(TEXT("context_features"), ContextBuildings);
+			Data->SetNumberField(TEXT("scenery_batch_actors"), 0);
 			Data->SetNumberField(TEXT("editable_buildings"), Generator->GetAllBuildings().Num());
 			if (FParse::Param(FCommandLine::Get(), TEXT("DesktopMemorySelectBuilding"))) Controller->SelectBuildingById(BuildingId);
 			if (!HistoryMode.IsEmpty() && !PrepareHistory()) { Finish(TEXT("Cannot prepare the history workload.")); return; }
@@ -139,6 +170,18 @@ void UDesktopMemoryCaptureSubsystem::Tick(float DeltaTime)
 	}
 	Sample->SetNumberField(TEXT("cached_preview_rooms"), Cached);
 	Sample->SetNumberField(TEXT("shown_preview_rooms"), Shown);
+	int32 CollisionSections = 0;
+	for (TActorIterator<AInteriorRoom> It(GetWorld()); It; ++It)
+	{
+		if (auto* Mesh = It->FindComponentByClass<UProceduralMeshComponent>())
+		{
+			for (int32 Index = 0; Index < Mesh->GetNumSections(); ++Index)
+			{
+				if (Mesh->GetProcMeshSection(Index)->bEnableCollision) ++CollisionSections;
+			}
+		}
+	}
+	Sample->SetNumberField(TEXT("preview_collision_sections"), CollisionSections);
 	Sample->SetBoolField(TEXT("world_rendering_disabled"), GetGameInstance()->GetGameViewportClient()->bDisableWorldRendering);
 	Samples.Add(MakeShared<FJsonValueObject>(Sample));
 	NextAction = Now + 0.5;
@@ -188,6 +231,7 @@ void UDesktopMemoryCaptureSubsystem::Finish(const FString& Error)
 	bEnabled = false;
 	Data->SetNumberField(TEXT("schema_version"), 1);
 	Data->SetArrayField(TEXT("samples"), Samples);
+	Data->SetArrayField(TEXT("frame_summaries"), FrameSummaries);
 	Data->SetStringField(TEXT("error"), Error);
 	FString Json;
 	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Output), true);

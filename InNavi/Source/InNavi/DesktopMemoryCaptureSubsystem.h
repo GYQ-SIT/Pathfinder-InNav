@@ -27,6 +27,8 @@ private:
 	TWeakObjectPtr<ABuildingGenerator> Generator;
 	TSharedPtr<class FJsonObject> Data;
 	TArray<TSharedPtr<class FJsonValue>> Samples;
+	TArray<TSharedPtr<class FJsonValue>> FrameSummaries;
+	TArray<double> FrameMilliseconds;
 	TArray<FString> PlainHistory;
 	TArray<FHistorySnapshotText> CompressedHistory;
 	FString Output, Project, BuildingId, HistoryMode;
@@ -34,4 +36,5 @@ private:
 	bool bEnabled = false, bStarted = false, bAdvance = false, bScreenshots = false;
 	int32 Phase = 0, PhaseSamples = 0;
 	double NextAction = 0;
+	double LastFrameTime = 0;
 };
