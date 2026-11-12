@@ -60,5 +60,8 @@ If branch protection requires the Windows workflow on pull requests, update the 
 | `GITHUB_TOKEN` | created by GitHub for each run | in a log or a file |
 | Login of the team12 VM | the team's shared sheet from the course | in the repository |
 
-The repository is **private**. Do not make it public, and do not copy a key into a file in it: if one is ever committed, treat it as
-public, replace it, and rewrite the history.
+The repository is **public**: it was made public on 2026-11-12 for the course review, and because a free private repository cannot enforce
+branch protection. Anyone can read all of it, its whole history included, so do not copy a key, a password or a token into a file in it, and
+do not commit personal files. If a secret is ever committed, treat it as published, replace it, and rewrite the history.
+`python scripts/lint.py` checks for the usual patterns; the history was also scanned for secret patterns on 2026-11-12 and nothing was found
+(a pattern scan, not a guarantee).
