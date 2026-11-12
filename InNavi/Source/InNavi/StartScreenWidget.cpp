@@ -29,10 +29,10 @@
 
 namespace
 {
-	// The design team's start screen is drawn in browser pixels; the project's UI scale is 0.77 at a window 1080 high (see
+	// The design team's start screen is drawn in browser pixels; the project's UI scale is 0.90 at a window 1080 high (see
 	// DefaultEngine.ini; it follows the window size from there), so sizes are divided by that reference to come out the same on
 	// screen at 1080 and to scale with the window at any other size.
-	constexpr float DesignToUi = 1.f / 0.77f;
+	constexpr float DesignToUi = 1.f / 0.90f;
 
 	// Slate font sizes are in points, drawn at 96 DPI (4/3 of a pixel each), while the design's sizes are pixels.
 	constexpr float PixelsToFontSize = 0.75f;

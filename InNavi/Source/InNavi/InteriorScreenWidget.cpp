@@ -12,6 +12,7 @@
 #include "StartScreenStyle.h"
 #include "MapPanelWidget.h"
 #include "DebugPanelWidget.h"
+#include "UiSizePanelWidget.h"
 #include "LayoutValidationPanelWidget.h"
 #include "PluginToolHost.h"
 #include "ConfirmDialogWidget.h"
@@ -679,6 +680,11 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		WindowDebugCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowDebug"), TEXT("Debug"));
 		WindowDebugCheckbox->SetIsChecked(false);
 		WindowDebugCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowDebugCheckChanged);
+
+		// Starts unchecked - the UI Size panel starts hidden. The Window menu only shows or hides it; the size is set in the panel.
+		WindowUiSizeCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowUiSize"), TEXT("UI Size"));
+		WindowUiSizeCheckbox->SetIsChecked(false);
+		WindowUiSizeCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowUiSizeCheckChanged);
 		PluginToolHost = NewObject<UPluginToolHost>(this);
 		PluginToolHost->AddMenu(LayoutTools::EScreen::Interior, [&AddDropdownCheckRow, WindowDropdownStack](const FString& Name, const FString& Label)
 		{
@@ -1287,6 +1293,11 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		DebugPanelWidget->SetOwnerScreen(this);
 		DebugPanelWidget->SetInfoProvider([this]() { return BuildDebugInfo(); });
 		DockHost->RegisterPanel(FName(GetDockPanelName(EDockPanelId::Debug)), FText::FromString(GetDockPanelName(EDockPanelId::Debug)), DebugPanelWidget);
+
+		// -- UI Size panel: the shared one (UiSizePanelWidget.h), also used by the exterior screen. Starts hidden.
+		UiSizePanelWidget = CreateWidget<UUiSizePanelWidget>(this, UUiSizePanelWidget::StaticClass());
+		UiSizePanelWidget->SetOwnerScreen(this);
+		DockHost->RegisterPanel(FName(GetDockPanelName(EDockPanelId::UiSize)), FText::FromString(GetDockPanelName(EDockPanelId::UiSize)), UiSizePanelWidget);
 		PluginToolHost->CreatePanels(this, DockHost, LayoutTools::EScreen::Interior, [this]() { ShowValidationPanel(); });
 		ValidationPanelWidget = Cast<ULayoutValidationPanelWidget>(PluginToolHost->FindPanel(TEXT("Validation")));
 
@@ -1525,6 +1536,7 @@ void UInteriorScreenWidget::RefreshWindowMenuChecks()
 	Sync(WindowAudioCheckbox, EDockPanelId::Audio);
 	Sync(WindowMapCheckbox, EDockPanelId::Map);
 	Sync(WindowDebugCheckbox, EDockPanelId::Debug);
+	Sync(WindowUiSizeCheckbox, EDockPanelId::UiSize);
 	if (PluginToolHost) PluginToolHost->Sync();
 }
 
@@ -1832,6 +1844,13 @@ UWidget* UInteriorScreenWidget::FindScreenWidget(FName Name) const
 			return Found;
 		}
 	}
+	if (UiSizePanelWidget)
+	{
+		if (UWidget* Found = UiSizePanelWidget->FindContentWidget(Name))
+		{
+			return Found;
+		}
+	}
 	return nullptr;
 }
 
@@ -1843,7 +1862,7 @@ FVector2D UInteriorScreenWidget::GetCanvasSize() const
 		return ReliableSize;
 	}
 	// The screen has not been painted yet (the saved layout is loaded before that). The raw viewport is in screen pixels, but the
-	// layout works in UI units - pixels divided by the DPI scale (it follows the window size, 0.77 at 1080) - so a layout loaded against the raw size would
+	// layout works in UI units - pixels divided by the DPI scale (it follows the window size, 0.90 at 1080) - so a layout loaded against the raw size would
 	// come out that much too small.
 	const FVector2D Viewport = UWidgetLayoutLibrary::GetViewportSize(this);
 	const float DpiScale = UWidgetLayoutLibrary::GetViewportScale(this);
@@ -1879,6 +1898,7 @@ const TCHAR* UInteriorScreenWidget::GetDockPanelName(EDockPanelId Id)
 	case EDockPanelId::Map:        return TEXT("Map");
 	case EDockPanelId::Debug:      return TEXT("Debug");
 	case EDockPanelId::Validation: return TEXT("Validation");
+	case EDockPanelId::UiSize:     return TEXT("UI Size");
 	default:                       return TEXT("");
 	}
 }
@@ -2274,6 +2294,10 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 	if (AudioPanelWidget)
 	{
 		AudioPanelWidget->SetContentWidth(ComputePanelButtonWidth(EDockPanelId::Audio));
+	}
+	if (UiSizePanelWidget)
+	{
+		UiSizePanelWidget->SetContentWidth(ComputePanelButtonWidth(EDockPanelId::UiSize));
 	}
 	if (MapPanelWidget)
 	{
@@ -3963,6 +3987,11 @@ void UInteriorScreenWidget::OnWindowMapCheckChanged(bool bIsChecked)
 void UInteriorScreenWidget::OnWindowDebugCheckChanged(bool bIsChecked)
 {
 	SetDockPanelUserHidden(EDockPanelId::Debug, !bIsChecked);
+}
+
+void UInteriorScreenWidget::OnWindowUiSizeCheckChanged(bool bIsChecked)
+{
+	SetDockPanelUserHidden(EDockPanelId::UiSize, !bIsChecked);
 }
 
 void UInteriorScreenWidget::ShowValidationPanel()

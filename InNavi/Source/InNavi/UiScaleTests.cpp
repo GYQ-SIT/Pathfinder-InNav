@@ -6,7 +6,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 
-// The UI follows the resolution of the window: the scale comes from the window's shortest side (UIScaleCurve in DefaultEngine.ini), 0.77 at
+// The UI follows the resolution of the window: the scale comes from the window's shortest side (UIScaleCurve in DefaultEngine.ini), 0.90 at
 // 1080, growing with the window above that. The phone keeps the fixed 0.77 it had (Config/Android/AndroidEngine.ini).
 
 namespace UiScaleTests
@@ -22,11 +22,11 @@ bool FUiScaleFollowsWindowTest::RunTest(const FString& Parameters)
 {
 	using namespace UiScaleTests;
 
-	TestEqual(TEXT("1080p keeps the size the screens were designed at"), ScaleFor(1920, 1080), 0.77f, 0.001f);
-	TestEqual(TEXT("1440p is bigger"), ScaleFor(2560, 1440), 1.03f, 0.001f);
-	TestEqual(TEXT("4K is bigger still"), ScaleFor(3840, 2160), 1.54f, 0.001f);
-	TestEqual(TEXT("720p is a little smaller"), ScaleFor(1280, 720), 0.62f, 0.001f);
-	TestEqual(TEXT("a very small window is still readable"), ScaleFor(854, 480), 0.55f, 0.001f);
+	TestEqual(TEXT("1080p is the reference"), ScaleFor(1920, 1080), 0.90f, 0.001f);
+	TestEqual(TEXT("1440p is bigger"), ScaleFor(2560, 1440), 1.20f, 0.001f);
+	TestEqual(TEXT("4K is bigger still"), ScaleFor(3840, 2160), 1.80f, 0.001f);
+	TestEqual(TEXT("720p is a little smaller"), ScaleFor(1280, 720), 0.72f, 0.001f);
+	TestEqual(TEXT("a very small window is still readable"), ScaleFor(854, 480), 0.64f, 0.001f);
 
 	// Above 1080 the UI keeps its share of the screen: twice the window, twice the scale.
 	TestEqual(TEXT("4K is twice 1080p"), ScaleFor(3840, 2160), 2.f * ScaleFor(1920, 1080), 0.01f);

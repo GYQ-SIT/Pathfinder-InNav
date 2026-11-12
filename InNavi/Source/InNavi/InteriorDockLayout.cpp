@@ -18,11 +18,12 @@ namespace InteriorDock
 	const FName Map(TEXT("Map"));
 	const FName Debug(TEXT("Debug"));
 	const FName Validation(TEXT("Validation"));
+	const FName UiSizePanel(TEXT("UI Size"));
 
 	const TArray<FName>& AllPanels()
 	{
 		static TArray<FName> Panels;
-		Panels = { Toolbar, Floor, Properties, Layers, Navigation, Audio, Map, Debug };
+		Panels = { Toolbar, Floor, Properties, Layers, Navigation, Audio, Map, Debug, UiSizePanel };
 		PluginTools::AppendPanels(Panels, LayoutTools::EScreen::Interior);
 		return Panels;
 	}
@@ -45,7 +46,7 @@ namespace InteriorDock
 		{
 			return EDockSide::Left;
 		}
-		if (Panel == Audio || Panel == Debug)
+		if (Panel == Audio || Panel == Debug || Panel == UiSizePanel)
 		{
 			return EDockSide::Bottom;
 		}
@@ -56,7 +57,7 @@ namespace InteriorDock
 	{
 		bool IsHiddenByDefault(FName Panel)
 		{
-			return PluginTools::HiddenByDefault(Panel, LayoutTools::EScreen::Interior) || Panel == Navigation || Panel == Audio || Panel == Debug || Panel == Map;
+			return PluginTools::HiddenByDefault(Panel, LayoutTools::EScreen::Interior) || Panel == Navigation || Panel == Audio || Panel == Debug || Panel == Map || Panel == UiSizePanel;
 		}
 
 		void SetRatios(const TSharedPtr<FDockNode>& Root, const TArray<float>& Ratios)
@@ -94,7 +95,9 @@ namespace InteriorDock
 
 		L.DockPanelToEdge(Audio, EDockSide::Bottom);
 		L.DockPanel(Debug, Audio, EDockDropZone::Center);
+		L.DockPanel(UiSizePanel, Audio, EDockDropZone::Center);
 		L.SetAreaExtent(EDockSide::Bottom, 220.f);
+		L.HidePanel(UiSizePanel);
 		L.HidePanel(Debug);
 		L.HidePanel(Audio);
 		PluginTools::PlaceDefaults(L, LayoutTools::EScreen::Interior);

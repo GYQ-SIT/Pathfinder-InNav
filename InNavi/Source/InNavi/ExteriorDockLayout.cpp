@@ -16,11 +16,12 @@ namespace ExteriorDock
 	const FName Debug(TEXT("Debug"));
 	const FName Validation(TEXT("Validation"));
 	const FName Navigation(TEXT("Navigation"));
+	const FName UiSizePanel(TEXT("UI Size"));
 
 	const TArray<FName>& AllPanels()
 	{
 		static TArray<FName> Panels;
-		Panels = { Audio, Map, Building, Debug, Navigation };
+		Panels = { Audio, Map, Building, Debug, Navigation, UiSizePanel };
 		PluginTools::AppendPanels(Panels, LayoutTools::EScreen::Exterior);
 		return Panels;
 	}
@@ -46,7 +47,7 @@ namespace ExteriorDock
 	{
 		bool IsHiddenByDefault(FName Panel)
 		{
-			return PluginTools::HiddenByDefault(Panel, LayoutTools::EScreen::Exterior) || Panel == Audio || Panel == Debug || Panel == Navigation;
+			return PluginTools::HiddenByDefault(Panel, LayoutTools::EScreen::Exterior) || Panel == Audio || Panel == Debug || Panel == Navigation || Panel == UiSizePanel;
 		}
 	}
 
@@ -66,7 +67,9 @@ namespace ExteriorDock
 		// Hidden panels are placed first and then hidden so the layout remembers where each one belongs.
 		L.DockPanelToEdge(Audio, EDockSide::Bottom);
 		L.DockPanel(Debug, Audio, EDockDropZone::Center);
+		L.DockPanel(UiSizePanel, Audio, EDockDropZone::Center);
 		L.SetAreaExtent(EDockSide::Bottom, 220.f);
+		L.HidePanel(UiSizePanel);
 		L.HidePanel(Debug);
 		L.HidePanel(Audio);
 		PluginTools::PlaceDefaults(L, LayoutTools::EScreen::Exterior);

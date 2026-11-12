@@ -63,7 +63,7 @@ canvas size — extents are stored as fractions of the real size.
 
 ## Shared panels
 
-Audio, Map, Debug and Navigation exist on both screens. Each is written once, as a subclass of
+Audio, Map, Debug, Navigation and UI Size exist on both screens. Each is written once, as a subclass of
 `UDockPanelContentWidget` ([DockPanelContent.h](../../InNavi/Source/InNavi/DockPanelContent.h)):
 
 | Panel | Class | Screen-specific part |
@@ -72,6 +72,7 @@ Audio, Map, Debug and Navigation exist on both screens. Each is written once, as
 | Map | `UMapPanelWidget` | `SetShowBuildingFilters(true)` on the exterior screen turns the Buildings section on |
 | Debug | `UDebugPanelWidget` | `SetInfoProvider(lambda)` supplies the screen's own lines; the panel adds FPS and the last failed action |
 | Navigation | `UNavigationDockPanelWidget` | holds no state (that is `UNavigationPanelWidget`, `ANavPlayerController::GetNavigationPanel()`); the screen calls `RefreshDisplay()` on every `OnStateChanged` and `RefreshRoomDropdowns()` when the places could have changed, passes the width with `SetContentWidth`, and tells the state whether it is outdoors with `SetOutdoorMode` (exterior screen: true) |
+| UI Size | `UUiSizePanelWidget` | none; the screen passes the width with `SetContentWidth`. The size itself lives in `UUiSizeSubsystem` (`UiSize.h`), so Ctrl + / Ctrl - / Ctrl 0 keep the panel current. Its dock id is `UiSizePanel` (shown as "UI Size"); the Window menu has one check box for it |
 
 If a panel will appear on only one screen, it can still be written the same way — a
 `UDockPanelContentWidget` subclass — and that is the recommended form for new panels.

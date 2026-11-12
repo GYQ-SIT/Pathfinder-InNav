@@ -15,6 +15,8 @@ namespace InteriorDock
 	INNAVI_API extern const FName Map;
 	INNAVI_API extern const FName Debug;
 	INNAVI_API extern const FName Validation;
+	// The UI Size panel (see UiSizePanelWidget.h); its name on screen is "UI Size".
+	INNAVI_API extern const FName UiSizePanel;
 
 	INNAVI_API const TArray<FName>& AllPanels();
 	INNAVI_API TSet<FName> KnownPanels();
@@ -23,7 +25,7 @@ namespace InteriorDock
 	INNAVI_API EDockSide DefaultSideFor(FName Panel);
 
 	// The team's default arrangement: Map over Toolbar on the left; Floor, Layers and Properties stacked
-	// on the right. Navigation (a tab beside Properties), Audio and Debug (bottom) start hidden, and
+	// on the right. Navigation (a tab beside Properties), Audio, Debug and UI Size (bottom) start hidden, and
 	// remember those spots for when the Window menu shows them.
 	INNAVI_API void BuildDefaultLayout(FDockLayout& Layout);
 

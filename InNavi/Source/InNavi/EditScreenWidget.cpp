@@ -3,6 +3,7 @@
 #include "AudioFileRowWidget.h"
 #include "AudioPanelWidget.h"
 #include "DebugPanelWidget.h"
+#include "UiSizePanelWidget.h"
 #include "LayoutValidationPanelWidget.h"
 #include "PluginToolHost.h"
 #include "BuildingInfoPanelWidget.h"
@@ -315,6 +316,11 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		WindowDebugCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowDebug"), TEXT("Debug"));
 		WindowDebugCheckbox->SetIsChecked(false);
 		WindowDebugCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowDebugCheckChanged);
+
+		// Starts unchecked - the UI Size panel starts hidden. The Window menu only shows or hides it; the size is set in the panel.
+		WindowUiSizeCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowUiSize"), TEXT("UI Size"));
+		WindowUiSizeCheckbox->SetIsChecked(false);
+		WindowUiSizeCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UEditScreenWidget::OnWindowUiSizeCheckChanged);
 		PluginToolHost = NewObject<UPluginToolHost>(this);
 		PluginToolHost->AddMenu(LayoutTools::EScreen::Exterior, [&AddDropdownCheckRow, WindowDropdownStack](const FString& Name, const FString& Label)
 		{
@@ -437,6 +443,11 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			return FString::Printf(TEXT("Selected Building: %s\nCamera Speed: %s\nUnsaved Changes: %s"), *SelectedBuilding, *CameraSpeed, *UnsavedChanges);
 		});
 		DockHost->RegisterPanel(ExteriorDock::Debug, FText::FromName(ExteriorDock::Debug), DebugPanelWidget);
+
+		// --- UI Size panel (Window > UI Size): the shared one (UiSizePanelWidget.h), also used by the interior editor. Starts hidden.
+		UiSizePanelWidget = CreateWidget<UUiSizePanelWidget>(this, UUiSizePanelWidget::StaticClass());
+		UiSizePanelWidget->SetOwnerScreen(this);
+		DockHost->RegisterPanel(ExteriorDock::UiSizePanel, FText::FromName(ExteriorDock::UiSizePanel), UiSizePanelWidget);
 		PluginToolHost->CreatePanels(this, DockHost, LayoutTools::EScreen::Exterior, [this]()
 		{
 			if (auto* PC = GetOwningPlayer<ANavPlayerController>())
@@ -572,6 +583,7 @@ void UEditScreenWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTim
 
 	// The Audio and Map panels' controls size themselves from their panel's width, which the user can change at any time.
 	SyncAudioPanelWidth();
+	SyncUiSizePanelWidth();
 	SyncMapPanelWidth();
 	SyncNavigationPanelWidth();
 	SyncBuildingPanelWidth();
@@ -1029,6 +1041,13 @@ UWidget* UEditScreenWidget::FindScreenWidget(FName Name) const
 			return Found;
 		}
 	}
+	if (UiSizePanelWidget)
+	{
+		if (UWidget* Found = UiSizePanelWidget->FindContentWidget(Name))
+		{
+			return Found;
+		}
+	}
 	if (NavigationPanelWidget)
 	{
 		if (UWidget* Found = NavigationPanelWidget->FindContentWidget(Name))
@@ -1067,7 +1086,7 @@ FVector2D UEditScreenWidget::GetCanvasSize() const
 		return LastKnownCanvasSize;
 	}
 	// The screen has not been painted yet (the saved layout is loaded before that). The raw viewport is in screen pixels, but the
-	// layout works in UI units - pixels divided by the DPI scale (it follows the window size, 0.77 at 1080) - so a layout loaded against the raw size would
+	// layout works in UI units - pixels divided by the DPI scale (it follows the window size, 0.90 at 1080) - so a layout loaded against the raw size would
 	// come out that much too small.
 	const FVector2D Viewport = UWidgetLayoutLibrary::GetViewportSize(this);
 	const float DpiScale = UWidgetLayoutLibrary::GetViewportScale(this);
@@ -1161,6 +1180,7 @@ void UEditScreenWidget::RefreshWindowMenuChecks()
 	Sync(WindowRoadsCheckbox, ExteriorDock::Map);
 	Sync(WindowBuildingCheckbox, ExteriorDock::Building);
 	Sync(WindowDebugCheckbox, ExteriorDock::Debug);
+	Sync(WindowUiSizeCheckbox, ExteriorDock::UiSizePanel);
 	if (PluginToolHost) PluginToolHost->Sync();
 	Sync(WindowNavigationCheckbox, ExteriorDock::Navigation);
 }
@@ -1210,6 +1230,21 @@ void UEditScreenWidget::SyncAudioPanelWidth()
 	}
 	// Minus the panel's 14px padding on each side and room for the scroll bar.
 	AudioPanelWidget->SetContentWidth(FMath::Max(80.f, PanelWidth - 48.f));
+}
+
+void UEditScreenWidget::SyncUiSizePanelWidth()
+{
+	if (!DockHost || !UiSizePanelWidget)
+	{
+		return;
+	}
+	const float PanelWidth = DockHost->GetPanelWidth(ExteriorDock::UiSizePanel);
+	if (PanelWidth <= 0.f)
+	{
+		return; // hidden, or not laid out yet
+	}
+	// Minus the panel's 14px padding on each side and room for the scroll bar.
+	UiSizePanelWidget->SetContentWidth(FMath::Max(80.f, PanelWidth - 48.f));
 }
 
 void UEditScreenWidget::SyncMapPanelWidth()
@@ -1265,6 +1300,11 @@ void UEditScreenWidget::OnWindowBuildingCheckChanged(bool bIsChecked)
 void UEditScreenWidget::OnWindowDebugCheckChanged(bool bIsChecked)
 {
 	SetDockPanelHidden(ExteriorDock::Debug, !bIsChecked);
+}
+
+void UEditScreenWidget::OnWindowUiSizeCheckChanged(bool bIsChecked)
+{
+	SetDockPanelHidden(ExteriorDock::UiSizePanel, !bIsChecked);
 }
 
 
