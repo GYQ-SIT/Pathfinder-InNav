@@ -2,6 +2,7 @@
 
 
 #include "BuildingGenerator.h"
+#include "GeoProjection.h"
 #include "BuildingTypes.h"
 #include "GroundFit.h"
 #include "LayoutValidation.h"
@@ -507,9 +508,6 @@ int32 ABuildingGenerator::LoadBuildingsFromDatabase(const FString& DatabasePath)
 	DatabaseRefLon = RefLon;
 	bHasDatabaseRefPoint = true;
 
-	constexpr double MetersPerDegreeLat = 111320.0;
-	const double MetersPerDegreeLon = MetersPerDegreeLat * FMath::Cos(FMath::DegreesToRadians(RefLat));
-
 	// This data is the real campus at real scale (unlike buildings.json's hand-authored, non-
 	// geographic footprint units) - Scale=100 makes SpawnBuildingFromData's Footprint*Scale land
 	// directly in UE's cm-per-unit convention, so footprint units below can just be real meters with
@@ -527,9 +525,9 @@ int32 ABuildingGenerator::LoadBuildingsFromDatabase(const FString& DatabasePath)
 		Footprint.Reserve(Pair.Value.LatLonPoints.Num());
 		for (const FVector2D& LonLat : Pair.Value.LatLonPoints)
 		{
-			const double X = (LonLat.X - RefLon) * MetersPerDegreeLon;
-			const double Y = (LonLat.Y - RefLat) * MetersPerDegreeLat;
-			Footprint.Add(FVector2D((float)X, (float)Y));
+			// X = north, Y = east (see GeoProjection.h): the campus is not a mirror image of the real map.
+			const FVector2D Meters = GeoProjection::ToLocalMeters(LonLat.Y, LonLat.X, RefLat, RefLon);
+			Footprint.Add(FVector2D((float)Meters.X, (float)Meters.Y));
 		}
 		// OSM closes a way by repeating its first node as the last one - SpawnBuildingFromData (and
 		// the adjacency test's own edge-wrapping) treat this as an already-open polygon, so strip the
@@ -702,17 +700,15 @@ int32 ABuildingGenerator::LoadRoadsAndPOIsFromDatabase(const FString& DatabasePa
 		return 0;
 	}
 
-	constexpr double MetersPerDegreeLat = 111320.0;
-	const double MetersPerDegreeLon = MetersPerDegreeLat * FMath::Cos(FMath::DegreesToRadians(DatabaseRefLat));
 	const double CapturedRefLat = DatabaseRefLat;
 	const double CapturedRefLon = DatabaseRefLon;
-	auto ProjectToWorldXY = [CapturedRefLat, CapturedRefLon, MetersPerDegreeLat, MetersPerDegreeLon, this](double Lat, double Lon) -> FVector2D
+	auto ProjectToWorldXY = [CapturedRefLat, CapturedRefLon, this](double Lat, double Lon) -> FVector2D
 	{
-		const double MetersX = (Lon - CapturedRefLon) * MetersPerDegreeLon;
-		const double MetersY = (Lat - CapturedRefLat) * MetersPerDegreeLat;
+		// The same projection as the campus buildings (X = north, Y = east, see GeoProjection.h).
+		const FVector2D Meters = GeoProjection::ToLocalMeters(Lat, Lon, CapturedRefLat, CapturedRefLon);
 		// Scale=100 (see LoadBuildingsFromDatabase) turns real-world meters directly into UE's
 		// cm-per-unit world space - the exact same conversion every road/POI position needs too.
-		return FVector2D((float)(MetersX * Scale), (float)(MetersY * Scale));
+		return FVector2D((float)(Meters.X * Scale), (float)(Meters.Y * Scale));
 	};
 
 	ClearAllRoadsAndPOIs();
@@ -784,15 +780,12 @@ int32 ABuildingGenerator::LoadContextBuildingsFromDatabase(const FString& Databa
 		return 0;
 	}
 
-	constexpr double MetersPerDegreeLat = 111320.0;
-	const double MetersPerDegreeLon = MetersPerDegreeLat * FMath::Cos(FMath::DegreesToRadians(DatabaseRefLat));
 	const double CapturedRefLat = DatabaseRefLat;
 	const double CapturedRefLon = DatabaseRefLon;
-	auto ProjectToWorldXY = [CapturedRefLat, CapturedRefLon, MetersPerDegreeLat, MetersPerDegreeLon, this](double Lat, double Lon) -> FVector2D
+	auto ProjectToWorldXY = [CapturedRefLat, CapturedRefLon, this](double Lat, double Lon) -> FVector2D
 	{
-		const double MetersX = (Lon - CapturedRefLon) * MetersPerDegreeLon;
-		const double MetersY = (Lat - CapturedRefLat) * MetersPerDegreeLat;
-		return FVector2D((float)(MetersX * Scale), (float)(MetersY * Scale));
+		const FVector2D Meters = GeoProjection::ToLocalMeters(Lat, Lon, CapturedRefLat, CapturedRefLon);
+		return FVector2D((float)(Meters.X * Scale), (float)(Meters.Y * Scale));
 	};
 
 	ClearAllContextBuildings();

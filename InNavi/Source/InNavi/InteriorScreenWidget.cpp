@@ -834,6 +834,12 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// Room colours: fills the rooms in the 2D plan with their type's colour. The swatch is coloured when on and grey when off (HandleRoomColoursChanged).
 		RoomColoursButton = AddEditButton(TEXT("Btn_RoomColours"), TEXT(""), TEXT("Colours"), TEXT("Room colours ON"), &RoomColoursIcon);
 		RoomColoursButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoomColoursClicked);
+		// Turn the plan: two buttons for the 2D plan only, one quarter turn each. They turn how the plan is looked at (a tall building can be laid across
+		// the screen); the rooms do not move, so they are not Rotate left / Rotate right of the Tools panel, which turn the selected room.
+		TurnPlanLeftButton = AddEditButton(TEXT("Btn_TurnPlanLeft"), TEXT("Icon_RotateCCW"), TEXT("Turn left"), TEXT("Turn the whole 2D plan to the left (only the view: the layout does not change)"), nullptr);
+		TurnPlanLeftButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnTurnPlanLeftClicked);
+		TurnPlanRightButton = AddEditButton(TEXT("Btn_TurnPlanRight"), TEXT("Icon_RotateCW"), TEXT("Turn right"), TEXT("Turn the whole 2D plan to the right (only the view: the layout does not change)"), nullptr);
+		TurnPlanRightButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnTurnPlanRightClicked);
 
 
 		// Isolate | Orbit | Grab - in 3D only, as one framed group like 2D | 3D. Isolate hides the bottom platform and the surroundings and lets the
@@ -1974,6 +1980,14 @@ void UInteriorScreenWidget::HandlePreviewModeChanged(bool bIsActive)
 	if (FloorPlanWidget)
 	{
 		FloorPlanWidget->SetVisibility(bIsActive ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	}
+	// The plan can only be turned in 2D.
+	for (UButton* TurnButton : { TurnPlanLeftButton, TurnPlanRightButton })
+	{
+		if (TurnButton)
+		{
+			TurnButton->SetVisibility(bIsActive ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+		}
 	}
 
 	if (Switch2DButton)
@@ -3624,6 +3638,22 @@ void UInteriorScreenWidget::OnSwitch3DClicked()
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->SetIn3DPreviewMode(true);
+	}
+}
+
+void UInteriorScreenWidget::OnTurnPlanLeftClicked()
+{
+	if (FloorPlanWidget)
+	{
+		FloorPlanWidget->TurnViewBy(-1);
+	}
+}
+
+void UInteriorScreenWidget::OnTurnPlanRightClicked()
+{
+	if (FloorPlanWidget)
+	{
+		FloorPlanWidget->TurnViewBy(1);
 	}
 }
 

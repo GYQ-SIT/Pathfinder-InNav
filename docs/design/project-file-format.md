@@ -72,6 +72,11 @@ A project made by opening a map database (a `.db` file) and saving it keeps all 
 `contextBuildings` and `roads` around them, so the saved file shows the same map as the database did (without the places of interest). A project
 drawn in the editor has neither.
 
+In such a project the footprints, roads and context buildings are in meters around the campus centre, **x towards the north and y towards the east**,
+like a map with north up (the editor's top view) and east to the right. Builds before 2026-11-15 put east on x and north on y, which drew the
+whole campus as a mirror image of the real map; a project saved from a database by such a build keeps that mirror image (it is consistent in itself,
+and still opens and routes) until the database is opened again and the project is saved again.
+
 **A building** (`buildings[]`)
 
 | Field | Type | Meaning | If absent |

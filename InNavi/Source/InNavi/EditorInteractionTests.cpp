@@ -303,4 +303,149 @@ bool FEditorSearchKeyboardTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// Turning the 2D plan is only a way of looking at it: a click must land on the same footprint point it is drawn over at every turn, a drag must still move
+// the content with the mouse, and a tall building laid across the screen must fill the widget.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorTurnPlanMappingTest, "InNavi.EditorUX.TurnPlan.Mapping", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FEditorTurnPlanMappingTest::RunTest(const FString& Parameters)
+{
+	using namespace EditorInteractionTests;
+
+	// A quarter turn to the right on the screen (x right, y down): right goes to down, down to left, left to up, up to right.
+	auto Turned = [](FVector2D Vector, int32 Turns) { return UInteriorFloorPlanWidget::RotateQuarterTurns(Vector, Turns); };
+	TestTrue(TEXT("right turns to down"), Turned(FVector2D(1, 0), 1).Equals(FVector2D(0, 1), 1e-6));
+	TestTrue(TEXT("down turns to left"), Turned(FVector2D(0, 1), 1).Equals(FVector2D(-1, 0), 1e-6));
+	TestTrue(TEXT("two quarters turn it round"), Turned(FVector2D(2, 3), 2).Equals(FVector2D(-2, -3), 1e-6));
+	TestTrue(TEXT("three quarters are one to the left"), Turned(FVector2D(1, 0), 3).Equals(Turned(FVector2D(1, 0), -1), 1e-6));
+	TestTrue(TEXT("four quarters are none"), Turned(FVector2D(2, 3), 4).Equals(FVector2D(2, 3), 1e-6));
+	TestTrue(TEXT("and any whole number of them counts"), Turned(FVector2D(2, 3), -5).Equals(Turned(FVector2D(2, 3), 3), 1e-6));
+
+	FNavigationSearchFixture F; Prepare(F); ANavPlayerController* PC = F.MakeController();
+	UInteriorFloorPlanWidget* W = Plan(F, PC);
+	const FVector2D Size(1000, 1000);
+	const FVector2D Centre = Size * 0.5;
+	const FVector2D Right(120, 0), Down(0, 80);
+
+	TestEqual(TEXT("not turned to begin with"), W->GetViewQuarterTurns(), 0);
+	const FVector2D CentrePoint0 = W->LocalPositionToFootprintPoint(Centre, Size);
+	const FVector2D RightStep0 = W->LocalPositionToFootprintPoint(Centre + Right, Size) - CentrePoint0;
+	const FVector2D DownStep0 = W->LocalPositionToFootprintPoint(Centre + Down, Size) - CentrePoint0;
+	TestTrue(TEXT("to the right on the screen is to the right in the plan, down is down"), RightStep0.X > 1.0 && FMath::IsNearlyZero(RightStep0.Y, 0.001) && DownStep0.Y > 1.0 && FMath::IsNearlyZero(DownStep0.X, 0.001));
+
+	for (int32 Turn = 1; Turn <= 4; ++Turn)
+	{
+		W->TurnViewBy(1);
+		TestEqual(TEXT("the turns count up and wrap round"), W->GetViewQuarterTurns(), Turn % 4);
+		// The middle of the widget stays the middle of the plan, whatever the turn.
+		const FVector2D CentrePoint = W->LocalPositionToFootprintPoint(Centre, Size);
+		TestTrue(TEXT("the middle stays where it was"), CentrePoint.Equals(CentrePoint0, 0.01));
+		// The screen's own right and down are the plan's directions turned back: the plan is turned to the right, so what is to the right of the middle on the
+		// screen was above it in the plan.
+		const FVector2D RightStep = W->LocalPositionToFootprintPoint(Centre + Right, Size) - CentrePoint;
+		const FVector2D DownStep = W->LocalPositionToFootprintPoint(Centre + Down, Size) - CentrePoint;
+		TestTrue(TEXT("a point to the right of the middle is the plan's direction turned back"), RightStep.Equals(UInteriorFloorPlanWidget::RotateQuarterTurns(RightStep0, -Turn), 0.01));
+		TestTrue(TEXT("and so is a point below it"), DownStep.Equals(UInteriorFloorPlanWidget::RotateQuarterTurns(DownStep0, -Turn), 0.01));
+		// Lengths are never changed by a turn.
+		TestTrue(TEXT("a turn does not change the scale"), FMath::IsNearlyEqual(RightStep.Size(), RightStep0.Size(), 0.01));
+	}
+	W->TurnViewBy(-1);
+	TestEqual(TEXT("one to the left from none is three to the right"), W->GetViewQuarterTurns(), 3);
+	W->TurnViewBy(1);
+	TestEqual(TEXT("and one to the right takes it back"), W->GetViewQuarterTurns(), 0);
+
+	// The resize handles are drawn through the same conversion as the plan: at every turn, a click on a handle is on the corner of the room it belongs to.
+	FString Error;
+	if (AInteriorRoom* Room = F.Interior->CreateRoomFromFootprint({{450,450},{550,450},{550,550},{450,550}}, TEXT("Turn"), TEXT("Turn"), true,false,false,Error))
+	{
+		PC->ToggleSelectMode(); PC->SelectRoom(TEXT("Turn"));
+		FVector2D RoomPosition, RoomSize;
+		PC->GetSelectedRoomBounds(RoomPosition, RoomSize);
+		for (int32 Turn = 0; Turn < 4; ++Turn)
+		{
+			const TArray<FVector2D> Handles = FEditorInteractionTestAccess::Handles(W, Size);
+			if (!TestEqual(TEXT("eight handles at every turn"), Handles.Num(), 8)) break;
+			bool bAllOnTheRoom = true;
+			for (const FVector2D& Handle : Handles)
+			{
+				const FVector2D Point = W->LocalPositionToFootprintPoint(Handle, Size);
+				bAllOnTheRoom &= Point.X > RoomPosition.X - 0.5 && Point.X < RoomPosition.X + RoomSize.X + 0.5 && Point.Y > RoomPosition.Y - 0.5 && Point.Y < RoomPosition.Y + RoomSize.Y + 0.5;
+			}
+			TestTrue(*FString::Printf(TEXT("every handle is on the room it belongs to (turn %d)"), Turn), bAllOnTheRoom);
+			W->TurnViewBy(1);
+		}
+		F.Interior->DeleteRoom(TEXT("Turn")); PC->SelectRoom(FString());
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorTurnPlanFitTest, "InNavi.EditorUX.TurnPlan.TallBuildingFillsTheWidget", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FEditorTurnPlanFitTest::RunTest(const FString& Parameters)
+{
+	using namespace EditorInteractionTests;
+	FNavigationSearchFixture F;
+	F.Interior->ClearLoadedInterior(); F.Generator->ClearAllBuildings();
+	// Tall and narrow (200 wide, 1000 deep): in a wide widget it is small, laid across the screen it is much larger.
+	F.Generator->CreateRectangleBuilding(TEXT("TALL"), TEXT("TALL"), {0, 0}, 200, 1000, 0, 2, 300);
+	F.Interior->LoadInteriorForBuilding(TEXT("TALL"));
+	// Floor 1 frames the whole campus area around the building; another floor frames the building's own outline, which is what is measured here.
+	F.Interior->SetActiveFloor(2);
+	ANavPlayerController* PC = F.MakeController();
+	UInteriorFloorPlanWidget* W = Plan(F, PC);
+	const FVector2D Size(1000, 400);
+	const FVector2D Centre = Size * 0.5;
+	auto WorldPerHundredPixels = [&]() { return (W->LocalPositionToFootprintPoint(Centre + FVector2D(100, 0), Size) - W->LocalPositionToFootprintPoint(Centre, Size)).Size(); };
+
+	const double Upright = WorldPerHundredPixels();
+	W->TurnViewBy(1);
+	const double Laid = WorldPerHundredPixels();
+	TestTrue(TEXT("laid across the screen the plan is drawn larger (fewer plan units per pixel)"), Laid < Upright * 0.6);
+	W->TurnViewBy(1);
+	TestTrue(TEXT("turned round it is as big as upright"), FMath::IsNearlyEqual(WorldPerHundredPixels(), Upright, Upright * 0.001));
+	W->TurnViewBy(1);
+	TestTrue(TEXT("and three quarters is as big as one"), FMath::IsNearlyEqual(WorldPerHundredPixels(), Laid, Laid * 0.001));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorTurnPlanButtonsTest, "InNavi.EditorUX.TurnPlan.Buttons", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FEditorTurnPlanButtonsTest::RunTest(const FString& Parameters)
+{
+	using namespace EditorInteractionTests;
+	FNavigationSearchFixture F; Prepare(F); ANavPlayerController* PC = F.MakeController();
+	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>(); Screen->Initialize(); Screen->TakeWidget(); Screen->SetOwningPlayer(PC);
+	UButton* Left = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_TurnPlanLeft")));
+	UButton* Right = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_TurnPlanRight")));
+	UWidget* Colours = Screen->FindScreenWidget(TEXT("Btn_RoomColours"));
+	UInteriorFloorPlanWidget* PlanWidget = Cast<UInteriorFloorPlanWidget>(Screen->FindScreenWidget(TEXT("FloorPlanWidget")));
+	if (!TestNotNull(TEXT("Turn left"), Left) || !TestNotNull(TEXT("Turn right"), Right) || !TestNotNull(TEXT("Colours"), Colours) || !TestNotNull(TEXT("the plan"), PlanWidget)) return false;
+
+	// Right after Colours, left then right.
+	const UPanelWidget* Row = Colours->GetParent();
+	if (TestTrue(TEXT("they are in the same bar as Colours"), Row && Left->GetParent() == Row && Right->GetParent() == Row))
+	{
+		TestEqual(TEXT("Turn left is right after Colours"), Row->GetChildIndex(Left), Row->GetChildIndex(Colours) + 1);
+		TestEqual(TEXT("and Turn right right after it"), Row->GetChildIndex(Right), Row->GetChildIndex(Left) + 1);
+	}
+
+	// Shown in 2D, gone in 3D, and back.
+	TestEqual(TEXT("shown in 2D"), Left->GetVisibility() == ESlateVisibility::Visible && Right->GetVisibility() == ESlateVisibility::Visible, true);
+	bool bPreview = true;
+	Screen->ProcessEvent(Screen->FindFunctionChecked(TEXT("HandlePreviewModeChanged")), &bPreview);
+	TestEqual(TEXT("hidden in 3D"), Left->GetVisibility() == ESlateVisibility::Collapsed && Right->GetVisibility() == ESlateVisibility::Collapsed, true);
+	bPreview = false;
+	Screen->ProcessEvent(Screen->FindFunctionChecked(TEXT("HandlePreviewModeChanged")), &bPreview);
+	TestEqual(TEXT("and back in 2D"), Left->GetVisibility() == ESlateVisibility::Visible && Right->GetVisibility() == ESlateVisibility::Visible, true);
+
+	// They turn the plan, a quarter at a time, and nothing else.
+	const int32 RoomsBefore = F.Interior->GetRoomsOnFloor(1).Num();
+	Right->OnClicked.Broadcast();
+	TestEqual(TEXT("Turn right: one quarter to the right"), PlanWidget->GetViewQuarterTurns(), 1);
+	Right->OnClicked.Broadcast();
+	TestEqual(TEXT("again: two"), PlanWidget->GetViewQuarterTurns(), 2);
+	Left->OnClicked.Broadcast();
+	TestEqual(TEXT("Turn left takes one back"), PlanWidget->GetViewQuarterTurns(), 1);
+	Left->OnClicked.Broadcast(); Left->OnClicked.Broadcast();
+	TestEqual(TEXT("and from none, left is three to the right"), PlanWidget->GetViewQuarterTurns(), 3);
+	TestEqual(TEXT("the layout is not touched"), F.Interior->GetRoomsOnFloor(1).Num(), RoomsBefore);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
