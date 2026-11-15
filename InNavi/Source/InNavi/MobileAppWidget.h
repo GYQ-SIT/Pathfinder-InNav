@@ -4,6 +4,7 @@
 #include "Blueprint/UserWidget.h"
 #include "MobileNavSource.h"
 #include "MobilePreferences.h"
+#include "MobileSearchHistory.h"
 #include "MobileSavedPlaces.h"
 #include "MobileSheetFlow.h"
 #include "MobileAppWidget.generated.h"
@@ -11,12 +12,14 @@
 class UBorder;
 class UButton;
 class UCanvasPanel;
+class UImage;
 class UScaleBox;
 class USizeBox;
 class UTextBlock;
 class UWidget;
 class UWidgetSwitcher;
 class UMobileSearchPageWidget;
+class UMobileSearchOverlayWidget;
 class UMobilePlacePageWidget;
 class UMobileRoutePageWidget;
 class UMobileNavigatePageWidget;
@@ -61,11 +64,17 @@ public:
 	static constexpr double TabBarHeight = 60.0;
 	// The part of the sheet's top that drags it: the handle and a little around it.
 	static constexpr double HandleZoneHeight = 28.0;
-	// The map's toolbar (level, locate, more) and its gap above the sheet. The top row (the title, Overview, 2D / 3D) is 54 tall, 8 below the map's top.
-	// The toolbar and the plan are hidden while the sheet is open to its top (88 percent), as in the prototype.
-	static constexpr double TopRowTop = 8.0;
-	static constexpr double TopRowHeight = 54.0;
-	static constexpr double ControlsHeight = 54.0;
+	// The map's search field (a tap opens the full-screen search): 46 tall, 12 below the header and 12 from each side. The top row (the title, Overview,
+	// 2D / 3D) is 42 tall and comes under it, 76 below the header. The map's toolbar (level, locate, more) and its gap above the sheet. The toolbar and the
+	// plan are hidden while the sheet is open to its top (88 percent), as in the prototype.
+	static constexpr double SearchDockTop = 12.0;
+	static constexpr double SearchDockHeight = 46.0;
+	static constexpr double SearchDockMargin = 12.0;
+	static constexpr double TopRowTop = 76.0;
+	// The sheet open to its top stops this far under the top row (not over the search field), as in the prototype.
+	static constexpr double TopRowGap = 18.0;
+	static constexpr double TopRowHeight = 42.0;
+	static constexpr double ControlsHeight = 42.0;
 	static constexpr double ControlsGap = 12.0;
 
 	enum class ETab : uint8 { Explore, Directory, Saved, Profile };
@@ -133,6 +142,17 @@ public:
 	UMobileNavigatePageWidget* GetNavigatePage() const { return NavigatePage; }
 	UMobileMapWidget* GetMapView() const { return MapView; }
 	UMobileExplorePageWidget* GetExplorePage() const { return ExplorePage; }
+	UMobileSearchOverlayWidget* GetSearchOverlay() const { return SearchOverlay; }
+	// The full-screen search: the map's (the buildings and places of the site) and the Explore tab's (the sites).
+	void OpenMapSearch();
+	void OpenExploreSearch();
+	// What the search picked, shown as if it had been chosen from the list under the map, whatever the sheet was doing (a route is left): a place goes
+	// to its page, a building to the map and the list of its places.
+	void OpenSearchedPlace(const FMobilePlace& Place);
+	void OpenSearchedBuilding(const FString& BuildingId);
+	// What was searched lately (the lists of the full-screen search). Kept in this file from now on, and read from it.
+	const FMobileSearchHistory& GetSearchHistory() const { return SearchHistory; }
+	void UseSearchHistoryFile(const FString& Path);
 	const FString& GetSiteId() const { return SiteId; }
 	// Opens a site (a card on Explore): everything starts again for it, on the map tab.
 	void OpenSite(const FString& NewSiteId);
@@ -147,12 +167,7 @@ public:
 	void ToggleOverview();
 	void LocateMe();
 	void SetMap3D(bool bShow3DMap);
-	// The map's tools (the More button above the sheet): the Move switch (drag and pinch move the view only when it is on, as in the prototype)
-	// and the zoom buttons, which always work.
-	void SetMapToolsOpen(bool bOpen);
-	bool IsMapToolsOpen() const { return bMapToolsOpen; }
-	void ToggleMapGestures();
-	bool AreMapGesturesOn() const { return bMapGestures; }
+	// Zooms the map by a step (a pinch or the mouse wheel do the same); the view always moves by dragging, as in the prototype's second iteration.
 	void ZoomMap(double Delta);
 	// A tap on a building of the overview opens it.
 	void OpenBuilding(const FString& BuildingId);
@@ -219,20 +234,15 @@ private:
 	UFUNCTION()
 	void OnShow3DClicked();
 	UFUNCTION()
-	void OnMapMoreClicked();
-	UFUNCTION()
-	void OnMapMoveClicked();
-	UFUNCTION()
-	void OnZoomInClicked();
-	UFUNCTION()
-	void OnZoomOutClicked();
+	void OnMapSearchClicked();
+	// Leaves the walk or the route the sheet was on and goes back to "Where to?", so a search can start anything over.
+	void ReturnToSearchState();
 
 	// Turns the screen's position (Slate units, from the window's top left) into design pixels.
 	FVector2D ToDesign(const FGeometry& Geometry, const FVector2D& ScreenSpacePosition) const;
 
 	void RefreshTabs();
 	void RefreshModeButtons();
-	void RefreshMapTools();
 	void RefreshSiteName();
 	// On a phone: reads the safe area the system reports (a camera cut-out, the status and gesture bars) and lays the screen out inside it.
 	void ApplyDeviceSafeArea();
@@ -287,6 +297,9 @@ private:
 	UTextBlock* TabLabels[4] = { nullptr, nullptr, nullptr, nullptr };
 	UPROPERTY()
 	UBorder* TabIcons[4] = { nullptr, nullptr, nullptr, nullptr };
+	// The picture in each tab's icon, when the icon's texture is imported (else the icon is the square the border draws).
+	UPROPERTY()
+	UImage* TabPictures[4] = { nullptr, nullptr, nullptr, nullptr };
 	UPROPERTY()
 	UButton* Mode2DButton = nullptr;
 	UPROPERTY()
@@ -311,6 +324,11 @@ private:
 	UMobileMapWidget* MapView = nullptr;
 	UPROPERTY()
 	UMobileExplorePageWidget* ExplorePage = nullptr;
+	// The full-screen search over the whole screen, and the search field of the map that opens it.
+	UPROPERTY()
+	UMobileSearchOverlayWidget* SearchOverlay = nullptr;
+	UPROPERTY()
+	UWidget* SearchDock = nullptr;
 	UPROPERTY()
 	UMobileSavedPageWidget* SavedPage = nullptr;
 	UPROPERTY()
@@ -328,23 +346,12 @@ private:
 	int32 MapLevel = 1;
 	bool bMapOverview = false;
 	bool bLevelPopupOpen = false;
-	// The map tools: the pop-up beside the More button, the Move switch, and the zoom buttons.
+	// The label of the map (the building and level, or the site), at the bottom left above the sheet.
 	UPROPERTY()
-	UBorder* MapToolsBorder = nullptr;
+	UBorder* MapCaption = nullptr;
+	// The edge of the level button, black while its list is open.
 	UPROPERTY()
-	UButton* MapMoveButton = nullptr;
-	UPROPERTY()
-	UTextBlock* MapMoveLabel = nullptr;
-	UPROPERTY()
-	UButton* ZoomInButton = nullptr;
-	UPROPERTY()
-	UButton* ZoomOutButton = nullptr;
-	UPROPERTY()
-	UTextBlock* ZoomInLabel = nullptr;
-	UPROPERTY()
-	UTextBlock* ZoomOutLabel = nullptr;
-	bool bMapToolsOpen = false;
-	bool bMapGestures = true;
+	UBorder* LevelFieldBorder = nullptr;
 	UPROPERTY()
 	UMobileArrivedPageWidget* ArrivedPage = nullptr;
 	// Which step of the route the person is on while walking (0-based).
@@ -358,6 +365,8 @@ private:
 	int32 MyLocationLevel = 1;
 	// The places the person saved, and the one they chose to start from (empty = their location).
 	FMobileSavedPlaces SavedPlaces;
+	// What the person searched for lately (the full-screen search).
+	FMobileSearchHistory SearchHistory;
 	// How the person chose the app to look (the Profile tab).
 	FMobilePreferences Preferences;
 	// The look the pages were built in, and whether a build again is waiting.

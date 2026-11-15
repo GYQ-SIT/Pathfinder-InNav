@@ -355,6 +355,8 @@ void ANavPlayerController::MobileApp()
 		{
 			Screen->UseSavedFile(FMobileSavedPlaces::DefaultFile());
 		}
+		// What was searched lately is kept in a file too.
+		Screen->UseSearchHistoryFile(FMobileSearchHistory::DefaultFile());
 		// For trying a screen straight away: -MobileTab=Directory and -MobileState=Route.
 		FString Tab, State;
 		if (FParse::Value(FCommandLine::Get(), TEXT("MobileTab="), Tab))
@@ -365,18 +367,10 @@ void ANavPlayerController::MobileApp()
 		{
 			Screen->PreviewState(State == TEXT("Place") ? EMobileSheetState::Place : State == TEXT("Route") ? EMobileSheetState::Route : State == TEXT("Navigating") ? EMobileSheetState::Navigating : State == TEXT("Arrived") ? EMobileSheetState::Arrived : EMobileSheetState::Search);
 		}
-		// For trying the search page: -MobileQuery=lounge, -MobileBrowse, -MobileFilters, and the sheet's height with -MobileSnap=Full.
-		FString Query, SnapName;
+		// For trying the directory page: -MobileFilters opens its filters, and the sheet's height with -MobileSnap=Full.
+		FString SnapName;
 		if (UMobileSearchPageWidget* SearchPage = Screen->GetSearchPage())
 		{
-			if (FParse::Value(FCommandLine::Get(), TEXT("MobileQuery="), Query))
-			{
-				SearchPage->SetQuery(Query);
-			}
-			if (FParse::Param(FCommandLine::Get(), TEXT("MobileBrowse")))
-			{
-				SearchPage->BrowseAll();
-			}
 			if (FParse::Param(FCommandLine::Get(), TEXT("MobileFilters")))
 			{
 				SearchPage->SetFiltersOpen(true);

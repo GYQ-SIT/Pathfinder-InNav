@@ -11,7 +11,7 @@ Bottom tabs: Explore, Directory, Saved, Profile. A full-screen map (Overview, 2D
 bottom sheet whose content follows one flow:
 
 1. **Explore** - site cards (name, subtitle, distance, levels / buildings).
-2. **Where to?** - search box, filters, places grouped by "building . level".
+2. **Directory** - the site's (or a building's) places grouped by "building . level", with filters; the search is on the map.
 3. **Place** - name, code (E2-01-101), building . level, photo, category, status, Save place, Use as starting point, Get directions.
 4. **Your route** - From (My location or a place; building and level), To, minutes, metres, accessibility (Escalator / Lift / Stairs /
    Use lift only), numbered steps ("Follow the corridor", "Turn towards X", "You have arrived").
@@ -113,14 +113,14 @@ ordinary, a tall and a scaled-up window, with a status bar and a gesture bar, an
 
 ## The search page (step 3, first page)
 
-`UMobileSearchPageWidget` is the "Where to?" page of the sheet. It asks an `IMobileNavSource` (the mock for now) and never anything else: a search box,
-a Filters toggle (one chip for each category the site has, Available only, Clear), and the places grouped by "building . level". With nothing typed
-and no filter it lists the places of the building and level the person is in (the first building's first level in the mock), with a Browse all
-places button; a search or a filter lists every match. Tapping a place hands it to the screen, which moves the sheet on. The back arrow goes to the
-Explore tab. A row or a chip is a `UMobileTapTarget`, which carries its own payload (a place id, a filter name) to whoever made it.
-
-The category icons and the search box's magnifier are placeholders (a letter on a soft square); the design team's icons replace them. More launch
-options for looking at it: `-MobileQuery=lounge`, `-MobileBrowse`, `-MobileFilters`, `-MobileSnap=Collapsed|Half|Full`.
+`UMobileSearchPageWidget` is the first page of the sheet, the directory of the site (the prototype's second iteration, "V2 - Map search"; it was "Where to?", with a search box and chips).
+It asks an `IMobileNavSource` (the mock for now) and never anything else: the **title** (the name of the building the map shows - `SetContextBuilding`, called whenever the map changes - or of the one the Building filter says; the site's name while the map shows the whole site), a
+**filters button** at the right (36 x 36, soft grey with a grey 18 px icon; blue while open; a small blue count of the filters that are on), and the places grouped by "building . level" - those of that building (every place of the site on the overview), with
+no Browse all button. The map's building is not a filter: it is not counted, and Clear leaves it. Finding a place by its name is the full-screen search of the map (below), so the page has no search box and no back arrow. The button opens three drop-downs in a
+row (`UMobileSelectWidget` in its compact form, `SetCompact`: the caption over a short box, 12 px text, a small arrow, and a black edge while its list is open, as the prototype's browser drop-down has): **Category** (All and the site's categories), **Building** (All buildings and each; a campus only) and **Level** (All levels and each level of the site); only
+one is open at a time. Each filter is one choice (`SetCategory`, `SetBuilding`, `SetLevel`, `ClearFilters`; `FMobilePlaceFilter`). A new site starts again with no filter. A row shows a map pin,
+the name, "code . category" and, at the right, "building . level"; tapping a place hands it to the screen, which moves the sheet on. A row is a `UMobileTapTarget`, which carries its own
+payload (a place id) to whoever made it. More launch options for looking at it: `-MobileFilters`, `-MobileSnap=Collapsed|Half|Full`.
 
 ## The place page (step 3, second page)
 
@@ -174,8 +174,9 @@ looking at a place); on the Overview a tap on a building opens it.
 
 What it shows follows the sheet (`UMobileAppWidget::RefreshMap`): the place's level for a place and the arrival, the start of the route for the route, the level
 of the step the person is at while walking (so it follows them up a lift and out of a building). The person's own choices last until the sheet moves on:
-the **level button** (opens a list of the building's levels, top one first, upward from the button; "Map" on the Overview), **Overview** (toggles the site view),
-**Locate** (back to My location's building and level) and **2D | 3D**. The dot is the step's position while walking, otherwise My location (the door of the
+the **level button** ("L1" and a small arrow; opens a list of the building's levels, top one first, upward from the button; "Map" on the Overview), **Zoom out** (to the site view,
+a campus only; it says **Back to building** while the site view is shown), **Locate** (back to My location's building and level) and **2D | 3D**. The title of the map (the building and
+level, "E2 . L1", or the site's name on the overview) is a white label at the bottom left, level with the toolbar. The dot is the step's position while walking, otherwise My location (the door of the
 building the person said they are in; the real source uses an authored entrance or navigation node and hides the dot if none is mapped). This is a manual location choice; there is no automatic indoor positioning.
 
 In the mock, rooms are drawn around the places' positions and the route is a path along the corridors (to the crossing, along to the room's door, in), with
@@ -191,12 +192,51 @@ back and stays on the place page.
 
 ## The Explore tab (site cards)
 
-`UMobileExplorePageWidget` is the first tab: the app's name, "Find your way indoors", and a card for each site from `ListSites()`: a picture (a placeholder drawing of buildings
+`UMobileExplorePageWidget` is the first tab: "Explore", a search field (a tap opens the full-screen search of the sites, below), and a card for each site from `ListSites()`: a picture (a placeholder drawing of buildings
 until there are pictures), the name, what it is, the distance (`DistanceLabel`), and how many buildings (a campus) or levels (one building). When the source's `GetDataNote()` is not
 empty (the mock's is "All maps, places and positioning are simulated.") a "Mock locations" pill sits by "Sites" and the note closes the page. A tap on a card calls
 `UMobileAppWidget::OpenSite`, which starts everything again for that site: the sheet at Where to?, no chosen place, no start, no route, every way between levels on, My location in
 the site's first building on its first level, the search, route choices and map taken from the site, the top bar showing its short name (`FMobileSite::ShortName`, else its name), and
 the map tab shown. Opening another site in the middle of a walk does the same. An unknown site is ignored.
+
+## The full-screen search (the prototype's second iteration)
+
+The design team changed the prototype ("V2 - Map search", next to "V1 - Before playtests" in its header): the search is no longer a box in the sheet but a field on the
+map, and a tap on it opens a search over the whole screen. This is how it is built (`UMobileSearchOverlayWidget`); the other changes of V2 (the Directory filters, the route
+page, several stops) follow in other steps.
+
+**The two search fields** (`MobileSearchField.h`) are white pills with a magnifier and a hint, 46 tall: on the **map** ("Search buildings or places", 12 below the header, 12 from
+each side; the top row with Zoom out and 2D | 3D now comes under it, `TopRowTop` 76) and on the **Explore** tab under "Explore" ("Search sites"). They are buttons, not
+text boxes: the typing happens in the overlay. The map's field is on the map tab only, and not while walking. The sheet open to its top now stops under the top row
+(`TopRowGap`) and does not cover the field, as in the prototype.
+
+**The overlay** covers the screen, the header and the tabs too, on the page's colour: the field (soft pill, blue edge, a magnifier, the text, a close button) and under it a list
+that scrolls. It has two modes:
+
+- **Places** (the map): with nothing typed, **Recent searches** - the buildings and places picked before (newest first, at most 8; ones of another site, or gone, are left
+  out), each with a clock, and **Clear history**; with none, "No recent searches yet. Search for a building or place." With words typed, **Search results**: the buildings of
+  the site whose name or id has every word, then the places (`SearchPlaces`); "No matching buildings or places." when there is none. A row is a circle with the icon, the name over
+  "Building" or "E2-01-101 . E2 . L1", and an arrow. At most 50 rows are made (a campus has thousands of places): past that a line says to type more. A tap on a building shows it
+  on the map and the list of its places (the sheet goes back to the search page if it was on a place or a route); a tap on a place opens its page, leaving a route if there was one.
+- **Sites** (Explore): with nothing typed, the words typed before (Enter keeps them; at most 8, any case counts once) and **Clear history**; "No recent searches yet." With words
+  typed, the sites whose name or subtitle has every word; "No sites found. Try another name." A tap on a site opens it (`OpenSite`); a tap on a recent search types it again.
+
+**What is kept** (`FMobileSearchHistory`, `Saved/MobileSearchHistory.json`, `{ "version": 1, "chosen": ["building:E2", "place:E2-01-101"], "queries": ["punggol"] }`) works like the
+saved places: written on every change, a missing or damaged file is empty lists, no file in tests. **Reset saved places & preferences** (Profile) clears it too. Tests:
+`InNavi.Mobile.SearchHistory.*` (the lists and the file) and `InNavi.Mobile.SearchOverlay.*` (both modes, and the screen opening it and following what it picked).
+
+## Fonts
+
+`MobileStyle::ApplyFont` sets the typeface to Bold or to Regular, always: the engine's text block is Bold by default, so a text that was only "not bold" used to come out bold, and the pages looked heavier than the prototype (which uses 400 to 600). Regular is what the prototype's 400 and 500 are (the engine's Roboto has no Medium). Use it for any phone text; do not rely on the default.
+
+## Icons
+
+The phone app's icons are the design team's line icons (Lucide, ISC licence): `InNavi/Content/ImageAssets/Mobile/Source/<Name>.svg` are the sources, `scripts/render-mobile-icons.py`
+draws each white on transparent (128 px) as `Mobile_<Name>.png`, and the texture `/Game/ImageAssets/Mobile/Mobile_<Name>` (imported from that PNG, with Compression "Uncompressed (RGBA8)"
+and Mip Gen "NoMipmaps") is what the app loads (`MobileIcons.h`) and tints to the colour it needs, so one icon serves the light and the night theme. The folder is always cooked
+(`DirectoriesToAlwaysCook` of `/Game/ImageAssets`). While a texture is not imported the icon is drawn from shapes (or a character), so a screen always has something to show and
+the tests do not need the textures. So far the search fields, the overlay and its rows (Search, Recent, MoveForward, ClearSearch), the tab bar (NavExplore, NavDirectory, NavSaved, NavProfile), the level button and locate (LevelDropdown,
+Recenter), the filters button (Filter) and the pin of a place row (Location) use them; the other icons are made and wait for the steps that replace the placeholders. `CompassColour` keeps its own colours (it is not tinted).
 
 ## The Saved tab
 
@@ -235,10 +275,9 @@ process-wide variables, so a test that changes them puts them back (`FAppearance
 
 ## Map zoom and pan
 
-The map has a view, as in the prototype: zoom from **0.7 to 2** (1 = the plan fits the uncovered part of the screen), and a pan. The **More** button above the sheet opens the map's tools:
-**Move: On / Off** (it **starts On**: the prototype starts it Off, but a drag should move the map at once) and **-** / **+** (a step of 0.2 about the middle of the uncovered part; each button turns off at its end of the range). Dragging with one pointer moves the view and two
-fingers pinch-zoom (about their middle, which also moves the view) only when **Move** is on, as in the prototype; with it off a drag does nothing and is not a tap. The mouse wheel zooms
-about the pointer when Move is on. A tap that does not move still picks a room or a building. The plan cannot be pushed out of sight: 80 pixels of it (or all of it, if smaller) stay in the
+The map has a view, as in the prototype: zoom from **0.7 to 2** (1 = the plan fits the uncovered part of the screen), and a pan. In the second iteration of the prototype the map has no tools
+(no More button, no Move switch, no zoom buttons): dragging with one pointer moves the view from the start, two fingers pinch-zoom (about their middle, which also moves the view), and the mouse
+wheel zooms about the pointer (`UMobileAppWidget::ZoomMap` is a step of 0.2 for the code and the tests). A tap that does not move still picks a room or a building. The plan cannot be pushed out of sight: 80 pixels of it (or all of it, if smaller) stay in the
 uncovered part. The view starts again at the fit for another level or building, the overview, the 2D / 3D switch, **Locate**, and opening a site; a refresh of the same level keeps it. Hit
 testing uses the same transform as drawing, so a room taps where it is drawn at any zoom. Only the pointer that pressed on the map is followed: an Android emulator reports a click as a
 touch and, with it, the mouse cursor's moves, which are ignored (the same rule as for the sheet's handle). Labels on the map keep their size when zoomed (and more of them appear, see above).
@@ -252,9 +291,12 @@ The phone screen follows the prototype's layout, in design pixels (375 wide):
 - **Sheet**: rests at **26 / 44 / 88 percent** of the space between the header and the tab bar (`MobileSheet::SnapHeight`); a handle zone 28 tall; a tap on the handle opens it all the way, or from
   all the way back to 44 (`NextSnap`). From 80 percent the plan and the toolbar are hidden (the top row stays). The plan fits between the top row and the toolbar, above the sheet **as it is
   now**, so it grows and shrinks as the sheet is dragged.
-- **Top row** (8 below the header, 54 tall): the title as plain text (14 bold; the building and level, "E2 . L1", or the site's name on the overview), **Overview** (44 tall; only for a campus; says
-  "Current" while the overview is shown), and the 2D / 3D switch (buttons 44 tall, 12 bold, in a bordered box with 8 px radius).
-- **Toolbar** (right 12, 12 above the sheet): one bar, 5 px padding, 4 px gaps, with the level (68 x 44, "L1"), locate (44 x 44, a drawn target) and more (44 x 44, three dots). The levels open
-  upward from the level button; the tools (Move: On, -, +, 44 tall, 8 px gaps) open upward from the bar, right-aligned. Icons are drawn from shapes until the design team's icons are in.
+- **Search field** (12 below the header, 12 from each side, 46 tall; a pill with a magnifier and "Search buildings or places"; on the map tab, not while walking).
+- **Top row** (76 below the header, 42 tall, under the search field, buttons at the right): **Zoom out** (40 tall, 12 bold; only for a campus; says "Back to building" while the overview is shown), and the
+  2D / 3D switch (buttons 36 x 34, 12 bold, in a bordered box with 3 px padding and 8 px radius).
+- **Map label** (left 12, 12 above the sheet, level with the toolbar): a white pill, radius 16, padding 10 x 8, with the building and level (14 bold).
+- **Toolbar** (right 12, 12 above the sheet): one bar, 42 tall, 3 px padding, radius 14, with the level (62 x 36, "L1" 14 and a small arrow) and locate (36 x 36, a 20 px icon), no gap between them. The levels open upward from the level button.
+  Both use the design team's icons (LevelDropdown, Recenter); a drawn target replaces locate until its texture is imported.
+- **Tab bar**: the design team's icons (NavExplore, NavDirectory, NavSaved, NavProfile), 24 px, blue for the open tab and grey for the others; squares until the textures are imported.
 
-`UMobileAppWidget::ControlsHeight` is the toolbar's 54; the pop-ups are not counted. Test: `InNavi.Mobile.LayoutLikePrototype`.
+`UMobileAppWidget::ControlsHeight` is the toolbar's 42; the pop-ups are not counted. The sheet open to its top stops `TopRowGap` (18) under the top row. Test: `InNavi.Mobile.LayoutLikePrototype`.

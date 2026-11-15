@@ -26,6 +26,8 @@ class INNAVI_API UMobileSelectWidget : public UUserWidget
 
 public:
 	void SetCaption(const FString& InCaption);
+	// The prototype's small drop-down (the directory's filters): the caption over a short box, a small arrow, small text. Set before the widget is built.
+	void SetCompact(bool bInCompact) { bCompact = bInCompact; }
 	// The options, and which is chosen (an empty value is a valid option too). A chosen value that is not among them shows as nothing.
 	void SetOptions(const TArray<FMobileSelectOption>& InOptions, const FString& InSelected);
 	void SetSelected(const FString& InSelected);
@@ -57,6 +59,9 @@ private:
 	UTextBlock* ValueText = nullptr;
 	UPROPERTY()
 	UBorder* ListPanel = nullptr;
+	// The box of the field, whose edge is black while the list is open (as a drop-down of the prototype's browser is).
+	UPROPERTY()
+	UBorder* FieldBox = nullptr;
 	UPROPERTY()
 	UVerticalBox* ListBox = nullptr;
 
@@ -64,6 +69,7 @@ private:
 	TArray<FMobileSelectOption> Options;
 	FString Selected;
 	bool bOpen = false;
+	bool bCompact = false;
 
 	TFunction<void(const FString&)> OnChanged;
 	TFunction<void()> OnOpened;

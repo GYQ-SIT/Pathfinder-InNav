@@ -2,6 +2,7 @@
 
 #include "MobileArrivedPageWidget.h"
 #include "MobileExplorePageWidget.h"
+#include "MobileIcons.h"
 #include "MobileMapWidget.h"
 #include "MobileNavigatePageWidget.h"
 #include "MobileTapTarget.h"
@@ -10,6 +11,8 @@
 #include "MobileProfilePageWidget.h"
 #include "MobileSavedPageWidget.h"
 #include "MobileSelectWidget.h"
+#include "MobileSearchField.h"
+#include "MobileSearchOverlayWidget.h"
 #include "MobileSearchPageWidget.h"
 #include "MobileStyle.h"
 #include "NavPlayerController.h"
@@ -116,31 +119,31 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 				Screen->OpenBuilding(BuildingId);
 			}
 		});
+		MapView->SetGesturesEnabled(true);
 		UCanvasPanelSlot* MapViewSlot = Phone->AddChildToCanvas(MapView);
 		MapViewSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
 		MapViewSlot->SetOffsets(FMargin(0.f));
 
-		// The top row of the map, as in the prototype: the title (the site, or the building and level) as plain text, Overview (for a campus), and 2D | 3D.
+		// The top row of the map, as in the prototype: Zoom out (for a campus) and 2D | 3D, at the right. The title is a label at the bottom left (below).
 		TopBarBorder = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("TopBar"));
 		TopBarBorder->SetBrushColor(FLinearColor::Transparent);
 		TopBarBorder->SetPadding(FMargin(12.f, 0.f));
 		UHorizontalBox* TopRow = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("TopRow"));
 		TopBarBorder->SetContent(TopRow);
 		SiteNameText = MakeText(Tree, TEXT("SiteName"), TEXT("SIT Campus"), 14.f, Ink, true);
-		UHorizontalBoxSlot* NameSlot = TopRow->AddChildToHorizontalBox(SiteNameText);
-		NameSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-		NameSlot->SetVerticalAlignment(VAlign_Center);
-		OverviewButton = MakeButton(Tree, TEXT("Btn_Overview"), TEXT("Overview"), White, Ink, 8.f, 44.f, &OverviewLabel, 14.f);
+		TopRow->AddChildToHorizontalBox(Tree->ConstructWidget<USpacer>(USpacer::StaticClass(), TEXT("TopRowSpacer")))->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		OverviewButton = MakeButton(Tree, TEXT("Btn_Overview"), TEXT("Zoom out"), White, Ink, 8.f, 40.f, &OverviewLabel, 10.f);
+		ApplyFont(OverviewLabel, 12.f, true);
 		OverviewButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnOverviewClicked);
 		TopRow->AddChildToHorizontalBox(OverviewButton)->SetVerticalAlignment(VAlign_Center);
 		UBorder* ModeBox = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("ModeBox"));
 		ModeBox->SetBrush(Rounded(White, Line, 8.f));
 		ModeBox->SetBrushColor(FLinearColor::White);
-		ModeBox->SetPadding(FMargin(5.f));
+		ModeBox->SetPadding(FMargin(3.f));
 		UHorizontalBox* ModeRow = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ModeRow"));
 		ModeBox->SetContent(ModeRow);
-		Mode2DButton = MakeButton(Tree, TEXT("Btn_Mode2D"), TEXT("2D"), Blue, OnBlue, 8.f, 44.f, &Mode2DLabel, 10.f);
-		Mode3DButton = MakeButton(Tree, TEXT("Btn_Mode3D"), TEXT("3D"), White, Ink, 8.f, 44.f, &Mode3DLabel, 10.f);
+		Mode2DButton = MakeButton(Tree, TEXT("Btn_Mode2D"), TEXT("2D"), Blue, OnBlue, 8.f, 34.f, &Mode2DLabel, 10.f);
+		Mode3DButton = MakeButton(Tree, TEXT("Btn_Mode3D"), TEXT("3D"), White, Ink, 8.f, 34.f, &Mode3DLabel, 10.f);
 		ApplyFont(Mode2DLabel, 12.f, true);
 		ApplyFont(Mode3DLabel, 12.f, true);
 		Mode2DButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnShow2DClicked);
@@ -154,34 +157,34 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		TopSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
 		TopSlot->SetAlignment(FVector2D(0.f, 0.f));
 
+		// The search field on the map, as in the prototype: above the top row. A tap opens the full-screen search of the buildings and places.
+		UButton* SearchDockButton = nullptr;
+		SearchDock = MobileSearchField::Make(Tree, TEXT("Btn_MapSearch"), TEXT("Search buildings or places"), &SearchDockButton);
+		SearchDockButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnMapSearchClicked);
+		UCanvasPanelSlot* DockSlot = Phone->AddChildToCanvas(SearchDock);
+		DockSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 0.f));
+		DockSlot->SetAlignment(FVector2D(0.f, 0.f));
+
 		// The map's toolbar, as in the prototype: one bar at the bottom right, above the sheet, with the level, locate and more. The levels (a list)
 		// and the tools (Move, zoom out and in) open upward from it.
 		UVerticalBox* Controls = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("MapControls"));
 		LevelPopupBorder = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("LevelPopup"));
-		LevelPopupBorder->SetBrush(Rounded(White, Line, 10.f));
+		LevelPopupBorder->SetBrush(Rounded(White, Ink, 3.f, 1.f));
 		LevelPopupBorder->SetBrushColor(FLinearColor::White);
-		LevelPopupBorder->SetPadding(FMargin(4.f));
+		LevelPopupBorder->SetPadding(FMargin(0.f));
 		LevelPopupBorder->SetVisibility(ESlateVisibility::Collapsed);
 		LevelPopupList = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("LevelPopupList"));
 		UScrollBox* LevelScroll = Tree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("LevelPopupScroll"));
 		LevelScroll->AddChild(LevelPopupList);
 		USizeBox* LevelLimit = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("LevelPopupLimit"));
 		LevelLimit->SetMaxDesiredHeight(200.f);
-		LevelLimit->SetMinDesiredWidth(64.f);
+		LevelLimit->SetMinDesiredWidth(62.f);
 		LevelLimit->SetContent(LevelScroll);
 		LevelPopupBorder->SetContent(LevelLimit);
 		UVerticalBoxSlot* LevelPopupSlot = Controls->AddChildToVerticalBox(LevelPopupBorder);
 		LevelPopupSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 7.f));
 		LevelPopupSlot->SetHorizontalAlignment(HAlign_Left);
 
-		// The tools: Move (drag and pinch), and zoom out and in.
-		MapToolsBorder = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("MapTools"));
-		MapToolsBorder->SetBrush(Rounded(White, Line, 10.f));
-		MapToolsBorder->SetBrushColor(FLinearColor::White);
-		MapToolsBorder->SetPadding(FMargin(8.f));
-		MapToolsBorder->SetVisibility(ESlateVisibility::Collapsed);
-		UHorizontalBox* ToolsRow = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("MapToolsRow"));
-		MapToolsBorder->SetContent(ToolsRow);
 		auto Sized = [Tree](UWidget* Content, float Width, float Height)
 		{
 			USizeBox* Box = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
@@ -190,46 +193,46 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 			Box->SetContent(Content);
 			return Box;
 		};
-		MapMoveButton = MakeButton(Tree, TEXT("Btn_MapMove"), TEXT("Move: On"), White, Ink, 8.f, 44.f, &MapMoveLabel, 10.f);
-		ApplyFont(MapMoveLabel, 13.f, true);
-		MapMoveButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnMapMoveClicked);
-		ToolsRow->AddChildToHorizontalBox(Sized(MapMoveButton, 73.f, 44.f));
-		ZoomOutButton = MakeButton(Tree, TEXT("Btn_ZoomOut"), TEXT("-"), White, Ink, 8.f, 44.f, &ZoomOutLabel, 10.f);
-		ZoomOutButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnZoomOutClicked);
-		ToolsRow->AddChildToHorizontalBox(Sized(ZoomOutButton, 44.f, 44.f))->SetPadding(FMargin(8.f, 0.f, 0.f, 0.f));
-		ZoomInButton = MakeButton(Tree, TEXT("Btn_ZoomIn"), TEXT("+"), White, Ink, 8.f, 44.f, &ZoomInLabel, 10.f);
-		ZoomInButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnZoomInClicked);
-		ToolsRow->AddChildToHorizontalBox(Sized(ZoomInButton, 44.f, 44.f))->SetPadding(FMargin(8.f, 0.f, 0.f, 0.f));
-		ApplyFont(ZoomOutLabel, 18.f, true);
-		ApplyFont(ZoomInLabel, 18.f, true);
-		UVerticalBoxSlot* ToolsSlot = Controls->AddChildToVerticalBox(MapToolsBorder);
-		ToolsSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 7.f));
-		ToolsSlot->SetHorizontalAlignment(HAlign_Right);
 
-		// The bar: level, locate, more.
+		// The bar, as in the prototype's second iteration: the level, and locate.
 		UBorder* ToolbarBorder = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("MapToolbar"));
-		ToolbarBorder->SetBrush(Rounded(White, Line, 10.f));
+		ToolbarBorder->SetBrush(Rounded(White, Line, 14.f));
 		ToolbarBorder->SetBrushColor(FLinearColor::White);
-		ToolbarBorder->SetPadding(FMargin(5.f));
+		ToolbarBorder->SetPadding(FMargin(3.f));
 		UHorizontalBox* ToolbarRow = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("MapToolbarRow"));
 		ToolbarBorder->SetContent(ToolbarRow);
-		UButton* LevelButton = MakeButton(Tree, TEXT("Btn_Level"), TEXT("L1"), White, Ink, 8.f, 44.f, &LevelLabel, 10.f);
-		LevelButton->SetStyle(StartStyle::Button(White, White * 0.94f, White * 0.86f, FLinearColor::Transparent, 8.f / StartStyle::DesignToUi));
-		ApplyFont(LevelLabel, 16.f, false);
+		// The level: "L1" and a small arrow down (the list of levels opens upward from it).
+		UButton* LevelButton = Tree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Level"));
+		LevelButton->SetStyle(StartStyle::Button(FLinearColor::Transparent, TapHover, TapHover * 2.f, FLinearColor::Transparent, 8.f / StartStyle::DesignToUi));
+		LevelButton->SetBackgroundColor(FLinearColor::White);
+		LevelLabel = MakeText(Tree, TEXT("Btn_Level_Label"), TEXT("L1"), 14.f, Ink);
+		UHorizontalBox* LevelRow = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("LevelRow"));
+		LevelRow->AddChildToHorizontalBox(LevelLabel)->SetVerticalAlignment(VAlign_Center);
+		UWidget* LevelArrow = MobileIcons::Picture(Tree, TEXT("LevelDropdown"), 16.f, Ink);
+		UHorizontalBoxSlot* LevelArrowSlot = LevelRow->AddChildToHorizontalBox(LevelArrow ? LevelArrow : static_cast<UWidget*>(MakeText(Tree, FString(), TEXT("v"), 12.f, Ink, true)));
+		LevelArrowSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
+		LevelArrowSlot->SetVerticalAlignment(VAlign_Center);
+		UBorder* LevelCentre = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("LevelCentre"));
+		LevelFieldBorder = LevelCentre;
+		LevelCentre->SetBrushColor(FLinearColor::White);
+		LevelCentre->SetHorizontalAlignment(HAlign_Center);
+		LevelCentre->SetVerticalAlignment(VAlign_Center);
+		LevelCentre->SetContent(LevelRow);
+		LevelButton->SetContent(Sized(LevelCentre, 62.f, 36.f));
 		LevelButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnLevelClicked);
-		ToolbarRow->AddChildToHorizontalBox(Sized(LevelButton, 68.f, 44.f));
-		// The two icon buttons are drawn from shapes until the design team's icons are in: a target for locate, three dots for more.
+		ToolbarRow->AddChildToHorizontalBox(LevelButton);
+		// The locate button: the design team's icon; until its texture is imported, a target drawn from shapes.
 		auto MakeIconButton = [&](const TCHAR* Name, UWidget* Icon) -> UButton*
 		{
 			UButton* Button = Tree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
-			Button->SetStyle(StartStyle::Button(White, White * 0.94f, White * 0.86f, FLinearColor::Transparent, 8.f / StartStyle::DesignToUi));
+			Button->SetStyle(StartStyle::Button(FLinearColor::Transparent, TapHover, TapHover * 2.f, FLinearColor::Transparent, 8.f / StartStyle::DesignToUi));
 			Button->SetBackgroundColor(FLinearColor::White);
 			UBorder* Centre = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
 			Centre->SetBrushColor(FLinearColor::Transparent);
 			Centre->SetHorizontalAlignment(HAlign_Center);
 			Centre->SetVerticalAlignment(VAlign_Center);
 			Centre->SetContent(Icon);
-			Button->SetContent(Sized(Centre, 44.f, 44.f));
+			Button->SetContent(Sized(Centre, 36.f, 36.f));
 			return Button;
 		};
 		auto Shape = [Tree](float Size, const FLinearColor& Fill, const FLinearColor& Edge, float EdgeWidth)
@@ -250,23 +253,27 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		UOverlaySlot* DotSlot = Target->AddChildToOverlay(Shape(6.f, Ink, FLinearColor::Transparent, 0.f));
 		DotSlot->SetHorizontalAlignment(HAlign_Center);
 		DotSlot->SetVerticalAlignment(VAlign_Center);
-		UButton* LocateButton = MakeIconButton(TEXT("Btn_Locate"), Target);
+		UWidget* LocateIcon = MobileIcons::Picture(Tree, TEXT("Recenter"), 20.f, Ink);
+		UButton* LocateButton = MakeIconButton(TEXT("Btn_Locate"), LocateIcon ? LocateIcon : static_cast<UWidget*>(Target));
 		LocateButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnLocateClicked);
-		ToolbarRow->AddChildToHorizontalBox(LocateButton)->SetPadding(FMargin(4.f, 0.f, 0.f, 0.f));
-		UVerticalBox* Dots = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-		for (int32 Dot = 0; Dot < 3; ++Dot)
-		{
-			Dots->AddChildToVerticalBox(Shape(4.f, Ink, FLinearColor::Transparent, 0.f))->SetPadding(FMargin(0.f, Dot == 0 ? 0.f : 3.f, 0.f, 0.f));
-		}
-		UButton* MoreButton = MakeIconButton(TEXT("Btn_MapMore"), Dots);
-		MoreButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnMapMoreClicked);
-		ToolbarRow->AddChildToHorizontalBox(MoreButton)->SetPadding(FMargin(4.f, 0.f, 0.f, 0.f));
+		ToolbarRow->AddChildToHorizontalBox(LocateButton);
 		Controls->AddChildToVerticalBox(ToolbarBorder)->SetHorizontalAlignment(HAlign_Right);
 		ControlsBox = Controls;
 		UCanvasPanelSlot* ControlsSlot = Phone->AddChildToCanvas(Controls);
 		ControlsSlot->SetAnchors(FAnchors(1.f, 0.f, 1.f, 0.f));
 		ControlsSlot->SetAlignment(FVector2D(1.f, 1.f));
 		ControlsSlot->SetAutoSize(true);
+
+		// The label of the map, as in the prototype: a white pill at the bottom left, level with the toolbar, with the building and level (or the site).
+		MapCaption = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("MapCaption"));
+		MapCaption->SetBrush(Rounded(White, FLinearColor::Transparent, 16.f, 0.f));
+		MapCaption->SetBrushColor(FLinearColor::White);
+		MapCaption->SetPadding(FMargin(10.f, 8.f));
+		MapCaption->SetContent(SiteNameText);
+		UCanvasPanelSlot* CaptionSlot = Phone->AddChildToCanvas(MapCaption);
+		CaptionSlot->SetAnchors(FAnchors(0.f, 0.f, 0.f, 0.f));
+		CaptionSlot->SetAlignment(FVector2D(0.f, 1.f));
+		CaptionSlot->SetAutoSize(true);
 
 		// The bottom sheet.
 		SheetBorder = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Sheet"));
@@ -321,7 +328,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 				}
 				const auto Places = Source->SearchPlaces(SiteId, FString(), FMobilePlaceFilter());
 				if (!Places.IsEmpty()) { ContextBuilding = Places[0].BuildingId; ContextLevel = Places[0].Level; }
-				SearchPage->SetSource(Source.Get(), SiteId, ContextBuilding, ContextLevel);
+				SearchPage->SetSource(Source.Get(), SiteId);
 				TWeakObjectPtr<UMobileAppWidget> WeakSearchOwner(this);
 				SearchPage->SetOnClearStart([WeakSearchOwner]()
 				{
@@ -345,13 +352,6 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 					if (UMobileAppWidget* Screen = WeakThis.Get())
 					{
 						Screen->ShowPlace(Place);
-					}
-				});
-				SearchPage->SetOnBack([WeakThis]()
-				{
-					if (UMobileAppWidget* Screen = WeakThis.Get())
-					{
-						Screen->SetActiveTab(ETab::Explore);
 					}
 				});
 				SheetPages->AddChild(SearchPage);
@@ -525,6 +525,13 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 					Screen->OpenSite(Chosen);
 				}
 			});
+			ExplorePage->SetOnSearchRequested([WeakExplore]()
+			{
+				if (UMobileAppWidget* Screen = WeakExplore.Get())
+				{
+					Screen->OpenExploreSearch();
+				}
+			});
 		}
 		ExploreOverlay->SetPadding(FMargin(0.f));
 		ExploreOverlay->SetContent(ExplorePage);
@@ -674,6 +681,14 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 			TabButtons[Index] = Tab;
 			TabLabels[Index] = Label;
 			TabIcons[Index] = Icon;
+			// The design team's icon when it is imported: tinted blue for the open tab and grey for the others (RefreshTabs).
+			static const TCHAR* TabPictureNames[4] = { TEXT("NavExplore"), TEXT("NavDirectory"), TEXT("NavSaved"), TEXT("NavProfile") };
+			if (UImage* Picture = MobileIcons::Image(Tree, TabPictureNames[Index], 24.f))
+			{
+				Icon->SetBrushColor(FLinearColor::Transparent);
+				Icon->SetContent(Picture);
+				TabPictures[Index] = Picture;
+			}
 			TabRow->AddChildToHorizontalBox(Tab)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		}
 		TabButtons[0]->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnTabExploreClicked);
@@ -683,6 +698,39 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		UCanvasPanelSlot* TabSlot = Phone->AddChildToCanvas(TabBarBorder);
 		TabSlot->SetAnchors(FAnchors(0.f, 1.f, 1.f, 1.f));
 		TabSlot->SetAlignment(FVector2D(0.f, 1.f));
+
+		// The full-screen search, over everything (the header and the tabs too); shut until one of the search fields is tapped. Added last, so it is on top.
+		SearchOverlay = CreateWidget<UMobileSearchOverlayWidget>(this, UMobileSearchOverlayWidget::StaticClass());
+		SearchOverlay->SetSource(Source.Get(), SiteId);
+		SearchOverlay->SetHistory(&SearchHistory);
+		{
+			TWeakObjectPtr<UMobileAppWidget> WeakSearch(this);
+			SearchOverlay->SetOnPlaceChosen([WeakSearch](const FMobilePlace& Place)
+			{
+				if (UMobileAppWidget* Screen = WeakSearch.Get())
+				{
+					Screen->OpenSearchedPlace(Place);
+				}
+			});
+			SearchOverlay->SetOnBuildingChosen([WeakSearch](const FString& BuildingId)
+			{
+				if (UMobileAppWidget* Screen = WeakSearch.Get())
+				{
+					Screen->OpenSearchedBuilding(BuildingId);
+				}
+			});
+			SearchOverlay->SetOnSiteChosen([WeakSearch](const FString& Chosen)
+			{
+				if (UMobileAppWidget* Screen = WeakSearch.Get())
+				{
+					Screen->OpenSite(Chosen);
+				}
+			});
+		}
+		SearchOverlay->SetVisibility(ESlateVisibility::Collapsed);
+		UCanvasPanelSlot* SearchOverlaySlot = Phone->AddChildToCanvas(SearchOverlay);
+		SearchOverlaySlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
+		SearchOverlaySlot->SetOffsets(FMargin(0.f));
 
 		RefreshMap();
 		SetActiveTab(ActiveTab);
@@ -730,11 +778,6 @@ void UMobileAppWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime
 	if (LocalSize.X > 1.f && LocalSize.Y > 1.f)
 	{
 		ApplyViewportSize(LocalSize.X, LocalSize.Y);
-	}
-	if (bMapToolsOpen)
-	{
-		// A pinch changes the zoom without the screen hearing of it; the buttons follow.
-		RefreshMapTools();
 	}
 #if PLATFORM_ANDROID || PLATFORM_IOS
 	SafeAreaPollSeconds -= InDeltaTime;
@@ -804,7 +847,14 @@ void UMobileAppWidget::ApplyDeviceSafeArea()
 
 double UMobileAppWidget::RestHeight(EMobileSheetSnap Target) const
 {
-	return MobileSheet::SnapHeight(Target, DesignHeight, TabBarHeight + SafeBottom, HeaderHeight + SafeTop);
+	const double Height = MobileSheet::SnapHeight(Target, DesignHeight, TabBarHeight + SafeBottom, HeaderHeight + SafeTop);
+	if (Target != EMobileSheetSnap::Full)
+	{
+		return Height;
+	}
+	// The sheet open to its top stops under the top row of the map (the search field and 2D | 3D) and does not cover it; it is never lower than half.
+	const double Room = DesignHeight - (TabBarHeight + SafeBottom) - (HeaderHeight + SafeTop + TopRowTop + TopRowHeight + TopRowGap);
+	return FMath::Min(Height, FMath::Max(Room, MobileSheet::SnapHeight(EMobileSheetSnap::Half, DesignHeight, TabBarHeight + SafeBottom, HeaderHeight + SafeTop)));
 }
 
 void UMobileAppWidget::PositionSheet()
@@ -850,6 +900,32 @@ void UMobileAppWidget::PositionSheet()
 			PanelSlot->SetOffsets(FMargin(0.f, static_cast<float>(HeaderTotal), 0.f, static_cast<float>(TabTotal)));
 		}
 	}
+	if (MapCaption)
+	{
+		// At the bottom left, level with the toolbar, above the sheet; not while the sheet is open to its top.
+		if (UCanvasPanelSlot* PanelSlot = CanvasSlot(MapCaption))
+		{
+			PanelSlot->SetPosition(FVector2D(12.0, DesignHeight - TabTotal - SheetHeight - ControlsGap));
+		}
+		MapCaption->SetVisibility(bMapPage && ControlsFit() ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+	}
+	if (SearchDock)
+	{
+		// The map's search field sits under the header, on the map tab, except while walking (the person is following the route then).
+		if (UCanvasPanelSlot* PanelSlot = CanvasSlot(SearchDock))
+		{
+			PanelSlot->SetOffsets(FMargin(static_cast<float>(SearchDockMargin), static_cast<float>(HeaderTotal + SearchDockTop), static_cast<float>(SearchDockMargin), static_cast<float>(SearchDockHeight)));
+		}
+		SearchDock->SetVisibility(bMapPage && Flow.GetState() != EMobileSheetState::Navigating ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (SearchOverlay)
+	{
+		// Over the whole screen, but inside the status bar and the gesture bar of a phone.
+		if (UCanvasPanelSlot* PanelSlot = CanvasSlot(SearchOverlay))
+		{
+			PanelSlot->SetOffsets(FMargin(0.f, static_cast<float>(SafeTop), 0.f, static_cast<float>(SafeBottom)));
+		}
+	}
 	if (MapView)
 	{
 		// The plan fits between the top row and the toolbar, above the sheet at the height it has now: it grows and shrinks as the sheet is dragged,
@@ -866,7 +942,7 @@ bool UMobileAppWidget::SheetIsOpen() const
 {
 	// The prototype hides the plan and the toolbar from 80 percent of the space between the header and the tab bar.
 	const double Workspace = DesignHeight - (HeaderHeight + SafeTop) - (TabBarHeight + SafeBottom);
-	return SheetHeight >= 0.8 * Workspace;
+	return SheetHeight >= FMath::Min(0.8 * Workspace, RestHeight(EMobileSheetSnap::Full) - 1.0);
 }
 
 bool UMobileAppWidget::ControlsFit() const
@@ -1043,6 +1119,8 @@ void UMobileAppWidget::RefreshSheetPage()
 	{
 		SheetPages->SetActiveWidgetIndex(static_cast<int32>(Flow.GetState()));
 	}
+	// What is on the map under the header follows the state too (the search field is not there while walking).
+	PositionSheet();
 }
 
 void UMobileAppWidget::RefreshTabs()
@@ -1054,7 +1132,11 @@ void UMobileAppWidget::RefreshTabs()
 		{
 			TabLabels[Index]->SetColorAndOpacity(FSlateColor(bActive ? Blue : Grey));
 		}
-		if (TabIcons[Index])
+		if (TabPictures[Index])
+		{
+			TabPictures[Index]->SetColorAndOpacity(bActive ? Blue : Grey);
+		}
+		else if (TabIcons[Index])
 		{
 			// Placeholder icons: a rounded square, blue for the open tab.
 			TabIcons[Index]->SetBrush(Rounded(bActive ? Blue : IconGrey, FLinearColor::Transparent, 6.f, 0.f));
@@ -1274,6 +1356,79 @@ void UMobileAppWidget::ShowPlace(const FMobilePlace& Place)
 	SendSheetEvent(EMobileSheetEvent::PlaceChosen);
 }
 
+void UMobileAppWidget::ReturnToSearchState()
+{
+	if (Flow.GetState() == EMobileSheetState::Search)
+	{
+		return;
+	}
+	Flow.Reset();
+	PendingRoute.Reset();
+	CurrentRoute = FMobileRoute();
+	NavStepIndex = 0;
+	Snap = MobileSheet::SnapForState(Flow.GetState());
+	RefreshSheetPage();
+	RefreshNavigation();
+	RefreshArrived();
+}
+
+void UMobileAppWidget::OpenSearchedPlace(const FMobilePlace& Place)
+{
+	ReturnToSearchState();
+	ShowPlace(Place);
+}
+
+void UMobileAppWidget::OpenSearchedBuilding(const FString& BuildingId)
+{
+	ReturnToSearchState();
+	SelectedPlace = FMobilePlace();
+	if (PlacePage)
+	{
+		PlacePage->SetPlace(FMobilePlace(), false, false);
+	}
+	if (SearchPage && Source.IsValid())
+	{
+		SearchPage->SetSource(Source.Get(), SiteId);
+	}
+	// The map shows the building, and the directory follows it.
+	OpenBuilding(BuildingId);
+	RefreshSearchStart();
+	SnapSheetNow();
+	RefreshMap();
+}
+
+void UMobileAppWidget::OpenMapSearch()
+{
+	if (SearchOverlay)
+	{
+		SearchOverlay->SetSource(Source.Get(), SiteId);
+		SearchOverlay->Open(UMobileSearchOverlayWidget::EMode::Places);
+	}
+}
+
+void UMobileAppWidget::OpenExploreSearch()
+{
+	if (SearchOverlay)
+	{
+		SearchOverlay->SetSource(Source.Get(), SiteId);
+		SearchOverlay->Open(UMobileSearchOverlayWidget::EMode::Sites);
+	}
+}
+
+void UMobileAppWidget::OnMapSearchClicked()
+{
+	OpenMapSearch();
+}
+
+void UMobileAppWidget::UseSearchHistoryFile(const FString& Path)
+{
+	SearchHistory.UseFile(Path);
+	if (SearchOverlay)
+	{
+		SearchOverlay->SetHistory(&SearchHistory);
+	}
+}
+
 void UMobileAppWidget::PreviewOpenSelect(const FString& Name)
 {
 	if (!RoutePage)
@@ -1430,8 +1585,17 @@ void UMobileAppWidget::ApplyMap()
 		}
 		LevelLabel->SetText(FText::FromString(Label));
 	}
-	RefreshMapTools();
 	RefreshSiteName();
+	if (SearchPage)
+	{
+		// The directory is of the building the map shows (the whole site on the overview).
+		SearchPage->SetContextBuilding(bMapOverview ? FString() : MapBuildingId);
+	}
+	if (LevelFieldBorder)
+	{
+		// The level button has a black edge while its list is open, as the prototype's drop-down has.
+		LevelFieldBorder->SetBrush(Rounded(FLinearColor::Transparent, bLevelPopupOpen ? Ink : FLinearColor::Transparent, 8.f, bLevelPopupOpen ? 1.5f : 0.f));
+	}
 	if (LevelPopupBorder && LevelPopupList)
 	{
 		LevelPopupBorder->SetVisibility(bLevelPopupOpen ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
@@ -1450,11 +1614,11 @@ void UMobileAppWidget::ApplyMap()
 					const bool bChosen = Level.Level == MapLevel;
 					UBorder* Pad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
 					Pad->SetBrushColor(FLinearColor::Transparent);
-					Pad->SetPadding(FMargin(14.f, 9.f));
-					Pad->SetHorizontalAlignment(HAlign_Center);
-					Pad->SetContent(MakeText(WidgetTree, FString(), Level.Label, 14.f, bChosen ? OnBlue : Ink, true));
+					Pad->SetPadding(FMargin(10.f, 5.f));
+					Pad->SetHorizontalAlignment(HAlign_Left);
+					Pad->SetContent(MakeText(WidgetTree, FString(), Level.Label, 14.f, bChosen ? OnBlue : Ink));
 					UMobileTapTarget* Row = CreateWidget<UMobileTapTarget>(this, UMobileTapTarget::StaticClass());
-					Row->Setup(Pad, FString::FromInt(Level.Level), bChosen ? Blue : FLinearColor::Transparent, 8.f);
+					Row->Setup(Pad, FString::FromInt(Level.Level), bChosen ? Blue : FLinearColor::Transparent, 0.f);
 					TWeakObjectPtr<UMobileAppWidget> WeakThis(this);
 					Row->SetOnTapped([WeakThis](const FString& Value)
 					{
@@ -1473,10 +1637,6 @@ void UMobileAppWidget::ApplyMap()
 void UMobileAppWidget::SetLevelPopupOpen(bool bOpen)
 {
 	bLevelPopupOpen = bOpen && !bMapOverview;
-	if (bLevelPopupOpen)
-	{
-		bMapToolsOpen = false;
-	}
 	ApplyMap();
 }
 
@@ -1541,65 +1701,14 @@ void UMobileAppWidget::SetMap3D(bool bShow3DMap)
 	RefreshModeButtons();
 }
 
-void UMobileAppWidget::SetMapToolsOpen(bool bOpen)
-{
-	bMapToolsOpen = bOpen;
-	if (bMapToolsOpen)
-	{
-		bLevelPopupOpen = false;
-	}
-	ApplyMap();
-}
-
-void UMobileAppWidget::ToggleMapGestures()
-{
-	bMapGestures = !bMapGestures;
-	RefreshMapTools();
-}
-
 void UMobileAppWidget::ZoomMap(double Delta)
 {
 	if (MapView)
 	{
 		MapView->ZoomBy(Delta);
 	}
-	RefreshMapTools();
 }
 
-void UMobileAppWidget::RefreshMapTools()
-{
-	if (MapView)
-	{
-		MapView->SetGesturesEnabled(bMapGestures);
-	}
-	if (MapToolsBorder)
-	{
-		MapToolsBorder->SetVisibility(bMapToolsOpen ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	}
-	if (MapMoveButton)
-	{
-		const FLinearColor Fill = bMapGestures ? Blue : White;
-		MapMoveButton->SetStyle(StartStyle::Button(Fill, Fill * 0.94f, Fill * 0.86f, Line, 8.f / StartStyle::DesignToUi));
-	}
-	if (MapMoveLabel)
-	{
-		MapMoveLabel->SetText(FText::FromString(bMapGestures ? TEXT("Move: On") : TEXT("Move: Off")));
-		MapMoveLabel->SetColorAndOpacity(FSlateColor(bMapGestures ? OnBlue : Ink));
-	}
-	// The zoom buttons stop at the ends of the range.
-	const double Zoom = MapView ? MapView->GetZoom() : 1.0;
-	const bool bCanIn = Zoom < UMobileMapWidget::MaxZoom - 1e-6;
-	const bool bCanOut = Zoom > UMobileMapWidget::MinZoom + 1e-6;
-	if (ZoomInButton) ZoomInButton->SetIsEnabled(bCanIn);
-	if (ZoomOutButton) ZoomOutButton->SetIsEnabled(bCanOut);
-	if (ZoomInLabel) ZoomInLabel->SetColorAndOpacity(FSlateColor(bCanIn ? Ink : Grey));
-	if (ZoomOutLabel) ZoomOutLabel->SetColorAndOpacity(FSlateColor(bCanOut ? Ink : Grey));
-}
-
-void UMobileAppWidget::OnMapMoreClicked() { SetMapToolsOpen(!bMapToolsOpen); }
-void UMobileAppWidget::OnMapMoveClicked() { ToggleMapGestures(); }
-void UMobileAppWidget::OnZoomInClicked() { ZoomMap(UMobileMapWidget::ZoomStep); }
-void UMobileAppWidget::OnZoomOutClicked() { ZoomMap(-UMobileMapWidget::ZoomStep); }
 
 void UMobileAppWidget::OnOverviewClicked() { ToggleOverview(); }
 void UMobileAppWidget::OnLevelClicked() { SetLevelPopupOpen(!bLevelPopupOpen); }
@@ -1655,7 +1764,11 @@ void UMobileAppWidget::OpenSite(const FString& NewSiteId)
 	MapLevel = FirstLevel;
 	if (SearchPage)
 	{
-		SearchPage->SetSource(Source.Get(), SiteId, FirstBuilding, FirstLevel);
+		SearchPage->SetSource(Source.Get(), SiteId);
+	}
+	if (SearchOverlay)
+	{
+		SearchOverlay->SetSource(Source.Get(), SiteId);
 	}
 	RefreshSearchStart();
 	if (RoutePage)
@@ -1723,6 +1836,7 @@ void UMobileAppWidget::ResetSavedAndPreferences()
 {
 	const bool bSavedPlacesReset = SavedPlaces.Clear();
 	const bool bPreferencesReset = Preferences.Reset();
+	const bool bHistoryReset = SearchHistory.ClearAll();
 	ApplyVolume(Preferences.GetVolume());
 	RefreshSaved();
 	SelectPlace(SelectedPlace);
@@ -1730,7 +1844,7 @@ void UMobileAppWidget::ResetSavedAndPreferences()
 	if (ProfilePage)
 	{
 		ProfilePage->SetPreferences(Preferences);
-		if (!bSavedPlacesReset || !bPreferencesReset) ProfilePage->ShowStatus(TEXT("Some changes could not be saved."));
+		if (!bSavedPlacesReset || !bPreferencesReset || !bHistoryReset) ProfilePage->ShowStatus(TEXT("Some changes could not be saved."));
 	}
 	SyncAppearance();
 }
@@ -1892,14 +2006,14 @@ void UMobileAppWidget::RefreshSiteName()
 	{
 		SiteNameText->SetText(FText::FromString(Title));
 	}
-	// Overview is only for a campus (more than one building); it says what a tap does: "Overview" from a level, "Current" from the overview.
+	// The button is only for a campus (more than one building); it says what a tap does: "Zoom out" (to the overview) from a level, "Back to building" from the overview.
 	if (OverviewButton)
 	{
 		OverviewButton->SetVisibility(Buildings.Num() > 1 ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (OverviewLabel)
 	{
-		OverviewLabel->SetText(FText::FromString(bMapOverview ? TEXT("Current") : TEXT("Overview")));
+		OverviewLabel->SetText(FText::FromString(bMapOverview ? TEXT("Back to building") : TEXT("Zoom out")));
 	}
 }
 

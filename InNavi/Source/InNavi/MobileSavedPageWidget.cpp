@@ -1,5 +1,6 @@
 #include "MobileSavedPageWidget.h"
 
+#include "MobileIcons.h"
 #include "MobileStyle.h"
 #include "MobileTapTarget.h"
 
@@ -72,16 +73,18 @@ void UMobileSavedPageWidget::RemovePlace(const FString& PlaceId)
 
 void UMobileSavedPageWidget::AddRow(const FMobilePlace& Place)
 {
-	// The icon is a placeholder (the category's letter on a soft square) until the design team's icons are in.
+	// The icon: a map pin on a soft square.
 	UBorder* Icon = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-	Icon->SetBrush(Rounded(BlueSoft, FLinearColor::Transparent, 10.f, 0.f));
+	Icon->SetBrush(Rounded(SoftPanel, FLinearColor::Transparent, 8.f, 0.f));
 	Icon->SetBrushColor(FLinearColor::White);
 	Icon->SetHorizontalAlignment(HAlign_Center);
 	Icon->SetVerticalAlignment(VAlign_Center);
-	Icon->SetContent(MakeText(WidgetTree, FString(), Place.Category.Left(1).ToUpper(), 16.f, Blue, true));
+	// The design team's map pin; until its texture is imported, the category's first letter.
+	UWidget* Pin = MobileIcons::Picture(WidgetTree, TEXT("Location"), 20.f, Blue);
+	Icon->SetContent(Pin ? Pin : static_cast<UWidget*>(MakeText(WidgetTree, FString(), Place.Category.Left(1).ToUpper(), 16.f, Blue, true)));
 	USizeBox* IconSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-	IconSize->SetWidthOverride(40.f);
-	IconSize->SetHeightOverride(40.f);
+	IconSize->SetWidthOverride(32.f);
+	IconSize->SetHeightOverride(32.f);
 	IconSize->SetContent(Icon);
 
 	UVerticalBox* Texts = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());

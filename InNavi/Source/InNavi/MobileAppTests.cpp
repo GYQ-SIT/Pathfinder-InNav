@@ -6,12 +6,14 @@
 #include "MobilePlacePageWidget.h"
 #include "MobileRoutePageWidget.h"
 #include "MobileSearchPageWidget.h"
+#include "MobileSelectWidget.h"
 #include "MobileSheetFlow.h"
 #include "MobileMockSource.h"
 #include "MobileTapTarget.h"
 
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/TextBlock.h"
 #include "Components/EditableTextBox.h"
 #include "Components/WidgetSwitcher.h"
 #include "Engine/World.h"
@@ -206,76 +208,120 @@ bool FMobileSearchPageTest::RunTest(const FString& Parameters)
 	UMobileSearchPageWidget* Page = CreateWidget<UMobileSearchPageWidget>(World, UMobileSearchPageWidget::StaticClass());
 	if (!TestNotNull(TEXT("the page is created"), Page)) return false;
 	Page->TakeWidget();
-	Page->SetSource(&Source, TEXT("sit-punggol"), TEXT("E2"), 1);
+	Page->SetSource(&Source, TEXT("sit-punggol"));
 
-	// Every control is there.
-	for (const TCHAR* Name : { TEXT("Txt_Search"), TEXT("Btn_Filters"), TEXT("Btn_SearchBack"), TEXT("ListScroll"), TEXT("FilterPanel"), TEXT("Btn_BrowseAll") })
+	// The directory of the prototype's second iteration: a title and a filters button, and no search box (that is the full-screen search), back arrow or Browse all.
+	for (const TCHAR* Name : { TEXT("Txt_SearchTitle"), TEXT("Btn_Filters"), TEXT("ListScroll"), TEXT("FilterPanel"), TEXT("FilterSelects"), TEXT("FiltersBadge") })
 	{
 		TestNotNull(*FString::Printf(TEXT("%s exists"), Name), Page->FindNamedWidget(Name));
 	}
+	for (const TCHAR* Gone : { TEXT("Txt_Search"), TEXT("Btn_SearchBack"), TEXT("Btn_BrowseAll"), TEXT("ChipBox") })
+	{
+		TestNull(*FString::Printf(TEXT("%s is gone"), Gone), Page->FindNamedWidget(Gone));
+	}
 
-	// At first: the places of the building and level the person is in, under one heading, and a way to see the rest.
-	TestEqual(TEXT("four places around the person"), Page->GetShownPlaces().Num(), 4);
-	TestEqual(TEXT("under one heading"), Page->GetGroupCount(), 1);
-	TestEqual(TEXT("all on E2's first level"), Page->GetShownPlaces()[0].GroupLabel(), FString(TEXT("E2 \u00B7 L1")));
+	// At first: every place of the site, a heading for each building and level, the site's name as the title, and the filters closed.
+	TestEqual(TEXT("every place of the campus"), Page->GetShownPlaces().Num(), 36);
+	TestEqual(TEXT("under a heading for each of the nine levels"), Page->GetGroupCount(), 9);
+	FString SiteName;
+	for (const FMobileSite& Site : Source.ListSites()) { if (Site.Id == TEXT("sit-punggol")) SiteName = Site.Name; }
+	TestEqual(TEXT("the title is the site's name"), Page->GetTitle(), SiteName);
+	TestEqual(TEXT("and it is shown"), Cast<UTextBlock>(Page->FindNamedWidget(TEXT("Txt_SearchTitle")))->GetText().ToString(), SiteName);
+	TestEqual(TEXT("no filter is on"), Page->GetActiveFilterCount(), 0);
+	TestEqual(TEXT("so there is no count"), Cast<UWidget>(Page->FindNamedWidget(TEXT("FiltersBadge")))->GetVisibility(), ESlateVisibility::Collapsed);
 	TestFalse(TEXT("the filters are closed"), Page->AreFiltersOpen());
 	TestEqual(TEXT("so their panel is hidden"), Cast<UWidget>(Page->FindNamedWidget(TEXT("FilterPanel")))->GetVisibility(), ESlateVisibility::Collapsed);
 
-	// Browse all places: every place, a heading for each building and level, and the button goes away.
-	Page->BrowseAll();
-	TestEqual(TEXT("every place of the campus"), Page->GetShownPlaces().Num(), 36);
-	TestEqual(TEXT("under a heading for each of the nine levels"), Page->GetGroupCount(), 9);
-	TestNull(TEXT("and the button is gone"), Page->FindNamedWidget(TEXT("Btn_BrowseAll")));
+	// The button opens the panel.
+	Cast<UButton>(Page->FindNamedWidget(TEXT("Btn_Filters")))->OnClicked.Broadcast();
+	TestTrue(TEXT("the button opens the filters"), Page->AreFiltersOpen());
+	TestEqual(TEXT("and shows the panel"), Cast<UWidget>(Page->FindNamedWidget(TEXT("FilterPanel")))->GetVisibility(), ESlateVisibility::Visible);
 
-	// A search lists every match, wherever it is.
-	Page->SetQuery(TEXT("classroom"));
-	TestEqual(TEXT("a classroom on every level"), Page->GetShownPlaces().Num(), 9);
-	Page->SetQuery(TEXT("e6 restrooms"));
-	TestEqual(TEXT("E6's restrooms"), Page->GetShownPlaces().Num(), 4);
-	Page->SetQuery(TEXT("zzqxjw"));
+	// The three drop-downs: All first, then what the site has.
+	UMobileSelectWidget* Category = Page->GetCategorySelect();
+	UMobileSelectWidget* Building = Page->GetBuildingSelect();
+	UMobileSelectWidget* Level = Page->GetLevelSelect();
+	if (!TestTrue(TEXT("the three drop-downs are there"), Category && Building && Level)) return false;
+	TestEqual(TEXT("the categories: All and the site's"), Category->GetOptionCount(), 1 + Source.ListCategories(TEXT("sit-punggol")).Num());
+	TestEqual(TEXT("All is chosen"), Category->GetSelected(), FString());
+	TestEqual(TEXT("the buildings: all and the three"), Building->GetOptionCount(), 4);
+	TestEqual(TEXT("the building drop-down is for a campus"), Building->GetVisibility(), ESlateVisibility::Visible);
+	TestTrue(TEXT("the levels: all, then each level once"), Level->GetOptionCount() > 1 && Level->GetOptions()[0].Label == TEXT("All levels"));
+
+	// A category.
+	Page->SetCategory(TEXT("Facilities"));
+	TestEqual(TEXT("a category keeps its places"), Page->GetShownPlaces().Num(), 18);
+	TestTrue(TEXT("all of that category"), !Page->GetShownPlaces().ContainsByPredicate([](const FMobilePlace& Place) { return Place.Category != TEXT("Facilities"); }));
+	TestEqual(TEXT("one filter is on"), Page->GetActiveFilterCount(), 1);
+	TestEqual(TEXT("and the count shows"), Cast<UWidget>(Page->FindNamedWidget(TEXT("FiltersBadge")))->GetVisibility(), ESlateVisibility::HitTestInvisible);
+	TestEqual(TEXT("the count says 1"), Cast<UTextBlock>(Page->FindNamedWidget(TEXT("Txt_FiltersBadge")))->GetText().ToString(), FString(TEXT("1")));
+	TestEqual(TEXT("the drop-down shows it"), Category->GetSelected(), FString(TEXT("Facilities")));
+	Page->SetCategory(FString());
+	TestEqual(TEXT("All brings every place back"), Page->GetShownPlaces().Num(), 36);
+
+	// A building: its places, and its name as the title.
+	Page->SetBuilding(TEXT("E6"));
+	TestTrue(TEXT("only that building's places"), !Page->GetShownPlaces().IsEmpty() && !Page->GetShownPlaces().ContainsByPredicate([](const FMobilePlace& Place) { return Place.BuildingId != TEXT("E6"); }));
+	FString BuildingName;
+	for (const FMobileBuilding& Candidate : Source.ListBuildings(TEXT("sit-punggol"))) { if (Candidate.Id == TEXT("E6")) BuildingName = Candidate.Name.IsEmpty() ? Candidate.Id : Candidate.Name; }
+	TestEqual(TEXT("the title is the building's"), Page->GetTitle(), BuildingName);
+	TestEqual(TEXT("and shown"), Cast<UTextBlock>(Page->FindNamedWidget(TEXT("Txt_SearchTitle")))->GetText().ToString(), BuildingName);
+
+	// The building the map shows is the directory's too: its name is the title and its places the list, and it is not a filter.
+	Page->ClearFilters();
+	Page->SetContextBuilding(TEXT("E2"));
+	TestTrue(TEXT("only that building's places"), !Page->GetShownPlaces().IsEmpty() && !Page->GetShownPlaces().ContainsByPredicate([](const FMobilePlace& Place) { return Place.BuildingId != TEXT("E2"); }));
+	TestEqual(TEXT("no filter is on"), Page->GetActiveFilterCount(), 0);
+	TestEqual(TEXT("the building drop-down still says all buildings"), Page->GetBuildingSelect()->GetSelected(), FString());
+	TestTrue(TEXT("the title is the building's"), Page->GetTitle() != SiteName && !Page->GetTitle().IsEmpty());
+	Page->SetBuilding(TEXT("E6"));
+	TestTrue(TEXT("the Building filter wins over the map's"), !Page->GetShownPlaces().ContainsByPredicate([](const FMobilePlace& Place) { return Place.BuildingId != TEXT("E6"); }));
+	Page->ClearFilters();
+	TestEqual(TEXT("clearing the filters leaves the map's building"), Page->GetContextBuilding(), FString(TEXT("E2")));
+	Page->SetContextBuilding(FString());
+	TestEqual(TEXT("the whole site again"), Page->GetShownPlaces().Num(), 36);
+	Page->SetBuilding(TEXT("E6"));
+
+	// A level, with the building and a category: the three together.
+	Page->SetLevel(1);
+	TestTrue(TEXT("a level of that building"), !Page->GetShownPlaces().ContainsByPredicate([](const FMobilePlace& Place) { return Place.Level != 1 || Place.BuildingId != TEXT("E6"); }));
+	Page->SetCategory(TEXT("Learning"));
+	TestEqual(TEXT("three filters are on"), Page->GetActiveFilterCount(), 3);
+	TestEqual(TEXT("and the count says 3"), Cast<UTextBlock>(Page->FindNamedWidget(TEXT("Txt_FiltersBadge")))->GetText().ToString(), FString(TEXT("3")));
+	Page->ClearFilters();
+
+	// Choosing in a drop-down is the same as asking the page.
+	Building->Choose(TEXT("E2"));
+	TestEqual(TEXT("the building drop-down filters"), Page->GetFilter().BuildingId, FString(TEXT("E2")));
+	Level->Choose(TEXT("1"));
+	TestEqual(TEXT("so does the level one"), Page->GetFilter().Level, 1);
+	Level->Choose(FString());
+	TestEqual(TEXT("All levels clears it"), Page->GetFilter().Level, static_cast<int32>(INDEX_NONE));
+	Page->ClearFilters();
+	TestTrue(TEXT("clearing the filters clears them"), Page->GetActiveFilterCount() == 0 && Page->GetShownPlaces().Num() == 36 && Page->GetTitle() == SiteName);
+
+	// Only one drop-down is open at a time.
+	Category->ToggleOpen();
+	Building->ToggleOpen();
+	TestTrue(TEXT("the last one opened is open"), Building->IsOpen() && !Category->IsOpen());
+
+	// No match says so.
+	Page->SetCategory(TEXT("No such category"));
 	TestTrue(TEXT("nothing matches"), Page->GetShownPlaces().IsEmpty());
 	TestNotNull(TEXT("and the page says so"), Page->FindNamedWidget(TEXT("Empty")));
-	Page->SetQuery(FString());
-
-	// Filters.
-	Page->SetFiltersOpen(true);
-	TestEqual(TEXT("the filters open"), Cast<UWidget>(Page->FindNamedWidget(TEXT("FilterPanel")))->GetVisibility(), ESlateVisibility::Visible);
-	Page->ToggleCategory(TEXT("Facilities"));
-	TestEqual(TEXT("a category keeps its places"), Page->GetShownPlaces().Num(), 18);
-	Page->ToggleCategory(TEXT("Learning"));
-	TestEqual(TEXT("two categories keep both"), Page->GetShownPlaces().Num(), 36);
-	Page->ToggleCategory(TEXT("Facilities"));
-	Page->ToggleCategory(TEXT("Learning"));
-	Page->ToggleCategory(TEXT("Learning"));
-	Page->SetQuery(TEXT("e2"));
-	TestEqual(TEXT("a word and a category together"), Page->GetShownPlaces().Num(), 6);
-	Page->ClearFilters();
-	TestTrue(TEXT("clearing the filters clears them"), Page->GetFilter().Categories.IsEmpty() && !Page->GetFilter().bAvailableOnly);
-	Page->SetQuery(FString());
-	Page->ToggleAvailableOnly();
-	TestEqual(TEXT("the campus has no closed place"), Page->GetShownPlaces().Num(), 36);
 	Page->ClearFilters();
 
-	// Picking a place hands it on; the back arrow too.
+	// Picking a place hands it on.
 	FString Chosen;
-	bool bWentBack = false;
 	Page->SetOnPlaceChosen([&Chosen](const FMobilePlace& Place) { Chosen = Place.Id; });
-	Page->SetOnBack([&bWentBack]() { bWentBack = true; });
 	Page->ChoosePlace(TEXT("E6-2M-103"));
 	TestEqual(TEXT("the chosen place arrives"), Chosen, FString(TEXT("E6-2M-103")));
-	Cast<UButton>(Page->FindNamedWidget(TEXT("Btn_SearchBack")))->OnClicked.Broadcast();
-	TestTrue(TEXT("and so does the back arrow"), bWentBack);
 
-	// Typing in the box searches.
-	Cast<UEditableTextBox>(Page->FindNamedWidget(TEXT("Txt_Search")))->OnTextChanged.Broadcast(FText::FromString(TEXT("lounge")));
-	TestEqual(TEXT("a study lounge on each level"), Page->GetShownPlaces().Num(), 9);
-
-	// The mall, where one restaurant is closed.
-	Page->SetSource(&Source, TEXT("paya-lebar"), TEXT("PLM"), 1);
-	TestEqual(TEXT("four places on the mall's first level"), Page->GetShownPlaces().Num(), 4);
-	Page->ToggleAvailableOnly();
-	TestEqual(TEXT("a filter lists every match: all 28 of the mall but the closed one"), Page->GetShownPlaces().Num(), 27);
-	Page->ClearFilters();
+	// The mall is one building: every place of it, and no building drop-down.
+	Page->SetSource(&Source, TEXT("paya-lebar"));
+	TestEqual(TEXT("all 28 places of the mall"), Page->GetShownPlaces().Num(), 28);
+	TestEqual(TEXT("a mall has no building drop-down"), Page->GetBuildingSelect()->GetVisibility(), ESlateVisibility::Collapsed);
+	TestFalse(TEXT("a new site closes the filters"), Page->AreFiltersOpen());
 
 	World->DestroyWorld(false);
 	return true;

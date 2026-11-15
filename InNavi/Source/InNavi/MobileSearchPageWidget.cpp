@@ -1,21 +1,24 @@
 #include "MobileSearchPageWidget.h"
 
+#include "MobileIcons.h"
+#include "MobileSelectWidget.h"
 #include "MobileStyle.h"
 #include "MobileTapTarget.h"
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
-#include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/Spacer.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
-#include "Components/WrapBox.h"
 
 using namespace MobileStyle;
 
@@ -27,15 +30,45 @@ TSharedRef<SWidget> UMobileSearchPageWidget::RebuildWidget()
 		UVerticalBox* Page = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("SearchPage"));
 		Tree->RootWidget = Page;
 
-		// The back arrow on the left, the title on the right.
+		// The title (the site, or the building when one is chosen) and, at the right, the filters button with the number of filters that are on.
 		UHorizontalBox* Header = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("SearchHeader"));
-		UTextBlock* BackLabel = nullptr;
-		UButton* Back = MakeButton(Tree, TEXT("Btn_SearchBack"), TEXT("‹"), White, Blue, 10.f, 36.f, &BackLabel, 14.f);
-		ApplyFont(BackLabel, 28.f, true);
-		Back->OnClicked.AddUniqueDynamic(this, &UMobileSearchPageWidget::HandleBackClicked);
-		Header->AddChildToHorizontalBox(Back)->SetVerticalAlignment(VAlign_Center);
-		Header->AddChildToHorizontalBox(Tree->ConstructWidget<USpacer>(USpacer::StaticClass(), TEXT("SearchHeaderSpacer")))->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-		Header->AddChildToHorizontalBox(MakeText(Tree, TEXT("Txt_SearchTitle"), TEXT("Where to?"), 22.f, Ink, true))->SetVerticalAlignment(VAlign_Center);
+		TitleText = MakeText(Tree, TEXT("Txt_SearchTitle"), TEXT(""), 16.f, Ink, true);
+		UHorizontalBoxSlot* TitleSlot = Header->AddChildToHorizontalBox(TitleText);
+		TitleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		TitleSlot->SetVerticalAlignment(VAlign_Center);
+		FiltersButton = Tree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Filters"));
+		FiltersButton->SetBackgroundColor(FLinearColor::White);
+		UOverlay* FilterOverlay = Tree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("FiltersOverlay"));
+		FiltersIcon = MobileIcons::Image(Tree, TEXT("Filter"), 18.f);
+		USizeBox* FilterIconSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("FiltersIconSize"));
+		FilterIconSize->SetWidthOverride(18.f);
+		FilterIconSize->SetHeightOverride(18.f);
+		if (FiltersIcon)
+		{
+			FilterIconSize->SetContent(FiltersIcon);
+		}
+		UWidget* FilterFace = FiltersIcon ? static_cast<UWidget*>(FilterIconSize) : static_cast<UWidget*>(FiltersLabel = MakeText(Tree, TEXT("Btn_Filters_Label"), TEXT("Filters"), 11.f, Ink, true));
+		UOverlaySlot* FaceSlot = FilterOverlay->AddChildToOverlay(FilterFace);
+		FaceSlot->SetHorizontalAlignment(HAlign_Center);
+		FaceSlot->SetVerticalAlignment(VAlign_Center);
+		FiltersBadge = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("FiltersBadge"));
+		FiltersBadge->SetBrush(Rounded(Blue, FLinearColor::Transparent, 8.f, 0.f));
+		FiltersBadge->SetBrushColor(FLinearColor::White);
+		FiltersBadge->SetPadding(FMargin(5.f, 1.f));
+		FiltersBadge->SetVisibility(ESlateVisibility::Collapsed);
+		FiltersBadgeText = MakeText(Tree, TEXT("Txt_FiltersBadge"), TEXT("1"), 10.f, OnBlue, true);
+		FiltersBadge->SetContent(FiltersBadgeText);
+		UOverlaySlot* BadgeSlot = FilterOverlay->AddChildToOverlay(FiltersBadge);
+		BadgeSlot->SetHorizontalAlignment(HAlign_Right);
+		BadgeSlot->SetVerticalAlignment(VAlign_Top);
+		BadgeSlot->SetPadding(FMargin(0.f, 2.f, 2.f, 0.f));
+		USizeBox* FilterSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("FiltersSize"));
+		FilterSize->SetWidthOverride(36.f);
+		FilterSize->SetHeightOverride(36.f);
+		FilterSize->SetContent(FilterOverlay);
+		FiltersButton->SetContent(FilterSize);
+		FiltersButton->OnClicked.AddUniqueDynamic(this, &UMobileSearchPageWidget::HandleFiltersClicked);
+		Header->AddChildToHorizontalBox(FiltersButton)->SetVerticalAlignment(VAlign_Center);
 		Page->AddChildToVerticalBox(Header)->SetPadding(FMargin(16.f, 0.f, 16.f, 0.f));
 
 		// Where the walk starts, when the person chose a place for it: a line under the title, and Clear to go back to My location.
@@ -56,25 +89,45 @@ TSharedRef<SWidget> UMobileSearchPageWidget::RebuildWidget()
 		StartRow->SetContent(StartLine);
 		Page->AddChildToVerticalBox(StartRow)->SetPadding(FMargin(16.f, 8.f, 16.f, 0.f));
 
-		// The search box and the filters toggle.
-		UHorizontalBox* SearchRow = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("SearchRow"));
-		SearchBox = Tree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_Search"));
-		SearchBox->SetWidgetStyle(SearchField(15.f));
-		SearchBox->SetHintText(FText::FromString(TEXT("Search a place or room")));
-		SearchBox->OnTextChanged.AddUniqueDynamic(this, &UMobileSearchPageWidget::HandleQueryChanged);
-		SearchRow->AddChildToHorizontalBox(SearchBox)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-		UButton* FiltersButton = MakeButton(Tree, TEXT("Btn_Filters"), TEXT("Filters"), White, Grey, 10.f, 40.f, &FiltersLabel, 14.f);
-		FiltersButton->OnClicked.AddUniqueDynamic(this, &UMobileSearchPageWidget::HandleFiltersClicked);
-		SearchRow->AddChildToHorizontalBox(FiltersButton)->SetPadding(FMargin(8.f, 0.f, 0.f, 0.f));
-		Page->AddChildToVerticalBox(SearchRow)->SetPadding(FMargin(16.f, 12.f, 16.f, 0.f));
-
-		// The filters, shown when the toggle is open.
+		// The filters, three drop-downs in a row, shown when the button is open.
 		FilterPanel = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("FilterPanel"));
 		FilterPanel->SetVisibility(ESlateVisibility::Collapsed);
-		ChipBox = Tree->ConstructWidget<UWrapBox>(UWrapBox::StaticClass(), TEXT("ChipBox"));
-		ChipBox->SetInnerSlotPadding(FVector2D(8.f, 8.f));
-		FilterPanel->AddChildToVerticalBox(ChipBox);
-		Page->AddChildToVerticalBox(FilterPanel)->SetPadding(FMargin(16.f, 12.f, 16.f, 0.f));
+		TWeakObjectPtr<UMobileSearchPageWidget> WeakThis(this);
+		auto MakeSelect = [this, WeakThis](const TCHAR* Caption, TFunction<void(UMobileSearchPageWidget*, const FString&)> OnChosen) -> UMobileSelectWidget*
+		{
+			UMobileSelectWidget* Select = CreateWidget<UMobileSelectWidget>(this, UMobileSelectWidget::StaticClass());
+			Select->SetCompact(true);
+			Select->SetCaption(Caption);
+			Select->SetOnChanged([WeakThis, OnChosen](const FString& Value)
+			{
+				if (UMobileSearchPageWidget* Self = WeakThis.Get())
+				{
+					OnChosen(Self, Value);
+				}
+			});
+			TWeakObjectPtr<UMobileSelectWidget> WeakSelect(Select);
+			Select->SetOnOpened([WeakThis, WeakSelect]()
+			{
+				if (UMobileSearchPageWidget* Self = WeakThis.Get())
+				{
+					Self->CloseOtherSelects(WeakSelect.Get());
+				}
+			});
+			return Select;
+		};
+		CategorySelect = MakeSelect(TEXT("Category"), [](UMobileSearchPageWidget* Self, const FString& Value) { Self->SetCategory(Value); });
+		BuildingSelect = MakeSelect(TEXT("Building"), [](UMobileSearchPageWidget* Self, const FString& Value) { Self->SetBuilding(Value); });
+		LevelSelect = MakeSelect(TEXT("Level"), [](UMobileSearchPageWidget* Self, const FString& Value) { Self->SetLevel(Value.IsEmpty() ? INDEX_NONE : FCString::Atoi(*Value)); });
+		UHorizontalBox* SelectRow = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("FilterSelects"));
+		SelectRow->AddChildToHorizontalBox(CategorySelect)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		UHorizontalBoxSlot* BuildingSlot = SelectRow->AddChildToHorizontalBox(BuildingSelect);
+		BuildingSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		BuildingSlot->SetPadding(FMargin(8.f, 0.f, 0.f, 0.f));
+		UHorizontalBoxSlot* LevelSlot = SelectRow->AddChildToHorizontalBox(LevelSelect);
+		LevelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		LevelSlot->SetPadding(FMargin(8.f, 0.f, 0.f, 0.f));
+		FilterPanel->AddChildToVerticalBox(SelectRow);
+		Page->AddChildToVerticalBox(FilterPanel)->SetPadding(FMargin(16.f, 8.f, 16.f, 0.f));
 
 		// The list.
 		ListScroll = Tree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("ListScroll"));
@@ -86,51 +139,50 @@ TSharedRef<SWidget> UMobileSearchPageWidget::RebuildWidget()
 	return Super::RebuildWidget();
 }
 
-void UMobileSearchPageWidget::SetSource(IMobileNavSource* InSource, const FString& InSiteId, const FString& InContextBuildingId, int32 InContextLevel)
+void UMobileSearchPageWidget::SetSource(IMobileNavSource* InSource, const FString& InSiteId)
 {
 	Source = InSource;
 	SiteId = InSiteId;
-	ContextBuildingId = InContextBuildingId;
-	ContextLevel = InContextLevel;
 	Filter = FMobilePlaceFilter();
-	Query.Reset();
-	bBrowseAll = false;
-	if (SearchBox)
-	{
-		SearchBox->SetText(FText::GetEmpty());
-	}
+	ContextBuildingId.Reset();
+	bFiltersOpen = false;
 	Refresh();
 }
 
-void UMobileSearchPageWidget::SetQuery(const FString& NewQuery)
+void UMobileSearchPageWidget::SetContextBuilding(const FString& BuildingId)
 {
-	Query = NewQuery;
-	if (SearchBox && SearchBox->GetText().ToString() != NewQuery)
+	if (ContextBuildingId != BuildingId)
 	{
-		SearchBox->SetText(FText::FromString(NewQuery));
+		ContextBuildingId = BuildingId;
+		Refresh();
 	}
-	Refresh();
 }
 
-void UMobileSearchPageWidget::ToggleCategory(const FString& Category)
+void UMobileSearchPageWidget::SetCategory(const FString& Category)
 {
-	if (!Filter.Categories.Remove(Category))
+	Filter.Categories.Reset();
+	if (!Category.IsEmpty())
 	{
 		Filter.Categories.Add(Category);
 	}
 	Refresh();
 }
 
-void UMobileSearchPageWidget::ToggleAvailableOnly()
+void UMobileSearchPageWidget::SetBuilding(const FString& BuildingId)
 {
-	Filter.bAvailableOnly = !Filter.bAvailableOnly;
+	Filter.BuildingId = BuildingId;
+	Refresh();
+}
+
+void UMobileSearchPageWidget::SetLevel(int32 Level)
+{
+	Filter.Level = Level;
 	Refresh();
 }
 
 void UMobileSearchPageWidget::ClearFilters()
 {
-	Filter.Categories.Reset();
-	Filter.bAvailableOnly = false;
+	Filter = FMobilePlaceFilter();
 	Refresh();
 }
 
@@ -140,10 +192,169 @@ void UMobileSearchPageWidget::SetFiltersOpen(bool bOpen)
 	Refresh();
 }
 
-void UMobileSearchPageWidget::BrowseAll()
+int32 UMobileSearchPageWidget::GetActiveFilterCount() const
 {
-	bBrowseAll = true;
-	Refresh();
+	return (Filter.Categories.IsEmpty() ? 0 : 1) + (Filter.BuildingId.IsEmpty() ? 0 : 1) + (Filter.Level == INDEX_NONE ? 0 : 1);
+}
+
+FString UMobileSearchPageWidget::GetTitle() const
+{
+	if (!Source)
+	{
+		return FString();
+	}
+	const FString& TitleBuilding = Filter.BuildingId.IsEmpty() ? ContextBuildingId : Filter.BuildingId;
+	if (!TitleBuilding.IsEmpty())
+	{
+		for (const FMobileBuilding& Building : Source->ListBuildings(SiteId))
+		{
+			if (Building.Id == TitleBuilding)
+			{
+				return Building.Name.IsEmpty() ? Building.Id : Building.Name;
+			}
+		}
+		return TitleBuilding;
+	}
+	for (const FMobileSite& Site : Source->ListSites())
+	{
+		if (Site.Id == SiteId)
+		{
+			return Site.Name;
+		}
+	}
+	return SiteId;
+}
+
+void UMobileSearchPageWidget::HandleFiltersClicked()
+{
+	SetFiltersOpen(!bFiltersOpen);
+}
+
+void UMobileSearchPageWidget::CloseOtherSelects(UMobileSelectWidget* Keep)
+{
+	for (UMobileSelectWidget* Select : { CategorySelect, BuildingSelect, LevelSelect })
+	{
+		if (Select && Select != Keep && Select->IsOpen())
+		{
+			Select->SetOpen(false);
+		}
+	}
+}
+
+void UMobileSearchPageWidget::RefreshHeader()
+{
+	if (TitleText)
+	{
+		TitleText->SetText(FText::FromString(GetTitle()));
+	}
+	const int32 Active = GetActiveFilterCount();
+	if (FiltersButton)
+	{
+		// Blue while the panel is open, soft grey otherwise.
+		const FLinearColor Fill = bFiltersOpen ? Blue : SoftPanel;
+		FiltersButton->SetStyle(StartStyle::Button(Fill, Fill * 0.94f, Fill * 0.86f, FLinearColor::Transparent, 10.f / StartStyle::DesignToUi));
+	}
+	if (FiltersIcon)
+	{
+		FiltersIcon->SetColorAndOpacity(bFiltersOpen ? OnBlue : Grey);
+	}
+	if (FiltersLabel)
+	{
+		FiltersLabel->SetColorAndOpacity(FSlateColor(bFiltersOpen ? OnBlue : Grey));
+	}
+	if (FiltersBadge)
+	{
+		FiltersBadge->SetVisibility(Active > 0 ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	}
+	if (FiltersBadgeText)
+	{
+		FiltersBadgeText->SetText(FText::AsNumber(Active));
+	}
+	if (FilterPanel)
+	{
+		FilterPanel->SetVisibility(bFiltersOpen ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (!Source || !CategorySelect || !BuildingSelect || !LevelSelect)
+	{
+		return;
+	}
+	// The drop-downs: All first, then what the site has. The building one is only for a campus.
+	TArray<FMobileSelectOption> Categories = { { FString(), TEXT("All") } };
+	for (const FString& Category : Source->ListCategories(SiteId))
+	{
+		Categories.Add({ Category, Category });
+	}
+	CategorySelect->SetOptions(Categories, Filter.Categories.IsEmpty() ? FString() : Filter.Categories[0]);
+
+	const TArray<FMobileBuilding> Buildings = Source->ListBuildings(SiteId);
+	TArray<FMobileSelectOption> BuildingOptions = { { FString(), TEXT("All buildings") } };
+	TMap<int32, FString> LevelNames;
+	for (const FMobileBuilding& Building : Buildings)
+	{
+		BuildingOptions.Add({ Building.Id, Building.Name.IsEmpty() ? Building.Id : Building.Name });
+		for (const FMobileLevel& Level : Building.Levels)
+		{
+			if (!LevelNames.Contains(Level.Level))
+			{
+				LevelNames.Add(Level.Level, Level.Label);
+			}
+		}
+	}
+	BuildingSelect->SetOptions(BuildingOptions, Filter.BuildingId);
+	BuildingSelect->SetVisibility(Buildings.Num() > 1 ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+
+	TArray<int32> LevelKeys;
+	LevelNames.GetKeys(LevelKeys);
+	LevelKeys.Sort();
+	TArray<FMobileSelectOption> LevelOptions = { { FString(), TEXT("All levels") } };
+	for (int32 Level : LevelKeys)
+	{
+		LevelOptions.Add({ FString::FromInt(Level), LevelNames[Level] });
+	}
+	LevelSelect->SetOptions(LevelOptions, Filter.Level == INDEX_NONE ? FString() : FString::FromInt(Filter.Level));
+}
+
+void UMobileSearchPageWidget::Refresh()
+{
+	ShownPlaces.Reset();
+	GroupCount = 0;
+	LastGroup.Reset();
+	if (!ListBox || !WidgetTree)
+	{
+		return;
+	}
+	RefreshHeader();
+	ListBox->ClearChildren();
+	if (!Source)
+	{
+		return;
+	}
+	FMobilePlaceFilter Effective = Filter;
+	if (Effective.BuildingId.IsEmpty())
+	{
+		Effective.BuildingId = ContextBuildingId;
+	}
+	ShownPlaces = Source->SearchPlaces(SiteId, FString(), Effective);
+	for (const FMobilePlace& Place : ShownPlaces)
+	{
+		const FString Group = Place.GroupLabel();
+		if (Group != LastGroup)
+		{
+			AddGroupHeading(Group);
+			LastGroup = Group;
+		}
+		AddPlaceRow(Place);
+	}
+	if (ShownPlaces.IsEmpty())
+	{
+		UBorder* Empty = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Empty"));
+		Empty->SetBrushColor(FLinearColor::Transparent);
+		Empty->SetPadding(FMargin(16.f, 24.f));
+		UTextBlock* Message = MakeText(WidgetTree, FString(), TEXT("No places match. Try other filters."), 13.f, Grey);
+		Message->SetAutoWrapText(true);
+		Empty->SetContent(Message);
+		ListBox->AddChildToVerticalBox(Empty);
+	}
 }
 
 void UMobileSearchPageWidget::ChoosePlace(const FString& PlaceId)
@@ -160,107 +371,30 @@ UWidget* UMobileSearchPageWidget::FindNamedWidget(const FName& Name) const
 	return WidgetTree ? WidgetTree->FindWidget(Name) : nullptr;
 }
 
-void UMobileSearchPageWidget::HandleQueryChanged(const FText& Text)
-{
-	if (Text.ToString() != Query)
-	{
-		Query = Text.ToString();
-		Refresh();
-	}
-}
-
-void UMobileSearchPageWidget::HandleBackClicked()
-{
-	if (OnBack)
-	{
-		OnBack();
-	}
-}
-
-void UMobileSearchPageWidget::HandleFiltersClicked()
-{
-	SetFiltersOpen(!bFiltersOpen);
-}
-
-void UMobileSearchPageWidget::HandleBrowseAllClicked()
-{
-	BrowseAll();
-}
-
-void UMobileSearchPageWidget::RefreshFilterChips()
-{
-	if (!ChipBox || !WidgetTree)
-	{
-		return;
-	}
-	ChipBox->ClearChildren();
-	auto AddChip = [this](const FString& Payload, const FString& Label, bool bOn)
-	{
-		UMobileTapTarget* Chip = CreateWidget<UMobileTapTarget>(this, UMobileTapTarget::StaticClass());
-		UBorder* Pill = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-		Pill->SetBrushColor(FLinearColor::Transparent);
-		Pill->SetPadding(FMargin(14.f, 8.f));
-		Pill->SetContent(MakeText(WidgetTree, FString(), Label, 13.f, bOn ? OnBlue : Blue, true));
-		Chip->Setup(Pill, Payload, bOn ? Blue : BlueSoft, 16.f);
-		TWeakObjectPtr<UMobileSearchPageWidget> WeakThis(this);
-		Chip->SetOnTapped([WeakThis](const FString& Tapped)
-		{
-			UMobileSearchPageWidget* Page = WeakThis.Get();
-			if (!Page)
-			{
-				return;
-			}
-			if (Tapped == TEXT("available"))
-			{
-				Page->ToggleAvailableOnly();
-			}
-			else if (Tapped == TEXT("clear"))
-			{
-				Page->ClearFilters();
-			}
-			else if (Tapped.StartsWith(TEXT("cat:")))
-			{
-				Page->ToggleCategory(Tapped.Mid(4));
-			}
-		});
-		ChipBox->AddChildToWrapBox(Chip);
-	};
-	if (Source)
-	{
-		for (const FString& Category : Source->ListCategories(SiteId))
-		{
-			AddChip(TEXT("cat:") + Category, Category, Filter.Categories.Contains(Category));
-		}
-	}
-	AddChip(TEXT("available"), TEXT("Available only"), Filter.bAvailableOnly);
-	if (!Filter.Categories.IsEmpty() || Filter.bAvailableOnly)
-	{
-		AddChip(TEXT("clear"), TEXT("Clear"), false);
-	}
-}
-
 void UMobileSearchPageWidget::AddGroupHeading(const FString& Label)
 {
 	++GroupCount;
 	UBorder* Heading = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
 	Heading->SetBrushColor(FLinearColor::Transparent);
 	Heading->SetPadding(FMargin(16.f, 16.f, 16.f, 4.f));
-	Heading->SetContent(MakeText(WidgetTree, FString(), Label, 12.f, Grey, true));
+	Heading->SetContent(MakeText(WidgetTree, FString(), Label, 14.f, Grey, true));
 	ListBox->AddChildToVerticalBox(Heading);
 }
 
 void UMobileSearchPageWidget::AddPlaceRow(const FMobilePlace& Place)
 {
-	// The icon is a placeholder: the category's first letter on a soft square, until the design team's icons are in.
+	// The icon: a map pin on a soft square.
 	UBorder* Icon = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-	Icon->SetBrush(Rounded(BlueSoft, FLinearColor::Transparent, 10.f, 0.f));
+	Icon->SetBrush(Rounded(SoftPanel, FLinearColor::Transparent, 8.f, 0.f));
 	Icon->SetBrushColor(FLinearColor::White);
 	Icon->SetHorizontalAlignment(HAlign_Center);
 	Icon->SetVerticalAlignment(VAlign_Center);
-	Icon->SetContent(MakeText(WidgetTree, FString(), Place.Category.Left(1).ToUpper(), 16.f, Blue, true));
+	// The design team's map pin; until its texture is imported, the category's first letter.
+	UWidget* Pin = MobileIcons::Picture(WidgetTree, TEXT("Location"), 20.f, Blue);
+	Icon->SetContent(Pin ? Pin : static_cast<UWidget*>(MakeText(WidgetTree, FString(), Place.Category.Left(1).ToUpper(), 16.f, Blue, true)));
 	USizeBox* IconSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-	IconSize->SetWidthOverride(40.f);
-	IconSize->SetHeightOverride(40.f);
+	IconSize->SetWidthOverride(32.f);
+	IconSize->SetHeightOverride(32.f);
 	IconSize->SetContent(Icon);
 
 	UVerticalBox* Text = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
@@ -284,7 +418,7 @@ void UMobileSearchPageWidget::AddPlaceRow(const FMobilePlace& Place)
 	TextSlot->SetPadding(FMargin(12.f, 0.f, 8.f, 0.f));
 	TextSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 	TextSlot->SetVerticalAlignment(VAlign_Center);
-	Row->AddChildToHorizontalBox(MakeText(WidgetTree, FString(), Place.LevelLabel, 12.f, Blue, true))->SetVerticalAlignment(VAlign_Center);
+	Row->AddChildToHorizontalBox(MakeText(WidgetTree, FString(), Place.GroupLabel(), 12.f, Blue, true))->SetVerticalAlignment(VAlign_Center);
 
 	UBorder* Padded = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
 	Padded->SetBrushColor(FLinearColor::Transparent);
@@ -309,76 +443,6 @@ void UMobileSearchPageWidget::AddPlaceRow(const FMobilePlace& Place)
 	Rule->SetBrushColor(Line);
 	Divider->SetContent(Rule);
 	ListBox->AddChildToVerticalBox(Divider)->SetPadding(FMargin(16.f, 0.f));
-}
-
-void UMobileSearchPageWidget::Refresh()
-{
-	ShownPlaces.Reset();
-	GroupCount = 0;
-	LastGroup.Reset();
-	if (!ListBox || !WidgetTree)
-	{
-		return;
-	}
-	if (FilterPanel)
-	{
-		FilterPanel->SetVisibility(bFiltersOpen ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	}
-	if (FiltersLabel)
-	{
-		FString Text = TEXT("Filters");
-		const int32 Active = Filter.Categories.Num() + (Filter.bAvailableOnly ? 1 : 0);
-		if (Active > 0)
-		{
-			Text += FString::Printf(TEXT(" (%d)"), Active);
-		}
-		FiltersLabel->SetText(FText::FromString(Text));
-		// Blue while the panel is open or a filter is on, grey otherwise.
-		FiltersLabel->SetColorAndOpacity(FSlateColor(bFiltersOpen || Active > 0 ? Blue : Grey));
-	}
-	RefreshFilterChips();
-
-	ListBox->ClearChildren();
-	if (!Source)
-	{
-		return;
-	}
-	// With nothing typed and no filter the list is the place the person is in; Browse all places opens the rest.
-	const bool bFiltered = !Query.TrimStartAndEnd().IsEmpty() || !Filter.Categories.IsEmpty() || Filter.bAvailableOnly;
-	const bool bAroundMe = !bFiltered && !bBrowseAll;
-	FMobilePlaceFilter Effective = Filter;
-	if (bAroundMe)
-	{
-		Effective.BuildingId = ContextBuildingId;
-		Effective.Level = ContextLevel;
-	}
-	ShownPlaces = Source->SearchPlaces(SiteId, Query, Effective);
-	for (const FMobilePlace& Place : ShownPlaces)
-	{
-		const FString Group = Place.GroupLabel();
-		if (Group != LastGroup)
-		{
-			AddGroupHeading(Group);
-			LastGroup = Group;
-		}
-		AddPlaceRow(Place);
-	}
-	if (ShownPlaces.IsEmpty())
-	{
-		UBorder* Empty = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Empty"));
-		Empty->SetBrushColor(FLinearColor::Transparent);
-		Empty->SetPadding(FMargin(16.f, 24.f));
-		UTextBlock* Message = MakeText(WidgetTree, FString(), TEXT("No places match. Try another word, or clear the filters."), 13.f, Grey);
-		Message->SetAutoWrapText(true);
-		Empty->SetContent(Message);
-		ListBox->AddChildToVerticalBox(Empty);
-	}
-	if (bAroundMe)
-	{
-		UButton* Browse = MakeButton(WidgetTree, TEXT("Btn_BrowseAll"), TEXT("Browse all places"), White, Blue, 12.f, 44.f);
-		Browse->OnClicked.AddUniqueDynamic(this, &UMobileSearchPageWidget::HandleBrowseAllClicked);
-		ListBox->AddChildToVerticalBox(Browse)->SetPadding(FMargin(16.f, 14.f, 16.f, 16.f));
-	}
 }
 
 void UMobileSearchPageWidget::SetStartLabel(const FString& Label)

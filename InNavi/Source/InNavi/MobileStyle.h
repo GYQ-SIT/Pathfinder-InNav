@@ -145,10 +145,8 @@ namespace MobileStyle
 		}
 		FSlateFontInfo Font = Block->GetFont();
 		Font.Size = FMath::RoundToInt(PixelSize * TextScale * StartStyle::PixelsToFont);
-		if (bBold)
-		{
-			Font.TypefaceFontName = TEXT("Bold");
-		}
+		// The text block's own default typeface is Bold, so Regular has to be asked for: a text that is not bold was bold until now.
+		Font.TypefaceFontName = bBold ? TEXT("Bold") : TEXT("Regular");
 		Block->SetFont(Font);
 	}
 
