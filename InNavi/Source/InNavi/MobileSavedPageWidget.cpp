@@ -7,6 +7,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/HorizontalBox.h"
+#include "Components/Button.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
@@ -23,11 +24,13 @@ TSharedRef<SWidget> UMobileSavedPageWidget::RebuildWidget()
 		UWidgetTree* Tree = WidgetTree;
 		UVerticalBox* Page = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("SavedPage"));
 		Tree->RootWidget = Page;
-		Page->AddChildToVerticalBox(MakeText(Tree, TEXT("Txt_SavedTitle"), TEXT("Saved"), 26.f, Ink, true))->SetPadding(FMargin(16.f, 22.f, 16.f, 0.f));
+		Page->AddChildToVerticalBox(MakeText(Tree, TEXT("Txt_SavedTitle"), TEXT("Saved places"), 26.f, Ink, true))->SetPadding(FMargin(16.f, 22.f, 16.f, 0.f));
+		Page->AddChildToVerticalBox(MakeText(Tree, TEXT("Txt_SavedSubtitle"), TEXT("Your shortcuts for the next visit."), 14.f, Grey))->SetPadding(FMargin(16.f, 6.f, 16.f, 0.f));
 		CountText = MakeText(Tree, TEXT("Txt_SavedCount"), TEXT(""), 13.f, Grey);
-		Page->AddChildToVerticalBox(CountText)->SetPadding(FMargin(16.f, 6.f, 16.f, 0.f));
+		Page->AddChildToVerticalBox(CountText)->SetPadding(FMargin(16.f, 4.f, 16.f, 0.f));
 		UScrollBox* Scroll = Tree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("SavedScroll"));
 		ListBox = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("SavedList"));
+		NoScrollShadow(Scroll);
 		Scroll->AddChild(ListBox);
 		Page->AddChildToVerticalBox(Scroll)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		Refresh();
@@ -50,6 +53,11 @@ void UMobileSavedPageWidget::SetSaved(const TArray<FString>& InIds)
 UWidget* UMobileSavedPageWidget::FindNamedWidget(const FName& Name) const
 {
 	return WidgetTree ? WidgetTree->FindWidget(Name) : nullptr;
+}
+
+void UMobileSavedPageWidget::HandleExploreClicked()
+{
+	PressExplore();
 }
 
 FString UMobileSavedPageWidget::GetCountString() const
@@ -179,12 +187,24 @@ void UMobileSavedPageWidget::Refresh()
 	if (ShownPlaces.IsEmpty())
 	{
 		bEmptyShown = true;
-		UVerticalBox* Message = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-		Message->AddChildToVerticalBox(MakeText(WidgetTree, FString(), TEXT("No saved places yet"), 16.f, Ink, true));
-		UTextBlock* Hint = MakeText(WidgetTree, FString(), TEXT("Tap Save place on a place, and it is kept here."), 13.f, Grey);
+		// Centred, as in the prototype: a blue heart, what it means, how to save one, and a button to the places.
+		UVerticalBox* Message = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("SavedEmpty"));
+		UWidget* Heart = MobileIcons::Picture(WidgetTree, TEXT("Heart"), 28.f, Blue);
+		if (Heart)
+		{
+			Message->AddChildToVerticalBox(Heart)->SetHorizontalAlignment(HAlign_Center);
+		}
+		UTextBlock* Title = MakeText(WidgetTree, TEXT("Txt_SavedEmptyTitle"), TEXT("No saved places yet"), 20.f, Ink, true);
+		Title->SetJustification(ETextJustify::Center);
+		Message->AddChildToVerticalBox(Title)->SetPadding(FMargin(0.f, 14.f, 0.f, 0.f));
+		UTextBlock* Hint = MakeText(WidgetTree, TEXT("Txt_SavedEmptyHint"), TEXT("Open a destination and select Save place."), 14.f, Grey);
 		Hint->SetAutoWrapText(true);
-		Message->AddChildToVerticalBox(Hint)->SetPadding(FMargin(0.f, 6.f, 0.f, 0.f));
-		ListBox->AddChildToVerticalBox(Message)->SetPadding(FMargin(16.f, 28.f, 16.f, 0.f));
+		Hint->SetJustification(ETextJustify::Center);
+		Message->AddChildToVerticalBox(Hint)->SetPadding(FMargin(0.f, 10.f, 0.f, 0.f));
+		UButton* Explore = MakeButton(WidgetTree, TEXT("Btn_SavedExplore"), TEXT("Explore places"), Blue, OnBlue, 12.f, 48.f);
+		Explore->OnClicked.AddUniqueDynamic(this, &UMobileSavedPageWidget::HandleExploreClicked);
+		Message->AddChildToVerticalBox(Explore)->SetPadding(FMargin(0.f, 24.f, 0.f, 0.f));
+		ListBox->AddChildToVerticalBox(Message)->SetPadding(FMargin(16.f, 40.f, 16.f, 0.f));
 		return;
 	}
 

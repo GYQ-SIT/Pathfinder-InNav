@@ -6,10 +6,11 @@
 #include "MobileArrivedPageWidget.generated.h"
 
 class UButton;
+class UImage;
 class UTextBlock;
 
 // The bottom sheet when the person has arrived, as in the prototype: "You have arrived", the place with its code and level, Find another place,
-// Save this place and View destination. It keeps no state: the screen says whether the place is saved and hears what the person chooses.
+// Save this place and View destination, and a circled cross at the top right that ends the trip (the same as Find another place). It keeps no state: the screen says whether the place is saved and hears what the person chooses.
 UCLASS()
 class INNAVI_API UMobileArrivedPageWidget : public UUserWidget
 {
@@ -19,6 +20,7 @@ public:
 	void SetPlace(const FMobilePlace& InPlace, bool bInSaved);
 
 	void SetOnFindAnother(TFunction<void()> InCallback) { OnFindAnother = MoveTemp(InCallback); }
+	void SetOnClose(TFunction<void()> InCallback) { OnClose = MoveTemp(InCallback); }
 	void SetOnSaveToggled(TFunction<void(const FMobilePlace&)> InCallback) { OnSaveToggled = MoveTemp(InCallback); }
 	void SetOnViewDestination(TFunction<void()> InCallback) { OnViewDestination = MoveTemp(InCallback); }
 
@@ -34,6 +36,8 @@ private:
 	UFUNCTION()
 	void HandleFindAnotherClicked();
 	UFUNCTION()
+	void HandleCloseClicked();
+	UFUNCTION()
 	void HandleSaveClicked();
 	UFUNCTION()
 	void HandleViewClicked();
@@ -46,11 +50,14 @@ private:
 	UButton* SaveButton = nullptr;
 	UPROPERTY()
 	UTextBlock* SaveLabel = nullptr;
+	UPROPERTY()
+	UImage* SaveHeart = nullptr;
 
 	FMobilePlace Place;
 	bool bSaved = false;
 
 	TFunction<void()> OnFindAnother;
+	TFunction<void()> OnClose;
 	TFunction<void(const FMobilePlace&)> OnSaveToggled;
 	TFunction<void()> OnViewDestination;
 };

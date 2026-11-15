@@ -124,6 +124,8 @@ payload (a place id) to whoever made it. More launch options for looking at it: 
 
 ## The place page (step 3, second page)
 
+The place page has a circled cross at the top right (it goes back) instead of a back arrow; the category is plain words beside the Available pill; **Save place** has a heart before it and **Get directions** a pin (`MobileIcons::IconLabelButton`, `CloseButton`). No page of the phone app draws the engine's dark edge shadow when a list is scrolled (`MobileStyle::NoScrollShadow`), as the prototype has none.
+
 `UMobilePlacePageWidget` shows one place: the back arrow, the name with its code, building and level under it, a photo box ("No photo" until a place
 has one), the category and an Available / Unavailable pill, the description, Save place and Use as starting point, and Get directions pinned at the
 bottom of the sheet whatever its height (the rest scrolls). It keeps no state of its own: `UMobileAppWidget` keeps the saved places and the starting
@@ -132,32 +134,62 @@ about Back, Save, Use as starting point and Get directions through callbacks. `-
 
 ## The route page (step 3, third page)
 
-`UMobileRoutePageWidget` is "Your route", as in the prototype: **From** (My location, or any place), **Building** and **Level** (asked for when From is My
-location: where the person is), **To**, the minutes and metres, the ways between levels (chips Escalator, Lift, Stairs - on is blue - and Use lift only),
-the numbered steps with the building and level of each, and Start navigation pinned at the bottom. With no route it shows the reason in red instead of
-the numbers and Start navigation is off.
+`UMobileRoutePageWidget` is "Your route", as in the prototype's second iteration ("V2 - Map search"): a title at the left and a close button (a circle with a cross) at the right,
+and then, in the scrolling part:
 
-The drop-downs are `UMobileSelectWidget`, drawn by the screen itself: a field with a small caption and the chosen text, and when it is open the list of
-options right under it (in the page, scrolling when long). The engine's own combo box opens a pop-up menu outside the phone screen's scale, so its
-text would not match the rest; this one scales with the screen. Only one is open at a time. The arrow is a placeholder letter until the design team's
-icon is in.
+- **The stops card** (soft grey, radius 20, rows 56 tall, a thin line joining the badges): the **start** (a blue badge with the locate icon; the drop-down **From** - My location or any place - and,
+  for My location, two small white boxes for the **building** and the **level** the person is on), then one row for each **destination**: a badge (a blue number for a stop on the way, a red
+  pin for the last), a drop-down with the place's name over its code, building and level, a cross to take it off (when there is more than one) and a **handle** to move it; and **Add stop**
+  (a blue plus badge and the words) which turns into a drop-down of the places that are not in the trip yet (and a cross to cancel).
+- With several destinations, a line over the numbers: "3 destinations . 9 min . 120 m total".
+- **The numbers**: "7 min . 150 m" (the sum of the legs) and a grey line, "via Escalator, Lift, Stairs" ("First destination . via ..." with several, "via Wheelchair accessible" for the lift alone).
+  With no route (or while it is being found) the reason is shown instead, in red, and Start navigation is off.
+- **The ways between levels**: three pills, Escalator, Lift and Stairs (on = blue edge and soft blue); each is a switch.
+- **Route options** and **Route steps** (each a line with its title and a plus or minus, closed at first): Route options holds **Wheelchair accessible** (the lift alone); Route steps the numbered steps
+  of the first leg, with the building and level of each.
+- **Start navigation**, pinned at the bottom (the navigate icon and the words).
 
-The page shows the `FMobileRouteRequest` (from, to, where My location is - `MyLocationBuildingId` and `MyLocationLevel` - and the preferences) and the
-route it is given, and reports every change as a new request. `UMobileAppWidget` keeps the start (also set from the place page's Use as starting point),
-where My location is (the first building's first level to begin with) and the preferences, finds the route again (`RefreshRoute`) whenever the sheet
-arrives at the route page or something changes, and a destination chosen on the route page is the place the place page shows too.
-`-MobileState=Route` shows the page, `-MobileOpen=From|To|Building|Level` opens a drop-down.
+The drop-downs are `UMobileSelectWidget`, drawn by the screen itself (the engine's own combo box opens a pop-up menu outside the phone screen's scale, so its text would not match the rest); the
+page uses three of its looks: **Bare** (the name and a small arrow, no box, inside a card), **Chip** (a small white box with the text only: the building and the level) and, in the directory,
+**Compact**. A drop-down has a short label for what it shows once chosen (a place's name) and a longer one for its list (the name, the building and the level). Only one is open at a time.
+
+The page shows the `FMobileRouteRequest` (from, to, the stops after it, where My location is - `MyLocationBuildingId` and `MyLocationLevel` - and the preferences) and the route it is given, and reports
+every change as a new request; `UMobileAppWidget` keeps the start (also set from the place page's Use as starting point), the stops, where My location is (the first building's first level to begin with)
+and the preferences, finds the route again (`RefreshRoute`) whenever the sheet arrives at the route page or something changes, and a destination chosen on the route page is the place the place page
+shows too. `-MobileState=Route` shows the page, `-MobileOpen=From|To|Building|Level` opens a drop-down.
+
+### Several destinations
+
+The destinations are the selected place and `StopPlaceIds` after it. The planner (`IMobileNavSource`) still plans one leg from a start to a place, so the screen plans **a leg for each destination**, one after the
+other (`PlanLeg`, `FinishLeg`; a source that plans in the background does one leg at a time): the first from the start, each next one from the destination before it. `Legs` holds the routes planned so far and
+`CurrentRoute` is the first while the route page shows (and the failing one, with its reason, if a leg has no route: the trip then cannot start). The page's changes are plain edits of the request:
+`AddStop`, `RemoveDestination` (never the last), `MoveDestination` and `ChooseDestination`. A handle (`UMobileReorderHandle`, mouse and touch, only the pointer that pressed on it is followed) reports how far
+it was dragged in design pixels; a row is `StopRowHeight` (56) tall, so dragging by two rows moves the stop two places, and no further than the list; a drag of less than 4 pixels is a tap.
+
+**Add stop from the place page:** the screen remembers the destinations of the trip the route page last showed (`TripDraft`). The map's search stays on the route page, so a place can be found while a trip is
+open: the sheet goes to that place, and its bottom button says **Add stop** (`CanAddStopFromPlace`: a trip is open and the place is not in it) instead of Get directions; pressing it puts the place at the end of the
+trip and goes back to the route page. Closing the route page, finding another place after arriving, and opening another site end the trip; Get directions with no trip open starts a new one.
+
+**Walking** goes through the legs: the page says "Destination 1 of 3"; on the last instruction of a leg that is not the last it says "Stop reached: <place>" and the button "Continue to <next place>"; pressing it starts
+the next leg at its first instruction; the last instruction of the last leg opens the arrival page, with the last destination. Exit goes back to the route page at the first leg, with the stops. **The map** shows the whole trip
+on the route page (every leg's line) with a numbered blue circle where each stop on the way is (`SetStops`; the last destination is the route's red end), and only the leg being walked while walking.
+
+Differences from the prototype: the start row has no handle (the start does not move, only the destinations do); the three ways between levels are text pills (the design team has no icons for escalator and lift yet);
+Wheelchair accessible is the lift alone (the planner has no other accessibility setting); there is no "sheltered" option.
 
 ## The walking and arrival pages (step 3, last two pages)
 
-`UMobileNavigatePageWidget` is the sheet while walking, kept low so the map has room: where to ("To Study lounge . E2 . L1"), Exit, the instruction of
-the step the person is on, "Step 2 of 3", the metres still to walk (that step's distance and every later one's), the step's building and level, and
-Next instruction. On the last step, which is the arrival, the button says "I have arrived". On a real phone the step would follow the person; here
-the screen (`UMobileAppWidget::AdvanceNavigation`) moves on when the button is pressed, and pressing it on the arrival opens the arrival page. Exit
-goes back to the route; setting off again starts at the first step.
+`UMobileNavigatePageWidget` is the sheet while walking, kept low so the map has room, as the prototype draws it: with several destinations "Destination 1 of 3" in small grey words at the top;
+then where to ("To Study lounge . E2 . L1", 14 bold) with **Exit** at the right (blue words, no box); a **dark card** (the prototype's, in any theme) with the arrow of the step in blue
+(straight on for most steps, a turn left or right, a check for the arrival: the design team's Straight, TurnLeft, TurnRight and Success) and the instruction in white; a thin **track** with
+what is walked of it in blue (the step the person is on, of all of them); "Step 2 of 3" at the left and the metres still to walk at the right (that step's distance and every later one's);
+and **Next instruction** (blue). On the last step, which is the arrival, the button says "I have arrived"; on the last step of a leg that is not the last it says "Continue to <next place>" and the card
+"Stop reached: <place>". On a real phone the step would follow the person; here the screen (`UMobileAppWidget::AdvanceNavigation`) moves on when the button is pressed, and pressing it on the arrival
+opens the arrival page. Exit goes back to the route; setting off again starts at the first step. The tab bar is not shown while walking (nor on the place and route pages); it is back on the arrival page.
 
-`UMobileArrivedPageWidget` is "You have arrived": the place with its code and level, Find another place (to the search), Save this place (the screen
-keeps the saved places, the same ones the place page shows), and View destination (to the place page). No page is a placeholder any more: the sheet
+`UMobileArrivedPageWidget` is "You have arrived" (centred, with the place with its code and level under it, and a circled cross at the right that ends the trip like Find another
+place): Find another place (to the search), Save this place (a heart and dark words on white; the screen keeps the saved places, the same ones the place page shows), and View destination
+(to the place page). No page is a placeholder any more: the sheet
 has five real pages, one for each state of the flow. `-MobileState=Navigating|Arrived` shows them.
 
 ## The map (step 3, the map area)
@@ -241,7 +273,7 @@ Recenter), the filters button (Filter) and the pin of a place row (Location) use
 ## The Saved tab
 
 `UMobileSavedPageWidget` is the Saved tab: the places the person saved, newest first, grouped under the name of their site (sites in the order they first come up), each row with a
-placeholder icon, the name, "code . building . level", and a **Remove** button. With nothing saved it says "No saved places yet" and how to save one. The page shows ids it is given and
+placeholder icon, the name, "code . building . level", and a **Remove** button. The title is "Saved places" with "Your shortcuts for the next visit." under it. With nothing saved the page is centred: a blue heart, "No saved places yet", "Open a destination and select Save place." and an **Explore places** button that opens the Explore tab. The page shows ids it is given and
 asks the source for what they are (`FindPlace`); an id the source no longer knows is left out.
 
 The list itself is the app's own state, not the site's data: `FMobileSavedPlaces` (ids only, newest first, no duplicates). **Save place** on the place page and **Save this place** on the
@@ -297,6 +329,6 @@ The phone screen follows the prototype's layout, in design pixels (375 wide):
 - **Map label** (left 12, 12 above the sheet, level with the toolbar): a white pill, radius 16, padding 10 x 8, with the building and level (14 bold).
 - **Toolbar** (right 12, 12 above the sheet): one bar, 42 tall, 3 px padding, radius 14, with the level (62 x 36, "L1" 14 and a small arrow) and locate (36 x 36, a 20 px icon), no gap between them. The levels open upward from the level button.
   Both use the design team's icons (LevelDropdown, Recenter); a drawn target replaces locate until its texture is imported.
-- **Tab bar**: the design team's icons (NavExplore, NavDirectory, NavSaved, NavProfile), 24 px, blue for the open tab and grey for the others; squares until the textures are imported.
+- **Tab bar** (hidden on the map tab while the sheet is on a place, the route, the walk or the arrival, as in the prototype: the sheet then goes down to the bottom of the screen; `TabsShown`, `TabAreaHeight`): the design team's icons (NavExplore, NavDirectory, NavSaved, NavProfile), 24 px, blue for the open tab and grey for the others; squares until the textures are imported.
 
 `UMobileAppWidget::ControlsHeight` is the toolbar's 42; the pop-ups are not counted. The sheet open to its top stops `TopRowGap` (18) under the top row. Test: `InNavi.Mobile.LayoutLikePrototype`.

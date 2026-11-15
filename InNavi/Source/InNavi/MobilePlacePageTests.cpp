@@ -43,7 +43,7 @@ bool FMobilePlacePageTest::RunTest(const FString& Parameters)
 
 	// What the person has done shows on the two buttons.
 	Page->SetPlace(Lounge, true, true);
-	TestEqual(TEXT("a saved place says Saved"), TextOf(TEXT("Btn_SavePlace_Label")), FString(TEXT("Saved")));
+	TestEqual(TEXT("a saved place offers to remove it"), TextOf(TEXT("Btn_SavePlace_Label")), FString(TEXT("Remove from saved")));
 	TestEqual(TEXT("the starting point says so"), TextOf(TEXT("Btn_UseAsStart_Label")), FString(TEXT("Starting point")));
 
 	// A closed place says so, and another place changes the page.

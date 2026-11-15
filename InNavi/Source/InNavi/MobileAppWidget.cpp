@@ -373,7 +373,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 				{
 					if (UMobileAppWidget* Screen = WeakThis.Get())
 					{
-						Screen->SendSheetEvent(EMobileSheetEvent::DirectionsRequested);
+						Screen->RequestDirections();
 					}
 				});
 				PlacePage->SetOnSaveToggled([WeakThis](const FMobilePlace& Place)
@@ -471,6 +471,14 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 					Screen->SendSheetEvent(EMobileSheetEvent::FindAnotherPlace);
 				}
 			});
+			// The cross at the top right ends the trip too.
+			ArrivedPage->SetOnClose([WeakThis]()
+			{
+				if (UMobileAppWidget* Screen = WeakThis.Get())
+				{
+					Screen->SendSheetEvent(EMobileSheetEvent::FindAnotherPlace);
+				}
+			});
 			ArrivedPage->SetOnSaveToggled([WeakThis](const FMobilePlace& Place)
 			{
 				if (UMobileAppWidget* Screen = WeakThis.Get())
@@ -541,6 +549,13 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		SavedPage->SetSource(Source.Get());
 		{
 			TWeakObjectPtr<UMobileAppWidget> WeakSaved(this);
+			SavedPage->SetOnExplore([WeakSaved]()
+			{
+				if (UMobileAppWidget* Screen = WeakSaved.Get())
+				{
+					Screen->SetActiveTab(ETab::Explore);
+				}
+			});
 			SavedPage->SetOnPlaceChosen([WeakSaved](const FMobilePlace& Place)
 			{
 				if (UMobileAppWidget* Screen = WeakSaved.Get())
@@ -749,12 +764,17 @@ void UMobileAppWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime
 	Super::NativeTick(MyGeometry, InDeltaTime);
 	if (StorageErrorSeconds > 0.f && (StorageErrorSeconds -= InDeltaTime) <= 0.f && StorageError)
 		StorageError->SetVisibility(ESlateVisibility::Collapsed);
-	if (PendingRoute && PendingRoute->Step(0.003, CurrentRoute))
+	if (PendingRoute)
 	{
-		PendingRoute.Reset();
-		if (RoutePage) RoutePage->SetRequest(ActiveRouteRequest, CurrentRoute);
-		RefreshNavigation();
-		RefreshMap();
+		FMobileRoute Result;
+		if (PendingRoute->Step(0.003, Result))
+		{
+			PendingRoute.Reset();
+			FinishLeg(PendingLeg, Result);
+			if (RoutePage) RoutePage->SetRequest(ActiveRouteRequest, CurrentRoute, PendingRoute.IsValid(), Legs);
+			RefreshNavigation();
+			RefreshMap();
+		}
 	}
 #if PLATFORM_ANDROID && !UE_BUILD_SHIPPING
 	++PerfFrames;
@@ -847,14 +867,19 @@ void UMobileAppWidget::ApplyDeviceSafeArea()
 
 double UMobileAppWidget::RestHeight(EMobileSheetSnap Target) const
 {
-	const double Height = MobileSheet::SnapHeight(Target, DesignHeight, TabBarHeight + SafeBottom, HeaderHeight + SafeTop);
+	double Height = MobileSheet::SnapHeight(Target, DesignHeight, TabAreaHeight(), HeaderHeight + SafeTop);
+	if (Target == EMobileSheetSnap::Collapsed && Flow.GetState() == EMobileSheetState::Navigating)
+	{
+		// Walking: the sheet is kept low for the map, but not lower than what it shows.
+		Height = FMath::Max(Height, NavigationSheetHeight);
+	}
 	if (Target != EMobileSheetSnap::Full)
 	{
 		return Height;
 	}
 	// The sheet open to its top stops under the top row of the map (the search field and 2D | 3D) and does not cover it; it is never lower than half.
-	const double Room = DesignHeight - (TabBarHeight + SafeBottom) - (HeaderHeight + SafeTop + TopRowTop + TopRowHeight + TopRowGap);
-	return FMath::Min(Height, FMath::Max(Room, MobileSheet::SnapHeight(EMobileSheetSnap::Half, DesignHeight, TabBarHeight + SafeBottom, HeaderHeight + SafeTop)));
+	const double Room = DesignHeight - (TabAreaHeight()) - (HeaderHeight + SafeTop + TopRowTop + TopRowHeight + TopRowGap);
+	return FMath::Min(Height, FMath::Max(Room, MobileSheet::SnapHeight(EMobileSheetSnap::Half, DesignHeight, TabAreaHeight(), HeaderHeight + SafeTop)));
 }
 
 void UMobileAppWidget::PositionSheet()
@@ -863,7 +888,7 @@ void UMobileAppWidget::PositionSheet()
 	{
 		return;
 	}
-	const double TabTotal = TabBarHeight + SafeBottom;
+	const double TabTotal = TabAreaHeight();
 	const double HeaderTotal = HeaderHeight + SafeTop;
 	const bool bMapPage = ActiveTab == ETab::Directory;
 	const bool bOpen = SheetIsOpen();
@@ -876,6 +901,7 @@ void UMobileAppWidget::PositionSheet()
 		PanelSlot->SetOffsets(FMargin(0.f, 0.f, 0.f, static_cast<float>(TabTotal)));
 	}
 	TabBarBorder->SetPadding(FMargin(0.f, 0.f, 0.f, static_cast<float>(SafeBottom)));
+	TabBarBorder->SetVisibility(TabsShown() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	// The header takes the status bar's place too: its colour reaches the top of the screen and its content sits below the status bar.
 	if (UCanvasPanelSlot* PanelSlot = CanvasSlot(HeaderBorder))
 	{
@@ -941,7 +967,7 @@ void UMobileAppWidget::PositionSheet()
 bool UMobileAppWidget::SheetIsOpen() const
 {
 	// The prototype hides the plan and the toolbar from 80 percent of the space between the header and the tab bar.
-	const double Workspace = DesignHeight - (HeaderHeight + SafeTop) - (TabBarHeight + SafeBottom);
+	const double Workspace = DesignHeight - (HeaderHeight + SafeTop) - (TabAreaHeight());
 	return SheetHeight >= FMath::Min(0.8 * Workspace, RestHeight(EMobileSheetSnap::Full) - 1.0);
 }
 
@@ -955,7 +981,7 @@ FMobileLayoutSnapshot UMobileAppWidget::GetLayoutSnapshot() const
 	FMobileLayoutSnapshot Snapshot;
 	Snapshot.DesignWidth = DesignWidth;
 	Snapshot.DesignHeight = DesignHeight;
-	Snapshot.TabBarHeight = TabBarHeight + SafeBottom;
+	Snapshot.TabBarHeight = TabAreaHeight();
 	Snapshot.TabBarTop = DesignHeight - Snapshot.TabBarHeight;
 	Snapshot.SheetHeight = SheetHeight;
 	Snapshot.SheetTop = Snapshot.TabBarTop - SheetHeight;
@@ -990,8 +1016,14 @@ void UMobileAppWidget::SetActiveTab(ETab Tab)
 void UMobileAppWidget::SendSheetEvent(EMobileSheetEvent Event)
 {
 	if (Event == EMobileSheetEvent::NavigationStarted && !CurrentRoute.bFound) return;
+	const EMobileSheetState StateBefore = Flow.GetState();
 	if (Flow.Handle(Event))
 	{
+		// Closing the route page ends the trip; so does finishing with the destination.
+		if ((Event == EMobileSheetEvent::Back && StateBefore == EMobileSheetState::Route) || Event == EMobileSheetEvent::FindAnotherPlace)
+		{
+			ForgetTrip();
+		}
 		Snap = MobileSheet::SnapForState(Flow.GetState());
 		RefreshSheetPage();
 		// Arriving at the route page (from the place, from walking, from choosing a place) finds the route again for what is chosen now.
@@ -1024,9 +1056,15 @@ void UMobileAppWidget::SendSheetEvent(EMobileSheetEvent Event)
 		if (Flow.GetState() == EMobileSheetState::Navigating && Event == EMobileSheetEvent::NavigationStarted)
 		{
 			NavStepIndex = 0;
+			LegIndex = 0;
+			if (!Legs.IsEmpty() && Legs[0].bFound)
+			{
+				CurrentRoute = Legs[0];
+			}
 		}
 		RefreshNavigation();
 		RefreshArrived();
+		RefreshPlaceButton();
 		RefreshMap();
 	}
 }
@@ -1048,9 +1086,29 @@ void UMobileAppWidget::AdvanceNavigation()
 		RefreshNavigation();
 		RefreshMap();
 	}
+	else if (Legs.IsValidIndex(LegIndex + 1) && Legs[LegIndex + 1].bFound)
+	{
+		// A stop, not the end: the next leg starts at this destination.
+		++LegIndex;
+		CurrentRoute = Legs[LegIndex];
+		NavStepIndex = 0;
+		if (ANavPlayerController* Controller = GetOwningPlayer<ANavPlayerController>())
+		{
+			Controller->PlayNextInstructionSound();
+		}
+		RefreshNavigation();
+		RefreshMap();
+	}
 	else
 	{
-		// The last instruction was the arrival.
+		// The last instruction was the arrival at the last destination: it is the place the arrival page shows.
+		FMobilePlace Last;
+		if (Source.IsValid() && !TripDraft.IsEmpty() && Source->FindPlace(TripDraft.Last(), Last) && Last.Id != SelectedPlace.Id)
+		{
+			const FMobileRoute Walked = CurrentRoute;
+			SelectPlace(Last);
+			CurrentRoute = Walked;
+		}
 		SendSheetEvent(EMobileSheetEvent::ArrivedAtDestination);
 	}
 }
@@ -1059,7 +1117,28 @@ void UMobileAppWidget::RefreshNavigation()
 {
 	if (NavigatePage)
 	{
-		NavigatePage->SetNavigation(SelectedPlace, CurrentRoute, NavStepIndex);
+		// The destination of the leg being walked (with one destination, the selected place) and the one after it.
+		FMobilePlace Where = SelectedPlace;
+		FString NextName;
+		if (Source.IsValid() && TripDraft.IsValidIndex(LegIndex))
+		{
+			Source->FindPlace(TripDraft[LegIndex], Where);
+		}
+		FMobilePlace Next;
+		if (Source.IsValid() && TripDraft.IsValidIndex(LegIndex + 1) && Source->FindPlace(TripDraft[LegIndex + 1], Next))
+		{
+			NextName = Next.Name;
+		}
+		NavigatePage->SetNavigation(Where, CurrentRoute, NavStepIndex);
+		NavigatePage->SetJourney(LegIndex + 1, FMath::Max(TripDraft.Num(), 1), NextName);
+	}
+}
+
+void UMobileAppWidget::RefreshPlaceButton()
+{
+	if (PlacePage)
+	{
+		PlacePage->SetAddStopMode(CanAddStopFromPlace());
 	}
 }
 
@@ -1080,15 +1159,102 @@ void UMobileAppWidget::RefreshRoute()
 	FMobileRouteRequest Request;
 	Request.FromPlaceId = StartPlaceId;
 	Request.ToPlaceId = SelectedPlace.Id;
+	Request.StopPlaceIds = StopPlaceIds;
 	Request.Preferences = RoutePreferences;
 	Request.MyLocationBuildingId = MyLocationBuildingId;
 	Request.MyLocationLevel = MyLocationLevel;
 	ActiveRouteRequest = Request;
+	TripDraft = DestinationIds();
 	PendingRoute.Reset();
-	PendingRoute = Source->BeginRoute(Request);
-	CurrentRoute = PendingRoute ? FMobileRoute() : Source->FindRoute(Request);
-	RoutePage->SetRequest(Request, CurrentRoute, PendingRoute.IsValid());
+	Legs.Reset();
+	LegIndex = 0;
+	CurrentRoute = FMobileRoute();
+	PlanLeg(0);
+	RoutePage->SetRequest(Request, CurrentRoute, PendingRoute.IsValid(), Legs);
 	RefreshMap();
+}
+
+TArray<FString> UMobileAppWidget::DestinationIds() const
+{
+	TArray<FString> Ids;
+	if (!SelectedPlace.Id.IsEmpty())
+	{
+		Ids.Add(SelectedPlace.Id);
+		Ids.Append(StopPlaceIds);
+	}
+	return Ids;
+}
+
+void UMobileAppWidget::PlanLeg(int32 Index)
+{
+	const TArray<FString> Ids = DestinationIds();
+	if (!Source.IsValid() || !Ids.IsValidIndex(Index))
+	{
+		return;
+	}
+	// The first leg starts where the person starts; each next one at the destination before it.
+	FMobileRouteRequest Leg = ActiveRouteRequest;
+	Leg.StopPlaceIds.Reset();
+	Leg.ToPlaceId = Ids[Index];
+	if (Index > 0)
+	{
+		Leg.FromPlaceId = Ids[Index - 1];
+	}
+	PendingLeg = Index;
+	PendingRoute = Source->BeginRoute(Leg);
+	if (!PendingRoute)
+	{
+		FinishLeg(Index, Source->FindRoute(Leg));
+	}
+}
+
+void UMobileAppWidget::FinishLeg(int32 Index, const FMobileRoute& Result)
+{
+	Legs.Add(Result);
+	if (Result.bFound && Index + 1 < DestinationIds().Num())
+	{
+		PlanLeg(Index + 1);
+		return;
+	}
+	// All planned: the first leg is the route the page shows. A leg that failed shows its reason instead, and the trip cannot start.
+	CurrentRoute = Result.bFound ? Legs[0] : Result;
+}
+
+bool UMobileAppWidget::CanAddStopFromPlace() const
+{
+	return Flow.GetState() == EMobileSheetState::Place && !SelectedPlace.Id.IsEmpty() && !TripDraft.IsEmpty() && !TripDraft.Contains(SelectedPlace.Id);
+}
+
+void UMobileAppWidget::ForgetTrip()
+{
+	StopPlaceIds.Reset();
+	TripDraft.Reset();
+	Legs.Reset();
+	LegIndex = 0;
+	PendingLeg = 0;
+	RefreshPlaceButton();
+}
+
+void UMobileAppWidget::RequestDirections()
+{
+	if (CanAddStopFromPlace())
+	{
+		// A trip is open (the route page was left to look for another place): this place becomes its last stop, and the route page shows the whole trip.
+		TArray<FString> Ids = TripDraft;
+		Ids.Add(SelectedPlace.Id);
+		FMobilePlace First;
+		if (Source.IsValid() && Source->FindPlace(Ids[0], First))
+		{
+			SelectPlace(First);
+			StopPlaceIds = TArray<FString>(Ids.GetData() + 1, Ids.Num() - 1);
+		}
+	}
+	else
+	{
+		// A new trip to this place alone.
+		ForgetTrip();
+	}
+	SendSheetEvent(EMobileSheetEvent::DirectionsRequested);
 }
 
 void UMobileAppWidget::NativeDestruct()
@@ -1102,6 +1268,7 @@ void UMobileAppWidget::ApplyRouteRequest(const FMobileRouteRequest& Changed)
 	StartPlaceId = Changed.FromPlaceId;
 	RefreshSearchStart();
 	RoutePreferences = Changed.Preferences;
+	StopPlaceIds = Changed.StopPlaceIds;
 	MyLocationBuildingId = Changed.MyLocationBuildingId;
 	MyLocationLevel = Changed.MyLocationLevel;
 	// A different destination chosen on the route page is the place the place page shows too.
@@ -1121,6 +1288,16 @@ void UMobileAppWidget::RefreshSheetPage()
 	}
 	// What is on the map under the header follows the state too (the search field is not there while walking).
 	PositionSheet();
+}
+
+bool UMobileAppWidget::TabsShown() const
+{
+	return ActiveTab != ETab::Directory || Flow.GetState() == EMobileSheetState::Search || Flow.GetState() == EMobileSheetState::Arrived;
+}
+
+double UMobileAppWidget::TabAreaHeight() const
+{
+	return (TabsShown() ? TabBarHeight : 0.0) + SafeBottom;
 }
 
 void UMobileAppWidget::RefreshTabs()
@@ -1182,7 +1359,7 @@ bool UMobileAppWidget::BeginSheetDrag(const FVector2D& DesignPosition)
 	{
 		return false;
 	}
-	const double SheetTop = DesignHeight - (TabBarHeight + SafeBottom) - SheetHeight;
+	const double SheetTop = DesignHeight - (TabAreaHeight()) - SheetHeight;
 	if (DesignPosition.Y < SheetTop || DesignPosition.Y > SheetTop + HandleZoneHeight)
 	{
 		return false;
@@ -1223,12 +1400,12 @@ void UMobileAppWidget::EndSheetDrag(const FVector2D& DesignPosition)
 	bDraggingSheet = false;
 	if (bSheetMoved)
 	{
-		Snap = MobileSheet::NearestSnap(SheetHeight, DesignHeight, TabBarHeight + SafeBottom, HeaderHeight + SafeTop);
+		Snap = MobileSheet::NearestSnap(SheetHeight, DesignHeight, TabAreaHeight(), HeaderHeight + SafeTop);
 	}
 	else
 	{
 		// A tap on the handle: the next height.
-		Snap = MobileSheet::NextSnap(MobileSheet::NearestSnap(SheetHeight, DesignHeight, TabBarHeight + SafeBottom, HeaderHeight + SafeTop));
+		Snap = MobileSheet::NextSnap(MobileSheet::NearestSnap(SheetHeight, DesignHeight, TabAreaHeight(), HeaderHeight + SafeTop));
 	}
 }
 
@@ -1348,6 +1525,7 @@ void UMobileAppWidget::SelectPlace(const FMobilePlace& Place)
 	{
 		PlacePage->SetPlace(Place, SavedPlaces.Contains(Place.Id), StartPlaceId == Place.Id);
 	}
+	RefreshPlaceButton();
 }
 
 void UMobileAppWidget::ShowPlace(const FMobilePlace& Place)
@@ -1365,6 +1543,9 @@ void UMobileAppWidget::ReturnToSearchState()
 	Flow.Reset();
 	PendingRoute.Reset();
 	CurrentRoute = FMobileRoute();
+	// The legs go; the trip's destinations stay in TripDraft, so a place found by the search can be added to the trip (Add stop).
+	Legs.Reset();
+	LegIndex = 0;
 	NavStepIndex = 0;
 	Snap = MobileSheet::SnapForState(Flow.GetState());
 	RefreshSheetPage();
@@ -1510,14 +1691,36 @@ void UMobileAppWidget::ApplyMap()
 		MapView->ShowLevel(MapBuildingId, MapLevel);
 	}
 	const bool bWalking = State == EMobileSheetState::Route || State == EMobileSheetState::Navigating;
+	TArray<FMobileRoutePoint> StopPoints;
 	if (bWalking && CurrentRoute.bFound)
 	{
-		MapView->SetRoute(CurrentRoute);
+		const bool bWholeTrip = State == EMobileSheetState::Route && Legs.Num() > 1 && Legs.Num() == DestinationIds().Num()
+			&& !Legs.ContainsByPredicate([](const FMobileRoute& Leg) { return !Leg.bFound; });
+		if (bWholeTrip)
+		{
+			// The route page shows the whole trip: every leg's line, and a numbered circle where each stop on the way is.
+			FMobileRoute WholeTrip = CurrentRoute;
+			WholeTrip.Points.Reset();
+			for (int32 Leg = 0; Leg < Legs.Num(); ++Leg)
+			{
+				WholeTrip.Points.Append(Legs[Leg].Points);
+				if (Leg < Legs.Num() - 1 && !Legs[Leg].Points.IsEmpty())
+				{
+					StopPoints.Add(Legs[Leg].Points.Last());
+				}
+			}
+			MapView->SetRoute(WholeTrip);
+		}
+		else
+		{
+			MapView->SetRoute(CurrentRoute);
+		}
 	}
 	else
 	{
 		MapView->ClearRoute();
 	}
+	MapView->SetStops(StopPoints);
 	const bool bShowsPlace = State == EMobileSheetState::Place || State == EMobileSheetState::Route || State == EMobileSheetState::Navigating || State == EMobileSheetState::Arrived;
 	MapView->SetHighlightPlace(bShowsPlace ? SelectedPlace.Id : FString());
 
@@ -1751,6 +1954,7 @@ void UMobileAppWidget::OpenSite(const FString& NewSiteId)
 	StartPlaceId.Reset();
 	CurrentRoute = FMobileRoute();
 	RoutePreferences = FMobileRoutePreferences();
+	ForgetTrip();
 	NavStepIndex = 0;
 	bMapOverview = false;
 	bLevelPopupOpen = false;
@@ -1944,7 +2148,7 @@ void UMobileAppWidget::RebuildForAppearance()
 	{
 		SelectPlace(SelectedPlace);
 		if (Flow.GetState() == EMobileSheetState::Route) RefreshRoute();
-		else if (RoutePage) RoutePage->SetRequest(ActiveRouteRequest, CurrentRoute);
+		else if (RoutePage) RoutePage->SetRequest(ActiveRouteRequest, CurrentRoute, false, Legs);
 	}
 	RefreshNavigation();
 	RefreshArrived();

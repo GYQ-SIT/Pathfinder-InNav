@@ -29,6 +29,7 @@ TSharedRef<SWidget> UMobileExplorePageWidget::RebuildWidget()
 
 		UScrollBox* Scroll = Tree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("ExploreScroll"));
 		UVerticalBox* Content = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ExploreContent"));
+		MobileStyle::NoScrollShadow(Scroll);
 		Scroll->AddChild(Content);
 		Content->AddChildToVerticalBox(MakeText(Tree, TEXT("Txt_ExploreTitle"), TEXT("Explore"), 28.f, Ink, true))->SetPadding(FMargin(24.f, 22.f, 24.f, 0.f));
 		// The search field: a tap opens the full-screen search of the sites.

@@ -32,6 +32,10 @@ public:
 	// What is drawn on it.
 	void SetRoute(const FMobileRoute& InRoute);
 	void ClearRoute();
+	// The stops on the way of a trip with several destinations (not the last, which the route's end shows): each is drawn as a blue circle with its number (1, 2, ...).
+	void SetStops(const TArray<FMobileRoutePoint>& InStops);
+	int32 GetStopCount() const { return Stops.Num(); }
+	int32 GetStopsOnLevel() const;
 	void SetHighlightPlace(const FString& PlaceId);
 	void SetPosition(const FMobileRoutePoint& InPosition);
 	void ClearPosition();
@@ -108,6 +112,7 @@ private:
 	FMobileLevelMap LevelMap;
 	FMobileCampusMap CampusMap;
 	FMobileRoute Route;
+	TArray<FMobileRoutePoint> Stops;
 	FString HighlightPlaceId;
 	FMobileRoutePoint Position;
 	bool bHasPosition = false;

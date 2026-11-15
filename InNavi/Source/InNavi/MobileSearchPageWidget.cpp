@@ -132,6 +132,7 @@ TSharedRef<SWidget> UMobileSearchPageWidget::RebuildWidget()
 		// The list.
 		ListScroll = Tree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("ListScroll"));
 		ListBox = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ListBox"));
+		MobileStyle::NoScrollShadow(ListScroll);
 		ListScroll->AddChild(ListBox);
 		Page->AddChildToVerticalBox(ListScroll)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		Refresh();

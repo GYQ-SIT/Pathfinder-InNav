@@ -103,6 +103,9 @@ struct FMobileRouteRequest
 	// Empty = "My location".
 	FString FromPlaceId;
 	FString ToPlaceId;
+	// More destinations after ToPlaceId, in order (the prototype's "Add stop"): the walk goes from the start to ToPlaceId, then to each of these. The sources
+	// plan one leg at a time (From and To), so they do not read this; the screen plans a leg for each destination.
+	TArray<FString> StopPlaceIds;
 	FMobileRoutePreferences Preferences;
 	// Where "My location" is, when the route starts from it: a building and level of the site (empty and INDEX_NONE = the door of the
 	// destination's building, on level 1).
