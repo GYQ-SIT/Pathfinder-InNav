@@ -312,14 +312,15 @@ bool FInteriorInspectionSingleFloorTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Orbit turns Grab off"), F.Controller->GetInspectionRotateStyle(), EInspectionRotateStyle::Orbit);
 	Grab->OnClicked.Broadcast();
 	TestEqual(TEXT("and Grab turns Orbit off"), F.Controller->GetInspectionRotateStyle(), EInspectionRotateStyle::Grab);
-	// Between Colours and View in the switcher bar, framed as one.
+	// After Colours and the two buttons that turn the 2D plan, and before View in the switcher bar, framed as one.
 	UWidget* Colours = Screen->FindScreenWidget(TEXT("Btn_RoomColours"));
+	UWidget* TurnRight = Screen->FindScreenWidget(TEXT("Btn_TurnPlanRight"));
 	UWidget* View = Screen->FindScreenWidget(TEXT("Btn_Edit3DModeToggle"));
 	UWidget* Frame = Screen->FindScreenWidget(TEXT("InspectionFrame"));
-	if (TestTrue(TEXT("Colours, View and the group exist"), Colours && View && Frame) && Colours->GetParent() && Colours->GetParent() == Frame->GetParent() && View->GetParent() == Frame->GetParent())
+	if (TestTrue(TEXT("Colours, the turn buttons, View and the group exist"), Colours && TurnRight && View && Frame) && Colours->GetParent() && Colours->GetParent() == Frame->GetParent() && View->GetParent() == Frame->GetParent())
 	{
 		const UPanelWidget* Row = Frame->GetParent();
-		TestEqual(TEXT("the group is right after Colours"), Row->GetChildIndex(Frame), Row->GetChildIndex(Colours) + 1);
+		TestEqual(TEXT("the group is right after the turn buttons"), Row->GetChildIndex(Frame), Row->GetChildIndex(TurnRight) + 1);
 		TestEqual(TEXT("and right before View"), Row->GetChildIndex(View), Row->GetChildIndex(Frame) + 1);
 	}
 	TestTrue(TEXT("Isolate is inside the group"), Button->GetParent() && Button->GetParent()->GetParent() == Frame);

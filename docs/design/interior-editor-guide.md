@@ -171,7 +171,7 @@ to confirm).
 
 Then, in order: **2D | 3D**, one segmented control (the active mode is blue) that toggles the preview mode (see below);
 **Undo** and **Redo** (the same as `Ctrl+Z`/`Ctrl+Y`); a **Snapping** button (same on/off as pressing `N` - see Snapping
-below), only here, not on the exterior screen; a **Colours** button (turns the room colours on and off: in the 2D plan each room is filled with its Room type colour, in 3D its floor is; on by default, not saved); and, only while in 3D preview, a **View**/**Edit** toggle (amber for View,
+below), only here, not on the exterior screen; a **Colours** button (turns the room colours on and off: in the 2D plan each room is filled with its Room type colour, in 3D its floor is; on by default, not saved); in 2D only, **Turn left** and **Turn right** (turn the whole plan a quarter turn at a time, so that a tall building can be laid across the screen; only the way the plan is looked at turns: the rooms, doors and the building are not changed, so nothing is saved or undone, and they are not the Tools panel's Rotate left / Rotate right, which turn the selected room; the turn is kept until it is turned back, also on another floor); and, only while in 3D preview, a **View**/**Edit** toggle (amber for View,
 green for Edit; it is 3D's sub-mode - covered in the 3D preview section below). Drop-downs in the editor share one dark
 look. Which floor you are on is shown by the Floor panel (switch with it or with `[`/`]`). The 3D camera controls are not on this bar: while
 in 3D preview a **Camera** menu appears in the menu bar after **Window**. Its dropdown
@@ -461,7 +461,7 @@ floor. Switching buildings (via the building switcher) exits back to 2D first.
 ### Isolate & Rotate
 
 In **3D**, click **Isolate** in the group **Isolate | Orbit | Grab** (in the bar under the menus, between
-**Colours** and **View**) to look at the model on its own and move and turn it, the way the SIT Campus
+**Colours** and **View**; the two Turn buttons are only there in 2D) to look at the model on its own and move and turn it, the way the SIT Campus
 Wayfinder's map is handled. The big **bottom platform** the building stands on is hidden, and
 so are the surrounding ground and the other buildings. **Every floor is kept, the first one too**:
 the first floor stands on a floor slab of its own (a slab at its base, like the floors above it have), made

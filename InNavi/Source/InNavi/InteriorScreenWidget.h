@@ -354,6 +354,13 @@ private:
 	UFUNCTION()
 	void OnRoomColoursClicked();
 
+	// Turn the whole 2D plan a quarter turn to the left / to the right (the two buttons after Colours, shown in 2D only). Only the way the plan is
+	// looked at turns: the rooms, doors and the building are not changed, so nothing is saved or undone.
+	UFUNCTION()
+	void OnTurnPlanLeftClicked();
+	UFUNCTION()
+	void OnTurnPlanRightClicked();
+
 	// Calls PC->UndoInteriorEdit()/RedoInteriorEdit() - same row as Snap, always visible in both 2D
 	// and 3D (mirrors the Ctrl+Z/Ctrl+Y key bindings, doesn't replace them).
 	UFUNCTION()
@@ -885,6 +892,13 @@ private:
 
 	UPROPERTY()
 	UImage* RoomColoursIcon = nullptr;
+
+	// Turn the 2D plan left / right: after Colours, in 2D only (see HandlePreviewModeChanged).
+	UPROPERTY()
+	UButton* TurnPlanLeftButton = nullptr;
+
+	UPROPERTY()
+	UButton* TurnPlanRightButton = nullptr;
 
 	// Undo/Redo - same row as Snap, always visible in both 2D and 3D (this row isn't hidden by
 	// preview mode) - see OnUndoClicked/OnRedoClicked.

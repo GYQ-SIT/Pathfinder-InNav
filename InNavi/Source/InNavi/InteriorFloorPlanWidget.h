@@ -37,6 +37,16 @@ public:
 	void ResetView() { PanOffset = FVector2D::ZeroVector; ZoomMultiplier = 1.f; }
 	void FinishEditDrag();
 
+	// Turns the whole plan on the screen by a quarter turn: +1 to the right (clockwise), -1 to the left. Only the way the plan is looked at changes - the
+	// rooms, walls, doors and the building outline are not touched, so nothing is saved or undone. The turn is kept until it is turned back (ResetView
+	// only recentres and zooms), also when another floor or building is shown.
+	void TurnViewBy(int32 QuarterTurns);
+	// How far the plan is turned now: 0 to 3 quarter turns to the right.
+	int32 GetViewQuarterTurns() const { return ViewQuarterTurns; }
+
+	// A vector turned by QuarterTurns quarter turns clockwise on the screen (x to the right, y down): (1, 0) turns to (0, 1). Any whole number of turns.
+	static FVector2D RotateQuarterTurns(const FVector2D& Vector, int32 QuarterTurns);
+
 protected:
 	virtual void NativeConstruct() override;
 	virtual int32 NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
@@ -83,6 +93,11 @@ private:
 	// OutOrigin is the world-space point that maps to the widget's center;
 	// OutPixelsPerUnit is world units to screen pixels.
 	void ComputeViewTransform(FVector2D WidgetSize, FVector2D& OutOrigin, float& OutPixelsPerUnit) const;
+
+	// The one pair of conversions between a world point and a position in the widget, with the turn of the plan in it. Everything that draws or
+	// hit-tests the plan goes through these, so a click always lands where it is drawn at any turn.
+	FVector2D ViewWorldToLocal(const FVector2D& WorldPoint, const FVector2D& Origin, float PixelsPerUnit, const FVector2D& WidgetSize) const;
+	FVector2D ViewLocalToWorld(const FVector2D& LocalPosition, const FVector2D& Origin, float PixelsPerUnit, const FVector2D& WidgetSize) const;
 
 	// Select/add-door modes: finds whichever room/wall on the active floor has an edge within a few
 	// pixels of LocalPosition, or nullptr if none does. Never matches the exterior building outline
@@ -163,6 +178,9 @@ private:
 	// Multiplies the auto-fit pixels-per-unit from ComputeViewTransform - 1 = the auto-fit size,
 	// >1 = zoomed in, <1 = zoomed out. Adjusted by the mouse wheel.
 	float ZoomMultiplier = 1.f;
+
+	// How many quarter turns to the right the plan is turned on the screen (0 to 3), see TurnViewBy.
+	int32 ViewQuarterTurns = 0;
 
 	// Connector markers (elevator/stairs/escalator - see NativePaint) are drawn as these icons
 	// instead of a plain colored box. Loaded once in NativeConstruct from Padre's toolbar icon

@@ -43,7 +43,7 @@ TArray<FVector2D> UInteriorFloorPlanWidget::GetResizeHandles(FVector2D WidgetSiz
 	for (const FVector2D& Direction : FloorPlanHandleDirections(Size))
 	{
 		const FVector2D Point = Position + Size * 0.5 + FVector2D(Direction.X * Size.X, Direction.Y * Size.Y) * 0.5;
-		Handles.Add(WidgetSize * 0.5 + ((Point + Building->BuildingOffset) * Generator->GetScale() - Origin) * PixelsPerUnit);
+		Handles.Add(ViewWorldToLocal((Point + Building->BuildingOffset) * Generator->GetScale(), Origin, PixelsPerUnit, WidgetSize));
 	}
 	return Handles;
 }
@@ -89,15 +89,14 @@ void UInteriorFloorPlanWidget::NativeConstruct()
 
 	if (UWorld* World = GetWorld())
 	{
-		for (TActorIterator<AInteriorGenerator> It(World); It; ++It)
+		// The first generator of each kind. (Not a loop that stops after its first round: the Android compiler rejects that as a loop that runs at most once.)
+		if (TActorIterator<AInteriorGenerator> InteriorIt(World); InteriorIt)
 		{
-			InteriorGen = *It;
-			break;
+			InteriorGen = *InteriorIt;
 		}
-		for (TActorIterator<ABuildingGenerator> It(World); It; ++It)
+		if (TActorIterator<ABuildingGenerator> GeneratorIt(World); GeneratorIt)
 		{
-			Generator = *It;
-			break;
+			Generator = *GeneratorIt;
 		}
 		PlayerController = Cast<ANavPlayerController>(World->GetFirstPlayerController());
 	}
@@ -495,7 +494,8 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 			const FVector2D DeltaPixels = CurrentLocalPosition - PanStartLocalPosition;
 			// Dragging right should move the content right, i.e. the world point at the widget's
 			// center should move left by the same screen-space delta.
-			PanOffset = PanStartOffset - DeltaPixels / PixelsPerUnit;
+			// The delta is on the screen; the plan may be turned, so turn it back into the world's own directions first.
+			PanOffset = PanStartOffset - RotateQuarterTurns(DeltaPixels, -ViewQuarterTurns) / PixelsPerUnit;
 		}
 		return FReply::Handled();
 	}
@@ -548,7 +548,7 @@ AInteriorRoom* UInteriorFloorPlanWidget::FindRoomNearLocalPosition(FVector2D Loc
 	const float Scale = Generator->GetScale();
 	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
 		{
-			return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+			return ViewWorldToLocal(WorldPoint, Origin, PixelsPerUnit, WidgetSize);
 		};
 
 	constexpr float ClickTolerancePixels = 10.f;
@@ -672,7 +672,7 @@ AInteriorRoom* UInteriorFloorPlanWidget::FindRoomContainingLocalPosition(FVector
 	const float Scale = Generator->GetScale();
 	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
 		{
-			return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+			return ViewWorldToLocal(WorldPoint, Origin, PixelsPerUnit, WidgetSize);
 		};
 
 	for (AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
@@ -724,7 +724,7 @@ bool UInteriorFloorPlanWidget::FindDoorNearLocalPosition(FVector2D LocalPosition
 	const float Scale = Generator->GetScale();
 	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
 		{
-			return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+			return ViewWorldToLocal(WorldPoint, Origin, PixelsPerUnit, WidgetSize);
 		};
 
 	constexpr float ClickTolerancePixels = 10.f;
@@ -798,7 +798,7 @@ bool UInteriorFloorPlanWidget::FindConnectorNearLocalPosition(FVector2D LocalPos
 	const float Scale = Generator->GetScale();
 	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
 		{
-			return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+			return ViewWorldToLocal(WorldPoint, Origin, PixelsPerUnit, WidgetSize);
 		};
 
 	constexpr float ClickTolerancePixels = 10.f;
@@ -863,7 +863,7 @@ bool UInteriorFloorPlanWidget::ComputeDoorDragOffset(const FString& RoomId, int3
 	const float Scale = Generator->GetScale();
 	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
 		{
-			return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+			return ViewWorldToLocal(WorldPoint, Origin, PixelsPerUnit, WidgetSize);
 		};
 
 	const FVector2D WorldA = (Footprint[EdgeIndex] + Building->BuildingOffset) * Scale;
@@ -880,6 +880,33 @@ bool UInteriorFloorPlanWidget::ComputeDoorDragOffset(const FString& RoomId, int3
 	constexpr float DoorWidthWorldUnits = 90.f; // matches AInteriorGenerator::AddDoorToRoom's fixed door width
 	OutOffsetWorldUnits = FMath::Clamp(ClickOffsetWorldUnits - DoorWidthWorldUnits * 0.5f, 0.f, FMath::Max(0.f, EdgeLengthWorldUnits - DoorWidthWorldUnits));
 	return true;
+}
+
+FVector2D UInteriorFloorPlanWidget::RotateQuarterTurns(const FVector2D& Vector, int32 QuarterTurns)
+{
+	// Clockwise on the screen, where y points down: a point to the right goes to the bottom.
+	switch (((QuarterTurns % 4) + 4) % 4)
+	{
+	case 1: return FVector2D(-Vector.Y, Vector.X);
+	case 2: return FVector2D(-Vector.X, -Vector.Y);
+	case 3: return FVector2D(Vector.Y, -Vector.X);
+	default: return Vector;
+	}
+}
+
+void UInteriorFloorPlanWidget::TurnViewBy(int32 QuarterTurns)
+{
+	ViewQuarterTurns = ((ViewQuarterTurns + QuarterTurns) % 4 + 4) % 4;
+}
+
+FVector2D UInteriorFloorPlanWidget::ViewWorldToLocal(const FVector2D& WorldPoint, const FVector2D& Origin, float PixelsPerUnit, const FVector2D& WidgetSize) const
+{
+	return WidgetSize * 0.5f + RotateQuarterTurns(WorldPoint - Origin, ViewQuarterTurns) * PixelsPerUnit;
+}
+
+FVector2D UInteriorFloorPlanWidget::ViewLocalToWorld(const FVector2D& LocalPosition, const FVector2D& Origin, float PixelsPerUnit, const FVector2D& WidgetSize) const
+{
+	return Origin + RotateQuarterTurns((LocalPosition - WidgetSize * 0.5f) / PixelsPerUnit, -ViewQuarterTurns);
 }
 
 void UInteriorFloorPlanWidget::ComputeViewTransform(FVector2D WidgetSize, FVector2D& OutOrigin, float& OutPixelsPerUnit) const
@@ -937,8 +964,10 @@ void UInteriorFloorPlanWidget::ComputeViewTransform(FVector2D WidgetSize, FVecto
 	const float BoundingHeight = MaxPoint.Y - MinPoint.Y;
 	const float Margin = 0.85f; // leave ~15% breathing room around the footprint
 
-	const float ScaleX = (BoundingWidth > KINDA_SMALL_NUMBER) ? (WidgetSize.X * Margin) / BoundingWidth : TNumericLimits<float>::Max();
-	const float ScaleY = (BoundingHeight > KINDA_SMALL_NUMBER) ? (WidgetSize.Y * Margin) / BoundingHeight : TNumericLimits<float>::Max();
+	// Turned a quarter (or three), the plan's width runs along the widget's height, so the widget's sides swap.
+	const FVector2D FitSize = (ViewQuarterTurns & 1) ? FVector2D(WidgetSize.Y, WidgetSize.X) : WidgetSize;
+	const float ScaleX = (BoundingWidth > KINDA_SMALL_NUMBER) ? (FitSize.X * Margin) / BoundingWidth : TNumericLimits<float>::Max();
+	const float ScaleY = (BoundingHeight > KINDA_SMALL_NUMBER) ? (FitSize.Y * Margin) / BoundingHeight : TNumericLimits<float>::Max();
 	OutPixelsPerUnit = FMath::Min(ScaleX, ScaleY);
 	if (OutPixelsPerUnit >= TNumericLimits<float>::Max())
 	{
@@ -969,7 +998,7 @@ FVector2D UInteriorFloorPlanWidget::LocalPositionToFootprintPoint(FVector2D Loca
 		return FVector2D::ZeroVector;
 	}
 
-	const FVector2D WorldPoint = Origin + (LocalPosition - WidgetSize * 0.5f) / PixelsPerUnit;
+	const FVector2D WorldPoint = ViewLocalToWorld(LocalPosition, Origin, PixelsPerUnit, WidgetSize);
 
 	const float Scale = Generator->GetScale();
 	if (Scale <= KINDA_SMALL_NUMBER)
@@ -1004,7 +1033,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 
 	auto WorldToLocal = [&](const FVector2D& WorldPoint) -> FVector2D
 		{
-			return WidgetSize * 0.5f + (WorldPoint - Origin) * PixelsPerUnit;
+			return ViewWorldToLocal(WorldPoint, Origin, PixelsPerUnit, WidgetSize);
 		};
 
 	// ---- Floor 1 indoor/outdoor context ----
@@ -1283,7 +1312,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			// AInteriorConnectorMarker::BuildMarker/GetConnectorFootprintCorners) - kept in radians
 			// only for this one call, degrees everywhere else in this codebase's own convention.
 			FSlateDrawElement::MakeRotatedBox(OutDrawElements, LayerId + 3, MarkerGeometry, IconBrush, ESlateDrawEffect::None,
-				FMath::DegreesToRadians(Node.RotationDegrees), FVector2f(ScaledConnectorSize, ScaledConnectorSize) * 0.5f,
+				FMath::DegreesToRadians(Node.RotationDegrees + 90.f * ViewQuarterTurns), FVector2f(ScaledConnectorSize, ScaledConnectorSize) * 0.5f,
 				FSlateDrawElement::RelativeToElement, NodeColor);
 		}
 	}
@@ -1468,7 +1497,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		if (Issue && Issue->bHasPosition && Issue->BuildingId == InteriorGen->GetLoadedBuildingId() && Issue->Floor == InteriorGen->GetActiveFloor())
 		{
 			const FVector2D World = (Issue->Position + Building->BuildingOffset) * Generator->GetScale();
-			const FVector2D Center = WidgetSize * .5 + (World - Origin) * PixelsPerUnit;
+			const FVector2D Center = ViewWorldToLocal(World, Origin, PixelsPerUnit, WidgetSize);
 			TArray<FVector2D> Ring;
 			for (int32 I = 0; I <= 24; ++I) { const double Angle = I * 2.0 * PI / 24; Ring.Add(Center + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * 14.0); }
 			FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 8, AllottedGeometry.ToPaintGeometry(), Ring, ESlateDrawEffect::None, FLinearColor::Yellow, true, 3.f);
