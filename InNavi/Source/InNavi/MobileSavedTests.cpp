@@ -123,7 +123,7 @@ bool FMobileSavedPageTest::RunTest(const FString& Parameters)
 	if (!TestNotNull(TEXT("the page is created"), Page)) return false;
 	Page->TakeWidget();
 	Page->SetSource(&Source);
-	TestEqual(TEXT("the title"), Cast<UTextBlock>(Page->FindNamedWidget(TEXT("Txt_SavedTitle")))->GetText().ToString(), FString(TEXT("Saved")));
+	TestEqual(TEXT("the title"), Cast<UTextBlock>(Page->FindNamedWidget(TEXT("Txt_SavedTitle")))->GetText().ToString(), FString(TEXT("Saved places")));
 
 	// Nothing saved: how to save one.
 	Page->SetSaved({});

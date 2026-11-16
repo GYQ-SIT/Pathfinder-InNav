@@ -233,40 +233,29 @@ bool FMobileMapToolsTest::RunTest(const FString& Parameters)
 	UMobileMapWidget* Map = Screen->GetMapView();
 	if (!TestNotNull(TEXT("the screen has the map"), Map)) return false;
 
-	// More opens the tools; Move starts off; the zoom buttons zoom a step.
-	TestFalse(TEXT("the tools are shut at first"), Screen->IsMapToolsOpen());
-	TestEqual(TEXT("and not shown"), Screen->FindNamedWidget(TEXT("MapTools"))->GetVisibility(), ESlateVisibility::Collapsed);
-	Click(TEXT("Btn_MapMore"));
-	TestTrue(TEXT("More opens them"), Screen->IsMapToolsOpen());
-	TestEqual(TEXT("and shows them"), Screen->FindNamedWidget(TEXT("MapTools"))->GetVisibility(), ESlateVisibility::Visible);
-	TestTrue(TEXT("Move is on at first, so a drag moves the map"), Screen->AreMapGesturesOn() && Map->AreGesturesEnabled());
-	TestEqual(TEXT("and the button says so"), Cast<UTextBlock>(Screen->FindNamedWidget(TEXT("Btn_MapMove_Label"))) ? Cast<UTextBlock>(Screen->FindNamedWidget(TEXT("Btn_MapMove_Label")))->GetText().ToString() : FString(), FString(TEXT("Move: On")));
-	Click(TEXT("Btn_MapMove"));
-	TestFalse(TEXT("pressing it turns the gestures off"), Screen->AreMapGesturesOn() || Map->AreGesturesEnabled());
-	Click(TEXT("Btn_MapMove"));
-	TestTrue(TEXT("and pressing it again turns them back on"), Screen->AreMapGesturesOn() && Map->AreGesturesEnabled());
-	Click(TEXT("Btn_ZoomIn"));
-	TestTrue(TEXT("zoom in is a step"), FMath::IsNearlyEqual(Map->GetZoom(), 1.2));
-	Click(TEXT("Btn_ZoomOut"));
-	Click(TEXT("Btn_ZoomOut"));
-	TestTrue(TEXT("zoom out is a step the other way"), FMath::IsNearlyEqual(Map->GetZoom(), 0.8));
-	Click(TEXT("Btn_ZoomOut"));
-	TestFalse(TEXT("at 0.7 zoom out is off"), Cast<UButton>(Screen->FindNamedWidget(TEXT("Btn_ZoomOut")))->GetIsEnabled());
-	for (int32 i = 0; i < 10; ++i)
+	// As in the prototype's second iteration, the map has no tools: no More, no Move switch, no zoom buttons. A drag moves it from the start, and
+	// a pinch or the wheel zooms it.
+	for (const TCHAR* Gone : { TEXT("Btn_MapMore"), TEXT("Btn_MapMove"), TEXT("Btn_ZoomIn"), TEXT("Btn_ZoomOut"), TEXT("MapTools") })
 	{
-		Click(TEXT("Btn_ZoomIn"));
+		TestNull(*FString::Printf(TEXT("%s is gone"), Gone), Screen->FindNamedWidget(Gone));
 	}
-	TestTrue(TEXT("zoom in stops at 2, and then is off"), FMath::IsNearlyEqual(Map->GetZoom(), 2.0) && !Cast<UButton>(Screen->FindNamedWidget(TEXT("Btn_ZoomIn")))->GetIsEnabled());
+	TestTrue(TEXT("a drag moves the map from the start"), Map->AreGesturesEnabled());
 
-	// Locate puts the view back at the fit; the level list and the tools are not open together.
+	// Zooming stays in its range.
+	Screen->ZoomMap(UMobileMapWidget::ZoomStep);
+	TestTrue(TEXT("zoom in is a step"), FMath::IsNearlyEqual(Map->GetZoom(), 1.2));
+	Screen->ZoomMap(-2.0 * UMobileMapWidget::ZoomStep);
+	TestTrue(TEXT("zoom out is a step the other way"), FMath::IsNearlyEqual(Map->GetZoom(), 0.8));
+	Screen->ZoomMap(-10.0);
+	TestTrue(TEXT("zoom out stops at 0.7"), FMath::IsNearlyEqual(Map->GetZoom(), UMobileMapWidget::MinZoom));
+	Screen->ZoomMap(10.0);
+	TestTrue(TEXT("zoom in stops at 2"), FMath::IsNearlyEqual(Map->GetZoom(), UMobileMapWidget::MaxZoom));
+
+	// Locate puts the view back at the fit.
 	Click(TEXT("Btn_Locate"));
 	TestTrue(TEXT("Locate starts the view again"), FMath::IsNearlyEqual(Map->GetZoom(), 1.0) && Map->GetPan().IsNearlyZero());
-	Screen->SetLevelPopupOpen(true);
-	TestFalse(TEXT("opening the levels shuts the tools"), Screen->IsMapToolsOpen());
-	Click(TEXT("Btn_MapMore"));
-	TestFalse(TEXT("and opening the tools shuts the levels"), Screen->IsLevelPopupOpen());
 
-	// The controls are taller by the new button, and still stay clear of the top bar.
+	// The controls stay clear of the top bar.
 	Screen->ApplyViewportSize(375.0, 812.0);
 	const FMobileLayoutSnapshot Layout = Screen->GetLayoutSnapshot();
 	TestTrue(TEXT("the controls fit above the half-open sheet"), Layout.SheetTop - UMobileAppWidget::ControlsGap - UMobileAppWidget::ControlsHeight >= Layout.TopBarBottom);

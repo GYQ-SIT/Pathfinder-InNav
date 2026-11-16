@@ -256,6 +256,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool SetRoomName(const FString& RoomId, const FString& NewName);
 
+	// True when a room or wall of this building (any floor) already has this name (not case sensitive).
+	bool IsRoomNameTaken(const FString& Name) const;
+
+	// The name itself when it is free; otherwise the next free one: a trailing number counts up ("Lab1" -> "Lab2", "Room 5" -> "Room 6"),
+	// and a name without one gets " 2", " 3" and so on ("Lab" -> "Lab 2"). Used when a room is created or pasted, so a copy never repeats a name
+	// (the door "Connects to" lookup resolves a room by its name).
+	FString MakeUniqueRoomName(const FString& Desired) const;
+
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool SetRoomTags(const FString& RoomId, const TArray<FString>& InTags);
 	UFUNCTION(BlueprintPure, Category = "Interior")

@@ -1,5 +1,6 @@
 #include "MobileProfilePageWidget.h"
 
+#include "MobileIcons.h"
 #include "MobileStyle.h"
 #include "MobileTapTarget.h"
 
@@ -28,6 +29,7 @@ TSharedRef<SWidget> UMobileProfilePageWidget::RebuildWidget()
 		Pad->SetBrushColor(FLinearColor::Transparent);
 		Pad->SetPadding(FMargin(16.f, 22.f, 16.f, 24.f));
 		Pad->SetContent(Content);
+		MobileStyle::NoScrollShadow(Scroll);
 		Scroll->AddChild(Pad);
 
 		auto Add = [Content](UWidget* Child, const FMargin& Margin)
@@ -41,46 +43,40 @@ TSharedRef<SWidget> UMobileProfilePageWidget::RebuildWidget()
 			return Text;
 		};
 
-		Add(MakeText(Tree, TEXT("Txt_ProfileTitle"), TEXT("Make it yours"), 26.f, Ink, true), FMargin(0.f));
-		Add(Wrapped(TEXT("Txt_ProfileSubtitle"), TEXT("Preferences stay on this device."), 13.f, Grey, false), FMargin(0.f, 6.f, 0.f, 0.f));
+		Add(MakeText(Tree, TEXT("Txt_ProfileTitle"), TEXT("Make it yours"), 29.f, Ink, true), FMargin(0.f));
+		Add(Wrapped(TEXT("Txt_ProfileSubtitle"), TEXT("Preferences stay on this device."), 14.f, Grey, false), FMargin(0.f, 6.f, 0.f, 0.f));
 
-		// The visitor card: there is no account.
-		UBorder* AvatarCircle = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
-		AvatarCircle->SetBrush(Rounded(BlueSoft, FLinearColor::Transparent, 20.f, 0.f));
-		AvatarCircle->SetBrushColor(FLinearColor::White);
-		AvatarCircle->SetHorizontalAlignment(HAlign_Center);
-		AvatarCircle->SetVerticalAlignment(VAlign_Center);
-		AvatarCircle->SetContent(MakeText(Tree, FString(), TEXT("V"), 16.f, Blue, true));
-		USizeBox* AvatarSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		AvatarSize->SetWidthOverride(40.f);
-		AvatarSize->SetHeightOverride(40.f);
-		AvatarSize->SetContent(AvatarCircle);
+		// The visitor card: there is no account. A person icon, the name and what that means, on a soft panel with an outline.
+		UWidget* Person = MobileIcons::Picture(Tree, TEXT("Profile"), 24.f, Ink);
 		UVerticalBox* WhoTexts = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-		WhoTexts->AddChildToVerticalBox(MakeText(Tree, TEXT("Txt_ProfileName"), TEXT("Visitor"), 15.f, Ink, true));
-		WhoTexts->AddChildToVerticalBox(MakeText(Tree, TEXT("Txt_ProfileAccount"), TEXT("No account needed for this prototype"), 12.f, Grey))->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
+		WhoTexts->AddChildToVerticalBox(MakeText(Tree, TEXT("Txt_ProfileName"), TEXT("Visitor"), 18.f, Ink, true));
+		WhoTexts->AddChildToVerticalBox(MakeText(Tree, TEXT("Txt_ProfileAccount"), TEXT("No account needed for this prototype"), 13.f, Grey))->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
 		UHorizontalBox* Who = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-		Who->AddChildToHorizontalBox(AvatarSize)->SetVerticalAlignment(VAlign_Center);
+		if (Person)
+		{
+			Who->AddChildToHorizontalBox(Person)->SetVerticalAlignment(VAlign_Center);
+		}
 		UHorizontalBoxSlot* WhoTextSlot = Who->AddChildToHorizontalBox(WhoTexts);
-		WhoTextSlot->SetPadding(FMargin(12.f, 0.f, 0.f, 0.f));
+		WhoTextSlot->SetPadding(FMargin(Person ? 14.f : 0.f, 0.f, 0.f, 0.f));
 		WhoTextSlot->SetVerticalAlignment(VAlign_Center);
 		UBorder* WhoCard = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("ProfileCard"));
-		WhoCard->SetBrush(Rounded(White, Line, 14.f));
+		WhoCard->SetBrush(Rounded(SoftPanel, FieldEdge, 14.f));
 		WhoCard->SetBrushColor(FLinearColor::White);
-		WhoCard->SetPadding(FMargin(14.f));
+		WhoCard->SetPadding(FMargin(16.f, 18.f));
 		WhoCard->SetContent(Who);
 		Add(WhoCard, FMargin(0.f, 18.f, 0.f, 0.f));
 
 		// Appearance: a light or night theme, and larger text.
-		Add(MakeText(Tree, TEXT("Txt_ProfileAppearance"), TEXT("Appearance"), 15.f, Ink, true), FMargin(0.f, 24.f, 0.f, 0.f));
-		Add(Wrapped(TEXT("Txt_ProfileAppearanceNote"), TEXT("Switch the full visual system without changing your route."), 12.f, Grey, false), FMargin(0.f, 4.f, 0.f, 0.f));
+		Add(MakeText(Tree, TEXT("Txt_ProfileAppearance"), TEXT("Appearance"), 18.f, Ink, true), FMargin(0.f, 24.f, 0.f, 0.f));
+		Add(Wrapped(TEXT("Txt_ProfileAppearanceNote"), TEXT("Switch the full visual system without changing your route."), 14.f, Grey, false), FMargin(0.f, 4.f, 0.f, 0.f));
 
 		TWeakObjectPtr<UMobileProfilePageWidget> WeakThis(this);
 		auto MakePill = [this, Tree, WeakThis](const TCHAR* Label, const FString& Payload, UBorder*& OutPill, UTextBlock*& OutLabel) -> UMobileTapTarget*
 		{
 			OutPill = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
 			OutPill->SetBrushColor(FLinearColor::White);
-			OutPill->SetPadding(FMargin(14.f, 9.f));
-			OutLabel = MakeText(Tree, FString(), Label, 13.f, Ink, true);
+			OutPill->SetPadding(FMargin(16.f, 10.f));
+			OutLabel = MakeText(Tree, FString(), Label, 15.f, Ink, true);
 			OutPill->SetContent(OutLabel);
 			UMobileTapTarget* Target = CreateWidget<UMobileTapTarget>(this, UMobileTapTarget::StaticClass());
 			Target->Setup(OutPill, Payload, FLinearColor::Transparent, 18.f);
@@ -98,22 +94,19 @@ TSharedRef<SWidget> UMobileProfilePageWidget::RebuildWidget()
 		Pills->AddChildToHorizontalBox(MakePill(TEXT("Night theme"), TEXT("night"), NightPill, NightLabel))->SetPadding(FMargin(8.f, 0.f, 0.f, 0.f));
 		Add(Pills, FMargin(0.f, 12.f, 0.f, 0.f));
 
-		// Larger text: a box and its label, all one tap.
+		// Larger text: a box and its label, all one tap. The ticked box is blue with a white check mark.
 		LargerTick = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
-		LargerTick->SetBrush(Rounded(White, FLinearColor::Transparent, 2.f, 0.f));
-		LargerTick->SetBrushColor(FLinearColor::White);
-		USizeBox* TickSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		TickSize->SetWidthOverride(8.f);
-		TickSize->SetHeightOverride(8.f);
-		TickSize->SetContent(LargerTick);
+		LargerTick->SetBrushColor(FLinearColor::Transparent);
+		UWidget* TickMark = MobileIcons::Tick(Tree, 16.f, OnBlue);
+		LargerTick->SetContent(TickMark);
 		LargerBox = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
 		LargerBox->SetBrushColor(FLinearColor::White);
 		LargerBox->SetHorizontalAlignment(HAlign_Center);
 		LargerBox->SetVerticalAlignment(VAlign_Center);
-		LargerBox->SetContent(TickSize);
+		LargerBox->SetContent(LargerTick);
 		USizeBox* BoxSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		BoxSize->SetWidthOverride(20.f);
-		BoxSize->SetHeightOverride(20.f);
+		BoxSize->SetWidthOverride(22.f);
+		BoxSize->SetHeightOverride(22.f);
 		BoxSize->SetContent(LargerBox);
 		UHorizontalBox* LargerRow = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
 		LargerRow->AddChildToHorizontalBox(MakeText(Tree, TEXT("Txt_ProfileLarger"), TEXT("Larger text"), 14.f, Ink))->SetVerticalAlignment(VAlign_Center);
@@ -144,8 +137,8 @@ TSharedRef<SWidget> UMobileProfilePageWidget::RebuildWidget()
 		Add(Divider, FMargin(0.f, 6.f, 0.f, 0.f));
 
 		// Sound: the volume of the app's sounds, a slider and the number it stands for.
-		Add(MakeText(Tree, TEXT("Txt_ProfileSound"), TEXT("Sound"), 15.f, Ink, true), FMargin(0.f, 20.f, 0.f, 0.f));
-		Add(Wrapped(TEXT("Txt_ProfileSoundNote"), TEXT("How loud the app's sounds are."), 12.f, Grey, false), FMargin(0.f, 4.f, 0.f, 0.f));
+		Add(MakeText(Tree, TEXT("Txt_ProfileSound"), TEXT("Sound"), 18.f, Ink, true), FMargin(0.f, 20.f, 0.f, 0.f));
+		Add(Wrapped(TEXT("Txt_ProfileSoundNote"), TEXT("How loud the app's sounds are."), 14.f, Grey, false), FMargin(0.f, 4.f, 0.f, 0.f));
 		VolumeSlider = Tree->ConstructWidget<USlider>(USlider::StaticClass(), TEXT("Slider_ProfileVolume"));
 		VolumeSlider->SetMinValue(0.f);
 		VolumeSlider->SetMaxValue(1.f);
@@ -180,17 +173,17 @@ TSharedRef<SWidget> UMobileProfilePageWidget::RebuildWidget()
 		Add(SoundDivider, FMargin(0.f, 14.f, 0.f, 0.f));
 
 		// About, and the reset.
-		Add(MakeText(Tree, TEXT("Txt_ProfileAbout"), TEXT("About InNav"), 15.f, Ink, true), FMargin(0.f, 20.f, 0.f, 0.f));
-		Add(Wrapped(TEXT("Txt_ProfileAboutText"), TEXT("Indoor navigation by Team Pathfinder. This interactive reference demonstrates interface behaviour for the engineering team."), 12.f, Grey, false), FMargin(0.f, 6.f, 0.f, 0.f));
+		Add(MakeText(Tree, TEXT("Txt_ProfileAbout"), TEXT("About InNav"), 18.f, Ink, true), FMargin(0.f, 20.f, 0.f, 0.f));
+		Add(Wrapped(TEXT("Txt_ProfileAboutText"), TEXT("Indoor navigation by Team Pathfinder. This interactive reference demonstrates interface behaviour for the engineering team."), 13.f, Grey, false), FMargin(0.f, 6.f, 0.f, 0.f));
 
 		UBorder* ResetFace = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
-		ResetFace->SetBrush(Rounded(White, Blue, 12.f));
+		ResetFace->SetBrush(Rounded(White, FieldEdge, 8.f));
 		ResetFace->SetBrushColor(FLinearColor::White);
 		ResetFace->SetPadding(FMargin(14.f, 13.f));
 		ResetFace->SetHorizontalAlignment(HAlign_Center);
-		ResetFace->SetContent(MakeText(Tree, TEXT("Txt_ProfileReset"), TEXT("Reset saved places & preferences"), 14.f, Blue, true));
+		ResetFace->SetContent(MakeText(Tree, TEXT("Txt_ProfileReset"), TEXT("Reset saved places & preferences"), 17.f, Blue, true));
 		UMobileTapTarget* Reset = CreateWidget<UMobileTapTarget>(this, UMobileTapTarget::StaticClass());
-		Reset->Setup(ResetFace, TEXT("reset"), FLinearColor::Transparent, 12.f);
+		Reset->Setup(ResetFace, TEXT("reset"), FLinearColor::Transparent, 8.f);
 		Reset->SetOnTapped([WeakThis](const FString&)
 		{
 			if (UMobileProfilePageWidget* Self = WeakThis.Get())
@@ -203,7 +196,7 @@ TSharedRef<SWidget> UMobileProfilePageWidget::RebuildWidget()
 		StatusText = MakeText(Tree, TEXT("Txt_ProfileStatus"), TEXT(""), 12.f, Blue, true);
 		StatusText->SetJustification(ETextJustify::Center);
 		Add(StatusText, FMargin(0.f, 10.f, 0.f, 0.f));
-		NoteText = Wrapped(TEXT("Txt_ProfileNote"), TEXT(""), 11.f, Grey, false);
+		NoteText = Wrapped(TEXT("Txt_ProfileNote"), TEXT(""), 12.f, Grey, false);
 		Add(NoteText, FMargin(0.f, 18.f, 0.f, 0.f));
 		Refresh();
 	}
@@ -317,7 +310,7 @@ void UMobileProfilePageWidget::Refresh()
 	{
 		if (Pill)
 		{
-			Pill->SetBrush(Rounded(bChosen ? Blue : White, bChosen ? Blue : Line, 18.f));
+			Pill->SetBrush(Rounded(bChosen ? Blue : SoftPanel, FLinearColor::Transparent, 20.f, 0.f));
 		}
 		if (Label)
 		{
@@ -342,6 +335,6 @@ void UMobileProfilePageWidget::Refresh()
 	}
 	if (LargerTick)
 	{
-		LargerTick->SetBrush(Rounded(bLargerText ? OnBlue : FLinearColor::Transparent, FLinearColor::Transparent, 2.f, 0.f));
+		LargerTick->SetVisibility(bLargerText ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Hidden);
 	}
 }

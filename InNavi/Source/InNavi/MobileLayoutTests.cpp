@@ -36,14 +36,17 @@ bool FMobileLayoutPrototypeTest::RunTest(const FString& Parameters)
 	const FMobileLayoutSnapshot Layout = Screen->GetLayoutSnapshot();
 	TestTrue(TEXT("44 tall at the top, 60 for the tab bar"), FMath::IsNearlyEqual(Layout.HeaderBottom, 44.0) && FMath::IsNearlyEqual(Layout.TabBarHeight, 60.0));
 
-	// The sheet rests at 26, 44 and 88 percent of what is between them.
+	// The sheet rests at 26, 44 and 88 percent of what is between them; open to its top it stops under the top row (the search field and 2D | 3D) if that is lower.
 	Screen->SetActiveTab(UMobileAppWidget::ETab::Directory);
 	const double Workspace = 812.0 - 44.0 - 60.0;
 	for (const TPair<EMobileSheetSnap, double>& Rest : { TPair<EMobileSheetSnap, double>(EMobileSheetSnap::Collapsed, 0.26), TPair<EMobileSheetSnap, double>(EMobileSheetSnap::Half, 0.44), TPair<EMobileSheetSnap, double>(EMobileSheetSnap::Full, 0.88) })
 	{
 		Screen->SetSnap(Rest.Key);
 		Screen->SnapSheetNow();
-		TestTrue(*FString::Printf(TEXT("the sheet at %.0f percent"), Rest.Value * 100.0), FMath::IsNearlyEqual(Screen->GetLayoutSnapshot().SheetHeight, Workspace * Rest.Value, 0.01));
+		const double UnderTopRow = 812.0 - 60.0 - (44.0 + UMobileAppWidget::TopRowTop + UMobileAppWidget::TopRowHeight + UMobileAppWidget::TopRowGap);
+		const double Expected = Rest.Key == EMobileSheetSnap::Full ? FMath::Min(Workspace * Rest.Value, UnderTopRow) : Workspace * Rest.Value;
+		TestTrue(*FString::Printf(TEXT("the sheet at %.0f percent"), Rest.Value * 100.0), FMath::IsNearlyEqual(Screen->GetLayoutSnapshot().SheetHeight, Expected, 0.01));
+		TestTrue(*FString::Printf(TEXT("the sheet at %.0f percent stays under the top row"), Rest.Value * 100.0), Screen->GetLayoutSnapshot().SheetTop >= Screen->GetLayoutSnapshot().TopBarBottom - 0.01);
 	}
 
 	// Open to the top the plan and the toolbar are hidden, and the top row stays; at the other heights they are shown.
@@ -65,20 +68,20 @@ bool FMobileLayoutPrototypeTest::RunTest(const FString& Parameters)
 
 	// The title is plain text: the building and level, or the site's name on the overview; Overview says what a tap does, and is for campuses.
 	TestEqual(TEXT("the campus opens on a level: building and level"), Title(), FString(TEXT("E2 · L1")));
-	TestEqual(TEXT("Overview is shown for a campus"), Cast<UButton>(Screen->FindNamedWidget(TEXT("Btn_Overview")))->GetVisibility(), ESlateVisibility::Visible);
-	TestEqual(TEXT("saying Overview"), Cast<UTextBlock>(Screen->FindNamedWidget(TEXT("Btn_Overview_Label")))->GetText().ToString(), FString(TEXT("Overview")));
+	TestEqual(TEXT("Zoom out is shown for a campus"), Cast<UButton>(Screen->FindNamedWidget(TEXT("Btn_Overview")))->GetVisibility(), ESlateVisibility::Visible);
+	TestEqual(TEXT("saying Zoom out"), Cast<UTextBlock>(Screen->FindNamedWidget(TEXT("Btn_Overview_Label")))->GetText().ToString(), FString(TEXT("Zoom out")));
 	Click(TEXT("Btn_Overview"));
 	TestEqual(TEXT("on the overview the title is the site"), Title(), FString(TEXT("SIT Campus")));
-	TestEqual(TEXT("and the button says Current"), Cast<UTextBlock>(Screen->FindNamedWidget(TEXT("Btn_Overview_Label")))->GetText().ToString(), FString(TEXT("Current")));
+	TestEqual(TEXT("and the button says Back to building"), Cast<UTextBlock>(Screen->FindNamedWidget(TEXT("Btn_Overview_Label")))->GetText().ToString(), FString(TEXT("Back to building")));
 	Click(TEXT("Btn_Overview"));
 	TestEqual(TEXT("back to the level"), Title(), FString(TEXT("E2 · L1")));
 	Screen->OpenSite(TEXT("paya-lebar"));
-	TestEqual(TEXT("a mall has one building, so no Overview"), Cast<UButton>(Screen->FindNamedWidget(TEXT("Btn_Overview")))->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("a mall has one building, so no Zoom out"), Cast<UButton>(Screen->FindNamedWidget(TEXT("Btn_Overview")))->GetVisibility(), ESlateVisibility::Collapsed);
 	Screen->ChooseMapLevel(2);
 	TestEqual(TEXT("and the title follows the level"), Title(), FString(TEXT("Paya Lebar Mall · L2")));
 
 	// The toolbar: level, locate and more, in one bar.
-	for (const TCHAR* Name : { TEXT("Btn_Level"), TEXT("Btn_Locate"), TEXT("Btn_MapMore"), TEXT("MapToolbar") })
+	for (const TCHAR* Name : { TEXT("Btn_Level"), TEXT("Btn_Locate"), TEXT("MapCaption"), TEXT("MapToolbar") })
 	{
 		TestNotNull(*FString::Printf(TEXT("%s is there"), Name), Screen->FindNamedWidget(Name));
 	}

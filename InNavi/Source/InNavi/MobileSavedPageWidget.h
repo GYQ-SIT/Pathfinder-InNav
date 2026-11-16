@@ -22,6 +22,9 @@ public:
 
 	void SetOnPlaceChosen(TFunction<void(const FMobilePlace&)> InCallback) { OnPlaceChosen = MoveTemp(InCallback); }
 	void SetOnRemove(TFunction<void(const FString&)> InCallback) { OnRemove = MoveTemp(InCallback); }
+	// The Explore places button of the empty page.
+	void SetOnExplore(TFunction<void()> InCallback) { OnExplore = MoveTemp(InCallback); }
+	void PressExplore() { if (OnExplore) OnExplore(); }
 
 	// A tap on a place's row, and on its Remove.
 	void ChoosePlace(const FString& PlaceId);
@@ -38,6 +41,9 @@ protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 
 private:
+	UFUNCTION()
+	void HandleExploreClicked();
+
 	void Refresh();
 	void AddRow(const FMobilePlace& Place);
 
@@ -54,4 +60,5 @@ private:
 
 	TFunction<void(const FMobilePlace&)> OnPlaceChosen;
 	TFunction<void(const FString&)> OnRemove;
+	TFunction<void()> OnExplore;
 };

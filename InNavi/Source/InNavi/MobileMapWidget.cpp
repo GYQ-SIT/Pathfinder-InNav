@@ -213,6 +213,17 @@ void UMobileMapWidget::ShowOverview()
 
 void UMobileMapWidget::SetRoute(const FMobileRoute& InRoute) { Route = InRoute; }
 void UMobileMapWidget::ClearRoute() { Route = FMobileRoute(); }
+void UMobileMapWidget::SetStops(const TArray<FMobileRoutePoint>& InStops) { Stops = InStops; }
+
+int32 UMobileMapWidget::GetStopsOnLevel() const
+{
+	int32 Count = 0;
+	for (const FMobileRoutePoint& Stop : Stops)
+	{
+		Count += (Stop.BuildingId == LevelMap.BuildingId && Stop.Level == LevelMap.Level) ? 1 : 0;
+	}
+	return Count;
+}
 void UMobileMapWidget::SetHighlightPlace(const FString& PlaceId) { HighlightPlaceId = PlaceId; }
 void UMobileMapWidget::SetPosition(const FMobileRoutePoint& InPosition) { Position = InPosition; bHasPosition = true; }
 void UMobileMapWidget::ClearPosition() { bHasPosition = false; }
@@ -529,6 +540,19 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 			const FVector2D At = ToWidgetPolygon({ End.Position }, W, H, Lift)[0];
 			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(At, 9.0), FLinearColor::White);
 			FillPolygon(OutDrawElements, Layer + 8, AllottedGeometry, Circle(At, 6.5), Red);
+		}
+	}
+
+	// The stops on the way, numbered, under the end of the route.
+	for (int32 StopIndex = 0; StopIndex < Stops.Num(); ++StopIndex)
+	{
+		const FMobileRoutePoint& Stop = Stops[StopIndex];
+		if (Stop.BuildingId == LevelMap.BuildingId && Stop.Level == LevelMap.Level)
+		{
+			const FVector2D At = ToWidgetPolygon({ Stop.Position }, W, H, Lift)[0];
+			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(At, 11.0), FLinearColor::White);
+			FillPolygon(OutDrawElements, Layer + 8, AllottedGeometry, Circle(At, 9.0), Blue);
+			DrawLabel(OutDrawElements, Layer + 9, AllottedGeometry, FString::FromInt(StopIndex + 1), At, 11.f, OnBlue, false);
 		}
 	}
 

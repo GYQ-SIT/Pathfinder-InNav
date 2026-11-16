@@ -1,5 +1,6 @@
 #include "MobileSelectWidget.h"
 
+#include "MobileIcons.h"
 #include "MobileStyle.h"
 #include "MobileTapTarget.h"
 
@@ -26,18 +27,35 @@ TSharedRef<SWidget> UMobileSelectWidget::RebuildWidget()
 
 		// The field: the caption over the chosen text, and a small arrow.
 		UVerticalBox* Texts = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("SelectTexts"));
-		CaptionText = MakeText(Tree, TEXT("Txt_SelectCaption"), Caption, 11.f, Grey, true);
-		ValueText = MakeText(Tree, TEXT("Txt_SelectValue"), TEXT(""), 15.f, Ink, true);
-		Texts->AddChildToVerticalBox(CaptionText);
-		Texts->AddChildToVerticalBox(ValueText)->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
+		const bool bSmall = Look != EMobileSelectLook::Normal;
+		const bool bCompact = Look == EMobileSelectLook::Compact;
+		const bool bCaptioned = Look == EMobileSelectLook::Normal || bCompact;
+		CaptionText = MakeText(Tree, TEXT("Txt_SelectCaption"), Caption, 11.f, Grey, !bCompact);
+		ValueText = MakeText(Tree, TEXT("Txt_SelectValue"), TEXT(""), Look == EMobileSelectLook::Normal ? 15.f : Look == EMobileSelectLook::Bare ? 15.f : 12.f, Ink, Look == EMobileSelectLook::Normal);
+		if (bCompact)
+		{
+			// The caption is over the box, not in it.
+			Root->AddChildToVerticalBox(CaptionText)->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+		}
+		else if (bCaptioned)
+		{
+			Texts->AddChildToVerticalBox(CaptionText);
+		}
+		Texts->AddChildToVerticalBox(ValueText)->SetPadding(FMargin(0.f, bCaptioned && !bCompact ? 2.f : 0.f, 0.f, 0.f));
 		UHorizontalBox* Row = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("SelectRow"));
 		Row->AddChildToHorizontalBox(Texts)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-		// The arrow is a placeholder letter until the design team's icon is in.
-		Row->AddChildToHorizontalBox(MakeText(Tree, TEXT("Txt_SelectArrow"), TEXT("v"), 13.f, Grey, true))->SetVerticalAlignment(VAlign_Center);
+		// The design team's arrow down; until its texture is imported, a letter.
+		if (Look != EMobileSelectLook::Chip)
+		{
+			UWidget* SelectArrow = MobileIcons::Picture(Tree, TEXT("LevelDropdown"), bSmall ? 14.f : 16.f, bSmall ? Ink : Grey);
+			Row->AddChildToHorizontalBox(SelectArrow ? SelectArrow : static_cast<UWidget*>(MakeText(Tree, TEXT("Txt_SelectArrow"), TEXT("v"), 13.f, Grey, true)))->SetVerticalAlignment(VAlign_Center);
+		}
 		UBorder* Box = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SelectBox"));
-		Box->SetBrush(Rounded(White, FieldEdge, 12.f));
+		FieldBox = Box;
+		Box->SetBrush(Look == EMobileSelectLook::Bare ? Rounded(FLinearColor::Transparent, FLinearColor::Transparent, 0.f, 0.f)
+			: Look == EMobileSelectLook::Chip ? Rounded(White, FLinearColor::Transparent, 7.f, 0.f) : Rounded(White, FieldEdge, bCompact ? 8.f : 12.f));
 		Box->SetBrushColor(FLinearColor::White);
-		Box->SetPadding(FMargin(14.f, 10.f));
+		Box->SetPadding(Look == EMobileSelectLook::Bare ? FMargin(0.f, 6.f) : Look == EMobileSelectLook::Chip ? FMargin(8.f, 6.f) : bCompact ? FMargin(8.f, 7.f) : FMargin(14.f, 10.f));
 		Box->SetContent(Row);
 		UMobileTapTarget* Field = CreateWidget<UMobileTapTarget>(this, UMobileTapTarget::StaticClass());
 		Field->Setup(Box, TEXT("field"), FLinearColor::Transparent, 12.f);
@@ -53,9 +71,9 @@ TSharedRef<SWidget> UMobileSelectWidget::RebuildWidget()
 
 		// The options, under the field when it is open.
 		ListPanel = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SelectList"));
-		ListPanel->SetBrush(Rounded(White, FieldEdge, 12.f));
+		ListPanel->SetBrush(bSmall ? Rounded(White, Ink, 3.f, 1.f) : Rounded(White, FieldEdge, 12.f));
 		ListPanel->SetBrushColor(FLinearColor::White);
-		ListPanel->SetPadding(FMargin(0.f, 4.f));
+		ListPanel->SetPadding(bSmall ? FMargin(0.f) : FMargin(0.f, 4.f));
 		ListPanel->SetVisibility(ESlateVisibility::Collapsed);
 		UScrollBox* Scroll = Tree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("SelectScroll"));
 		ListBox = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("SelectOptions"));
@@ -91,6 +109,12 @@ void UMobileSelectWidget::SetSelected(const FString& InSelected)
 {
 	Selected = InSelected;
 	Refresh();
+}
+
+FString UMobileSelectWidget::GetSelectedShortLabel() const
+{
+	const FMobileSelectOption* Found = Options.FindByPredicate([this](const FMobileSelectOption& Option) { return Option.Value == Selected; });
+	return Found ? (Found->ShortLabel.IsEmpty() ? Found->Label : Found->ShortLabel) : FString();
 }
 
 FString UMobileSelectWidget::GetSelectedLabel() const
@@ -132,7 +156,14 @@ void UMobileSelectWidget::Refresh()
 	{
 		return;
 	}
-	ValueText->SetText(FText::FromString(GetSelectedLabel()));
+	ValueText->SetText(FText::FromString(GetSelectedShortLabel()));
+	const bool bSmall = Look != EMobileSelectLook::Normal;
+	const bool bCompact = Look == EMobileSelectLook::Compact;
+	if (bCompact && FieldBox)
+	{
+		// Black edge while the list is open, as the prototype's drop-down has.
+		FieldBox->SetBrush(Rounded(White, bOpen ? Ink : FieldEdge, 8.f, bOpen ? 1.5f : 1.f));
+	}
 	ListPanel->SetVisibility(bOpen ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	ListBox->ClearChildren();
 	if (!bOpen)
@@ -144,12 +175,14 @@ void UMobileSelectWidget::Refresh()
 		const bool bChosen = Option.Value == Selected;
 		UBorder* Pad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
 		Pad->SetBrushColor(FLinearColor::Transparent);
-		Pad->SetPadding(FMargin(14.f, 10.f));
-		UTextBlock* Text = MakeText(WidgetTree, FString(), Option.Label, 14.f, bChosen ? Blue : Ink, bChosen);
+		Pad->SetPadding(bSmall ? FMargin(8.f, 5.f) : FMargin(14.f, 10.f));
+		// A small list, as the prototype's browser draws it: the chosen option on blue with white text.
+		const FLinearColor TextColour = bSmall ? (bChosen ? OnBlue : Ink) : (bChosen ? Blue : Ink);
+		UTextBlock* Text = MakeText(WidgetTree, FString(), Option.Label, Look == EMobileSelectLook::Normal || Look == EMobileSelectLook::Bare ? 14.f : 12.f, TextColour, bChosen && !bSmall);
 		Text->SetAutoWrapText(true);
 		Pad->SetContent(Text);
 		UMobileTapTarget* Row = CreateWidget<UMobileTapTarget>(this, UMobileTapTarget::StaticClass());
-		Row->Setup(Pad, Option.Value, bChosen ? BlueSoft : FLinearColor::Transparent, 0.f);
+		Row->Setup(Pad, Option.Value, bChosen ? (bSmall ? Blue : BlueSoft) : FLinearColor::Transparent, 0.f);
 		TWeakObjectPtr<UMobileSelectWidget> WeakThis(this);
 		Row->SetOnTapped([WeakThis](const FString& Value)
 		{
