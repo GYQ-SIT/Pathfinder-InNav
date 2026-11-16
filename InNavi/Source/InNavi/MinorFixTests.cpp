@@ -337,4 +337,60 @@ bool FMinorFixDatabasePrecisionTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInteriorUniqueRoomNamesTest, "InNavi.Interior.UniqueRoomNames", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FInteriorUniqueRoomNamesTest::RunTest(const FString& Parameters)
+{
+	// Pasting a room hands its name to the creation function; two rooms of a building must never end up with the same name, because the
+	// door "Connects to" lookup finds a room by its name.
+	FNavigationSearchFixture Fixture;
+	Fixture.Interior->ClearLoadedInterior();
+	Fixture.Generator->ClearAllBuildings();
+	const TArray<FVector2D> Outline = {{0,0}, {1600,0}, {1600,1000}, {0,1000}};
+	Fixture.Generator->SpawnBuildingFromData(TEXT("Names"), TEXT("Names"), Outline, 2, 300, {0,0});
+	AInteriorGenerator* Interior = Fixture.Interior;
+	Interior->LoadInteriorForBuilding(TEXT("Names"));
+	Interior->SetActiveFloor(1);
+	FString Error;
+	auto Make = [&](float Left, const TCHAR* Name, float Top = 100.f) -> FString
+	{
+		AInteriorRoom* Room = Interior->CreateRoomFromFootprintWithTags({{Left, Top}, {Left + 150, Top}, {Left + 150, Top + 150}, {Left, Top + 150}},
+			FString(), Name, true, false, false, Error, {});
+		return Room ? Room->RoomName : FString(TEXT("<not created>"));
+	};
+
+	TestEqual(TEXT("a free name is kept"), Make(100, TEXT("Lab1")), FString(TEXT("Lab1")));
+	TestEqual(TEXT("a second room keeps its own free name"), Make(300, TEXT("Lab2")), FString(TEXT("Lab2")));
+	TestEqual(TEXT("copying Lab1 when Lab2 exists takes the next free number"), Make(500, TEXT("Lab1")), FString(TEXT("Lab3")));
+	TestEqual(TEXT("copying Lab1 again counts on"), Make(700, TEXT("Lab1")), FString(TEXT("Lab4")));
+	TestEqual(TEXT("a name without a number gets one"), Make(900, TEXT("Hall")), FString(TEXT("Hall")));
+	TestEqual(TEXT("the copy of a name without a number is numbered from 2"), Make(1100, TEXT("Hall")), FString(TEXT("Hall 2")));
+	TestEqual(TEXT("and then 3"), Make(1300, TEXT("Hall")), FString(TEXT("Hall 3")));
+	TestEqual(TEXT("a name with a space and a number keeps its space"), Interior->MakeUniqueRoomName(TEXT("Hall 2")), FString(TEXT("Hall 4")));
+	TestEqual(TEXT("the comparison does not care about case"), Interior->MakeUniqueRoomName(TEXT("lab1")), FString(TEXT("lab5")));
+
+	// A wall copied with the same name is numbered too.
+	AInteriorRoom* Wall = Interior->CreateWallFromPoints({{100, 600}, {500, 600}}, FString(), Error, {}, TEXT("Hall"));
+	if (TestNotNull(TEXT("the wall is created"), Wall))
+	{
+		TestEqual(TEXT("a wall does not repeat a room's name"), Wall->RoomName, FString(TEXT("Hall 4")));
+	}
+
+	// An empty name becomes the room's id, which is unique.
+	TestFalse(TEXT("an empty name takes the id"), Make(900, TEXT(""), 800.f).IsEmpty());
+
+	// No two rooms of the building share a name.
+	TSet<FString> Seen;
+	bool bAllDifferent = true;
+	for (const int32 Level : {1, 2})
+	{
+		for (const AInteriorRoom* Room : Interior->GetRoomsOnFloor(Level))
+		{
+			bAllDifferent &= Room && !Seen.Contains(Room->RoomName);
+			if (Room) Seen.Add(Room->RoomName);
+		}
+	}
+	TestTrue(TEXT("every room of the building has its own name"), bAllDifferent);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS
