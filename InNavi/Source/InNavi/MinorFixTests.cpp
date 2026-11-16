@@ -360,19 +360,21 @@ bool FInteriorUniqueRoomNamesTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("a free name is kept"), Make(100, TEXT("Lab1")), FString(TEXT("Lab1")));
 	TestEqual(TEXT("a second room keeps its own free name"), Make(300, TEXT("Lab2")), FString(TEXT("Lab2")));
-	TestEqual(TEXT("copying Lab1 when Lab2 exists takes the next free number"), Make(500, TEXT("Lab1")), FString(TEXT("Lab3")));
-	TestEqual(TEXT("copying Lab1 again counts on"), Make(700, TEXT("Lab1")), FString(TEXT("Lab4")));
-	TestEqual(TEXT("a name without a number gets one"), Make(900, TEXT("Hall")), FString(TEXT("Hall")));
-	TestEqual(TEXT("the copy of a name without a number is numbered from 2"), Make(1100, TEXT("Hall")), FString(TEXT("Hall 2")));
-	TestEqual(TEXT("and then 3"), Make(1300, TEXT("Hall")), FString(TEXT("Hall 3")));
-	TestEqual(TEXT("a name with a space and a number keeps its space"), Interior->MakeUniqueRoomName(TEXT("Hall 2")), FString(TEXT("Hall 4")));
-	TestEqual(TEXT("the comparison does not care about case"), Interior->MakeUniqueRoomName(TEXT("lab1")), FString(TEXT("lab5")));
+	TestEqual(TEXT("a copy of Lab1 gets a number in brackets, so it is not mistaken for the next room"), Make(500, TEXT("Lab1")), FString(TEXT("Lab1 (1)")));
+	TestEqual(TEXT("copying Lab1 again counts on"), Make(700, TEXT("Lab1")), FString(TEXT("Lab1 (2)")));
+	TestEqual(TEXT("a name without a number gets one in brackets"), Make(900, TEXT("Hall")), FString(TEXT("Hall")));
+	TestEqual(TEXT("the copy is (1)"), Make(1100, TEXT("Hall")), FString(TEXT("Hall (1)")));
+	TestEqual(TEXT("and then (2)"), Make(1300, TEXT("Hall")), FString(TEXT("Hall (2)")));
+	TestEqual(TEXT("Lobby 14 is free"), Make(100, TEXT("Lobby 14"), 300.f), FString(TEXT("Lobby 14")));
+	TestEqual(TEXT("its copy keeps the 14 and adds the bracket, so it is not mistaken for Lobby 15"), Interior->MakeUniqueRoomName(TEXT("Lobby 14")), FString(TEXT("Lobby 14 (1)")));
+	TestEqual(TEXT("a copy of a copy counts on from its own bracket"), Interior->MakeUniqueRoomName(TEXT("Hall (2)")), FString(TEXT("Hall (3)")));
+	TestEqual(TEXT("the comparison does not care about case"), Interior->MakeUniqueRoomName(TEXT("lab1")), FString(TEXT("lab1 (3)")));
 
 	// A wall copied with the same name is numbered too.
 	AInteriorRoom* Wall = Interior->CreateWallFromPoints({{100, 600}, {500, 600}}, FString(), Error, {}, TEXT("Hall"));
 	if (TestNotNull(TEXT("the wall is created"), Wall))
 	{
-		TestEqual(TEXT("a wall does not repeat a room's name"), Wall->RoomName, FString(TEXT("Hall 4")));
+		TestEqual(TEXT("a wall does not repeat a room's name"), Wall->RoomName, FString(TEXT("Hall (3)")));
 	}
 
 	// An empty name becomes the room's id, which is unique.

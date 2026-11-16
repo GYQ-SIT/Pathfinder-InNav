@@ -259,9 +259,9 @@ public:
 	// True when a room or wall of this building (any floor) already has this name (not case sensitive).
 	bool IsRoomNameTaken(const FString& Name) const;
 
-	// The name itself when it is free; otherwise the next free one: a trailing number counts up ("Lab1" -> "Lab2", "Room 5" -> "Room 6"),
-	// and a name without one gets " 2", " 3" and so on ("Lab" -> "Lab 2"). Used when a room is created or pasted, so a copy never repeats a name
-	// (the door "Connects to" lookup resolves a room by its name).
+	// The name itself when it is free; otherwise the next free one with the number in brackets: "Room" -> "Room (1)" -> "Room (2)", and "Lobby 14" ->
+	// "Lobby 14 (1)" (the brackets keep a copy apart from rooms that are simply numbered). A copy of "Room (2)" counts on from there. Used when a room
+	// is created or pasted, so a copy never repeats a name (the door "Connects to" lookup resolves a room by its name).
 	FString MakeUniqueRoomName(const FString& Desired) const;
 
 	UFUNCTION(BlueprintCallable, Category = "Interior")
