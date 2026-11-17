@@ -63,8 +63,18 @@ class ProjectSchema(unittest.TestCase):
     def test_a_point_with_three_numbers(self):
         self.expect(lambda d: d["buildings"][0]["footprint"].__setitem__(0, [0, 0, 0]), "$.buildings[0].footprint[0]", "at most 2")
 
-    def test_a_floor_below_the_ground(self):
-        self.expect(lambda d: d["buildings"][0]["interior"]["floors"][0].update(level=0), ".level", "below the minimum")
+    def test_a_floor_that_does_not_exist(self):
+        # There is no level 0: the ground floor is 1 and the first basement is -1.
+        self.expect(lambda d: d["buildings"][0]["interior"]["floors"][0].update(level=0), ".level", "is not allowed")
+        self.expect(lambda d: d["buildings"][0]["interior"]["floors"][0].update(level=-21), ".level", "below the minimum")
+        self.expect(lambda d: d["buildings"][0].update(firstLevel=0), ".firstLevel", "is not allowed")
+
+    def test_a_building_with_basements_is_valid(self):
+        data = copy.deepcopy(self.project)
+        building = data["buildings"][0]
+        building["firstLevel"] = -1
+        building["interior"]["floors"][0]["level"] = -1
+        self.assertEqual(errors_of(PROJECT_SCHEMA, data), [])
 
     def test_floor_count_and_authored_level_have_an_upper_bound(self):
         self.expect(lambda d: d["buildings"][0].update(floorCount=201), ".floorCount", "above the maximum")
