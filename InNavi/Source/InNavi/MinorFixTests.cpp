@@ -324,7 +324,9 @@ bool FMinorFixDatabasePrecisionTest::RunTest(const FString& Parameters)
 		const TArray<FVector2D>& Outline = Building->GetFootprint();
 		for (int32 Index = 0; Index < Outline.Num() && Index < Nodes.Num(); ++Index)
 		{
-			const FVector2D Expected((Nodes[Index].Y - RefLon) * MetersPerDegreeLon, (Nodes[Index].X - RefLat) * MetersPerDegreeLat);
+			// North is X and east is Y (not the other way round: that would be a mirror image of the map). Written out here on purpose, not
+			// through GeoProjection, so that this test does not just agree with the code it checks.
+			const FVector2D Expected((Nodes[Index].X - RefLat) * MetersPerDegreeLat, (Nodes[Index].Y - RefLon) * MetersPerDegreeLon);
 			Worst = FMath::Max(Worst, FVector2D::Distance(Outline[Index], Expected));
 			++Compared;
 		}

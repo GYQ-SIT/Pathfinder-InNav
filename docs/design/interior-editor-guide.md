@@ -171,7 +171,7 @@ to confirm).
 
 Then, in order: **2D | 3D**, one segmented control (the active mode is blue) that toggles the preview mode (see below);
 **Undo** and **Redo** (the same as `Ctrl+Z`/`Ctrl+Y`); a **Snapping** button (same on/off as pressing `N` - see Snapping
-below), only here, not on the exterior screen; a **Colours** button (turns the room colours on and off: in the 2D plan each room is filled with its Room type colour, in 3D its floor is; on by default, not saved); and, only while in 3D preview, a **View**/**Edit** toggle (amber for View,
+below), only here, not on the exterior screen; a **Colours** button (turns the room colours on and off: in the 2D plan each room is filled with its Room type colour, in 3D its floor is; on by default, not saved); in 2D only, **Turn left** and **Turn right** (turn the whole plan a quarter turn at a time, so that a tall building can be laid across the screen; only the way the plan is looked at turns: the rooms, doors and the building are not changed, so nothing is saved or undone, and they are not the Tools panel's Rotate left / Rotate right, which turn the selected room; the turn is kept until it is turned back, also on another floor); and, only while in 3D preview, a **View**/**Edit** toggle (amber for View,
 green for Edit; it is 3D's sub-mode - covered in the 3D preview section below). Drop-downs in the editor share one dark
 look. Which floor you are on is shown by the Floor panel (switch with it or with `[`/`]`). The 3D camera controls are not on this bar: while
 in 3D preview a **Camera** menu appears in the menu bar after **Window**. Its dropdown
@@ -181,20 +181,37 @@ so you can press them repeatedly). Clicking anywhere else closes it.
 
 ## UI scale
 
-The desktop UI scales automatically as the window is resized. The start screen, project
-library, dialogs and both editor screens use the existing 1920x1080 design as a reference:
-1080p keeps its original size, 720p scales it down, and 4K doubles it. Both width and height
-are considered so controls also fit narrower, taller and ultrawide windows. Bars and dock
-areas stretch to the window edges; floating panels stay inside the usable workspace.
-Resizing preserves your saved panel arrangement.
+The UI follows the resolution of the window (the scale is chosen from the window's shortest side,
+`UIScaleCurve` in `Config/DefaultEngine.ini`): 0.90 at a window 1080 high, and above that it grows in step
+with the window (1440 -> 1.20, 2160 -> 1.80), so the UI takes the same share of the screen on a 1080p, a
+1440p and a 4K monitor, in the editor and in the packaged build. Below 1080 it shrinks more slowly than the
+window (720 -> 0.72, 480 -> 0.64), so a small window still shows readable text and has more room for the
+panels.
 
-This is configured by `UIScaleRule=Custom` and `CustomScalingRuleClass` in
-`Config/DefaultEngine.ini` (`InNaviDPIScalingRule`). The phone app keeps its own scaling.
+**UI size.** On top of that the UI can be made bigger or smaller at any resolution, for a presentation or a
+small screen. It is the **UI Size** dock panel (a dock panel like the others, on both editor screens; **Window >
+UI Size** only shows or hides it, and it starts hidden): **-** and **+** step through 80, 90, 100, 110, 125,
+150, 175 and 200 %, the framed box between them shows the size now, and **Default size** goes back to 100 %.
+There is no slider on purpose: every step rescales the whole UI and the panel moves under the mouse, so a
+dragged slider flickered. Hover a control to see what it does and its shortcut. **Ctrl +**, **Ctrl -** and
+**Ctrl 0** do the same on the editor screens, and keep the panel up to date. The start page and the project pages are not affected by
+the UI size (they follow the window size and nothing else), and the keys do nothing there.
+The size applies at once to both editor screens (the exterior one and the interior one) and is remembered for the next run (`[InNavi.Display] UiSizePercent`
+in `GameUserSettings.ini`). The plain `=`, `-` and `0` keys keep their uses (grow and shrink a room, rotate).
+The phone app is not affected: it keeps a fixed 0.77 (`Config/Android/AndroidEngine.ini`) and fits its own
+layout to the screen width.
+
+When the screen's resolution is switched in the Windows display settings while the program runs, the
+program follows it: the engine itself leaves the window at its old size, so `UDisplayChangeSubsystem`
+waits for the change to settle and then resizes the window (a full-screen window becomes the size of the
+new screen; a windowed one is only made smaller if it no longer fits, and centred), and the UI scale
+follows the new window size. The same check runs once, two seconds after the start, for a program that
+was last run at another resolution. Resize is logged as `[Display] ...` in the log.
 
 ## Dockable panels
 
-Eight panels — **Toolbar**, **Floor**, **Properties**, **Layers**, **Navigation**,
-**Audio**, **Map**, **Debug** — sit in a Visual Studio / Unreal-style docking layout. The
+Nine panels — **Toolbar**, **Floor**, **Properties**, **Layers**, **Navigation**,
+**Audio**, **Map**, **Debug**, **UI Size** — sit in a Visual Studio / Unreal-style docking layout. The
 middle of the screen (the floor plan or the 3D view) is never part of the layout; panels
 dock around it, on the left, right, top or bottom edge, and sit on top of the canvas.
 
@@ -444,7 +461,7 @@ floor. Switching buildings (via the building switcher) exits back to 2D first.
 ### Isolate & Rotate
 
 In **3D**, click **Isolate** in the group **Isolate | Orbit | Grab** (in the bar under the menus, between
-**Colours** and **View**) to look at the model on its own and move and turn it, the way the SIT Campus
+**Colours** and **View**; the two Turn buttons are only there in 2D) to look at the model on its own and move and turn it, the way the SIT Campus
 Wayfinder's map is handled. The big **bottom platform** the building stands on is hidden, and
 so are the surrounding ground and the other buildings. **Every floor is kept, the first one too**:
 the first floor stands on a floor slab of its own (a slab at its base, like the floors above it have), made

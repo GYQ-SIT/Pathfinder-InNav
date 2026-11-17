@@ -12,6 +12,9 @@
 #include "StartScreenStyle.h"
 #include "MapPanelWidget.h"
 #include "DebugPanelWidget.h"
+#include "UiSizePanelWidget.h"
+#include "UiSizeSubsystem.h"
+#include "UiToolTip.h"
 #include "LayoutValidationPanelWidget.h"
 #include "PluginToolHost.h"
 #include "ConfirmDialogWidget.h"
@@ -133,54 +136,8 @@ namespace
 
 UWidget* UInteriorScreenWidget::MakeToolTipWidget(const TCHAR* TooltipLabel)
 {
-	UTextBlock* TooltipText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
-	TooltipText->SetText(FText::FromString(FString(TooltipLabel)));
-	TooltipText->SetColorAndOpacity(FSlateColor(FLinearColor::Black));
-	TooltipText->SetAutoWrapText(true);
-	// Left-justified text in a fixed-width box left a ragged, lopsided-looking gap on the
-	// right of every line shorter than the longest one - centering each wrapped line reads as
-	// a balanced block instead.
-	TooltipText->SetJustification(ETextJustify::Center);
-	FSlateFontInfo TooltipFont = TooltipText->GetFont();
-	TooltipFont.TypefaceFontName = TEXT("Regular"); // the default font style otherwise renders bold
-	TooltipText->SetFont(TooltipFont);
-
-	// Descriptions are full sentences now (how to actually use the mode, not just its name) -
-	// wide enough for about 7 words a line before wrapping, instead of stretching edge to
-	// edge. MaxDesiredWidth alone let the wrap collapse to one word per line (nothing gave
-	// AutoWrapText an actual width to wrap against) - WidthOverride is a hard width, so
-	// wrapping has something real to measure against.
-	USizeBox* TooltipSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-	TooltipSizeBox->SetWidthOverride(1000.f);
-	TooltipSizeBox->SetContent(TooltipText);
-
-	UBorder* TooltipBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-	TooltipBorder->SetBrushColor(FLinearColor::White);
-	TooltipBorder->SetPadding(FMargin(10.f, 6.f));
-	TooltipBorder->SetContent(TooltipSizeBox);
-
-	// UWidget::SetToolTip (below) builds its SToolTip with no border/background of its own
-	// (BorderImage(nullptr)), unlike the engine's native default tooltip (SetToolTipText),
-	// which has a soft drop shadow baked into its brush. Faking that here with a second,
-	// darker copy of the same box behind the real one, offset a few px down-right - an Overlay
-	// stretches every child to match its largest sibling by default, so the shadow layer ends
-	// up the same size as the real box even though it has no text of its own.
-	UBorder* ShadowBorder = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-	ShadowBorder->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.35f));
-
-	// Overlay slots default to Left/Top, not Fill - without Fill on both, the empty shadow
-	// layer would just collapse to zero size instead of stretching to match its sibling.
-	UOverlay* TooltipOverlay = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass());
-	UOverlaySlot* ShadowSlot = TooltipOverlay->AddChildToOverlay(ShadowBorder);
-	ShadowSlot->SetHorizontalAlignment(HAlign_Fill);
-	ShadowSlot->SetVerticalAlignment(VAlign_Fill);
-	ShadowSlot->SetPadding(FMargin(3.f, 3.f, 0.f, 0.f));
-	UOverlaySlot* ForegroundSlot = TooltipOverlay->AddChildToOverlay(TooltipBorder);
-	ForegroundSlot->SetHorizontalAlignment(HAlign_Fill);
-	ForegroundSlot->SetVerticalAlignment(VAlign_Fill);
-	ForegroundSlot->SetPadding(FMargin(0.f, 0.f, 3.f, 3.f));
-
-	return TooltipOverlay;
+	// One hover hint for the whole UI: see UiToolTip.h.
+	return UiToolTip::Make(WidgetTree, FString(TooltipLabel));
 }
 
 TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
@@ -679,6 +636,11 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		WindowDebugCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowDebug"), TEXT("Debug"));
 		WindowDebugCheckbox->SetIsChecked(false);
 		WindowDebugCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowDebugCheckChanged);
+
+		// Starts unchecked - the UI Size panel starts hidden. The Window menu only shows or hides it; the size is set in the panel.
+		WindowUiSizeCheckbox = AddDropdownCheckRow(WindowDropdownStack, TEXT("Chk_WindowUiSize"), TEXT("UI Size"));
+		WindowUiSizeCheckbox->SetIsChecked(false);
+		WindowUiSizeCheckbox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnWindowUiSizeCheckChanged);
 		PluginToolHost = NewObject<UPluginToolHost>(this);
 		PluginToolHost->AddMenu(LayoutTools::EScreen::Interior, [&AddDropdownCheckRow, WindowDropdownStack](const FString& Name, const FString& Label)
 		{
@@ -872,6 +834,12 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		// Room colours: fills the rooms in the 2D plan with their type's colour. The swatch is coloured when on and grey when off (HandleRoomColoursChanged).
 		RoomColoursButton = AddEditButton(TEXT("Btn_RoomColours"), TEXT(""), TEXT("Colours"), TEXT("Room colours ON"), &RoomColoursIcon);
 		RoomColoursButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRoomColoursClicked);
+		// Turn the plan: two buttons for the 2D plan only, one quarter turn each. They turn how the plan is looked at (a tall building can be laid across
+		// the screen); the rooms do not move, so they are not Rotate left / Rotate right of the Tools panel, which turn the selected room.
+		TurnPlanLeftButton = AddEditButton(TEXT("Btn_TurnPlanLeft"), TEXT("Icon_RotateCCW"), TEXT("Turn left"), TEXT("Turn the whole 2D plan to the left (only the view: the layout does not change)"), nullptr);
+		TurnPlanLeftButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnTurnPlanLeftClicked);
+		TurnPlanRightButton = AddEditButton(TEXT("Btn_TurnPlanRight"), TEXT("Icon_RotateCW"), TEXT("Turn right"), TEXT("Turn the whole 2D plan to the right (only the view: the layout does not change)"), nullptr);
+		TurnPlanRightButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnTurnPlanRightClicked);
 
 
 		// Isolate | Orbit | Grab - in 3D only, as one framed group like 2D | 3D. Isolate hides the bottom platform and the surroundings and lets the
@@ -1287,6 +1255,11 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		DebugPanelWidget->SetOwnerScreen(this);
 		DebugPanelWidget->SetInfoProvider([this]() { return BuildDebugInfo(); });
 		DockHost->RegisterPanel(FName(GetDockPanelName(EDockPanelId::Debug)), FText::FromString(GetDockPanelName(EDockPanelId::Debug)), DebugPanelWidget);
+
+		// -- UI Size panel: the shared one (UiSizePanelWidget.h), also used by the exterior screen. Starts hidden.
+		UiSizePanelWidget = CreateWidget<UUiSizePanelWidget>(this, UUiSizePanelWidget::StaticClass());
+		UiSizePanelWidget->SetOwnerScreen(this);
+		DockHost->RegisterPanel(FName(GetDockPanelName(EDockPanelId::UiSize)), FText::FromString(GetDockPanelName(EDockPanelId::UiSize)), UiSizePanelWidget);
 		PluginToolHost->CreatePanels(this, DockHost, LayoutTools::EScreen::Interior, [this]() { ShowValidationPanel(); });
 		ValidationPanelWidget = Cast<ULayoutValidationPanelWidget>(PluginToolHost->FindPanel(TEXT("Validation")));
 
@@ -1311,6 +1284,12 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 void UInteriorScreenWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+
+	// The UI size applies on the editor screens only (not on the start page or the project pages): this one is on screen now.
+	if (UUiSizeSubsystem* UiSizeSettings = UUiSizeSubsystem::Get(this))
+	{
+		UiSizeSettings->EditorScreenOpened(this);
+	}
 
 	if (BackButton)
 	{
@@ -1525,6 +1504,7 @@ void UInteriorScreenWidget::RefreshWindowMenuChecks()
 	Sync(WindowAudioCheckbox, EDockPanelId::Audio);
 	Sync(WindowMapCheckbox, EDockPanelId::Map);
 	Sync(WindowDebugCheckbox, EDockPanelId::Debug);
+	Sync(WindowUiSizeCheckbox, EDockPanelId::UiSize);
 	if (PluginToolHost) PluginToolHost->Sync();
 }
 
@@ -1564,6 +1544,10 @@ void UInteriorScreenWidget::SyncDockPanelWidths()
 
 void UInteriorScreenWidget::NativeDestruct()
 {
+	if (UUiSizeSubsystem* UiSizeSettings = UUiSizeSubsystem::Get(this))
+	{
+		UiSizeSettings->EditorScreenClosed(this);
+	}
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->OnSelectedDoorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedDoorChanged);
@@ -1832,6 +1816,13 @@ UWidget* UInteriorScreenWidget::FindScreenWidget(FName Name) const
 			return Found;
 		}
 	}
+	if (UiSizePanelWidget)
+	{
+		if (UWidget* Found = UiSizePanelWidget->FindContentWidget(Name))
+		{
+			return Found;
+		}
+	}
 	return nullptr;
 }
 
@@ -1843,7 +1834,7 @@ FVector2D UInteriorScreenWidget::GetCanvasSize() const
 		return ReliableSize;
 	}
 	// The screen has not been painted yet (the saved layout is loaded before that). The raw viewport is in screen pixels, but the
-	// layout works in UI units - pixels divided by the viewport's DPI scale - so a layout loaded against the raw size would
+	// layout works in UI units - pixels divided by the DPI scale (it follows the window size, 0.90 at 1080) - so a layout loaded against the raw size would
 	// come out that much too small.
 	const FVector2D Viewport = UWidgetLayoutLibrary::GetViewportSize(this);
 	const float DpiScale = UWidgetLayoutLibrary::GetViewportScale(this);
@@ -1879,6 +1870,7 @@ const TCHAR* UInteriorScreenWidget::GetDockPanelName(EDockPanelId Id)
 	case EDockPanelId::Map:        return TEXT("Map");
 	case EDockPanelId::Debug:      return TEXT("Debug");
 	case EDockPanelId::Validation: return TEXT("Validation");
+	case EDockPanelId::UiSize:     return TEXT("UI Size");
 	default:                       return TEXT("");
 	}
 }
@@ -1988,6 +1980,14 @@ void UInteriorScreenWidget::HandlePreviewModeChanged(bool bIsActive)
 	if (FloorPlanWidget)
 	{
 		FloorPlanWidget->SetVisibility(bIsActive ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	}
+	// The plan can only be turned in 2D.
+	for (UButton* TurnButton : { TurnPlanLeftButton, TurnPlanRightButton })
+	{
+		if (TurnButton)
+		{
+			TurnButton->SetVisibility(bIsActive ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+		}
 	}
 
 	if (Switch2DButton)
@@ -2274,6 +2274,10 @@ void UInteriorScreenWidget::RefreshDockPanelContentWidths()
 	if (AudioPanelWidget)
 	{
 		AudioPanelWidget->SetContentWidth(ComputePanelButtonWidth(EDockPanelId::Audio));
+	}
+	if (UiSizePanelWidget)
+	{
+		UiSizePanelWidget->SetContentWidth(ComputePanelButtonWidth(EDockPanelId::UiSize));
 	}
 	if (MapPanelWidget)
 	{
@@ -3637,6 +3641,22 @@ void UInteriorScreenWidget::OnSwitch3DClicked()
 	}
 }
 
+void UInteriorScreenWidget::OnTurnPlanLeftClicked()
+{
+	if (FloorPlanWidget)
+	{
+		FloorPlanWidget->TurnViewBy(-1);
+	}
+}
+
+void UInteriorScreenWidget::OnTurnPlanRightClicked()
+{
+	if (FloorPlanWidget)
+	{
+		FloorPlanWidget->TurnViewBy(1);
+	}
+}
+
 void UInteriorScreenWidget::OnRoomColoursClicked()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
@@ -3963,6 +3983,11 @@ void UInteriorScreenWidget::OnWindowMapCheckChanged(bool bIsChecked)
 void UInteriorScreenWidget::OnWindowDebugCheckChanged(bool bIsChecked)
 {
 	SetDockPanelUserHidden(EDockPanelId::Debug, !bIsChecked);
+}
+
+void UInteriorScreenWidget::OnWindowUiSizeCheckChanged(bool bIsChecked)
+{
+	SetDockPanelUserHidden(EDockPanelId::UiSize, !bIsChecked);
 }
 
 void UInteriorScreenWidget::ShowValidationPanel()

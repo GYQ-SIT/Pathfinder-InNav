@@ -16,6 +16,7 @@ nav:
   - Deliverables: deliverables.md
   - Performance: performance.md
   - Configuration: configuration.md
+  - Pull Request Guide: pull-request-guide.md
   - Design:
       - Interior Editor Guide: design/interior-editor-guide.md
       - Project File Format: design/project-file-format.md

@@ -12,6 +12,7 @@ class UBorder;
 class UButton;
 class UAudioPanelWidget;
 class UDebugPanelWidget;
+class UUiSizePanelWidget;
 class ULayoutValidationPanelWidget;
 class UPluginToolHost;
 class UNavigationDockPanelWidget;
@@ -59,6 +60,7 @@ public:
 	UWidget* FindScreenWidget(FName Name) const;
 	UAudioPanelWidget* GetAudioPanelForTests() const { return AudioPanelWidget; }
 	UDebugPanelWidget* GetDebugPanelForTests() const { return DebugPanelWidget; }
+	UUiSizePanelWidget* GetUiSizePanelForTests() const { return UiSizePanelWidget; }
 	ULayoutValidationPanelWidget* GetValidationPanelForTests() const { return ValidationPanelWidget; }
 	UMapPanelWidget* GetMapPanelForTests() const { return MapPanelWidget; }
 	UBuildingInfoPanelWidget* GetBuildingInfoPanelForTests() const { return BuildingInfoPanelWidget; }
@@ -212,6 +214,10 @@ private:
 	UFUNCTION()
 	void OnWindowDebugCheckChanged(bool bIsChecked);
 
+	// Window > UI Size - show or hide the UI Size panel.
+	UFUNCTION()
+	void OnWindowUiSizeCheckChanged(bool bIsChecked);
+
 	UFUNCTION()
 	void OnWindowNavigationCheckChanged(bool bIsChecked);
 
@@ -240,6 +246,7 @@ private:
 	void SaveDockLayoutToDisk() const;
 	// The Audio panel's controls size themselves from the width of the dock group showing it.
 	void SyncAudioPanelWidth();
+	void SyncUiSizePanelWidth();
 	// Same for the Map panel's building controls.
 	void SyncMapPanelWidth();
 	void SyncNavigationPanelWidth();
@@ -316,6 +323,8 @@ private:
 
 	UPROPERTY()
 	UCheckBox* WindowDebugCheckbox = nullptr;
+	UPROPERTY()
+	UCheckBox* WindowUiSizeCheckbox = nullptr;
 
 	UPROPERTY()
 	UCheckBox* WindowNavigationCheckbox = nullptr;
@@ -349,6 +358,10 @@ private:
 	// The Debug dock panel (shared with the interior editor, see DebugPanelWidget.h). Starts hidden.
 	UPROPERTY()
 	UDebugPanelWidget* DebugPanelWidget = nullptr;
+
+	// The UI Size dock panel (shared with the interior editor, see UiSizePanelWidget.h). Starts hidden.
+	UPROPERTY()
+	UUiSizePanelWidget* UiSizePanelWidget = nullptr;
 	UPROPERTY()
 	ULayoutValidationPanelWidget* ValidationPanelWidget = nullptr;
 	UPROPERTY() UPluginToolHost* PluginToolHost = nullptr;

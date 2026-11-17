@@ -17,11 +17,12 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Styling/SlateTypes.h"
 
-// Colours and sizes come from the design team's page. Its sizes are browser pixels; the project's UI scale is 0.77, so
-// they are divided by it, and font sizes (points, drawn at 96 DPI) are 3/4 of a pixel size.
+// Colours and sizes come from the design team's page. Its sizes are browser pixels; the project's UI scale is 0.90 at a window
+// 1080 high (and follows the window size from there, see DefaultEngine.ini), so they are divided by that reference and then scale
+// with the window like every other screen, and font sizes (points, drawn at 96 DPI) are 3/4 of a pixel size.
 namespace
 {
-	constexpr float DialogUiScale = 1.f / 0.77f;
+	constexpr float DialogUiScale = 1.f / 0.90f;
 	constexpr float DialogPixelsToFont = 0.75f;
 
 	FLinearColor DialogRgb(uint8 R, uint8 G, uint8 B, uint8 A = 255)
