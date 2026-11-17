@@ -7,6 +7,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/Parse.h"
+#include "RenderUtils.h"
 
 namespace
 {
@@ -31,16 +32,21 @@ void UDesktopRenderingSubsystem::Initialize(FSubsystemCollectionBase& Collection
 	bAvailable = !GIsEditor && !FParse::Param(FCommandLine::Get(), TEXT("MobileApp"));
 #endif
 	if (!bAvailable) return;
-	bool bUseLightweight = true;
-	GConfig->GetBool(SettingsSection, TEXT("Lightweight"), bUseLightweight, GGameUserSettingsIni);
+	// Apply at world BeginPlay, after engine scalability/user settings have finished loading.
+	bLightweight = ResolveLightweightPreference(GConfig->Find(GGameUserSettingsIni), FCommandLine::Get());
+}
+
+bool UDesktopRenderingSubsystem::ResolveLightweightPreference(const FConfigFile* Settings, const TCHAR* CommandLine)
+{
+	bool bUseLightweight = false;
+	if (Settings) Settings->GetBool(SettingsSection, TEXT("Lightweight"), bUseLightweight);
 	FString Override;
-	if (FParse::Value(FCommandLine::Get(), TEXT("DesktopRenderPreset="), Override))
+	if (FParse::Value(CommandLine, TEXT("DesktopRenderPreset="), Override))
 	{
 		if (Override.Equals(TEXT("Standard"), ESearchCase::IgnoreCase)) bUseLightweight = false;
 		else if (Override.Equals(TEXT("Lightweight"), ESearchCase::IgnoreCase)) bUseLightweight = true;
 	}
-	// Apply at world BeginPlay, after engine scalability/user settings have finished loading.
-	bLightweight = bUseLightweight;
+	return bUseLightweight;
 }
 
 void UDesktopRenderingSubsystem::SetLightweight(bool bEnabled, bool bPersist)
@@ -50,8 +56,14 @@ void UDesktopRenderingSubsystem::SetLightweight(bool bEnabled, bool bPersist)
 	{
 		if (IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(Setting.Name))
 		{
-			if (!OriginalSettings.Contains(Setting.Name)) OriginalSettings.Add(Setting.Name, Variable->GetInt());
-			Variable->SetWithCurrentPriority(bEnabled ? Setting.Lightweight : OriginalSettings.FindChecked(Setting.Name));
+			if (Variable->TestFlags(ECVF_ReadOnly)) continue;
+			// UE only consults this switch after initialization when on-demand RT was enabled at startup.
+			if (FCString::Strcmp(Setting.Name, TEXT("r.RayTracing.Enable")) == 0 && !IsRayTracingEnableOnDemandSupported()) continue;
+			if (bEnabled && !OriginalSettings.Contains(Setting.Name)) OriginalSettings.Add(Setting.Name, Variable->GetInt());
+			const int32* Original = OriginalSettings.Find(Setting.Name);
+			if (!bEnabled && !Original) continue; // Standard startup leaves the engine's settings alone.
+			const int32 Desired = bEnabled ? Setting.Lightweight : *Original;
+			if (Variable->GetInt() != Desired) Variable->SetWithCurrentPriority(Desired);
 		}
 	}
 	bLightweight = bEnabled;
@@ -100,7 +112,10 @@ void UDesktopRenderingSubsystem::Deinitialize()
 	OpaqueScreens.Reset();
 	for (const auto& Setting : OriginalSettings)
 	{
-		if (IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(*Setting.Key)) Variable->SetWithCurrentPriority(Setting.Value);
+		if (IConsoleVariable* Variable = IConsoleManager::Get().FindConsoleVariable(*Setting.Key))
+		{
+			if (!Variable->TestFlags(ECVF_ReadOnly) && Variable->GetInt() != Setting.Value) Variable->SetWithCurrentPriority(Setting.Value);
+		}
 	}
 	OriginalSettings.Reset();
 	Super::Deinitialize();

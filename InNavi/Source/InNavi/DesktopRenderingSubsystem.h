@@ -6,6 +6,7 @@
 
 class UGameViewportClient;
 class UUserWidget;
+class FConfigFile;
 
 UCLASS()
 class INNAVI_API UDesktopRenderingSubsystem : public UGameInstanceSubsystem
@@ -22,7 +23,9 @@ public:
 
 private:
 	friend class FDesktopRenderingPresetTest;
+	friend class FDesktopRenderingDefaultsTest;
 	friend class FDesktopRenderingScreenTest;
+	static bool ResolveLightweightPreference(const FConfigFile* Settings, const TCHAR* CommandLine);
 	void RestoreWorldRendering();
 	void UpdateOpaqueScreen(UUserWidget* Screen, bool bVisible, UGameViewportClient* Viewport);
 	TMap<FString, int32> OriginalSettings;

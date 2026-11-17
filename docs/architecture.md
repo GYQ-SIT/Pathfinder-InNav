@@ -67,7 +67,7 @@ flowchart TD
     Screens --> Dock[DockLayoutModel and DockSharedPanels]
     Screens --> Nav[NavigationPanelWidget]
     Screens --> Host[PluginToolHost]
-    Screens --> DPI[InNaviDPIScalingRule]
+    Screens --> DPI[UIScaleCurve, UI Size and DisplayFit]
     PC --> Nav
     PC --> Gen[InteriorGenerator and FloorLayout]
     PC --> Data[BuildingGenerator]
@@ -108,12 +108,14 @@ placements between screens within the application session. Visibility, docking/f
 entirely of shared panels transfer their full split/tab tree, order and ratios; shared panels mixed with screen-specific panels transfer
 individually. Screens publish state on layout/menu changes and when leaving, then apply it after loading their own layout.
 
-`UInNaviDPIScalingRule`, selected by `DefaultEngine.ini`, fits the desktop's 1920×1080 design to both viewport dimensions:
-`max(0.01, 0.77 × min(width / 1920, height / 1080))`. At 1080p the reference scale remains 0.77. Android/iOS and desktop `-MobileApp`
-retain 0.77 and the phone-specific layout; invalid/zero viewport sizes use the reference scale. `StartStyle::DesignToUi` converts design
-pixels to UI units. Dock calculations use UI-space sizes, and clamp the computed floating-window rectangles inside the workspace without
-overwriting the saved placement, allowing a larger window to restore the user's arrangement. This covers menus, dialogs and the library
-as well as the editor screens (`DesktopResponsiveTests`).
+Desktop DPI follows the shortest-side `UIScaleCurve` in `DefaultEngine.ini`: 0.72 at 720p, 0.90 at 1080p and 1.80 at
+2160p. The obsolete custom 1920×1080 fit rule is removed. `UUiSizeSubsystem` adds the user's UI Size multiplier on the two
+editor screens; start/library screens use the window curve alone. `UDisplayChangeSubsystem` / `DisplayFit` resize or fit the
+Windows game window when display resolution changes. Android keeps its fixed 0.77 platform curve and phone layout.
+`StartStyle::DesignToUi` converts design pixels to UI units. Dock calculations use UI-space sizes, and intentionally keep computed
+floating rectangles fully inside the usable workspace (below the menu bar and above the bottom margin). Partial off-screen
+placement is not supported. Computation preserves the stored position/size, so enlarging the viewport restores the saved arrangement
+(`DesktopResponsiveTests`).
 
 Start and project-library screens register full-window pointer coverage through `SetPointerOverUICallback` and own a keyboard-shortcut
 block. The controller drops shortcut key presses while these screens cover the scene, while allowing releases and mouse events through.

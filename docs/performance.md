@@ -110,6 +110,12 @@ tests run on (see "The machine that runs the CI is slower" below).
 
 ## Desktop memory usage
 
+The shipped desktop default is **Standard**. Lightweight is an explicit Map-panel or command-line choice. Historical measurements
+below that specify Lightweight still describe that opt-in configuration. The preset switches virtual shadow maps at runtime; ray
+tracing is toggled only with startup on-demand support enabled, otherwise its engine state is retained. See
+[rendering configuration](configuration.md#desktop-rendering-switches).
+
+
 `InNavi.Performance.MemoryUsage` measures process RAM (resident working set) and committed memory, in bytes, at these checkpoints:
 after garbage collection, with the real campus loaded, with a generated ten-floor interior, after the first route builds its graph,
 after eleven more routes reuse it, and after destroying the workload, clearing the graph cache and collecting garbage again.

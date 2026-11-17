@@ -243,6 +243,8 @@ of the editor are not compatible; the first run after updating uses the team def
   it to the front. Dragging the strip of a window that holds a single panel docks it like a tab drag;
   dropping on another window's strip adds the panel as a tab of that window. Right-click while
   dragging a tab cancels the drop.
+  Floating windows stay fully inside the usable viewport; they cannot be parked partly off-screen. Shrinking the viewport fits
+  their displayed bounds while retaining their saved position and size for a larger viewport.
 
 ### Toolbar panel
 
