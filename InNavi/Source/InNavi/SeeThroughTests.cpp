@@ -96,18 +96,19 @@ bool FSeeThroughDistanceTest::RunTest(const FString& Parameters)
 	{
 		return false;
 	}
-	Controller->BuildCampusInteriorPreviewForTests();
-
 	// Far away: the whole, solid building, and its rooms out of sight.
 	PutCameraAbove(Controller, E2, 100000.f);
+	Controller->BuildCampusInteriorPreviewForTests();
 	TestNearlyEqual(TEXT("far away the building is opaque"), E2->GetBuildingOpacity(), 1.f, 0.01f);
 	TestEqual(TEXT("and none of its rooms show"), Controller->CountShownCampusRoomsForTests(TEXT("E2")), 0);
+	TestEqual(TEXT("unrevealed rooms have no preview actors"), Controller->CountCachedCampusRoomsForTests(TEXT("E2")), 0);
 
 	// Close: walls and roof clear, the rooms show.
 	PutCameraAbove(Controller, E2, 500.f);
 	TestNearlyEqual(TEXT("close the walls and roof are clear"), E2->GetBuildingOpacity(), ClearOpacity, 0.01f);
 	const int32 Total = Controller->CountShownCampusRoomsForTests(TEXT("E2"));
 	TestTrue(TEXT("and its rooms show"), Total > 0);
+	TestEqual(TEXT("revealing by distance creates the rooms"), Controller->CountCachedCampusRoomsForTests(TEXT("E2")), Total);
 
 	// The switch for every building off: solid again, whatever the distance.
 	Controller->SetCampusSeeThroughEnabled(false);
@@ -141,6 +142,64 @@ bool FSeeThroughDistanceTest::RunTest(const FString& Parameters)
 	// The switch on again: the camera is still close.
 	Controller->SetCampusSeeThroughEnabled(true);
 	TestNearlyEqual(TEXT("with see-through on again the close building is clear"), E2->GetBuildingOpacity(), ClearOpacity, 0.01f);
+	TestEqual(TEXT("revealing again reuses the cached rooms"), Controller->CountCachedCampusRoomsForTests(TEXT("E2")), Total);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FSeeThroughLazyPreviewTest, "InNavi.Building.SeeThrough.LazyPreview", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FSeeThroughLazyPreviewTest::RunTest(const FString& Parameters)
+{
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	Controller->SetCampusSeeThroughEnabled(false);
+	Controller->Possess(Fixture.World->SpawnActor<ADefaultPawn>());
+	TestTrue(TEXT("the project loads through the app's load path"),
+		Controller->LoadBuildingDataFromPathOrDatabase(FPaths::ProjectDir() / TEXT("Data/buildings.json")) > 0);
+	TestFalse(TEXT("loading an opaque campus creates no interior actors"), static_cast<bool>(TActorIterator<AInteriorRoom>(Fixture.World)));
+	Controller->SetBuildingRoomFloor(TEXT("E2"), 1);
+	TestEqual(TEXT("choosing a floor on an opaque building creates nothing"), Controller->CountCachedCampusRoomsForTests(TEXT("E2")), 0);
+
+	Controller->SetCampusBuildingsVisible(false);
+	Controller->SetBuildingMadeTransparent(TEXT("E2"), true);
+	TestEqual(TEXT("a hidden building creates no previews even if made transparent"), Controller->CountCachedCampusRoomsForTests(TEXT("E2")), 0);
+	Controller->SetCampusBuildingsVisible(true);
+	Controller->SetBuildingMadeTransparent(TEXT("E2"), true);
+	TestEqual(TEXT("first reveal creates only the selected floor's three rooms"), Controller->CountCachedCampusRoomsForTests(TEXT("E2")), 3);
+	TestEqual(TEXT("the selected floor is visible immediately"), Controller->CountShownCampusRoomsForTests(TEXT("E2")), 3);
+	TestEqual(TEXT("the other authored building is not loaded"), Controller->CountCachedCampusRoomsForTests(TEXT("E6")), 0);
+
+	TArray<TWeakObjectPtr<AInteriorRoom>> FirstFloorRooms;
+	for (TActorIterator<AInteriorRoom> It(Fixture.World); It; ++It) FirstFloorRooms.Add(*It);
+	Controller->SetBuildingRoomFloor(TEXT("E2"), 2);
+	TestEqual(TEXT("switching floors adds just the newly needed room"), Controller->CountCachedCampusRoomsForTests(TEXT("E2")), 4);
+	TestEqual(TEXT("only floor two shows"), Controller->CountShownCampusRoomsForTests(TEXT("E2")), 1);
+	Controller->SetBuildingRoomFloor(TEXT("E2"), 99);
+	TestEqual(TEXT("a missing floor creates no rooms"), Controller->CountCachedCampusRoomsForTests(TEXT("E2")), 4);
+	TestEqual(TEXT("a missing floor shows no rooms"), Controller->CountShownCampusRoomsForTests(TEXT("E2")), 0);
+	Controller->SetBuildingRoomFloor(TEXT("E2"), 1);
+	TestEqual(TEXT("returning to floor one shows its cached rooms"), Controller->CountShownCampusRoomsForTests(TEXT("E2")), 3);
+	for (const auto& Room : FirstFloorRooms)
+	{
+		TestTrue(TEXT("switching floors preserves the original room actors"), Room.IsValid() && !Room->IsHidden());
+	}
+	Controller->SetBuildingRoomFloor(TEXT("E2"), 0);
+	TestEqual(TEXT("all floors shows every room without duplication"), Controller->CountShownCampusRoomsForTests(TEXT("E2")), 4);
+	TestEqual(TEXT("all floors reuses already created rooms"), Controller->CountCachedCampusRoomsForTests(TEXT("E2")), 4);
+
+	Controller->SetBuildingRoomFloor(TEXT("E6"), 1);
+	Controller->SetBuildingMadeTransparent(TEXT("E6"), true);
+	TestEqual(TEXT("a second building can be revealed at the same time"), Controller->CountShownCampusRoomsForTests(TEXT("E6")), 4);
+	TestEqual(TEXT("the first building stays visible"), Controller->CountShownCampusRoomsForTests(TEXT("E2")), 4);
+	Controller->SetBuildingRoomFloor(TEXT("E6"), 0);
+	TestEqual(TEXT("all floors adds the second building's previously unneeded floor"), Controller->CountShownCampusRoomsForTests(TEXT("E6")), 5);
+
+	Controller->SetBuildingMadeTransparent(TEXT("E2"), false);
+	Controller->SetBuildingMadeTransparent(TEXT("E6"), false);
+	TestEqual(TEXT("opaque buildings keep their previews cached"), Controller->CountCachedCampusRoomsForTests(TEXT("E2")), 4);
+	TestEqual(TEXT("opaque cached rooms are hidden"), Controller->CountShownCampusRoomsForTests(TEXT("E2")), 0);
+	Controller->BuildCampusInteriorPreviewForTests();
+	TestFalse(TEXT("refresh drops stale actors without recreating hidden interiors"), static_cast<bool>(TActorIterator<AInteriorRoom>(Fixture.World)));
+	for (const auto& Room : FirstFloorRooms) TestFalse(TEXT("refresh destroys the old preview actors"), Room.IsValid());
 	return true;
 }
 

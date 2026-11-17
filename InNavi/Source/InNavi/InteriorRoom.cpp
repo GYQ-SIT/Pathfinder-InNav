@@ -67,7 +67,7 @@ static void BuildWallSpansForEdge(float EdgeLength, float WallHeight, const TArr
 	}
 }
 
-void AInteriorRoom::BuildWalls(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, float FloorBaseZ, float WallHeight, float WallThickness, const TArray<FInteriorOpening>& Openings, bool bClosedLoop)
+void AInteriorRoom::BuildWalls(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, float FloorBaseZ, float WallHeight, float WallThickness, const TArray<FInteriorOpening>& Openings, bool bClosedLoop, bool bCreateCollision)
 {
 	const int32 MinPoints = bClosedLoop ? 3 : 2;
 	if (Footprint.Num() < MinPoints)
@@ -84,6 +84,8 @@ void AInteriorRoom::BuildWalls(const TArray<FVector2D>& Footprint, float Scale, 
 	CachedWallThickness = WallThickness;
 	CachedOpenings = Openings;
 	CachedClosedLoop = bClosedLoop;
+	bGenerateCollision = bCreateCollision;
+	MeshComp->SetCollisionEnabled(bGenerateCollision ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
 
 	RebuildMesh();
 }
@@ -260,7 +262,7 @@ void AInteriorRoom::RebuildMesh()
 
 	TArray<FProcMeshTangent> Tangents;
 	TArray<FColor> VertexColors;
-	MeshComp->CreateMeshSection(0, Mesh.Vertices, Mesh.Triangles, Mesh.Normals, Mesh.UV0, VertexColors, Tangents, true);
+	MeshComp->CreateMeshSection(0, Mesh.Vertices, Mesh.Triangles, Mesh.Normals, Mesh.UV0, VertexColors, Tangents, bGenerateCollision);
 
 	if (!DynMaterial)
 	{
@@ -332,7 +334,7 @@ void AInteriorRoom::RebuildMesh()
 		UKismetProceduralMeshLibrary::CalculateTangentsForMesh(FloorVertices, FloorTriangles, FloorUV0, FloorNormals, FloorTangents);
 
 		TArray<FColor> FloorVertexColors;
-		MeshComp->CreateMeshSection(1, FloorVertices, FloorTriangles, FloorNormals, FloorUV0, FloorVertexColors, FloorTangents, true);
+		MeshComp->CreateMeshSection(1, FloorVertices, FloorTriangles, FloorNormals, FloorUV0, FloorVertexColors, FloorTangents, bGenerateCollision);
 
 		if (!FloorDynMaterial)
 		{

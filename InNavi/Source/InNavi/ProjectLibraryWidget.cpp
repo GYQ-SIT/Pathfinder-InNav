@@ -1,4 +1,6 @@
 #include "ProjectLibraryWidget.h"
+#include "DesktopRenderingSubsystem.h"
+#include "Engine/GameInstance.h"
 
 #include "BrandTopBarWidget.h"
 #include "EditScreenWidget.h"
@@ -147,6 +149,10 @@ void UProjectLibraryWidget::BlockClicksToTheScene()
 void UProjectLibraryWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	if (GetGameInstance())
+	{
+		if (auto* Rendering = GetGameInstance()->GetSubsystem<UDesktopRenderingSubsystem>()) Rendering->SetOpaqueScreen(this, true);
+	}
 	BlockClicksToTheScene();
 	for (UButton* Button : { BackButton, NewButton })
 	{
@@ -184,6 +190,10 @@ void UProjectLibraryWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 
 void UProjectLibraryWidget::NativeDestruct()
 {
+	if (GetGameInstance())
+	{
+		if (auto* Rendering = GetGameInstance()->GetSubsystem<UDesktopRenderingSubsystem>()) Rendering->SetOpaqueScreen(this, false);
+	}
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->OnActionFailed.RemoveDynamic(this, &UProjectLibraryWidget::HandleActionFailed);

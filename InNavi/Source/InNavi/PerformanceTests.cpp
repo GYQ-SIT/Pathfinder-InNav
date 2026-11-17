@@ -4,16 +4,26 @@
 #include "FrameStats.h"
 #include "LayoutValidationSession.h"
 #include "MobileRealSource.h"
+#include "EditScreenWidget.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
+#include "Engine/GameViewportClient.h"
+#include "EngineUtils.h"
 #include "PolyBuilding.h"
 #include "NavigationRoutePlanner.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformMemory.h"
+#include "HAL/PlatformProcess.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/CommandLine.h"
+#include "Misc/EngineVersion.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Parse.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "UObject/GarbageCollection.h"
 
 // The numbers behind docs/performance.md. Each test measures one thing at the size of the real data, writes what it measured to
 // Saved/Performance/<name>.json and into the test log, and fails only when a budget of the document is broken. The budgets are loose
@@ -44,15 +54,16 @@ namespace PerformanceTests
 		return Result;
 	}
 
-	void SaveMeasurement(const FString& Name, const TSharedRef<FJsonObject>& Data)
+	bool SaveMeasurement(const FString& Name, const TSharedRef<FJsonObject>& Data)
 	{
 		Data->SetStringField(TEXT("machine_cpu"), FPlatformMisc::GetCPUBrand().TrimStartAndEnd());
 		Data->SetNumberField(TEXT("machine_cores"), FPlatformMisc::NumberOfCores());
 		Data->SetNumberField(TEXT("machine_ram_gb"), FPlatformMemory::GetConstants().TotalPhysicalGB);
 		FString Text;
 		const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Text);
-		FJsonSerializer::Serialize(Data, Writer);
-		FFileHelper::SaveStringToFile(Text, *(FPaths::ProjectSavedDir() / TEXT("Performance") / (Name + TEXT(".json"))));
+		const FString Directory = FPaths::ProjectSavedDir() / TEXT("Performance");
+		return IFileManager::Get().MakeDirectory(*Directory, true) && FJsonSerializer::Serialize(Data, Writer)
+			&& FFileHelper::SaveStringToFile(Text, *(Directory / (Name + TEXT(".json"))));
 	}
 
 	// The rooms of the open building that a route can start or end in.
@@ -355,6 +366,110 @@ bool FPerformanceValidationTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// CPU process memory at repeatable checkpoints of a desktop data workload. This includes the editor/test harness;
+// use scripts/measure-memory.ps1 against a packaged desktop process for the rendered application's footprint.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPerformanceMemoryUsageTest, "InNavi.Performance.MemoryUsage", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FPerformanceMemoryUsageTest::RunTest(const FString& Parameters)
+{
+	using namespace PerformanceTests;
+	constexpr double BytesPerMiB = 1024.0 * 1024.0;
+	double MaxGrowthMiB = 0.0;
+	const bool bHasBudget = FParse::Value(FCommandLine::Get(), TEXT("MemoryMaxGrowthMiB="), MaxGrowthMiB);
+	if (bHasBudget && !TestTrue(TEXT("MemoryMaxGrowthMiB must be finite and positive"), FMath::IsFinite(MaxGrowthMiB) && MaxGrowthMiB > 0.0)) return false;
+
+	FNavigationRoutePlanner::ClearGraphCache();
+	CollectGarbage(RF_NoFlags, true);
+	const FPlatformMemoryStats Baseline = FPlatformMemory::GetStats();
+	const double Start = FPlatformTime::Seconds();
+	TArray<TSharedPtr<FJsonValue>> Snapshots;
+	uint64 MaxSampledResident = 0, MaxSampledCommitted = 0;
+	auto Sample = [&](const TCHAR* Phase)
+	{
+		const FPlatformMemoryStats Stats = FPlatformMemory::GetStats();
+		TestTrue(TEXT("process memory counters are available"), Stats.UsedPhysical > 0 && Stats.UsedVirtual > 0);
+		TestTrue(TEXT("process lifetime peaks cover the current counters"), Stats.PeakUsedPhysical >= Stats.UsedPhysical && Stats.PeakUsedVirtual >= Stats.UsedVirtual);
+		const int64 ResidentDelta = (int64)Stats.UsedPhysical - (int64)Baseline.UsedPhysical;
+		const int64 CommittedDelta = (int64)Stats.UsedVirtual - (int64)Baseline.UsedVirtual;
+		auto Snapshot = MakeShared<FJsonObject>();
+		Snapshot->SetStringField(TEXT("phase"), Phase);
+		Snapshot->SetNumberField(TEXT("elapsed_seconds"), FPlatformTime::Seconds() - Start);
+		Snapshot->SetNumberField(TEXT("resident_bytes"), Stats.UsedPhysical);
+		Snapshot->SetNumberField(TEXT("committed_bytes"), Stats.UsedVirtual);
+		Snapshot->SetNumberField(TEXT("process_lifetime_peak_resident_bytes"), Stats.PeakUsedPhysical);
+		Snapshot->SetNumberField(TEXT("process_lifetime_peak_committed_bytes"), Stats.PeakUsedVirtual);
+		Snapshot->SetNumberField(TEXT("resident_delta_from_baseline_bytes"), ResidentDelta);
+		Snapshot->SetNumberField(TEXT("committed_delta_from_baseline_bytes"), CommittedDelta);
+		Snapshots.Add(MakeShared<FJsonValueObject>(Snapshot));
+		MaxSampledResident = FMath::Max(MaxSampledResident, Stats.UsedPhysical);
+		MaxSampledCommitted = FMath::Max(MaxSampledCommitted, Stats.UsedVirtual);
+		AddInfo(FString::Printf(TEXT("Memory [%s]: resident %.2f MiB (%+.2f), committed %.2f MiB (%+.2f from baseline)"),
+			Phase, Stats.UsedPhysical / BytesPerMiB, ResidentDelta / BytesPerMiB, Stats.UsedVirtual / BytesPerMiB, CommittedDelta / BytesPerMiB));
+	};
+	Sample(TEXT("baseline_after_gc"));
+	auto Data = MakeShared<FJsonObject>();
+	{
+		FNavigationSearchFixture Fixture;
+		ON_SCOPE_EXIT { FNavigationRoutePlanner::ClearGraphCache(); };
+		Fixture.Interior->ClearLoadedInterior();
+		Fixture.Generator->ClearAllBuildings();
+		const FString Database = FPaths::ProjectDir() / TEXT("Data/map_extended.db");
+		if (!TestTrue(TEXT("the campus database is there"), IFileManager::Get().FileExists(*Database))) return false;
+		const int32 Buildings = Fixture.Generator->LoadBuildingsFromDatabase(Database);
+		const int32 Roads = Fixture.Generator->LoadRoadsAndPOIsFromDatabase(Database);
+		const int32 Context = Fixture.Generator->LoadContextBuildingsFromDatabase(Database);
+		if (!TestTrue(TEXT("the real campus workload loaded"), Buildings > 0 && Roads > 1000 && Context > 100)) return false;
+		Data->SetNumberField(TEXT("campus_buildings"), Buildings);
+		Data->SetNumberField(TEXT("roads_and_pois"), Roads);
+		Data->SetNumberField(TEXT("context_buildings"), Context);
+		Sample(TEXT("campus_loaded"));
+
+		const FString Id(TEXT("MEMORY"));
+		BuildTenFloors(Fixture, Id, *this);
+		Sample(TEXT("ten_floor_interior_generated"));
+		const auto Rooms = UsableRooms(Fixture, Id);
+		Data->SetNumberField(TEXT("usable_rooms"), Rooms.Num());
+		if (!TestTrue(TEXT("the interior has enough rooms for the route workload"), Rooms.Num() >= 20)) return false;
+		const APolyBuilding* Building = Fixture.Generator->FindBuildingById(Id);
+		FNavigationRoutePlanner::ClearGraphCache();
+		int32 Found = 0;
+		for (int32 Index = 0; Index < 12; ++Index)
+		{
+			const auto& From = Rooms[Index];
+			const auto& To = Rooms[(Index * 7 + 3) % Rooms.Num()];
+			FNavigationRouteResult Route;
+			Found += FNavigationRoutePlanner::FindRoute(*Building, *Fixture.Interior, Fixture.Generator->GetScale(),
+				From.Floor, From.Centroid, To.Floor, To.Centroid, Route) ? 1 : 0;
+			Sample(Index == 0 ? TEXT("first_route_graph_cached") : TEXT("warm_route"));
+		}
+		Data->SetNumberField(TEXT("routes_attempted"), 12);
+		Data->SetNumberField(TEXT("routes_found"), Found);
+		TestTrue(TEXT("most route pairs have a route"), Found >= 10);
+		TestEqual(TEXT("warm routes reuse the graph"), FNavigationRoutePlanner::GetGraphCacheHits(), 11);
+	}
+	// Only collect after the fixture has released its raw UObject pointers. Allocators may retain freed pages;
+	// a nonzero cleanup delta is a measurement, not proof of a leak.
+	CollectGarbage(RF_NoFlags, true);
+	Sample(TEXT("workload_destroyed_cache_cleared_after_gc"));
+	const double GrowthMiB = FMath::Max(0.0, ((double)MaxSampledCommitted - Baseline.UsedVirtual) / BytesPerMiB);
+	Data->SetNumberField(TEXT("schema_version"), 1);
+	Data->SetStringField(TEXT("measured_at_utc"), FDateTime::UtcNow().ToIso8601());
+	Data->SetStringField(TEXT("engine_version"), FEngineVersion::Current().ToString());
+	Data->SetNumberField(TEXT("process_id"), FPlatformProcess::GetCurrentProcessId());
+	Data->SetBoolField(TEXT("includes_editor_overhead"), GIsEditor);
+	Data->SetBoolField(TEXT("null_rhi"), FParse::Param(FCommandLine::Get(), TEXT("nullrhi")));
+	Data->SetStringField(TEXT("scope"), TEXT("Desktop data workload; process CPU memory including the test harness; excludes dedicated GPU memory. Peaks are process-lifetime counters, sampled maxima are checkpoint maxima."));
+	Data->SetArrayField(TEXT("snapshots"), Snapshots);
+	Data->SetNumberField(TEXT("max_sampled_resident_bytes"), MaxSampledResident);
+	Data->SetNumberField(TEXT("max_sampled_committed_bytes"), MaxSampledCommitted);
+	Data->SetNumberField(TEXT("max_sampled_committed_growth_mib"), GrowthMiB);
+	if (bHasBudget) Data->SetNumberField(TEXT("max_committed_growth_budget_mib"), MaxGrowthMiB);
+	TestTrue(TEXT("memory measurements are saved"), SaveMeasurement(TEXT("memory-usage"), Data));
+	if (bHasBudget) TestTrue(TEXT("sampled committed growth stays within MemoryMaxGrowthMiB"), GrowthMiB <= MaxGrowthMiB);
+	AddInfo(FString::Printf(TEXT("Memory: max sampled resident %.2f MiB, committed %.2f MiB, committed growth %.2f MiB. Report: Saved/Performance/memory-usage.json"),
+		MaxSampledResident / BytesPerMiB, MaxSampledCommitted / BytesPerMiB, GrowthMiB));
+	return true;
+}
+
 // The frame figures of the Debug panel: the average, the 1 % low and the slowest frame, over the last ten seconds.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPerformanceFrameStatsTest, "InNavi.Performance.FrameStats", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FPerformanceFrameStatsTest::RunTest(const FString& Parameters)
@@ -381,6 +496,172 @@ bool FPerformanceFrameStatsTest::RunTest(const FString& Parameters)
 	for (int32 Frame = 0; Frame < 1200; ++Frame) Long.AddFrame(1.0 / 120.0);
 	TestTrue(TEXT("old slow frames have left the window"), FMath::IsNearlyEqual(Long.AverageFps(), 120.0, 0.5) && Long.MinFps() > 100.0);
 	TestTrue(TEXT("and the text says what it shows"), Long.ToText().Contains(TEXT("avg")) && Long.ToText().Contains(TEXT("1% low")));
+	return true;
+}
+
+// Opt-in rendered-app comparison: run alone with -game, never as an editor fixture or with -nullrhi.
+namespace PerformanceTests
+{
+	class FCampusPreviewMemoryCapture : public IAutomationLatentCommand
+	{
+	public:
+		FCampusPreviewMemoryCapture(FAutomationTestBase* InTest, const FString& InProject, const FString& InBuilding,
+			const FString& InVariant, const FString& InOutput)
+			: Test(InTest), Project(InProject), BuildingId(InBuilding), Variant(InVariant), Output(InOutput) {}
+
+		bool Update() override
+		{
+			const double Now = FPlatformTime::Seconds();
+			if (Now < NextAction) return false;
+			if (!Controller.IsValid())
+			{
+				for (const FWorldContext& Context : GEngine->GetWorldContexts())
+				{
+					if (Context.WorldType == EWorldType::Game && Context.World())
+					{
+						Controller = Cast<ANavPlayerController>(Context.World()->GetFirstPlayerController());
+						if (Controller.IsValid()) break;
+					}
+				}
+				if (!Controller.IsValid() || GIsEditor || FParse::Param(FCommandLine::Get(), TEXT("nullrhi")))
+				{
+					Test->AddError(TEXT("Campus preview capture requires a rendered -game desktop process."));
+					return true;
+				}
+				for (TActorIterator<ABuildingGenerator> It(Controller->GetWorld()); It; ++It) { Generator = *It; break; }
+				if (!Generator.IsValid()) { Test->AddError(TEXT("No app building generator.")); return true; }
+				TArray<UUserWidget*> Widgets;
+				UWidgetBlueprintLibrary::GetAllWidgetsOfClass(Controller.Get(), Widgets, UUserWidget::StaticClass(), true);
+				for (UUserWidget* Widget : Widgets) Widget->RemoveFromParent();
+				UEditScreenWidget* Screen = CreateWidget<UEditScreenWidget>(Controller.Get(), UEditScreenWidget::StaticClass());
+				if (!Screen) { Test->AddError(TEXT("Cannot create exterior screen.")); return true; }
+				Screen->AddToViewport();
+				Controller->SetCampusSeeThroughEnabled(false);
+				Controller->StartNewProject();
+				CollectGarbage(RF_NoFlags, true);
+				Data->SetStringField(TEXT("started_at_utc"), FDateTime::UtcNow().ToIso8601());
+				Data->SetStringField(TEXT("engine_version"), FEngineVersion::Current().ToString());
+				Data->SetStringField(TEXT("cpu"), FPlatformMisc::GetCPUBrand().TrimStartAndEnd());
+				Data->SetNumberField(TEXT("visible_physical_memory_bytes"), FPlatformMemory::GetConstants().TotalPhysical);
+				Data->SetNumberField(TEXT("process_id"), FPlatformProcess::GetCurrentProcessId());
+				Data->SetStringField(TEXT("project_file"), Project);
+				Data->SetStringField(TEXT("building_id"), BuildingId);
+				Data->SetStringField(TEXT("variant"), Variant);
+				const FIntPoint Viewport = GEngine->GameViewport->Viewport->GetSizeXY();
+				Data->SetNumberField(TEXT("viewport_width"), Viewport.X);
+				Data->SetNumberField(TEXT("viewport_height"), Viewport.Y);
+				Data->SetBoolField(TEXT("includes_editor_runtime"), true);
+				Data->SetBoolField(TEXT("null_rhi"), false);
+				Data->SetNumberField(TEXT("settle_seconds_per_phase"), 5);
+				Data->SetNumberField(TEXT("sample_interval_seconds"), 0.5);
+				Data->SetNumberField(TEXT("samples_per_phase"), 10);
+				Data->SetStringField(TEXT("scope"), TEXT("Rendered UnrealEditor.exe -game Development, 1280x720; Windows process working set and private committed bytes, not dedicated GPU memory. One explicit GC before empty baseline; normal rendering/engine GC continues during capture."));
+				NextAction = Now + 5.0;
+				return false;
+			}
+
+			static const TCHAR* Names[] = { TEXT("empty_baseline"), TEXT("campus_opaque"), TEXT("selected_floor_1"), TEXT("selected_building_all_floors") };
+			auto Sample = MakeShared<FJsonObject>();
+			const FPlatformMemoryStats Stats = FPlatformMemory::GetStats();
+			Sample->SetStringField(TEXT("phase"), Names[Phase]);
+			Sample->SetStringField(TEXT("measured_at_utc"), FDateTime::UtcNow().ToIso8601());
+			Sample->SetNumberField(TEXT("resident_bytes"), Stats.UsedPhysical);
+			Sample->SetNumberField(TEXT("private_committed_bytes"), Stats.UsedVirtual);
+			int32 Cached = 0, Shown = 0;
+			for (APolyBuilding* Building : Generator->GetAllBuildings())
+			{
+				Cached += Controller->CountCachedCampusRoomsForTests(Building->BuildingId);
+				Shown += Controller->CountShownCampusRoomsForTests(Building->BuildingId);
+			}
+			Sample->SetNumberField(TEXT("cached_preview_rooms"), Cached);
+			Sample->SetNumberField(TEXT("shown_preview_rooms"), Shown);
+			Samples.Add(MakeShared<FJsonValueObject>(Sample));
+			if (++PhaseSamples < 10) { NextAction = Now + 0.5; return false; }
+			Test->AddInfo(FString::Printf(TEXT("Preview memory %s: cached %d, shown %d, resident %.2f MiB, private %.2f MiB"),
+				Names[Phase], Cached, Shown, Stats.UsedPhysical / 1048576.0, Stats.UsedVirtual / 1048576.0));
+			PhaseSamples = 0;
+			if (++Phase == 4)
+			{
+				Data->SetNumberField(TEXT("schema_version"), 1);
+				Data->SetArrayField(TEXT("samples"), Samples);
+				FString Json;
+				IFileManager::Get().MakeDirectory(*FPaths::GetPath(Output), true);
+				Test->TestTrue(TEXT("preview memory capture saved"), FJsonSerializer::Serialize(Data, TJsonWriterFactory<>::Create(&Json))
+					&& FFileHelper::SaveStringToFile(Json, *Output));
+				return true;
+			}
+			if (Phase == 1)
+			{
+				if (!Test->TestTrue(TEXT("benchmark project loaded"), Controller->LoadBuildingDataFromPathOrDatabase(Project) > 0)) return true;
+				if (!Test->TestNotNull(TEXT("benchmark building exists"), Generator->FindBuildingById(BuildingId))) return true;
+				int32 AuthoredRooms = 0;
+				for (APolyBuilding* Building : Generator->GetAllBuildings())
+				{
+					const auto Interior = Generator->GetInteriorDataForBuilding(Building->BuildingId);
+					const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
+					if (!Interior || !Interior->TryGetArrayField(TEXT("floors"), Floors)) continue;
+					for (const auto& Floor : *Floors)
+					{
+						const TArray<TSharedPtr<FJsonValue>>* Rooms = nullptr;
+						if (Floor->AsObject()->TryGetArrayField(TEXT("rooms"), Rooms)) AuthoredRooms += Rooms->Num();
+					}
+				}
+				Data->SetNumberField(TEXT("authored_rooms"), AuthoredRooms);
+				Data->SetNumberField(TEXT("editable_buildings"), Generator->GetAllBuildings().Num());
+				int32 Created = 0;
+				for (APolyBuilding* Building : Generator->GetAllBuildings()) Created += Controller->CountCachedCampusRoomsForTests(Building->BuildingId);
+				Test->TestEqual(TEXT("opaque preview count matches the compiled variant"), Created, Variant == TEXT("eager") ? AuthoredRooms : 0);
+			}
+			else if (Phase == 2)
+			{
+				Controller->SetBuildingRoomFloor(BuildingId, 1);
+				Controller->SetBuildingMadeTransparent(BuildingId, true);
+			}
+			else Controller->SetBuildingRoomFloor(BuildingId, 0);
+			NextAction = FPlatformTime::Seconds() + 5.0;
+			return false;
+		}
+	private:
+		FAutomationTestBase* Test;
+		FString Project, BuildingId, Variant, Output;
+		TWeakObjectPtr<ANavPlayerController> Controller;
+		TWeakObjectPtr<ABuildingGenerator> Generator;
+		TSharedRef<FJsonObject> Data = MakeShared<FJsonObject>();
+		TArray<TSharedPtr<FJsonValue>> Samples;
+		double NextAction = 0.0;
+		int32 Phase = 0, PhaseSamples = 0;
+	};
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPerformanceCampusPreviewMemoryTest, "InNavi.Performance.CampusPreviewMemory",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext | EAutomationTestFlags::EngineFilter)
+bool FPerformanceCampusPreviewMemoryTest::RunTest(const FString& Parameters)
+{
+	FString PreparedProject;
+	if (FParse::Value(FCommandLine::Get(), TEXT("PreviewMemoryPrepare="), PreparedProject))
+	{
+		FNavigationSearchFixture Fixture;
+		Fixture.Interior->ClearLoadedInterior();
+		Fixture.Generator->ClearAllBuildings();
+		PerformanceTests::BuildTenFloors(Fixture, TEXT("MEMORY"), *this);
+		TestTrue(TEXT("generated benchmark project saved"), Fixture.Generator->SaveBuildingsToFile(PreparedProject));
+		return true;
+	}
+	FString Project, Building, Variant, Output;
+	if (!FParse::Value(FCommandLine::Get(), TEXT("PreviewMemoryProject="), Project))
+	{
+		AddInfo(TEXT("Opt-in rendered-app capture: supply PreviewMemoryProject, PreviewMemoryBuilding, PreviewMemoryVariant and PreviewMemoryOutput; see docs/performance.md."));
+		return true;
+	}
+	if (!FParse::Value(FCommandLine::Get(), TEXT("PreviewMemoryBuilding="), Building)
+		|| !FParse::Value(FCommandLine::Get(), TEXT("PreviewMemoryVariant="), Variant)
+		|| !FParse::Value(FCommandLine::Get(), TEXT("PreviewMemoryOutput="), Output)
+		|| (Variant != TEXT("eager") && Variant != TEXT("lazy")))
+	{
+		AddError(TEXT("Missing/invalid preview memory capture parameters."));
+		return false;
+	}
+	AddCommand(new PerformanceTests::FCampusPreviewMemoryCapture(this, Project, Building, Variant, Output));
 	return true;
 }
 

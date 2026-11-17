@@ -1,0 +1,66 @@
+{
+  "measured_at_local": "2026-11-11T23:02:00+08:00",
+  "local_time_precision": "minute; trace recording began at approximately 23:02 SGT",
+  "tool": "Unreal Insights 5.8.2 MemoryInsights.ExportAllocs",
+  "build": "UnrealEditor.exe -game, Development, UE 5.8.2-56702186; not a packaged Shipping build",
+  "machine": {
+    "os": "Windows",
+    "cpu": "AMD Ryzen 7 7700 8-Core Processor",
+    "installed_ram_gib": 16,
+    "os_visible_ram_gib": 15.15
+  },
+  "viewport_pixels": [
+    1280,
+    720
+  ],
+  "rendering": "D3D12 SM6; rendering enabled; not nullrhi",
+  "trace_channels": "default,memory",
+  "trace_file": "desktop.utrace",
+  "trace_bytes": 3481748451,
+  "trace_sha256": "912e8bd3ab2fd6d3b0ce1aa5e9384c27ae7c25f6451924b47472d7e63f5a14f4",
+  "capture_directory": "InNavi/Saved/Performance/MemoryInsights-20261111 (local, git-ignored)",
+  "query": {
+    "rule": "aAf",
+    "columns": [
+      "Size",
+      "Tag"
+    ],
+    "max_results": "unlimited",
+    "heap_scope": "all root heaps (System memory and Video memory)"
+  },
+  "metric": "Sum of the Size column of live exported allocations; includes virtual/reserved allocations and heap bookkeeping. Not OS resident RAM, private committed memory, or a physical GPU-memory measurement.",
+  "data_quality": {
+    "status": "provisional",
+    "heap_event_errors": 49,
+    "free_event_errors": 9,
+    "zero_size_rows_per_snapshot": 35,
+    "notes": "Insights recovered missing heap/free events. Both checkpoint exports completed successfully, but totals are not a validated memory requirement."
+  },
+  "campus_workload": {
+    "editable_buildings": 29,
+    "context_buildings": 407,
+    "road_actors": 1359
+  },
+  "scenarios": [
+    {
+      "scenario": "start-screen-live",
+      "bookmark": "StartScreenIdle",
+      "allocation_count": 4239453,
+      "live_traced_allocation_bytes": 18900054698,
+      "live_traced_allocation_mib": 18024.5,
+      "zero_size_allocations": 35,
+      "trace_time_seconds_rounded": 75.27,
+      "csv_sha256": "254bd768ff45b8173d1de6175055a1dfcb1edf9ee31fa3867ee64346d00c43e0"
+    },
+    {
+      "scenario": "campus-live",
+      "bookmark": "CampusIdle",
+      "allocation_count": 4386518,
+      "live_traced_allocation_bytes": 18976041854,
+      "live_traced_allocation_mib": 18096.96,
+      "zero_size_allocations": 35,
+      "trace_time_seconds_rounded": 141.43,
+      "csv_sha256": "e8b1e78371270f54d0c6347701324a0a929d31182c8ca28e6613c538da45d349"
+    }
+  ]
+}

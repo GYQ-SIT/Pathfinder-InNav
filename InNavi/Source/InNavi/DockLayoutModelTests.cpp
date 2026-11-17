@@ -456,13 +456,13 @@ bool FDockComputeLayoutTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("one tab rect"), GA->TabRects.Num(), 1);
 	}
 
-	// A floating window dragged far off screen is pulled back so a strip of it stays reachable.
+	// A floating window dragged far off screen is pulled fully into the usable viewport.
 	L.FloatPanel(P(TEXT("F")), FVector2D(-5000.0, -5000.0), FVector2D(10000.0, 10000.0));
 	L.ComputeLayout(HD, M, C);
 	TestEqual(TEXT("one floating rect"), C.FloatingRects.Num(), 1);
 	if (C.FloatingRects.Num() == 1)
 	{
-		TestTrue(TEXT("still reachable horizontally"), C.FloatingRects[0].Max.X >= M.FloatingMinVisible - 0.01f);
+		TestTrue(TEXT("fully visible horizontally"), C.FloatingRects[0].Min.X >= 0 && C.FloatingRects[0].Max.X <= HD.X + 0.01);
 		TestTrue(TEXT("not above the usable area"), C.FloatingRects[0].Min.Y >= 30.0 - 0.01);
 		TestTrue(TEXT("not larger than the screen"), C.FloatingRects[0].GetSize().X <= 1920.01 && C.FloatingRects[0].GetSize().Y <= 1050.01);
 	}

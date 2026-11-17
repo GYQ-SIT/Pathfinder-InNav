@@ -1,0 +1,1747 @@
+{
+  "schema_version": 1,
+  "tool": "Android dumpsys meminfo -d, invoked over USB ADB 37.0.1",
+  "package": "com.teampathfinder.innavi",
+  "release_tag": "mobile-test-3",
+  "app_version": "1.4",
+  "version_code": 5,
+  "configuration": "Android ARM64 Development, ASTC, distribution-signed",
+  "application_source_commit": "52eb8f69b273f7ba8b87fa57673226be7eac3862",
+  "installed_apk_sha256": "6c101c94eee5bb13cb355acf8436b62ac1eb2abf884dac0b718dfe65873e4b54",
+  "installed_apk_verified_against_release": true,
+  "device": {
+    "ro.product.manufacturer": "Google",
+    "ro.product.model": "Pixel 9 Pro XL",
+    "ro.build.version.release": "17",
+    "ro.build.version.sdk": "37",
+    "ro.product.cpu.abi": "arm64-v8a",
+    "ro.soc.model": "Tensor G4",
+    "ram_memtotal": "MemTotal:       15957128 kB",
+    "screen_size": "Physical size: 1344x2992",
+    "density": "Physical density: 480",
+    "package_version": [
+      "primaryCpuAbi=arm64-v8a",
+      "versionCode=5 minSdk=26 targetSdk=36",
+      "versionName=1.4"
+    ]
+  },
+  "capture_start_sgt": "2026-11-11T23:48:54.097131+08:00",
+  "capture_end_sgt": "2026-11-11T23:56:54.102167+08:00",
+  "sample_count": 35,
+  "raw_report_count": 70,
+  "samples_per_scenario": 5,
+  "requested_interval_seconds": 5,
+  "power_condition": "USB connected and charging",
+  "method": "One force-stop/cold launch before Explore, followed by sequential foreground UI states without restarting the app or forcing GC. Each sample captures both same-package/same-UID processes, the ActivityManager-managed main activity and its detached companion. Combined PSS is the sum of their reported TOTAL PSS; RSS is reported for the main process only. The companion role was not independently identified.",
+  "process_set": [
+    {
+      "pid": 22406,
+      "role": "main activity process",
+      "parent_pid": 1388
+    },
+    {
+      "pid": 22446,
+      "role": "same-name same-UID detached companion",
+      "parent_pid": 1
+    }
+  ],
+  "units": "Raw Android kB interpreted as KiB; /1024 gives MiB. PSS apportions shared pages; do not add main RSS, graphics rows, or swap PSS to combined PSS.",
+  "maximum_sampled_combined_pss_kib": 1221579,
+  "maximum_sampled_main_rss_kib": 1365568,
+  "raw_capture_directory": "InNavi/Saved/MobileMemory-20261111 (local, git-ignored)",
+  "limitations": [
+    "One phone, one sequential session, five snapshots per state; not a continuous startup/route-calculation peak or leak endurance test.",
+    "Android shared-page accounting, graphics accounting, caches and OS activity can vary between samples and devices.",
+    "The initial 2D-directory sample window overlapped read-only installed-APK hash verification; file-cache effects are possible.",
+    "The measured route is a short same-floor route; cross-floor and campus routing were not sampled."
+  ],
+  "scenarios": [
+    {
+      "schema_version": 1,
+      "tool": "adb shell dumpsys meminfo -d <pid>",
+      "scenario": "explore-after-cold-start",
+      "main_process_id": 22406,
+      "sample_count": 5,
+      "requested_interval_seconds": 5,
+      "duration_seconds": 23.43799999996554,
+      "units": "Android kB treated as KiB; divide by 1024 for MiB",
+      "scope": "Main activity process plus all same-name processes found for the package; PSS is summed, RSS is reported only for the main process to avoid double-counting shared pages.",
+      "samples": [
+        {
+          "index": 1,
+          "measured_at_utc": "2026-11-11T15:48:54.097131+00:00",
+          "measured_at_sgt": "2026-11-11T23:48:54.097131+08:00",
+          "elapsed_seconds": 1.0160000000614673,
+          "process_count": 2,
+          "main_pss_kib": 1189801,
+          "main_rss_kib": 1364568,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31371,
+          "combined_pss_kib": 1221172,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1189801,
+              "rss_kib": 1364568,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787136,
+              "raw_file": "explore-after-cold-start/meminfo-01-main-22406.txt",
+              "raw_sha256": "ae350a404c5afdf356cc1697e7ddfb821fccef40afb778bd8aa568e19dea7399"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31371,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "explore-after-cold-start/meminfo-01-helper-22446.txt",
+              "raw_sha256": "0cc5468854d977df805879f096be731ce4519a01a9a8aac87ded7578b102622a"
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "measured_at_utc": "2026-11-11T15:48:59.686449+00:00",
+          "measured_at_sgt": "2026-11-11T23:48:59.686449+08:00",
+          "elapsed_seconds": 6.60999999998603,
+          "process_count": 2,
+          "main_pss_kib": 1189774,
+          "main_rss_kib": 1365048,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31372,
+          "combined_pss_kib": 1221146,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1189774,
+              "rss_kib": 1365048,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787152,
+              "raw_file": "explore-after-cold-start/meminfo-02-main-22406.txt",
+              "raw_sha256": "b36dba677e550f958732039fe04c3aee9e2efe174521ff17267f637d08385873"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31372,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "explore-after-cold-start/meminfo-02-helper-22446.txt",
+              "raw_sha256": "3f00543dccec4a170bb70677359921723363ae18c03323b14af8554cef11bec1"
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "measured_at_utc": "2026-11-11T15:49:05.330323+00:00",
+          "measured_at_sgt": "2026-11-11T23:49:05.330323+08:00",
+          "elapsed_seconds": 12.25,
+          "process_count": 2,
+          "main_pss_kib": 1189826,
+          "main_rss_kib": 1365100,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31372,
+          "combined_pss_kib": 1221198,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1189826,
+              "rss_kib": 1365100,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787160,
+              "raw_file": "explore-after-cold-start/meminfo-03-main-22406.txt",
+              "raw_sha256": "572e7ba7eefe07dd1b2c2084e2b442f015f4034ab2b93c22fa5b8b7712a5afec"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31372,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "explore-after-cold-start/meminfo-03-helper-22446.txt",
+              "raw_sha256": "e0c0da19227b7d9b38c85d087eab9bf93ab5aa9578543f2b56471ed9899b86b8"
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "measured_at_utc": "2026-11-11T15:49:10.893863+00:00",
+          "measured_at_sgt": "2026-11-11T23:49:10.893863+08:00",
+          "elapsed_seconds": 17.81299999996554,
+          "process_count": 2,
+          "main_pss_kib": 1188790,
+          "main_rss_kib": 1364064,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31372,
+          "combined_pss_kib": 1220162,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1188790,
+              "rss_kib": 1364064,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787152,
+              "raw_file": "explore-after-cold-start/meminfo-04-main-22406.txt",
+              "raw_sha256": "d007698c81e6c1dee8080b0cfc256b20c3e103aa4572d6a7ab01eca72d83eb73"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31372,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "explore-after-cold-start/meminfo-04-helper-22446.txt",
+              "raw_sha256": "41b33313fa44867b1ce0d45df690d49d3bfcea812f073ea03612eedf09d64c8f"
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "measured_at_utc": "2026-11-11T15:49:16.528072+00:00",
+          "measured_at_sgt": "2026-11-11T23:49:16.528072+08:00",
+          "elapsed_seconds": 23.43799999996554,
+          "process_count": 2,
+          "main_pss_kib": 1188953,
+          "main_rss_kib": 1364228,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31372,
+          "combined_pss_kib": 1220325,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1188953,
+              "rss_kib": 1364228,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787152,
+              "raw_file": "explore-after-cold-start/meminfo-05-main-22406.txt",
+              "raw_sha256": "4b145a1a72fbfb42497caa5c99c8f35a58b8c31c84da82c1e1d442ba30e9cb82"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31372,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "explore-after-cold-start/meminfo-05-helper-22446.txt",
+              "raw_sha256": "4c7c1cc97cb8ce610ec4b9548993414c2a628da33c0afb6389f031687cf265f2"
+            }
+          ]
+        }
+      ],
+      "main_pss_kib": {
+        "count": 5,
+        "minimum": 1188790,
+        "maximum": 1189826,
+        "median": 1189774,
+        "mean": 1189428.8
+      },
+      "main_rss_kib": {
+        "count": 5,
+        "minimum": 1364064,
+        "maximum": 1365100,
+        "median": 1364568,
+        "mean": 1364601.6
+      },
+      "main_swap_pss_kib": {
+        "count": 5,
+        "minimum": 5,
+        "maximum": 5,
+        "median": 5,
+        "mean": 5
+      },
+      "helper_pss_kib": {
+        "count": 5,
+        "minimum": 31371,
+        "maximum": 31372,
+        "median": 31372,
+        "mean": 31371.8
+      },
+      "combined_pss_kib": {
+        "count": 5,
+        "minimum": 1220162,
+        "maximum": 1221198,
+        "median": 1221146,
+        "mean": 1220800.6
+      },
+      "combined_swap_pss_kib": {
+        "count": 5,
+        "minimum": 66,
+        "maximum": 66,
+        "median": 66,
+        "mean": 66
+      },
+      "description": "Explore after a fresh launch"
+    },
+    {
+      "schema_version": 1,
+      "tool": "adb shell dumpsys meminfo -d <pid>",
+      "scenario": "authored-directory-2d",
+      "main_process_id": 22406,
+      "sample_count": 5,
+      "requested_interval_seconds": 5,
+      "duration_seconds": 23.531000000075437,
+      "units": "Android kB treated as KiB; divide by 1024 for MiB",
+      "scope": "Main activity process plus all same-name processes found for the package; PSS is summed, RSS is reported only for the main process to avoid double-counting shared pages.",
+      "samples": [
+        {
+          "index": 1,
+          "measured_at_utc": "2026-11-11T15:50:02.983230+00:00",
+          "measured_at_sgt": "2026-11-11T23:50:02.983230+08:00",
+          "elapsed_seconds": 0.7190000000409782,
+          "process_count": 2,
+          "main_pss_kib": 1190207,
+          "main_rss_kib": 1365568,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31372,
+          "combined_pss_kib": 1221579,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1190207,
+              "rss_kib": 1365568,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787048,
+              "raw_file": "authored-directory-2d/meminfo-01-main-22406.txt",
+              "raw_sha256": "29ad923a98b546a2e3701945524133451724d5fe782739a1fa53f7679b3090a7"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31372,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "authored-directory-2d/meminfo-01-helper-22446.txt",
+              "raw_sha256": "d5accd2738bd4337d24a051c21587e531ad911efc7bc707275bd39d7d7a0f9d9"
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "measured_at_utc": "2026-11-11T15:50:08.589249+00:00",
+          "measured_at_sgt": "2026-11-11T23:50:08.589249+08:00",
+          "elapsed_seconds": 6.312000000034459,
+          "process_count": 2,
+          "main_pss_kib": 1188291,
+          "main_rss_kib": 1363652,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31372,
+          "combined_pss_kib": 1219663,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1188291,
+              "rss_kib": 1363652,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787008,
+              "raw_file": "authored-directory-2d/meminfo-02-main-22406.txt",
+              "raw_sha256": "53347fab213e0339aa62e241d3a407db117feba37ecdcd1a50296ceac5ab9522"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31372,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "authored-directory-2d/meminfo-02-helper-22446.txt",
+              "raw_sha256": "c2a2e4fb2c1911d2c25bcc1ff8d1508070202371a2d947d69e4d8f2fe4c19384"
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "measured_at_utc": "2026-11-11T15:50:14.378217+00:00",
+          "measured_at_sgt": "2026-11-11T23:50:14.378217+08:00",
+          "elapsed_seconds": 12.109000000054948,
+          "process_count": 2,
+          "main_pss_kib": 1189031,
+          "main_rss_kib": 1364392,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31372,
+          "combined_pss_kib": 1220403,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1189031,
+              "rss_kib": 1364392,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787016,
+              "raw_file": "authored-directory-2d/meminfo-03-main-22406.txt",
+              "raw_sha256": "e4aadb608d3a5d49f9fa3a86df9a5ad89890b87c7e590bcb2bdef4143ad868f6"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31372,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "authored-directory-2d/meminfo-03-helper-22446.txt",
+              "raw_sha256": "aca80954cecf2c6bc6dabe3c5d3544f071a9e6a7128340ca1ac291ceb1d7993c"
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "measured_at_utc": "2026-11-11T15:50:20.053994+00:00",
+          "measured_at_sgt": "2026-11-11T23:50:20.053994+08:00",
+          "elapsed_seconds": 17.781000000075437,
+          "process_count": 2,
+          "main_pss_kib": 1189109,
+          "main_rss_kib": 1364440,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31372,
+          "combined_pss_kib": 1220481,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1189109,
+              "rss_kib": 1364440,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787024,
+              "raw_file": "authored-directory-2d/meminfo-04-main-22406.txt",
+              "raw_sha256": "8ddf1b4a3b8278ac988c6508fb4470bf2031be13683c91a5d01edcabfa7b98f5"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31372,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "authored-directory-2d/meminfo-04-helper-22446.txt",
+              "raw_sha256": "6eb2ec7fd10a5c4a7da2c4f521504533f1b892ff05f39fd91f2a532a7cd7ea05"
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "measured_at_utc": "2026-11-11T15:50:25.796195+00:00",
+          "measured_at_sgt": "2026-11-11T23:50:25.796195+08:00",
+          "elapsed_seconds": 23.531000000075437,
+          "process_count": 2,
+          "main_pss_kib": 1189126,
+          "main_rss_kib": 1364468,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31324,
+          "combined_pss_kib": 1220450,
+          "combined_swap_pss_kib": 45,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1189126,
+              "rss_kib": 1364468,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787024,
+              "raw_file": "authored-directory-2d/meminfo-05-main-22406.txt",
+              "raw_sha256": "a46b8e36a769cac45f508ef1ee80b81b42f8ecc1a3be6d297510abec3914574a"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31324,
+              "rss_kib": 87596,
+              "swap_pss_kib": 40,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "authored-directory-2d/meminfo-05-helper-22446.txt",
+              "raw_sha256": "7f0116cd38a36d9bee3bc22dd71d59cfb0b2abfca1bbdeffa436819acf2d167b"
+            }
+          ]
+        }
+      ],
+      "main_pss_kib": {
+        "count": 5,
+        "minimum": 1188291,
+        "maximum": 1190207,
+        "median": 1189109,
+        "mean": 1189152.8
+      },
+      "main_rss_kib": {
+        "count": 5,
+        "minimum": 1363652,
+        "maximum": 1365568,
+        "median": 1364440,
+        "mean": 1364504
+      },
+      "main_swap_pss_kib": {
+        "count": 5,
+        "minimum": 5,
+        "maximum": 5,
+        "median": 5,
+        "mean": 5
+      },
+      "helper_pss_kib": {
+        "count": 5,
+        "minimum": 31324,
+        "maximum": 31372,
+        "median": 31372,
+        "mean": 31362.4
+      },
+      "combined_pss_kib": {
+        "count": 5,
+        "minimum": 1219663,
+        "maximum": 1221579,
+        "median": 1220450,
+        "mean": 1220515.2
+      },
+      "combined_swap_pss_kib": {
+        "count": 5,
+        "minimum": 45,
+        "maximum": 66,
+        "median": 66,
+        "mean": 61.8
+      },
+      "description": "Authored buildings project, Block E2 L1, 2D directory"
+    },
+    {
+      "schema_version": 1,
+      "tool": "adb shell dumpsys meminfo -d <pid>",
+      "scenario": "authored-directory-3d",
+      "main_process_id": 22406,
+      "sample_count": 5,
+      "requested_interval_seconds": 5,
+      "duration_seconds": 23.891000000061467,
+      "units": "Android kB treated as KiB; divide by 1024 for MiB",
+      "scope": "Main activity process plus all same-name processes found for the package; PSS is summed, RSS is reported only for the main process to avoid double-counting shared pages.",
+      "samples": [
+        {
+          "index": 1,
+          "measured_at_utc": "2026-11-11T15:51:51.532451+00:00",
+          "measured_at_sgt": "2026-11-11T23:51:51.532451+08:00",
+          "elapsed_seconds": 1.125,
+          "process_count": 2,
+          "main_pss_kib": 1157835,
+          "main_rss_kib": 1333048,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31334,
+          "combined_pss_kib": 1189169,
+          "combined_swap_pss_kib": 49,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1157835,
+              "rss_kib": 1333048,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787028,
+              "raw_file": "authored-directory-3d/meminfo-01-main-22406.txt",
+              "raw_sha256": "061b0cc8d07ea96aa83c2b07ff80cd2ddb1f31cc3d4ad250152c41aa044a2991"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31334,
+              "rss_kib": 87596,
+              "swap_pss_kib": 44,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "authored-directory-3d/meminfo-01-helper-22446.txt",
+              "raw_sha256": "0c7348d1f927ba343fc0ef5341630c06aa94e2f8b0b5e531c5ca65f196b4873e"
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "measured_at_utc": "2026-11-11T15:51:57.161046+00:00",
+          "measured_at_sgt": "2026-11-11T23:51:57.161046+08:00",
+          "elapsed_seconds": 6.75,
+          "process_count": 2,
+          "main_pss_kib": 1157459,
+          "main_rss_kib": 1332672,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31371,
+          "combined_pss_kib": 1188830,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1157459,
+              "rss_kib": 1332672,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 786988,
+              "raw_file": "authored-directory-3d/meminfo-02-main-22406.txt",
+              "raw_sha256": "f260a5ff2f395432f10e19c15c20cabf6de2909f2ae2908d332c88db9fa453e2"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31371,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "authored-directory-3d/meminfo-02-helper-22446.txt",
+              "raw_sha256": "5672249243fa29d4829cbe8d440aea13588597b2dc9acbcb43d401159460fda9"
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "measured_at_utc": "2026-11-11T15:52:02.939646+00:00",
+          "measured_at_sgt": "2026-11-11T23:52:02.939646+08:00",
+          "elapsed_seconds": 12.53200000000652,
+          "process_count": 2,
+          "main_pss_kib": 1157511,
+          "main_rss_kib": 1332724,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31371,
+          "combined_pss_kib": 1188882,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1157511,
+              "rss_kib": 1332724,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787004,
+              "raw_file": "authored-directory-3d/meminfo-03-main-22406.txt",
+              "raw_sha256": "b6c5bb493849f79b4e21745e90ff558e60a5b2a8dacf832838ee4bd6d1a26a28"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31371,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "authored-directory-3d/meminfo-03-helper-22446.txt",
+              "raw_sha256": "d3c610b3db112fe593ccb69f910eebd1492b7c1a92890f68ec979da4bf163d74"
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "measured_at_utc": "2026-11-11T15:52:08.577557+00:00",
+          "measured_at_sgt": "2026-11-11T23:52:08.577557+08:00",
+          "elapsed_seconds": 18.17200000002049,
+          "process_count": 2,
+          "main_pss_kib": 1157535,
+          "main_rss_kib": 1332752,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31375,
+          "combined_pss_kib": 1188910,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1157535,
+              "rss_kib": 1332752,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 786884,
+              "raw_file": "authored-directory-3d/meminfo-04-main-22406.txt",
+              "raw_sha256": "04ec0ede0eb9b705b59ba52bfe47c6c57f8ae87b3583c31f17557066b35365dc"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31375,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "authored-directory-3d/meminfo-04-helper-22446.txt",
+              "raw_sha256": "3cba056f7c50bfa5127d1440a785f758b813aecd779350acd2fa8789e81434d4"
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "measured_at_utc": "2026-11-11T15:52:14.300870+00:00",
+          "measured_at_sgt": "2026-11-11T23:52:14.300870+08:00",
+          "elapsed_seconds": 23.891000000061467,
+          "process_count": 2,
+          "main_pss_kib": 1156752,
+          "main_rss_kib": 1331964,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31381,
+          "combined_pss_kib": 1188133,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1156752,
+              "rss_kib": 1331964,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 786900,
+              "raw_file": "authored-directory-3d/meminfo-05-main-22406.txt",
+              "raw_sha256": "206c9653cd342f72d0abec0bb06b9eeb0b736e09abc747d4139f24170acd6cec"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31381,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "authored-directory-3d/meminfo-05-helper-22446.txt",
+              "raw_sha256": "17cbc3cd9053375d97a365b30424d3d203c0a6c978a0ca9d7ee38918b7ad1e7a"
+            }
+          ]
+        }
+      ],
+      "main_pss_kib": {
+        "count": 5,
+        "minimum": 1156752,
+        "maximum": 1157835,
+        "median": 1157511,
+        "mean": 1157418.4
+      },
+      "main_rss_kib": {
+        "count": 5,
+        "minimum": 1331964,
+        "maximum": 1333048,
+        "median": 1332724,
+        "mean": 1332632
+      },
+      "main_swap_pss_kib": {
+        "count": 5,
+        "minimum": 5,
+        "maximum": 5,
+        "median": 5,
+        "mean": 5
+      },
+      "helper_pss_kib": {
+        "count": 5,
+        "minimum": 31334,
+        "maximum": 31381,
+        "median": 31371,
+        "mean": 31366.4
+      },
+      "combined_pss_kib": {
+        "count": 5,
+        "minimum": 1188133,
+        "maximum": 1189169,
+        "median": 1188882,
+        "mean": 1188784.8
+      },
+      "combined_swap_pss_kib": {
+        "count": 5,
+        "minimum": 49,
+        "maximum": 66,
+        "median": 66,
+        "mean": 62.6
+      },
+      "description": "Same floor, 3D directory"
+    },
+    {
+      "schema_version": 1,
+      "tool": "adb shell dumpsys meminfo -d <pid>",
+      "scenario": "route-planned-e2-l1",
+      "main_process_id": 22406,
+      "sample_count": 5,
+      "requested_interval_seconds": 5,
+      "duration_seconds": 23.73499999998603,
+      "units": "Android kB treated as KiB; divide by 1024 for MiB",
+      "scope": "Main activity process plus all same-name processes found for the package; PSS is summed, RSS is reported only for the main process to avoid double-counting shared pages.",
+      "samples": [
+        {
+          "index": 1,
+          "measured_at_utc": "2026-11-11T15:53:11.605094+00:00",
+          "measured_at_sgt": "2026-11-11T23:53:11.605094+08:00",
+          "elapsed_seconds": 0.9849999999860302,
+          "process_count": 2,
+          "main_pss_kib": 1028804,
+          "main_rss_kib": 1204012,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31385,
+          "combined_pss_kib": 1060189,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1028804,
+              "rss_kib": 1204012,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 655900,
+              "raw_file": "route-planned-e2-l1/meminfo-01-main-22406.txt",
+              "raw_sha256": "ae40fcc8d295c7f85d6c00931004bb29a75a5526d2b393a3e258987a228e5bf2"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31385,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "route-planned-e2-l1/meminfo-01-helper-22446.txt",
+              "raw_sha256": "27c910a239f0710fc845d8d1c72257b5e40c4def56cbb482762656916123eed6"
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "measured_at_utc": "2026-11-11T15:53:17.248059+00:00",
+          "measured_at_sgt": "2026-11-11T23:53:17.248059+08:00",
+          "elapsed_seconds": 6.625,
+          "process_count": 2,
+          "main_pss_kib": 1026415,
+          "main_rss_kib": 1201620,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31385,
+          "combined_pss_kib": 1057800,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1026415,
+              "rss_kib": 1201620,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 655932,
+              "raw_file": "route-planned-e2-l1/meminfo-02-main-22406.txt",
+              "raw_sha256": "51266e993fd45b1bdfc4d0413776d5b0c1ac9a36719734d036c7041b72e3e516"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31385,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "route-planned-e2-l1/meminfo-02-helper-22446.txt",
+              "raw_sha256": "64f27a2b8efa90a8de22ee9177c4d4091b298402849bebb2db761fa2888e3af5"
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "measured_at_utc": "2026-11-11T15:53:22.992192+00:00",
+          "measured_at_sgt": "2026-11-11T23:53:22.992192+08:00",
+          "elapsed_seconds": 12.35999999998603,
+          "process_count": 2,
+          "main_pss_kib": 993767,
+          "main_rss_kib": 1168972,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31385,
+          "combined_pss_kib": 1025152,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 993767,
+              "rss_kib": 1168972,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 623092,
+              "raw_file": "route-planned-e2-l1/meminfo-03-main-22406.txt",
+              "raw_sha256": "15e960dd1a086ad957d77a37aaa23009af41a211070a3bac28d45d51b8912f33"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31385,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "route-planned-e2-l1/meminfo-03-helper-22446.txt",
+              "raw_sha256": "b25912163f512215a823ec41e50608578ca5b4edf095faf0eade5418517dd0ab"
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "measured_at_utc": "2026-11-11T15:53:28.624151+00:00",
+          "measured_at_sgt": "2026-11-11T23:53:28.624151+08:00",
+          "elapsed_seconds": 18.0,
+          "process_count": 2,
+          "main_pss_kib": 993835,
+          "main_rss_kib": 1169040,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31385,
+          "combined_pss_kib": 1025220,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 993835,
+              "rss_kib": 1169040,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 623108,
+              "raw_file": "route-planned-e2-l1/meminfo-04-main-22406.txt",
+              "raw_sha256": "7ecd8d9daa1db7220b100ff0b0ced2d52cb48c02eb1043ec3b9f9e77da6d5c23"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31385,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "route-planned-e2-l1/meminfo-04-helper-22446.txt",
+              "raw_sha256": "040a0a2daf74f2baea065d8ee1d73090f91e16180132a659a12c497c4e6a8303"
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "measured_at_utc": "2026-11-11T15:53:34.366245+00:00",
+          "measured_at_sgt": "2026-11-11T23:53:34.366245+08:00",
+          "elapsed_seconds": 23.73499999998603,
+          "process_count": 2,
+          "main_pss_kib": 993955,
+          "main_rss_kib": 1169160,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31385,
+          "combined_pss_kib": 1025340,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 993955,
+              "rss_kib": 1169160,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 623108,
+              "raw_file": "route-planned-e2-l1/meminfo-05-main-22406.txt",
+              "raw_sha256": "ca67d67a02c77d4d0eecef0c7fde2d2d368950afe9880f1be37a354c6c01f702"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31385,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "route-planned-e2-l1/meminfo-05-helper-22446.txt",
+              "raw_sha256": "39c14c8dcaa6d6b8491d2bbf0c28ca889fb2db4e57dd45a95dd8c354f1a15a5f"
+            }
+          ]
+        }
+      ],
+      "main_pss_kib": {
+        "count": 5,
+        "minimum": 993767,
+        "maximum": 1028804,
+        "median": 993955,
+        "mean": 1007355.2
+      },
+      "main_rss_kib": {
+        "count": 5,
+        "minimum": 1168972,
+        "maximum": 1204012,
+        "median": 1169160,
+        "mean": 1182560.8
+      },
+      "main_swap_pss_kib": {
+        "count": 5,
+        "minimum": 5,
+        "maximum": 5,
+        "median": 5,
+        "mean": 5
+      },
+      "helper_pss_kib": {
+        "count": 5,
+        "minimum": 31385,
+        "maximum": 31385,
+        "median": 31385,
+        "mean": 31385
+      },
+      "combined_pss_kib": {
+        "count": 5,
+        "minimum": 1025152,
+        "maximum": 1060189,
+        "median": 1025340,
+        "mean": 1038740.2
+      },
+      "combined_swap_pss_kib": {
+        "count": 5,
+        "minimum": 66,
+        "maximum": 66,
+        "median": 66,
+        "mean": 66
+      },
+      "description": "Route result: My location in Block E2 L1 to E2-01-01"
+    },
+    {
+      "schema_version": 1,
+      "tool": "adb shell dumpsys meminfo -d <pid>",
+      "scenario": "navigation-active-e2-l1",
+      "main_process_id": 22406,
+      "sample_count": 5,
+      "requested_interval_seconds": 5,
+      "duration_seconds": 23.890999999945052,
+      "units": "Android kB treated as KiB; divide by 1024 for MiB",
+      "scope": "Main activity process plus all same-name processes found for the package; PSS is summed, RSS is reported only for the main process to avoid double-counting shared pages.",
+      "samples": [
+        {
+          "index": 1,
+          "measured_at_utc": "2026-11-11T15:54:13.165790+00:00",
+          "measured_at_sgt": "2026-11-11T23:54:13.165790+08:00",
+          "elapsed_seconds": 0.875,
+          "process_count": 2,
+          "main_pss_kib": 994923,
+          "main_rss_kib": 1170128,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31385,
+          "combined_pss_kib": 1026308,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 994923,
+              "rss_kib": 1170128,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 623084,
+              "raw_file": "navigation-active-e2-l1/meminfo-01-main-22406.txt",
+              "raw_sha256": "cdefe508583269479bda96d828efdbd90b8fd016448bd00066b799e458f6be63"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31385,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "navigation-active-e2-l1/meminfo-01-helper-22446.txt",
+              "raw_sha256": "54593876d4e382927e797003cc0f2e49dcbceb8c4597297325b21ba1c1c37b53"
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "measured_at_utc": "2026-11-11T15:54:18.851773+00:00",
+          "measured_at_sgt": "2026-11-11T23:54:18.851773+08:00",
+          "elapsed_seconds": 6.562999999965541,
+          "process_count": 2,
+          "main_pss_kib": 995367,
+          "main_rss_kib": 1170572,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31385,
+          "combined_pss_kib": 1026752,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 995367,
+              "rss_kib": 1170572,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 623092,
+              "raw_file": "navigation-active-e2-l1/meminfo-02-main-22406.txt",
+              "raw_sha256": "4f0f9a742dbc41c72f27d36e651b50df7435a4a137c4c7ae92f3e5a42a7ce635"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31385,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "navigation-active-e2-l1/meminfo-02-helper-22446.txt",
+              "raw_sha256": "21c26330f5a0b6f9de6a4549dd4e887d31427892ba90ca6b23a052ee37af83f2"
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "measured_at_utc": "2026-11-11T15:54:24.618084+00:00",
+          "measured_at_sgt": "2026-11-11T23:54:24.618084+08:00",
+          "elapsed_seconds": 12.327999999979511,
+          "process_count": 2,
+          "main_pss_kib": 995327,
+          "main_rss_kib": 1170532,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31385,
+          "combined_pss_kib": 1026712,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 995327,
+              "rss_kib": 1170532,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 622956,
+              "raw_file": "navigation-active-e2-l1/meminfo-03-main-22406.txt",
+              "raw_sha256": "4f1b3a8b657aa55300f4fb14b49f4aa1b39e4cfc799ee95f81089621e80d6f84"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31385,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "navigation-active-e2-l1/meminfo-03-helper-22446.txt",
+              "raw_sha256": "f4e6848a57a8f5dc6c195b59e7ad3e8011c03936febba2611d2fe6a08e8bc1a7"
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "measured_at_utc": "2026-11-11T15:54:30.390544+00:00",
+          "measured_at_sgt": "2026-11-11T23:54:30.390544+08:00",
+          "elapsed_seconds": 18.093999999924563,
+          "process_count": 2,
+          "main_pss_kib": 995379,
+          "main_rss_kib": 1170584,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31385,
+          "combined_pss_kib": 1026764,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 995379,
+              "rss_kib": 1170584,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 622956,
+              "raw_file": "navigation-active-e2-l1/meminfo-04-main-22406.txt",
+              "raw_sha256": "996818f120e637a802678b3668383d038074318847fdb16744d3c185e5ef1b07"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31385,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "navigation-active-e2-l1/meminfo-04-helper-22446.txt",
+              "raw_sha256": "cb381b1c4376fb0ceb33f0b6c4cf7cc6383374beffb958b9b18f89ec9d86ad09"
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "measured_at_utc": "2026-11-11T15:54:36.181815+00:00",
+          "measured_at_sgt": "2026-11-11T23:54:36.181815+08:00",
+          "elapsed_seconds": 23.890999999945052,
+          "process_count": 2,
+          "main_pss_kib": 995159,
+          "main_rss_kib": 1170364,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31385,
+          "combined_pss_kib": 1026544,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 995159,
+              "rss_kib": 1170364,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 622676,
+              "raw_file": "navigation-active-e2-l1/meminfo-05-main-22406.txt",
+              "raw_sha256": "6a2353ca9fe43a9d1900092b67e84b8f557fb74aa54e972f635f9b5b834c5a54"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31385,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "navigation-active-e2-l1/meminfo-05-helper-22446.txt",
+              "raw_sha256": "8f905508d9ccb761bf4edd55c6caf231be7bf15cb92b0b9159ac097b8494a319"
+            }
+          ]
+        }
+      ],
+      "main_pss_kib": {
+        "count": 5,
+        "minimum": 994923,
+        "maximum": 995379,
+        "median": 995327,
+        "mean": 995231
+      },
+      "main_rss_kib": {
+        "count": 5,
+        "minimum": 1170128,
+        "maximum": 1170584,
+        "median": 1170532,
+        "mean": 1170436
+      },
+      "main_swap_pss_kib": {
+        "count": 5,
+        "minimum": 5,
+        "maximum": 5,
+        "median": 5,
+        "mean": 5
+      },
+      "helper_pss_kib": {
+        "count": 5,
+        "minimum": 31385,
+        "maximum": 31385,
+        "median": 31385,
+        "mean": 31385
+      },
+      "combined_pss_kib": {
+        "count": 5,
+        "minimum": 1026308,
+        "maximum": 1026764,
+        "median": 1026712,
+        "mean": 1026616
+      },
+      "combined_swap_pss_kib": {
+        "count": 5,
+        "minimum": 66,
+        "maximum": 66,
+        "median": 66,
+        "mean": 66
+      },
+      "description": "Active guidance, step 1 of 3, same 16 m route"
+    },
+    {
+      "schema_version": 1,
+      "tool": "adb shell dumpsys meminfo -d <pid>",
+      "scenario": "campus-overview-29-buildings",
+      "main_process_id": 22406,
+      "sample_count": 5,
+      "requested_interval_seconds": 5,
+      "duration_seconds": 23.844000000040978,
+      "units": "Android kB treated as KiB; divide by 1024 for MiB",
+      "scope": "Main activity process plus all same-name processes found for the package; PSS is summed, RSS is reported only for the main process to avoid double-counting shared pages.",
+      "samples": [
+        {
+          "index": 1,
+          "measured_at_utc": "2026-11-11T15:55:45.905683+00:00",
+          "measured_at_sgt": "2026-11-11T23:55:45.905683+08:00",
+          "elapsed_seconds": 0.875,
+          "process_count": 2,
+          "main_pss_kib": 1163129,
+          "main_rss_kib": 1338336,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31385,
+          "combined_pss_kib": 1194514,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1163129,
+              "rss_kib": 1338336,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 788272,
+              "raw_file": "campus-overview-29-buildings/meminfo-01-main-22406.txt",
+              "raw_sha256": "be85a5c113c6f38d0f1424d19247415cd20336ce3a1bdc9ab5ac98d7fffcde84"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31385,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "campus-overview-29-buildings/meminfo-01-helper-22446.txt",
+              "raw_sha256": "e4d48273efbfa169f5c95768f71c66d5d72f19046599aa42c297cd6f7708a797"
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "measured_at_utc": "2026-11-11T15:55:51.540599+00:00",
+          "measured_at_sgt": "2026-11-11T23:55:51.540599+08:00",
+          "elapsed_seconds": 6.516000000061467,
+          "process_count": 2,
+          "main_pss_kib": 1162863,
+          "main_rss_kib": 1338068,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31385,
+          "combined_pss_kib": 1194248,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1162863,
+              "rss_kib": 1338068,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 788264,
+              "raw_file": "campus-overview-29-buildings/meminfo-02-main-22406.txt",
+              "raw_sha256": "e5d96e75124ab534e4bab61ce75095e3c7b6fb7c60dbae99dca5a605d89934a1"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31385,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "campus-overview-29-buildings/meminfo-02-helper-22446.txt",
+              "raw_sha256": "93cd5c36d464ede944a478345758b618ed190bd2be61a10394163465f992eb9a"
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "measured_at_utc": "2026-11-11T15:55:57.286405+00:00",
+          "measured_at_sgt": "2026-11-11T23:55:57.286405+08:00",
+          "elapsed_seconds": 12.266000000061467,
+          "process_count": 2,
+          "main_pss_kib": 1162907,
+          "main_rss_kib": 1338112,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31385,
+          "combined_pss_kib": 1194292,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1162907,
+              "rss_kib": 1338112,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 788264,
+              "raw_file": "campus-overview-29-buildings/meminfo-03-main-22406.txt",
+              "raw_sha256": "2e0094ffaed533614876fc0ef785bb3307fffeb21d3c061cb317935b6c149a3c"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31385,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "campus-overview-29-buildings/meminfo-03-helper-22446.txt",
+              "raw_sha256": "9a6d3eb2ea4272a299bccf98e059a3ab333c4e8a7a9f0dee1ff71bc37f8323ee"
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "measured_at_utc": "2026-11-11T15:56:03.098113+00:00",
+          "measured_at_sgt": "2026-11-11T23:56:03.098113+08:00",
+          "elapsed_seconds": 18.063000000081956,
+          "process_count": 2,
+          "main_pss_kib": 1163051,
+          "main_rss_kib": 1338256,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31385,
+          "combined_pss_kib": 1194436,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1163051,
+              "rss_kib": 1338256,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 788380,
+              "raw_file": "campus-overview-29-buildings/meminfo-04-main-22406.txt",
+              "raw_sha256": "cf6e646ce45a3e1c8a9500b9956c8d4a54278c8a30a9e06d82212034b1134665"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31385,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "campus-overview-29-buildings/meminfo-04-helper-22446.txt",
+              "raw_sha256": "42eedac98ce3d7504f21079edf6d232c2defe62e9949ac2c34fa66c9f2f6320f"
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "measured_at_utc": "2026-11-11T15:56:08.866416+00:00",
+          "measured_at_sgt": "2026-11-11T23:56:08.866416+08:00",
+          "elapsed_seconds": 23.844000000040978,
+          "process_count": 2,
+          "main_pss_kib": 1162075,
+          "main_rss_kib": 1337280,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31385,
+          "combined_pss_kib": 1193460,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1162075,
+              "rss_kib": 1337280,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787340,
+              "raw_file": "campus-overview-29-buildings/meminfo-05-main-22406.txt",
+              "raw_sha256": "14c198082ebe72c9952bfc85590347781eb7a1b90fd07acdabf391e77b10a914"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31385,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "campus-overview-29-buildings/meminfo-05-helper-22446.txt",
+              "raw_sha256": "b8214eb9c20127232a5474a7bfa5b2626c99d324fd1b8edbb981b5ab6861cf12"
+            }
+          ]
+        }
+      ],
+      "main_pss_kib": {
+        "count": 5,
+        "minimum": 1162075,
+        "maximum": 1163129,
+        "median": 1162907,
+        "mean": 1162805
+      },
+      "main_rss_kib": {
+        "count": 5,
+        "minimum": 1337280,
+        "maximum": 1338336,
+        "median": 1338112,
+        "mean": 1338010.4
+      },
+      "main_swap_pss_kib": {
+        "count": 5,
+        "minimum": 5,
+        "maximum": 5,
+        "median": 5,
+        "mean": 5
+      },
+      "helper_pss_kib": {
+        "count": 5,
+        "minimum": 31385,
+        "maximum": 31385,
+        "median": 31385,
+        "mean": 31385
+      },
+      "combined_pss_kib": {
+        "count": 5,
+        "minimum": 1193460,
+        "maximum": 1194514,
+        "median": 1194292,
+        "mean": 1194190
+      },
+      "combined_swap_pss_kib": {
+        "count": 5,
+        "minimum": 66,
+        "maximum": 66,
+        "median": 66,
+        "mean": 66
+      },
+      "description": "map_extended.db site overview, 29 building footprints"
+    },
+    {
+      "schema_version": 1,
+      "tool": "adb shell dumpsys meminfo -d <pid>",
+      "scenario": "explore-after-map-and-route-use",
+      "main_process_id": 22406,
+      "sample_count": 5,
+      "requested_interval_seconds": 5,
+      "duration_seconds": 23.719000000040978,
+      "units": "Android kB treated as KiB; divide by 1024 for MiB",
+      "scope": "Main activity process plus all same-name processes found for the package; PSS is summed, RSS is reported only for the main process to avoid double-counting shared pages.",
+      "samples": [
+        {
+          "index": 1,
+          "measured_at_utc": "2026-11-11T15:56:31.143960+00:00",
+          "measured_at_sgt": "2026-11-11T23:56:31.143960+08:00",
+          "elapsed_seconds": 0.75,
+          "process_count": 2,
+          "main_pss_kib": 1161191,
+          "main_rss_kib": 1336396,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31385,
+          "combined_pss_kib": 1192576,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1161191,
+              "rss_kib": 1336396,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787340,
+              "raw_file": "explore-after-map-and-route-use/meminfo-01-main-22406.txt",
+              "raw_sha256": "aaf383cf5d7360e493ab7b43a4aa61cb6d41f00fdfb6e5056e67ab168fe983fb"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31385,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "explore-after-map-and-route-use/meminfo-01-helper-22446.txt",
+              "raw_sha256": "fa9d53b372d037f43e4e55b357f5de21238fdc944e0cd59a47cf83d730554078"
+            }
+          ]
+        },
+        {
+          "index": 2,
+          "measured_at_utc": "2026-11-11T15:56:36.753291+00:00",
+          "measured_at_sgt": "2026-11-11T23:56:36.753291+08:00",
+          "elapsed_seconds": 6.359000000054948,
+          "process_count": 2,
+          "main_pss_kib": 1161204,
+          "main_rss_kib": 1336380,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31388,
+          "combined_pss_kib": 1192592,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1161204,
+              "rss_kib": 1336380,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787308,
+              "raw_file": "explore-after-map-and-route-use/meminfo-02-main-22406.txt",
+              "raw_sha256": "64cd5e5690b7c1700f6c3cb7b24318ff2c9d34d66c1aa15955ed620a87d19903"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31388,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "explore-after-map-and-route-use/meminfo-02-helper-22446.txt",
+              "raw_sha256": "786adbdd897079a81530ee50094a732f026a79323b7cbdfb0c3f3abe8042ea33"
+            }
+          ]
+        },
+        {
+          "index": 3,
+          "measured_at_utc": "2026-11-11T15:56:42.683293+00:00",
+          "measured_at_sgt": "2026-11-11T23:56:42.683293+08:00",
+          "elapsed_seconds": 12.297000000020489,
+          "process_count": 2,
+          "main_pss_kib": 1161244,
+          "main_rss_kib": 1336420,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31390,
+          "combined_pss_kib": 1192634,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1161244,
+              "rss_kib": 1336420,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787316,
+              "raw_file": "explore-after-map-and-route-use/meminfo-03-main-22406.txt",
+              "raw_sha256": "d4653bf4b5f21f7ab497241c398c200dccecd86b3b1d26cf02d66b849ae17481"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31390,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "explore-after-map-and-route-use/meminfo-03-helper-22446.txt",
+              "raw_sha256": "bf79560484ef34cf12a7375f5a02094ad63524b9ed3e2c5061df26487751f914"
+            }
+          ]
+        },
+        {
+          "index": 4,
+          "measured_at_utc": "2026-11-11T15:56:48.365707+00:00",
+          "measured_at_sgt": "2026-11-11T23:56:48.365707+08:00",
+          "elapsed_seconds": 17.984000000054948,
+          "process_count": 2,
+          "main_pss_kib": 1161250,
+          "main_rss_kib": 1336424,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31390,
+          "combined_pss_kib": 1192640,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1161250,
+              "rss_kib": 1336424,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787316,
+              "raw_file": "explore-after-map-and-route-use/meminfo-04-main-22406.txt",
+              "raw_sha256": "611a7265e126c481423c01a558aac52f99598aa417c518c7157570d50b0a9ad4"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31390,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "explore-after-map-and-route-use/meminfo-04-helper-22446.txt",
+              "raw_sha256": "053881e06406e093753aa9abcd6ec748fc25ebe849f1aae002cfae1607178a87"
+            }
+          ]
+        },
+        {
+          "index": 5,
+          "measured_at_utc": "2026-11-11T15:56:54.102167+00:00",
+          "measured_at_sgt": "2026-11-11T23:56:54.102167+08:00",
+          "elapsed_seconds": 23.719000000040978,
+          "process_count": 2,
+          "main_pss_kib": 1161002,
+          "main_rss_kib": 1336172,
+          "main_swap_pss_kib": 5,
+          "helper_pss_kib": 31390,
+          "combined_pss_kib": 1192392,
+          "combined_swap_pss_kib": 66,
+          "processes": [
+            {
+              "role": "main",
+              "pid": 22406,
+              "ppid": 1388,
+              "pss_kib": 1161002,
+              "rss_kib": 1336172,
+              "swap_pss_kib": 5,
+              "app_summary_graphics_kib": 787060,
+              "raw_file": "explore-after-map-and-route-use/meminfo-05-main-22406.txt",
+              "raw_sha256": "d4d441a1cf68025512735147f40fd03021fca990a0063f76d4ee70e7dbdbce22"
+            },
+            {
+              "role": "helper",
+              "pid": 22446,
+              "ppid": 1,
+              "pss_kib": 31390,
+              "rss_kib": 87596,
+              "swap_pss_kib": 61,
+              "app_summary_graphics_kib": 0,
+              "raw_file": "explore-after-map-and-route-use/meminfo-05-helper-22446.txt",
+              "raw_sha256": "ab617db0e8f8a4c6414dbf446d66a96486b6aca51b95415c655cb2f652c4c513"
+            }
+          ]
+        }
+      ],
+      "main_pss_kib": {
+        "count": 5,
+        "minimum": 1161002,
+        "maximum": 1161250,
+        "median": 1161204,
+        "mean": 1161178.2
+      },
+      "main_rss_kib": {
+        "count": 5,
+        "minimum": 1336172,
+        "maximum": 1336424,
+        "median": 1336396,
+        "mean": 1336358.4
+      },
+      "main_swap_pss_kib": {
+        "count": 5,
+        "minimum": 5,
+        "maximum": 5,
+        "median": 5,
+        "mean": 5
+      },
+      "helper_pss_kib": {
+        "count": 5,
+        "minimum": 31385,
+        "maximum": 31390,
+        "median": 31390,
+        "mean": 31388.6
+      },
+      "combined_pss_kib": {
+        "count": 5,
+        "minimum": 1192392,
+        "maximum": 1192640,
+        "median": 1192592,
+        "mean": 1192566.8
+      },
+      "combined_swap_pss_kib": {
+        "count": 5,
+        "minimum": 66,
+        "maximum": 66,
+        "median": 66,
+        "mean": 66
+      },
+      "description": "Return to Explore after maps and navigation"
+    }
+  ]
+}

@@ -118,6 +118,12 @@ Things that do not need doing: dragging, resizing, tabs, floating, saving and re
 the saved-layout migration for older files — `PlaceMissingPanels` puts a panel an old file
 does not mention at its default spot.
 
+## Floating window bounds
+
+Floating windows intentionally stay fully inside the usable viewport, below the top bar and above the bottom margin. Dragging a
+window partly off-screen is clamped; large windows shrink to fit. The computed rectangle changes without overwriting its saved
+position and size, so a larger viewport restores the arrangement. There is no partial-visibility margin setting.
+
 ## Pitfalls
 
 - A panel placed on the canvas (even "temporarily") fails the guard tests.

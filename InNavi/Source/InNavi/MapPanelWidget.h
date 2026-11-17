@@ -138,6 +138,10 @@ private:
 	void OnRevealFarChanged(float NewValue);
 	UFUNCTION()
 	void OnRevealNearChanged(float NewValue);
+	UFUNCTION()
+	void OnRenderingPresetClicked();
+	void AddRenderingControls(UVerticalBox* Stack);
+	void RefreshRenderingControls();
 
 	FString SelectedBuildingId() const;
 	void SelectFloorOption(int32 Minimum, int32 Maximum);
@@ -233,6 +237,11 @@ private:
 	UTextBlock* RevealFarText = nullptr;
 	UPROPERTY()
 	UTextBlock* RevealNearText = nullptr;
+	UPROPERTY()
+	UButton* RenderingPresetButton = nullptr;
+	UPROPERTY()
+	UTextBlock* RenderingPresetLabel = nullptr;
+	int8 DisplayedRenderingPreset = -127;
 	bool bViewOpen = false;
 
 	TFunction<void(const FString&)> BuildingClickHandler;
