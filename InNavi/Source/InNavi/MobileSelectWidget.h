@@ -14,7 +14,13 @@ struct FMobileSelectOption
 	// What the select hands back, and what it shows.
 	FString Value;
 	FString Label;
+	// What the field shows once the option is chosen, when that is less than the list does ("Study lounge" for "Study lounge . E2 . L1"); empty = the label.
+	FString ShortLabel;
 };
+
+// How a select looks. Normal: the caption in the box, big text. Compact: the prototype's small drop-down (the caption over a short box, a small arrow).
+// Bare: only the chosen text and a small arrow, no box (inside a card). Chip: a small white box with the chosen text only (a building, a level).
+enum class EMobileSelectLook : uint8 { Normal, Compact, Bare, Chip };
 
 // A drop-down for the phone screens, drawn by the screen itself: a field with a small caption and the chosen text, and under it, when it is
 // open, the list of options. The list opens in the page (below the field), so it scales with the rest of the screen, which a pop-up menu of
@@ -26,6 +32,9 @@ class INNAVI_API UMobileSelectWidget : public UUserWidget
 
 public:
 	void SetCaption(const FString& InCaption);
+	// The prototype's small drop-down (the directory's filters): the caption over a short box, a small arrow, small text. Set before the widget is built.
+	void SetCompact(bool bInCompact) { Look = bInCompact ? EMobileSelectLook::Compact : EMobileSelectLook::Normal; }
+	void SetLook(EMobileSelectLook InLook) { Look = InLook; }
 	// The options, and which is chosen (an empty value is a valid option too). A chosen value that is not among them shows as nothing.
 	void SetOptions(const TArray<FMobileSelectOption>& InOptions, const FString& InSelected);
 	void SetSelected(const FString& InSelected);
@@ -42,6 +51,8 @@ public:
 
 	const FString& GetSelected() const { return Selected; }
 	FString GetSelectedLabel() const;
+	// What the field shows: the short label of the chosen option, else its label.
+	FString GetSelectedShortLabel() const;
 	int32 GetOptionCount() const { return Options.Num(); }
 	const TArray<FMobileSelectOption>& GetOptions() const { return Options; }
 
@@ -57,6 +68,9 @@ private:
 	UTextBlock* ValueText = nullptr;
 	UPROPERTY()
 	UBorder* ListPanel = nullptr;
+	// The box of the field, whose edge is black while the list is open (as a drop-down of the prototype's browser is).
+	UPROPERTY()
+	UBorder* FieldBox = nullptr;
 	UPROPERTY()
 	UVerticalBox* ListBox = nullptr;
 
@@ -64,6 +78,7 @@ private:
 	TArray<FMobileSelectOption> Options;
 	FString Selected;
 	bool bOpen = false;
+	EMobileSelectLook Look = EMobileSelectLook::Normal;
 
 	TFunction<void(const FString&)> OnChanged;
 	TFunction<void()> OnOpened;

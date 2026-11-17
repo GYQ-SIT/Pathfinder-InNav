@@ -8,6 +8,7 @@
 class UBorder;
 class UButton;
 class UHorizontalBox;
+class UImage;
 class UTextBlock;
 
 // The bottom sheet's page for one place: its name, code and level, a photo (a "No photo" box when there is none), what kind of place it is and
@@ -27,6 +28,10 @@ public:
 	void SetOnSaveToggled(TFunction<void(const FMobilePlace&)> InCallback) { OnSaveToggled = MoveTemp(InCallback); }
 	void SetOnUseAsStart(TFunction<void(const FMobilePlace&)> InCallback) { OnUseAsStart = MoveTemp(InCallback); }
 
+	// The bottom button says "Add stop" instead of "Get directions" while a trip is open and this place is not in it (the screen tells the page).
+	void SetAddStopMode(bool bInAddStop);
+	bool IsAddStopMode() const { return bAddStop; }
+	FString GetDirectionsLabelString() const;
 	const FMobilePlace& GetPlace() const { return Place; }
 	bool IsSaved() const { return bSaved; }
 	bool IsStart() const { return bIsStart; }
@@ -54,6 +59,8 @@ private:
 	UPROPERTY()
 	UTextBlock* PhotoText = nullptr;
 	UPROPERTY()
+	UImage* SaveHeart = nullptr;
+	UPROPERTY()
 	UTextBlock* DescriptionText = nullptr;
 	UPROPERTY()
 	UHorizontalBox* PillRow = nullptr;
@@ -61,6 +68,9 @@ private:
 	UButton* SaveButton = nullptr;
 	UPROPERTY()
 	UTextBlock* SaveLabel = nullptr;
+	UPROPERTY()
+	UTextBlock* DirectionsLabel = nullptr;
+	bool bAddStop = false;
 	UPROPERTY()
 	UButton* StartButton = nullptr;
 	UPROPERTY()

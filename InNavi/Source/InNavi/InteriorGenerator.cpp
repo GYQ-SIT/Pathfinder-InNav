@@ -1141,7 +1141,7 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprintWithTags(const TArray<
 		Room->SetTypeColourShown(bRoomColoursVisible);
 		Room->RoomId = ResolvedId;
 		Room->NavigationId = FGuid::NewGuid().ToString(EGuidFormats::Digits);
-		Room->RoomName = RoomName.IsEmpty() ? ResolvedId : RoomName;
+		Room->RoomName = MakeUniqueRoomName(RoomName.IsEmpty() ? ResolvedId : RoomName);
 		Room->RoomTags = NavigationSearch::NormalizeTags(InTags);
 		Room->RoomType = RoomTypes::Normalize(InRoomType);
 		Room->FloorLevel = ActiveFloor;
@@ -1312,7 +1312,7 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 	if (Wall)
 	{
 		Wall->RoomId = ResolvedId;
-		Wall->RoomName = WallName.IsEmpty() ? ResolvedId : WallName;
+		Wall->RoomName = MakeUniqueRoomName(WallName.IsEmpty() ? ResolvedId : WallName);
 		Wall->FloorLevel = ActiveFloor;
 		Wall->bIsPublic = true;
 		Wall->bRequiresKey = false;
@@ -2392,6 +2392,54 @@ bool AInteriorGenerator::SetDoorConnectsTo(const FString& RoomId, const FString&
 	}
 
 	return false;
+}
+
+bool AInteriorGenerator::IsRoomNameTaken(const FString& Name) const
+{
+	for (const auto& Pair : RoomsByFloor)
+	{
+		for (const AInteriorRoom* Other : Pair.Value.Rooms)
+		{
+			if (Other && Other->RoomName == Name)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+FString AInteriorGenerator::MakeUniqueRoomName(const FString& Desired) const
+{
+	if (!IsRoomNameTaken(Desired))
+	{
+		return Desired;
+	}
+
+	// Split a trailing number off ("Lab1" -> "Lab" + 1); no number (or one too long to count) starts at 2 after a space.
+	int32 DigitStart = Desired.Len();
+	while (DigitStart > 0 && FChar::IsDigit(Desired[DigitStart - 1]))
+	{
+		--DigitStart;
+	}
+	FString Prefix;
+	int32 Number = 2;
+	if (DigitStart < Desired.Len() && Desired.Len() - DigitStart <= 9)
+	{
+		Prefix = Desired.Left(DigitStart);
+		Number = FCString::Atoi(*Desired.Mid(DigitStart)) + 1;
+	}
+	else
+	{
+		Prefix = Desired + TEXT(" ");
+	}
+
+	FString Candidate;
+	do
+	{
+		Candidate = Prefix + FString::FromInt(Number++);
+	} while (IsRoomNameTaken(Candidate));
+	return Candidate;
 }
 
 bool AInteriorGenerator::SetRoomName(const FString& RoomId, const FString& NewName)

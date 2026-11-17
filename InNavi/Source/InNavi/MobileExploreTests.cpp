@@ -26,11 +26,11 @@ bool FMobileExplorePageTest::RunTest(const FString& Parameters)
 	UMobileExplorePageWidget* Page = CreateWidget<UMobileExplorePageWidget>(World, UMobileExplorePageWidget::StaticClass());
 	if (!TestNotNull(TEXT("the page is created"), Page)) return false;
 	Page->TakeWidget();
-	for (const TCHAR* Name : { TEXT("Txt_ExploreTitle"), TEXT("Txt_ExploreSubtitle"), TEXT("Txt_ExploreSites"), TEXT("ExploreCards"), TEXT("ExploreScroll") })
+	for (const TCHAR* Name : { TEXT("Txt_ExploreTitle"), TEXT("Btn_ExploreSearch"), TEXT("Txt_ExploreSites"), TEXT("ExploreCards"), TEXT("ExploreScroll") })
 	{
 		TestNotNull(*FString::Printf(TEXT("%s exists"), Name), Page->FindNamedWidget(Name));
 	}
-	TestEqual(TEXT("the title"), Cast<UTextBlock>(Page->FindNamedWidget(TEXT("Txt_ExploreTitle")))->GetText().ToString(), FString(TEXT("Find your way indoors")));
+	TestEqual(TEXT("the title"), Cast<UTextBlock>(Page->FindNamedWidget(TEXT("Txt_ExploreTitle")))->GetText().ToString(), FString(TEXT("Explore")));
 	TestTrue(TEXT("no cards without a source"), Page->GetShownSites().IsEmpty());
 
 	Page->SetSource(&Source);
@@ -77,7 +77,7 @@ bool FMobileOpenSiteTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("its building and level at the top"), SiteName(), FString(TEXT("Paya Lebar Mall · L1")));
 	TestEqual(TEXT("started again at Where to?"), Screen->GetFlow().GetState(), EMobileSheetState::Search);
 	TestTrue(TEXT("with no place chosen and no start"), Screen->GetSelectedPlace().Id.IsEmpty() && Screen->GetStartPlaceId().IsEmpty());
-	TestEqual(TEXT("the search lists the mall's first level"), Screen->GetSearchPage()->GetShownPlaces().Num(), 4);
+	TestEqual(TEXT("the directory lists the mall's places"), Screen->GetSearchPage()->GetShownPlaces().Num(), 28);
 	TestEqual(TEXT("(Pepper Lunch first)"), Screen->GetSearchPage()->GetShownPlaces()[0].Name, FString(TEXT("Pepper Lunch")));
 	TestTrue(TEXT("the map shows the mall's first level"), Screen->GetMapView()->GetBuildingId() == TEXT("PLM") && Screen->GetMapView()->GetLevel() == 1);
 	TestTrue(TEXT("with the person in the mall (My location)"), Screen->GetMyLocationBuildingId() == TEXT("PLM") && Screen->GetMapView()->HasPosition());

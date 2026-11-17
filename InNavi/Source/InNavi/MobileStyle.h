@@ -6,6 +6,7 @@
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
+#include "Components/ScrollBox.h"
 #include "Components/Button.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
@@ -33,6 +34,8 @@ namespace MobileStyle
 	inline FLinearColor SoftPanel = StartStyle::Rgb(241, 245, 249);
 	inline FLinearColor IconGrey = StartStyle::Rgb(209, 213, 219);
 	inline FLinearColor MapBackground = StartStyle::Rgb(222, 231, 238);
+	// The heart of a saved place (the prototype's red, the same in both themes).
+	inline const FLinearColor RedHeart = StartStyle::Rgb(220, 38, 38);
 	inline FLinearColor Red = StartStyle::Rgb(185, 28, 28);
 	inline FLinearColor RedSoft = StartStyle::Rgb(254, 226, 226);
 	inline FLinearColor Green = StartStyle::Rgb(22, 101, 52);
@@ -145,10 +148,8 @@ namespace MobileStyle
 		}
 		FSlateFontInfo Font = Block->GetFont();
 		Font.Size = FMath::RoundToInt(PixelSize * TextScale * StartStyle::PixelsToFont);
-		if (bBold)
-		{
-			Font.TypefaceFontName = TEXT("Bold");
-		}
+		// The text block's own default typeface is Bold, so Regular has to be asked for: a text that is not bold was bold until now.
+		Font.TypefaceFontName = bBold ? TEXT("Bold") : TEXT("Regular");
 		Block->SetFont(Font);
 	}
 
@@ -159,6 +160,17 @@ namespace MobileStyle
 		Block->SetColorAndOpacity(FSlateColor(Color));
 		ApplyFont(Block, PixelSize, bBold);
 		return Block;
+	}
+
+	// A scroll box without the dark gradient the engine draws at the edge of what is scrolled out of view (the prototype has none).
+	inline void NoScrollShadow(UScrollBox* Scroll)
+	{
+		FScrollBoxStyle Style = Scroll->GetWidgetStyle();
+		Style.TopShadowBrush = FSlateNoResource();
+		Style.BottomShadowBrush = FSlateNoResource();
+		Style.LeftShadowBrush = FSlateNoResource();
+		Style.RightShadowBrush = FSlateNoResource();
+		Scroll->SetWidgetStyle(Style);
 	}
 
 	// A rounded button with a centred label.

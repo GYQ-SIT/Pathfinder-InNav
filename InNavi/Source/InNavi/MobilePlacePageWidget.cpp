@@ -1,5 +1,6 @@
 #include "MobilePlacePageWidget.h"
 
+#include "MobileIcons.h"
 #include "MobileStyle.h"
 
 #include "Blueprint/WidgetTree.h"
@@ -7,6 +8,7 @@
 #include "Components/Button.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/Spacer.h"
@@ -38,27 +40,25 @@ TSharedRef<SWidget> UMobilePlacePageWidget::RebuildWidget()
 		UVerticalBox* Page = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("PlacePage"));
 		Tree->RootWidget = Page;
 
-		// The back arrow, then the name and below it the code and where it is.
+		// The name and below it the code and where it is, with a close button (a circle with a cross) at the right: it goes back, as the back arrow did.
 		UHorizontalBox* Header = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("PlaceHeader"));
-		UTextBlock* BackLabel = nullptr;
-		UButton* Back = MakeButton(Tree, TEXT("Btn_PlaceBack"), TEXT("‹"), White, Blue, 10.f, 36.f, &BackLabel, 14.f);
-		ApplyFont(BackLabel, 28.f, true);
-		Back->OnClicked.AddUniqueDynamic(this, &UMobilePlacePageWidget::HandleBackClicked);
-		Header->AddChildToHorizontalBox(Back)->SetVerticalAlignment(VAlign_Center);
 		UVerticalBox* Titles = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("PlaceTitles"));
-		TitleText = MakeText(Tree, TEXT("Txt_PlaceTitle"), TEXT(""), 22.f, Ink, true);
+		TitleText = MakeText(Tree, TEXT("Txt_PlaceTitle"), TEXT(""), 17.f, Ink, true);
 		SubtitleText = MakeText(Tree, TEXT("Txt_PlaceSubtitle"), TEXT(""), 12.f, Grey);
 		Titles->AddChildToVerticalBox(TitleText);
 		Titles->AddChildToVerticalBox(SubtitleText)->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
 		UHorizontalBoxSlot* TitlesSlot = Header->AddChildToHorizontalBox(Titles);
-		TitlesSlot->SetPadding(FMargin(12.f, 0.f, 0.f, 0.f));
 		TitlesSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		TitlesSlot->SetVerticalAlignment(VAlign_Center);
-		Page->AddChildToVerticalBox(Header)->SetPadding(FMargin(16.f, 0.f, 16.f, 0.f));
+		UButton* Back = MobileIcons::CloseButton(Tree, TEXT("Btn_PlaceBack"));
+		Back->OnClicked.AddUniqueDynamic(this, &UMobilePlacePageWidget::HandleBackClicked);
+		Header->AddChildToHorizontalBox(Back)->SetVerticalAlignment(VAlign_Top);
+		Page->AddChildToVerticalBox(Header)->SetPadding(FMargin(16.f, 0.f, 4.f, 0.f));
 
 		// The part that scrolls: the photo, the pills, the description and the two secondary buttons.
 		UScrollBox* Scroll = Tree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("PlaceScroll"));
 		UVerticalBox* Content = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("PlaceContent"));
+		NoScrollShadow(Scroll);
 		Scroll->AddChild(Content);
 
 		UBorder* Photo = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("PlacePhoto"));
@@ -80,16 +80,16 @@ TSharedRef<SWidget> UMobilePlacePageWidget::RebuildWidget()
 		DescriptionText->SetAutoWrapText(true);
 		Content->AddChildToVerticalBox(DescriptionText)->SetPadding(FMargin(16.f, 10.f, 16.f, 0.f));
 
-		SaveButton = MakeButton(Tree, TEXT("Btn_SavePlace"), TEXT("Save place"), White, Blue, 12.f, 44.f, &SaveLabel);
+		SaveButton = MobileIcons::IconLabelButton(Tree, TEXT("Btn_SavePlace"), TEXT("Save place"), TEXT("Heart"), White, Ink, 12.f, 38.f, &SaveLabel, &SaveHeart);
 		SaveButton->OnClicked.AddUniqueDynamic(this, &UMobilePlacePageWidget::HandleSaveClicked);
-		Content->AddChildToVerticalBox(SaveButton)->SetPadding(FMargin(16.f, 16.f, 16.f, 0.f));
-		StartButton = MakeButton(Tree, TEXT("Btn_UseAsStart"), TEXT("Use as starting point"), White, Blue, 12.f, 44.f, &StartLabel);
+		Content->AddChildToVerticalBox(SaveButton)->SetPadding(FMargin(16.f, 12.f, 16.f, 0.f));
+		StartButton = MakeButton(Tree, TEXT("Btn_UseAsStart"), TEXT("Use as starting point"), White, Blue, 12.f, 38.f, &StartLabel);
 		StartButton->OnClicked.AddUniqueDynamic(this, &UMobilePlacePageWidget::HandleStartClicked);
 		Content->AddChildToVerticalBox(StartButton)->SetPadding(FMargin(16.f, 8.f, 16.f, 12.f));
 		Page->AddChildToVerticalBox(Scroll)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 
 		// Get directions stays at the bottom whatever the height of the sheet.
-		UButton* Directions = MakeButton(Tree, TEXT("Btn_GetDirections"), TEXT("Get directions"), Blue, OnBlue, 12.f, 48.f);
+		UButton* Directions = MobileIcons::IconLabelButton(Tree, TEXT("Btn_GetDirections"), bAddStop ? TEXT("Add stop") : TEXT("Get directions"), TEXT("Location"), Blue, OnBlue, 12.f, 48.f, &DirectionsLabel, nullptr);
 		Directions->OnClicked.AddUniqueDynamic(this, &UMobilePlacePageWidget::HandleDirectionsClicked);
 		Page->AddChildToVerticalBox(Directions)->SetPadding(FMargin(16.f, 8.f, 16.f, 12.f));
 
@@ -127,20 +127,27 @@ void UMobilePlacePageWidget::Refresh()
 	PillRow->ClearChildren();
 	if (!Place.Category.IsEmpty())
 	{
-		PillRow->AddChildToHorizontalBox(MakePill(WidgetTree, Place.Category, BlueSoft, Blue))->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+		UHorizontalBoxSlot* CategorySlot = PillRow->AddChildToHorizontalBox(MakeText(WidgetTree, FString(), Place.Category, 14.f, Ink));
+		CategorySlot->SetPadding(FMargin(0.f, 0.f, 10.f, 0.f));
+		CategorySlot->SetVerticalAlignment(VAlign_Center);
 	}
 	PillRow->AddChildToHorizontalBox(Place.bAvailable ? MakePill(WidgetTree, TEXT("Available"), GreenSoft, Green) : MakePill(WidgetTree, TEXT("Unavailable"), RedSoft, Red));
 
-	// The two secondary buttons say what they have done: Saved, Starting point.
-	auto Style = [](UButton* Button, UTextBlock* Label, const TCHAR* Off, const TCHAR* On, bool bOn)
+	// The two secondary buttons say what they have done. Saved is a white button with a red heart that offers to remove the place (as in the prototype); the starting
+	// point is a blue one that says so.
 	{
-		Label->SetText(FText::FromString(bOn ? On : Off));
-		const FLinearColor Fill = bOn ? Blue : White;
-		Button->SetStyle(StartStyle::Button(Fill, Fill * 0.94f, Fill * 0.86f, Line, 12.f / StartStyle::DesignToUi));
-		Label->SetColorAndOpacity(FSlateColor(bOn ? OnBlue : Blue));
-	};
-	Style(SaveButton, SaveLabel, TEXT("Save place"), TEXT("Saved"), bSaved);
-	Style(StartButton, StartLabel, TEXT("Use as starting point"), TEXT("Starting point"), bIsStart);
+		SaveLabel->SetText(FText::FromString(bSaved ? TEXT("Remove from saved") : TEXT("Save place")));
+		SaveButton->SetStyle(StartStyle::Button(White, White * 0.94f, White * 0.86f, FieldEdge, 12.f / StartStyle::DesignToUi));
+		SaveLabel->SetColorAndOpacity(FSlateColor(Ink));
+		if (SaveHeart)
+		{
+			SaveHeart->SetColorAndOpacity(bSaved ? RedHeart : Ink);
+		}
+		StartLabel->SetText(FText::FromString(bIsStart ? TEXT("Starting point") : TEXT("Use as starting point")));
+		const FLinearColor Fill = bIsStart ? Blue : White;
+		StartButton->SetStyle(StartStyle::Button(Fill, Fill * 0.94f, Fill * 0.86f, bIsStart ? Line : FieldEdge, 12.f / StartStyle::DesignToUi));
+		StartLabel->SetColorAndOpacity(FSlateColor(bIsStart ? OnBlue : Blue));
+	}
 }
 
 void UMobilePlacePageWidget::HandleBackClicked()
@@ -149,6 +156,20 @@ void UMobilePlacePageWidget::HandleBackClicked()
 	{
 		OnBack();
 	}
+}
+
+void UMobilePlacePageWidget::SetAddStopMode(bool bInAddStop)
+{
+	bAddStop = bInAddStop;
+	if (DirectionsLabel)
+	{
+		DirectionsLabel->SetText(FText::FromString(bAddStop ? TEXT("Add stop") : TEXT("Get directions")));
+	}
+}
+
+FString UMobilePlacePageWidget::GetDirectionsLabelString() const
+{
+	return DirectionsLabel ? DirectionsLabel->GetText().ToString() : FString();
 }
 
 void UMobilePlacePageWidget::HandleDirectionsClicked()

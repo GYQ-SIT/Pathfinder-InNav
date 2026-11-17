@@ -97,7 +97,7 @@ bool FMobileArrivedPageTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("the place, its code and level"), Page->GetPlaceString(), FString(TEXT("Study lounge · E2-01-101 · Level 1")));
 	TestEqual(TEXT("Save this place"), Page->GetSaveLabelString(), FString(TEXT("Save this place")));
 	Page->SetPlace(Lounge, true);
-	TestEqual(TEXT("a saved place says Saved"), Page->GetSaveLabelString(), FString(TEXT("Saved")));
+	TestEqual(TEXT("a saved place offers to remove it"), Page->GetSaveLabelString(), FString(TEXT("Remove from saved")));
 
 	FString Log;
 	Page->SetOnFindAnother([&Log]() { Log += TEXT("another;"); });
@@ -179,6 +179,48 @@ bool FMobileWalkFlowTest::RunTest(const FString& Parameters)
 	}
 	Click(Arrived->FindNamedWidget(TEXT("Btn_FindAnother")));
 	TestEqual(TEXT("find another place goes to the search"), Screen->GetFlow().GetState(), EMobileSheetState::Search);
+	World->DestroyWorld(false);
+	return true;
+}
+
+// What the button and the line under the numbers say for each kind of step: Reached L2 and the hint on a step that changes level, Outside and Inside E2
+// for leaving and entering a building, Next instruction for the rest, and I have arrived at the end.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileNavigateLabelsTest, "InNavi.Mobile.NavigateLabels", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileNavigateLabelsTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	UMobileNavigatePageWidget* Page = CreateWidget<UMobileNavigatePageWidget>(World, UMobileNavigatePageWidget::StaticClass());
+	if (!TestNotNull(TEXT("the page is created"), Page)) return false;
+	Page->TakeWidget();
+	auto Step = [](EMobileStepKind Kind, const TCHAR* Text, int32 Level, const TCHAR* Label)
+	{
+		FMobileStep S;
+		S.Kind = Kind; S.Text = Text; S.Level = Level; S.LevelLabel = Label; S.BuildingId = TEXT("E2"); S.BuildingName = TEXT("E2"); S.Metres = 10.0;
+		return S;
+	};
+	FMobileRoute Route;
+	Route.bFound = true;
+	Route.Steps = { Step(EMobileStepKind::Straight, TEXT("Follow the corridor"), 1, TEXT("L1")), Step(EMobileStepKind::TakeLift, TEXT("Take the lift to L2"), 1, TEXT("L1")),
+		Step(EMobileStepKind::ExitBuilding, TEXT("Leave E2"), 2, TEXT("L2")), Step(EMobileStepKind::EnterBuilding, TEXT("Enter E6"), 1, TEXT("L1")),
+		Step(EMobileStepKind::TurnLeft, TEXT("Turn left"), 1, TEXT("L1")), Step(EMobileStepKind::Arrive, TEXT("You have arrived"), 1, TEXT("L1")) };
+	FMobilePlace Place;
+	Place.Name = TEXT("Study lounge"); Place.BuildingName = TEXT("E2"); Place.LevelLabel = TEXT("L1");
+
+	Page->SetNavigation(Place, Route, 0);
+	TestEqual(TEXT("an ordinary step"), Page->GetNextLabelString(), FString(TEXT("Next instruction")));
+	TestTrue(TEXT("has no hint"), Page->GetHintString().IsEmpty());
+	Page->SetNavigation(Place, Route, 1);
+	TestEqual(TEXT("a step that changes level says where it ends"), Page->GetNextLabelString(), FString(TEXT("Reached L2")));
+	TestEqual(TEXT("and asks to check the signage"), Page->GetHintString(), FString(TEXT("Check the building signage, then confirm Level 2.")));
+	Page->SetNavigation(Place, Route, 2);
+	TestEqual(TEXT("leaving a building"), Page->GetNextLabelString(), FString(TEXT("Outside")));
+	TestTrue(TEXT("with no hint"), Page->GetHintString().IsEmpty());
+	Page->SetNavigation(Place, Route, 3);
+	TestEqual(TEXT("entering one"), Page->GetNextLabelString(), FString(TEXT("Inside E2")));
+	Page->SetNavigation(Place, Route, 4);
+	TestEqual(TEXT("a turn"), Page->GetNextLabelString(), FString(TEXT("Next instruction")));
+	Page->SetNavigation(Place, Route, 5);
+	TestEqual(TEXT("the arrival"), Page->GetNextLabelString(), FString(TEXT("I have arrived")));
 	World->DestroyWorld(false);
 	return true;
 }
