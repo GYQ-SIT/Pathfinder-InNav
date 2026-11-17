@@ -31,7 +31,8 @@ public:
 	// Spawns one building directly from already-parsed data. Used both by JSON loading
 	// (LoadBuildingsFromFile) and by runtime building creation (e.g. NavPlayerController's build mode).
 	// Returns nullptr if Id is empty, already used, or Footprint has fewer than 3 points.
-	APolyBuilding* SpawnBuildingFromData(const FString& Id, const FString& Name, const TArray<FVector2D>& Footprint, int32 FloorCount, float FloorHeight, FVector2D Offset);
+	// FirstLevel is the level of the lowest floor (see APolyBuilding::BuildFromFootprint): 1 for a building that starts on the ground.
+	APolyBuilding* SpawnBuildingFromData(const FString& Id, const FString& Name, const TArray<FVector2D>& Footprint, int32 FloorCount, float FloorHeight, FVector2D Offset, int32 FirstLevel = 1);
 
 	// SpawnBuildingFromData multiplies footprint+offset by this. Callers building a footprint
 	// out of world-space coordinates (e.g. from a raycast) must divide by this first.
@@ -335,6 +336,7 @@ private:
 	struct FBuildingBaseline
 	{
 		int32 FloorCount = 1;
+		int32 FirstLevel = 1;
 		FString Name;
 		FString Type;
 		bool bHadInterior = false;

@@ -33,11 +33,18 @@ static bool CheckProjectFloorLimits(const TArray<TSharedPtr<FJsonValue>>& Buildi
 			&& FMath::IsFinite(Value) && Value >= 1 && Value <= LayoutValidation::MaxBuildingFloors
 			&& Value == FMath::FloorToDouble(Value));
 	};
+	// A level: a whole number that is one of the floors a building can have (1 is the ground floor, -1 is B1; there is no 0).
+	const auto IsValidLevel = [](const FJsonObject& Object, const TCHAR* Field)
+	{
+		double Value = 0;
+		return !Object.HasField(Field) || (Object.TryGetNumberField(Field, Value)
+			&& FMath::IsFinite(Value) && Value == FMath::FloorToDouble(Value) && LayoutValidation::IsValidLevel(int32(Value)));
+	};
 	for (const auto& Value : Buildings)
 	{
 		const TSharedPtr<FJsonObject>* Building = nullptr;
 		if (!Value.IsValid() || !Value->TryGetObject(Building) || !Building->IsValid()) continue;
-		bool bValid = IsValidFloor(**Building, TEXT("floorCount"));
+		bool bValid = IsValidFloor(**Building, TEXT("floorCount")) && IsValidLevel(**Building, TEXT("firstLevel"));
 		const TSharedPtr<FJsonObject>* Interior = nullptr;
 		const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
 		if (bValid && (*Building)->TryGetObjectField(TEXT("interior"), Interior) && Interior->IsValid()
@@ -46,7 +53,7 @@ static bool CheckProjectFloorLimits(const TArray<TSharedPtr<FJsonValue>>& Buildi
 			for (const auto& FloorValue : *Floors)
 			{
 				const TSharedPtr<FJsonObject>* Floor = nullptr;
-				if (FloorValue.IsValid() && FloorValue->TryGetObject(Floor) && Floor->IsValid() && !IsValidFloor(**Floor, TEXT("level")))
+				if (FloorValue.IsValid() && FloorValue->TryGetObject(Floor) && Floor->IsValid() && !IsValidLevel(**Floor, TEXT("level")))
 				{
 					bValid = false;
 					break;
@@ -57,7 +64,8 @@ static bool CheckProjectFloorLimits(const TArray<TSharedPtr<FJsonValue>>& Buildi
 		{
 			FString Id;
 			(*Building)->TryGetStringField(TEXT("id"), Id);
-			OutProblem = FString::Printf(TEXT("Building '%s' must use whole floor counts and levels from 1 to %d."), *Id, LayoutValidation::MaxBuildingFloors);
+			OutProblem = FString::Printf(TEXT("Building '%s' must use whole floor counts from 1 to %d and floor levels from B%d (-%d) to %d (there is no level 0)."), *Id, LayoutValidation::MaxBuildingFloors,
+				LayoutValidation::MaxBasementFloors, LayoutValidation::MaxBasementFloors, LayoutValidation::MaxBuildingFloors);
 			return false;
 		}
 	}
@@ -356,6 +364,9 @@ int32 ABuildingGenerator::LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& R
 		// Each building has its own floorCount and floorHeight (falls back to global)
 		int32 FloorCount = 10;
 		B->TryGetNumberField(TEXT("floorCount"), FloorCount);
+		// The level of the lowest floor; a file without it (every file before basements) starts on the ground floor.
+		int32 FirstLevel = 1;
+		B->TryGetNumberField(TEXT("firstLevel"), FirstLevel);
 
 		float FloorHeight = GlobalFloorHeight;
 		if (!ReadBuildingFloorHeight(*B, GlobalFloorHeight, FloorHeight)) continue;
@@ -382,7 +393,7 @@ int32 ABuildingGenerator::LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& R
 			Footprint.Add(Point);
 		}
 
-		if (APolyBuilding* Spawned = SpawnBuildingFromData(Id, Name, Footprint, FloorCount, FloorHeight, Offset))
+		if (APolyBuilding* Spawned = SpawnBuildingFromData(Id, Name, Footprint, FloorCount, FloorHeight, Offset, FirstLevel))
 		{
 			SpawnedCount++;
 
@@ -1298,7 +1309,7 @@ void ABuildingGenerator::SetRoadsAndPOIsWithinCampusOnly(bool bEnable, const FVe
 	MarkGroundDirty();
 }
 
-APolyBuilding* ABuildingGenerator::SpawnBuildingFromData(const FString& Id, const FString& Name, const TArray<FVector2D>& Footprint, int32 FloorCount, float FloorHeight, FVector2D Offset)
+APolyBuilding* ABuildingGenerator::SpawnBuildingFromData(const FString& Id, const FString& Name, const TArray<FVector2D>& Footprint, int32 FloorCount, float FloorHeight, FVector2D Offset, int32 FirstLevel)
 {
 	if (Id.IsEmpty())
 	{
@@ -1350,7 +1361,7 @@ APolyBuilding* ABuildingGenerator::SpawnBuildingFromData(const FString& Id, cons
 	{
 		NewBuilding->BuildingId = Id;
 		NewBuilding->BuildingName = Name;
-		NewBuilding->BuildFromFootprint(Footprint, Scale, Offset, FloorCount, FloorHeight, !bNavigationGeometryOnly);
+		NewBuilding->BuildFromFootprint(Footprint, Scale, Offset, FloorCount, FloorHeight, !bNavigationGeometryOnly, FirstLevel);
 		UsedBuildingIds.Add(Id);
 		RemovedBuildingIds.Remove(Id);
 		BuildingsById.Add(Id, NewBuilding);
@@ -1513,6 +1524,11 @@ bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath, FString& O
 		BuildingObject->SetArrayField(TEXT("offset"), OffsetArray);
 
 		BuildingObject->SetNumberField(TEXT("floorCount"), Building->GetFloorCount());
+		// Written only when the building does not start on the ground floor, so the file of an ordinary building is the same as it always was.
+		if (Building->GetFirstLevel() != 1)
+		{
+			BuildingObject->SetNumberField(TEXT("firstLevel"), Building->GetFirstLevel());
+		}
 		BuildingObject->SetNumberField(TEXT("floorHeight"), Building->GetFloorHeight());
 		BuildingObject->SetStringField(TEXT("buildingType"), Building->GetBuildingType());
 
@@ -1650,9 +1666,8 @@ bool ABuildingGenerator::MakeMirrorOfEntrance(const FString& SourceBuildingId, c
 	{
 		return false;
 	}
-	if (Source.Level < 1 || Source.Level > From->GetFloorCount() || Source.Level > To->GetFloorCount()
-		|| !InteriorEntrances::AreElevationsAligned((Source.Level - 1) * double(From->GetFloorHeight()),
-			(Source.Level - 1) * double(To->GetFloorHeight())))
+	if (!From->HasLevel(Source.Level) || !To->HasLevel(Source.Level)
+		|| !InteriorEntrances::AreElevationsAligned(From->GetLevelBaseZ(Source.Level), To->GetLevelBaseZ(Source.Level)))
 	{
 		return false;
 	}
@@ -1994,6 +2009,7 @@ bool ABuildingGenerator::CaptureBuildingBaselineInto(const FString& BuildingId, 
 		return false;
 	}
 	Out.FloorCount = (*Found)->GetFloorCount();
+	Out.FirstLevel = (*Found)->GetFirstLevel();
 	Out.Name = (*Found)->BuildingName;
 	Out.Type = (*Found)->GetBuildingType();
 	Out.bHadInterior = false;
@@ -2045,9 +2061,9 @@ void ABuildingGenerator::RestoreBuildingBaselines()
 		APolyBuilding* Building = *Found;
 		const FBuildingBaseline& Baseline = Pair.Value;
 
-		if (Building->GetFloorCount() != Baseline.FloorCount)
+		if (Building->GetFloorCount() != Baseline.FloorCount || Building->GetFirstLevel() != Baseline.FirstLevel)
 		{
-			Building->SetFloorCount(Baseline.FloorCount);
+			Building->SetLevelRange(Baseline.FirstLevel, LayoutValidation::LevelAfter(Baseline.FirstLevel, Baseline.FloorCount - 1));
 		}
 		// Straight back to the remembered name - it was valid then, so no uniqueness check is needed.
 		Building->BuildingName = Baseline.Name;

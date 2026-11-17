@@ -2928,7 +2928,7 @@ void ANavPlayerController::FocusCameraOnBuildingFromExterior(APolyBuilding* Buil
 	// Aim at the middle of the building and back off along the view direction far enough to see all of it.
 	// The current heading (yaw) is kept so the view does not spin; only the pitch is set.
 	const float BuildingHeight = Building->GetFloorCount() * Building->GetFloorHeight();
-	const FVector Target(Center.X, Center.Y, BuildingHeight * 0.5f);
+	const FVector Target(Center.X, Center.Y, Building->GetBaseZ() + BuildingHeight * 0.5f);
 	const FRotator Rotation(-35.f, GetControlRotation().Yaw, 0.f);
 	const float Distance = FMath::Max(Span, BuildingHeight) * 1.8f + 500.f;
 

@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "BuildingTypes.h"
 #include "GameFramework/Actor.h"
+#include "LayoutValidation.h"
 #include "PolyBuilding.generated.h"
 
 class UProceduralMeshComponent;
@@ -39,8 +40,10 @@ public:
 	// each. Offset shifts the whole building in the XY plane (in the same units as the footprint,
 	// before scale). Footprint/Scale/Offset/FloorCount/FloorHeight are cached so the mesh can be
 	// regenerated later (see SetFloorCount) without needing them passed in again.
+	// FirstLevel is the level of the lowest floor (1 = the ground floor, -1 = B1, 3 = a building that only exists from the third floor up); the
+	// floors run from there for FloorCount floors (see LayoutValidation::LevelAfter: there is no level 0).
 	void BuildFromFootprint(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, int32 FloorCount, float FloorHeight,
-		bool bBuildMesh = true);
+		bool bBuildMesh = true, int32 FirstLevel = 1);
 
 	// Changes floor count and regenerates the exterior mesh at the new height. This is how the
 	// interior editor's "Add floor" (or remove floor) stays in sync with the exterior shell -
@@ -49,8 +52,29 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	void SetFloorCount(int32 NewFloorCount);
 
+	// Changes the floors the building has: from FirstLevel to LastLevel, both included (LastLevel is kept at or above FirstLevel). The mesh is
+	// rebuilt to match, and OnFloorCountChanged fires when the range changed.
+	UFUNCTION(BlueprintCallable, Category = "Building")
+	void SetLevelRange(int32 NewFirstLevel, int32 NewLastLevel);
+
 	UFUNCTION(BlueprintPure, Category = "Building")
 	int32 GetFloorCount() const { return FloorCount; }
+
+	// The lowest and the highest level of the building (see BuildFromFootprint).
+	UFUNCTION(BlueprintPure, Category = "Building")
+	int32 GetFirstLevel() const { return FirstLevel; }
+	UFUNCTION(BlueprintPure, Category = "Building")
+	int32 GetLastLevel() const { return LayoutValidation::LevelAfter(FirstLevel, FloorCount - 1); }
+	bool HasLevel(int32 Level) const { return GetLevelPosition(Level) > 0; }
+	// Every level of the building from the lowest up. Loop over this and not over first..last: level 0 does not exist.
+	TArray<int32> GetLevels() const;
+	// 1 for the lowest floor, FloorCount for the highest; 0 for a level the building does not have.
+	int32 GetLevelPosition(int32 Level) const;
+	// The height of the bottom of a floor, in world units (the ground is 0, B1 is below it). Level need not be one of the building's.
+	float GetLevelBaseZ(int32 Level) const { return LayoutValidation::LevelIndex(Level) * FloorHeight; }
+	// The bottom and the top of the whole building in world units: where the lowest floor starts and the highest ends.
+	float GetBaseZ() const { return GetLevelBaseZ(FirstLevel); }
+	float GetTopZ() const { return GetBaseZ() + FloorCount * FloorHeight; }
 
 	UFUNCTION(BlueprintPure, Category = "Building")
 	float GetFloorHeight() const { return FloorHeight; }
@@ -86,13 +110,13 @@ public:
 	// wall would otherwise block the view into whichever floor is being looked at. The mesh keeps each
 	// floor boundary as its own section (see RebuildMesh) specifically so this doesn't have to hide the
 	// whole building.
-	// Level must be between 1 and GetFloorCount(); pass 0 to show everything (exterior view).
+	// Level must be one of the building's levels (see GetLevels); pass 0 to show everything (exterior view).
 	void SetVisibleInteriorLevel(int32 Level);
 
 	// Temporary inspection policy; reapplied after every mesh rebuild, including collision. The bottom platform (section 0) goes, and the
 	// first floor gets a slab of its own while it is the floor being viewed.
 	void SetInspectionBottomHidden(bool bNewHidden);
-	// The floor of Level 1 while the bottom platform is hidden: a slab of its own, facing up, since the platform (section 0) is what the
+	// The floor of the lowest level while the bottom platform is hidden: a slab of its own, facing up, since the platform (section 0) is what the
 	// first floor stands on otherwise.
 	int32 GetInspectionFloorSectionIndex() const { return 2 * FloorCount + 1; }
 
@@ -139,6 +163,9 @@ private:
 	// BuildCapSection (recreating is the only way to toggle a section's collision).
 	void BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBottom, float ZTop, int32 SectionIndex, bool bCreateCollision, int32 Level);
 
+	// Brings a first level and a floor count to what a building may have: a level that exists, and a count that stays under the highest level.
+	static void ClampLevelRange(int32& InOutFirstLevel, int32& InOutFloorCount);
+
 	// Rebuilds every roof/slab section AND every floor's wall ring (visibility AND collision together)
 	// based on VisibleInteriorLevel - called after RebuildMesh (so a floor add/remove reapplies it) and
 	// by SetVisibleInteriorLevel. Uses CachedPoly2D/CachedCapTris rather than needing RebuildMesh to
@@ -148,11 +175,13 @@ private:
 	// Wall sections live after the cap sections (0 = ground cap, 1..FloorCount = roof/inter-floor
 	// caps - see RebuildMesh) so adding/removing floors never renumbers either group relative to
 	// itself.
-	int32 GetWallSectionIndex(int32 Level) const { return FloorCount + Level; }
+	// Position is 1 for the lowest floor (GetLevelPosition), not the level itself.
+	int32 GetWallSectionIndex(int32 Position) const { return FloorCount + Position; }
 
 	TArray<FVector2D> CachedFootprint;
 	float CachedScale = 1.f;
 	int32 FloorCount = 1;
+	int32 FirstLevel = 1;
 	float FloorHeight = 300.f;
 
 	// The current build's transformed footprint and its ear-clipped triangulation - cached so
