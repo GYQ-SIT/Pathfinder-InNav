@@ -115,7 +115,7 @@ and still opens and routes) until the database is opened again and the project i
 the opening, **cm**), `width` (**cm**). A window also has `height` and `sillHeight`. A door has `inputId` (what it opens from) and `connectsTo` (what it opens to: a room's id, or `"corridor"`).
 
 **A connector** (`navNodes[]`): `id`, `type` (`"elevator"`, `"stairs"`, `"escalator"` or `"pathNode"`), `position` (`[x, y]`, footprint units), `connectsFloors` (the levels it
-joins), `connectorGroupId` (the instances of one connector on its floors share it; this is what lets a route change floor), and when they are not 0 and 1, `rotationDegrees` and `sizeScale`.
+joins), `connectorGroupId` (the instances of one connector on its floors share it, and each floor has one; this is what lets a route change floor), and when they are not 0 and 1, `rotationDegrees` and `sizeScale`. Each floor's instance has its own `position`, `rotationDegrees` and `sizeScale`: a lift is usually the same on every floor, stairs and escalators often are not, and the instances of a connector do not have to stand in one column.
 
 **A door in the outer wall** (`entrances[]`): `id`, `kind` (`"main"`, the way out of the building, or `"link"`, a door to the building next door), `level`, `edge` (which edge of the
 building's footprint), `offset` and `width` (**cm**), and for a link `connectsTo` (the other building's id). A link door is stored once; the other building shows it as a door that is

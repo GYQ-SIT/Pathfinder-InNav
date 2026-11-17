@@ -702,36 +702,54 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 		}
 	}
 
-	// Older projects could contain separate shafts with the same group ID.
-	TMap<FString, TArray<int32>> ShaftsByGroup;
+	// A group is one connector, with one node on each floor it reaches, and each floor's node stands where it was put (see MoveConnectorNode):
+	// positions do not tell connectors apart. Older projects could contain separate shafts with the same group ID; those are told apart by what
+	// cannot be one connector: two nodes of the group on the same floor, or of different types. The later one becomes a group of its own.
+	struct FShaft { EInteriorNavNodeType Type; TSet<int32> Levels; FString GroupId; FVector2D Position; };
+	TMap<FString, TArray<FShaft>> ShaftsByGroup;
 	for (int32 Index = 0; Index < NavNodes.Num(); ++Index)
 	{
 		auto& Node = NavNodes[Index];
 		if (!Node.ConnectorGroupId.IsEmpty() && Node.Type != EInteriorNavNodeType::PathNode)
 		{
-			auto& Shafts = ShaftsByGroup.FindOrAdd(Node.ConnectorGroupId);
-			const int32* Shaft = Shafts.FindByPredicate([&](int32 Candidate)
+			TArray<FShaft>& Shafts = ShaftsByGroup.FindOrAdd(Node.ConnectorGroupId);
+			// The shaft this floor can belong to: the same type and not yet on this floor. Of several, the one whose last floor stood where this
+			// one does (older projects kept every floor of a shaft in one column), else the first.
+			FShaft* Shaft = nullptr;
+			for (FShaft& Candidate : Shafts)
 			{
-				const auto& First = NavNodes[Candidate];
-				return First.Type == Node.Type && First.Position.Equals(Node.Position, 0.01);
-			});
+				if (Candidate.Type != Node.Type || Candidate.Levels.Contains(Node.Level))
+				{
+					continue;
+				}
+				if (!Shaft || Candidate.Position.Equals(Node.Position, 0.01))
+				{
+					Shaft = &Candidate;
+					if (Candidate.Position.Equals(Node.Position, 0.01))
+					{
+						break;
+					}
+				}
+			}
 			if (Shaft)
 			{
-				const FString& GroupId = NavNodes[*Shaft].ConnectorGroupId;
-				if (Node.ConnectorGroupId != GroupId)
+				Shaft->Levels.Add(Node.Level);
+				Shaft->Position = Node.Position;
+				if (Node.ConnectorGroupId != Shaft->GroupId)
 				{
-					Node.ConnectorGroupId = GroupId;
-					Node.Id = FString::Printf(TEXT("%s-F%s"), *GroupId, *LevelCode(Node.Level));
+					Node.ConnectorGroupId = Shaft->GroupId;
+					Node.Id = FString::Printf(TEXT("%s-F%s"), *Shaft->GroupId, *LevelCode(Node.Level));
 				}
 			}
 			else
 			{
+				const FString OriginalGroup = Node.ConnectorGroupId;
 				if (!Shafts.IsEmpty())
 				{
 					Node.ConnectorGroupId = LoadedBuildingId + TEXT("-NAV-") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
 					Node.Id = FString::Printf(TEXT("%s-F%s"), *Node.ConnectorGroupId, *LevelCode(Node.Level));
 				}
-				Shafts.Add(Index);
+				Shafts.Add({ Node.Type, { Node.Level }, Node.ConnectorGroupId, Node.Position });
 			}
 		}
 		SpawnConnectorMarker(Node, Building);
@@ -1714,14 +1732,20 @@ bool AInteriorGenerator::SetConnectorFloors(const FString& GroupId, const TArray
 	float RotationDegrees = 0.f;
 	float SizeScale = 1.f;
 	TArray<int32> CurrentFloors;
+	bool bTemplateIsActiveFloor = false;
 	for (const FInteriorNavNode& Node : NavNodes)
 	{
 		if (Node.ConnectorGroupId == GroupId)
 		{
-			Type = Node.Type;
-			Position = Node.Position;
-			RotationDegrees = Node.RotationDegrees;
-			SizeScale = Node.SizeScale;
+			// A new floor is made like the floor being edited, when the connector is on it (the floors are not alike any more), else like the last one.
+			if (!bTemplateIsActiveFloor)
+			{
+				Type = Node.Type;
+				Position = Node.Position;
+				RotationDegrees = Node.RotationDegrees;
+				SizeScale = Node.SizeScale;
+				bTemplateIsActiveFloor = Node.Level == ActiveFloor;
+			}
 			CurrentFloors.Add(Node.Level);
 		}
 	}
@@ -1796,12 +1820,65 @@ bool AInteriorGenerator::SetConnectorFloors(const FString& GroupId, const TArray
 	return true;
 }
 
-bool AInteriorGenerator::RotateConnectorGroup(const FString& GroupId, float DeltaDegrees)
+TMap<int32, FVector2D> AInteriorGenerator::GetConnectorPositions(const FString& GroupId, int32 OnlyLevel) const
+{
+	TMap<int32, FVector2D> Positions;
+	for (const FInteriorNavNode& Node : NavNodes)
+	{
+		if (Node.ConnectorGroupId == GroupId && (OnlyLevel == 0 || Node.Level == OnlyLevel))
+		{
+			Positions.Add(Node.Level, Node.Position);
+		}
+	}
+	return Positions;
+}
+
+bool AInteriorGenerator::SetConnectorPositions(const FString& GroupId, const TMap<int32, FVector2D>& NewPositions)
+{
+	TArray<FInteriorNavNode*> Moving;
+	for (FInteriorNavNode& Node : NavNodes)
+	{
+		if (Node.ConnectorGroupId == GroupId && NewPositions.Contains(Node.Level))
+		{
+			Moving.Add(&Node);
+		}
+	}
+	if (Moving.IsEmpty())
+	{
+		return false;
+	}
+
+	bool bAnyMoved = false;
+	for (const FInteriorNavNode* Node : Moving)
+	{
+		const FVector2D& NewPosition = NewPositions.FindChecked(Node->Level);
+		bAnyMoved |= !NewPosition.Equals(Node->Position, 0.0001);
+		if (!CanPlaceConnectorOnFloor(Node->Type, NewPosition, Node->Level, Node->RotationDegrees, Node->SizeScale, GroupId, false))
+		{
+			return false;
+		}
+	}
+	if (!bAnyMoved)
+	{
+		return true;
+	}
+
+	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+	for (FInteriorNavNode* Node : Moving)
+	{
+		Node->Position = NewPositions.FindChecked(Node->Level);
+		RebuildConnectorMarker(*Node, Building);
+	}
+	NotifyNavigationLayoutChanged();
+	return true;
+}
+
+bool AInteriorGenerator::RotateConnectorGroup(const FString& GroupId, float DeltaDegrees, int32 OnlyLevel)
 {
 	TArray<FInteriorNavNode*> GroupNodes;
 	for (FInteriorNavNode& Node : NavNodes)
 	{
-		if (Node.ConnectorGroupId == GroupId)
+		if (Node.ConnectorGroupId == GroupId && (OnlyLevel == 0 || Node.Level == OnlyLevel))
 		{
 			GroupNodes.Add(&Node);
 		}
@@ -1811,19 +1888,11 @@ bool AInteriorGenerator::RotateConnectorGroup(const FString& GroupId, float Delt
 		return false;
 	}
 
-	// Every floor instance shares one orientation (see FInteriorNavNode::RotationDegrees), so this
-	// rotates them all together - GroupNodes[0] stands in for the group's shared Type/Position/scale.
-	const float NewRotation = GroupNodes[0]->RotationDegrees + DeltaDegrees;
-	const EInteriorNavNodeType Type = GroupNodes[0]->Type;
-	const FVector2D Position = GroupNodes[0]->Position;
-	const float SizeScale = GroupNodes[0]->SizeScale;
-
-	// All-or-nothing across every floor the connector reaches, same reasoning as PlaceConnectorNode -
-	// called every tick while a rotate key/button is held, so a silent no-op (no log spam) once any
-	// floor would be blocked.
+	// Each floor node turns from its own orientation. All-or-nothing across the nodes being turned, same reasoning as PlaceConnectorNode - this is
+	// called every tick while a rotate key/button is held, so a silent no-op (no log spam) once any floor would be blocked.
 	for (const FInteriorNavNode* Node : GroupNodes)
 	{
-		if (!CanPlaceConnectorOnFloor(Type, Position, Node->Level, NewRotation, SizeScale, GroupId))
+		if (!CanPlaceConnectorOnFloor(Node->Type, Node->Position, Node->Level, Node->RotationDegrees + DeltaDegrees, Node->SizeScale, GroupId))
 		{
 			return false;
 		}
@@ -1832,19 +1901,19 @@ bool AInteriorGenerator::RotateConnectorGroup(const FString& GroupId, float Delt
 	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
 	for (FInteriorNavNode* Node : GroupNodes)
 	{
-		Node->RotationDegrees = NewRotation;
+		Node->RotationDegrees += DeltaDegrees;
 		RebuildConnectorMarker(*Node, Building);
 	}
 	NotifyNavigationLayoutChanged();
 	return true;
 }
 
-bool AInteriorGenerator::ScaleConnectorGroup(const FString& GroupId, float DeltaScale)
+bool AInteriorGenerator::ScaleConnectorGroup(const FString& GroupId, float DeltaScale, int32 OnlyLevel)
 {
 	TArray<FInteriorNavNode*> GroupNodes;
 	for (FInteriorNavNode& Node : NavNodes)
 	{
-		if (Node.ConnectorGroupId == GroupId)
+		if (Node.ConnectorGroupId == GroupId && (OnlyLevel == 0 || Node.Level == OnlyLevel))
 		{
 			GroupNodes.Add(&Node);
 		}
@@ -1854,21 +1923,23 @@ bool AInteriorGenerator::ScaleConnectorGroup(const FString& GroupId, float Delta
 		return false;
 	}
 
-	const float NewScale = FMath::Clamp(GroupNodes[0]->SizeScale + DeltaScale, MinConnectorScale, MaxConnectorScale);
-	if (FMath::IsNearlyEqual(NewScale, GroupNodes[0]->SizeScale))
+	// Each floor node grows or shrinks from its own size (clamped); the ones already at the limit stay.
+	bool bAnyChanges = false;
+	for (const FInteriorNavNode* Node : GroupNodes)
+	{
+		bAnyChanges |= !FMath::IsNearlyEqual(FMath::Clamp(Node->SizeScale + DeltaScale, MinConnectorScale, MaxConnectorScale), Node->SizeScale);
+	}
+	if (!bAnyChanges)
 	{
 		// Already at the min/max clamp - nothing to do (and nothing to log; Grow/Shrink buttons are
 		// clicked repeatedly right up against the limit in normal use).
 		return false;
 	}
 
-	const EInteriorNavNodeType Type = GroupNodes[0]->Type;
-	const FVector2D Position = GroupNodes[0]->Position;
-	const float RotationDegrees = GroupNodes[0]->RotationDegrees;
-
 	for (const FInteriorNavNode* Node : GroupNodes)
 	{
-		if (!CanPlaceConnectorOnFloor(Type, Position, Node->Level, RotationDegrees, NewScale, GroupId))
+		const float NewScale = FMath::Clamp(Node->SizeScale + DeltaScale, MinConnectorScale, MaxConnectorScale);
+		if (!CanPlaceConnectorOnFloor(Node->Type, Node->Position, Node->Level, Node->RotationDegrees, NewScale, GroupId))
 		{
 			UE_LOG(LogTemp, Error, TEXT("ScaleConnectorGroup: '%s' unchanged"), *GroupId);
 			return false;
@@ -1878,7 +1949,7 @@ bool AInteriorGenerator::ScaleConnectorGroup(const FString& GroupId, float Delta
 	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
 	for (FInteriorNavNode* Node : GroupNodes)
 	{
-		Node->SizeScale = NewScale;
+		Node->SizeScale = FMath::Clamp(Node->SizeScale + DeltaScale, MinConnectorScale, MaxConnectorScale);
 		RebuildConnectorMarker(*Node, Building);
 	}
 	RecordHistorySnapshot();

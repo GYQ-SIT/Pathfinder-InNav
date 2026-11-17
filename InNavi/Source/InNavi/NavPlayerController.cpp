@@ -3764,6 +3764,30 @@ void ANavPlayerController::FocusCameraOnCampusPoint(const FNavigationRoutePoint&
 	SetControlRotation(Rotation);
 }
 
+TMap<int32, FVector2D> ANavPlayerController::GetSelectedConnectorPositions(bool bAllFloors) const
+{
+	if (SelectedConnectorGroupId.IsEmpty() || !InteriorGen)
+	{
+		return TMap<int32, FVector2D>();
+	}
+	return InteriorGen->GetConnectorPositions(SelectedConnectorGroupId, bAllFloors ? 0 : InteriorGen->GetActiveFloor());
+}
+
+bool ANavPlayerController::MoveSelectedConnectorTo(const TMap<int32, FVector2D>& NewPositions)
+{
+	// Same View-mode edit-proofing as NudgeSelectedRoomSize.
+	if (bInteriorInspectionEnabled || (bIsIn3DPreviewMode && !bIsIn3DEditMode) || SelectedConnectorGroupId.IsEmpty() || !InteriorGen)
+	{
+		return false;
+	}
+	if (!InteriorGen->SetConnectorPositions(SelectedConnectorGroupId, NewPositions))
+	{
+		return false;
+	}
+	bHasUnsavedChanges = true;
+	return true;
+}
+
 void ANavPlayerController::SetPointerOverUICallback(const UObject* ScreenOwner, TFunction<bool(const FVector2D&)> Callback)
 {
 	PointerOverUIOwner = ScreenOwner;
@@ -5435,7 +5459,8 @@ void ANavPlayerController::NudgeSelectedRoomSize(float Delta)
 	if (!SelectedConnectorGroupId.IsEmpty() && InteriorGen)
 	{
 		const float ScaleDelta = (Delta > 0.f) ? ConnectorScaleStep : -ConnectorScaleStep;
-		if (InteriorGen->ScaleConnectorGroup(SelectedConnectorGroupId, ScaleDelta))
+		// The active floor's node alone, or every floor of the connector with Shift held.
+		if (InteriorGen->ScaleConnectorGroup(SelectedConnectorGroupId, ScaleDelta, IsShiftHeld() ? 0 : InteriorGen->GetActiveFloor()))
 		{
 			bHasUnsavedChanges = true;
 		}
@@ -5542,7 +5567,7 @@ void ANavPlayerController::RotateSelectedRoom(float DeltaDegrees)
 	// anything when a connector (not a room) is selected.
 	if (!SelectedConnectorGroupId.IsEmpty() && InteriorGen)
 	{
-		if (InteriorGen->RotateConnectorGroup(SelectedConnectorGroupId, DeltaDegrees))
+		if (InteriorGen->RotateConnectorGroup(SelectedConnectorGroupId, DeltaDegrees, IsShiftHeld() ? 0 : InteriorGen->GetActiveFloor()))
 		{
 			bHasUnsavedChanges = true;
 		}

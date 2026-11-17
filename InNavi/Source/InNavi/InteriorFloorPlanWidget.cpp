@@ -225,7 +225,13 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 			if (FindConnectorNearLocalPosition(LocalPosition, InGeometry.GetLocalSize(), ConnectorGroupId))
 			{
 				PlayerController->SelectConnector(ConnectorGroupId);
-				return FReply::Handled();
+				// A plain click only selects; dragging moves the connector on this floor alone (Shift: on every floor it reaches) - see
+				// NativeOnMouseMove.
+				bIsDraggingConnector = true;
+				bConnectorMoved = false;
+				DragStartConnectorPositions = PlayerController->GetSelectedConnectorPositions(InMouseEvent.IsShiftDown());
+				DragStartFootprintPosition = LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize());
+				return FReply::Handled().CaptureMouse(TakeWidget());
 			}
 
 			// A door in the building's outer wall.
@@ -340,6 +346,12 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 		return FReply::Handled().ReleaseMouseCapture();
 	}
 
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsDraggingConnector)
+	{
+		FinishEditDrag();
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+
 	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsDraggingDoor)
 	{
 		FinishEditDrag();
@@ -358,6 +370,14 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 void UInteriorFloorPlanWidget::FinishEditDrag()
 {
 	bIsDraggingPrefab = false;
+	if (bIsDraggingConnector)
+	{
+		// One history step for the whole drag, and only when the connector did move.
+		bIsDraggingConnector = false;
+		if (bConnectorMoved && InteriorGen) InteriorGen->RecordHistorySnapshot();
+		bConnectorMoved = false;
+		DragStartConnectorPositions.Reset();
+	}
 	if (bIsResizingRoom)
 	{
 		bIsResizingRoom = false;
@@ -409,6 +429,27 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 			return FReply::Handled().ReleaseMouseCapture();
 		}
 		ResizeAtLocalPosition(InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition()), InGeometry.GetLocalSize());
+		return FReply::Handled();
+	}
+	if (bIsDraggingConnector)
+	{
+		// Same defensive check as the door drag below.
+		if (!InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton) || !PlayerController)
+		{
+			FinishEditDrag();
+			return FReply::Handled().ReleaseMouseCapture();
+		}
+		const FVector2D CurrentFootprintPosition = LocalPositionToFootprintPoint(InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition()), InGeometry.GetLocalSize());
+		const FVector2D Delta = CurrentFootprintPosition - DragStartFootprintPosition;
+		TMap<int32, FVector2D> NewPositions;
+		for (const TPair<int32, FVector2D>& Pair : DragStartConnectorPositions)
+		{
+			NewPositions.Add(Pair.Key, Pair.Value + Delta);
+		}
+		if (PlayerController->MoveSelectedConnectorTo(NewPositions) && !Delta.IsNearlyZero(0.0001))
+		{
+			bConnectorMoved = true;
+		}
 		return FReply::Handled();
 	}
 	if (bIsDraggingDoor)

@@ -366,23 +366,28 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool SetConnectorFloors(const FString& GroupId, const TArray<int32>& NewConnectsToFloors);
 
-	// Rotates every floor instance of connector GroupId by DeltaDegrees about its own center
-	// (positive = counter-clockwise, same convention as RotateRoom) - they share one orientation
-	// (see FInteriorNavNode::RotationDegrees), so this validates the new footprint on EVERY floor the
-	// connector reaches (building outline, walls, other connectors, other buildings - see
-	// CanPlaceConnectorOnFloor) and only applies it if all of them pass; no partial rotation. Unlike
-	// RotateRoom, there's no deferred/mid-gesture-allowed check to speak of, so this is fully
-	// validated on every call - safe to call every tick while a rotate key/button is held, same usage
-	// pattern as RotateRoom.
-	UFUNCTION(BlueprintCallable, Category = "Interior")
-	bool RotateConnectorGroup(const FString& GroupId, float DeltaDegrees);
+	// A connector is one group of floors (GroupId) with a node on each floor it reaches. Each floor's node has its own position, orientation
+	// and size: a lift is usually the same on every floor, stairs and escalators are not, and the person drawing it decides. Moving, rotating
+	// and resizing take a floor (OnlyLevel) and change that floor's node alone, or 0 for every floor of the group.
 
-	// Adjusts every floor instance of connector GroupId's SizeScale by DeltaScale (clamped to
-	// [MinConnectorScale, MaxConnectorScale]) - same all-floors-must-pass validation as
-	// RotateConnectorGroup, and a discrete immediate step (no drag/release split) like
-	// GrowSelectedRoom/ShrinkSelectedRoom's NudgeSelectedRoomSize.
+	// Puts the floor nodes of connector GroupId at the positions in NewPositions (floor level -> position; floors not in it stay where they
+	// are). All or nothing: every new spot is validated on its floor (building outline, walls, other connectors - see CanPlaceConnectorOnFloor)
+	// and nothing moves unless all pass. Silent when it fails: called on every mouse move of a drag.
+	bool SetConnectorPositions(const FString& GroupId, const TMap<int32, FVector2D>& NewPositions);
+
+	// The position of every floor node of connector GroupId (floor level -> position); with OnlyLevel, just that floor's.
+	TMap<int32, FVector2D> GetConnectorPositions(const FString& GroupId, int32 OnlyLevel = 0) const;
+
+	// Rotates the floor node(s) of connector GroupId by DeltaDegrees about its own center (positive = counter-clockwise, same convention as
+	// RotateRoom). Every node is validated on its floor and the rotation only applies if all of them pass; no partial rotation. Safe to call
+	// every tick while a rotate key/button is held.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
-	bool ScaleConnectorGroup(const FString& GroupId, float DeltaScale);
+	bool RotateConnectorGroup(const FString& GroupId, float DeltaDegrees, int32 OnlyLevel = 0);
+
+	// Adjusts the SizeScale of the floor node(s) of connector GroupId by DeltaScale (clamped to [MinConnectorScale, MaxConnectorScale]); the same
+	// all-must-pass validation as RotateConnectorGroup, and a discrete immediate step like GrowSelectedRoom/ShrinkSelectedRoom's NudgeSelectedRoomSize.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool ScaleConnectorGroup(const FString& GroupId, float DeltaScale, int32 OnlyLevel = 0);
 
 	// The rooms/walls spawned on a given floor - read-only, for a 2D floor plan renderer to draw
 	// (see UInteriorFloorPlanWidget). Empty if that floor doesn't exist.

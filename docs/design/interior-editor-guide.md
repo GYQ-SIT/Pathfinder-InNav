@@ -258,7 +258,7 @@ tool that is active is highlighted in blue. Four groups:
 
 - **SELECT** - the select tool (`Q`): click a room (anywhere in its body, not just
   the outline), a door marker, or a connector marker to select it; drag to move it;
-  `Delete` to delete.
+  `Delete` to delete. A connector moves on its own (see "Moving a connector" below).
 - **DRAW & PLACE** - draw a custom room (`P`, click points then `Enter`, `Esc` cancels), draw a
   standalone wall (`L`, same mechanic), or place a prefab rectangle/triangle/circle
   room (`1`/`2`/`3`) centered on the next click.
@@ -306,6 +306,19 @@ labels over dark fields, and every kind ends with a red **Delete ...** button (t
 - **Connector**: its type (read-only), and **FLOORS IT REACHES**, a checklist of floors -
   check/uncheck floors and hit **Save changes**. Only shows checkboxes for floors that actually
   exist on the loaded building.
+
+### Moving a connector
+
+A lift, stair or escalator is one connector with a marker on each floor it reaches, and **each floor's marker has its own position,
+turn and size**. Select it on the floor you want, then:
+
+- **drag** it;
+- turn it with `9` / `0` and resize it with `=` / `-` (or the Toolbar buttons).
+
+All of these change the marker of the **floor you are on** and leave the other floors alone. Hold **Shift** to change **every floor of the
+connector** at once (each by the same step, from where it is). A spot outside the building or on a wall or another connector is refused. One drag
+is one Undo step. The route follows the connector by its group, not by where its floors stand, so a stair that is a little
+further along on the next floor still joins them.
 
 ### Doors in the outer wall
 
@@ -515,8 +528,8 @@ clicking in the 3D view instead of the 2D canvas:
 - **Select** — click a room, door, or connector; the selected room/connector tints
   light green (3D's equivalent of 2D's red outline — a selected door highlights its
   own room, same as 2D). Click empty space to deselect.
-- **Move** — drag a selected room to reposition it (connectors are rotate/scale only,
-  never dragged, same restriction as 2D).
+- **Move** — drag a selected room to reposition it (connectors are moved in the 2D plan
+  only, not in the 3D view).
 - **Resize**/**Rotate**/**Delete** — same `=`/`-`, hold `9`/`0`, and Delete
   shortcuts as 2D, now actually work in 3D Edit mode (they're inert in View mode, even
   if something was selected before switching to it).

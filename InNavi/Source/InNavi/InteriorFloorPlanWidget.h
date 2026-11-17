@@ -159,6 +159,11 @@ private:
 	// Set when a select-mode left-click lands on a door marker - a plain click (mouse up without
 	// moving) has no visible effect beyond the SelectDoor call already made on mouse down; if the
 	// user drags instead, NativeOnMouseMove slides the door along DraggingDoorEdgeIndex via MoveDoor.
+	// Dragging a connector (select mode): where its floor node(s) were when the drag began (just the active floor's, or every floor's when Shift was
+	// held), so each move is computed from there and does not drift.
+	bool bIsDraggingConnector = false;
+	bool bConnectorMoved = false;
+	TMap<int32, FVector2D> DragStartConnectorPositions;
 	bool bIsDraggingDoor = false;
 	TWeakObjectPtr<AInteriorRoom> DragTarget;
 	FString DraggingDoorRoomId;

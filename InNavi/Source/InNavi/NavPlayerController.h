@@ -768,6 +768,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool SetSelectedConnectorFloors(const TArray<int32>& NewFloors);
 
+	// Moving the selected connector. Its floors are separate nodes that each stand where they were put, so a move changes the node of the active
+	// floor alone, or, with bAllFloors, every floor of the connector together (what Shift does). The 2D plan drags with these: it takes the
+	// positions at the start of the drag and asks for the start plus how far the mouse went, and ends the drag with one history step.
+	TMap<int32, FVector2D> GetSelectedConnectorPositions(bool bAllFloors) const;
+	bool MoveSelectedConnectorTo(const TMap<int32, FVector2D>& NewPositions);
+
+
 	// Removes a single room/wall by id (see AInteriorGenerator::DeleteRoom) - general-purpose,
 	// explicit-id version. See also DeleteSelection. Also clears the door selection if the deleted
 	// room happened to own the currently-selected door (it no longer exists either way).
@@ -1405,6 +1412,9 @@ private:
 	// connector (elevator/stairs/escalator) instead of a room - see NudgeSelectedRoomSize's own
 	// comment.
 	void NudgeSelectedRoomSize(float Delta);
+
+	// Shift held: a rotate, resize or move of a connector goes to every floor of it, not just the active floor.
+	bool IsShiftHeld() const { return IsInputKeyDown(EKeys::LeftShift) || IsInputKeyDown(EKeys::RightShift); }
 
 	// See NudgeSelectedRoomSize's connector branch - AInteriorGenerator::ScaleConnectorGroup's own
 	// SizeScale multiplier, not an absolute unit size like a room's Delta.

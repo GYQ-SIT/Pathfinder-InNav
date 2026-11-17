@@ -718,10 +718,9 @@ namespace
 
 		if (!A.Point.ConnectorId.IsEmpty() &&
 			A.Point.ConnectorId == B.Point.ConnectorId &&
-			A.Point.ConnectorType == B.Point.ConnectorType &&
-			A.Point.Position.Equals(B.Point.Position, 0.01f))
+			A.Point.ConnectorType == B.Point.ConnectorType)
 		{
-			// Newer data uses ConnectorGroupId.
+			// Newer data uses ConnectorGroupId. Each floor's node of a connector stands where it was put, so the group decides, not the position.
 			bSameConnector = true;
 		}
 		else if (A.Point.ConnectorId.IsEmpty() &&

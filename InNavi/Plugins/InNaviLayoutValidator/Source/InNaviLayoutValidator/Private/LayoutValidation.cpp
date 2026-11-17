@@ -417,8 +417,9 @@ namespace LayoutValidation
                     for (const auto& Other : Nodes)
                     {
                         if (&Node == &Other || Node.Group != Other.Group) continue;
-                        if (Node.Context.Floor == Other.Context.Floor || Node.Type != Other.Type || !Node.Position.Equals(Other.Position, 0.01) || !FMath::IsNearlyEqual(Node.Size, Other.Size, Epsilon) || !FMath::IsNearlyEqual(Node.Rotation, Other.Rotation, Epsilon))
-                        { Issue(TEXT("CONNECTOR_GROUP_INCONSISTENT"), TEXT("Copies of this connector disagree on type, position, size or floor."), TEXT("Edit the connector group so its floor instances agree.")); break; }
+                        // Each floor's node stands where it was put, turned and sized as its floor needs: only the type has to agree, and one floor has one node.
+                        if (Node.Context.Floor == Other.Context.Floor || Node.Type != Other.Type)
+                        { Issue(TEXT("CONNECTOR_GROUP_INCONSISTENT"), TEXT("Copies of this connector disagree on type, or two of them are on one floor."), TEXT("Edit the connector group so each floor has one instance of the same type.")); break; }
                     }
                     for (int32 Level : Node.Floors)
                     {
