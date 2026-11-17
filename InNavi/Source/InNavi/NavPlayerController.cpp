@@ -4067,6 +4067,38 @@ bool ANavPlayerController::SetSelectedBuildingType(const FString& NewType)
 	return true;
 }
 
+bool ANavPlayerController::SetSelectedBuildingFloorRange(int32 FirstLevel, int32 LastLevel)
+{
+	const FString Id = GetSelectedBuildingId();
+	if (bInteriorInspectionEnabled || !Generator || Id.IsEmpty())
+	{
+		return false;
+	}
+	const APolyBuilding* Building = Generator->FindBuildingById(Id);
+	if (!Building)
+	{
+		return false;
+	}
+	const int32 BeforeFirst = Building->GetFirstLevel();
+	const int32 BeforeLast = Building->GetLastLevel();
+	// A building that is open in the interior editor has its live floors: they decide, and the editor writes them back.
+	const bool bOpenInEditor = InteriorGen && InteriorGen->GetLoadedBuildingId() == Id;
+	const bool bSuccess = bOpenInEditor ? InteriorGen->SetLevelRange(FirstLevel, LastLevel) : Generator->SetBuildingLevelRange(Id, FirstLevel, LastLevel);
+	if (!bSuccess)
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not use those floors. They go from B%d (-%d) to %d, with no level 0."), LayoutValidation::MaxBasementFloors,
+			LayoutValidation::MaxBasementFloors, LayoutValidation::MaxBuildingFloors), EActionFailureSeverity::Warning);
+		return false;
+	}
+	if (BeforeFirst != Building->GetFirstLevel() || BeforeLast != Building->GetLastLevel())
+	{
+		bHasUnsavedChanges = true;
+		// The campus previews of this building were made for its old floors.
+		BuildCampusInteriorPreview();
+	}
+	return true;
+}
+
 FString ANavPlayerController::GetSelectedBuildingType() const
 {
 	return Generator ? Generator->GetBuildingType(GetSelectedBuildingId()) : BuildingTypes::Default();

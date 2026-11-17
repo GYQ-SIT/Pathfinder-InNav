@@ -1200,6 +1200,115 @@ void ABuildingGenerator::RefreshContextBuildingVisibility()
 	MarkGroundDirty();
 }
 
+bool ABuildingGenerator::SetBuildingLevelRange(const FString& BuildingId, int32 NewFirstLevel, int32 NewLastLevel)
+{
+	APolyBuilding* Building = FindBuildingById(BuildingId);
+	if (!IsValid(Building) || !LayoutValidation::IsValidLevel(NewFirstLevel) || !LayoutValidation::IsValidLevel(NewLastLevel))
+	{
+		return false;
+	}
+	if (LayoutValidation::LevelIndex(NewLastLevel) < LayoutValidation::LevelIndex(NewFirstLevel))
+	{
+		NewLastLevel = NewFirstLevel;
+	}
+	if (LayoutValidation::LevelSpan(NewFirstLevel, NewLastLevel) > LayoutValidation::MaxBuildingFloors)
+	{
+		return false;
+	}
+	if (Building->GetFirstLevel() == NewFirstLevel && Building->GetLastLevel() == NewLastLevel)
+	{
+		return true;
+	}
+
+	const auto InRange = [NewFirstLevel, NewLastLevel](int32 Level)
+	{
+		const int32 Index = LayoutValidation::LevelIndex(Level);
+		return LayoutValidation::IsValidLevel(Level) && Index >= LayoutValidation::LevelIndex(NewFirstLevel) && Index <= LayoutValidation::LevelIndex(NewLastLevel);
+	};
+	const auto LevelOf = [](const TSharedPtr<FJsonObject>& Object, const TCHAR* Field, int32 Default)
+	{
+		double Value = Default;
+		if (Object.IsValid())
+		{
+			Object->TryGetNumberField(Field, Value);
+		}
+		return static_cast<int32>(Value);
+	};
+
+	CaptureBuildingBaseline(BuildingId);
+
+	// The saved interior: only the floors in the range stay, a connector reaches only floors in the range, and the doors in the outer wall of the
+	// floors that go are gone. The objects are copied before they are changed: the old interior may still be held by Discard's baseline.
+	if (const TSharedPtr<FJsonObject> Interior = GetInteriorDataForBuilding(BuildingId))
+	{
+		const TSharedRef<FJsonObject> Updated = MakeShared<FJsonObject>(*Interior);
+		const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
+		if (Interior->TryGetArrayField(TEXT("floors"), Floors))
+		{
+			TArray<TSharedPtr<FJsonValue>> KeptFloors;
+			for (const TSharedPtr<FJsonValue>& FloorValue : *Floors)
+			{
+				const TSharedPtr<FJsonObject> Floor = FloorValue.IsValid() ? FloorValue->AsObject() : nullptr;
+				if (!Floor.IsValid() || !InRange(LevelOf(Floor, TEXT("level"), 1)))
+				{
+					continue;
+				}
+				const TSharedRef<FJsonObject> KeptFloor = MakeShared<FJsonObject>(*Floor);
+				const TArray<TSharedPtr<FJsonValue>>* Nodes = nullptr;
+				if (Floor->TryGetArrayField(TEXT("navNodes"), Nodes))
+				{
+					TArray<TSharedPtr<FJsonValue>> KeptNodes;
+					for (const TSharedPtr<FJsonValue>& NodeValue : *Nodes)
+					{
+						const TSharedPtr<FJsonObject> Node = NodeValue.IsValid() ? NodeValue->AsObject() : nullptr;
+						const TArray<TSharedPtr<FJsonValue>>* Reaches = nullptr;
+						if (!Node.IsValid() || !Node->TryGetArrayField(TEXT("connectsFloors"), Reaches))
+						{
+							KeptNodes.Add(NodeValue);
+							continue;
+						}
+						const TSharedRef<FJsonObject> KeptNode = MakeShared<FJsonObject>(*Node);
+						TArray<TSharedPtr<FJsonValue>> KeptReaches;
+						for (const TSharedPtr<FJsonValue>& Reached : *Reaches)
+						{
+							double ReachedLevel = 0;
+							if (Reached.IsValid() && Reached->TryGetNumber(ReachedLevel) && InRange(static_cast<int32>(ReachedLevel)))
+							{
+								KeptReaches.Add(Reached);
+							}
+						}
+						KeptNode->SetArrayField(TEXT("connectsFloors"), KeptReaches);
+						KeptNodes.Add(MakeShared<FJsonValueObject>(KeptNode));
+					}
+					KeptFloor->SetArrayField(TEXT("navNodes"), KeptNodes);
+				}
+				KeptFloors.Add(MakeShared<FJsonValueObject>(KeptFloor));
+			}
+			Updated->SetArrayField(TEXT("floors"), KeptFloors);
+		}
+		const TArray<TSharedPtr<FJsonValue>>* Entrances = nullptr;
+		if (Interior->TryGetArrayField(TEXT("entrances"), Entrances))
+		{
+			TArray<TSharedPtr<FJsonValue>> KeptEntrances;
+			for (const TSharedPtr<FJsonValue>& EntranceValue : *Entrances)
+			{
+				const TSharedPtr<FJsonObject> Entrance = EntranceValue.IsValid() ? EntranceValue->AsObject() : nullptr;
+				if (Entrance.IsValid() && InRange(LevelOf(Entrance, TEXT("level"), 1)))
+				{
+					KeptEntrances.Add(EntranceValue);
+				}
+			}
+			Updated->SetArrayField(TEXT("entrances"), KeptEntrances);
+		}
+		SetInteriorDataForBuilding(BuildingId, Updated, false);
+	}
+
+	Building->SetLevelRange(NewFirstLevel, NewLastLevel);
+	++BuildingResultsRevision;
+	NotifyNavigationLayoutChanged();
+	return true;
+}
+
 bool ABuildingGenerator::SetBuildingType(const FString& BuildingId, const FString& Type)
 {
 	APolyBuilding* Building = FindBuildingById(BuildingId);

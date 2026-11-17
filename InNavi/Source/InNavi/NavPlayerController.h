@@ -607,6 +607,9 @@ public:
 
 	// The selected building's type (BuildingTypes.h). Setting it marks the project as changed when the type actually differs.
 	bool SetSelectedBuildingType(const FString& NewType);
+	// The floors of the selected building, from FirstLevel to LastLevel (see ABuildingGenerator::SetBuildingLevelRange): what the Building panel's
+	// From and To boxes set. Floors outside the range go with everything on them; Discard changes brings them back.
+	bool SetSelectedBuildingFloorRange(int32 FirstLevel, int32 LastLevel);
 	FString GetSelectedBuildingType() const;
 	// The Map panel's type check boxes: what the generator hides and shows by type. Not saved in the project.
 	void SetBuildingTypeVisible(const FString& Type, bool bVisible);

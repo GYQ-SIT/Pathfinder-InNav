@@ -262,6 +262,13 @@ public:
 	// False if there is no such building.
 	bool GetBuildingSummary(const FString& BuildingId, FBuildingSummary& OutSummary) const;
 
+	// Gives a building the floors from NewFirstLevel to NewLastLevel (both included; level 0 does not exist, B1 is -1; a last level below the
+	// first is the one floor). The shell is rebuilt, and the saved interior loses what is on the floors that go: their rooms, walls, lifts and
+	// stairs, the doors in the outer wall, and the floors a connector reached there. A building that is open in the interior editor must
+	// change through AInteriorGenerator::SetLevelRange instead (its live floors are the truth). Returns false for a building that is not there
+	// or a level that does not exist.
+	bool SetBuildingLevelRange(const FString& BuildingId, int32 NewFirstLevel, int32 NewLastLevel);
+
 	// Stashes the interior data for a building id, overwriting whatever was there before (e.g.
 	// InteriorGenerator syncing its current in-memory state before a project save).
 	// A live-to-stored sync passes false: model edits already notified navigation, while saving/viewing is not an edit.

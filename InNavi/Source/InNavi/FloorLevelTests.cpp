@@ -1,8 +1,13 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "BuildingGenerator.h"
+#include "BuildingInfoPanelWidget.h"
+#include "EditScreenWidget.h"
+#include "NavPlayerController.h"
 #include "InteriorGenerator.h"
+#include "InteriorEntrance.h"
 #include "InteriorRoom.h"
+#include "NavigationRoutePlanner.h"
 #include "LayoutValidation.h"
 #include "PolyBuilding.h"
 #include "UiTestFixture.h"
@@ -397,6 +402,181 @@ bool FInteriorLevelsSaveLoadTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("both floors are there"), Interior->GetFloorLevels(), TArray<int32>({-1, 1}));
 	IFileManager::Get().Delete(*OldPath);
 	IFileManager::Get().Delete(*BasementPath);
+	return true;
+}
+
+namespace FloorLevelTests
+{
+	// An interior with an empty floor for each of these levels, the doors in the outer wall, and (when asked) a lift that reaches all of them.
+	TSharedPtr<FJsonObject> InteriorFor(const TArray<int32>& Levels, const TArray<FInteriorEntrance>& Doors, bool bLift)
+	{
+		auto Data = MakeShared<FJsonObject>();
+		TArray<TSharedPtr<FJsonValue>> Floors;
+		for (const int32 Level : Levels)
+		{
+			auto Floor = MakeShared<FJsonObject>();
+			Floor->SetNumberField(TEXT("level"), Level);
+			Floor->SetNumberField(TEXT("wallThickness"), 20);
+			Floor->SetArrayField(TEXT("rooms"), {});
+			TArray<TSharedPtr<FJsonValue>> Nodes;
+			if (bLift)
+			{
+				auto Node = MakeShared<FJsonObject>();
+				Node->SetStringField(TEXT("id"), FString::Printf(TEXT("Lift-%d"), Level));
+				Node->SetStringField(TEXT("type"), TEXT("elevator"));
+				Node->SetStringField(TEXT("connectorGroupId"), TEXT("Lift"));
+				Node->SetArrayField(TEXT("position"), { MakeShared<FJsonValueNumber>(500), MakeShared<FJsonValueNumber>(500) });
+				TArray<TSharedPtr<FJsonValue>> Reaches;
+				for (const int32 Reached : Levels) Reaches.Add(MakeShared<FJsonValueNumber>(Reached));
+				Node->SetArrayField(TEXT("connectsFloors"), Reaches);
+				Nodes.Add(MakeShared<FJsonValueObject>(Node));
+			}
+			Floor->SetArrayField(TEXT("navNodes"), Nodes);
+			Floors.Add(MakeShared<FJsonValueObject>(Floor));
+		}
+		Data->SetArrayField(TEXT("floors"), Floors);
+		TArray<TSharedPtr<FJsonValue>> Entrances;
+		for (const FInteriorEntrance& Door : Doors) Entrances.Add(MakeShared<FJsonValueObject>(InteriorEntrances::ToJson(Door)));
+		Data->SetArrayField(TEXT("entrances"), Entrances);
+		return Data;
+	}
+
+	FNavigationRoutePoint PointOn(const FString& Building, int32 Floor, FVector2D Position)
+	{
+		FNavigationRoutePoint Result;
+		Result.BuildingId = Building; Result.Floor = Floor; Result.Position = Position;
+		return Result;
+	}
+}
+
+// Routes follow the levels: a walkway that only exists on the second floor is reached through the link door of the building next to it (it has no
+// way out of its own), and the floor under the ground floor is B1, one floor down, reached by a lift that serves it.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLevelRoutingTest, "InNavi.Levels.Routing", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FLevelRoutingTest::RunTest(const FString& Parameters)
+{
+	using namespace FloorLevelTests;
+	FNavigationSearchFixture Fixture;
+	Fixture.Interior->ClearLoadedInterior();
+	Fixture.Generator->ClearAllBuildings();
+	const TArray<FVector2D> Shape = {{0, 0}, {1000, 0}, {1000, 1000}, {0, 1000}};
+	Fixture.Generator->SpawnBuildingFromData(TEXT("L-A"), TEXT("A"), Shape, 2, 300, {0, 0});
+	Fixture.Generator->SpawnBuildingFromData(TEXT("L-WALK"), TEXT("Walkway"), Shape, 1, 300, {1000, 0}, 2);
+	Fixture.Generator->SpawnBuildingFromData(TEXT("L-DEEP"), TEXT("Deep"), Shape, 2, 300, {0, 2000}, -1);
+
+	FInteriorEntrance Link;
+	Link.Id = TEXT("L-A-LINK"); Link.Kind = EInteriorEntranceKind::Link; Link.Level = 2; Link.EdgeIndex = 1;
+	Link.Offset = 875; Link.Width = 100; Link.ConnectsTo = TEXT("L-WALK");
+	Fixture.Generator->SetInteriorDataForBuilding(TEXT("L-A"), InteriorFor({1, 2}, {Link}, false));
+	Fixture.Generator->SetInteriorDataForBuilding(TEXT("L-WALK"), InteriorFor({2}, {}, false));
+	Fixture.Generator->SetInteriorDataForBuilding(TEXT("L-DEEP"), InteriorFor({-1, 1}, {}, true));
+	Fixture.Interior->LoadInteriorForBuilding(TEXT("L-A"));
+
+	// From the second floor of A over the link door onto the walkway, which is the second floor too, 300 up.
+	FNavigationRouteResult Route;
+	if (TestTrue(TEXT("a route from A's second floor to the walkway"), FNavigationRoutePlanner::FindCampusRoute(*Fixture.Generator, *Fixture.Interior,
+		PointOn(TEXT("L-A"), 2, {900, 925}), PointOn(TEXT("L-WALK"), 2, {100, 925}), Route)))
+	{
+		TestEqual(TEXT("it ends on the walkway"), Route.Points.Last().BuildingId, FString(TEXT("L-WALK")));
+		TestEqual(TEXT("on level 2"), Route.Points.Last().Floor, 2);
+		TestTrue(TEXT("at the height of the second floor"), FMath::IsNearlyEqual(Route.Points.Last().WorldPosition.Z, 300.0, 1.0));
+	}
+	// The ground floor of A does not meet the walkway: there is no floor 1 there.
+	TestFalse(TEXT("A's ground floor has no way onto the walkway"), FNavigationRoutePlanner::FindCampusRoute(*Fixture.Generator, *Fixture.Interior,
+		PointOn(TEXT("L-A"), 1, {900, 925}), PointOn(TEXT("L-WALK"), 2, {100, 925}), Route));
+	// The walkway has no main door, so there is no way from the outside onto it (outside is floor 0).
+	TestFalse(TEXT("no way from outside onto the walkway"), FNavigationRoutePlanner::FindCampusRoute(*Fixture.Generator, *Fixture.Interior,
+		PointOn(TEXT("L-WALK"), 0, {1500, 500}), PointOn(TEXT("L-WALK"), 2, {500, 500}), Route));
+
+	// B1 and the ground floor are next to each other: a lift that serves both takes the route down, to a point one floor under the ground.
+	if (TestTrue(TEXT("a route from the ground floor down to B1"), FNavigationRoutePlanner::FindCampusRoute(*Fixture.Generator, *Fixture.Interior,
+		PointOn(TEXT("L-DEEP"), 1, {100, 100}), PointOn(TEXT("L-DEEP"), -1, {900, 900}), Route)))
+	{
+		TestEqual(TEXT("it ends on B1"), Route.Points.Last().Floor, -1);
+		TestTrue(TEXT("300 under the ground"), FMath::IsNearlyEqual(Route.Points.Last().WorldPosition.Z, -300.0, 1.0));
+		TestTrue(TEXT("and it was on the ground floor before"), Route.Points.ContainsByPredicate([](const FNavigationRoutePoint& P) { return P.Floor == 1; }));
+	}
+	TestTrue(TEXT("and back up"), FNavigationRoutePlanner::FindCampusRoute(*Fixture.Generator, *Fixture.Interior,
+		PointOn(TEXT("L-DEEP"), -1, {900, 900}), PointOn(TEXT("L-DEEP"), 1, {100, 100}), Route));
+	return true;
+}
+
+// The Building panel of the exterior screen changes the floors of a building that is not open in the interior editor: the saved interior
+// keeps what is on the floors that stay and loses the rest (rooms, lifts that reached them, doors in the outer wall of the floors that go).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FBuildingPanelFloorsTest, "InNavi.Levels.BuildingPanel", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FBuildingPanelFloorsTest::RunTest(const FString& Parameters)
+{
+	using namespace FloorLevelTests;
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	Fixture.Interior->ClearLoadedInterior();
+	Fixture.Generator->ClearAllBuildings();
+	const TArray<FVector2D> Shape = {{0, 0}, {1000, 0}, {1000, 1000}, {0, 1000}};
+	APolyBuilding* Tower = Fixture.Generator->SpawnBuildingFromData(TEXT("P-TOWER"), TEXT("Tower"), Shape, 3, 300, {0, 0});
+	if (!TestNotNull(TEXT("a building of three floors"), Tower)) return false;
+	FInteriorEntrance Main;
+	Main.Id = TEXT("P-MAIN"); Main.Kind = EInteriorEntranceKind::Main; Main.Level = 1; Main.EdgeIndex = 3; Main.Offset = 380; Main.Width = 240;
+	FInteriorEntrance Link;
+	Link.Id = TEXT("P-LINK"); Link.Kind = EInteriorEntranceKind::Link; Link.Level = 3; Link.EdgeIndex = 1; Link.Offset = 380; Link.Width = 240; Link.ConnectsTo = TEXT("P-NEXT");
+	Fixture.Generator->SetInteriorDataForBuilding(TEXT("P-TOWER"), InteriorFor({1, 2, 3}, {Main, Link}, true));
+
+	TestTrue(TEXT("the building is selected"), Controller->SelectBuildingById(TEXT("P-TOWER")));
+	UEditScreenWidget* Exterior = NewObject<UEditScreenWidget>();
+	Exterior->Initialize(); Exterior->TakeWidget(); Exterior->SetOwningPlayer(Controller);
+	UBuildingInfoPanelWidget* Panel = Exterior->GetBuildingInfoPanelForTests();
+	if (!TestNotNull(TEXT("the Building panel"), Panel)) return false;
+	Panel->Refresh();
+	TestEqual(TEXT("From shows the first floor"), Panel->GetFloorFromTextForTests(), FString(TEXT("1")));
+	TestEqual(TEXT("To shows the last"), Panel->GetFloorToTextForTests(), FString(TEXT("3")));
+
+	// 2 to 3: the ground floor goes, with the main door on it, and the lift reaches only the two floors that are left.
+	Panel->CommitFloorRangeForTests(TEXT("2"), TEXT("3"));
+	TestEqual(TEXT("the building has floors 2 and 3"), Tower->GetLevels(), TArray<int32>({2, 3}));
+	TestTrue(TEXT("and the project is marked as changed"), Controller->HasUnsavedChanges());
+	TestEqual(TEXT("the panel shows the new range"), Panel->GetFloorFromTextForTests(), FString(TEXT("2")));
+	const TSharedPtr<FJsonObject> Saved = Fixture.Generator->GetInteriorDataForBuilding(TEXT("P-TOWER"));
+	const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
+	if (TestTrue(TEXT("the saved interior has floors"), Saved.IsValid() && Saved->TryGetArrayField(TEXT("floors"), Floors)))
+	{
+		TArray<int32> Levels;
+		TArray<int32> Reached;
+		for (const TSharedPtr<FJsonValue>& Value : *Floors)
+		{
+			Levels.Add(int32(Value->AsObject()->GetNumberField(TEXT("level"))));
+			const TArray<TSharedPtr<FJsonValue>>* Nodes = nullptr;
+			if (Value->AsObject()->TryGetArrayField(TEXT("navNodes"), Nodes) && Nodes->Num() == 1)
+			{
+				for (const TSharedPtr<FJsonValue>& Level : (*Nodes)[0]->AsObject()->GetArrayField(TEXT("connectsFloors"))) Reached.AddUnique(int32(Level->AsNumber()));
+			}
+		}
+		TestEqual(TEXT("only floors 2 and 3 are saved"), Levels, TArray<int32>({2, 3}));
+		Reached.Sort();
+		TestEqual(TEXT("the lift reaches only those"), Reached, TArray<int32>({2, 3}));
+	}
+	const TArray<TSharedPtr<FJsonValue>>* Doors = nullptr;
+	if (TestTrue(TEXT("the saved interior has doors"), Saved.IsValid() && Saved->TryGetArrayField(TEXT("entrances"), Doors)))
+	{
+		TestEqual(TEXT("the main door on the ground floor is gone, the door on floor 3 stays"), Doors->Num(), 1);
+		if (Doors->Num() == 1) TestEqual(TEXT("it is the link door"), (*Doors)[0]->AsObject()->GetStringField(TEXT("id")), FString(TEXT("P-LINK")));
+	}
+
+	// Down from B1 (From B1 To B2), the way a basement is said; B2 is the lowest.
+	Panel->CommitFloorRangeForTests(TEXT("B1"), TEXT("B2"));
+	TestEqual(TEXT("the building has B2 and B1"), Tower->GetLevels(), TArray<int32>({-2, -1}));
+	TestEqual(TEXT("From shows B1 for a building that is all basement"), Panel->GetFloorFromTextForTests(), FString(TEXT("B1")));
+	TestEqual(TEXT("and To shows B2"), Panel->GetFloorToTextForTests(), FString(TEXT("B2")));
+
+	// Either order, and a range that spans the ground.
+	Panel->CommitFloorRangeForTests(TEXT("2"), TEXT("B2"));
+	TestEqual(TEXT("From 2 To B2 is the same range as B2 to 2"), Tower->GetLevels(), TArray<int32>({-2, -1, 1, 2}));
+	TestEqual(TEXT("shown from the lowest"), Panel->GetFloorFromTextForTests(), FString(TEXT("B2")));
+	TestEqual(TEXT("to the highest"), Panel->GetFloorToTextForTests(), FString(TEXT("2")));
+
+	// Something that is not a floor changes nothing.
+	Panel->CommitFloorRangeForTests(TEXT("0"), TEXT("3"));
+	TestEqual(TEXT("0 is not a floor"), Tower->GetLevels(), TArray<int32>({-2, -1, 1, 2}));
+	Panel->CommitFloorRangeForTests(TEXT("abc"), TEXT("3"));
+	TestEqual(TEXT("neither are words"), Tower->GetLevels(), TArray<int32>({-2, -1, 1, 2}));
+	TestEqual(TEXT("the boxes show the floors the building has again"), Panel->GetFloorFromTextForTests(), FString(TEXT("B2")));
 	return true;
 }
 

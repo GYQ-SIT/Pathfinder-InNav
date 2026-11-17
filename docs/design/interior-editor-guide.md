@@ -93,6 +93,10 @@ selected building (picked in the Map panel's list or by clicking it in the scene
 - **Floors**, **Rooms** (all floors) and **Lifts & stairs** (elevators, stairs and escalators; a
   link that reaches several floors counts once). Rooms and links come from the interior data
   saved in the project, so edits made in the interior editor show here once they are saved;
+- **From** and **To** under the numbers: the first and the last floor of the building, typed as `3`, `-1` or `B1` (Enter or
+  clicking away applies them, either order is accepted; a building that goes down reads From B1 To B2). Floors outside the range
+  are removed with everything on them, and **Discard changes** brings them back. The same two boxes are in the interior editor's
+  Floor panel;
 - **STATUS**: an amber **Empty** tag while the building has no rooms, a green **Has rooms** tag
   once it does;
 - **Open 2D floor editor** - opens the building in the interior editor's 2D floor plan - and
@@ -271,9 +275,17 @@ overlapping another room will fail, with the reason logged to the Output Log.
 ### Floor panel
 
 The heading shows **Floors** and how many there are, with **+ Add** on the right. Each floor is a row - "Level N"
-and, on the right, how high that level is above the ground floor (for example 0 m, 3 m, 6 m, from the building's
-own floor height); the active floor's row is blue. Click a row to switch to that floor (same as `[`/`]` to cycle
-up/down). **+ Add** and **Delete floor** do the same as `F`/`X`; Delete floor turns red under the mouse.
+(or "Level B1" for a basement) and, on the right, how high that level is above the ground floor (for example -3 m, 0 m,
+3 m, 6 m, from the building's own floor height); the active floor's row is blue. Click a row to switch to that floor (same
+as `[`/`]` to cycle up/down). **+ Add** and **Delete floor** do the same as `F`/`X`; Delete floor turns red under the mouse.
+
+Below the list, **From** and **To** are the first and the last floor of the building, typed as `3`, `-1` or `B1` and applied
+with Enter or by clicking away. A building that goes down is read from B1 downwards (From B1, To B2); either order is
+accepted. A building does not have to start on the ground floor: From 3 To 3 is a walkway that only exists on the third
+floor, 6 m up. Floors outside the range are removed with everything on them (Undo brings them back), and new floors are
+empty. There is no level 0, and a building goes down to B20 and up to 200. The floors keep their numbers: only the highest
+or the lowest floor can be deleted (**Delete floor**), never one in the middle. A **main door** can only be on the ground
+floor, so a building without one (a walkway) is entered through the link doors of the buildings next to it.
 
 ### Properties panel
 
