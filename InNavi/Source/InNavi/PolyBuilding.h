@@ -66,6 +66,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Building")
 	int32 GetLastLevel() const { return LayoutValidation::LevelAfter(FirstLevel, FloorCount - 1); }
 	bool HasLevel(int32 Level) const { return GetLevelPosition(Level) > 0; }
+	// The floor a project opens on: the ground floor (1) when the building has it, else the floor nearest the ground (the lowest floor of a
+	// building that starts higher up, the highest floor of one that is all basement). The main door of a building is on the ground floor only: a
+	// walkway or bridge between two buildings has none, and is entered through the doors that link it to them.
+	int32 GetNearestGroundLevel() const { return HasLevel(1) ? 1 : (LayoutValidation::LevelIndex(FirstLevel) > 0 ? FirstLevel : GetLastLevel()); }
 	// Every level of the building from the lowest up. Loop over this and not over first..last: level 0 does not exist.
 	TArray<int32> GetLevels() const;
 	// 1 for the lowest floor, FloorCount for the highest; 0 for a level the building does not have.

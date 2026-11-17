@@ -1,4 +1,5 @@
 #include "NavigationRouteVisualization.h"
+#include "LayoutValidation.h"
 #include "Components/TextRenderComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/World.h"
@@ -24,12 +25,12 @@ namespace
 			return Point.WorldPosition + FVector(0, 0, RouteDisplayLift);
 		}
 		const FVector2D XY = (Point.Position + Offset) * Scale;
-		return FVector(XY.X, XY.Y, FMath::Max(0, Point.Floor - 1) * Height + RouteDisplayLift);
+		return FVector(XY.X, XY.Y, LayoutValidation::LevelIndex(Point.Floor) * Height + RouteDisplayLift);
 	}
 
 	FString NavigationFloorLabel(int32 Floor)
 	{
-		return Floor == 0 ? TEXT("Outside") : FString::Printf(TEXT("Floor %d"), Floor);
+		return Floor == 0 ? FString(TEXT("Outside")) : TEXT("Floor ") + LayoutValidation::LevelLabel(Floor);
 	}
 
 	FString NavigationConnectorLabel(const FNavigationRoutePoint& Point)
@@ -125,7 +126,7 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 			FString Text;
 			if (bExterior)
 			{
-				Text = From.Floor == 0 ? FString::Printf(TEXT("Enter building %s - Floor 1"), *To.BuildingId)
+				Text = From.Floor == 0 ? FString::Printf(TEXT("Enter building %s - Floor %s"), *To.BuildingId, *LayoutValidation::LevelLabel(To.Floor))
 					: FString::Printf(TEXT("Exit building %s - Outside"), *From.BuildingId);
 			}
 			else

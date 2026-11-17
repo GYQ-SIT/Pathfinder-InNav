@@ -1,4 +1,5 @@
 #include "FloorListEntryWidget.h"
+#include "LayoutValidation.h"
 
 #include "NavPlayerController.h"
 #include "Blueprint/WidgetTree.h"
@@ -92,7 +93,7 @@ void UFloorListEntryWidget::ApplyVisuals()
 {
 	if (Label)
 	{
-		Label->SetText(FText::FromString(FString::Printf(TEXT("Level %d"), FloorNumber)));
+		Label->SetText(FText::FromString(TEXT("Level ") + LayoutValidation::LevelLabel(FloorNumber)));
 	}
 	if (ElevationLabel)
 	{

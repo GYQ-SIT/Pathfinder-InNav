@@ -1825,6 +1825,7 @@ bool ABuildingGenerator::GetBuildingSummary(const FString& BuildingId, FBuilding
 	OutSummary.Id = Building->BuildingId;
 	OutSummary.Name = Building->BuildingName;
 	OutSummary.Floors = Building->GetFloorCount();
+	OutSummary.FirstLevel = Building->GetFirstLevel();
 	OutSummary.Type = Building->GetBuildingType();
 	OutSummary.Footprint = Building->GetFootprint();
 

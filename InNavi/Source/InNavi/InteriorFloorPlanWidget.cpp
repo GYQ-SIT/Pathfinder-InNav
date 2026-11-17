@@ -161,7 +161,7 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 
 			// A valid floor must be selected.
 			const int32 ActiveFloor = InteriorGen->GetActiveFloor();
-			if (ActiveFloor < 1)
+			if (ActiveFloor == 0)
 			{
 				UE_LOG(LogTemp, Error, TEXT("[Navigation] 2D navigation click rejected: active floor=%d"), ActiveFloor);
 				return FReply::Handled();

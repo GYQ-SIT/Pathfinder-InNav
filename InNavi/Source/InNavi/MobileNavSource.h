@@ -79,7 +79,7 @@ struct FMobilePlaceFilter
 	bool bAvailableOnly = false;
 	// Empty / INDEX_NONE = anywhere.
 	FString BuildingId;
-	int32 Level = INDEX_NONE;
+	int32 Level = 0; // 0 = any level (0 is not a level: -1 is B1)
 };
 
 // Which ways between levels a person will take; every one is on unless switched off. "Use lift only" is the lift alone.
@@ -110,7 +110,7 @@ struct FMobileRouteRequest
 	// Where "My location" is, when the route starts from it: a building and level of the site (empty and INDEX_NONE = the door of the
 	// destination's building, on level 1).
 	FString MyLocationBuildingId;
-	int32 MyLocationLevel = INDEX_NONE;
+	int32 MyLocationLevel = 0; // 0 = not set (0 is not a level: -1 is B1)
 };
 
 enum class EMobileStepKind : uint8

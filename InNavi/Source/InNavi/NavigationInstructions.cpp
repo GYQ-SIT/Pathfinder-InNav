@@ -1,4 +1,5 @@
 #include "NavigationInstructions.h"
+#include "LayoutValidation.h"
 
 namespace NavigationInstructionPrivate
 {
@@ -48,13 +49,13 @@ TArray<FNavigationInstruction> NavigationInstructions::Build(const TArray<FNavig
 		if (!IsWalkingEdge(A, B))
 		{
 			Walking = INDEX_NONE; Incoming = FVector2D::ZeroVector;
-			if (A.Floor > 0 && B.Floor > 0 && !A.BuildingId.IsEmpty() && !B.BuildingId.IsEmpty() && A.BuildingId != B.BuildingId)
+			if (A.Floor != 0 && B.Floor != 0 && !A.BuildingId.IsEmpty() && !B.BuildingId.IsEmpty() && A.BuildingId != B.BuildingId)
 			{
 				Add(ENavigationInstructionKind::ExitBuilding, FString::Printf(TEXT("Use the link door from %s to %s on Floor %d."), *BuildingName(A.BuildingId), *BuildingName(B.BuildingId), A.Floor), I, I + 1, Metres);
 				Add(ENavigationInstructionKind::EnterBuilding, FString::Printf(TEXT("Enter the building %s on Floor %d."), *BuildingName(B.BuildingId), B.Floor), I + 1, I + 1, 0);
 			}
 			else if (A.Floor == 0)
-				Add(ENavigationInstructionKind::EnterBuilding, TEXT("Enter the building ") + BuildingName(B.BuildingId) + TEXT(" on Floor 1."), I + 1, I + 1, Metres);
+				Add(ENavigationInstructionKind::EnterBuilding, TEXT("Enter the building ") + BuildingName(B.BuildingId) + TEXT(" on Floor ") + LayoutValidation::LevelLabel(B.Floor) + TEXT("."), I + 1, I + 1, Metres);
 			else if (B.Floor == 0)
 				Add(ENavigationInstructionKind::ExitBuilding, TEXT("Leave ") + BuildingName(A.BuildingId) + TEXT(" and continue outside."), I, I + 1, Metres);
 			else

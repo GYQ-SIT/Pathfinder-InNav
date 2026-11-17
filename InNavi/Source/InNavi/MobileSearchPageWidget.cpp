@@ -117,7 +117,7 @@ TSharedRef<SWidget> UMobileSearchPageWidget::RebuildWidget()
 		};
 		CategorySelect = MakeSelect(TEXT("Category"), [](UMobileSearchPageWidget* Self, const FString& Value) { Self->SetCategory(Value); });
 		BuildingSelect = MakeSelect(TEXT("Building"), [](UMobileSearchPageWidget* Self, const FString& Value) { Self->SetBuilding(Value); });
-		LevelSelect = MakeSelect(TEXT("Level"), [](UMobileSearchPageWidget* Self, const FString& Value) { Self->SetLevel(Value.IsEmpty() ? INDEX_NONE : FCString::Atoi(*Value)); });
+		LevelSelect = MakeSelect(TEXT("Level"), [](UMobileSearchPageWidget* Self, const FString& Value) { Self->SetLevel(Value.IsEmpty() ? 0 : FCString::Atoi(*Value)); });
 		UHorizontalBox* SelectRow = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("FilterSelects"));
 		SelectRow->AddChildToHorizontalBox(CategorySelect)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		UHorizontalBoxSlot* BuildingSlot = SelectRow->AddChildToHorizontalBox(BuildingSelect);
@@ -195,7 +195,7 @@ void UMobileSearchPageWidget::SetFiltersOpen(bool bOpen)
 
 int32 UMobileSearchPageWidget::GetActiveFilterCount() const
 {
-	return (Filter.Categories.IsEmpty() ? 0 : 1) + (Filter.BuildingId.IsEmpty() ? 0 : 1) + (Filter.Level == INDEX_NONE ? 0 : 1);
+	return (Filter.Categories.IsEmpty() ? 0 : 1) + (Filter.BuildingId.IsEmpty() ? 0 : 1) + (Filter.Level == 0 ? 0 : 1);
 }
 
 FString UMobileSearchPageWidget::GetTitle() const
@@ -312,7 +312,7 @@ void UMobileSearchPageWidget::RefreshHeader()
 	{
 		LevelOptions.Add({ FString::FromInt(Level), LevelNames[Level] });
 	}
-	LevelSelect->SetOptions(LevelOptions, Filter.Level == INDEX_NONE ? FString() : FString::FromInt(Filter.Level));
+	LevelSelect->SetOptions(LevelOptions, Filter.Level == 0 ? FString() : FString::FromInt(Filter.Level));
 }
 
 void UMobileSearchPageWidget::Refresh()

@@ -296,7 +296,7 @@ bool FMobileSearchPageTest::RunTest(const FString& Parameters)
 	Level->Choose(TEXT("1"));
 	TestEqual(TEXT("so does the level one"), Page->GetFilter().Level, 1);
 	Level->Choose(FString());
-	TestEqual(TEXT("All levels clears it"), Page->GetFilter().Level, static_cast<int32>(INDEX_NONE));
+	TestEqual(TEXT("All levels clears it"), Page->GetFilter().Level, 0);
 	Page->ClearFilters();
 	TestTrue(TEXT("clearing the filters clears them"), Page->GetActiveFilterCount() == 0 && Page->GetShownPlaces().Num() == 36 && Page->GetTitle() == SiteName);
 

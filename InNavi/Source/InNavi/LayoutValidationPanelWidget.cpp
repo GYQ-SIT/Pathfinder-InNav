@@ -155,7 +155,7 @@ void ULayoutValidationPanelWidget::RebuildIssues()
         auto* Button = WidgetTree->ConstructWidget<ULayoutValidationIssueButton>(ULayoutValidationIssueButton::StaticClass());
         Button->SetStyle(StartStyle::SecondaryButton()); Button->SetBackgroundColor(FLinearColor::White); Button->SetIssue(this, I);
         auto* Box = WidgetTree->ConstructWidget<UVerticalBox>(); Button->SetContent(Box);
-        const FString Location = Issue.BuildingId.IsEmpty() ? TEXT("Project") : Issue.BuildingId + (Issue.Floor > 0 ? FString::Printf(TEXT(" / L%d"), Issue.Floor) : FString());
+        const FString Location = Issue.BuildingId.IsEmpty() ? TEXT("Project") : Issue.BuildingId + (Issue.Floor != 0 ? TEXT(" / L") + LayoutValidation::LevelLabel(Issue.Floor) : FString());
         auto* Title = AddText(Box, FString(LayoutValidation::SeverityName(Issue.Severity)) + TEXT(" - ") + Location + TEXT(" ") + Issue.ObjectId, NAME_None);
         Title->SetColorAndOpacity(FSlateColor(Issue.Severity == LayoutValidation::ESeverity::Error ? FLinearColor(1.f, .4f, .35f) : Issue.Severity == LayoutValidation::ESeverity::Warning ? FLinearColor::Yellow : FLinearColor(.6f, .8f, 1.f)));
         AddText(Box, Issue.Message, NAME_None); AddText(Box, Issue.Suggestion, NAME_None);

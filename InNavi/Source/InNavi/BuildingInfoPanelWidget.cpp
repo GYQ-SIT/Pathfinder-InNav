@@ -1,4 +1,5 @@
 #include "BuildingInfoPanelWidget.h"
+#include "LayoutValidation.h"
 
 #include "BuildingSummary.h"
 #include "BuildingTypes.h"
@@ -319,9 +320,13 @@ void UBuildingInfoPanelWidget::HandleRoomFloorSelected(FString SelectedItem, ESe
 	{
 		return;
 	}
-	// "All floors" is 0; "Floor 3" is 3.
+	// "All floors" is 0; "Floor 3" is 3 and "Floor B1" is -1.
 	const FString Prefix(TEXT("Floor "));
-	const int32 Floor = SelectedItem.StartsWith(Prefix) ? FCString::Atoi(*SelectedItem.RightChop(Prefix.Len())) : 0;
+	int32 Floor = 0;
+	if (SelectedItem.StartsWith(Prefix))
+	{
+		LayoutValidation::ParseLevel(SelectedItem.RightChop(Prefix.Len()), Floor);
+	}
 	PC->SetBuildingRoomFloor(DisplayedId, Floor);
 }
 
@@ -407,17 +412,24 @@ void UBuildingInfoPanelWidget::Refresh()
 	if (RoomFloorCombo)
 	{
 		// One item per floor of this building, so the list follows the selection.
-		if (RoomFloorCombo->GetOptionCount() != Summary.Floors + 1)
+		const FString FirstOption = TEXT("Floor ") + LayoutValidation::LevelLabel(Summary.FirstLevel);
+		if (RoomFloorCombo->GetOptionCount() != Summary.Floors + 1 || RoomFloorCombo->GetOptionAtIndex(1) != FirstOption)
 		{
 			RoomFloorCombo->ClearOptions();
 			RoomFloorCombo->AddOption(TEXT("All floors"));
-			for (int32 Level = 1; Level <= Summary.Floors; ++Level)
+			for (int32 Step = 0; Step < Summary.Floors; ++Step)
 			{
-				RoomFloorCombo->AddOption(FString::Printf(TEXT("Floor %d"), Level));
+				RoomFloorCombo->AddOption(TEXT("Floor ") + LayoutValidation::LevelLabel(LayoutValidation::LevelAfter(Summary.FirstLevel, Step)));
 			}
 		}
-		const int32 ChosenFloor = PC ? FMath::Clamp(PC->GetBuildingRoomFloor(Summary.Id), 0, Summary.Floors) : 0;
-		RoomFloorCombo->SetSelectedOption(ChosenFloor == 0 ? FString(TEXT("All floors")) : FString::Printf(TEXT("Floor %d"), ChosenFloor));
+		// A floor this building does not have (the choice was made for another range of floors) is "All floors".
+		int32 ChosenFloor = PC ? PC->GetBuildingRoomFloor(Summary.Id) : 0;
+		const int32 ChosenPosition = LayoutValidation::LevelIndex(ChosenFloor) - LayoutValidation::LevelIndex(Summary.FirstLevel);
+		if (ChosenFloor != 0 && (!LayoutValidation::IsValidLevel(ChosenFloor) || ChosenPosition < 0 || ChosenPosition >= Summary.Floors))
+		{
+			ChosenFloor = 0;
+		}
+		RoomFloorCombo->SetSelectedOption(ChosenFloor == 0 ? FString(TEXT("All floors")) : TEXT("Floor ") + LayoutValidation::LevelLabel(ChosenFloor));
 	}
 	bRefreshingReveal = false;
 	ShowTransparentState(PC && PC->IsBuildingMadeTransparent(Summary.Id));

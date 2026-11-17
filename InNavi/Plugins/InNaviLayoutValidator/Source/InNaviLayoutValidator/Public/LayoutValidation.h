@@ -22,6 +22,41 @@ namespace LayoutValidation
     inline constexpr int32 LevelSpan(int32 First, int32 Last) { return LevelIndex(Last) >= LevelIndex(First) ? LevelIndex(Last) - LevelIndex(First) + 1 : 0; }
     // What the floor is called: "B1" for -1, "3" for 3.
     inline FString LevelLabel(int32 Level) { return Level < 0 ? FString::Printf(TEXT("B%d"), -Level) : FString::FromInt(Level); }
+    // Reads a level as a person types it: "3", "-1" or "B1" (also "b1"). Not a level (empty, 0, "B0", words, out of range) gives false.
+    inline bool ParseLevel(const FString& Text, int32& OutLevel)
+    {
+        FString Digits = Text.TrimStartAndEnd();
+        bool bBasement = false;
+        if (Digits.StartsWith(TEXT("B"), ESearchCase::IgnoreCase))
+        {
+            bBasement = true;
+            Digits = Digits.Mid(1).TrimStart();
+        }
+        const bool bMinus = Digits.StartsWith(TEXT("-"));
+        if (bMinus)
+        {
+            Digits = Digits.Mid(1);
+        }
+        if (Digits.IsEmpty() || Digits.Len() > 4 || (bBasement && bMinus))
+        {
+            return false;
+        }
+        for (const TCHAR Character : Digits)
+        {
+            if (!FChar::IsDigit(Character))
+            {
+                return false;
+            }
+        }
+        const int32 Value = FCString::Atoi(*Digits);
+        const int32 Level = (bBasement || bMinus) ? -Value : Value;
+        if (!IsValidLevel(Level))
+        {
+            return false;
+        }
+        OutLevel = Level;
+        return true;
+    }
 
     enum class ESeverity : uint8 { Error, Warning, Info };
     enum class EObjectKind : uint8 { Project, Building, Floor, Room, Opening, Connector, Entrance };
@@ -32,7 +67,8 @@ namespace LayoutValidation
         ESeverity Severity = ESeverity::Error;
         EObjectKind Kind = EObjectKind::Project;
         FString BuildingId;
-        int32 Floor = INDEX_NONE;
+        // The level of the floor the issue is on (1 = ground floor, -1 = B1), or 0 for none: 0 is not a level, and -1 is B1, so INDEX_NONE would not do.
+        int32 Floor = 0;
         FString ObjectId;
         FString OwnerId;
         FString JsonPath;

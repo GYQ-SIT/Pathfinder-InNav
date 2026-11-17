@@ -1,4 +1,5 @@
 #include "InteriorScreenWidget.h"
+#include "LayoutValidation.h"
 #include "DockHostUMG.h"
 #include "InteriorDockLayout.h"
 #include "DockSharedPanels.h"
@@ -381,6 +382,31 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		FloorListSizeBox->SetContent(FloorListBox);
 		UVerticalBoxSlot* FloorListSlot = FloorStack->AddChildToVerticalBox(FloorListSizeBox);
 		FloorListSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f * StartStyle::DesignToUi));
+
+		// From / To: the lowest and the highest floor of the building, typed as 3, -1 or B1 (see OnFloorRangeCommitted).
+		{
+			UHorizontalBox* RangeRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("FloorRangeRow"));
+			auto AddRangeBox = [this, RangeRow](const TCHAR* Caption, const TCHAR* CaptionName, const TCHAR* BoxName, const TCHAR* Hint, UEditableTextBox*& OutBox)
+			{
+				UTextBlock* CaptionText = StartStyle::Text(WidgetTree, CaptionName, Caption, 12.f, StartStyle::Rgb(150, 172, 202), true);
+				UHorizontalBoxSlot* CaptionSlot = RangeRow->AddChildToHorizontalBox(CaptionText);
+				CaptionSlot->SetVerticalAlignment(VAlign_Center);
+				CaptionSlot->SetPadding(FMargin(0.f, 0.f, 6.f * StartStyle::DesignToUi, 0.f));
+				OutBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), BoxName);
+				OutBox->SetJustification(ETextJustify::Center);
+				OutBox->SetToolTip(MakeToolTipWidget(Hint));
+				OutBox->OnTextCommitted.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFloorRangeCommitted);
+				ApplyStandardFont(OutBox);
+				OutBox->SetWidgetStyle(StartStyle::Field(13.f));
+				USizeBox* BoxSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+				BoxSize->SetWidthOverride(64.f);
+				BoxSize->SetContent(OutBox);
+				RangeRow->AddChildToHorizontalBox(BoxSize)->SetPadding(FMargin(0.f, 0.f, 12.f * StartStyle::DesignToUi, 0.f));
+			};
+			AddRangeBox(TEXT("From"), TEXT("Txt_FloorFrom"), TEXT("Edt_FloorFrom"), TEXT("Where the building starts: 1 is the ground floor, 3 the third floor. For basements it goes down from B1 (From B1 To B2). Press Enter to apply."), FloorFromBox);
+			AddRangeBox(TEXT("To"), TEXT("Txt_FloorTo"), TEXT("Edt_FloorTo"), TEXT("Where the building ends. Floors outside From and To are removed with everything on them (Undo brings them back). Press Enter to apply."), FloorToBox);
+			FloorStack->AddChildToVerticalBox(RangeRow)->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f * StartStyle::DesignToUi));
+		}
 
 		// Delete floor: a quiet button that turns red when the mouse is over it.
 		RemoveFloorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_RemoveFloor"));
@@ -1167,6 +1193,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 			FloorsWrap->AddChildToWrapBox(FloorEntry);
 			FloorCheckboxes.Add(CheckBox);
+			FloorCheckboxLabels.Add(FloorLabel);
 		}
 
 		AddButtonsRow(ConnectorFieldsBox, TEXT("Btn_DeleteConnector"), TEXT("Delete connector"), nullptr, TEXT("Btn_ApplyConnector"), TEXT("Save changes"), ApplyConnectorButton);
@@ -1928,12 +1955,13 @@ void UInteriorScreenWidget::HandleBeforeProjectSave()
 	if (ConnectorFieldsBox && ConnectorFieldsBox->GetVisibility() == ESlateVisibility::Visible)
 	{
 		TArray<int32> Checked;
-		for (int32 Index = 0; Index < FloorCheckboxes.Num(); ++Index)
+		const TArray<int32> BuildingLevels = PC->GetLoadedBuildingLevels();
+		for (int32 Index = 0; Index < FloorCheckboxes.Num() && Index < BuildingLevels.Num(); ++Index)
 		{
 			const UCheckBox* CheckBox = FloorCheckboxes[Index];
 			if (CheckBox && CheckBox->GetVisibility() != ESlateVisibility::Collapsed && CheckBox->IsChecked())
 			{
-				Checked.Add(Index + 1);
+				Checked.Add(BuildingLevels[Index]);
 			}
 		}
 		TArray<int32> Current = PC->GetSelectedConnectorFloors();
@@ -2738,7 +2766,7 @@ void UInteriorScreenWidget::HandleSelectedConnectorChanged(FString GroupId)
 	}
 
 	const TArray<int32> CurrentFloors = PC->GetSelectedConnectorFloors();
-	const int32 FloorCount = PC->GetLoadedBuildingFloorCount();
+	const TArray<int32> BuildingLevels = PC->GetLoadedBuildingLevels();
 	for (int32 Index = 0; Index < FloorCheckboxes.Num(); ++Index)
 	{
 		UCheckBox* CheckBox = FloorCheckboxes[Index];
@@ -2747,11 +2775,15 @@ void UInteriorScreenWidget::HandleSelectedConnectorChanged(FString GroupId)
 			continue;
 		}
 
-		const int32 FloorNumber = Index + 1;
-		if (FloorNumber <= FloorCount)
+		if (BuildingLevels.IsValidIndex(Index))
 		{
+			const int32 FloorNumber = BuildingLevels[Index];
 			CheckBox->SetVisibility(ESlateVisibility::Visible);
 			CheckBox->SetIsChecked(CurrentFloors.Contains(FloorNumber));
+			if (FloorCheckboxLabels.IsValidIndex(Index) && FloorCheckboxLabels[Index])
+			{
+				FloorCheckboxLabels[Index]->SetText(FText::FromString(LayoutValidation::LevelLabel(FloorNumber)));
+			}
 		}
 		else
 		{
@@ -2788,12 +2820,13 @@ void UInteriorScreenWidget::OnApplyConnectorClicked()
 	}
 
 	TArray<int32> NewFloors;
-	for (int32 Index = 0; Index < FloorCheckboxes.Num(); ++Index)
+	const TArray<int32> BuildingLevels = PC->GetLoadedBuildingLevels();
+	for (int32 Index = 0; Index < FloorCheckboxes.Num() && Index < BuildingLevels.Num(); ++Index)
 	{
 		const UCheckBox* CheckBox = FloorCheckboxes[Index];
 		if (CheckBox && CheckBox->GetVisibility() != ESlateVisibility::Collapsed && CheckBox->IsChecked())
 		{
-			NewFloors.Add(Index + 1);
+			NewFloors.Add(BuildingLevels[Index]);
 		}
 	}
 
@@ -2817,16 +2850,32 @@ void UInteriorScreenWidget::RefreshFloorList()
 	{
 		FloorCountText->SetText(FText::AsNumber(FloorCount));
 	}
+	{
+		// From and To read in the direction the building goes: up from its lowest floor, or, for a building that is all basement, down from B1
+		// (From B1 To B2, not the other way round).
+		const TArray<int32> BuildingLevels = PC->GetLoadedBuildingLevels();
+		const bool bAllBasement = !BuildingLevels.IsEmpty() && BuildingLevels.Last() < 0;
+		if (FloorFromBox)
+		{
+			const int32 From = BuildingLevels.IsEmpty() ? 0 : (bAllBasement ? BuildingLevels.Last() : BuildingLevels[0]);
+			FloorFromBox->SetText(FText::FromString(From == 0 ? FString() : LayoutValidation::LevelLabel(From)));
+		}
+		if (FloorToBox)
+		{
+			const int32 To = BuildingLevels.IsEmpty() ? 0 : (bAllBasement ? BuildingLevels[0] : BuildingLevels.Last());
+			FloorToBox->SetText(FText::FromString(To == 0 ? FString() : LayoutValidation::LevelLabel(To)));
+		}
+	}
 	// Lowest floor first (Level 1 at the top) - reversed from the original mockup per explicit
 	// request.
-	for (int32 FloorNumber = 1; FloorNumber <= FloorCount; ++FloorNumber)
+	for (const int32 FloorNumber : PC->GetLoadedBuildingLevels())
 	{
 		UFloorListEntryWidget* Entry = CreateWidget<UFloorListEntryWidget>(PC, UFloorListEntryWidget::StaticClass());
 		if (!Entry)
 		{
 			continue;
 		}
-		Entry->SetFloorNumber(FloorNumber, FloorNumber == ActiveFloor, (FloorNumber - 1) * FloorHeightCm / 100.f);
+		Entry->SetFloorNumber(FloorNumber, FloorNumber == ActiveFloor, PC->GetLoadedBuildingLevelBaseZ(FloorNumber) / 100.f);
 		Entry->SetWidth(ComputePanelButtonWidth(EDockPanelId::Floor));
 		Entry->OnEntryClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleFloorEntryClicked);
 
@@ -2875,7 +2924,7 @@ void UInteriorScreenWidget::RefreshLayersList()
 	const int32 ActiveFloor = PC->GetActiveFloor();
 	if (LayersLevelText)
 	{
-		LayersLevelText->SetText(FText::FromString(FString::Printf(TEXT("LEVEL %d"), ActiveFloor)));
+		LayersLevelText->SetText(FText::FromString(TEXT("LEVEL ") + LayoutValidation::LevelLabel(ActiveFloor)));
 	}
 
 	// How many of each kind the active floor has, shown on the category rows.
@@ -2906,7 +2955,7 @@ void UInteriorScreenWidget::RefreshLayersList()
 			FString Label;
 		};
 		TArray<FResult> Results;
-		for (int32 Floor = 1; Floor <= PC->GetLoadedBuildingFloorCount(); ++Floor)
+		for (const int32 Floor : PC->GetLoadedBuildingLevels())
 		{
 			for (const FString& RoomId : PC->GetRoomIdsOnFloor(Floor))
 			{
@@ -3134,7 +3183,7 @@ void UInteriorScreenWidget::HandleLayerRowLabelClicked(FString RowKey)
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		const int32 Floor = FCString::Atoi(*FloorText);
-		if (Floor > 0 && Floor != PC->GetActiveFloor())
+		if (Floor != 0 && Floor != PC->GetActiveFloor())
 		{
 			PC->SetActiveFloor(Floor);
 		}
@@ -3714,6 +3763,45 @@ void UInteriorScreenWidget::OnIncreaseSpeedClicked()
 		PC->IncreaseMoveSpeed3DPreview();
 	}
 	RefreshCameraSpeedDisplay();
+}
+
+void UInteriorScreenWidget::OnFloorRangeCommitted(const FText& NewText, ETextCommit::Type CommitType)
+{
+	if (CommitType != ETextCommit::OnEnter && CommitType != ETextCommit::OnUserMovedFocus)
+	{
+		return;
+	}
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC || !FloorFromBox || !FloorToBox)
+	{
+		return;
+	}
+	const TArray<int32> Current = PC->GetLoadedBuildingLevels();
+	if (Current.IsEmpty())
+	{
+		return;
+	}
+
+	int32 First = 0;
+	int32 Last = 0;
+	if (!LayoutValidation::ParseLevel(FloorFromBox->GetText().ToString(), First) || !LayoutValidation::ParseLevel(FloorToBox->GetText().ToString(), Last))
+	{
+		PC->OnActionFailed.Broadcast(TEXT("Type a floor as 3, -1 or B1. Floors go from B20 to 200, and there is no floor 0."), EActionFailureSeverity::Warning);
+	}
+	else
+	{
+		// Either order is fine: for basements From B1 To B2 is the natural way to say it, and it is the same two floors as B2 and B1.
+		if (LayoutValidation::LevelIndex(Last) < LayoutValidation::LevelIndex(First))
+		{
+			Swap(First, Last);
+		}
+		if (First != Current[0] || Last != Current.Last())
+		{
+			PC->SetFloorRange(First, Last);
+		}
+	}
+	// What the building has now: what was typed when it was applied, the old values when it was not.
+	RefreshFloorList();
 }
 
 void UInteriorScreenWidget::OnCameraSpeedTextCommitted(const FText& NewText, ETextCommit::Type CommitType)

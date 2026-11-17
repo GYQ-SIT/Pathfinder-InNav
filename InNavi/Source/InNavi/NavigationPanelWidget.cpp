@@ -1,4 +1,5 @@
 #include "NavigationPanelWidget.h"
+#include "LayoutValidation.h"
 #include "NavigationInstructions.h"
 
 #include "BuildingGenerator.h"
@@ -403,7 +404,7 @@ void UNavigationPanelWidget::RefreshRoomSearchIndex() const
 		return;
 	}
 
-	for (int32 Floor = 1; Floor <= FloorCount; ++Floor)
+	for (const int32 Floor : Building->GetLevels())
 	{
 		for (AInteriorRoom* Room : Interior->GetRoomsOnFloor(Floor))
 		{
@@ -1162,7 +1163,7 @@ void UNavigationPanelWidget::StampPoint(FNavigationRoutePoint& Point, const FStr
 	if (const APolyBuilding* Building = Generator ? Generator->FindBuildingById(BuildingId) : nullptr)
 	{
 		const FVector2D XY = (Point.Position + Building->BuildingOffset) * Generator->GetScale();
-		Point.WorldPosition = FVector(XY.X, XY.Y, FMath::Max(0, Point.Floor - 1) * Building->GetFloorHeight());
+		Point.WorldPosition = FVector(XY.X, XY.Y, Building->GetLevelBaseZ(Point.Floor));
 		Point.bHasWorldPosition = true;
 	}
 }
@@ -1222,8 +1223,8 @@ bool UNavigationPanelWidget::ApplyWorldRouteResult(const FString& BuildingId,
 		const FString OwnerId = Input.BuildingId.IsEmpty() ? BuildingId : Input.BuildingId;
 		const APolyBuilding* Owner = Generator->FindBuildingById(OwnerId);
 		if (!FMath::IsFinite(Input.WorldPosition.X) || !FMath::IsFinite(Input.WorldPosition.Y)
-			|| !FMath::IsFinite(Input.WorldPosition.Z) || Input.Floor < OutdoorFloor
-			|| !Owner || Input.Floor > Owner->GetFloorCount())
+			|| !FMath::IsFinite(Input.WorldPosition.Z)
+			|| !Owner || (Input.Floor != OutdoorFloor && !Owner->HasLevel(Input.Floor)))
 		{
 			SetStatusMessage(TEXT("The 3D route contains an invalid position or floor."), ENavigationMessageKind::Error);
 			return false;

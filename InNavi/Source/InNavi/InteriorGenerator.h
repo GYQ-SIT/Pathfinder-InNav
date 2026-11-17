@@ -96,7 +96,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	int32 GetActiveFloor() const { return ActiveFloor; }
 
+	// The levels that have a floor, from the lowest up (B2, B1, 1, 2 ... : the numbers go up with the height, and there is no 0).
 	TArray<int32> GetFloorLevels() const;
+
+	// The floor a building opens on: the ground floor (1) when it has it, else the floor nearest to the ground (a bridge on the third floor, a
+	// car park under it). The main door is not tied to it: that is on the ground floor only.
+	int32 GetOpeningLevel() const;
+
+	// Gives the building the floors from NewFirstLevel up to NewLastLevel (both included, see LayoutValidation::LevelAfter: no level 0). Floors
+	// outside the range are removed together with their rooms, walls, lifts, stairs and doors in the outer wall; new floors are empty and take
+	// the wall height and thickness of the nearest floor. The exterior shell follows. Returns false when no interior is loaded or a level does not
+	// exist; a range with the last level below the first becomes the one floor.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool SetLevelRange(int32 NewFirstLevel, int32 NewLastLevel);
 
 	// Wall thickness is stored per floor in world units. Navigation uses this to build an accurate
 	// clearance boundary around the authored wall centre lines instead of assuming every floor has
@@ -108,15 +120,17 @@ public:
 	// floor has no rooms yet, Phase 3's drawing tools are what would populate it.
 	// WallHeight/WallThickness default to the topmost existing floor's values (or 280/20 if this
 	// is the first floor). Switches the active floor to the new one.
-	// Returns the new floor's level, or -1 if no building interior is currently loaded.
+	// Returns the new floor's level, or 0 (which is no level) if there is no interior loaded or the building is at its highest level.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	int32 AddFloor();
 
-	// Removes the given floor (can be any floor, not just the top one - matches "delete whatever
-	// floor you're currently viewing"). Destroys that floor's rooms, then shifts every floor above
-	// it down by one level - renumbering them, moving their rooms' vertical position, and
-	// regenerating those rooms' meshes (see AInteriorRoom::SetFloorBaseZ). Shrinks the exterior
-	// shell to match. Refuses to remove the last remaining floor. Returns true on success.
+	// The same below the lowest floor: a new basement (or the floor under a bridge). Returns the new level, or 0 when it cannot be added.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	int32 AddFloorBelow();
+
+	// Removes the highest or the lowest floor of the building with everything on it (see SetLevelRange). A floor in the middle cannot go: the
+	// floors above it would have to change their numbers, and a floor is known by its number (doors to other buildings, lifts, bookmarks).
+	// Refuses to remove the last remaining floor. Returns true on success.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool RemoveFloor(int32 Level);
 
@@ -484,6 +498,7 @@ private:
 	{
 		FHistorySnapshotText Json;
 		int32 FloorCount = 1;
+		int32 FirstLevel = 1;
 		// An edit to another building is recorded on the transition into this snapshot.
 		FString EntranceOwnerId;
 		TSharedPtr<FJsonObject> RemovedEntrance;

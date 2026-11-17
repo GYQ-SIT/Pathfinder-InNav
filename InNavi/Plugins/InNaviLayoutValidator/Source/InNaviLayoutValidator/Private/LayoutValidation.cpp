@@ -113,7 +113,7 @@ namespace LayoutValidation
         struct FContext
         {
             FString Building, Id, Owner, Path = TEXT("$");
-            int32 Floor = INDEX_NONE;
+            int32 Floor = 0; // no floor (0 is not a level; -1 is B1)
             EObjectKind Kind = EObjectKind::Project;
         };
         struct FNode
@@ -295,8 +295,15 @@ namespace LayoutValidation
                 }
                 if (Type.IsEmpty() || Type == TEXT("door")) References.Add({ C, String(Obj, TEXT("inputId")), String(Obj, TEXT("connectsTo")) });
             }
-            void Interior(const TSharedPtr<FJsonObject>& Obj, const TArray<FVector2D>& Boundary, int32 FloorCount, double Scale)
+            void Interior(const TSharedPtr<FJsonObject>& Obj, const TArray<FVector2D>& Boundary, int32 FloorCount, double Scale, int32 FirstLevel = 1)
             {
+                // The floors a building has: FloorCount of them from FirstLevel up (see LevelAfter: level 0 does not exist, B1 is -1).
+                const auto HasLevel = [FirstLevel, FloorCount](int32 Level)
+                {
+                    if (!IsValidLevel(Level)) return false;
+                    const int32 Position = LevelIndex(Level) - LevelIndex(FirstLevel);
+                    return Position >= 0 && Position < FloorCount;
+                };
                 const auto Base = C;
                 TSet<int32> FloorIds;
                 TSet<FString> RoomIds, NavigationIds, NodeIds, EntranceIds;
@@ -311,7 +318,7 @@ namespace LayoutValidation
                     C = Base; C.Kind = EObjectKind::Floor; C.Path = Base.Path + FString::Printf(TEXT(".floors[%d]"), I);
                     const auto Floor = Object(Floors[I]); if (!Floor) continue;
                     C.Floor = Integer(Floor, TEXT("level"), 1);
-                    if (C.Floor < 1 || C.Floor > FloorCount) Issue(TEXT("FLOOR_RANGE"), TEXT("Floor level is outside this building's floor count."), TEXT("Correct the floor level or building floor count."));
+                    if (!HasLevel(C.Floor)) Issue(TEXT("FLOOR_RANGE"), TEXT("Floor level is outside this building's floor count."), TEXT("Correct the floor level or building floor count."));
                     if (FloorIds.Contains(C.Floor)) Issue(TEXT("FLOOR_DUPLICATE"), TEXT("The same floor level is defined twice."), TEXT("Keep a single definition of each floor."));
                     FloorIds.Add(C.Floor);
                     if (Number(Floor, TEXT("wallHeight"), 280) <= 0 || Number(Floor, TEXT("wallThickness"), 20) < 0) Invalid(TEXT("wall dimensions"));
@@ -378,7 +385,7 @@ namespace LayoutValidation
                         if (Node.Size <= 0) Invalid(TEXT("connector sizeScale"));
                         for (const auto& Level : Array(ObjNode, TEXT("connectsFloors")))
                         {
-                            if (!Level.IsValid() || Level->Type != EJson::Number || !FMath::IsFinite(Level->AsNumber()) || Level->AsNumber() < 1 || Level->AsNumber() > FloorCount || FMath::FloorToDouble(Level->AsNumber()) != Level->AsNumber()) Invalid(TEXT("connectsFloors level"));
+                            if (!Level.IsValid() || Level->Type != EJson::Number || !FMath::IsFinite(Level->AsNumber()) || FMath::Abs(Level->AsNumber()) > MaxBuildingFloors || FMath::FloorToDouble(Level->AsNumber()) != Level->AsNumber() || !HasLevel(static_cast<int32>(Level->AsNumber()))) Invalid(TEXT("connectsFloors level"));
                             else Node.Floors.AddUnique(static_cast<int32>(Level->AsNumber()));
                         }
                         Nodes.Add(MoveTemp(Node));
@@ -429,7 +436,7 @@ namespace LayoutValidation
                     Id(Entrance, EntranceIds); C.Floor = Integer(Entrance, TEXT("level"), 1);
                     const FString Kind = String(Entrance, TEXT("kind")).ToLower();
                     if (!Kind.IsEmpty() && Kind != TEXT("main") && Kind != TEXT("link")) Invalid(TEXT("entrance kind"));
-                    if (C.Floor < 1 || C.Floor > FloorCount || (Kind != TEXT("link") && C.Floor != 1)) Issue(TEXT("ENTRANCE_FLOOR"), TEXT("Entrance is on an invalid floor; main entrances belong on level 1."), TEXT("Correct the entrance floor or kind."));
+                    if (!HasLevel(C.Floor) || (Kind != TEXT("link") && C.Floor != 1)) Issue(TEXT("ENTRANCE_FLOOR"), TEXT("Entrance is on an invalid floor; main entrances belong on level 1."), TEXT("Correct the entrance floor or kind."));
                     const int32 Edge = Integer(Entrance, TEXT("edge"), 0);
                     const double Offset = Number(Entrance, TEXT("offset"), 0), Width = Number(Entrance, TEXT("width"), 240);
                     if (!Boundary.IsValidIndex(Edge) || Offset < 0 || Width <= 0 || (Boundary.IsValidIndex(Edge) && Offset + Width > FVector2D::Distance(Boundary[Edge], Boundary[(Edge + 1) % Boundary.Num()]) * Scale + Epsilon))
@@ -476,6 +483,9 @@ namespace LayoutValidation
             ById.Add(Reader.C.Building, Building);
             Reader.String(Building, TEXT("name"), true);
             const int32 Count = Reader.Integer(Building, TEXT("floorCount"), 10);
+            // The level of the lowest floor (1 when there is none: a file from before basements).
+            const int32 FirstLevel = Reader.Integer(Building, TEXT("firstLevel"), 1);
+            if (!IsValidLevel(FirstLevel)) Reader.Invalid(TEXT("building firstLevel"));
             if (Count < 1 || Count > MaxBuildingFloors || Reader.Number(Building, TEXT("floorHeight"), Reader.Number(Project, TEXT("floorHeight"), 300)) <= 0) Reader.Invalid(TEXT("building floor dimensions"));
             const auto Boundary = Reader.Shape(Building, true);
             if (const auto Offset = Building->Values.Find(TEXT("offset"))) Reader.XY(*Offset);
@@ -483,7 +493,7 @@ namespace LayoutValidation
             if (Interior)
             {
                 Reader.C.Path += TEXT(".interior");
-                if (auto Object = Reader.Object(*Interior)) Reader.Interior(Object, Boundary, Count, Scale);
+                if (auto Object = Reader.Object(*Interior)) Reader.Interior(Object, Boundary, Count, Scale, IsValidLevel(FirstLevel) ? FirstLevel : 1);
             }
             else Reader.Issue(TEXT("INTERIOR_UNAUTHORED"), TEXT("This building has no authored interior."), TEXT("Author its interior before checking room reachability."), ESeverity::Info);
         }

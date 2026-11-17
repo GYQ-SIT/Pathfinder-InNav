@@ -384,7 +384,7 @@ TArray<FMobilePlace> FMobileMockSource::SearchPlaces(const FString& SiteId, cons
 		if ((!Filter.Categories.IsEmpty() && !Filter.Categories.Contains(Place.Category))
 			|| (Filter.bAvailableOnly && !Place.bAvailable)
 			|| (!Filter.BuildingId.IsEmpty() && Place.BuildingId != Filter.BuildingId)
-			|| (Filter.Level != INDEX_NONE && Place.Level != Filter.Level))
+			|| (Filter.Level != 0 && Place.Level != Filter.Level))
 		{
 			continue;
 		}

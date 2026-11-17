@@ -950,9 +950,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	int32 GetActiveFloor() const;
 
+	// Add the next floor above the highest, or below the lowest (a basement). The new level, or 0 when it could not be added.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	int32 AddFloor();
 
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	int32 AddFloorBelow();
+
+	// The floors of the loaded building, from FirstLevel up to LastLevel (see AInteriorGenerator::SetLevelRange): what the Floors panel's two
+	// boxes set. Floors outside the range go, with everything on them.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool SetFloorRange(int32 FirstLevel, int32 LastLevel);
+
+	// Only the highest or the lowest floor can be removed (the others keep their numbers).
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool RemoveFloor(int32 Level);
 
@@ -964,6 +974,10 @@ public:
 	// always showing a fixed set of checkboxes. Returns 0 if no building interior is loaded.
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	int32 GetLoadedBuildingFloorCount() const;
+	// The levels of the loaded building from the lowest up (B2, B1, 1, 2 ...; there is no 0), and how high a level's floor is above the ground in
+	// world units. Loop over these, not over 1..GetLoadedBuildingFloorCount().
+	TArray<int32> GetLoadedBuildingLevels() const;
+	float GetLoadedBuildingLevelBaseZ(int32 Level) const;
 
 	// How tall one floor of the loaded building is, in world units (cm); 300 if nothing is loaded.
 	float GetLoadedBuildingFloorHeight() const;

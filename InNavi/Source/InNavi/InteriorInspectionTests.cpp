@@ -180,7 +180,7 @@ bool FInteriorInspectionVisibilityTest::RunTest(const FString& Parameters)
 	Other->SetActorHiddenInGame(false);
 	F.Controller->GetInspectionPivot()->ApplyIsolation();
 	TestTrue(TEXT("isolation survives an external visibility refresh"), Other->IsHidden());
-	TestEqual(TEXT("add floor blocked"), F.Controller->AddFloor(), -1);
+	TestEqual(TEXT("add floor blocked"), F.Controller->AddFloor(), 0);
 	TestFalse(TEXT("delete floor blocked"), F.Controller->RemoveFloor(2));
 	TestFalse(TEXT("delete room blocked"), F.Controller->DeleteRoom(TEXT("ROOM2")));
 	TestFalse(TEXT("undo blocked"), F.Controller->UndoInteriorEdit());

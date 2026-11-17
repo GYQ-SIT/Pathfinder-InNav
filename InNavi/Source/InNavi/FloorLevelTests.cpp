@@ -2,6 +2,7 @@
 
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
+#include "InteriorRoom.h"
 #include "LayoutValidation.h"
 #include "PolyBuilding.h"
 #include "UiTestFixture.h"
@@ -246,6 +247,156 @@ bool FBuildingLevelSaveLoadTest::RunTest(const FString& Parameters)
 		IFileManager::Get().Delete(*BadPath);
 	}
 	IFileManager::Get().Delete(*Path);
+	return true;
+}
+
+namespace FloorLevelTests
+{
+	AInteriorRoom* MakeRoom(AInteriorGenerator& Interior, const TCHAR* Name, float Left = 100.f)
+	{
+		FString Error;
+		return Interior.CreateRoomFromFootprintWithTags({{Left, 100}, {Left + 200, 100}, {Left + 200, 300}, {Left, 300}}, FString(), Name, true, false, false, Error, {});
+	}
+}
+
+// The interior editor follows the building's levels: a basement floor is its own floor with its own height, a building that starts on the third
+// floor opens on it, the entry floor is the one nearest the ground, and floors keep their numbers.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInteriorLevelsTest, "InNavi.Levels.Interior", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FInteriorLevelsTest::RunTest(const FString& Parameters)
+{
+	using namespace FloorLevelTests;
+	FNavigationSearchFixture Fixture;
+	AInteriorGenerator* Interior = Fixture.Interior;
+	Interior->ClearLoadedInterior();
+	Fixture.Generator->ClearAllBuildings();
+	const TArray<FVector2D> Big = {{0, 0}, {1600, 0}, {1600, 1000}, {0, 1000}};
+
+	// A building with two basements and a ground floor opens on the ground floor, with a floor for every level.
+	Fixture.Generator->SpawnBuildingFromData(TEXT("I-DEEP"), TEXT("Deep"), Big, 3, 300.f, FVector2D(0.0, 0.0), -2);
+	Interior->LoadInteriorForBuilding(TEXT("I-DEEP"));
+	TestEqual(TEXT("a floor for every level, with no 0"), Interior->GetFloorLevels(), TArray<int32>({-2, -1, 1}));
+	TestEqual(TEXT("it opens on the ground floor"), Interior->GetActiveFloor(), 1);
+	TestEqual(TEXT("the floor it opens on is the ground floor"), Interior->GetOpeningLevel(), 1);
+	Interior->SetActiveFloor(-1);
+	TestEqual(TEXT("B1 can be the active floor"), Interior->GetActiveFloor(), -1);
+	Interior->SetActiveFloor(0);
+	TestTrue(TEXT("0 is not a floor: the nearest floor is used"), Interior->GetActiveFloor() == 1 || Interior->GetActiveFloor() == -1);
+	Interior->SetActiveFloor(2);
+	TestEqual(TEXT("a floor the building does not have gives the nearest one"), Interior->GetActiveFloor(), 1);
+
+	// A room on B1 is drawn one floor under the ground, and its id says B01.
+	Interior->SetActiveFloor(-1);
+	AInteriorRoom* Basement = MakeRoom(*Interior, TEXT("Car park"));
+	if (TestNotNull(TEXT("a room on B1"), Basement))
+	{
+		TestEqual(TEXT("it is on level -1"), Basement->FloorLevel, -1);
+		TestTrue(TEXT("its walls start one floor under the ground"), FMath::IsNearlyEqual(Basement->GetComponentsBoundingBox().Min.Z, -300.0, 1.0));
+		TestTrue(TEXT("its id has B01 in it, not -1"), Basement->RoomId.Contains(TEXT("-B01-")));
+	}
+	TestEqual(TEXT("the room is on the floor B1"), Interior->GetRoomsOnFloor(-1).Num(), 1);
+
+	// The range is changed from either end; the floors that stay keep their numbers, and Undo brings it all back.
+	Interior->SetActiveFloor(1);
+	AInteriorRoom* Ground = MakeRoom(*Interior, TEXT("Lobby"), 600.f);
+	TestNotNull(TEXT("a room on the ground floor"), Ground);
+	TestEqual(TEXT("adding a floor above gives level 2"), Interior->AddFloor(), 2);
+	TestEqual(TEXT("and below gives B3"), Interior->AddFloorBelow(), -3);
+	TestEqual(TEXT("the floors are B3 to 2"), Interior->GetFloorLevels(), TArray<int32>({-3, -2, -1, 1, 2}));
+	TestTrue(TEXT("the lowest floor can be removed"), Interior->RemoveFloor(-3));
+	TestFalse(TEXT("a floor in the middle cannot"), Interior->RemoveFloor(-1));
+	TestEqual(TEXT("so the floors are B2 to 2"), Interior->GetFloorLevels(), TArray<int32>({-2, -1, 1, 2}));
+	TestTrue(TEXT("the range is set: B1 to 1"), Interior->SetLevelRange(-1, 1));
+	TestEqual(TEXT("B2 and 2 are gone"), Interior->GetFloorLevels(), TArray<int32>({-1, 1}));
+	TestEqual(TEXT("the room on B1 stays"), Interior->GetRoomsOnFloor(-1).Num(), 1);
+	TestEqual(TEXT("and the one on the ground floor"), Interior->GetRoomsOnFloor(1).Num(), 1);
+	TestTrue(TEXT("a range with the last floor below the first is the one floor"), Interior->SetLevelRange(1, -1));
+	TestEqual(TEXT("which is the first"), Interior->GetFloorLevels(), TArray<int32>({1}));
+	TestEqual(TEXT("the room on B1 went with its floor"), Interior->GetRoomsOnFloor(-1).Num(), 0);
+	TestFalse(TEXT("0 is not a floor"), Interior->SetLevelRange(0, 2));
+	TestFalse(TEXT("nor is a floor too deep"), Interior->SetLevelRange(-LayoutValidation::MaxBasementFloors - 1, 2));
+	TestTrue(TEXT("Undo brings the floors back"), Interior->Undo());
+	const APolyBuilding* Deep = Fixture.Generator->FindBuildingById(TEXT("I-DEEP"));
+	TestEqual(TEXT("the building has B1 and 1 again"), Deep->GetLevels(), TArray<int32>({-1, 1}));
+	TestEqual(TEXT("with the room on B1"), Interior->GetRoomsOnFloor(-1).Num(), 1);
+
+	// A building that only exists on the third floor opens on it: the way in is on that floor, at its height.
+	Fixture.Generator->SpawnBuildingFromData(TEXT("I-BRIDGE"), TEXT("Bridge"), Big, 1, 300.f, FVector2D(20000.0, 0.0), 3);
+	Interior->LoadInteriorForBuilding(TEXT("I-BRIDGE"));
+	TestEqual(TEXT("its only floor is 3"), Interior->GetFloorLevels(), TArray<int32>({3}));
+	TestEqual(TEXT("it opens on it"), Interior->GetActiveFloor(), 3);
+	TestEqual(TEXT("the floor it opens on is the third"), Interior->GetOpeningLevel(), 3);
+	// A walkway has no way out of its own: the main door is on the ground floor only, and this building has none.
+	FString DoorError;
+	TestTrue(TEXT("no main door on the third floor"), Interior->AddEntranceAtPoint(FVector2D(800.0, 0.0), 15.f, DoorError).IsEmpty());
+	TestTrue(TEXT("the reason is the ground floor"), DoorError.Contains(TEXT("ground floor")));
+	AInteriorRoom* Deck = MakeRoom(*Interior, TEXT("Walkway"));
+	if (TestNotNull(TEXT("a room on the bridge"), Deck))
+	{
+		TestEqual(TEXT("it is on level 3"), Deck->FloorLevel, 3);
+		TestTrue(TEXT("and starts 600 up"), FMath::IsNearlyEqual(Deck->GetComponentsBoundingBox().Min.Z, 600.0, 1.0));
+	}
+	return true;
+}
+
+// A basement floor survives saving and loading, and a project from before basements (floors with a level and a shell without a first level)
+// opens as it always did: the shell grows to cover its floors.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FInteriorLevelsSaveLoadTest, "InNavi.Levels.InteriorSaveAndLoad", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FInteriorLevelsSaveLoadTest::RunTest(const FString& Parameters)
+{
+	using namespace FloorLevelTests;
+	FNavigationSearchFixture Fixture;
+	AInteriorGenerator* Interior = Fixture.Interior;
+	Interior->ClearLoadedInterior();
+	Fixture.Generator->ClearAllBuildings();
+	const TArray<FVector2D> Big = {{0, 0}, {1600, 0}, {1600, 1000}, {0, 1000}};
+	Fixture.Generator->SpawnBuildingFromData(TEXT("V-DEEP"), TEXT("Deep"), Big, 3, 300.f, FVector2D(0.0, 0.0), -2);
+	Interior->LoadInteriorForBuilding(TEXT("V-DEEP"));
+	Interior->SetActiveFloor(-2);
+	TestNotNull(TEXT("a room on B2"), MakeRoom(*Interior, TEXT("Plant room")));
+	Interior->SetActiveFloor(1);
+	TestNotNull(TEXT("a room on the ground floor"), MakeRoom(*Interior, TEXT("Entrance hall")));
+	Fixture.Generator->SetInteriorDataForBuilding(TEXT("V-DEEP"), Interior->CaptureInteriorSnapshot());
+
+	const FString Path = TemporaryPath();
+	if (!TestTrue(TEXT("the project is saved"), Fixture.Generator->SaveBuildingsToFile(Path))) return false;
+	Interior->ClearLoadedInterior();
+	Fixture.Generator->ClearAllBuildings();
+	TestEqual(TEXT("and loads"), Fixture.Generator->LoadBuildingsFromFile(Path), 1);
+	Interior->LoadInteriorForBuilding(TEXT("V-DEEP"));
+	TestEqual(TEXT("the floors come back as they were"), Interior->GetFloorLevels(), TArray<int32>({-2, -1, 1}));
+	TestEqual(TEXT("with the room on B2"), Interior->GetRoomsOnFloor(-2).Num(), 1);
+	TestEqual(TEXT("and the one on the ground floor"), Interior->GetRoomsOnFloor(1).Num(), 1);
+	IFileManager::Get().Delete(*Path);
+
+	// A file from before basements: a shell of one floor and an interior with a floor on level 3. The shell grows to cover it, as it always did.
+	const FString OldPath = TemporaryPath();
+	FFileHelper::SaveStringToFile(TEXT(R"({"buildings":[{"id":"V-OLD","name":"Old","floorCount":1,"footprint":[[0,0],[1000,0],[1000,1000],[0,1000]],"interior":{"floors":[{"level":3}]}}]})"), *OldPath);
+	Interior->ClearLoadedInterior();
+	Fixture.Generator->ClearAllBuildings();
+	TestEqual(TEXT("the old file loads"), Fixture.Generator->LoadBuildingsFromFile(OldPath), 1);
+	Interior->LoadInteriorForBuilding(TEXT("V-OLD"));
+	const APolyBuilding* Old = Fixture.Generator->FindBuildingById(TEXT("V-OLD"));
+	if (TestNotNull(TEXT("the building"), Old))
+	{
+		TestEqual(TEXT("its shell now covers level 3, from the ground floor"), Old->GetLevels(), TArray<int32>({1, 2, 3}));
+	}
+	TestEqual(TEXT("only the authored floor has an entry"), Interior->GetFloorLevels(), TArray<int32>({3}));
+
+	// A file with a basement floor in the interior but no first level on the building: the shell goes down to cover it.
+	const FString BasementPath = TemporaryPath();
+	FFileHelper::SaveStringToFile(TEXT(R"({"buildings":[{"id":"V-BASE","name":"Base","floorCount":2,"footprint":[[0,0],[1000,0],[1000,1000],[0,1000]],"interior":{"floors":[{"level":-1},{"level":1}]}}]})"), *BasementPath);
+	Interior->ClearLoadedInterior();
+	Fixture.Generator->ClearAllBuildings();
+	TestEqual(TEXT("the file with a basement floor loads"), Fixture.Generator->LoadBuildingsFromFile(BasementPath), 1);
+	Interior->LoadInteriorForBuilding(TEXT("V-BASE"));
+	const APolyBuilding* Base = Fixture.Generator->FindBuildingById(TEXT("V-BASE"));
+	if (TestNotNull(TEXT("the building"), Base))
+	{
+		TestTrue(TEXT("its shell covers B1 and the ground floor"), Base->HasLevel(-1) && Base->HasLevel(1));
+	}
+	TestEqual(TEXT("both floors are there"), Interior->GetFloorLevels(), TArray<int32>({-1, 1}));
+	IFileManager::Get().Delete(*OldPath);
+	IFileManager::Get().Delete(*BasementPath);
 	return true;
 }
 
