@@ -13,4 +13,5 @@ class INNAVI_API ANavGameMode : public AGameModeBase
 
 public:
 	ANavGameMode();
+	virtual void BeginPlay() override;
 };

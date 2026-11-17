@@ -106,7 +106,338 @@ UnrealEditor-Cmd.exe InNavi/InNavi.uproject -ExecCmds="Automation RunTests InNav
 The measurements are in `InNavi/Saved/Performance/*.json`. The tests fail when a loose guard limit is broken (campus load 10 s, interior
 5 s, the first route in the largest building 45 s, a route between buildings 5 s, validating a building 45 s and a project 30 s), so a
 large slowdown is caught on the pull request that causes it. The limits are not the budgets above: they are set for the slowest machine the
-tests run on (see the next section).
+tests run on (see "The machine that runs the CI is slower" below).
+
+## Desktop memory usage
+
+The shipped desktop default is **Standard**. Lightweight is an explicit Map-panel or command-line choice. Historical measurements
+below that specify Lightweight still describe that opt-in configuration. The preset switches virtual shadow maps at runtime; ray
+tracing is toggled only with startup on-demand support enabled, otherwise its engine state is retained. See
+[rendering configuration](configuration.md#desktop-rendering-switches).
+
+
+`InNavi.Performance.MemoryUsage` measures process RAM (resident working set) and committed memory, in bytes, at these checkpoints:
+after garbage collection, with the real campus loaded, with a generated ten-floor interior, after the first route builds its graph,
+after eleven more routes reuse it, and after destroying the workload, clearing the graph cache and collecting garbage again.
+Each checkpoint includes its signed change from baseline. The JSON also records machine details, the engine version, whether the
+editor and `-nullrhi` were used, and the largest sampled values. Log messages use MiB (1,048,576 bytes).
+
+Run it in a fresh process for a comparable baseline, with the editor closed:
+
+```powershell
+& 'C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor-Cmd.exe' InNavi/InNavi.uproject '-ExecCmds=Automation RunTests InNavi.Performance.MemoryUsage; Quit' -unattended -nullrhi -nosplash -nosound -ReportExportPath=Saved/MemoryTests
+```
+
+The measurement is `InNavi/Saved/Performance/memory-usage.json`; the automation result is also checked in the normal Windows CI run.
+There is no assumed RAM budget: by default the test checks that its campus and route workloads succeeded, counters are available, and
+the report was saved. Add `-MemoryMaxGrowthMiB=512` to fail if the largest **sampled committed-memory increase over baseline** exceeds
+512 MiB. Choose a limit appropriate to the machine and build. Cleanup memory need not return to baseline because Unreal's allocators
+and asset caches can keep pages. That difference alone does not establish a leak.
+
+This automation measures a desktop **data workload inside Unreal Editor**, including its test harness. With `-nullrhi` it omits renderer
+resources. It is not the packaged app's footprint, and none of these counters measures dedicated GPU memory. Reported OS peaks cover
+the process's entire lifetime, including startup and any earlier tests; checkpoint maxima can miss temporary allocations between samples.
+
+For the actual rendered desktop app, open a packaged build and sample its running process:
+
+```powershell
+Get-Process InNavi* | Select-Object Id, ProcessName
+powershell -ExecutionPolicy Bypass -File scripts/measure-memory.ps1 -ProcessId 1234 -DurationSeconds 60 -Scenario 'Campus idle'
+```
+
+Replace `1234` with the running game's PID. If the package exposes both a small bootstrap `InNavi.exe` and an
+`InNavi-Win64-Shipping.exe` (or Development) process, select the latter. You can also sample an `UnrealEditor.exe -game` instance;
+label that result as a development run. Allow startup to settle, then use separate runs for campus idle, interior editing and route
+calculation so the scenario is clear. Interact with the app during sampling as needed.
+
+The sampler writes every sample and min/mean/max values for the working set and private committed bytes to
+`InNavi/Saved/Performance/desktop-process-memory.json`. Use `-OutputPath` to retain separate reports,
+`-IntervalMilliseconds` to change the default 500 ms interval, and `-MaxPrivateMiB` for an optional absolute private-memory limit.
+It fails on premature process exit or an exceeded limit, saves partial measurements if any exist, and leaves the target process running.
+Working set includes shared resident pages. OS lifetime peaks can predate the sampling window; sampled maxima can miss brief spikes.
+
+Local verification on 2026-11-11 (Windows, Unreal 5.8 Development; machine details in the automation JSON):
+
+| Run | Resident RAM / working set | Committed / private memory |
+|-----|----------------------------|----------------------------|
+| Fresh memory automation, baseline after GC, `-nullrhi` | 2,729.38 MiB | 2,541.30 MiB |
+| Same automation, largest checkpoint value | 2,765.64 MiB | 2,558.23 MiB (+16.93 MiB over baseline) |
+| Desktop Development start screen, rendering enabled, 1280x720, 30 samples over 15 s | sampled maximum 2,100.23 MiB | sampled maximum 5,360.41 MiB |
+
+These are measurements of the development processes on this machine, not packaged Shipping memory requirements. The full 265-test
+automation suite and the fresh memory-only run passed. The process sampler was also checked for normal sampling, an exceeded limit,
+a missing PID and premature process exit.
+
+### Campus interior previews
+
+Campus X-ray room actors and meshes are created only when the existing camera-distance or per-building transparency rules reveal
+them. Choosing a single floor creates only that floor's preview; All floors creates any remaining floors. Opaque or filtered-out
+buildings keep their interiors as project data until revealed. Multiple buildings can still show interiors at the same time.
+
+Created previews stay cached for quick floor switching and repeat visits. The existing refresh paths invalidate the cache after
+interior editing, discard and project replacement, so the next reveal uses current data. New/Close destroys the previews.
+This avoids allocations for unrevealed interiors; it does not impose a memory limit on previously visited previews. First reveal
+still pays the mesh-construction cost. The `InNavi.Building.SeeThrough.*` automation tests check allocation on demand, cache reuse,
+visibility and the edit/save lifecycle. The earlier desktop tables and Insights capture predate this optimization.
+
+### Preview RAM comparison — 2026-11-12
+
+Compared the original eager preview algorithms with the optimized lazy algorithms on **Windows 11, Ryzen 7 7700, 16 GiB RAM,
+RTX 4070**, using **UnrealEditor.exe -game, Development, D3D12 SM6, 1280x720, capped at 30 FPS**. Rendering was enabled.
+The capture ran **01:03–01:17 SGT**. This is a controlled rendered-app workload with the native exterior screen, not a packaged
+Shipping measurement. Both builds used the same harness and data; the baseline restored the two original preview functions
+verbatim from `8e5bb6e` while retaining the common cache-struct fields and the unused optimized helper.
+
+There were **14 fresh app processes and 560 memory samples**: three eager/lazy pairs for the shipped six-building, nine-room
+authored project; three pairs for a generated ten-floor, 225-room building; and one pair for the footprint-only campus database
+(29 editable buildings, 407 context buildings, 1,359 road actors, no authored preview rooms). Pilot runs were excluded.
+The generated project was saved once, then the identical file was loaded in every run; generation and its undo history were
+outside the measured process. Execution order was reversed for the second pair of each repeated workload.
+
+For each process and state, take the median of ten samples and subtract that process's empty-app median. The table reports
+**eager growth minus lazy growth**, then the median and range across paired runs. **Positive means lower measured growth in
+the lazy build; negative means higher growth.** Resident memory is the Windows working set, including shared resident pages.
+Private committed memory is a separate counter; neither measures dedicated GPU memory. Values below are **MiB**.
+
+| Workload / state | Cached preview rooms, eager → lazy | Pairs | Resident difference, median [range] | Private committed difference, median |
+|------------------|------------------------------------|-------|------------------------------------|--------------------------------------|
+| Shipped authored project, opaque | 9 → 0 | 3 | -3.56 [-13.03, +0.80] | -15.22 |
+| Shipped authored project, E2 floor 1 revealed | 9 → 3 | 3 | -2.29 [-14.44, +4.62] | -10.73 |
+| Generated 225-room building, opaque | 225 → 0 | 3 | +13.13 [+12.05, +16.91] | +25.24 |
+| Generated building, floor 1 revealed | 225 → 22 | 3 | +9.36 [+2.74, +11.10] | +17.76 |
+| Footprint-only campus, opaque control | 0 → 0 | 1 | +10.11 [single pair] | +3.71 |
+
+**Interpretation:** the large generated case showed modest lower memory growth, but these results do **not establish a general
+or precisely attributable RAM saving**. The no-room control differed by 10.11 MiB while opaque and up to 22.27 MiB in later
+states despite having no preview room actors in either build. The small authored project did not show a consistent resident-RAM
+reduction, and its private committed growth was higher in the lazy build. After revealing all floors of the generated building,
+both builds retained 225 previews, yet a 9.34 MiB median resident difference remained. Allocation history, renderer/allocator
+caches and OS/run variation contribute to the observed differences; the control is a different workload with only one pair,
+so its difference cannot simply be subtracted as a noise correction.
+
+The confirmed improvement is avoiding unused preview actors and meshes until reveal. Previously visited previews remain cached.
+These short snapshots can miss transient peaks and do not measure a leak or establish a RAM budget. A packaged build with longer
+steady-state windows and more control repetitions would be needed before claiming a reliable end-user RAM reduction.
+The [measurement record](measurements/desktop-campus-preview-ram-2026-11-12.json) includes all 560 samples, per-run summaries,
+paired differences, source/input/DLL hashes and limitations. Raw reports, comparison sources, DLLs, runner and logs are retained
+locally in `InNavi/Saved/CampusPreviewMemory-20261112/` (git-ignored). The optimized source and DLL were restored after comparison.
+
+### Reproduce the preview comparison
+
+`InNavi.Performance.CampusPreviewMemory` is an opt-in capture of the rendered desktop app, not the headless data fixture.
+It opens the native exterior screen in the actual game world, clears the project, and samples an empty-app baseline. It then loads
+the chosen project with camera-distance see-through disabled, reveals floor 1 of one building, and reveals all floors of that
+building. Each phase settles for five seconds, then takes ten process-memory samples with a requested 500 ms interval while
+rendering continues. There is one explicit GC before the empty baseline; normal engine GC continues afterward.
+
+Run it alone in a fresh `UnrealEditor.exe -game` Development process, with rendering enabled:
+
+```powershell
+$engine = 'C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64'
+$project = Join-Path $PWD 'InNavi/InNavi.uproject'
+$data = Join-Path $PWD 'InNavi/Data/buildings.json'
+$output = Join-Path $PWD 'InNavi/Saved/Performance/preview-memory-lazy.json'
+& "$engine\UnrealEditor.exe" $project -game -d3d12 -windowed -ResX=1280 -ResY=720 -ForceRes -unattended -nosplash -nosound -NoVSync `
+  "-PreviewMemoryProject=$data" -PreviewMemoryBuilding=E2 -PreviewMemoryVariant=lazy "-PreviewMemoryOutput=$output" `
+  '-ExecCmds=t.MaxFPS 30,Automation RunTests InNavi.Performance.CampusPreviewMemory; Quit'
+```
+
+`PreviewMemoryVariant` labels and checks the compiled implementation; it does **not** switch implementations. For the baseline
+comparison, compile the original `BuildCampusInteriorPreview` and `UpdateBuildingTransparency` functions from `8e5bb6e`, keeping
+the same measurement harness and room-count helper, and use `-PreviewMemoryVariant=eager`. Restore the optimized functions for
+the lazy capture. Keep all other build/runtime settings and project data identical, and alternate execution order across repeats.
+The baseline retains the same cache-struct fields and the unused optimized helper, isolating the two original preview algorithms.
+
+For a generated large interior, first create one input file and reuse it for both variants:
+
+```powershell
+$generated = Join-Path $PWD 'InNavi/Saved/Performance/preview-memory-ten-floor.json'
+& "$engine\UnrealEditor-Cmd.exe" $project -unattended -nullrhi -nosplash -nosound "-PreviewMemoryPrepare=$generated" `
+  '-ExecCmds=Automation RunTests InNavi.Performance.CampusPreviewMemory; Quit'
+```
+
+Then use that file as `PreviewMemoryProject` and `-PreviewMemoryBuilding=MEMORY` in the rendered capture command.
+Without these opt-in parameters, the test reports instructions and does not run the capture during the normal suite.
+
+### Desktop preview collision and rejected scenery trial — 2026-11-13
+
+Campus interior previews now skip collision cooking: these visual-only actors already had collision disabled. Editable rooms
+retain collision for picking and walking. Geometry, openings, floor slabs, preview caching, project serialization and navigation
+data are unchanged. In the generated 225-room building, showing every floor now requests **zero preview collision sections**,
+compared with 450 previously (walls and floor slabs). A regression test checks matching visual geometry, retained editable-room
+collision, and collision-free preview rebuilds.
+
+A scenery-batching prototype was tested and **removed from the final implementation**. It reduced the real campus's 1,766
+scenery actors/components to 719, retaining all 1,359 roads and 407 context buildings, filters, colours and collision geometry.
+However, three paired Shipping runs showed **28.43 MiB more resident memory** and **45.83 MiB more private committed memory**
+while the campus was opaque (median of paired differences). Resident differences ranged from **6.08 to 51.54 MiB higher**;
+private committed differences ranged from **11.40 to 54.49 MiB higher**. Even after subtracting each process's empty baseline,
+the median increase was 13.23 MiB resident and 12.96 MiB committed. Median load time improved from 1,398 to 1,311 ms, which did
+not justify keeping it as a RAM optimization. Fewer actors alone did not establish a memory saving.
+
+The [prototype measurement record](measurements/desktop-scenery-memory-2026-11-13.json) retains all 480 samples from three
+pairs each for the campus and generated interior, source/input/executable hashes, frame summaries and the rejection decision.
+Prototype source, executable, reports, screenshots and runner remain locally in `InNavi/Saved/SceneryMemory-20261113/`.
+Prototype frame summaries used engine Tick DeltaTime, which may be clamped; their maxima are not wall-clock hitch measurements.
+
+The final collision-only comparison uses the same **Windows Shipping** executable in both modes, with D3D12 rendering,
+a 1280x720 viewport, the Lightweight preset and a 30 FPS cap. The reference mode adds `-LegacyPreviewCollision`; the default
+skips preview collision cooking. Scenery uses the existing renderer in both modes. Each fresh process has its own user directory.
+The generated ten-floor project has 225 rooms and no scenery. The three pairs alternate reference/optimized, optimized/reference,
+reference/optimized. Separate screenshot runs are excluded from memory statistics.
+
+The final source passed **272 automated tests**, and its rebuilt Shipping package passed the startup smoke test and a rendered
+225-room screenshot check. Measurements ran on **2026-11-13 SGT**, Windows 11, Ryzen 7 7700, with 15.15 GiB OS-visible RAM.
+The table shows the median of the three per-process phase medians, in **MiB**:
+
+| State | Resident before | Resident after | Private committed before | Private committed after |
+|-------|-----------------|----------------|--------------------------|-------------------------|
+| Empty-app baseline | 1,023.60 | 1,025.19 | 1,601.22 | 1,581.21 |
+| Generated project, opaque | 1,009.73 | 1,023.42 | 1,601.56 | 1,583.17 |
+| First floor, 22 preview rooms | 1,012.56 | 1,021.98 | 1,597.43 | 1,581.23 |
+| All floors, 225 preview rooms | 1,032.20 | 1,040.65 | 1,634.05 | 1,611.75 |
+
+**There is no demonstrated repeatable resident-RAM reduction.** The all-floor paired resident saving had a median of **−5.16 MiB**
+(range **−17.53 to +46.07 MiB**; a negative saving means higher usage). Subtracting each process's empty baseline gives a median
+saving of **5.24 MiB**, but a range of **−10.54 to +31.15 MiB**. All-floor private committed memory fell in every pair; after the
+same baseline adjustment, its saving was **7.09 MiB median**, range **4.31–29.53 MiB**. These are modest allocation savings,
+not evidence of a large reduction in the application's physical RAM requirement.
+
+For the narrower step from 22 to 225 visible rooms, the median paired reduction in additional resident usage was **23.60 MiB**
+(range **−4.95 to +26.31 MiB**); additional private committed usage fell by **14.03 MiB** (range **−5.35 to +24.80 MiB**).
+This step also includes rendering, caches and normal GC, and did not improve in every pair. Paired-difference medians need not
+equal the subtraction of the independent before/after medians in the table.
+
+There was no evident timing regression in this workload. Median project-load time was **10.54 ms before / 9.65 ms after**;
+that call parses the project and does not include subsequent preview creation. For the all-floor phase, median mean frame interval
+was **40.87 / 40.55 ms**, and median p95 was **46.51 / 46.37 ms**. These are capped, unattended capture conditions, not a guarantee
+of interactive FPS or performance on other machines.
+
+The [final measurement record](measurements/desktop-preview-collision-memory-2026-11-13.json) contains all **240 samples**, paired
+and baseline-adjusted statistics, frame summaries, source/input/executable/package hashes and hardware details. Raw reports,
+screenshots, scripts, both source variants and the final local Shipping ZIP are retained under
+`InNavi/Saved/SceneryMemory-20261113/` (git-ignored). No mobile RAM claim is made by this desktop comparison.
+
+The native `DesktopMemoryOutput` diagnostic opens the exterior editor, clears the project, and takes an empty baseline after
+one explicit GC. It then loads the project, shows floor 1, and shows all floors of one building. Each phase settles for five seconds
+before ten samples at a requested 500 ms interval. Normal engine GC continues. Loading time covers the synchronous project-load
+call. Final frame summaries use monotonic time between diagnostic ticks, including settling and transition hitches. The FPS cap
+makes this a regression check, not a rendering throughput benchmark. Working set and private committed memory are separate metrics.
+
+To reproduce an optimized capture from an unpacked Shipping package:
+
+```powershell
+$package = 'C:\path\to\unpacked\package'
+$app = Join-Path $package 'InNavi/Binaries/Win64/InNavi-Win64-Shipping.exe'
+$data = Join-Path $PWD 'InNavi/Saved/Performance/preview-memory-ten-floor.json'
+$output = Join-Path $PWD 'InNavi/Saved/Performance/preview-collision-optimized.json'
+$userDir = Join-Path $PWD 'InNavi/Saved/Performance/preview-collision-optimized-user'
+& $app -unattended -d3d12 -windowed -ResX=1280 -ResY=720 -ForceRes -nosplash -nosound -NoVSync `
+  -SaveToUserDir "-UserDir=$userDir" -DesktopRenderPreset=Lightweight `
+  "-DesktopMemoryProject=$data" -DesktopMemoryBuilding=MEMORY "-DesktopMemoryOutput=$output"
+```
+
+Prepare the generated project using the preview-comparison command above. For the reference capture, use fresh output/user paths
+and add `-LegacyPreviewCollision`. Do not enable `-DesktopMemoryScreenshots` in a memory run. The app writes its report and exits
+automatically. Short steady-state windows on one machine do not establish startup peaks, leaks or an app-wide average.
+
+### Unreal Insights desktop capture — 2026-11-11
+
+Captured the rendered desktop application at approximately **23:02–23:04 SGT**, using **Unreal Insights 5.8.2 Memory Insights**.
+The application was `UnrealEditor.exe -game`, **Development**, at **1280x720**, with D3D12 SM6 rendering enabled (no `-nullrhi`).
+The machine was Windows with an **AMD Ryzen 7 7700**, **16 GiB installed RAM** (15.15 GiB visible to Windows).
+This run includes the editor executable's runtime and development facilities; it is not a packaged Shipping measurement.
+
+Tracing was enabled from process startup with `-trace=default,memory -tracefile="<capture-directory>/desktop.utrace"`.
+After the start screen settled, the in-game console command `Trace.Bookmark StartScreenIdle` marked the first checkpoint.
+The project library then opened `map_extended.db`; after its **29 editable buildings, 407 context buildings and 1,359 road actors**
+loaded, `Trace.Bookmark CampusIdle` marked the second checkpoint. The application was closed normally to finish the trace.
+
+Unreal Insights analyzed the completed trace and exported both checkpoints using its **live allocations** query (`aAf`):
+
+```text
+MemoryInsights.ExportAllocs -Rule=aAf -BookmarkA=StartScreenIdle -Output="<capture-directory>/start-screen-live.csv" -Columns=Size,Tag
+MemoryInsights.ExportAllocs -Rule=aAf -BookmarkA=CampusIdle -Output="<capture-directory>/campus-live.csv" -Columns=Size,Tag
+```
+
+These commands were supplied in a response file through `-ExecOnAnalysisCompleteCmd="@=<response-file>"`, with
+`-OpenTraceFile="<capture-directory>/desktop.utrace" -AutoQuit`. Neither export had a result-count limit. The CSV row counts
+were checked against the successful export counts in the Insights analysis log, and each CSV's integer `Size` column was summed.
+
+| Desktop checkpoint | Time in trace | Exported live allocations | Sum of exported allocation sizes |
+|--------------------|---------------|---------------------------|----------------------------------|
+| Start screen idle | 75.27 s | 4,239,453 | 18,900,054,698 bytes / **18,024.50 MiB** |
+| Full campus loaded, exterior editor idle | 141.43 s | 4,386,518 | 18,976,041,854 bytes / **18,096.96 MiB** |
+
+**Metric and quality limits:** these are **provisional, unfiltered traced-allocation totals**, across both System memory and Video
+memory roots. They include virtual/reserved allocations and heap bookkeeping. They are **not resident RAM, private committed memory,
+or a physical GPU-memory reading**; a sum exceeding the machine's installed RAM does not mean that much physical RAM was in use.
+For example, the start-screen export contains 4,113,093,848 bytes tagged `LiveCoding` and 3,271,925,760 bytes tagged `ProgramSize`.
+The analysis reported **49 heap-event errors and 9 free-event errors**, with recovery of missing events; each checkpoint export
+contains **35 zero-size rows**. Both exports completed successfully, but these totals should not be treated as a validated memory
+requirement or a leak verdict. The earlier process-counter table measures a different metric and remains separate.
+
+The [measurement record](measurements/desktop-memory-insights-2026-11-11.json) contains exact totals, counts, conditions, trace/CSV
+SHA-256 hashes and quality notes. The raw 3,481,748,451-byte trace, CSV exports, response file and analysis log are retained locally
+under `InNavi/Saved/Performance/MemoryInsights-20261111/` (git-ignored). This capture covers the start screen and exterior campus;
+interior editing and routing were not included in this Insights run.
+
+## Phone memory usage — 2026-11-11
+
+Measured the installed **mobile-test-3 release, version 1.4 (version code 5)** on a **Google Pixel 9 Pro XL**,
+using `adb shell dumpsys meminfo -d <pid>` over USB. The installed APK's SHA-256 matched the published release:
+`6c101c94eee5bb13cb355acf8436b62ac1eb2abf884dac0b718dfe65873e4b54`.
+This is the Android ARM64 **Development**, ASTC, distribution-signed build from commit
+`52eb8f69b273f7ba8b87fa57673226be7eac3862`, rather than a Shipping build.
+
+The phone reported **Android 17 / API 37**, Tensor G4, a **1344x2992** physical screen at density **480**, and
+**15,957,128 KiB** of OS-visible RAM (15.22 GiB). It was connected by USB and charging.
+The capture ran from **23:48:54 to 23:56:54 SGT** on 2026-11-11.
+
+There was one force-stop and fresh launch before the first Explore reading, followed by the states below in order, without
+restarting the app, clearing its data or forcing garbage collection. Each state has **five foreground samples**, with a requested
+five-second pause between samples; ADB commands add time, so each window took approximately 23–24 seconds.
+The main activity process (PID 22406) and a detached, same-name, same-UID companion (PID 22446) stayed alive throughout.
+Both were captured sequentially for each sample, giving **35 samples and 70 process reports**. The companion's role was not
+independently identified.
+
+All table values are **MiB** (Android's reported kB divided by 1024). **Combined PSS** sums `TOTAL PSS` for both processes.
+[Android's dumpsys documentation](https://developer.android.com/tools/dumpsys) defines PSS as accounting for each process's share
+of shared pages. RSS counts shared pages in full, so only the **main process's RSS** is reported here; it is not added to PSS.
+Graphics rows and swap PSS are also not added to `TOTAL PSS`.
+
+| Foreground state, in capture order | Samples | Combined PSS median | Combined PSS maximum | Main RSS median |
+|------------------------------------|---------|---------------------|----------------------|-----------------|
+| Explore after fresh launch | 5 | 1,192.53 | 1,192.58 | 1,332.59 |
+| Authored project, Block E2 L1, 2D directory | 5 | 1,191.85 | 1,192.95 | 1,332.46 |
+| Same floor, 3D directory | 5 | 1,161.02 | 1,161.30 | 1,301.49 |
+| Route result, My location to E2-01-01 | 5 | 1,001.31 | 1,035.34 | 1,141.76 |
+| Active guidance, step 1 of 3 on the same 16 m route | 5 | 1,002.65 | 1,002.70 | 1,143.10 |
+| Campus overview, 29 building footprints | 5 | 1,166.30 | 1,166.52 | 1,306.75 |
+| Explore after using maps and navigation | 5 | 1,164.64 | 1,164.69 | 1,305.07 |
+
+The **largest sampled combined PSS was 1,192.95 MiB (about 1.17 GiB)**. The largest sampled main-process RSS was
+**1,333.56 MiB**, a separate metric. Combined swap PSS medians were approximately **0.06 MiB**.
+These are snapshots from one phone and one sequential session, not a continuous startup/route-calculation peak or an endurance
+test for leaks. The route was a short same-floor route; cross-floor and campus routes were not sampled. The initial 2D-directory
+window overlapped read-only installed-APK hash verification, which may affect file caches. Shared-page accounting, graphics,
+caches and OS activity can also change the readings, so differences between states do not establish their individual memory costs.
+
+To repeat the capture, identify the current activity process and any same-package companion before sampling; PIDs change each run:
+
+```text
+adb shell am force-stop com.teampathfinder.innavi
+adb shell am start -W -n com.teampathfinder.innavi/com.epicgames.unreal.GameActivity
+adb shell ps -A -o UID,PID,PPID,NAME
+adb shell dumpsys meminfo -d <main-pid>
+adb shell dumpsys meminfo -d <companion-pid>
+```
+
+Keep the app in the foreground, open each state above and let it settle, then capture both processes five times with a five-second
+pause between pairs of reports. The [measurement record](measurements/mobile-memory-dumpsys-2026-11-11.json) contains all
+per-sample counters, summaries, build/device details and raw-report SHA-256 hashes. Raw reports, the capture script and screenshots
+are retained locally in `InNavi/Saved/MobileMemory-20261111/` (git-ignored). These PSS readings measure a different quantity from
+the desktop Insights allocation totals above and should not be compared directly.
 
 ## The machine that runs the CI is slower
 

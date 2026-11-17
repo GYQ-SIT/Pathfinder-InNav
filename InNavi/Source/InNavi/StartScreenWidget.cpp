@@ -1,4 +1,6 @@
 #include "StartScreenWidget.h"
+#include "DesktopRenderingSubsystem.h"
+#include "Engine/GameInstance.h"
 
 #include "EditScreenWidget.h"
 #include "NavPlayerController.h"
@@ -479,6 +481,10 @@ void UStartScreenWidget::BlockClicksToTheScene()
 
 void UStartScreenWidget::NativeDestruct()
 {
+	if (GetGameInstance())
+	{
+		if (auto* Rendering = GetGameInstance()->GetSubsystem<UDesktopRenderingSubsystem>()) Rendering->SetOpaqueScreen(this, false);
+	}
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		PC->ClearPointerOverUICallback(this);
@@ -490,6 +496,10 @@ void UStartScreenWidget::NativeDestruct()
 void UStartScreenWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	if (GetGameInstance())
+	{
+		if (auto* Rendering = GetGameInstance()->GetSubsystem<UDesktopRenderingSubsystem>()) Rendering->SetOpaqueScreen(this, true);
+	}
 	BlockClicksToTheScene();
 
 	if (NewButton)

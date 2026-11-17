@@ -24,7 +24,25 @@ CI**, and both are kept outside the repository.
 | UI scale | `UIScaleCurve` in `InNavi/Config/DefaultEngine.ini` (the phone: `Config/Android/AndroidEngine.ini`) | 0.90 at a window 1080 high, growing with the window above that (1440 -> 1.20, 2160 -> 1.80) and shrinking more slowly below (720 -> 0.72); the phone keeps a fixed 0.77 | How big the editor's UI is on a screen of a given resolution |
 | UI size (the user's choice) | `UiSize.h`, `UUiSizeSubsystem`; saved in `GameUserSettings.ini` (`[InNavi.Display] UiSizePercent`) | 100 %; steps 80, 90, 100, 110, 125, 150, 175, 200 | the UI Size dock panel (Window > UI Size shows it), or Ctrl + / Ctrl - / Ctrl 0: scales the UI of the two editor screens on top of the curve above; the start page and the project pages are not scaled by it (Windows only) |
 | Screen resolution changes | `UDisplayChangeSubsystem` and `DisplayFit` in `InNavi/Source/InNavi/` | on Windows, in the packaged game only | When the resolution is switched in the Windows display settings, the game window is resized to the new screen (full screen) or made to fit it (windowed); the UI scale then follows the new window size |
+| Desktop rendering | `[InNavi.DesktopRendering] Lightweight` in `DefaultGameUserSettings.ini`; user override in `GameUserSettings.ini` | `False` (Standard) | The Map panel toggles Lightweight explicitly; existing saved choices and `-DesktopRenderPreset=Standard` / `Lightweight` overrides are respected |
 | Input | `InNavi/Config/DefaultInput.ini` | the click action and the keys | The mouse and keyboard mappings |
+
+### Desktop rendering switches
+
+Standard leaves the engine's rendering settings intact on startup. Lightweight is opt-in and restores the captured settings when
+switched back to Standard. In UE 5.8, `r.Shadow.Virtual.Enable` is writable, render-thread safe and recreates component render state
+when changed. `r.RayTracing.Enable` changes the active ray-tracing state only when `r.RayTracing.EnableOnDemand=1` was configured
+at startup (ray tracing must also be supported and enabled by the project/RHI). When on-demand support is off, the preset leaves the
+ray-tracing switch unchanged. The preset does not change the read-only startup setting or claim ray-tracing memory savings in that
+case. Read-only console variables are skipped. Regression coverage checks VSM restoration and the engine's effective RT state.
+
+Verified on UE 5.8.2 with D3D12 on 2026-11-17: both fresh game runs started in Standard; VSM switched `1 -> 0 -> 1` in both
+startup modes. Effective RT switched `1 -> 0 -> 1` with on-demand support enabled and stayed `1 -> 1 -> 1` with it disabled.
+`InNavi.Desktop.Rendering.RuntimeTransitions` waits across rendered frames between switches. Run the rendering group in a
+desktop game with `-game -d3d12 -DesktopRenderBehindUI` and
+`-ExecCmds="Automation RunTests InNavi.Desktop.Rendering; Quit"`, using a fresh `-SaveToUserDir -UserDir=<directory>`.
+Repeat separately with startup override `-ini:Engine:[ConsoleVariables]:r.RayTracing.EnableOnDemand=1` and `=0`, waiting for
+the game to exit between runs. The headless suite covers default/saved/command-line preferences and the existing UI scaling path.
 
 ## Command-line flags (the phone app and its test runs)
 

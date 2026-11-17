@@ -119,7 +119,7 @@ struct INNAVI_API FDockMetrics
 	float MinEdgeExtent = 120.f;
 	float MaxEdgeFraction = 0.6f; // an edge area may use at most this share of the usable width/height
 	float EdgeGuideSize = 36.f;   // distance from the screen edge that counts as "dock to this edge"
-	float FloatingMinVisible = 40.f;
+	// Floating rectangles are fully bounded by the usable viewport; partial off-screen placement is not supported.
 	float FloatingGripHeight = 14.f; // the draggable strip along the top of every floating window
 	FVector2D FloatingMinSize = FVector2D(160.0, 120.0); // smallest size a user can resize a floating window to
 	FVector2D FloatingDefaultSize = FVector2D(320.0, 360.0); // size of a window created by dropping on empty canvas

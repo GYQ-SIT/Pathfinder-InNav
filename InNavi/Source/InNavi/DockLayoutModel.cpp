@@ -1545,10 +1545,12 @@ void FDockLayout::ComputeLayout(const FVector2D& Viewport, const FDockMetrics& M
 	for (int32 i = 0; i < Floating.Num(); ++i)
 	{
 		const FDockFloatingWindow& Window = Floating[i];
-		const float SizeX = FMath::Clamp((float)Window.Size.X, 50.f, W);
-		const float SizeY = FMath::Clamp((float)Window.Size.Y, 50.f, FMath::Max(50.f, UsableHeight));
-		const float X = FMath::Clamp((float)Window.Position.X, M.FloatingMinVisible - SizeX, W - M.FloatingMinVisible);
-		const float Y = FMath::Clamp((float)Window.Position.Y, UsableTop, FMath::Max(UsableTop, UsableBottom - M.FloatingMinVisible));
+		// Keep the entire window usable after an aspect-ratio change or loading a layout from a
+		// larger screen. Clamp only the computed rect so growing the viewport restores the user's layout.
+		const float SizeX = FMath::Clamp((float)Window.Size.X, FMath::Min(50.f, W), W);
+		const float SizeY = FMath::Clamp((float)Window.Size.Y, FMath::Min(50.f, UsableHeight), UsableHeight);
+		const float X = FMath::Clamp((float)Window.Position.X, 0.f, W - SizeX);
+		const float Y = FMath::Clamp((float)Window.Position.Y, UsableTop, UsableBottom - SizeY);
 		const FBox2D Rect = MakeBox(X, Y, X + SizeX, Y + SizeY);
 		Out.FloatingRects.Add(Rect);
 		const float Grip = FMath::Min(M.FloatingGripHeight, SizeY);

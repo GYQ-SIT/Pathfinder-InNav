@@ -28,7 +28,8 @@ public:
 	// the normal case); false stops after the last segment (a standalone open wall/partition line,
 	// N points -> N-1 walls, no closing edge). Footprint needs at least 3 points when closed, 2 when
 	// open.
-	void BuildWalls(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, float FloorBaseZ, float WallHeight, float WallThickness, const TArray<FInteriorOpening>& Openings, bool bClosedLoop);
+	// Preview-only callers can skip collision cooking; editable rooms keep it enabled by default.
+	void BuildWalls(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, float FloorBaseZ, float WallHeight, float WallThickness, const TArray<FInteriorOpening>& Openings, bool bClosedLoop, bool bCreateCollision = true);
 
 	// Repositions this room vertically and regenerates the mesh - used when removing a floor
 	// shifts every floor above it down by one level. Footprint/openings/etc. are unchanged, only
@@ -121,6 +122,7 @@ private:
 	float CachedWallThickness = 20.f;
 	TArray<FInteriorOpening> CachedOpenings;
 	bool CachedClosedLoop = true;
+	bool bGenerateCollision = true;
 
 	UPROPERTY()
 	UProceduralMeshComponent* MeshComp;
