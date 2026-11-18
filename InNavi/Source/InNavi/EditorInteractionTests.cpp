@@ -8,6 +8,7 @@
 #include "NavCameraPawn.h"
 #include "NavGameMode.h"
 #include "NavigationDockPanelWidget.h"
+#include "PolyBuilding.h"
 #include "Components/Button.h"
 #include "Components/EditableTextBox.h"
 #include "Components/InputComponent.h"
@@ -30,6 +31,7 @@ struct FEditorInteractionTestAccess
 	static FReply Up(UInteriorFloorPlanWidget* W, const FGeometry& G, const FPointerEvent& E) { return W->NativeOnMouseButtonUp(G,E); }
 	static TArray<FVector2D> Handles(UInteriorFloorPlanWidget* W, FVector2D Size) { return W->GetResizeHandles(Size); }
 	static TArray<FVector2D> Preview(UInteriorFloorPlanWidget* W) { return W->GetPrefabPreview(); }
+	static void ResizePreview(const UInteriorFloorPlanWidget* W, FVector2D& Position, FVector2D& Size) { Position = W->ResizePreviewPosition; Size = W->ResizePreviewSize; }
 	static FReply SearchKey(UNavigationPlaceCombo* Combo, FKey Key)
 	{
 		return Combo->HandleSearchKey(FGeometry(), FKeyEvent(Key,FModifierKeysState(),0,false,0,0));
@@ -201,7 +203,61 @@ bool FEditorResizeTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorCameraControlsTest, "InNavi.EditorUX.CameraControls", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+// PAT-190: dragging a resize handle never shows the room outside the building. The preview stops at the wall, a corner handle slides along it, and
+// letting go applies exactly what was shown (no "Unable to resize" after the fact).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorResizeStopsAtWallTest, "InNavi.EditorUX.ResizeStopsAtWall", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FEditorResizeStopsAtWallTest::RunTest(const FString& Parameters)
+{
+	using namespace EditorInteractionTests;
+	FNavigationSearchFixture F; Prepare(F); ANavPlayerController* PC = F.MakeController();
+	FString Error;
+	AInteriorRoom* Room = F.Interior->CreateRoomFromFootprint({{450,450},{550,450},{550,550},{450,550}}, TEXT("Wall"), TEXT("Wall"), true,false,false,Error);
+	if (!TestNotNull(TEXT("room created"), Room)) return false;
+	PC->ToggleSelectMode(); PC->SelectRoom(TEXT("Wall"));
+
+	// The check the drag relies on, against the real outline of the building.
+	const APolyBuilding* Building = F.Generator->FindBuildingById(TEXT("UX"));
+	if (!TestNotNull(TEXT("building"), Building)) return false;
+	const FBox2D Walls(Building->GetFootprint());
+	TestTrue(TEXT("a size inside the building fits"), F.Interior->DoesResizeStayInsideBuilding(TEXT("Wall"), {450,450}, {100,100}));
+	TestFalse(TEXT("a size past the wall does not"), F.Interior->DoesResizeStayInsideBuilding(TEXT("Wall"), {450,450}, {Walls.GetSize().X * 2.0, 100}));
+	TestFalse(TEXT("an unknown room does not"), F.Interior->DoesResizeStayInsideBuilding(TEXT("Nope"), {400,400}, {200,200}));
+
+	FVector2D Position, Start; PC->GetSelectedRoomBounds(Position, Start);
+	UInteriorFloorPlanWidget* W = Plan(F, PC);
+	const FGeometry G = FGeometry::MakeRoot(FVector2f(1000,1000), FSlateLayoutTransform());
+	const TArray<FVector2D> Handles = FEditorInteractionTestAccess::Handles(W, G.GetLocalSize());
+	if (!TestEqual(TEXT("eight resize handles"), Handles.Num(), 8)) return false;
+
+	// Bottom-right corner, pulled far past the building in both directions.
+	FEditorInteractionTestAccess::Down(W, G, Mouse(Handles[4], true));
+	FEditorInteractionTestAccess::Move(W, G, Mouse(Handles[4] + FVector2D(4000,4000), true));
+	FVector2D PreviewPosition, PreviewSize;
+	FEditorInteractionTestAccess::ResizePreview(W, PreviewPosition, PreviewSize);
+	TestTrue(TEXT("the preview grew"), PreviewSize.X > Start.X + 1.0 && PreviewSize.Y > Start.Y + 1.0);
+	TestTrue(TEXT("the preview is inside the building"), F.Interior->DoesResizeStayInsideBuilding(TEXT("Wall"), PreviewPosition, PreviewSize));
+	TestTrue(TEXT("it stopped at the far wall on X"), FMath::IsNearlyEqual(PreviewPosition.X + PreviewSize.X, Walls.Max.X, Walls.GetSize().X * 0.01));
+	TestTrue(TEXT("and on Y"), FMath::IsNearlyEqual(PreviewPosition.Y + PreviewSize.Y, Walls.Max.Y, Walls.GetSize().Y * 0.01));
+	TestTrue(TEXT("the top-left corner did not move"), PreviewPosition.Equals(FVector2D(450,450), 0.01));
+
+	// Pulled past the right wall only: X stops at the wall, Y follows the pointer (the corner slides along the wall).
+	FEditorInteractionTestAccess::Move(W, G, Mouse(Handles[4] + FVector2D(4000,20), true));
+	FEditorInteractionTestAccess::ResizePreview(W, PreviewPosition, PreviewSize);
+	TestTrue(TEXT("X stays at the wall"), FMath::IsNearlyEqual(PreviewPosition.X + PreviewSize.X, Walls.Max.X, Walls.GetSize().X * 0.01));
+	TestTrue(TEXT("Y is not stuck at the wall"), PreviewPosition.Y + PreviewSize.Y < Walls.Max.Y - Walls.GetSize().Y * 0.05);
+
+	// Letting go applies the shown size.
+	FEditorInteractionTestAccess::Move(W, G, Mouse(Handles[4] + FVector2D(4000,4000), true));
+	FEditorInteractionTestAccess::ResizePreview(W, PreviewPosition, PreviewSize);
+	FEditorInteractionTestAccess::Up(W, G, Mouse(Handles[4] + FVector2D(4000,4000), false));
+	FVector2D After; PC->GetSelectedRoomBounds(Position, After);
+	TestTrue(TEXT("the room has the size that was shown"), After.Equals(PreviewSize, 0.05));
+	const AInteriorRoom* Resized = F.Interior->GetRoomById(TEXT("Wall"));
+	TestTrue(TEXT("and is still inside the building"), Resized && F.Interior->DoesResizeStayInsideBuilding(TEXT("Wall"), Position, After));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorCameraControlsTest,"InNavi.EditorUX.CameraControls", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FEditorCameraControlsTest::RunTest(const FString& Parameters)
 {
 	FNavigationSearchFixture F; ANavPlayerController* PC = F.MakeController();

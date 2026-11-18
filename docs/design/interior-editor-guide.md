@@ -305,7 +305,16 @@ labels over dark fields, and every kind ends with a red **Delete ...** button (t
   connects to on the other side (another room, by name, or "corridor").
 - **Connector**: its type (read-only), and **FLOORS IT REACHES**, a checklist of floors -
   check/uncheck floors and hit **Save changes**. Only shows checkboxes for floors that actually
-  exist on the loaded building.
+  exist on the loaded building. **Select all floors** ticks every one of them in one click (basements included); click it again while all are
+  ticked and it clears them all (a toggle). Untick the floors the connector should not reach, then **Save changes** (a connector needs
+  at least one floor).
+
+### Resizing a room by its handles
+
+Select a room and drag one of its eight handles (corners and sides). **The preview stops at the building's outer wall**: a room is never
+shown outside the outline. Pull a corner past a wall and it slides along the wall instead of freezing (X stops at the wall while Y still
+follows the pointer). What you see is what is applied on release. The preview only follows the outer wall: a size that would overlap another
+room or wall, or box in a lift, stair or escalator, is still refused on release, with the reason in the message line.
 
 ### Moving a connector
 

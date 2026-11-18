@@ -184,6 +184,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth, bool bRecordHistory = true);
 	bool ResizeRoomToBounds(const FString& RoomId, FVector2D Position, FVector2D Size, bool bRecordHistory = true);
+	// True when ResizeRoomToBounds with these bounds would keep the room inside the building's outline. Changes nothing; the resize drag uses it to stop at the wall (PAT-190).
+	bool DoesResizeStayInsideBuilding(const FString& RoomId, FVector2D Position, FVector2D Size) const;
 
 	// Rotates a room/wall's footprint by DeltaDegrees around its own bounding-box center (positive
 	// = counter-clockwise). Rejects (no-op, returns false) if the rotated footprint would extend

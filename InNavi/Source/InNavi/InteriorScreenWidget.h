@@ -250,6 +250,9 @@ private:
 	UFUNCTION()
 	void OnApplyConnectorClicked();
 
+	UFUNCTION()
+	void OnSelectAllFloorsClicked();
+
 	// Shows PropertiesPanel if any of Door/Room/Connector is currently selected on the PC, hides it
 	// if none are - called at the end of each HandleSelected*Changed once that handler has already
 	// shown/hidden its own fields box.
@@ -824,6 +827,9 @@ private:
 
 	UPROPERTY()
 	UButton* ApplyConnectorButton = nullptr;
+	// Toggle: ticks every floor box the building has, or clears them all when all are already ticked (the user still presses Save changes).
+	UPROPERTY()
+	UButton* SelectAllFloorsButton = nullptr;
 
 	// Layers panel - see the comment above HandleLayerRowExpandClicked.
 	UPROPERTY()

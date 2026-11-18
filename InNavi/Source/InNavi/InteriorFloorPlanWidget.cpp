@@ -78,6 +78,41 @@ void UInteriorFloorPlanWidget::ResizeAtLocalPosition(FVector2D LocalPosition, FV
 	if (ResizeDirection.X < 0) Min.X = FMath::Min(Point.X, Max.X - MinX);
 	if (ResizeDirection.Y > 0) Max.Y = FMath::Max(Point.Y, Min.Y + MinY);
 	if (ResizeDirection.Y < 0) Min.Y = FMath::Min(Point.Y, Max.Y - MinY);
+
+	// Stop at the building's wall: the preview never goes beyond what the release would accept (PAT-190). If the pointer is past the wall, each axis is
+	// pulled back to the farthest size that still fits, one axis at a time, so a corner handle slides along the wall instead of freezing. A room that
+	// already sticks out of the outline (an old project) is left alone.
+	const FVector2D StartMin = ResizeStartPosition, StartMax = ResizeStartPosition + ResizeStartSize;
+	auto FitsBuilding = [this](FVector2D A, FVector2D B) { return InteriorGen->DoesResizeStayInsideBuilding(DraggingRoomId, A, B - A); };
+	if (!FitsBuilding(Min, Max) && FitsBuilding(StartMin, StartMax))
+	{
+		FVector2D ResolvedMin = StartMin, ResolvedMax = StartMax;
+		for (int32 Axis = 0; Axis < 2; ++Axis)
+		{
+			FVector2D TryMin = ResolvedMin, TryMax = ResolvedMax;
+			TryMin[Axis] = Min[Axis];
+			TryMax[Axis] = Max[Axis];
+			if (FitsBuilding(TryMin, TryMax))
+			{
+				ResolvedMin = TryMin;
+				ResolvedMax = TryMax;
+				continue;
+			}
+			double Good = 0.0, Bad = 1.0;
+			for (int32 Step = 0; Step < 20; ++Step)
+			{
+				const double Mid = (Good + Bad) * 0.5;
+				FVector2D MidMin = ResolvedMin, MidMax = ResolvedMax;
+				MidMin[Axis] = FMath::Lerp(ResolvedMin[Axis], Min[Axis], Mid);
+				MidMax[Axis] = FMath::Lerp(ResolvedMax[Axis], Max[Axis], Mid);
+				(FitsBuilding(MidMin, MidMax) ? Good : Bad) = Mid;
+			}
+			ResolvedMin[Axis] = FMath::Lerp(ResolvedMin[Axis], Min[Axis], Good);
+			ResolvedMax[Axis] = FMath::Lerp(ResolvedMax[Axis], Max[Axis], Good);
+		}
+		Min = ResolvedMin;
+		Max = ResolvedMax;
+	}
 	ResizePreviewPosition = Min;
 	ResizePreviewSize = Max - Min;
 	bResizeChanged = !ResizePreviewPosition.Equals(ResizeStartPosition, 1e-6) || !ResizePreviewSize.Equals(ResizeStartSize, 1e-6);

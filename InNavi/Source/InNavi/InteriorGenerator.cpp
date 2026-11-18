@@ -59,11 +59,11 @@ void AInteriorGenerator::BeginPlay()
 {
 	Super::BeginPlay();
 
-	for (TActorIterator<ABuildingGenerator> It(GetWorld()); It; ++It)
+	// The first building generator. (Not a loop that stops after its first round: the Android compiler rejects that as a loop that runs at most once.)
+	if (TActorIterator<ABuildingGenerator> It(GetWorld()); It)
 	{
 		Generator = *It;
 		Generator->OnBuildingRemoved.AddUObject(this, &AInteriorGenerator::HandleBuildingRemoved);
-		break;
 	}
 }
 
@@ -2080,6 +2080,28 @@ bool AInteriorGenerator::ResizeRoomToBounds(const FString& RoomId, FVector2D Pos
 
 	UE_LOG(LogTemp, Error, TEXT("ResizeRoom: '%s' not found"), *RoomId);
 	return false;
+}
+
+bool AInteriorGenerator::DoesResizeStayInsideBuilding(const FString& RoomId, FVector2D Position, FVector2D Size) const
+{
+	// The same stretch of the footprint as ResizeRoomToBounds, and the same outline rule, without changing anything: the drag asks this for every
+	// candidate size so the preview can stop at the wall instead of showing a room outside the building and refusing it on release.
+	const AInteriorRoom* Room = GetRoomById(RoomId);
+	if (!Room || Room->GetFootprint().IsEmpty() || !FMath::IsFinite(Position.X) || !FMath::IsFinite(Position.Y) || !FMath::IsFinite(Size.X) || !FMath::IsFinite(Size.Y)) return false;
+	const TArray<FVector2D>& OldFootprint = Room->GetFootprint();
+	const FBox2D Bounds(OldFootprint);
+	const double OldWidth = Bounds.Max.X - Bounds.Min.X;
+	const double OldDepth = Bounds.Max.Y - Bounds.Min.Y;
+	const double ScaleX = OldWidth < KINDA_SMALL_NUMBER ? 1.0 : Size.X / OldWidth;
+	const double ScaleY = OldDepth < KINDA_SMALL_NUMBER ? 1.0 : Size.Y / OldDepth;
+	TArray<FVector2D> NewFootprint;
+	NewFootprint.Reserve(OldFootprint.Num());
+	for (const FVector2D& Point : OldFootprint)
+	{
+		NewFootprint.Add(Position + FVector2D((Point.X - Bounds.Min.X) * ScaleX, (Point.Y - Bounds.Min.Y) * ScaleY));
+	}
+	const APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+	return !Building || IsFootprintFullyInsidePolygon(NewFootprint, Building->GetFootprint(), Room->IsClosedLoop());
 }
 
 bool AInteriorGenerator::RotateRoom(const FString& RoomId, float DeltaDegrees)

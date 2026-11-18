@@ -1196,6 +1196,23 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			FloorCheckboxLabels.Add(FloorLabel);
 		}
 
+		// One click ticks every floor of the building (a lift that serves twenty floors needs no twenty clicks), and a second click, with all ticked,
+		// clears them; untick the ones that do not belong, then Save changes.
+		SelectAllFloorsButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_SelectAllFloors"));
+		SelectAllFloorsButton->SetStyle(SecondaryButton());
+		SelectAllFloorsButton->SetBackgroundColor(FLinearColor::White);
+		UTextBlock* SelectAllFloorsText = Text(WidgetTree, TEXT("Btn_SelectAllFloorsLabel"), TEXT("Select all floors"), 12.f, FLinearColor::White, true);
+		SelectAllFloorsText->SetJustification(ETextJustify::Center);
+		UBorder* SelectAllFloorsPad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Btn_SelectAllFloorsPad"));
+		SelectAllFloorsPad->SetBrushColor(FLinearColor::Transparent);
+		SelectAllFloorsPad->SetPadding(FMargin(8.f * DesignToUi, 7.f * DesignToUi));
+		SelectAllFloorsPad->SetContent(SelectAllFloorsText);
+		SelectAllFloorsButton->SetContent(SelectAllFloorsPad);
+		SelectAllFloorsButton->SetToolTip(MakeToolTipWidget(TEXT("Tick every floor of this building; click again when all are ticked to clear them. Then press Save changes (a connector needs at least one floor).")));
+		SelectAllFloorsButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSelectAllFloorsClicked);
+		SelectAllFloorsButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+		ConnectorFieldsBox->AddChildToVerticalBox(InWidthBox(SelectAllFloorsButton))->SetPadding(FMargin(0.f, 4.f * DesignToUi, 0.f, 0.f));
+
 		AddButtonsRow(ConnectorFieldsBox, TEXT("Btn_DeleteConnector"), TEXT("Delete connector"), nullptr, TEXT("Btn_ApplyConnector"), TEXT("Save changes"), ApplyConnectorButton);
 		ApplyConnectorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyConnectorClicked);
 		}
@@ -2775,6 +2792,12 @@ void UInteriorScreenWidget::HandleSelectedConnectorChanged(FString GroupId)
 			continue;
 		}
 
+		// The whole entry (box and number) shows or hides, so a ten-floor building lists ten floors, not twenty numbers with ten boxes.
+		if (UWidget* Entry = CheckBox->GetParent())
+		{
+			Entry->SetVisibility(BuildingLevels.IsValidIndex(Index) ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+		}
+
 		if (BuildingLevels.IsValidIndex(Index))
 		{
 			const int32 FloorNumber = BuildingLevels[Index];
@@ -2808,6 +2831,27 @@ void UInteriorScreenWidget::RefreshPropertiesPanelVisibility()
 	if (!bAnySelected && PropertiesKindTag)
 	{
 		PropertiesKindTag->SetVisibility(ESlateVisibility::Collapsed);
+	}
+}
+
+void UInteriorScreenWidget::OnSelectAllFloorsClicked()
+{
+	// A toggle: when every floor is already ticked the click clears them all, otherwise it ticks them all. Only the boxes the building uses are
+	// visible (HandleSelectedConnectorChanged); the hidden ones stay as they are.
+	bool bAllTicked = true;
+	for (const UCheckBox* CheckBox : FloorCheckboxes)
+	{
+		if (CheckBox && CheckBox->GetVisibility() != ESlateVisibility::Collapsed && !CheckBox->IsChecked())
+		{
+			bAllTicked = false;
+		}
+	}
+	for (UCheckBox* CheckBox : FloorCheckboxes)
+	{
+		if (CheckBox && CheckBox->GetVisibility() != ESlateVisibility::Collapsed)
+		{
+			CheckBox->SetIsChecked(!bAllTicked);
+		}
 	}
 }
 

@@ -2,6 +2,7 @@
 
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
+#include "InteriorScreenWidget.h"
 #include "InteriorTypes.h"
 #include "LayoutValidation.h"
 #include "NavPlayerController.h"
@@ -9,6 +10,8 @@
 #include "PolyBuilding.h"
 #include "UiTestFixture.h"
 
+#include "Components/Button.h"
+#include "Components/CheckBox.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
@@ -191,6 +194,73 @@ bool FConnectorFloorControllerTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("floor 1 where it was"), S.Node(1)->Position.Equals(Saved1, 0.001));
 		TestTrue(TEXT("floor 2 where it was"), S.Node(2)->Position.Equals(Saved2, 0.001));
 	}
+	return true;
+}
+
+// PAT-199: the connector panel has a "Select all floors" button. One click ticks every floor box the building uses (a basement included, boxes
+// beyond the building's floors stay hidden and unticked); the floors only change when Save changes is pressed, and floors can be unticked first.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConnectorSelectAllFloorsTest, "InNavi.Interior.ConnectorFloors.SelectAllFloors", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConnectorSelectAllFloorsTest::RunTest(const FString& Parameters)
+{
+	using namespace ConnectorFloorTests;
+	FConnectorScene S;
+	if (!TestFalse(TEXT("a lift is placed"), S.Group.IsEmpty())) return false;
+	// The lift reaches floors 1 and 2 only; the building also gets a basement, so it has B1, 1, 2, 3.
+	TestTrue(TEXT("the lift is cut down to two floors"), S.Interior->SetConnectorFloors(S.Group, { 1, 2 }));
+	ANavPlayerController* Controller = S.Fixture.MakeController();
+	S.Fixture.Generator->SetInteriorDataForBuilding(TEXT("CF"), S.Interior->CaptureInteriorSnapshot());
+	Controller->LoadInteriorForBuilding(TEXT("CF"));
+	if (!TestNotEqual(TEXT("a basement is added"), S.Interior->AddFloorBelow(), 0)) return false;
+	S.Group = S.Interior->GetNavNodes().IsEmpty() ? FString() : S.Interior->GetNavNodes()[0].ConnectorGroupId;
+	if (!TestFalse(TEXT("the lift is there"), S.Group.IsEmpty())) return false;
+
+	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>(); Screen->Initialize(); Screen->TakeWidget(); Screen->SetOwningPlayer(Controller);
+	FScriptDelegate Selected; Selected.BindUFunction(Screen, TEXT("HandleSelectedConnectorChanged")); Controller->OnSelectedConnectorChanged.AddUnique(Selected);
+	Controller->SelectConnector(S.Group);
+
+	auto Box = [Screen](int32 Index) { return Cast<UCheckBox>(Screen->FindScreenWidget(*FString::Printf(TEXT("Chk_Floor%d"), Index))); };
+	auto* SelectAll = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_SelectAllFloors")));
+	auto* Save = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_ApplyConnector")));
+	if (!TestNotNull(TEXT("select all button"), SelectAll) || !TestNotNull(TEXT("save button"), Save)) return false;
+	for (int32 Index = 1; Index <= 5; ++Index) if (!TestNotNull(TEXT("floor box"), Box(Index))) return false;
+
+	// Only the building's four floors are listed: the fifth entry (its box and its number) is hidden, the fourth is shown.
+	TestEqual(TEXT("the fifth entry is hidden with its number"), Box(5)->GetParent()->GetVisibility(), ESlateVisibility::Collapsed);
+	TestNotEqual(TEXT("the fourth entry is shown"), Box(4)->GetParent()->GetVisibility(), ESlateVisibility::Collapsed);
+
+	// Boxes are in building order: B1, 1, 2, 3.
+	TestFalse(TEXT("B1 is not reached yet"), Box(1)->IsChecked());
+	TestTrue(TEXT("floor 1 is reached"), Box(2)->IsChecked());
+	TestTrue(TEXT("floor 2 is reached"), Box(3)->IsChecked());
+	TestFalse(TEXT("floor 3 is not reached yet"), Box(4)->IsChecked());
+
+	SelectAll->OnClicked.Broadcast();
+	for (int32 Index = 1; Index <= 4; ++Index) TestTrue(*FString::Printf(TEXT("box %d is ticked"), Index), Box(Index)->IsChecked());
+	TestFalse(TEXT("a box beyond the building stays unticked"), Box(5)->IsChecked());
+	TestFalse(TEXT("and stays hidden"), Box(5)->GetVisibility() != ESlateVisibility::Collapsed);
+	TestEqual(TEXT("nothing changed in the building yet"), Controller->GetSelectedConnectorFloors().Num(), 2);
+
+	// A second click, with every floor ticked, clears them all (a toggle); a third ticks them again.
+	SelectAll->OnClicked.Broadcast();
+	for (int32 Index = 1; Index <= 4; ++Index) TestFalse(*FString::Printf(TEXT("box %d is cleared"), Index), Box(Index)->IsChecked());
+	TestFalse(TEXT("the hidden box is still unticked"), Box(5)->IsChecked());
+	SelectAll->OnClicked.Broadcast();
+	for (int32 Index = 1; Index <= 4; ++Index) TestTrue(*FString::Printf(TEXT("box %d is ticked again"), Index), Box(Index)->IsChecked());
+
+	// Unticking one floor and saving keeps just that one out.
+	Box(3)->SetIsChecked(false);
+	Save->OnClicked.Broadcast();
+	TArray<int32> Floors = Controller->GetSelectedConnectorFloors();
+	Floors.Sort();
+	TestEqual(TEXT("saved floors are B1, 1 and 3"), Floors, TArray<int32>({ -1, 1, 3 }));
+
+	// And Select all floors then Save reaches every floor.
+	SelectAll->OnClicked.Broadcast();
+	Save->OnClicked.Broadcast();
+	Floors = Controller->GetSelectedConnectorFloors();
+	Floors.Sort();
+	TestEqual(TEXT("saved floors are all four"), Floors, TArray<int32>({ -1, 1, 2, 3 }));
+	Controller->OnSelectedConnectorChanged.Remove(Selected);
 	return true;
 }
 
