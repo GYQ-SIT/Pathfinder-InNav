@@ -1,4 +1,7 @@
-# System Architecture (v1.1)
+# System Architecture in detail (v1.1)
+
+> This is the long version: every behaviour, safeguard and delivery step, for the people who work on the code. **Start with the one-page
+> [architecture](architecture.md)**; come back here for the part you need.
 
 > Team **Pathfinder** · Project **InNavi**
 > Owned by: **Tech Lead.** This is the `Architecture` technical deliverable.
