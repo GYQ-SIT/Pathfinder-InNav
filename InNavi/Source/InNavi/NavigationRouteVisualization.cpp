@@ -94,7 +94,7 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 				const auto& Local = bDeparting ? From : To;
 				const auto& Other = bDeparting ? To : From;
 				if (Visible(Local)) View.Labels.Add({ WorldPoint(Local) + FVector(0, 0, 95),
-					FString::Printf(TEXT("Link door %s %s - Floor %d"), bDeparting ? TEXT("to") : TEXT("from"), *Other.BuildingId, Other.Floor), NavigationTransitionColor });
+					FString::Printf(TEXT("Link door %s %s - Floor %s"), bDeparting ? TEXT("to") : TEXT("from"), *Other.BuildingId, *LayoutValidation::LevelLabel(Other.Floor)), NavigationTransitionColor });
 			}
 			continue;
 		}

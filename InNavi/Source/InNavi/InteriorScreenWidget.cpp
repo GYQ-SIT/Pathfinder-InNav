@@ -2118,7 +2118,7 @@ void UInteriorScreenWidget::HandleInspectionModeChanged(bool bEnabled)
 	if (InspectionHint)
 	{
 		InspectionHint->SetVisibility(bEnabled ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
-		InspectionHint->SetText(FText::FromString(FString::Printf(TEXT("Showing Level %d without the bottom platform. Left-drag to move the model, right-drag to turn it, scroll to zoom. Esc to restore."), PC->GetActiveFloor())));
+		InspectionHint->SetText(FText::FromString(FString::Printf(TEXT("Showing Level %s without the bottom platform. Left-drag to move the model, right-drag to turn it, scroll to zoom. Esc to restore."), *LayoutValidation::LevelLabel(PC->GetActiveFloor()))));
 	}
 	if (!bEnabled && InspectionPivotOverlay) InspectionPivotOverlay->SetVisibility(ESlateVisibility::Collapsed);
 	if (bEnabled && InspectionUiStates.IsEmpty())
@@ -2384,8 +2384,8 @@ void UInteriorScreenWidget::HandleSelectedEntranceChanged(FString EntranceId)
 	if (DoorRoomText)
 	{
 		DoorRoomText->SetText(FText::FromString(bMain
-			? FString::Printf(TEXT("Floor %d. The way out: leads outside the building."), Entrance->Level)
-			: FString::Printf(TEXT("Floor %d. Connects to building %s%s."), Entrance->Level, *PC->GetBuildingDisplayName(Entrance->ConnectsTo),
+			? FString::Printf(TEXT("Floor %s. The way out: leads outside the building."), *LayoutValidation::LevelLabel(Entrance->Level))
+			: FString::Printf(TEXT("Floor %s. Connects to building %s%s."), *LayoutValidation::LevelLabel(Entrance->Level), *PC->GetBuildingDisplayName(Entrance->ConnectsTo),
 				Entrance->bMirrored ? TEXT(" (opened from that building)") : TEXT(""))));
 	}
 	RefreshPropertiesPanelVisibility();
@@ -2972,7 +2972,7 @@ void UInteriorScreenWidget::RefreshLayersList()
 				{
 					continue;
 				}
-				FString Label = FString::Printf(TEXT("%s [%s] - Floor %d"), RoomName.IsEmpty() ? *RoomId : *RoomName, *RoomId, Floor);
+				FString Label = FString::Printf(TEXT("%s [%s] - Floor %s"), RoomName.IsEmpty() ? *RoomId : *RoomName, *RoomId, *LayoutValidation::LevelLabel(Floor));
 				if (bTyped)
 				{
 					Label += TEXT(" - ") + RoomType;

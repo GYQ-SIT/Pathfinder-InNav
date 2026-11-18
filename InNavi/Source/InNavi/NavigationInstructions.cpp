@@ -51,8 +51,8 @@ TArray<FNavigationInstruction> NavigationInstructions::Build(const TArray<FNavig
 			Walking = INDEX_NONE; Incoming = FVector2D::ZeroVector;
 			if (A.Floor != 0 && B.Floor != 0 && !A.BuildingId.IsEmpty() && !B.BuildingId.IsEmpty() && A.BuildingId != B.BuildingId)
 			{
-				Add(ENavigationInstructionKind::ExitBuilding, FString::Printf(TEXT("Use the link door from %s to %s on Floor %d."), *BuildingName(A.BuildingId), *BuildingName(B.BuildingId), A.Floor), I, I + 1, Metres);
-				Add(ENavigationInstructionKind::EnterBuilding, FString::Printf(TEXT("Enter the building %s on Floor %d."), *BuildingName(B.BuildingId), B.Floor), I + 1, I + 1, 0);
+				Add(ENavigationInstructionKind::ExitBuilding, FString::Printf(TEXT("Use the link door from %s to %s on Floor %s."), *BuildingName(A.BuildingId), *BuildingName(B.BuildingId), *LayoutValidation::LevelLabel(A.Floor)), I, I + 1, Metres);
+				Add(ENavigationInstructionKind::EnterBuilding, FString::Printf(TEXT("Enter the building %s on Floor %s."), *BuildingName(B.BuildingId), *LayoutValidation::LevelLabel(B.Floor)), I + 1, I + 1, 0);
 			}
 			else if (A.Floor == 0)
 				Add(ENavigationInstructionKind::EnterBuilding, TEXT("Enter the building ") + BuildingName(B.BuildingId) + TEXT(" on Floor ") + LayoutValidation::LevelLabel(B.Floor) + TEXT("."), I + 1, I + 1, Metres);
@@ -72,7 +72,7 @@ TArray<FNavigationInstruction> NavigationInstructions::Build(const TArray<FNavig
 					&& Points[Result.Last().PointIndex].ConnectorId == A.ConnectorId
 					&& (A.Floor - Points[Result.Last().PointIndex].Floor) * (B.Floor - A.Floor) > 0;
 				const int32 Start = bSameRide ? Result.Last().PointIndex : I;
-				const FString Text = FString::Printf(TEXT("Take the %s in %s from Floor %d to Floor %d."), Word, *BuildingName(A.BuildingId), Points[Start].Floor, B.Floor);
+				const FString Text = FString::Printf(TEXT("Take the %s in %s from Floor %s to Floor %s."), Word, *BuildingName(A.BuildingId), *LayoutValidation::LevelLabel(Points[Start].Floor), *LayoutValidation::LevelLabel(B.Floor));
 				if (bSameRide) { Result.Last().Text = Text; Result.Last().LastPointIndex = I + 1; Result.Last().Metres += Metres; }
 				else Add(Kind, Text, I, I + 1, Metres);
 			}
