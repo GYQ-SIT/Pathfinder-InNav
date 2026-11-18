@@ -668,6 +668,19 @@ public:
 	int32 SelectRoomsInRect(const FBox2D& Rect, bool bAdd);
 	// Deletes every selected room and wall as one Undo step.
 	bool DeleteMultiSelection();
+
+	// ---- Duplicate to floors (PAT-200) ----
+	// A right-click on a room in the 2D plan opens a small menu at the pointer. The room becomes the selection first (unless it is part of a
+	// multiple selection already, which stays), and the menu's one row opens the "Duplicate to Floors" dialog for the selected room or rooms.
+	void OpenRoomContextMenu(const FString& RoomId);
+	bool IsRoomContextMenuOpen() const;
+	UFUNCTION()
+	void OpenDuplicateToFloorsDialog();
+	bool IsDuplicateDialogOpen() const;
+	// Copies the selected room(s) onto each of Levels, in the same place, as ONE Undo step. The floor you are on and the selection stay as they
+	// were. Returns how many copies were made; a copy that does not fit on a floor (another room there, a lift in the way) is skipped and the
+	// message names the floor and the reason.
+	int32 DuplicateSelectionToFloors(const TArray<int32>& Levels);
 	// The closed rooms of the selection (a wall has no type or tags).
 	TArray<FString> GetMultiSelectedClosedRoomIds() const;
 	// The type the selected rooms share; bOutMixed is true (and the result empty) when they differ.
@@ -1583,6 +1596,10 @@ private:
 	// un-highlighting.
 	UPROPERTY()
 	AActor* HighlightedSelectionActor = nullptr;
+
+	TWeakObjectPtr<class URoomContextMenuWidget> RoomContextMenu;
+	TWeakObjectPtr<class UDuplicateToFloorsDialogWidget> DuplicateDialog;
+	void HandleDuplicateFloorsConfirmed(const TArray<int32>& Levels);
 
 	// See IsMultiSelection. And the rooms tinted in 3D for it.
 	TArray<FString> MultiSelectedRoomIds;

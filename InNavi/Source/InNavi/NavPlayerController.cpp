@@ -3,6 +3,8 @@
 
 #include "NavPlayerController.h"
 #include "InteriorDrawing.h"
+#include "DuplicateToFloorsDialogWidget.h"
+#include "RoomContextMenuWidget.h"
 #include "NavigationSearchUtils.h"
 #include "NavigationPanelWidget.h"
 #include "MobileAppWidget.h"
@@ -1748,6 +1750,116 @@ bool ANavPlayerController::DeleteMultiSelection()
 		OnInteriorContentChanged.Broadcast();
 	}
 	return Deleted > 0;
+}
+
+bool ANavPlayerController::IsRoomContextMenuOpen() const
+{
+	return RoomContextMenu.IsValid() && RoomContextMenu->IsInViewport();
+}
+
+bool ANavPlayerController::IsDuplicateDialogOpen() const
+{
+	return DuplicateDialog.IsValid() && DuplicateDialog->IsInViewport();
+}
+
+void ANavPlayerController::OpenRoomContextMenu(const FString& RoomId)
+{
+	if (bInteriorInspectionEnabled || !InteriorGen || RoomId.IsEmpty() || (bIsIn3DPreviewMode && !bIsIn3DEditMode)) return;
+	if (RoomContextMenu.IsValid()) RoomContextMenu->RemoveFromParent();
+	// What the menu acts on: the room that was clicked, unless it is part of a multiple selection (then all of them).
+	if (!IsRoomSelected(RoomId)) SelectRoom(RoomId);
+	URoomContextMenuWidget* Menu = CreateWidget<URoomContextMenuWidget>(this, URoomContextMenuWidget::StaticClass());
+	if (!Menu) return;
+	float MouseX = 0.f, MouseY = 0.f;
+	GetMousePosition(MouseX, MouseY);
+	const float Dpi = UWidgetLayoutLibrary::GetViewportScale(this);
+	Menu->SetMenuPosition(FVector2D(MouseX, MouseY) / FMath::Max(Dpi, 0.01f));
+	Menu->OnDuplicateToFloors.AddUniqueDynamic(this, &ANavPlayerController::OpenDuplicateToFloorsDialog);
+	Menu->AddToViewport(50);
+	RoomContextMenu = Menu;
+}
+
+void ANavPlayerController::OpenDuplicateToFloorsDialog()
+{
+	if (bInteriorInspectionEnabled || !InteriorGen) return;
+	TArray<FString> Ids = IsMultiSelection() ? MultiSelectedRoomIds : TArray<FString>();
+	if (Ids.IsEmpty() && !SelectedRoomId.IsEmpty()) Ids.Add(SelectedRoomId);
+	if (Ids.IsEmpty()) return;
+	// The floors the rooms are on cannot be ticked.
+	const TArray<int32> Levels = InteriorGen->GetFloorLevels();
+	TArray<int32> FromLevels;
+	for (const int32 Level : Levels)
+	{
+		for (const AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(Level))
+		{
+			if (Room && Ids.Contains(Room->RoomId)) FromLevels.AddUnique(Level);
+		}
+	}
+	FString Heading;
+	if (Ids.Num() == 1)
+	{
+		const FString Name = InteriorGen->GetRoomName(Ids[0]);
+		Heading = Name.IsEmpty() ? Ids[0] : Name;
+	}
+	else
+	{
+		Heading = FString::Printf(TEXT("%d rooms"), Ids.Num());
+	}
+	if (DuplicateDialog.IsValid()) DuplicateDialog->RemoveFromParent();
+	UDuplicateToFloorsDialogWidget* Dialog = CreateWidget<UDuplicateToFloorsDialogWidget>(this, UDuplicateToFloorsDialogWidget::StaticClass());
+	if (!Dialog) return;
+	Dialog->Setup(Levels, FromLevels, Heading);
+	Dialog->OnConfirmed.AddUObject(this, &ANavPlayerController::HandleDuplicateFloorsConfirmed);
+	Dialog->AddToViewport(60);
+	DuplicateDialog = Dialog;
+}
+
+void ANavPlayerController::HandleDuplicateFloorsConfirmed(const TArray<int32>& Levels)
+{
+	DuplicateSelectionToFloors(Levels);
+}
+
+int32 ANavPlayerController::DuplicateSelectionToFloors(const TArray<int32>& Levels)
+{
+	if (bInteriorInspectionEnabled || !InteriorGen) return 0;
+	TArray<FString> Ids = IsMultiSelection() ? MultiSelectedRoomIds : TArray<FString>();
+	if (Ids.IsEmpty() && !SelectedRoomId.IsEmpty()) Ids.Add(SelectedRoomId);
+	if (Ids.IsEmpty() || Levels.IsEmpty()) return 0;
+
+	int32 Created = 0;
+	TArray<FString> Problems;
+	InteriorGen->BeginHistoryBatch();
+	for (const int32 Level : Levels)
+	{
+		for (const FString& Id : Ids)
+		{
+			FString Error;
+			if (InteriorGen->DuplicateRoomToFloor(Id, Level, Error))
+			{
+				++Created;
+			}
+			else
+			{
+				const FString Name = InteriorGen->GetRoomName(Id);
+				Problems.Add(FString::Printf(TEXT("'%s' on floor %s: %s"), Name.IsEmpty() ? *Id : *Name, *LayoutValidation::LevelLabel(Level), *Error));
+			}
+		}
+	}
+	InteriorGen->EndHistoryBatch(Created > 0);
+	if (Created > 0)
+	{
+		bHasUnsavedChanges = true;
+		OnInteriorContentChanged.Broadcast();
+	}
+	if (!Problems.IsEmpty())
+	{
+		const int32 Shown = FMath::Min(Problems.Num(), 2);
+		FString Message = FString::Printf(TEXT("%d of %d copies could not be made. "), Problems.Num(), Problems.Num() + Created);
+		for (int32 Index = 0; Index < Shown; ++Index) Message += Problems[Index] + (Index + 1 < Shown ? TEXT(" ") : TEXT(""));
+		if (Problems.Num() > Shown) Message += FString::Printf(TEXT(" (and %d more)"), Problems.Num() - Shown);
+		OnActionFailed.Broadcast(Message, EActionFailureSeverity::Warning);
+	}
+	return Created;
 }
 
 TArray<FString> ANavPlayerController::GetMultiSelectedClosedRoomIds() const

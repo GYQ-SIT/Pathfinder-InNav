@@ -2134,6 +2134,42 @@ bool AInteriorGenerator::DoesResizeStayInsideBuilding(const FString& RoomId, FVe
 	return !Building || IsFootprintFullyInsidePolygon(NewFootprint, Building->GetFootprint(), Room->IsClosedLoop());
 }
 
+AInteriorRoom* AInteriorGenerator::DuplicateRoomToFloor(const FString& RoomId, int32 TargetLevel, FString& OutError)
+{
+	OutError.Empty();
+	const AInteriorRoom* Source = GetRoomById(RoomId);
+	if (!Source)
+	{
+		OutError = TEXT("The room no longer exists.");
+		return nullptr;
+	}
+	if (!FloorInfoByLevel.Contains(TargetLevel))
+	{
+		OutError = FString::Printf(TEXT("The building has no floor %s."), *LayoutValidation::LevelLabel(TargetLevel));
+		return nullptr;
+	}
+	int32 SourceLevel = 0;
+	for (const auto& Pair : RoomsByFloor)
+	{
+		if (Pair.Value.Rooms.Contains(Source)) { SourceLevel = Pair.Key; break; }
+	}
+	if (SourceLevel == TargetLevel)
+	{
+		OutError = TEXT("That is the floor the room is on.");
+		return nullptr;
+	}
+
+	// The create functions work on the active floor: go there, make the copy, come back.
+	const int32 PreviousFloor = ActiveFloor;
+	SetActiveFloor(TargetLevel);
+	AInteriorRoom* Copy = Source->IsClosedLoop()
+		? CreateRoomFromFootprintWithTags(Source->GetFootprint(), FString(), Source->RoomName, Source->bIsPublic, Source->bRequiresKey, /*bAllowOverlap=*/false,
+			OutError, Source->RoomTags, Source->RoomType, Source->GetOpenings())
+		: CreateWallFromPoints(Source->GetFootprint(), FString(), OutError, Source->GetOpenings(), Source->RoomName);
+	SetActiveFloor(PreviousFloor);
+	return Copy;
+}
+
 bool AInteriorGenerator::CanMoveRoomVertex(const FString& RoomId, int32 VertexIndex, FVector2D NewPosition) const
 {
 	if (!FMath::IsFinite(NewPosition.X) || !FMath::IsFinite(NewPosition.Y)) return false;

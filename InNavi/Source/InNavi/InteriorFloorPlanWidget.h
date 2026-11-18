@@ -67,6 +67,7 @@ protected:
 private:
 	friend struct FEditorInteractionTestAccess;
 	friend struct FEditorFeedbackTestAccess;
+	friend struct FDuplicateTestAccess;
 	TArray<FVector2D> GetResizeHandles(FVector2D WidgetSize) const;
 	// Where the selected room's (or wall's) own corners are in the widget, in the order of its footprint: the dots a single corner is dragged by.
 	// A corner that sits where a resize handle sits needs Ctrl to be grabbed (a plain drag there resizes the whole room, as it always did);

@@ -450,6 +450,14 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 	if (InMouseEvent.GetEffectingButton() == EKeys::RightMouseButton && bIsPanning)
 	{
 		bIsPanning = false;
+		// A right-click that did not pan (the pointer stayed put) on a room opens its menu.
+		const FVector2D UpLocal = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+		if (PlayerController && PlayerController->IsInSelectMode() && FVector2D::DistSquared(UpLocal, PanStartLocalPosition) < 25.0)
+		{
+			AInteriorRoom* Room = FindRoomNearLocalPosition(UpLocal, InGeometry.GetLocalSize());
+			if (!Room) Room = FindRoomContainingLocalPosition(UpLocal, InGeometry.GetLocalSize());
+			if (Room) PlayerController->OpenRoomContextMenu(Room->RoomId);
+		}
 		return FReply::Handled().ReleaseMouseCapture();
 	}
 

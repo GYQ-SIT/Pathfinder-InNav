@@ -289,6 +289,21 @@ A value on which they differ shows as **-**; leave it and nothing changes, pick 
 selected room (walls have neither) as **one Undo step**. Name, position and size are not offered, so selected rooms can never be given the same
 position and lie on top of each other. Dragging, resizing, rotating and the corner dots work on one room at a time.
 
+### Duplicate to floors
+
+Repeated layouts (a lift lobby on every floor) need not be rebuilt by hand. In Select mode:
+
+1. **Right-click** a room or wall in the 2D plan (without moving the mouse; a right-drag still pans). The room is selected, unless it is part of a
+   multiple selection, which stays, and a small menu opens at the pointer.
+2. Choose **Duplicate to Floors...**. A dialog lists **every floor of the building** with a tick box. Every floor is ticked except the one the
+   room is on, which is shown (marked "here") but cannot be ticked. Untick the floors you do not want; **Duplicate** is off while none is ticked.
+3. **Duplicate** copies the room onto each ticked floor, in the **same place**, with the **same shape and size**, its **doors and windows**, **room
+   type**, **search tags** and public/key settings. Each copy gets its own id and a name made unique the way a pasted room's is ("Lift lobby (1)",
+   "Lift lobby (2)"). Basements are listed like any other floor. With several rooms selected, all of them are copied.
+
+All the copies are **one Undo step**, and you stay on the floor you are on. A copy that does not fit on a floor (another room or wall in the way
+there, a lift or stair) is skipped; the other floors still get theirs, and the message names the floor and the reason.
+
 ### Drawing controls (Shift, Ctrl+Z, corners)
 
 - **Shift while drawing a room or wall**: the next point goes straight along X or Y from the previous point (whichever way the pointer

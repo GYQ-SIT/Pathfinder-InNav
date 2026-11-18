@@ -192,6 +192,12 @@ public:
 	// overlap another room or wall, wall in a lift/stair/escalator, or leave a door without room on its wall. bRecordHistory false is for a drag,
 	// which records one history step itself when it ends.
 	bool MoveRoomVertex(const FString& RoomId, int32 VertexIndex, FVector2D NewPosition, bool bRecordHistory = true);
+	// PAT-200: a copy of a room or wall on another floor, in the same place: same outline, doors and windows, type, tags and flags. It gets its own
+	// id and a name made unique the way a pasted room's is ("Lift lobby (1)"). Refused with the reason in OutError when it does not fit there (another
+	// room or wall, a lift or stair in the way). The active floor is left as it was. No history step of its own: the caller batches the copies
+	// (BeginHistoryBatch / EndHistoryBatch).
+	AInteriorRoom* DuplicateRoomToFloor(const FString& RoomId, int32 TargetLevel, FString& OutError);
+
 	// The geometry part of the same question, without changing anything: would the corner be allowed there? (Whether a door still fits on its wall is
 	// only known when the move is made.) A corner drag uses it to stop at the last allowed spot.
 	bool CanMoveRoomVertex(const FString& RoomId, int32 VertexIndex, FVector2D NewPosition) const;
