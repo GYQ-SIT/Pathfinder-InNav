@@ -348,6 +348,12 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 
 			if (Room)
 			{
+				// Shift+click adds the room to the selection, or takes it out; no drag starts.
+				if (InMouseEvent.IsShiftDown())
+				{
+					PlayerController->ToggleRoomInSelection(Room->RoomId);
+					return FReply::Handled();
+				}
 				PlayerController->SelectRoom(Room->RoomId);
 
 				// Same idea as the door drag above - a plain click just selects; dragging slides the
@@ -361,8 +367,11 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 				return FReply::Handled().CaptureMouse(TakeWidget());
 			}
 
-			PlayerController->SelectRoom(FString());
-			return FReply::Handled();
+			// Empty plan: a click deselects, a drag draws a selection window (Shift adds to the selection) - see FinishSelectBox.
+			bIsDraggingSelectBox = true;
+			bSelectBoxAdd = InMouseEvent.IsShiftDown();
+			SelectBoxStart = SelectBoxEnd = LocalPosition;
+			return FReply::Handled().CaptureMouse(TakeWidget());
 		}
 
 		if (PlayerController->IsInAddDoorMode())
@@ -444,6 +453,13 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 		return FReply::Handled().ReleaseMouseCapture();
 	}
 
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsDraggingSelectBox)
+	{
+		SelectBoxEnd = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+		FinishSelectBox(InGeometry.GetLocalSize(), true);
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+
 	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsDraggingVertex)
 	{
 		FinishEditDrag();
@@ -471,9 +487,27 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 	return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
 }
 
+void UInteriorFloorPlanWidget::FinishSelectBox(FVector2D WidgetSize, bool bApply)
+{
+	const bool bWasDragging = bIsDraggingSelectBox;
+	bIsDraggingSelectBox = false;
+	if (!bWasDragging || !bApply || !PlayerController) return;
+	if (FVector2D::DistSquared(SelectBoxStart, SelectBoxEnd) > 36.0)
+	{
+		const FBox2D Rect(TArray<FVector2D>{ LocalPositionToFootprintPoint(SelectBoxStart, WidgetSize), LocalPositionToFootprintPoint(SelectBoxEnd, WidgetSize) });
+		PlayerController->SelectRoomsInRect(Rect, bSelectBoxAdd);
+	}
+	else if (!bSelectBoxAdd)
+	{
+		PlayerController->SelectRoom(FString());
+	}
+}
+
 void UInteriorFloorPlanWidget::FinishEditDrag()
 {
 	bIsDraggingPrefab = false;
+	// A selection window that loses the mouse (focus lost, Esc) is dropped without selecting anything.
+	bIsDraggingSelectBox = false;
 	if (bIsDraggingVertex)
 	{
 		// One history step for the whole corner drag, and only when a corner did move.
@@ -548,6 +582,17 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 			return FReply::Handled().ReleaseMouseCapture();
 		}
 		ResizeAtLocalPosition(InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition()), InGeometry.GetLocalSize());
+		return FReply::Handled();
+	}
+	if (bIsDraggingSelectBox)
+	{
+		if (!InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton) || !PlayerController || !PlayerController->IsInSelectMode())
+		{
+			bIsDraggingSelectBox = false;
+			return FReply::Handled().ReleaseMouseCapture();
+		}
+		SelectBoxEnd = PointerLocal;
+		bSelectBoxAdd = InMouseEvent.IsShiftDown();
 		return FReply::Handled();
 	}
 	if (bIsDraggingVertex)
@@ -1323,7 +1368,6 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 	}
 
 	// ---- Rooms/walls on the active floor ----
-	const FString SelectedRoomId = PlayerController ? PlayerController->GetSelectedRoomId() : FString();
 	for (const AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
 	{
 		if (!Room)
@@ -1389,7 +1433,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			}
 		}
 
-		const bool bIsSelected = !SelectedRoomId.IsEmpty() && Room->RoomId == SelectedRoomId;
+		const bool bIsSelected = PlayerController && PlayerController->IsRoomSelected(Room->RoomId);
 		const FLinearColor LineColor = bIsSelected ? FLinearColor(1.f, 0.15f, 0.15f, 1.f) : FLinearColor::Black;
 		const float LineThickness = bIsSelected ? 4.f : 3.f;
 
@@ -1751,6 +1795,17 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		}
 		FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 9, AllottedGeometry.ToPaintGeometry(), Preview,
 			ESlateDrawEffect::None, FLinearColor(1.f, 0.6f, 0.f), true, 3.f);
+	}
+	// The selection window being dragged: a faint blue fill with a blue rim.
+	if (bIsDraggingSelectBox)
+	{
+		const FVector2D Min(FMath::Min(SelectBoxStart.X, SelectBoxEnd.X), FMath::Min(SelectBoxStart.Y, SelectBoxEnd.Y));
+		const FVector2D Max(FMath::Max(SelectBoxStart.X, SelectBoxEnd.X), FMath::Max(SelectBoxStart.Y, SelectBoxEnd.Y));
+		FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 10,
+			AllottedGeometry.ToPaintGeometry(FVector2f(Max - Min), FSlateLayoutTransform(Min)),
+			FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox")), ESlateDrawEffect::None, FLinearColor(0.2f, 0.6f, 1.f, 0.15f));
+		const TArray<FVector2D> Rim = { Min, FVector2D(Max.X, Min.Y), Max, FVector2D(Min.X, Max.Y), Min };
+		FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 10, AllottedGeometry.ToPaintGeometry(), Rim, ESlateDrawEffect::None, FLinearColor(0.2f, 0.6f, 1.f, 0.9f), true, 1.5f);
 	}
 	return LayerId + 11;
 }

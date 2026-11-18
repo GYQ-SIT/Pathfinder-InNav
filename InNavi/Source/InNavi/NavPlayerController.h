@@ -59,6 +59,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnEditModeChanged);
 // Broadcast whenever the selected room/wall changes on the 2D floor plan canvas (select mode
 // picking a different one, or clicking empty space to deselect - RoomId is empty in that case).
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedRoomChanged, FString, RoomId);
+// Several rooms are selected at once (Count >= 2), or that ended (Count 0). A single room or wall still goes through FOnSelectedRoomChanged.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnMultiSelectionChanged, int32, Count);
 // Broadcast whenever the selected door changes (selecting one, selecting a different one, or
 // deselecting - both ids are empty in that case). Mirrors FOnSelectedRoomChanged for doors, since
 // the two selections are tracked and broadcast separately (see SelectRoom/SelectDoor).
@@ -646,6 +648,36 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Interior")
 	FOnSelectedRoomChanged OnSelectedRoomChanged;
+
+	// ---- Several rooms at once (PAT-196) ----
+	// With two or more rooms/walls selected, SelectedRoomId is empty (so the resize handles, the corner dots, rotate and the name/size fields all
+	// stay off) and the ids are here instead. Shift+click toggles a room in the selection, and a window dragged across empty plan in Select mode
+	// selects the rooms inside it. Selecting any single thing (SelectRoom, a door, a connector ...) ends it.
+	UPROPERTY(BlueprintAssignable, Category = "Interior")
+	FOnMultiSelectionChanged OnMultiSelectionChanged;
+	bool IsMultiSelection() const { return MultiSelectedRoomIds.Num() >= 2; }
+	const TArray<FString>& GetMultiSelectedRoomIds() const { return MultiSelectedRoomIds; }
+	// Whether the room is part of the selection, single or multiple (what the plan draws in red).
+	bool IsRoomSelected(const FString& RoomId) const { return !RoomId.IsEmpty() && (RoomId == SelectedRoomId || MultiSelectedRoomIds.Contains(RoomId)); }
+	// Sets the selection to exactly these rooms: none clears it, one is a plain single selection, two or more is a multi selection.
+	void SetRoomSelection(const TArray<FString>& RoomIds);
+	// Shift+click: adds the room to the selection, or takes it out when it is already in.
+	void ToggleRoomInSelection(const FString& RoomId);
+	// A selection window: the rooms and walls on the active floor that lie wholly inside Rect (footprint units). bAdd keeps what was selected.
+	// Returns how many are selected afterwards.
+	int32 SelectRoomsInRect(const FBox2D& Rect, bool bAdd);
+	// Deletes every selected room and wall as one Undo step.
+	bool DeleteMultiSelection();
+	// The closed rooms of the selection (a wall has no type or tags).
+	TArray<FString> GetMultiSelectedClosedRoomIds() const;
+	// The type the selected rooms share; bOutMixed is true (and the result empty) when they differ.
+	FString GetMultiRoomType(bool& bOutMixed) const;
+	// The tags the selected rooms share; bOutMixed is true when their tag lists differ.
+	TArray<FString> GetMultiRoomTags(bool& bOutMixed) const;
+	// Applies a type and/or the tags to every closed room of the selection as ONE Undo step. False when nothing changed.
+	bool SetMultiRoomProperties(const FString* NewType, const TArray<FString>* NewTags);
+	bool SetMultiRoomType(const FString& NewType) { return SetMultiRoomProperties(&NewType, nullptr); }
+	bool SetMultiRoomTags(const TArray<FString>& InTags) { return SetMultiRoomProperties(nullptr, &InTags); }
 
 	// Renames the currently-selected room/wall (see AInteriorGenerator::SetRoomName) - what a room
 	// properties panel's "apply" button should call. No-op (returns false) if nothing is selected.
@@ -1551,6 +1583,11 @@ private:
 	// un-highlighting.
 	UPROPERTY()
 	AActor* HighlightedSelectionActor = nullptr;
+
+	// See IsMultiSelection. And the rooms tinted in 3D for it.
+	TArray<FString> MultiSelectedRoomIds;
+	TArray<TWeakObjectPtr<AInteriorRoom>> MultiHighlightedRooms;
+	void ClearMultiSelection();
 
 	// Un-highlights HighlightedSelectionActor, then re-highlights whichever room/connector
 	// SelectedRoomId/SelectedDoorRoomId/SelectedConnectorGroupId now points at (a selected door

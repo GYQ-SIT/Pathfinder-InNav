@@ -420,6 +420,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior|History")
 	void RecordHistorySnapshot();
 
+	// Edits between BeginHistoryBatch and EndHistoryBatch make one Undo step instead of one each (deleting or retyping several rooms at once).
+	// EndHistoryBatch(false) records nothing, for a batch in which nothing changed. Batches do not nest.
+	void BeginHistoryBatch() { bBulkEditing = true; }
+	void EndHistoryBatch(bool bChanged)
+	{
+		bBulkEditing = false;
+		if (bChanged) RecordHistorySnapshot();
+	}
+
 	// Go back to the previous interior state.
 	UFUNCTION(BlueprintCallable, Category = "Interior|History")
 	bool Undo();

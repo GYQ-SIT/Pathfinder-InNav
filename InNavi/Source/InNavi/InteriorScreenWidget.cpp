@@ -1379,6 +1379,7 @@ void UInteriorScreenWidget::NativeConstruct()
 	{
 		PC->OnSelectedDoorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedDoorChanged);
 		PC->OnSelectedRoomChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedRoomChanged);
+		PC->OnMultiSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleMultiSelectionChanged);
 		PC->OnSelectedConnectorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedConnectorChanged);
 		PC->OnEditModeChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleEditModeChanged);
 		// Ctrl+S (or any other trigger of PC->SaveCurrentProject/SaveCurrentProjectAs) doesn't go
@@ -2508,6 +2509,7 @@ void UInteriorScreenWidget::HandleSelectedRoomChanged(FString RoomId)
 	}
 
 	RoomFieldsBox->SetVisibility(ESlateVisibility::Visible);
+	if (RoomNameRowSizeBox) RoomNameRowSizeBox->SetVisibility(ESlateVisibility::Visible);
 	if (DoorFieldsBox)
 	{
 		DoorFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
@@ -2556,8 +2558,76 @@ void UInteriorScreenWidget::HandleSelectedRoomChanged(FString RoomId)
 	RefreshPropertiesPanelVisibility();
 }
 
+void UInteriorScreenWidget::HandleMultiSelectionChanged(int32 Count)
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!RoomFieldsBox || !PC) return;
+
+	if (Count < 2)
+	{
+		// Over: the single selection that may follow shows its own fields; with nothing left the room fields go away.
+		if (bMultiMode)
+		{
+			bMultiMode = false;
+			if (RoomTypeComboBox) RoomTypeComboBox->RemoveOption(TEXT("-"));
+			if (RoomNameRowSizeBox) RoomNameRowSizeBox->SetVisibility(ESlateVisibility::Visible);
+			RoomFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
+			RefreshPropertiesPanelVisibility();
+		}
+		return;
+	}
+
+	bMultiMode = true;
+	RoomFieldsBox->SetVisibility(ESlateVisibility::Visible);
+	if (DoorFieldsBox) DoorFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
+	if (ConnectorFieldsBox) ConnectorFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
+	// Name, position and size belong to one room: rooms given the same position would lie on top of each other.
+	if (RoomNameRowSizeBox) RoomNameRowSizeBox->SetVisibility(ESlateVisibility::Collapsed);
+	if (PropertiesTitleText) PropertiesTitleText->SetText(FText::FromString(FString::Printf(TEXT("%d rooms selected"), Count)));
+	SetKindTag(TEXT("MULTIPLE"), StartStyle::Rgb(60, 78, 104));
+	if (PropertiesKindTag) PropertiesKindTag->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	if (RoomDeleteLabel) RoomDeleteLabel->SetText(FText::FromString(TEXT("Delete rooms")));
+	if (RoomSubtitleText) RoomSubtitleText->SetText(FText::FromString(TEXT("Room type and search tags are changed for all of them. A \"-\" means they differ.")));
+
+	const bool bAnyRoom = !PC->GetMultiSelectedClosedRoomIds().IsEmpty();
+	if (RoomTagsFields) RoomTagsFields->SetVisibility(bAnyRoom ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	bool bTypeMixed = false, bTagsMixed = false;
+	const FString SharedType = PC->GetMultiRoomType(bTypeMixed);
+	const TArray<FString> SharedTags = PC->GetMultiRoomTags(bTagsMixed);
+	if (RoomTypeComboBox)
+	{
+		RoomTypeComboBox->RemoveOption(TEXT("-"));
+		if (bTypeMixed) RoomTypeComboBox->AddOption(TEXT("-"));
+		MultiShownType = bTypeMixed ? FString(TEXT("-")) : SharedType;
+		RoomTypeComboBox->SetSelectedOption(MultiShownType);
+	}
+	MultiShownTags = bTagsMixed ? FString(TEXT("-")) : FString::Join(SharedTags, TEXT(", "));
+	if (RoomTagsTextBox) RoomTagsTextBox->SetText(FText::FromString(MultiShownTags));
+	RefreshPropertiesPanelVisibility();
+}
+
+void UInteriorScreenWidget::ApplyMultiRoomChanges()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC || !PC->IsMultiSelection()) return;
+	const FString NewType = RoomTypeComboBox ? RoomTypeComboBox->GetSelectedOption() : MultiShownType;
+	const FString NewTags = RoomTagsTextBox ? RoomTagsTextBox->GetText().ToString() : MultiShownTags;
+	// Only what the user changed: a type or tags still shown as "-" (different rooms) stay as they are in every room.
+	const bool bTypeChanged = NewType != MultiShownType && NewType != TEXT("-");
+	const bool bTagsChanged = NewTags != MultiShownTags;
+	const FString TypeToSet = NewType;
+	const TArray<FString> TagsToSet = NavigationSearch::ParseTags(NewTags);
+	PC->SetMultiRoomProperties(bTypeChanged ? &TypeToSet : nullptr, bTagsChanged ? &TagsToSet : nullptr);
+	HandleMultiSelectionChanged(PC->GetMultiSelectedRoomIds().Num());
+}
+
 void UInteriorScreenWidget::OnApplyRoomClicked()
 {
+	if (bMultiMode)
+	{
+		ApplyMultiRoomChanges();
+		return;
+	}
 	// Capture every property before resizing or renaming can refresh the panel.
 	const FString NewName = RoomNameTextBox ? RoomNameTextBox->GetText().ToString() : FString();
 	const FString NewTags = RoomTagsTextBox ? RoomTagsTextBox->GetText().ToString() : FString();
@@ -2828,7 +2898,7 @@ void UInteriorScreenWidget::RefreshPropertiesPanelVisibility()
 	// placeholder instead of disappearing, like a real editor's Details panel. Showing or hiding it is the
 	// dock system's business (Window menu / tab close button), not selection state's.
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
-	const bool bAnySelected = PC && (!PC->GetSelectedRoomId().IsEmpty() || !PC->GetSelectedDoorId().IsEmpty() || !PC->GetSelectedConnectorGroupId().IsEmpty() || !PC->GetSelectedEntranceId().IsEmpty());
+	const bool bAnySelected = PC && (!PC->GetSelectedRoomId().IsEmpty() || PC->IsMultiSelection() || !PC->GetSelectedDoorId().IsEmpty() || !PC->GetSelectedConnectorGroupId().IsEmpty() || !PC->GetSelectedEntranceId().IsEmpty());
 	if (!bAnySelected && PropertiesTitleText)
 	{
 		PropertiesTitleText->SetText(FText::FromString(TEXT("Nothing selected")));

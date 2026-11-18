@@ -4,6 +4,7 @@
 #include "InteriorDrawing.h"
 #include "NavigationSearchUtils.h"
 #include "Components/ComboBoxString.h"
+#include "Components/TextBlock.h"
 #include "InteriorFloorPlanWidget.h"
 #include "InteriorScreenWidget.h"
 #include "InteriorRoom.h"
@@ -470,6 +471,165 @@ bool FEditorAutoTagsTest::RunTest(const FString& Parameters)
 	Save->OnClicked.Broadcast();
 	TestEqual(TEXT("typed tags are not touched"), PC->GetSelectedRoomTags(), TArray<FString>({ TEXT("projector") }));
 	PC->OnSelectedRoomChanged.Remove(Selected);
+	return true;
+}
+
+// PAT-196: several rooms are selected with Shift+click and with a selection window; a plain click goes back to one room, Delete removes them all as one Undo step.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorMultiSelectTest, "InNavi.EditorUX.MultiSelect", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FEditorMultiSelectTest::RunTest(const FString& Parameters)
+{
+	using namespace EditorInteractionTests;
+	FNavigationSearchFixture F; Prepare(F); ANavPlayerController* PC = F.MakeController();
+	FString Error;
+	for (const TPair<FString, double>& Room : TArray<TPair<FString, double>>{ { TEXT("A"), 100 }, { TEXT("B"), 200 }, { TEXT("C"), 300 } })
+	{
+		if (!TestNotNull(TEXT("a room"), F.Interior->CreateRoomFromFootprint({ {Room.Value, 100}, {Room.Value + 50, 100}, {Room.Value + 50, 150}, {Room.Value, 150} }, Room.Key, Room.Key, true, false, false, Error))) return false;
+	}
+	PC->ToggleSelectMode();
+	UInteriorFloorPlanWidget* W = Plan(F, PC);
+	const FGeometry G = FGeometry::MakeRoot(FVector2f(1000,1000), FSlateLayoutTransform());
+	auto Ids = [&]() { TArray<FString> Result = PC->GetMultiSelectedRoomIds(); Result.Sort(); return Result; };
+
+	// The controller's rules.
+	PC->SelectRoom(TEXT("A"));
+	PC->ToggleRoomInSelection(TEXT("B"));
+	TestTrue(TEXT("two rooms are a multi selection"), PC->IsMultiSelection());
+	TestTrue(TEXT("with no single room selected"), PC->GetSelectedRoomId().IsEmpty());
+	TestEqual(TEXT("they are A and B"), Ids(), TArray<FString>({ TEXT("A"), TEXT("B") }));
+	PC->ToggleRoomInSelection(TEXT("C"));
+	TestEqual(TEXT("three"), PC->GetMultiSelectedRoomIds().Num(), 3);
+	PC->ToggleRoomInSelection(TEXT("B"));
+	TestEqual(TEXT("B taken out again"), Ids(), TArray<FString>({ TEXT("A"), TEXT("C") }));
+	PC->ToggleRoomInSelection(TEXT("A"));
+	TestFalse(TEXT("one left is a plain selection"), PC->IsMultiSelection());
+	TestEqual(TEXT("of C"), PC->GetSelectedRoomId(), FString(TEXT("C")));
+	PC->SetRoomSelection({ TEXT("A"), TEXT("B") });
+	PC->SelectRoom(TEXT("C"));
+	TestFalse(TEXT("selecting a single room ends the multi selection"), PC->IsMultiSelection());
+	TestTrue(TEXT("every selected room is drawn as selected"), PC->IsRoomSelected(TEXT("C")) && !PC->IsRoomSelected(TEXT("A")));
+
+	// Where things are on the plan: the corners of a selected room.
+	auto Box = [&](const FString& Id) { PC->SelectRoom(Id); return FBox2D(FEditorInteractionTestAccess::Vertices(W, G.GetLocalSize())); };
+	const FBox2D A = Box(TEXT("A")), B = Box(TEXT("B")), C = Box(TEXT("C"));
+	PC->SelectRoom(FString());
+
+	// Shift+click adds and removes.
+	PC->SelectRoom(TEXT("A"));
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(B.GetCenter(), true, true, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(B.GetCenter(), false, true, false));
+	TestEqual(TEXT("Shift+click adds a room"), Ids(), TArray<FString>({ TEXT("A"), TEXT("B") }));
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(C.GetCenter(), true, true, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(C.GetCenter(), false, true, false));
+	TestEqual(TEXT("and another"), PC->GetMultiSelectedRoomIds().Num(), 3);
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(B.GetCenter(), true, true, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(B.GetCenter(), false, true, false));
+	TestEqual(TEXT("Shift+click on a selected room takes it out"), Ids(), TArray<FString>({ TEXT("A"), TEXT("C") }));
+
+	// A plain click goes back to one room.
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(A.GetCenter(), true, false, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(A.GetCenter(), false, false, false));
+	TestFalse(TEXT("a plain click ends the multi selection"), PC->IsMultiSelection());
+	TestEqual(TEXT("and selects that room"), PC->GetSelectedRoomId(), FString(TEXT("A")));
+
+	// A selection window selects the rooms wholly inside it.
+	const FVector2D Pad(12, 12);
+	const FBox2D AB = A + B;
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(AB.Min - Pad, true, false, false));
+	FEditorInteractionTestAccess::Move(W, G, MouseWith(AB.Max + Pad, true, false, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(AB.Max + Pad, false, false, false));
+	TestEqual(TEXT("a window around A and B selects both"), Ids(), TArray<FString>({ TEXT("A"), TEXT("B") }));
+	// With Shift it adds.
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(C.Min - Pad, true, true, false));
+	FEditorInteractionTestAccess::Move(W, G, MouseWith(C.Max + Pad, true, true, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(C.Max + Pad, false, true, false));
+	TestEqual(TEXT("Shift keeps the selection and adds C"), PC->GetMultiSelectedRoomIds().Num(), 3);
+	// A window that only touches a room does not select it.
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(A.Min - Pad, true, false, false));
+	FEditorInteractionTestAccess::Move(W, G, MouseWith(A.GetCenter(), true, false, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(A.GetCenter(), false, false, false));
+	TestFalse(TEXT("half a room is not inside the window"), PC->IsMultiSelection() || !PC->GetSelectedRoomId().IsEmpty());
+	// A click on empty plan deselects.
+	PC->SelectRoom(TEXT("A"));
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(A.Min - Pad, true, false, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(A.Min - Pad, false, false, false));
+	TestTrue(TEXT("a click on empty plan deselects"), PC->GetSelectedRoomId().IsEmpty() && !PC->IsMultiSelection());
+
+	// Delete removes them all as one Undo step.
+	PC->SetRoomSelection({ TEXT("A"), TEXT("B") });
+	TestTrue(TEXT("Delete works on the selection"), PC->DeleteSelection());
+	TestTrue(TEXT("A and B are gone"), F.Interior->GetRoomById(TEXT("A")) == nullptr && F.Interior->GetRoomById(TEXT("B")) == nullptr);
+	TestNotNull(TEXT("C is not"), F.Interior->GetRoomById(TEXT("C")));
+	TestFalse(TEXT("nothing is selected afterwards"), PC->IsMultiSelection());
+	TestTrue(TEXT("one Undo brings both back"), F.Interior->Undo() && F.Interior->GetRoomById(TEXT("A")) != nullptr && F.Interior->GetRoomById(TEXT("B")) != nullptr);
+	return true;
+}
+
+// PAT-197: with several rooms selected the Properties panel edits what they share. A value that differs shows "-" and is left alone unless changed;
+// a change goes to every selected room as one Undo step; name, position and size are not offered.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorMultiEditTest, "InNavi.EditorUX.MultiEdit", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FEditorMultiEditTest::RunTest(const FString& Parameters)
+{
+	using namespace EditorInteractionTests;
+	FNavigationSearchFixture F; Prepare(F); ANavPlayerController* PC = F.MakeController();
+	FString Error;
+	for (const TPair<FString, double>& Room : TArray<TPair<FString, double>>{ { TEXT("A"), 100 }, { TEXT("B"), 200 }, { TEXT("C"), 300 } })
+	{
+		if (!TestNotNull(TEXT("a room"), F.Interior->CreateRoomFromFootprint({ {Room.Value, 100}, {Room.Value + 50, 100}, {Room.Value + 50, 150}, {Room.Value, 150} }, Room.Key, Room.Key, true, false, false, Error))) return false;
+	}
+	F.Interior->SetRoomType(TEXT("A"), TEXT("Classroom")); F.Interior->SetRoomTags(TEXT("A"), { TEXT("x") });
+	F.Interior->SetRoomType(TEXT("B"), TEXT("Toilet"));
+	F.Interior->SetRoomType(TEXT("C"), TEXT("Toilet"));
+	PC->ToggleSelectMode();
+	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>(); Screen->Initialize(); Screen->TakeWidget(); Screen->SetOwningPlayer(PC);
+	FScriptDelegate Multi; Multi.BindUFunction(Screen, TEXT("HandleMultiSelectionChanged")); PC->OnMultiSelectionChanged.AddUnique(Multi);
+	FScriptDelegate Single; Single.BindUFunction(Screen, TEXT("HandleSelectedRoomChanged")); PC->OnSelectedRoomChanged.AddUnique(Single);
+	auto* Title = Cast<UTextBlock>(Screen->FindScreenWidget(TEXT("Txt_PropertiesTitle")));
+	auto* Tags = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_RoomTags")));
+	auto* Type = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cmb_RoomType")));
+	auto* Save = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_ApplyRoom")));
+	if (!TestNotNull(TEXT("title"), Title) || !TestNotNull(TEXT("tags"), Tags) || !TestNotNull(TEXT("type"), Type) || !TestNotNull(TEXT("save"), Save)) return false;
+
+	// A and B differ in type and in tags: both show "-".
+	PC->SetRoomSelection({ TEXT("A"), TEXT("B") });
+	TestEqual(TEXT("the panel says how many"), Title->GetText().ToString(), FString(TEXT("2 rooms selected")));
+	TestEqual(TEXT("the type differs"), Type->GetSelectedOption(), FString(TEXT("-")));
+	TestEqual(TEXT("the tags differ"), Tags->GetText().ToString(), FString(TEXT("-")));
+
+	// Save with nothing changed changes nothing.
+	Save->OnClicked.Broadcast();
+	TestTrue(TEXT("the types are as they were"), F.Interior->GetRoomType(TEXT("A")) == TEXT("Classroom") && F.Interior->GetRoomType(TEXT("B")) == TEXT("Toilet"));
+	TestEqual(TEXT("and the tags"), F.Interior->GetRoomTags(TEXT("A")), TArray<FString>({ TEXT("x") }));
+	TestTrue(TEXT("a dash is not saved as a tag"), F.Interior->GetRoomTags(TEXT("B")).IsEmpty());
+
+	// A new type goes to both, and C is untouched; one Undo takes it back.
+	Type->SetSelectedOption(TEXT("Lab"));
+	Save->OnClicked.Broadcast();
+	TestTrue(TEXT("both are Lab"), F.Interior->GetRoomType(TEXT("A")) == TEXT("Lab") && F.Interior->GetRoomType(TEXT("B")) == TEXT("Lab"));
+	TestEqual(TEXT("C is not selected, so it stays"), F.Interior->GetRoomType(TEXT("C")), FString(TEXT("Toilet")));
+	TestEqual(TEXT("the type is now shared"), Type->GetSelectedOption(), FString(TEXT("Lab")));
+	TestTrue(TEXT("one Undo takes the type back in both"), F.Interior->Undo() && F.Interior->GetRoomType(TEXT("A")) == TEXT("Classroom") && F.Interior->GetRoomType(TEXT("B")) == TEXT("Toilet"));
+	F.Interior->Redo();
+
+	// New tags go to both too; a type and tags in one Save are one Undo step.
+	PC->SetRoomSelection({ TEXT("A"), TEXT("B") });
+	Type->SetSelectedOption(TEXT("Office")); Tags->SetText(FText::FromString(TEXT("staff, floor one")));
+	Save->OnClicked.Broadcast();
+	TestEqual(TEXT("both have the new tags"), F.Interior->GetRoomTags(TEXT("A")), TArray<FString>({ TEXT("staff"), TEXT("floor one") }));
+	TestEqual(TEXT("in B too"), F.Interior->GetRoomTags(TEXT("B")), TArray<FString>({ TEXT("staff"), TEXT("floor one") }));
+	TestEqual(TEXT("the tags are shown as shared"), Tags->GetText().ToString(), FString(TEXT("staff, floor one")));
+	TestTrue(TEXT("one Undo takes back the type and the tags"), F.Interior->Undo() && F.Interior->GetRoomType(TEXT("A")) == TEXT("Lab") && F.Interior->GetRoomTags(TEXT("B")).IsEmpty());
+
+	// Rooms that agree show the value, without a dash.
+	PC->SetRoomSelection({ TEXT("A"), TEXT("B") });
+	TestEqual(TEXT("A and B are both Lab again: the type shows, with no dash"), Type->GetSelectedOption(), FString(TEXT("Lab")));
+	PC->SetRoomSelection({ TEXT("B"), TEXT("C") });
+	TestEqual(TEXT("B is a Lab and C a Toilet: a dash"), Type->GetSelectedOption(), FString(TEXT("-")));
+	TestEqual(TEXT("B and C both have no tags: shown empty, not as a dash"), Tags->GetText().ToString(), FString());
+
+	// Back to one room: the single room panel returns.
+	PC->SelectRoom(TEXT("A"));
+	TestEqual(TEXT("the title is the room's again"), Title->GetText().ToString(), FString(TEXT("Room properties")));
+	PC->OnMultiSelectionChanged.Remove(Multi); PC->OnSelectedRoomChanged.Remove(Single);
 	return true;
 }
 

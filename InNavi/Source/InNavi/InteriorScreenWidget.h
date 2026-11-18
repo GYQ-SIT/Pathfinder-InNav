@@ -220,6 +220,18 @@ private:
 	UFUNCTION()
 	void HandleSelectedRoomChanged(FString RoomId);
 
+	// Two or more rooms/walls are selected (Count), or that ended (0): the Properties panel then edits what they share - Room Type and Search Tags -
+	// and leaves out name, position and size (PAT-197). See ANavPlayerController::OnMultiSelectionChanged.
+	UFUNCTION()
+	void HandleMultiSelectionChanged(int32 Count);
+	// Applies the type / tags changed in the panel to every selected room as one Undo step. A value shown as "-" (the rooms differ) and left alone
+	// changes nothing.
+	void ApplyMultiRoomChanges();
+	// The panel is showing a multiple selection, and what it showed for the type and the tags (to tell what the user changed).
+	bool bMultiMode = false;
+	FString MultiShownType;
+	FString MultiShownTags;
+
 	UFUNCTION()
 	void OnApplyRoomClicked();
 	UFUNCTION()

@@ -1672,8 +1672,155 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 	UE_LOG(LogTemp, Warning, TEXT("Room point %d added: (%.1f, %.1f)"), PendingRoomFootprint.Num(), FootprintPoint.X, FootprintPoint.Y);
 }
 
+void ANavPlayerController::ClearMultiSelection()
+{
+	if (MultiSelectedRoomIds.IsEmpty()) return;
+	MultiSelectedRoomIds.Reset();
+	OnMultiSelectionChanged.Broadcast(0);
+	RefreshSelectionHighlight();
+}
+
+void ANavPlayerController::SetRoomSelection(const TArray<FString>& RoomIds)
+{
+	TArray<FString> Unique;
+	for (const FString& Id : RoomIds)
+	{
+		if (!Id.IsEmpty()) Unique.AddUnique(Id);
+	}
+	if (Unique.Num() <= 1)
+	{
+		SelectRoom(Unique.IsEmpty() ? FString() : Unique[0]);
+		return;
+	}
+	// Clears a single room, a door, a connector, an entrance and an older multi selection, then the rooms go in.
+	SelectRoom(FString());
+	MultiSelectedRoomIds = Unique;
+	OnMultiSelectionChanged.Broadcast(Unique.Num());
+	RefreshSelectionHighlight();
+}
+
+void ANavPlayerController::ToggleRoomInSelection(const FString& RoomId)
+{
+	if (RoomId.IsEmpty() || bInteriorInspectionEnabled) return;
+	TArray<FString> Current;
+	if (IsMultiSelection()) Current = MultiSelectedRoomIds;
+	else if (!SelectedRoomId.IsEmpty()) Current.Add(SelectedRoomId);
+	if (Current.Remove(RoomId) == 0) Current.Add(RoomId);
+	SetRoomSelection(Current);
+}
+
+int32 ANavPlayerController::SelectRoomsInRect(const FBox2D& Rect, bool bAdd)
+{
+	if (!InteriorGen || bInteriorInspectionEnabled) return 0;
+	TArray<FString> Ids;
+	if (bAdd)
+	{
+		if (IsMultiSelection()) Ids = MultiSelectedRoomIds;
+		else if (!SelectedRoomId.IsEmpty()) Ids.Add(SelectedRoomId);
+	}
+	for (const AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
+	{
+		if (!Room || Room->GetFootprint().IsEmpty()) continue;
+		const FBox2D Bounds(Room->GetFootprint());
+		if (Rect.IsInside(Bounds.Min) && Rect.IsInside(Bounds.Max)) Ids.AddUnique(Room->RoomId);
+	}
+	SetRoomSelection(Ids);
+	return IsMultiSelection() ? MultiSelectedRoomIds.Num() : (SelectedRoomId.IsEmpty() ? 0 : 1);
+}
+
+bool ANavPlayerController::DeleteMultiSelection()
+{
+	if (bInteriorInspectionEnabled || !InteriorGen || !IsMultiSelection()) return false;
+	const TArray<FString> Ids = MultiSelectedRoomIds;
+	int32 Deleted = 0;
+	InteriorGen->BeginHistoryBatch();
+	for (const FString& Id : Ids)
+	{
+		if (!InteriorGen->DeleteRoom(Id)) continue;
+		++Deleted;
+		if (NavigationPanel) NavigationPanel->NotifyRoomDeleted(Id);
+	}
+	InteriorGen->EndHistoryBatch(Deleted > 0);
+	SetRoomSelection(TArray<FString>());
+	if (Deleted > 0)
+	{
+		bHasUnsavedChanges = true;
+		OnInteriorContentChanged.Broadcast();
+	}
+	return Deleted > 0;
+}
+
+TArray<FString> ANavPlayerController::GetMultiSelectedClosedRoomIds() const
+{
+	TArray<FString> Closed;
+	if (InteriorGen)
+	{
+		for (const FString& Id : MultiSelectedRoomIds)
+		{
+			if (InteriorGen->IsRoomClosedLoop(Id)) Closed.Add(Id);
+		}
+	}
+	return Closed;
+}
+
+FString ANavPlayerController::GetMultiRoomType(bool& bOutMixed) const
+{
+	bOutMixed = false;
+	FString Shared;
+	bool bFirst = true;
+	for (const FString& Id : GetMultiSelectedClosedRoomIds())
+	{
+		const FString Type = InteriorGen->GetRoomType(Id);
+		if (bFirst) { Shared = Type; bFirst = false; }
+		else if (Type != Shared) { bOutMixed = true; return FString(); }
+	}
+	return Shared;
+}
+
+TArray<FString> ANavPlayerController::GetMultiRoomTags(bool& bOutMixed) const
+{
+	bOutMixed = false;
+	TArray<FString> Shared;
+	bool bFirst = true;
+	for (const FString& Id : GetMultiSelectedClosedRoomIds())
+	{
+		const TArray<FString> RoomTags = InteriorGen->GetRoomTags(Id);
+		if (bFirst) { Shared = RoomTags; bFirst = false; }
+		else if (RoomTags != Shared) { bOutMixed = true; return TArray<FString>(); }
+	}
+	return Shared;
+}
+
+bool ANavPlayerController::SetMultiRoomProperties(const FString* NewType, const TArray<FString>* NewTags)
+{
+	if (bInteriorInspectionEnabled || !InteriorGen) return false;
+	bool bChanged = false;
+	InteriorGen->BeginHistoryBatch();
+	for (const FString& Id : GetMultiSelectedClosedRoomIds())
+	{
+		if (NewType)
+		{
+			const FString Before = InteriorGen->GetRoomType(Id);
+			if (InteriorGen->SetRoomType(Id, *NewType) && Before != InteriorGen->GetRoomType(Id)) bChanged = true;
+		}
+		if (NewTags)
+		{
+			const TArray<FString> Before = InteriorGen->GetRoomTags(Id);
+			if (InteriorGen->SetRoomTags(Id, *NewTags) && Before != InteriorGen->GetRoomTags(Id)) bChanged = true;
+		}
+	}
+	InteriorGen->EndHistoryBatch(bChanged);
+	if (bChanged)
+	{
+		bHasUnsavedChanges = true;
+		OnInteriorContentChanged.Broadcast();
+	}
+	return bChanged;
+}
+
 void ANavPlayerController::SelectRoom(const FString& RoomId)
 {
+	ClearMultiSelection();
 	if (SelectedRoomId != RoomId) FinishRotationGesture();
 	SelectEntrance(FString());
 	// Tracked (rather than an early-return once SelectedRoomId itself is unchanged) so
@@ -1711,6 +1858,7 @@ void ANavPlayerController::SelectRoom(const FString& RoomId)
 
 void ANavPlayerController::SelectDoor(const FString& RoomId, const FString& DoorId)
 {
+	ClearMultiSelection();
 	FinishRotationGesture();
 	SelectEntrance(FString());
 	if (!SelectedRoomId.IsEmpty())
@@ -1732,6 +1880,7 @@ void ANavPlayerController::SelectDoor(const FString& RoomId, const FString& Door
 
 void ANavPlayerController::SelectConnector(const FString& GroupId)
 {
+	ClearMultiSelection();
 	if (SelectedConnectorGroupId != GroupId) FinishRotationGesture();
 	SelectEntrance(FString());
 	// See SelectRoom's own comment on why this is tracked rather than an early return.
@@ -2180,6 +2329,11 @@ bool ANavPlayerController::DeleteSelection()
 		return DeleteSelectedConnector();
 	}
 
+	if (IsMultiSelection())
+	{
+		return DeleteMultiSelection();
+	}
+
 	if (SelectedRoomId.IsEmpty())
 	{
 		return false;
@@ -2238,6 +2392,7 @@ void ANavPlayerController::SelectEntrance(const FString& EntranceId, const FStri
 	}
 	if (!EntranceId.IsEmpty())
 	{
+		ClearMultiSelection();
 		FinishRotationGesture();
 		// A door in the outer wall is selected on its own, like a room, a door or a connector.
 		if (!SelectedRoomId.IsEmpty())
@@ -2957,6 +3112,7 @@ void ANavPlayerController::ClearProjectState()
 	ActivePrefabShape = 0;
 	bAddDoorMode = false;
 	SelectedRoomId.Empty();
+	MultiSelectedRoomIds.Reset();
 	SelectedDoorRoomId.Empty();
 	SelectedDoorId.Empty();
 	PendingRoomFootprint.Reset();
@@ -3410,6 +3566,11 @@ void ANavPlayerController::SetIn3DEditMode(bool bEnable)
 
 void ANavPlayerController::RefreshSelectionHighlight()
 {
+	for (const TWeakObjectPtr<AInteriorRoom>& Room : MultiHighlightedRooms)
+	{
+		if (Room.IsValid()) Room->SetHighlighted(false);
+	}
+	MultiHighlightedRooms.Reset();
 	if (AInteriorRoom* PrevRoom = Cast<AInteriorRoom>(HighlightedSelectionActor))
 	{
 		PrevRoom->SetHighlighted(false);
@@ -3435,6 +3596,19 @@ void ANavPlayerController::RefreshSelectionHighlight()
 				Node.MarkerActor->SetHighlighted(true);
 				HighlightedSelectionActor = Node.MarkerActor;
 				break;
+			}
+		}
+		return;
+	}
+
+	if (IsMultiSelection())
+	{
+		for (AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
+		{
+			if (Room && MultiSelectedRoomIds.Contains(Room->RoomId))
+			{
+				Room->SetHighlighted(true);
+				MultiHighlightedRooms.Add(Room);
 			}
 		}
 		return;
@@ -5186,6 +5360,8 @@ void ANavPlayerController::SetActiveFloor(int32 Level)
 		return;
 	}
 
+	// A selection of several rooms belongs to the floor it was made on; it would otherwise go on, out of sight, on another floor.
+	if (IsMultiSelection() && InteriorGen->GetActiveFloor() != Level) SetRoomSelection(TArray<FString>());
 	InteriorGen->SetActiveFloor(Level);
 	RepositionCameraToActiveFloor();
 	// A selected connector's marker is a separate actor per floor (see

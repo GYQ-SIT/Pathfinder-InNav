@@ -77,6 +77,13 @@ private:
 	TArray<FVector2D> GetPrefabPreview() const;
 	// Shift on a shape drag: the far corner pulled onto the shape's own proportions (square, circle, equilateral triangle).
 	FVector2D ShapeDragEnd(FVector2D RawEnd, bool bShiftHeld) const;
+	// The selection window (PAT-196): a drag across empty plan in Select mode. Both ends are in widget space; with Shift it adds to the selection.
+	bool bIsDraggingSelectBox = false;
+	bool bSelectBoxAdd = false;
+	FVector2D SelectBoxStart = FVector2D::ZeroVector;
+	FVector2D SelectBoxEnd = FVector2D::ZeroVector;
+	// Ends the selection window: a real drag selects the rooms inside it, a click on empty plan deselects (unless Shift). bApply false just drops it.
+	void FinishSelectBox(FVector2D WidgetSize, bool bApply);
 	bool bIsDraggingVertex = false;
 	bool bVertexMoved = false;
 	int32 DraggingVertexIndex = INDEX_NONE;

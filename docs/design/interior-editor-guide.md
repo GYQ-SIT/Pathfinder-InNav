@@ -273,6 +273,22 @@ tool that is active is highlighted in blue. Four groups:
 Clicking inside the building's outline but on top of a wall, outside the outline, or
 overlapping another room will fail, with the reason logged to the Output Log.
 
+### Selecting several rooms
+
+In Select mode (`Q`) on the 2D plan:
+
+- **Shift+click** a room or wall adds it to the selection; Shift+click on one that is already selected takes it out. Selected rooms are outlined
+  in red. When one is left, it is an ordinary single selection again.
+- **Selection window**: press on empty plan and drag; every room and wall on this floor that lies **wholly inside** the window is selected (a room
+  only touched by the window is not). Hold **Shift** to add to the selection instead of replacing it. A plain click on empty plan deselects.
+- A plain click on a room goes back to that one room. Changing floor, or selecting a door or a connector, ends the multiple selection.
+- **Delete** (key or the red button) removes every selected room and wall as **one Undo step**.
+
+With two or more selected, the Properties panel is headed "N rooms selected" and edits what the rooms share: **Room type** and **Search tags**.
+A value on which they differ shows as **-**; leave it and nothing changes, pick or type a new one and **Save changes** applies it to every
+selected room (walls have neither) as **one Undo step**. Name, position and size are not offered, so selected rooms can never be given the same
+position and lie on top of each other. Dragging, resizing, rotating and the corner dots work on one room at a time.
+
 ### Drawing controls (Shift, Ctrl+Z, corners)
 
 - **Shift while drawing a room or wall**: the next point goes straight along X or Y from the previous point (whichever way the pointer
