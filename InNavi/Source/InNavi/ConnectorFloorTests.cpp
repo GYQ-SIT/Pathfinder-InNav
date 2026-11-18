@@ -330,6 +330,38 @@ bool FConnectorBlockedReasonTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// PAT-204: a connector placed inside a closed room with no door is placed all the same, with a warning that nobody can reach it.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConnectorEnclosedWarningTest, "InNavi.Interior.ConnectorFloors.EnclosedWarning", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConnectorEnclosedWarningTest::RunTest(const FString& Parameters)
+{
+	using namespace ConnectorFloorTests;
+	FConnectorScene S;
+	FString Error;
+	AInteriorRoom* Vault = S.Interior->CreateRoomFromFootprint({ S.At(10, 5), S.At(20, 5), S.At(20, 15), S.At(10, 15) }, TEXT("V1"), TEXT("Vault"), true, false, false, Error);
+	if (!TestNotNull(TEXT("a room without a door"), Vault)) return false;
+	TestTrue(TEXT("a spot in it is enclosed"), S.Interior->FindEnclosingRoomWithoutDoor(S.At(15, 10), 1) == Vault);
+	TestNull(TEXT("a spot outside it is not"), S.Interior->FindEnclosingRoomWithoutDoor(S.At(40, 10), 1));
+	TestNull(TEXT("the same spot on another floor is not"), S.Interior->FindEnclosingRoomWithoutDoor(S.At(15, 10), 2));
+
+	// The user's side: placing a lift in it still works, and says why nobody can get to it.
+	ANavPlayerController* Controller = S.Fixture.MakeController();
+	S.Fixture.Generator->SetInteriorDataForBuilding(TEXT("CF"), S.Interior->CaptureInteriorSnapshot());
+	Controller->LoadInteriorForBuilding(TEXT("CF"));
+	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>(); Screen->Initialize(); Screen->TakeWidget(); Screen->SetOwningPlayer(Controller);
+	UDebugPanelWidget* Panel = Screen->GetDebugPanelForTests();
+	if (!TestNotNull(TEXT("debug panel"), Panel)) return false;
+	Panel->BindToController();
+	Controller->ToggleElevatorMode();
+	TestFalse(TEXT("the lift is placed"), Controller->PlaceConnectorAt(S.At(15, 10)).IsEmpty());
+	TestTrue(TEXT("and the message names the room"), Panel->GetLastErrorTextForTests().Contains(TEXT("Vault")));
+	TestTrue(TEXT("and says it has no door"), Panel->GetLastErrorTextForTests().Contains(TEXT("no door")));
+
+	// With a door the room is open and the lift needs no warning.
+	S.Interior->AddDoorToRoom(TEXT("V1"), 0, 100.f);
+	TestNull(TEXT("a room with a door is not enclosed"), S.Interior->FindEnclosingRoomWithoutDoor(S.At(15, 10), 1));
+	return true;
+}
+
 // A route takes a lift whose floors do not stand in one column, and the validator no longer calls that inconsistent.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConnectorFloorRouteTest, "InNavi.Interior.ConnectorFloors.RouteAndValidation", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FConnectorFloorRouteTest::RunTest(const FString& Parameters)

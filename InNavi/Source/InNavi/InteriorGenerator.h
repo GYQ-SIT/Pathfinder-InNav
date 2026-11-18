@@ -200,6 +200,10 @@ public:
 	// room 'Lab'."). Empty after a yes. Reading it clears it, so a later failure for another reason never shows an old one (PAT-206).
 	FString ConsumeConnectorFailure() const;
 
+	// The closed room on Level that stands around Position and has no door (a window or a void is no way in), or null. A lift, stair or escalator in
+	// such a room cannot be reached, which the editor tells the user without blocking the placement (PAT-204).
+	const AInteriorRoom* FindEnclosingRoomWithoutDoor(FVector2D Position, int32 Level) const;
+
 	// Rotates a room/wall's footprint by DeltaDegrees around its own bounding-box center (positive
 	// = counter-clockwise). Rejects (no-op, returns false) if the rotated footprint would extend
 	// outside the building's outline or overlap another room/wall - checked every call (i.e. every

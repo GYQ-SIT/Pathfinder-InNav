@@ -265,7 +265,8 @@ tool that is active is highlighted in blue. Four groups:
 - **DOORS & LINKS** - add-door mode (`K`, click a wall edge to cut a fixed-size door into
   it), or place a stairs/elevator/escalator connector (`5`/`4`/`6`) at the next click;
   an elevator defaults to every floor in the building, stairs/escalator default to the
-  floor above and below.
+  floor above and below. A connector placed inside a closed room that has no door is still
+  placed, with a warning that nobody can reach it (the validator reports it too, as `CONNECTOR_ENCLOSED`).
 - **TRANSFORM** - grow/shrink the selected room (`=`/`-`), and hold to rotate it
   counter-clockwise/clockwise around its own center (hold `9`/`0`).
 
@@ -318,6 +319,10 @@ labels over dark fields, and every kind ends with a red **Delete ...** button (t
   together. Both are saved with the project (`roomType` is left out of the file when it is Other, so older files load
   unchanged), work with Undo/Redo, are copied with a copied room, and make the room findable in the Layers and
   Navigation searches (the word "other" is not searchable). Blank and repeated tags (ignoring case) are dropped.
+  **The first time a room is saved** from this panel (in this session) and it has no tags, they are filled in from its name and type: the
+  words of the name in lower case, then the type ("Male Toilet L2" + Toilet gives `male, toilet, l2`; the type Other adds nothing; words of digits only are left out, and a name that carries a database id, such as `SQL-1161271361-01-02`, gives
+  nothing, so only the type is used). Later saves
+  never fill them again, so tags you cleared stay cleared, and tags you typed are never touched.
 - **Door**: which room it belongs to (read-only), and **CONNECTS TO**, a dropdown to pick what it
   connects to on the other side (another room, by name, or "corridor").
 - **Connector**: its type (read-only), and **FLOORS IT REACHES**, a checklist of floors -

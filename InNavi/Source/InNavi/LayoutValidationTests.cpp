@@ -137,6 +137,54 @@ namespace InNaviValidationTests
         return true;
     }
 
+    // PAT-204: a lift, stair or escalator inside a closed room with no door is reported as a warning; a door, or standing outside the room, clears it.
+    IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEnclosedConnectorRule, "InNavi.LayoutValidation.EnclosedConnector", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+    bool FEnclosedConnectorRule::RunTest(const FString& Parameters)
+    {
+        using namespace InNaviValidationTests;
+        auto Root = Project();
+        const auto Lift = Floor(Root)->GetArrayField(TEXT("navNodes"))[0]->AsObject();
+        const auto MoveLift = [&](double X, double Y)
+        {
+            Lift->SetArrayField(TEXT("position"), TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueNumber>(X), MakeShared<FJsonValueNumber>(Y) });
+        };
+        TestFalse(TEXT("a lift outside every room is fine"), Has(ValidateProject(Root), TEXT("CONNECTOR_ENCLOSED")));
+
+        MoveLift(250, 250); // inside room R1, which has a door
+        TestFalse(TEXT("inside a room that has a door is fine"), Has(ValidateProject(Root), TEXT("CONNECTOR_ENCLOSED")));
+
+        // Without its door the room is closed.
+        const auto R1 = Room(Root);
+        R1->SetArrayField(TEXT("openings"), TArray<TSharedPtr<FJsonValue>>());
+        const FReport Closed = ValidateProject(Root);
+        const FIssue* Issue = Closed.Issues.FindByPredicate([](const FIssue& I) { return I.Rule == TEXT("CONNECTOR_ENCLOSED"); });
+        if (!TestNotNull(TEXT("a lift in a room with no door is reported"), Issue)) return false;
+        TestTrue(TEXT("as a warning"), Issue->Severity == ESeverity::Warning);
+        TestTrue(TEXT("on the lift, on its floor"), Issue->Kind == EObjectKind::Connector && Issue->Floor == 1);
+        TestTrue(TEXT("naming the room"), Issue->Message.Contains(TEXT("R1")));
+        TestFalse(TEXT("a warning does not make the report an error"), Closed.HasErrors());
+
+        // A window or a void is not a way in.
+        const auto Window = MakeShared<FJsonObject>();
+        Window->SetStringField(TEXT("id"), TEXT("W1")); Window->SetStringField(TEXT("type"), TEXT("window"));
+        Window->SetNumberField(TEXT("edgeIndex"), 0); Window->SetNumberField(TEXT("offset"), 100); Window->SetNumberField(TEXT("width"), 120);
+        R1->SetArrayField(TEXT("openings"), TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(Window) });
+        TestTrue(TEXT("a window alone does not count"), Has(ValidateProject(Root), TEXT("CONNECTOR_ENCLOSED")));
+
+        // A door (a type left out means a door) clears it.
+        const auto Door = MakeShared<FJsonObject>();
+        Door->SetStringField(TEXT("id"), TEXT("D9")); Door->SetNumberField(TEXT("edgeIndex"), 0); Door->SetNumberField(TEXT("offset"), 100); Door->SetNumberField(TEXT("width"), 120);
+        R1->SetArrayField(TEXT("openings"), TArray<TSharedPtr<FJsonValue>>{ MakeShared<FJsonValueObject>(Door) });
+        TestFalse(TEXT("a door clears it"), Has(ValidateProject(Root), TEXT("CONNECTOR_ENCLOSED")));
+
+        // A room on another floor does not enclose it.
+        R1->SetArrayField(TEXT("openings"), TArray<TSharedPtr<FJsonValue>>());
+        Room(Root, 1)->SetArrayField(TEXT("openings"), TArray<TSharedPtr<FJsonValue>>());
+        MoveLift(800, 800);
+        TestFalse(TEXT("outside the closed rooms it is fine again"), Has(ValidateProject(Root), TEXT("CONNECTOR_ENCLOSED")));
+        return true;
+    }
+
     IMPLEMENT_SIMPLE_AUTOMATION_TEST(FReferenceRules, "InNavi.LayoutValidation.ReferencesAndLegacy", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
     bool FReferenceRules::RunTest(const FString& Parameters)
     {

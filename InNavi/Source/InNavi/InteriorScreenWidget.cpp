@@ -2581,6 +2581,11 @@ void UInteriorScreenWidget::OnApplyRoomClicked()
 	ApplyRoomTags(NewTags);
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
+		// The first save of a room without tags fills them from its name and type; the box shows what was filled.
+		if (PC->AutoFillSelectedRoomTagsOnFirstSave() && RoomTagsTextBox)
+		{
+			RoomTagsTextBox->SetText(FText::FromString(FString::Join(PC->GetSelectedRoomTags(), TEXT(", "))));
+		}
 		if (RoomSubtitleText)
 		{
 			const FString Name = PC->GetSelectedRoomName();

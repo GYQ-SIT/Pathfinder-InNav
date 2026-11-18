@@ -130,8 +130,11 @@ namespace LayoutValidation
             FContext Context;
             FBox2D Bounds{ForceInit};
             TArray<TStaticArray<FVector2D, 3>> Triangles;
+            // The outline, and whether the room has a door (a window or a void is not a way in): what CONNECTOR_ENCLOSED looks at.
+            TArray<FVector2D> Outline;
+            bool bHasDoor = false;
 
-            FRoomShape(const FContext& InContext, const TArray<FVector2D>& Points) : Context(InContext)
+            FRoomShape(const FContext& InContext, const TArray<FVector2D>& Points) : Context(InContext), Outline(Points)
             {
                 for (const FVector2D& Point : Points) Bounds += Point;
                 TArray<UE::Geometry::FIndex3i> Indices;
@@ -341,7 +344,7 @@ namespace LayoutValidation
                         const int32 IssuesBeforeShape = Report.Issues.Num();
                         const auto Points = Shape(Room, bClosed);
                         if (ShouldCancel()) return;
-                        if (bClosed && Report.Issues.Num() == IssuesBeforeShape) Shapes.Emplace(C, Points);
+                        const int32 ShapeIndex = (bClosed && Report.Issues.Num() == IssuesBeforeShape) ? Shapes.Emplace(C, Points) : INDEX_NONE;
                         Containment(Points, bClosed, Boundary);
                         const auto RoomContext = C;
                         TSet<FString> OpeningIds;
@@ -350,6 +353,15 @@ namespace LayoutValidation
                         {
                             C = RoomContext; C.Kind = EObjectKind::Opening; C.Owner = RoomContext.Id; C.Path += FString::Printf(TEXT(".openings[%d]"), O);
                             if (const auto Item = Object(Openings[O])) Opening(Item, Points, bClosed, Scale, OpeningIds, References);
+                        }
+                        if (ShapeIndex != INDEX_NONE)
+                        {
+                            for (const auto& Item : Openings)
+                            {
+                                if (!Item.IsValid() || Item->Type != EJson::Object) continue;
+                                const FString OpeningType = String(Item->AsObject(), TEXT("type")).ToLower();
+                                if (OpeningType.IsEmpty() || OpeningType == TEXT("door")) Shapes[ShapeIndex].bHasDoor = true;
+                            }
                         }
                         // Overlaps are advisory: the authoring tools allow intentional overlap.
                         for (int32 O = 0; O < Openings.Num(); ++O) for (int32 P = O + 1; P < Openings.Num(); ++P)
@@ -399,6 +411,20 @@ namespace LayoutValidation
                     {
                         C = Shapes[A].Context;
                         Issue(TEXT("ROOM_OVERLAP"), TEXT("Room footprint overlaps ") + Shapes[B].Context.Id + TEXT("."), TEXT("Review the overlap; keep it if it is intentional."), ESeverity::Warning);
+                    }
+                }
+                // A lift, stair or escalator inside a closed room without a door cannot be reached. A warning, not an error: a restricted-access layout can
+                // be intentional, and the tools do not stop the placement.
+                for (const auto& Node : Nodes)
+                {
+                    if (Node.Type != TEXT("elevator") && Node.Type != TEXT("stairs") && Node.Type != TEXT("escalator")) continue;
+                    for (const auto& Shape : Shapes)
+                    {
+                        if (Shape.Context.Floor != Node.Context.Floor || Shape.bHasDoor || !Inside(Node.Position, Shape.Outline)) continue;
+                        C = Node.Context;
+                        Issue(TEXT("CONNECTOR_ENCLOSED"), FString::Printf(TEXT("The %s is inside room %s, which has no door, so nobody can reach it."), *Node.Type, *Shape.Context.Id),
+                            TEXT("Add a door to the room, or move the connector out of it. Keep it only if access is restricted on purpose."), ESeverity::Warning);
+                        break;
                     }
                 }
                 for (const auto& Reference : References)

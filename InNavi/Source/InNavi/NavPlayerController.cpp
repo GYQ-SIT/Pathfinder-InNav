@@ -3,6 +3,7 @@
 
 #include "NavPlayerController.h"
 #include "InteriorDrawing.h"
+#include "NavigationSearchUtils.h"
 #include "NavigationPanelWidget.h"
 #include "MobileAppWidget.h"
 #include "MobileSearchPageWidget.h"
@@ -1833,6 +1834,16 @@ bool ANavPlayerController::MoveSelectedRoomVertex(int32 VertexIndex, FVector2D N
 	return true;
 }
 
+bool ANavPlayerController::AutoFillSelectedRoomTagsOnFirstSave()
+{
+	if (bInteriorInspectionEnabled || SelectedRoomId.IsEmpty() || !InteriorGen || !InteriorGen->IsRoomClosedLoop(SelectedRoomId)) return false;
+	bool bAlreadySaved = false;
+	RoomIdsSavedOnce.Add(SelectedRoomId, &bAlreadySaved);
+	if (bAlreadySaved || !InteriorGen->GetRoomTags(SelectedRoomId).IsEmpty()) return false;
+	const TArray<FString> DerivedTags = NavigationSearch::TagsFromNameAndType(GetSelectedRoomName(), GetSelectedRoomType());
+	return !DerivedTags.IsEmpty() && SetSelectedRoomTags(DerivedTags);
+}
+
 bool ANavPlayerController::SetSelectedRoomTags(const TArray<FString>& InTags)
 {
 	if (bInteriorInspectionEnabled) return false;
@@ -2585,6 +2596,12 @@ FString ANavPlayerController::PlaceConnectorAt(FVector2D FootprintPosition)
 	}
 
 	bHasUnsavedChanges = true;
+	// Placed all the same (a closed room may be meant), but say that nobody can reach it: the room has no door.
+	if (const AInteriorRoom* Closed = InteriorGen->FindEnclosingRoomWithoutDoor(FootprintPosition, ActiveFloorLevel))
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("The connector is placed, but room '%s' has no door, so nobody can reach it. Add a door to the room, or move the connector."),
+			Closed->RoomName.IsEmpty() ? *Closed->RoomId : *Closed->RoomName), EActionFailureSeverity::Warning);
+	}
 	return GroupId;
 }
 

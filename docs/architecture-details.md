@@ -245,9 +245,9 @@ count as the current scene composition. Automation writes fresh measurements to 
 | Plugin package | `publish-layout-validator.yml` publishes a matching versioned source package to GitHub Packages, resolves the consumer pin/lock and verifies its source; native code is built by UnrealBuildTool |
 | Wiki | `deploy-wiki.yml` runs on `main` documentation/configuration changes or a manual run, on the self-hosted Linux wiki runner. MkDocs builds to staging; `publish-wiki.py` swaps directories when possible and otherwise replaces contents inside the writable web root |
 
-The checked-in plugin descriptor/package are **1.1.1**; the root consumer dependency/lockfile still pin **1.0.0**. Build/release checks use
+The checked-in plugin descriptor/package are **1.2.0**; the root consumer dependency/lockfile still pin **1.0.0**. Build/release checks use
 `install-layout-validator.mjs --check --allow-unreleased`: matching versions must match installed package source; a newer checked-in
-version is permitted before publication. This distinction does not assert that 1.1.1 has been published. Package access uses CI credentials.
+version is permitted before publication. This distinction does not assert that 1.2.0 has been published. Package access uses CI credentials.
 
 Headless CI checks state and preview draw-element generation, but rendered input tests (`InNavi.EditorUX.Rendered.*`) explicitly require
 an additional run **without `-nullrhi`**. Client-context live-audio checks require `-game` and audio enabled. The default headless editor run

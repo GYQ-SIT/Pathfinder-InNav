@@ -1449,6 +1449,19 @@ FString AInteriorGenerator::ConsumeConnectorFailure() const
 	return Reason;
 }
 
+const AInteriorRoom* AInteriorGenerator::FindEnclosingRoomWithoutDoor(FVector2D Position, int32 Level) const
+{
+	const FInteriorRoomList* RoomList = RoomsByFloor.Find(Level);
+	if (!RoomList) return nullptr;
+	for (const AInteriorRoom* Room : RoomList->Rooms)
+	{
+		if (!Room || !Room->IsClosedLoop() || !InteriorGen_IsPointInPolygon(Position, Room->GetFootprint())) continue;
+		const bool bHasDoor = Room->GetOpenings().ContainsByPredicate([](const FInteriorOpening& Opening) { return Opening.Type == EInteriorOpeningType::Door; });
+		if (!bHasDoor) return Room;
+	}
+	return nullptr;
+}
+
 bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVector2D Position, int32 Level, float RotationDegrees, float SizeScale, const FString& IgnoreGroupId, bool bLogFailures) const
 {
 	LastConnectorFailure.Reset();

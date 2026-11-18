@@ -2,6 +2,8 @@
 
 #include "UiTestFixture.h"
 #include "InteriorDrawing.h"
+#include "NavigationSearchUtils.h"
+#include "Components/ComboBoxString.h"
 #include "InteriorFloorPlanWidget.h"
 #include "InteriorScreenWidget.h"
 #include "InteriorRoom.h"
@@ -422,6 +424,52 @@ bool FEditorRoomCornersTest::RunTest(const FString& Parameters)
 	const FVector2D Stopped = Corner(3);
 	TestTrue(TEXT("the corner is still inside the building"), Stopped.X <= Walls.Max.X + 0.01 && Stopped.Y <= Walls.Max.Y + 0.01);
 	TestTrue(TEXT("and moved toward the wall as far as it could"), Stopped.X > Inner2.X + 1.0 || Stopped.Y > Inner2.Y + 1.0);
+	return true;
+}
+
+// PAT-198: the first save of a room without tags fills them from its name and type; later saves and tags the user typed are left alone.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorAutoTagsTest, "InNavi.EditorUX.AutoTags", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FEditorAutoTagsTest::RunTest(const FString& Parameters)
+{
+	using namespace EditorInteractionTests;
+	TestEqual(TEXT("the words of the name, then the type"), NavigationSearch::TagsFromNameAndType(TEXT("Male Toilet L2"), TEXT("Toilet")), TArray<FString>({ TEXT("male"), TEXT("toilet"), TEXT("l2") }));
+	TestEqual(TEXT("the type Other adds nothing, and a word of digits only is no tag"), NavigationSearch::TagsFromNameAndType(TEXT("Lab 3"), TEXT("Other")), TArray<FString>({ TEXT("lab") }));
+	TestEqual(TEXT("a two-word type is one tag"), NavigationSearch::TagsFromNameAndType(TEXT("Level 2 Lobby"), TEXT("Lift lobby")), TArray<FString>({ TEXT("level"), TEXT("lobby"), TEXT("lift lobby") }));
+	TestTrue(TEXT("a database id as the name gives no tags of its own"), NavigationSearch::TagsFromNameAndType(TEXT("SQL-1161271361-01-02"), TEXT("Other")).IsEmpty());
+	TestEqual(TEXT("only the type is used then"), NavigationSearch::TagsFromNameAndType(TEXT("SQL-1161271361-01-02"), TEXT("Toilet")), TArray<FString>({ TEXT("toilet") }));
+	TestTrue(TEXT("nothing to derive from nothing"), NavigationSearch::TagsFromNameAndType(FString(), TEXT("Other")).IsEmpty());
+
+	FNavigationSearchFixture F; Prepare(F); ANavPlayerController* PC = F.MakeController();
+	FString Error;
+	if (!TestNotNull(TEXT("room A"), F.Interior->CreateRoomFromFootprint({{100,100},{150,100},{150,150},{100,150}}, TEXT("A"), TEXT("Room A"), true, false, false, Error))) return false;
+	if (!TestNotNull(TEXT("room B"), F.Interior->CreateRoomFromFootprint({{200,100},{250,100},{250,150},{200,150}}, TEXT("B"), TEXT("Room B"), true, false, false, Error))) return false;
+	PC->ToggleSelectMode();
+	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>(); Screen->Initialize(); Screen->TakeWidget(); Screen->SetOwningPlayer(PC);
+	FScriptDelegate Selected; Selected.BindUFunction(Screen, TEXT("HandleSelectedRoomChanged")); PC->OnSelectedRoomChanged.AddUnique(Selected);
+	auto* Name = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_RoomName")));
+	auto* Tags = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_RoomTags")));
+	auto* Type = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cmb_RoomType")));
+	auto* Save = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_ApplyRoom")));
+	if (!TestNotNull(TEXT("name field"), Name) || !TestNotNull(TEXT("tags field"), Tags) || !TestNotNull(TEXT("type"), Type) || !TestNotNull(TEXT("save"), Save)) return false;
+
+	// Room A: first save, no tags: they are filled and the box shows them.
+	PC->SelectRoom(TEXT("A"));
+	Name->SetText(FText::FromString(TEXT("Male Toilet L2"))); Type->SetSelectedOption(TEXT("Toilet"));
+	Save->OnClicked.Broadcast();
+	TestEqual(TEXT("tags were filled from the name and type"), PC->GetSelectedRoomTags(), TArray<FString>({ TEXT("male"), TEXT("toilet"), TEXT("l2") }));
+	TestEqual(TEXT("and the box shows them"), Tags->GetText().ToString(), FString(TEXT("male, toilet, l2")));
+
+	// A later save does not fill them again: cleared tags stay cleared.
+	Tags->SetText(FText::GetEmpty()); Name->SetText(FText::FromString(TEXT("Female Toilet L2")));
+	Save->OnClicked.Broadcast();
+	TestTrue(TEXT("a second save leaves the tags the user cleared"), PC->GetSelectedRoomTags().IsEmpty());
+
+	// Room B: tags the user typed are kept as typed.
+	PC->SelectRoom(TEXT("B"));
+	Name->SetText(FText::FromString(TEXT("Seminar room"))); Type->SetSelectedOption(TEXT("Classroom")); Tags->SetText(FText::FromString(TEXT("projector")));
+	Save->OnClicked.Broadcast();
+	TestEqual(TEXT("typed tags are not touched"), PC->GetSelectedRoomTags(), TArray<FString>({ TEXT("projector") }));
+	PC->OnSelectedRoomChanged.Remove(Selected);
 	return true;
 }
 

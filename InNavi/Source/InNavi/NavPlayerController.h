@@ -667,6 +667,10 @@ public:
 	// Whether that move would be allowed, without making it (the corner drag looks for the farthest allowed spot with this).
 	bool CanMoveSelectedRoomVertex(int32 VertexIndex, FVector2D NewPosition) const;
 	bool SetSelectedRoomTags(const TArray<FString>& InTags);
+	// PAT-198: the first time the selected room is saved from the Properties panel in this session, a room with no search tags gets them from its
+	// name and type (NavigationSearch::TagsFromNameAndType). Later saves never fill them again, so tags the user cleared stay cleared, and tags the
+	// user typed are never touched. True when tags were filled.
+	bool AutoFillSelectedRoomTagsOnFirstSave();
 	TArray<FString> GetSelectedRoomTags() const;
 	// The selected room's type (see RoomTypes.h). Setting marks the project changed when the type actually differs.
 	bool SetSelectedRoomType(const FString& NewType);
@@ -1564,6 +1568,8 @@ private:
 	bool bWallsVisible = true;
 	bool bPathNodesVisible = true;
 	bool bIONodesVisible = true;
+	// Rooms already saved once from the Properties panel in this session (see AutoFillSelectedRoomTagsOnFirstSave).
+	TSet<FString> RoomIdsSavedOnce;
 	TSet<FString> HiddenRoomIds;
 	TSet<FString> HiddenPathNodeIds;
 	TSet<FString> HiddenIONodeIds;
