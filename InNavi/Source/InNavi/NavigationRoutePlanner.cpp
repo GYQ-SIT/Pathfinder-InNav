@@ -688,9 +688,11 @@ namespace
 
 		if (bOnePointIsOutside)
 		{
+			// The outside meets a building on its ground floor: only that floor has exits (see IsExteriorExitVertex below), so any indoor
+			// floor will do here.
 			const bool bCorrectFloorPair =
-				(A.Point.Floor == UNavigationPanelWidget::OutdoorFloor && B.Point.Floor == 1)
-				|| (B.Point.Floor == UNavigationPanelWidget::OutdoorFloor && A.Point.Floor == 1);
+				(A.Point.Floor == UNavigationPanelWidget::OutdoorFloor && B.Point.Floor != UNavigationPanelWidget::OutdoorFloor)
+				|| (B.Point.Floor == UNavigationPanelWidget::OutdoorFloor && A.Point.Floor != UNavigationPanelWidget::OutdoorFloor);
 
 			return bCorrectFloorPair
 				&& IsExteriorExitVertex(A)
@@ -716,10 +718,9 @@ namespace
 
 		if (!A.Point.ConnectorId.IsEmpty() &&
 			A.Point.ConnectorId == B.Point.ConnectorId &&
-			A.Point.ConnectorType == B.Point.ConnectorType &&
-			A.Point.Position.Equals(B.Point.Position, 0.01f))
+			A.Point.ConnectorType == B.Point.ConnectorType)
 		{
-			// Newer data uses ConnectorGroupId.
+			// Newer data uses ConnectorGroupId. Each floor's node of a connector stands where it was put, so the group decides, not the position.
 			bSameConnector = true;
 		}
 		else if (A.Point.ConnectorId.IsEmpty() &&
@@ -754,9 +755,9 @@ namespace
 					return true;
 				}
 
-				// Stairs and escalators normally connect adjacent floors.
-				return FMath::Abs(
-					Connector.Point.Floor - TargetFloor) == 1;
+				// Stairs and escalators normally connect adjacent floors (B1 and the ground floor are adjacent: there is no level 0).
+				return FMath::Abs(LayoutValidation::LevelIndex(Connector.Point.Floor)
+					- LayoutValidation::LevelIndex(TargetFloor)) == 1;
 			};
 
 		// Both connector copies must agree that the floors are connected.
@@ -786,7 +787,7 @@ bool FNavigationRoutePlanner::IsValidPoint(const APolyBuilding& Building,
 		return true;
 	}
 
-	if (Floor < 1 || Floor > Building.GetFloorCount())
+	if (!Building.HasLevel(Floor))
 	{
 		OutError = TEXT("Choose a floor in the loaded building.");
 		return false;
@@ -844,7 +845,7 @@ namespace
 	bool EntrancePosition(const FRouteBuilding& Model, const FInteriorEntrance& Door, float Scale, FVector2D& Position)
 	{
 		const auto& Boundary = Model.Building->GetFootprint();
-		if (!Boundary.IsValidIndex(Door.EdgeIndex) || Door.Level < 1 || Door.Level > Model.Building->GetFloorCount()
+		if (!Boundary.IsValidIndex(Door.EdgeIndex) || !Model.Building->HasLevel(Door.Level)
 			|| !FMath::IsFinite(Door.Offset) || !FMath::IsFinite(Door.Width) || Door.Offset < 0 || Door.Width <= 0) return false;
 		const FVector2D A = Boundary[Door.EdgeIndex], B = Boundary[(Door.EdgeIndex + 1) % Boundary.Num()];
 		if ((Door.Offset + Door.Width) / Scale > FVector2D::Distance(A, B) + GeometryEpsilon) return false;
@@ -865,7 +866,7 @@ namespace
 		const bool bLive = Live.GetLoadedBuildingId() == Building.BuildingId;
 		const TArray<TSharedPtr<FJsonValue>>* SavedFloors = nullptr;
 		if (Saved.IsValid()) Saved->TryGetArrayField(TEXT("floors"), SavedFloors);
-		for (int32 Level = 1; Level <= Building.GetFloorCount(); ++Level)
+		for (const int32 Level : Building.GetLevels())
 		{
 			if (OnlyFloor != INDEX_NONE && OnlyFloor != Level) continue;
 			if (bLive)
@@ -1121,7 +1122,7 @@ namespace
 		{
 			Point.BuildingId = Building.BuildingId;
 			const FVector2D XY = (Point.Position + Building.BuildingOffset) * Scale;
-			Point.WorldPosition = FVector(XY.X, XY.Y, FMath::Max(0, Point.Floor - 1) * Building.GetFloorHeight());
+			Point.WorldPosition = FVector(XY.X, XY.Y, Building.GetLevelBaseZ(Point.Floor));
 			Point.bHasWorldPosition = true;
 		};
 		auto Validate = [&](FNavigationRoutePoint& Point) -> bool
@@ -1299,7 +1300,7 @@ namespace
 			else
 			{
 				if (!CanUseConnectorBetween(A, B)) continue;
-				Cost = A.Point.Floor == 0 || B.Point.Floor == 0 ? 5.f : 20.f + FMath::Abs(A.Point.Floor - B.Point.Floor) * M->Building->GetFloorHeight() / Scale;
+				Cost = A.Point.Floor == 0 || B.Point.Floor == 0 ? 5.f : 20.f + FMath::Abs(LayoutValidation::LevelIndex(A.Point.Floor) - LayoutValidation::LevelIndex(B.Point.Floor)) * M->Building->GetFloorHeight() / Scale;
 			}
 			Edges.Add({ J, Cost });
 		}
@@ -1404,7 +1405,7 @@ namespace
 			{
 				const auto& A = Result.Points[I - 1]; auto B = Result.Points[I];
 				TArray<double> Crossings;
-				if (A.Floor > 0 && A.Floor == B.Floor && A.BuildingId == B.BuildingId)
+				if (A.Floor != 0 && A.Floor == B.Floor && A.BuildingId == B.BuildingId)
 				{
 					const FVector2D Direction = B.Position - A.Position;
 					for (const auto& Door : Graph.Doorways)
@@ -1895,7 +1896,7 @@ struct FNavigationRouteJob::FImpl
 			FromStart = FMath::Min(FromStart, FVector2D::Distance(Start.Position, Exit.Position));
 			ToDestination = FMath::Min(ToDestination, FVector2D::Distance(Exit.Position, Destination.Position));
 		}
-		auto ToGroundFloor = [&](int32 Floor) { return Floor == 1 ? 0.0 : 20.0 + (Floor - 1) * Own->Building->GetFloorHeight() / Scale; };
+		auto ToGroundFloor = [&](int32 Floor) { return Floor == 1 ? 0.0 : 20.0 + FMath::Abs(LayoutValidation::LevelIndex(Floor)) * Own->Building->GetFloorHeight() / Scale; };
 		OutsideBound = FromStart < TNumericLimits<double>::Max()
 			? 10.0 + FromStart + ToDestination + ToGroundFloor(Start.Floor) + ToGroundFloor(Destination.Floor) : TNumericLimits<double>::Max();
 		IndoorModels.Reset();

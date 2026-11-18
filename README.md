@@ -25,7 +25,8 @@ build, reading project data and routes through a mobile data adapter).
   - `Data/` — sample data, audio, default dock layouts
 - `docs/`
   - `proposal.md` — project proposal
-  - `architecture.md` — system architecture v1.0: the layers, the boundaries, the tech stack, the delivery pipeline, who owns what
+  - `architecture.md` — system architecture on one page: the five layers, one route search, and the questions for the code owners
+  - `architecture-details.md` — the long version: the boundaries, the tech stack, every safeguard, the delivery pipeline, who owns what
   - `configuration.md` — every setting (files, flags, CI), where it is set, and where the secrets are kept
   - `performance.md` — the performance budgets and the measured numbers
   - `toolchain-decision.md` — stack/platform decisions and why
@@ -164,4 +165,4 @@ wiki and this repository say the same thing: `docs/` is the one source, and the 
 
 ## Team
 
-Who owns which component is in `docs/architecture.md` (section 8) and `docs/deliverables.md`.
+Who owns which component is in `docs/architecture-details.md` (section 8) and `docs/deliverables.md`.

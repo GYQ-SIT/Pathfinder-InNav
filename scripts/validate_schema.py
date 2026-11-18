@@ -5,7 +5,7 @@ It understands the part of JSON Schema (draft-07) that the schemas of this repos
 that a keyword is never silently ignored:
 
   type (one name or a list), enum, const, required, properties, additionalProperties (true, false or a schema), items (one schema),
-  minItems, maxItems, minimum, maximum, exclusiveMinimum, minLength, pattern, $ref (to "#/definitions/name" or "#/$defs/name"), and the
+  minItems, maxItems, minimum, maximum, exclusiveMinimum, minLength, pattern, not (a value that must not be valid against a schema), $ref (to "#/definitions/name" or "#/$defs/name"), and the
   annotations $schema, $id, title, description, default, examples, $comment, definitions, $defs.
 
 Usage:
@@ -20,7 +20,7 @@ import sys
 
 ANNOTATIONS = {"$schema", "$id", "title", "description", "default", "examples", "$comment", "definitions", "$defs"}
 KEYWORDS = {"type", "enum", "const", "required", "properties", "additionalProperties", "items", "minItems", "maxItems", "minimum", "maximum",
-            "exclusiveMinimum", "minLength", "pattern", "$ref"}
+            "exclusiveMinimum", "minLength", "pattern", "not", "$ref"}
 
 
 def reject_constant(token):
@@ -84,7 +84,7 @@ def check_schema(schema, where="#"):
         elif key in ("definitions", "$defs"):
             for name, sub in value.items():
                 check_schema(sub, f"{where}/{key}/{name}")
-        elif key == "items" or (key == "additionalProperties" and isinstance(value, dict)):
+        elif key in ("items", "not") or (key == "additionalProperties" and isinstance(value, dict)):
             check_schema(value, f"{where}/{key}")
 
 
@@ -107,6 +107,8 @@ def validate(value, schema, root, path="$"):
         errors.append(f"{path}: {value!r} is not one of {schema['enum']}")
     if "const" in schema and value != schema["const"]:
         errors.append(f"{path}: must be {schema['const']!r}")
+    if "not" in schema and not validate(value, schema["not"], root, path):
+        errors.append(f"{path}: {value!r} is not allowed")
     if isinstance(value, bool):
         return errors
     if isinstance(value, (int, float)):
@@ -155,11 +157,11 @@ def validate_file(schema_path, data_path):
 def self_test():
     schema = {"type": "object", "required": ["a"], "additionalProperties": False,
               "properties": {"a": {"type": "integer", "minimum": 1}, "b": {"type": "array", "minItems": 2, "items": {"$ref": "#/definitions/pt"}},
-                             "c": {"enum": ["x", "y"]}}, "definitions": {"pt": {"type": "number"}}}
+                             "c": {"enum": ["x", "y"]}, "d": {"type": "integer", "not": {"const": 0}}}, "definitions": {"pt": {"type": "number"}}}
     cases = [
         ({"a": 1}, 0), ({"a": 1, "b": [1, 2.5], "c": "x"}, 0), ({}, 1), ({"a": 0}, 1), ({"a": 1.5}, 1), ({"a": True}, 1),
         ({"a": 1, "z": 1}, 1), ({"a": 1, "b": [1]}, 1), ({"a": 1, "b": [1, "s"]}, 1), ({"a": 1, "c": "q"}, 1), ([], 1),
-        ({"a": 1, "b": [float("nan"), float("inf")]}, 2),
+        ({"a": 1, "b": [float("nan"), float("inf")]}, 2), ({"a": 1, "d": 0}, 1), ({"a": 1, "d": -3}, 0),
     ]
     failed = 0
     for value, expected in cases:

@@ -7,6 +7,56 @@ class FJsonObject;
 namespace LayoutValidation
 {
     inline constexpr int32 MaxBuildingFloors = 200;
+    // How far down a building may go: level -20 is B20.
+    inline constexpr int32 MaxBasementFloors = 20;
+
+    // Floor levels. 1 is the ground floor, 2, 3 ... go up, and the basements are -1 (B1), -2 (B2) ... going down. There is no level 0 (0 is
+    // "no floor" in several places), so the floors of a building are not simply first..last: use these, never "Level++" or "Level - 1".
+    inline constexpr bool IsValidLevel(int32 Level) { return Level != 0 && Level >= -MaxBasementFloors && Level <= MaxBuildingFloors; }
+    // How many floors a level is above the ground floor: level 1 is 0, level 2 is 1, B1 (-1) is -1. A floor's bottom is this times the floor height.
+    inline constexpr int32 LevelIndex(int32 Level) { return Level > 0 ? Level - 1 : Level; }
+    inline constexpr int32 LevelFromIndex(int32 Index) { return Index >= 0 ? Index + 1 : Index; }
+    // The level Steps floors above Level (below for a negative Steps): LevelAfter(-1, 1) is 1, LevelAfter(1, -1) is -1.
+    inline constexpr int32 LevelAfter(int32 Level, int32 Steps) { return LevelFromIndex(LevelIndex(Level) + Steps); }
+    // The number of floors from First up to Last (0 when Last is below First).
+    inline constexpr int32 LevelSpan(int32 First, int32 Last) { return LevelIndex(Last) >= LevelIndex(First) ? LevelIndex(Last) - LevelIndex(First) + 1 : 0; }
+    // What the floor is called: "B1" for -1, "3" for 3.
+    inline FString LevelLabel(int32 Level) { return Level < 0 ? FString::Printf(TEXT("B%d"), -Level) : FString::FromInt(Level); }
+    // Reads a level as a person types it: "3", "-1" or "B1" (also "b1"). Not a level (empty, 0, "B0", words, out of range) gives false.
+    inline bool ParseLevel(const FString& Text, int32& OutLevel)
+    {
+        FString Digits = Text.TrimStartAndEnd();
+        bool bBasement = false;
+        if (Digits.StartsWith(TEXT("B"), ESearchCase::IgnoreCase))
+        {
+            bBasement = true;
+            Digits = Digits.Mid(1).TrimStart();
+        }
+        const bool bMinus = Digits.StartsWith(TEXT("-"));
+        if (bMinus)
+        {
+            Digits = Digits.Mid(1);
+        }
+        if (Digits.IsEmpty() || Digits.Len() > 4 || (bBasement && bMinus))
+        {
+            return false;
+        }
+        for (const TCHAR Character : Digits)
+        {
+            if (!FChar::IsDigit(Character))
+            {
+                return false;
+            }
+        }
+        const int32 Value = FCString::Atoi(*Digits);
+        const int32 Level = (bBasement || bMinus) ? -Value : Value;
+        if (!IsValidLevel(Level))
+        {
+            return false;
+        }
+        OutLevel = Level;
+        return true;
+    }
 
     enum class ESeverity : uint8 { Error, Warning, Info };
     enum class EObjectKind : uint8 { Project, Building, Floor, Room, Opening, Connector, Entrance };
@@ -17,7 +67,8 @@ namespace LayoutValidation
         ESeverity Severity = ESeverity::Error;
         EObjectKind Kind = EObjectKind::Project;
         FString BuildingId;
-        int32 Floor = INDEX_NONE;
+        // The level of the floor the issue is on (1 = ground floor, -1 = B1), or 0 for none: 0 is not a level, and -1 is B1, so INDEX_NONE would not do.
+        int32 Floor = 0;
         FString ObjectId;
         FString OwnerId;
         FString JsonPath;

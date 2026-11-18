@@ -1,4 +1,5 @@
 #include "MobileArrivedPageWidget.h"
+#include "LayoutValidation.h"
 
 #include "MobileIcons.h"
 #include "MobileStyle.h"
@@ -82,7 +83,7 @@ void UMobileArrivedPageWidget::Refresh()
 	{
 		return;
 	}
-	PlaceText->SetText(FText::FromString(Place.Name.IsEmpty() ? FString() : Place.Name + TEXT(" · ") + Place.WithCode(FString::Printf(TEXT("Level %d"), Place.Level))));
+	PlaceText->SetText(FText::FromString(Place.Name.IsEmpty() ? FString() : Place.Name + TEXT(" · ") + Place.WithCode(FString::Printf(TEXT("Level %s"), *LayoutValidation::LevelLabel(Place.Level)))));
 	// A white button with a heart; saved, the heart is red and the button offers to remove the place.
 	SaveLabel->SetText(FText::FromString(bSaved ? TEXT("Remove from saved") : TEXT("Save this place")));
 	SaveButton->SetStyle(StartStyle::Button(White, White * 0.94f, White * 0.86f, FieldEdge, 12.f / StartStyle::DesignToUi));

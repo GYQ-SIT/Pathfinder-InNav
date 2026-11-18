@@ -49,6 +49,12 @@ float AInteriorGenerator::GetWallThicknessForFloor(int32 Level) const
 	return 20.f;
 }
 
+// How a level is written in an id: 03 for the third floor, B01 for B1 (so an id stays readable and unique).
+static FString LevelCode(int32 Level)
+{
+	return Level < 0 ? FString::Printf(TEXT("B%02d"), -Level) : FString::Printf(TEXT("%02d"), Level);
+}
+
 void AInteriorGenerator::BeginPlay()
 {
 	Super::BeginPlay();
@@ -466,13 +472,13 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 		// Pre-fill one empty floor slot per floor the exterior shell already claims to have, so a
 		// later AddFloor continues on from there instead of shrinking the shell back down to 1 floor.
 		const int32 ExistingFloorCount = FMath::Max(1, Building->GetFloorCount());
-		for (int32 Level = 1; Level <= ExistingFloorCount; Level++)
+		for (const int32 Level : Building->GetLevels())
 		{
 			FloorInfoByLevel.Add(Level, FInteriorFloorInfo());
 			RoomsByFloor.Add(Level, FInteriorRoomList());
 		}
 
-		ActiveFloor = 1;
+		ActiveFloor = GetOpeningLevel();
 		SetActiveFloor(ActiveFloor);
 
 		UE_LOG(LogTemp, Warning, TEXT("No interior data yet for %s - starting blank with %d floor(s) matching the exterior"), *BuildingId, ExistingFloorCount);
@@ -489,10 +495,10 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 
 	const float Scale = Generator->GetScale();
 	const FVector2D BuildingOffset = Building->BuildingOffset;
-	const float ExteriorFloorHeight = Building->GetFloorHeight();
-
 	int32 SpawnedCount = 0;
-	int32 ShellFloorCount = Building->GetFloorCount();
+	// The floors of the shell, widened below to cover every floor the file has (an older file could have floors above its shell).
+	int32 ShellFirstLevel = Building->GetFirstLevel();
+	int32 ShellLastLevel = Building->GetLastLevel();
 
 	for (const TSharedPtr<FJsonValue>& FloorValue : *FloorsArray)
 	{
@@ -504,13 +510,13 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 
 		double LevelValue = 1;
 		FloorObject->TryGetNumberField(TEXT("level"), LevelValue);
-		if (!FMath::IsFinite(LevelValue) || LevelValue < 1 || LevelValue > LayoutValidation::MaxBuildingFloors
-			|| LevelValue != FMath::FloorToDouble(LevelValue))
+		if (!FMath::IsFinite(LevelValue) || LevelValue != FMath::FloorToDouble(LevelValue) || !LayoutValidation::IsValidLevel(static_cast<int32>(LevelValue)))
 		{
 			continue;
 		}
 		const int32 Level = static_cast<int32>(LevelValue);
-		ShellFloorCount = FMath::Max(ShellFloorCount, Level);
+		if (LayoutValidation::LevelIndex(Level) < LayoutValidation::LevelIndex(ShellFirstLevel)) ShellFirstLevel = Level;
+		if (LayoutValidation::LevelIndex(Level) > LayoutValidation::LevelIndex(ShellLastLevel)) ShellLastLevel = Level;
 
 		float WallHeight = 280.f;
 		FloorObject->TryGetNumberField(TEXT("wallHeight"), WallHeight);
@@ -520,7 +526,7 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 
 		FloorInfoByLevel.Add(Level, FInteriorFloorInfo{ WallHeight, WallThickness });
 
-		const float FloorBaseZ = (Level - 1) * ExteriorFloorHeight;
+		const float FloorBaseZ = Building->GetLevelBaseZ(Level);
 
 		const TArray<TSharedPtr<FJsonValue>>* RoomsArray;
 		if (FloorObject->TryGetArrayField(TEXT("rooms"), RoomsArray))
@@ -683,8 +689,8 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 					for (const TSharedPtr<FJsonValue>& FloorNum : *ConnectsFloorsArray)
 					{
 						double ServedFloor = 0;
-						if (FloorNum && FloorNum->TryGetNumber(ServedFloor) && ServedFloor >= 1
-							&& ServedFloor <= LayoutValidation::MaxBuildingFloors && ServedFloor == FMath::FloorToDouble(ServedFloor))
+						if (FloorNum && FloorNum->TryGetNumber(ServedFloor) && ServedFloor == FMath::FloorToDouble(ServedFloor)
+							&& LayoutValidation::IsValidLevel(static_cast<int32>(ServedFloor)))
 						{
 							Node.ConnectsFloors.Add(static_cast<int32>(ServedFloor));
 						}
@@ -696,49 +702,67 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 		}
 	}
 
-	// Older projects could contain separate shafts with the same group ID.
-	TMap<FString, TArray<int32>> ShaftsByGroup;
+	// A group is one connector, with one node on each floor it reaches, and each floor's node stands where it was put (see MoveConnectorNode):
+	// positions do not tell connectors apart. Older projects could contain separate shafts with the same group ID; those are told apart by what
+	// cannot be one connector: two nodes of the group on the same floor, or of different types. The later one becomes a group of its own.
+	struct FShaft { EInteriorNavNodeType Type; TSet<int32> Levels; FString GroupId; FVector2D Position; };
+	TMap<FString, TArray<FShaft>> ShaftsByGroup;
 	for (int32 Index = 0; Index < NavNodes.Num(); ++Index)
 	{
 		auto& Node = NavNodes[Index];
 		if (!Node.ConnectorGroupId.IsEmpty() && Node.Type != EInteriorNavNodeType::PathNode)
 		{
-			auto& Shafts = ShaftsByGroup.FindOrAdd(Node.ConnectorGroupId);
-			const int32* Shaft = Shafts.FindByPredicate([&](int32 Candidate)
+			TArray<FShaft>& Shafts = ShaftsByGroup.FindOrAdd(Node.ConnectorGroupId);
+			// The shaft this floor can belong to: the same type and not yet on this floor. Of several, the one whose last floor stood where this
+			// one does (older projects kept every floor of a shaft in one column), else the first.
+			FShaft* Shaft = nullptr;
+			for (FShaft& Candidate : Shafts)
 			{
-				const auto& First = NavNodes[Candidate];
-				return First.Type == Node.Type && First.Position.Equals(Node.Position, 0.01);
-			});
+				if (Candidate.Type != Node.Type || Candidate.Levels.Contains(Node.Level))
+				{
+					continue;
+				}
+				if (!Shaft || Candidate.Position.Equals(Node.Position, 0.01))
+				{
+					Shaft = &Candidate;
+					if (Candidate.Position.Equals(Node.Position, 0.01))
+					{
+						break;
+					}
+				}
+			}
 			if (Shaft)
 			{
-				const FString& GroupId = NavNodes[*Shaft].ConnectorGroupId;
-				if (Node.ConnectorGroupId != GroupId)
+				Shaft->Levels.Add(Node.Level);
+				Shaft->Position = Node.Position;
+				if (Node.ConnectorGroupId != Shaft->GroupId)
 				{
-					Node.ConnectorGroupId = GroupId;
-					Node.Id = FString::Printf(TEXT("%s-F%02d"), *GroupId, Node.Level);
+					Node.ConnectorGroupId = Shaft->GroupId;
+					Node.Id = FString::Printf(TEXT("%s-F%s"), *Shaft->GroupId, *LevelCode(Node.Level));
 				}
 			}
 			else
 			{
+				const FString OriginalGroup = Node.ConnectorGroupId;
 				if (!Shafts.IsEmpty())
 				{
 					Node.ConnectorGroupId = LoadedBuildingId + TEXT("-NAV-") + FGuid::NewGuid().ToString(EGuidFormats::Digits);
-					Node.Id = FString::Printf(TEXT("%s-F%02d"), *Node.ConnectorGroupId, Node.Level);
+					Node.Id = FString::Printf(TEXT("%s-F%s"), *Node.ConnectorGroupId, *LevelCode(Node.Level));
 				}
-				Shafts.Add(Index);
+				Shafts.Add({ Node.Type, { Node.Level }, Node.ConnectorGroupId, Node.Position });
 			}
 		}
 		SpawnConnectorMarker(Node, Building);
 	}
 
 	// The saved shell includes unauthored floors. Expand it if a legacy save placed a floor above it.
-	if (Building->GetFloorCount() != ShellFloorCount)
+	if (Building->GetFirstLevel() != ShellFirstLevel || Building->GetLastLevel() != ShellLastLevel)
 	{
-		Building->SetFloorCount(ShellFloorCount);
+		Building->SetLevelRange(ShellFirstLevel, ShellLastLevel);
 		RefreshMirroredEntrances();
 	}
 
-	ActiveFloor = 1;
+	ActiveFloor = GetOpeningLevel();
 	SetActiveFloor(ActiveFloor);
 
 	UE_LOG(LogTemp, Warning, TEXT("Loaded interior for %s: %d floors, %d rooms"), *BuildingId, FloorInfoByLevel.Num(), SpawnedCount);
@@ -799,18 +823,22 @@ void AInteriorGenerator::SetActiveFloor(int32 Level)
 		return;
 	}
 
-	int32 MinLevel = TNumericLimits<int32>::Max();
-	int32 MaxLevel = TNumericLimits<int32>::Min();
+	// The level asked for, or else the floor nearest to it by height (the levels have a gap where level 0 would be, and may not reach the level asked for).
+	int32 ClampedLevel = 0;
+	int32 BestDistance = TNumericLimits<int32>::Max();
+	const int32 AskedIndex = LayoutValidation::LevelIndex(Level == 0 ? 1 : Level);
 	for (const auto& Pair : FloorInfoByLevel)
 	{
-		MinLevel = FMath::Min(MinLevel, Pair.Key);
-		MaxLevel = FMath::Max(MaxLevel, Pair.Key);
+		const int32 Distance = FMath::Abs(LayoutValidation::LevelIndex(Pair.Key) - AskedIndex);
+		if (Distance < BestDistance || (Distance == BestDistance && Pair.Key < ClampedLevel))
+		{
+			BestDistance = Distance;
+			ClampedLevel = Pair.Key;
+		}
 	}
-
-	const int32 ClampedLevel = FMath::Clamp(Level, MinLevel, MaxLevel);
 	if (ClampedLevel != Level)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("SetActiveFloor: %d is outside the loaded range [%d, %d], clamped to %d"), Level, MinLevel, MaxLevel, ClampedLevel);
+		UE_LOG(LogTemp, Warning, TEXT("SetActiveFloor: %d is not a floor of this building, using %d"), Level, ClampedLevel);
 	}
 
 	ActiveFloor = ClampedLevel;
@@ -839,48 +867,169 @@ void AInteriorGenerator::SetActiveFloor(int32 Level)
 	}
 }
 
-int32 AInteriorGenerator::AddFloor()
+int32 AInteriorGenerator::GetOpeningLevel() const
 {
-	if (LoadedBuildingId.IsEmpty() || !Generator)
-	{
-		UE_LOG(LogTemp, Error, TEXT("AddFloor: no building interior currently loaded"));
-		return -1;
-	}
+	const APolyBuilding* Building = (!LoadedBuildingId.IsEmpty() && Generator) ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+	return Building ? Building->GetNearestGroundLevel() : 1;
+}
 
-	APolyBuilding* Building = Generator->FindBuildingById(LoadedBuildingId);
+bool AInteriorGenerator::SetLevelRange(int32 NewFirstLevel, int32 NewLastLevel)
+{
+	APolyBuilding* Building = (!LoadedBuildingId.IsEmpty() && Generator) ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
 	if (!Building)
 	{
-		UE_LOG(LogTemp, Error, TEXT("AddFloor: building '%s' no longer exists"), *LoadedBuildingId);
-		return -1;
+		UE_LOG(LogTemp, Error, TEXT("SetLevelRange: no building interior currently loaded"));
+		return false;
+	}
+	if (!LayoutValidation::IsValidLevel(NewFirstLevel) || !LayoutValidation::IsValidLevel(NewLastLevel))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SetLevelRange: %d to %d is not a range of floors (levels go from B%d to %d, with no 0)"), NewFirstLevel, NewLastLevel,
+			LayoutValidation::MaxBasementFloors, LayoutValidation::MaxBuildingFloors);
+		return false;
+	}
+	if (LayoutValidation::LevelIndex(NewLastLevel) < LayoutValidation::LevelIndex(NewFirstLevel))
+	{
+		NewLastLevel = NewFirstLevel;
+	}
+	if (LayoutValidation::LevelSpan(NewFirstLevel, NewLastLevel) > LayoutValidation::MaxBuildingFloors)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("SetLevelRange: a building has at most %d floors"), LayoutValidation::MaxBuildingFloors);
+		return false;
+	}
+	if (NewFirstLevel == Building->GetFirstLevel() && NewLastLevel == Building->GetLastLevel())
+	{
+		return true;
 	}
 
-	int32 HighestLevel = 0;
+	const int32 OldFirstLevel = Building->GetFirstLevel();
+	const int32 OldLastLevel = Building->GetLastLevel();
+	const auto InRange = [NewFirstLevel, NewLastLevel](int32 Level)
+	{
+		const int32 Index = LayoutValidation::LevelIndex(Level);
+		return Index >= LayoutValidation::LevelIndex(NewFirstLevel) && Index <= LayoutValidation::LevelIndex(NewLastLevel);
+	};
+
+	// The floors that go, with their rooms and walls.
+	TArray<int32> Removed;
 	for (const auto& Pair : FloorInfoByLevel)
 	{
-		HighestLevel = FMath::Max(HighestLevel, Pair.Key);
+		if (!InRange(Pair.Key))
+		{
+			Removed.Add(Pair.Key);
+		}
 	}
-	const int32 NewLevel = Building->GetFloorCount() + 1;
-	if (NewLevel > LayoutValidation::MaxBuildingFloors)
+	for (const int32 Level : Removed)
+	{
+		if (FInteriorRoomList* RemovedRooms = RoomsByFloor.Find(Level))
+		{
+			for (AInteriorRoom* Room : RemovedRooms->Rooms)
+			{
+				if (Room)
+				{
+					Room->Destroy();
+				}
+			}
+		}
+		RoomsByFloor.Remove(Level);
+		FloorInfoByLevel.Remove(Level);
+	}
+
+	// Connectors and doors in the outer wall go with their floor: those on a removed floor are removed, and a connector that reached a removed
+	// floor no longer reaches it.
+	for (int32 Index = NavNodes.Num() - 1; Index >= 0; --Index)
+	{
+		FInteriorNavNode& Node = NavNodes[Index];
+		if (!InRange(Node.Level))
+		{
+			if (Node.MarkerActor)
+			{
+				Node.MarkerActor->Destroy();
+			}
+			NavNodes.RemoveAt(Index);
+			continue;
+		}
+		Node.ConnectsFloors.RemoveAll([&InRange](int32 Level) { return !InRange(Level); });
+	}
+	Entrances.RemoveAll([&InRange](const FInteriorEntrance& Entrance) { return !InRange(Entrance.Level); });
+
+	// The floors that come: empty, with the wall height and thickness of the nearest floor that is there.
+	for (int32 Step = 0, Count = LayoutValidation::LevelSpan(NewFirstLevel, NewLastLevel); Step < Count; ++Step)
+	{
+		const int32 Level = LayoutValidation::LevelAfter(NewFirstLevel, Step);
+		const int32 LevelPosition = LayoutValidation::LevelIndex(Level);
+		const bool bWasInTheBuilding = LevelPosition >= LayoutValidation::LevelIndex(OldFirstLevel) && LevelPosition <= LayoutValidation::LevelIndex(OldLastLevel);
+		if (bWasInTheBuilding || FloorInfoByLevel.Contains(Level))
+		{
+			// A floor the building already had stays as it was: an unauthored floor of an older project has no entry and is not given one.
+			continue;
+		}
+		FInteriorFloorInfo NewFloorInfo;
+		int32 BestDistance = TNumericLimits<int32>::Max();
+		for (const auto& Pair : FloorInfoByLevel)
+		{
+			const int32 Distance = FMath::Abs(LayoutValidation::LevelIndex(Pair.Key) - LayoutValidation::LevelIndex(Level));
+			if (Distance < BestDistance)
+			{
+				BestDistance = Distance;
+				NewFloorInfo = Pair.Value;
+			}
+		}
+		FloorInfoByLevel.Add(Level, NewFloorInfo);
+		RoomsByFloor.Add(Level, FInteriorRoomList());
+	}
+
+	// The exterior shell follows: the floors the interior has are the source of truth for how tall it is and where it starts.
+	Building->SetLevelRange(NewFirstLevel, NewLastLevel);
+	RefreshMirroredEntrances();
+	SetActiveFloor(ActiveFloor);
+
+	UE_LOG(LogTemp, Warning, TEXT("%s now has the floors %s to %s (%d removed)"), *LoadedBuildingId, *LayoutValidation::LevelLabel(NewFirstLevel),
+		*LayoutValidation::LevelLabel(NewLastLevel), Removed.Num());
+	RecordHistorySnapshot();
+	return true;
+}
+
+int32 AInteriorGenerator::AddFloor()
+{
+	APolyBuilding* Building = (!LoadedBuildingId.IsEmpty() && Generator) ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+	if (!Building)
+	{
+		UE_LOG(LogTemp, Error, TEXT("AddFloor: no building interior currently loaded"));
+		return 0;
+	}
+	const int32 NewLevel = LayoutValidation::LevelAfter(Building->GetLastLevel(), 1);
+	if (!LayoutValidation::IsValidLevel(NewLevel) || Building->GetFloorCount() >= LayoutValidation::MaxBuildingFloors)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("AddFloor: building '%s' is at the floor limit"), *LoadedBuildingId);
-		return INDEX_NONE;
+		return 0;
 	}
-
-	FInteriorFloorInfo NewFloorInfo;
-	if (const FInteriorFloorInfo* TopFloor = FloorInfoByLevel.Find(HighestLevel))
+	if (!SetLevelRange(Building->GetFirstLevel(), NewLevel))
 	{
-		NewFloorInfo = *TopFloor;
+		return 0;
 	}
-	FloorInfoByLevel.Add(NewLevel, NewFloorInfo);
-	RoomsByFloor.Add(NewLevel, FInteriorRoomList());
-
-	// New floor count is the source of truth for how tall the exterior shell is.
-	Building->SetFloorCount(NewLevel);
-
 	SetActiveFloor(NewLevel);
+	return NewLevel;
+}
 
-	UE_LOG(LogTemp, Warning, TEXT("Added floor %d to %s (wallHeight=%.0f, wallThickness=%.0f)"), NewLevel, *LoadedBuildingId, NewFloorInfo.WallHeight, NewFloorInfo.WallThickness);
-	RecordHistorySnapshot();
+int32 AInteriorGenerator::AddFloorBelow()
+{
+	APolyBuilding* Building = (!LoadedBuildingId.IsEmpty() && Generator) ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+	if (!Building)
+	{
+		UE_LOG(LogTemp, Error, TEXT("AddFloorBelow: no building interior currently loaded"));
+		return 0;
+	}
+	const int32 NewLevel = LayoutValidation::LevelAfter(Building->GetFirstLevel(), -1);
+	if (!LayoutValidation::IsValidLevel(NewLevel) || Building->GetFloorCount() >= LayoutValidation::MaxBuildingFloors)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AddFloorBelow: building '%s' is at the basement limit"), *LoadedBuildingId);
+		return 0;
+	}
+	if (!SetLevelRange(NewLevel, Building->GetLastLevel()))
+	{
+		return 0;
+	}
+	SetActiveFloor(NewLevel);
 	return NewLevel;
 }
 
@@ -898,116 +1047,24 @@ bool AInteriorGenerator::RemoveFloor(int32 Level)
 		return false;
 	}
 
-	if (!Generator)
-	{
-		return false;
-	}
-
-	APolyBuilding* Building = Generator->FindBuildingById(LoadedBuildingId);
+	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
 	if (!Building)
 	{
 		UE_LOG(LogTemp, Error, TEXT("RemoveFloor: building '%s' no longer exists"), *LoadedBuildingId);
 		return false;
 	}
 
-	const int32 MaxLevel = Building->GetFloorCount();
-
-	// Destroy the removed floor's rooms.
-	if (FInteriorRoomList* RemovedRooms = RoomsByFloor.Find(Level))
+	// Only an end floor can go: the floors keep their numbers.
+	if (Level == Building->GetLastLevel())
 	{
-		for (AInteriorRoom* Room : RemovedRooms->Rooms)
-		{
-			if (Room)
-			{
-				Room->Destroy();
-			}
-		}
+		return SetLevelRange(Building->GetFirstLevel(), LayoutValidation::LevelAfter(Level, -1));
 	}
-	RoomsByFloor.Remove(Level);
-	FloorInfoByLevel.Remove(Level);
-
-	const float ExteriorFloorHeight = Building->GetFloorHeight();
-
-	// Shift every floor above the removed one down by one level: renumber it and reposition its
-	// rooms' meshes to the new (lower) height.
-	for (int32 OldLevel = Level + 1; OldLevel <= MaxLevel; OldLevel++)
+	if (Level == Building->GetFirstLevel())
 	{
-		const int32 NewLevelNum = OldLevel - 1;
-
-		if (const FInteriorFloorInfo* Info = FloorInfoByLevel.Find(OldLevel))
-		{
-			const FInteriorFloorInfo InfoCopy = *Info;
-			FloorInfoByLevel.Remove(OldLevel);
-			FloorInfoByLevel.Add(NewLevelNum, InfoCopy);
-		}
-
-		if (const FInteriorRoomList* MovingRooms = RoomsByFloor.Find(OldLevel))
-		{
-			FInteriorRoomList RoomsCopy = *MovingRooms;
-			RoomsByFloor.Remove(OldLevel);
-
-			const float NewFloorBaseZ = (NewLevelNum - 1) * ExteriorFloorHeight;
-			for (AInteriorRoom* Room : RoomsCopy.Rooms)
-			{
-				if (Room)
-				{
-					Room->FloorLevel = NewLevelNum;
-					Room->SetFloorBaseZ(NewFloorBaseZ);
-				}
-			}
-
-			RoomsByFloor.Add(NewLevelNum, RoomsCopy);
-		}
+		return SetLevelRange(LayoutValidation::LevelAfter(Level, 1), Building->GetLastLevel());
 	}
-
-	// Connectors and doors in the outer wall go with their floor: those on the removed floor are removed, those above it come down one
-	// level (a connector's marker is placed again at its new height), and the floors every connector reaches are renumbered the same way.
-	for (int32 Index = NavNodes.Num() - 1; Index >= 0; --Index)
-	{
-		FInteriorNavNode& Node = NavNodes[Index];
-		if (Node.Level == Level)
-		{
-			if (Node.MarkerActor)
-			{
-				Node.MarkerActor->Destroy();
-			}
-			NavNodes.RemoveAt(Index);
-			continue;
-		}
-		Node.ConnectsFloors.Remove(Level);
-		for (int32& ConnectedLevel : Node.ConnectsFloors)
-		{
-			if (ConnectedLevel > Level)
-			{
-				--ConnectedLevel;
-			}
-		}
-		if (Node.Level > Level)
-		{
-			--Node.Level;
-			RebuildConnectorMarker(Node, Building);
-		}
-	}
-	Entrances.RemoveAll([Level](const FInteriorEntrance& Entrance) { return Entrance.Level == Level; });
-	for (FInteriorEntrance& Entrance : Entrances)
-	{
-		if (Entrance.Level > Level)
-		{
-			--Entrance.Level;
-		}
-	}
-	const int32 NewFloorCount = MaxLevel - 1;
-
-	// New floor count is the source of truth for how tall the exterior shell is.
-	Building->SetFloorCount(NewFloorCount);
-	RefreshMirroredEntrances();
-
-	SetActiveFloor(FMath::Clamp(ActiveFloor, 1, NewFloorCount));
-
-	UE_LOG(LogTemp, Warning,TEXT("Removed floor %d from %s, now %d floors"),Level, *LoadedBuildingId, NewFloorCount);
-
-	RecordHistorySnapshot();
-	return true;
+	UE_LOG(LogTemp, Warning, TEXT("RemoveFloor: floor %d is in the middle of the building, and only the highest or the lowest floor can be removed"), Level);
+	return false;
 }
 
 FString AInteriorGenerator::PeekNextRoomId() const
@@ -1021,7 +1078,7 @@ FString AInteriorGenerator::PeekNextRoomId() const
 	// carry a permanent navigation ID so reusing a display ID can't retarget a bookmark.
 	for (int32 Index = 1; ; Index++)
 	{
-		const FString CandidateId = FString::Printf(TEXT("%s-%02d-%02d"), *LoadedBuildingId, ActiveFloor, Index);
+		const FString CandidateId = FString::Printf(TEXT("%s-%s-%02d"), *LoadedBuildingId, *LevelCode(ActiveFloor), Index);
 		if (!UsedRoomIds.Contains(CandidateId))
 		{
 			return CandidateId;
@@ -1133,7 +1190,7 @@ AInteriorRoom* AInteriorGenerator::CreateRoomFromFootprintWithTags(const TArray<
 	}
 
 	const float Scale = Generator->GetScale();
-	const float FloorBaseZ = (ActiveFloor - 1) * Building->GetFloorHeight();
+	const float FloorBaseZ = Building->GetLevelBaseZ(ActiveFloor);
 
 	AInteriorRoom* Room = GetWorld()->SpawnActor<AInteriorRoom>(FVector::ZeroVector, FRotator::ZeroRotator);
 	if (Room)
@@ -1306,7 +1363,7 @@ AInteriorRoom* AInteriorGenerator::CreateWallFromPoints(const TArray<FVector2D>&
 	}
 
 	const float Scale = Generator->GetScale();
-	const float FloorBaseZ = (ActiveFloor - 1) * Building->GetFloorHeight();
+	const float FloorBaseZ = Building->GetLevelBaseZ(ActiveFloor);
 
 	AInteriorRoom* Wall = GetWorld()->SpawnActor<AInteriorRoom>(FVector::ZeroVector, FRotator::ZeroRotator);
 	if (Wall)
@@ -1553,7 +1610,7 @@ void AInteriorGenerator::RebuildConnectorMarker(FInteriorNavNode& Node, APolyBui
 
 	const float Scale = Generator->GetScale();
 	const FVector2D WorldCenter = (Node.Position + Building->BuildingOffset) * Scale;
-	const float FloorBaseZ = (Node.Level - 1) * Building->GetFloorHeight();
+	const float FloorBaseZ = Building->GetLevelBaseZ(Node.Level);
 	Node.MarkerActor->BuildMarker(Node.Type, WorldCenter, FloorBaseZ, Building->GetFloorHeight(), Node.RotationDegrees, Node.SizeScale);
 	Node.MarkerActor->SetOwnerGroupId(Node.ConnectorGroupId);
 	Node.MarkerActor->SetActorHiddenInGame(Node.Level != ActiveFloor);
@@ -1608,7 +1665,7 @@ FString AInteriorGenerator::PlaceConnectorNode(EInteriorNavNodeType Type, FVecto
 		GroupId = FString::Printf(TEXT("%s-NAV-%02d"), *LoadedBuildingId, Index);
 		if (!ExistingIds.Contains(GroupId) && !Floors.ContainsByPredicate([&](int32 Level)
 		{
-			return ExistingIds.Contains(FString::Printf(TEXT("%s-F%02d"), *GroupId, Level));
+			return ExistingIds.Contains(FString::Printf(TEXT("%s-F%s"), *GroupId, *LevelCode(Level)));
 		}))
 		{
 			break;
@@ -1617,7 +1674,7 @@ FString AInteriorGenerator::PlaceConnectorNode(EInteriorNavNodeType Type, FVecto
 	for (int32 Level : Floors)
 	{
 		FInteriorNavNode Node;
-		Node.Id = FString::Printf(TEXT("%s-F%02d"), *GroupId, Level);
+		Node.Id = FString::Printf(TEXT("%s-F%s"), *GroupId, *LevelCode(Level));
 		Node.Type = Type;
 		Node.Level = Level;
 		Node.Position = Position;
@@ -1675,14 +1732,20 @@ bool AInteriorGenerator::SetConnectorFloors(const FString& GroupId, const TArray
 	float RotationDegrees = 0.f;
 	float SizeScale = 1.f;
 	TArray<int32> CurrentFloors;
+	bool bTemplateIsActiveFloor = false;
 	for (const FInteriorNavNode& Node : NavNodes)
 	{
 		if (Node.ConnectorGroupId == GroupId)
 		{
-			Type = Node.Type;
-			Position = Node.Position;
-			RotationDegrees = Node.RotationDegrees;
-			SizeScale = Node.SizeScale;
+			// A new floor is made like the floor being edited, when the connector is on it (the floors are not alike any more), else like the last one.
+			if (!bTemplateIsActiveFloor)
+			{
+				Type = Node.Type;
+				Position = Node.Position;
+				RotationDegrees = Node.RotationDegrees;
+				SizeScale = Node.SizeScale;
+				bTemplateIsActiveFloor = Node.Level == ActiveFloor;
+			}
 			CurrentFloors.Add(Node.Level);
 		}
 	}
@@ -1738,7 +1801,7 @@ bool AInteriorGenerator::SetConnectorFloors(const FString& GroupId, const TArray
 		}
 
 		FInteriorNavNode NewNode;
-		NewNode.Id = FString::Printf(TEXT("%s-F%02d"), *GroupId, Level);
+		NewNode.Id = FString::Printf(TEXT("%s-F%s"), *GroupId, *LevelCode(Level));
 		NewNode.Type = Type;
 		NewNode.Level = Level;
 		NewNode.Position = Position;
@@ -1757,12 +1820,65 @@ bool AInteriorGenerator::SetConnectorFloors(const FString& GroupId, const TArray
 	return true;
 }
 
-bool AInteriorGenerator::RotateConnectorGroup(const FString& GroupId, float DeltaDegrees)
+TMap<int32, FVector2D> AInteriorGenerator::GetConnectorPositions(const FString& GroupId, int32 OnlyLevel) const
+{
+	TMap<int32, FVector2D> Positions;
+	for (const FInteriorNavNode& Node : NavNodes)
+	{
+		if (Node.ConnectorGroupId == GroupId && (OnlyLevel == 0 || Node.Level == OnlyLevel))
+		{
+			Positions.Add(Node.Level, Node.Position);
+		}
+	}
+	return Positions;
+}
+
+bool AInteriorGenerator::SetConnectorPositions(const FString& GroupId, const TMap<int32, FVector2D>& NewPositions)
+{
+	TArray<FInteriorNavNode*> Moving;
+	for (FInteriorNavNode& Node : NavNodes)
+	{
+		if (Node.ConnectorGroupId == GroupId && NewPositions.Contains(Node.Level))
+		{
+			Moving.Add(&Node);
+		}
+	}
+	if (Moving.IsEmpty())
+	{
+		return false;
+	}
+
+	bool bAnyMoved = false;
+	for (const FInteriorNavNode* Node : Moving)
+	{
+		const FVector2D& NewPosition = NewPositions.FindChecked(Node->Level);
+		bAnyMoved |= !NewPosition.Equals(Node->Position, 0.0001);
+		if (!CanPlaceConnectorOnFloor(Node->Type, NewPosition, Node->Level, Node->RotationDegrees, Node->SizeScale, GroupId, false))
+		{
+			return false;
+		}
+	}
+	if (!bAnyMoved)
+	{
+		return true;
+	}
+
+	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+	for (FInteriorNavNode* Node : Moving)
+	{
+		Node->Position = NewPositions.FindChecked(Node->Level);
+		RebuildConnectorMarker(*Node, Building);
+	}
+	NotifyNavigationLayoutChanged();
+	return true;
+}
+
+bool AInteriorGenerator::RotateConnectorGroup(const FString& GroupId, float DeltaDegrees, int32 OnlyLevel)
 {
 	TArray<FInteriorNavNode*> GroupNodes;
 	for (FInteriorNavNode& Node : NavNodes)
 	{
-		if (Node.ConnectorGroupId == GroupId)
+		if (Node.ConnectorGroupId == GroupId && (OnlyLevel == 0 || Node.Level == OnlyLevel))
 		{
 			GroupNodes.Add(&Node);
 		}
@@ -1772,19 +1888,11 @@ bool AInteriorGenerator::RotateConnectorGroup(const FString& GroupId, float Delt
 		return false;
 	}
 
-	// Every floor instance shares one orientation (see FInteriorNavNode::RotationDegrees), so this
-	// rotates them all together - GroupNodes[0] stands in for the group's shared Type/Position/scale.
-	const float NewRotation = GroupNodes[0]->RotationDegrees + DeltaDegrees;
-	const EInteriorNavNodeType Type = GroupNodes[0]->Type;
-	const FVector2D Position = GroupNodes[0]->Position;
-	const float SizeScale = GroupNodes[0]->SizeScale;
-
-	// All-or-nothing across every floor the connector reaches, same reasoning as PlaceConnectorNode -
-	// called every tick while a rotate key/button is held, so a silent no-op (no log spam) once any
-	// floor would be blocked.
+	// Each floor node turns from its own orientation. All-or-nothing across the nodes being turned, same reasoning as PlaceConnectorNode - this is
+	// called every tick while a rotate key/button is held, so a silent no-op (no log spam) once any floor would be blocked.
 	for (const FInteriorNavNode* Node : GroupNodes)
 	{
-		if (!CanPlaceConnectorOnFloor(Type, Position, Node->Level, NewRotation, SizeScale, GroupId))
+		if (!CanPlaceConnectorOnFloor(Node->Type, Node->Position, Node->Level, Node->RotationDegrees + DeltaDegrees, Node->SizeScale, GroupId))
 		{
 			return false;
 		}
@@ -1793,19 +1901,19 @@ bool AInteriorGenerator::RotateConnectorGroup(const FString& GroupId, float Delt
 	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
 	for (FInteriorNavNode* Node : GroupNodes)
 	{
-		Node->RotationDegrees = NewRotation;
+		Node->RotationDegrees += DeltaDegrees;
 		RebuildConnectorMarker(*Node, Building);
 	}
 	NotifyNavigationLayoutChanged();
 	return true;
 }
 
-bool AInteriorGenerator::ScaleConnectorGroup(const FString& GroupId, float DeltaScale)
+bool AInteriorGenerator::ScaleConnectorGroup(const FString& GroupId, float DeltaScale, int32 OnlyLevel)
 {
 	TArray<FInteriorNavNode*> GroupNodes;
 	for (FInteriorNavNode& Node : NavNodes)
 	{
-		if (Node.ConnectorGroupId == GroupId)
+		if (Node.ConnectorGroupId == GroupId && (OnlyLevel == 0 || Node.Level == OnlyLevel))
 		{
 			GroupNodes.Add(&Node);
 		}
@@ -1815,21 +1923,23 @@ bool AInteriorGenerator::ScaleConnectorGroup(const FString& GroupId, float Delta
 		return false;
 	}
 
-	const float NewScale = FMath::Clamp(GroupNodes[0]->SizeScale + DeltaScale, MinConnectorScale, MaxConnectorScale);
-	if (FMath::IsNearlyEqual(NewScale, GroupNodes[0]->SizeScale))
+	// Each floor node grows or shrinks from its own size (clamped); the ones already at the limit stay.
+	bool bAnyChanges = false;
+	for (const FInteriorNavNode* Node : GroupNodes)
+	{
+		bAnyChanges |= !FMath::IsNearlyEqual(FMath::Clamp(Node->SizeScale + DeltaScale, MinConnectorScale, MaxConnectorScale), Node->SizeScale);
+	}
+	if (!bAnyChanges)
 	{
 		// Already at the min/max clamp - nothing to do (and nothing to log; Grow/Shrink buttons are
 		// clicked repeatedly right up against the limit in normal use).
 		return false;
 	}
 
-	const EInteriorNavNodeType Type = GroupNodes[0]->Type;
-	const FVector2D Position = GroupNodes[0]->Position;
-	const float RotationDegrees = GroupNodes[0]->RotationDegrees;
-
 	for (const FInteriorNavNode* Node : GroupNodes)
 	{
-		if (!CanPlaceConnectorOnFloor(Type, Position, Node->Level, RotationDegrees, NewScale, GroupId))
+		const float NewScale = FMath::Clamp(Node->SizeScale + DeltaScale, MinConnectorScale, MaxConnectorScale);
+		if (!CanPlaceConnectorOnFloor(Node->Type, Node->Position, Node->Level, Node->RotationDegrees, NewScale, GroupId))
 		{
 			UE_LOG(LogTemp, Error, TEXT("ScaleConnectorGroup: '%s' unchanged"), *GroupId);
 			return false;
@@ -1839,7 +1949,7 @@ bool AInteriorGenerator::ScaleConnectorGroup(const FString& GroupId, float Delta
 	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
 	for (FInteriorNavNode* Node : GroupNodes)
 	{
-		Node->SizeScale = NewScale;
+		Node->SizeScale = FMath::Clamp(Node->SizeScale + DeltaScale, MinConnectorScale, MaxConnectorScale);
 		RebuildConnectorMarker(*Node, Building);
 	}
 	RecordHistorySnapshot();
@@ -2416,28 +2526,26 @@ FString AInteriorGenerator::MakeUniqueRoomName(const FString& Desired) const
 		return Desired;
 	}
 
-	// Split a trailing number off ("Lab1" -> "Lab" + 1); no number (or one too long to count) starts at 2 after a space.
-	int32 DigitStart = Desired.Len();
-	while (DigitStart > 0 && FChar::IsDigit(Desired[DigitStart - 1]))
+	// A copy of "Room (2)" counts on from its own bracket ("Room (3)"); anything else gets "(1)" after the whole name ("Lobby 14" -> "Lobby 14 (1)").
+	FString Base = Desired;
+	int32 Number = 1;
+	if (Desired.EndsWith(TEXT(")")))
 	{
-		--DigitStart;
+		int32 Open = INDEX_NONE;
+		Desired.FindLastChar(TEXT('('), Open);
+		const FString Digits = Open == INDEX_NONE ? FString() : Desired.Mid(Open + 1, Desired.Len() - Open - 2);
+		if (Open > 0 && Digits.Len() >= 1 && Digits.Len() <= 9 && Digits.IsNumeric() && !Digits.Contains(TEXT("-")) && !Digits.Contains(TEXT(".")) && !Digits.Contains(TEXT("+")))
+		{
+			Base = Desired.Left(Open).TrimEnd();
+			Number = FCString::Atoi(*Digits) + 1;
+		}
 	}
-	FString Prefix;
-	int32 Number = 2;
-	if (DigitStart < Desired.Len() && Desired.Len() - DigitStart <= 9)
-	{
-		Prefix = Desired.Left(DigitStart);
-		Number = FCString::Atoi(*Desired.Mid(DigitStart)) + 1;
-	}
-	else
-	{
-		Prefix = Desired + TEXT(" ");
-	}
+	const FString Prefix = Base + TEXT(" (");
 
 	FString Candidate;
 	do
 	{
-		Candidate = Prefix + FString::FromInt(Number++);
+		Candidate = Prefix + FString::FromInt(Number++) + TEXT(")");
 	} while (IsRoomNameTaken(Candidate));
 	return Candidate;
 }
@@ -2662,15 +2770,14 @@ FString AInteriorGenerator::AddEntranceAtPoint(const FVector2D& FootprintPoint, 
 	// Wholly on the shared wall: a door to that building, which must have this floor and room for the matching door.
 	const FString NeighbourId = *Neighbours.CreateConstIterator();
 	const APolyBuilding* Neighbour = Generator->FindBuildingById(NeighbourId);
-	if (!Neighbour || ActiveFloor > Neighbour->GetFloorCount())
+	if (!Neighbour || !Neighbour->HasLevel(ActiveFloor))
 	{
-		OutError = FString::Printf(TEXT("%s has no floor %d, so there is nothing to connect to here."), *NeighbourId, ActiveFloor);
+		OutError = FString::Printf(TEXT("%s has no floor %s, so there is nothing to connect to here."), *NeighbourId, *LayoutValidation::LevelLabel(ActiveFloor));
 		return FString();
 	}
-	if (!InteriorEntrances::AreElevationsAligned((ActiveFloor - 1) * double(Building->GetFloorHeight()),
-		(ActiveFloor - 1) * double(Neighbour->GetFloorHeight())))
+	if (!InteriorEntrances::AreElevationsAligned(Building->GetLevelBaseZ(ActiveFloor), Neighbour->GetLevelBaseZ(ActiveFloor)))
 	{
-		OutError = FString::Printf(TEXT("Floor %d in %s is at a different height, so the doors cannot connect."), ActiveFloor, *NeighbourId);
+		OutError = FString::Printf(TEXT("Floor %s in %s is at a different height, so the doors cannot connect."), *LayoutValidation::LevelLabel(ActiveFloor), *NeighbourId);
 		return FString();
 	}
 	FInteriorEntrance Link;
@@ -2840,11 +2947,7 @@ bool AInteriorGenerator::GenerateFloor(int32 Seed, FFloorGenerationResult& OutRe
 	}
 
 	const int32 Level = ActiveFloor;
-	int32 HighestLevel = 0;
-	for (const TPair<int32, FInteriorFloorInfo>& Pair : FloorInfoByLevel)
-	{
-		HighestLevel = FMath::Max(HighestLevel, Pair.Key);
-	}
+	const TArray<int32> AllLevels = GetFloorLevels();
 
 	bBulkEditing = true;
 	// A new core: its lifts reach every floor and its stair the floors either side, as far as nothing blocks them on those floors.
@@ -2852,9 +2955,13 @@ bool AInteriorGenerator::GenerateFloor(int32 Seed, FFloorGenerationResult& OutRe
 	{
 		TArray<int32> Floors;
 		const bool bStair = Connector.Type != EInteriorNavNodeType::Elevator;
-		for (int32 Floor = bStair ? FMath::Max(1, Level - 1) : 1; Floor <= (bStair ? FMath::Min(HighestLevel, Level + 1) : HighestLevel); ++Floor)
+		for (const int32 Floor : AllLevels)
 		{
-			Floors.Add(Floor);
+			// A lift reaches every floor, a stair the floor itself and the one above and the one below.
+			if (!bStair || FMath::Abs(LayoutValidation::LevelIndex(Floor) - LayoutValidation::LevelIndex(Level)) <= 1)
+			{
+				Floors.Add(Floor);
+			}
 		}
 		// Asked quietly first, so a floor where something is in the way is a "just this floor", not a line in the error log.
 		for (int32 Floor : Floors)
@@ -2918,7 +3025,7 @@ bool AInteriorGenerator::GenerateFloor(int32 Seed, FFloorGenerationResult& OutRe
 			continue;
 		}
 		FString CreateError;
-		const FString Name = FString::Printf(TEXT("%s %d-%02d"), *Proposed.Type, Level, ++RoomNumber);
+		const FString Name = FString::Printf(TEXT("%s %s-%02d"), *Proposed.Type, *LayoutValidation::LevelLabel(Level), ++RoomNumber);
 		AInteriorRoom* Room = CreateRoomFromFootprintWithTags(Proposed.Footprint, FString(), Name, true, false, false, CreateError, { TEXT("generated") }, Proposed.Type);
 		if (!Room)
 		{
@@ -3389,6 +3496,7 @@ void AInteriorGenerator::RecordHistorySnapshotInternal(const FString& EntranceOw
 	TSharedRef<FJsonObject> InteriorObject = SerializeCurrentInterior();
 	FInteriorHistorySnapshot Snapshot;
 	Snapshot.FloorCount = Building->GetFloorCount();
+	Snapshot.FirstLevel = Building->GetFirstLevel();
 	Snapshot.EntranceOwnerId = EntranceOwnerId;
 	Snapshot.RemovedEntrance = MoveTemp(RemovedEntrance);
 	FString Json;
@@ -3489,9 +3597,9 @@ bool AInteriorGenerator::RestoreHistorySnapshot(int32 TargetIndex)
 	TGuardValue<bool> Restoring(bIsRestoringHistory, true);
 	if (!ApplyEntranceEdit(bUndo)) return false;
 
-	if (Building->GetFloorCount() != Snapshot.FloorCount)
+	if (Building->GetFloorCount() != Snapshot.FloorCount || Building->GetFirstLevel() != Snapshot.FirstLevel)
 	{
-		Building->SetFloorCount(Snapshot.FloorCount);
+		Building->SetLevelRange(Snapshot.FirstLevel, LayoutValidation::LevelAfter(Snapshot.FirstLevel, Snapshot.FloorCount - 1));
 	}
 
 	Generator->SetInteriorDataForBuilding(

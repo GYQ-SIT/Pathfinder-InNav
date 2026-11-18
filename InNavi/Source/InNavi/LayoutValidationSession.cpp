@@ -216,7 +216,7 @@ bool ULayoutValidationSession::ShowIssue(ANavPlayerController& Controller, int32
     // This explicit view action follows the controller's normal building-switch path, which preserves unsaved edits.
     if (Controller.GetLoadedBuildingId() != Issue.BuildingId && Controller.LoadInteriorForBuilding(Issue.BuildingId) < 0) return false;
     Controller.SetIn3DPreviewMode(false);
-    if (Issue.Floor > 0) Controller.SetActiveFloor(Issue.Floor);
+    if (Issue.Floor != 0) Controller.SetActiveFloor(Issue.Floor);
     switch (Issue.Kind)
     {
     case LayoutValidation::EObjectKind::Room: Controller.SelectRoom(Issue.ObjectId); break;

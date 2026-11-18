@@ -1,4 +1,5 @@
 #include "NavigationPanelWidget.h"
+#include "LayoutValidation.h"
 #include "NavigationInstructions.h"
 
 #include "BuildingGenerator.h"
@@ -339,7 +340,7 @@ void UNavigationPanelWidget::SelectPoint(FVector2D FootprintPosition, int32 Floo
 	SelectedPoint.Floor = SelectedFloor;
 	// The mode stays on: the next click changes the place again, until the button is pressed again (or Esc).
 	SetEndpoint(Endpoint, SelectedPoint, Building->BuildingId, EndpointName,
-		SelectedFloor == OutdoorFloor ? TEXT("outside") : FString::Printf(TEXT("indoors on Floor %d"), SelectedFloor),
+		SelectedFloor == OutdoorFloor ? TEXT("outside") : FString::Printf(TEXT("indoors on Floor %s"), *LayoutValidation::LevelLabel(SelectedFloor)),
 		false);
 	AddKeepPickingHint();
 	UE_LOG(LogTemp, Warning, TEXT("[Navigation] Point accepted as %s: position=(%.2f, %.2f), floor=%d"),
@@ -403,7 +404,7 @@ void UNavigationPanelWidget::RefreshRoomSearchIndex() const
 		return;
 	}
 
-	for (int32 Floor = 1; Floor <= FloorCount; ++Floor)
+	for (const int32 Floor : Building->GetLevels())
 	{
 		for (AInteriorRoom* Room : Interior->GetRoomsOnFloor(Floor))
 		{
@@ -422,7 +423,7 @@ void UNavigationPanelWidget::RefreshRoomSearchIndex() const
 			Option.Floor = Floor;
 			Option.Centroid = ComputePolygonCentroid(Room->GetFootprint());
 			// The id is not shown (a room is picked by name and floor); it can still be searched for.
-			Option.DisplayLabel = FString::Printf(TEXT("%s (Floor %d)"), *Option.RoomName, Floor);
+			Option.DisplayLabel = FString::Printf(TEXT("%s (Floor %s)"), *Option.RoomName, *LayoutValidation::LevelLabel(Floor));
 			Option.SearchableText = Option.DisplayLabel + TEXT(" ") + Option.RoomId + TEXT(" ") + FString::Join(Option.Tags, TEXT(" "));
 			// Other says nothing, and would make a search for the word "other" match every untyped room.
 			if (Option.RoomType != RoomTypes::Default())
@@ -515,7 +516,7 @@ bool UNavigationPanelWidget::SetEndpointToRoom(const FString& RoomOptionLabel, b
 	FSelectedEndpoint& Endpoint = bIsStart ? Start : Destination;
 	SetEndpoint(Endpoint, SelectedPoint, BuildingId,
 		bIsStart ? TEXT("Start") : TEXT("Destination"),
-		FString::Printf(TEXT("to '%s' indoors on Floor %d"), *Found->RoomName, Found->Floor),
+		FString::Printf(TEXT("to '%s' indoors on Floor %s"), *Found->RoomName, *LayoutValidation::LevelLabel(Found->Floor)),
 		true, RoomOptionLabel, Found->RoomId);
 	return true;
 }
@@ -887,7 +888,7 @@ FString UNavigationPanelWidget::PlaceText(const FSelectedEndpoint& Endpoint) con
 	// A point picked on the map is a custom point: outside, or on a floor (with its building when that is not the open one). The longer
 	// phrase, with the building it is near, is for the status and the directions.
 	const bool bOutside = Endpoint.Point.Floor == OutdoorFloor;
-	FString Text = bOutside ? FString(TEXT("Custom Point (External)")) : FString::Printf(TEXT("Custom Point (Floor %d)"), Endpoint.Point.Floor);
+	FString Text = bOutside ? FString(TEXT("Custom Point (External)")) : FString::Printf(TEXT("Custom Point (Floor %s)"), *LayoutValidation::LevelLabel(Endpoint.Point.Floor));
 	if (!bOutside && Interior && Endpoint.BuildingId != Interior->GetLoadedBuildingId())
 	{
 		Text = BuildingDisplayName(Endpoint.BuildingId) + TEXT(" · ") + Text;
@@ -1162,7 +1163,7 @@ void UNavigationPanelWidget::StampPoint(FNavigationRoutePoint& Point, const FStr
 	if (const APolyBuilding* Building = Generator ? Generator->FindBuildingById(BuildingId) : nullptr)
 	{
 		const FVector2D XY = (Point.Position + Building->BuildingOffset) * Generator->GetScale();
-		Point.WorldPosition = FVector(XY.X, XY.Y, FMath::Max(0, Point.Floor - 1) * Building->GetFloorHeight());
+		Point.WorldPosition = FVector(XY.X, XY.Y, Building->GetLevelBaseZ(Point.Floor));
 		Point.bHasWorldPosition = true;
 	}
 }
@@ -1222,8 +1223,8 @@ bool UNavigationPanelWidget::ApplyWorldRouteResult(const FString& BuildingId,
 		const FString OwnerId = Input.BuildingId.IsEmpty() ? BuildingId : Input.BuildingId;
 		const APolyBuilding* Owner = Generator->FindBuildingById(OwnerId);
 		if (!FMath::IsFinite(Input.WorldPosition.X) || !FMath::IsFinite(Input.WorldPosition.Y)
-			|| !FMath::IsFinite(Input.WorldPosition.Z) || Input.Floor < OutdoorFloor
-			|| !Owner || Input.Floor > Owner->GetFloorCount())
+			|| !FMath::IsFinite(Input.WorldPosition.Z)
+			|| !Owner || (Input.Floor != OutdoorFloor && !Owner->HasLevel(Input.Floor)))
 		{
 			SetStatusMessage(TEXT("The 3D route contains an invalid position or floor."), ENavigationMessageKind::Error);
 			return false;
@@ -1646,7 +1647,7 @@ bool UNavigationPanelWidget::RefreshSelectedPlaces()
 					bFound = FNavigationRoutePlanner::FindRoomDestination(*Generator, *Interior, Endpoint.BuildingId,
 						Room->FloorLevel, Room->GetFootprint(), Endpoint.Point.Position, &Center);
 					Endpoint.Point.Floor = Room->FloorLevel;
-					Endpoint.RoomOptionLabel = FString::Printf(TEXT("%s (Floor %d)"), *Room->RoomName, Room->FloorLevel);
+					Endpoint.RoomOptionLabel = FString::Printf(TEXT("%s (Floor %s)"), *Room->RoomName, *LayoutValidation::LevelLabel(Room->FloorLevel));
 				}
 			}
 			// Interior is named in the condition as well as used in the initializer: the static analyser does not see through the conditional.
@@ -1674,7 +1675,7 @@ bool UNavigationPanelWidget::RefreshSelectedPlaces()
 							Level, Polygon, Endpoint.Point.Position, &Center)) continue;
 						Endpoint.Point.Floor = Level;
 						Room->TryGetStringField(TEXT("name"), Name); if (Name.IsEmpty()) Name = Id;
-						Endpoint.RoomOptionLabel = FString::Printf(TEXT("%s (Floor %d)"), *Name, Level); bFound = true; break;
+						Endpoint.RoomOptionLabel = FString::Printf(TEXT("%s (Floor %s)"), *Name, *LayoutValidation::LevelLabel(Level)); bFound = true; break;
 					}
 					if (bFound) break;
 				}
@@ -1770,7 +1771,7 @@ FString UNavigationPanelWidget::EndpointPhrase(const FSelectedEndpoint& Endpoint
 		}
 		return Building.IsEmpty() ? FString(TEXT("a spot outside")) : FString::Printf(TEXT("a spot outside near %s"), *Building);
 	}
-	const FString Floor = FString::Printf(TEXT("Floor %d"), Endpoint.Point.Floor);
+	const FString Floor = FString::Printf(TEXT("Floor %s"), *LayoutValidation::LevelLabel(Endpoint.Point.Floor));
 	if (Endpoint.bSetViaDropdown && !Endpoint.RoomOptionLabel.IsEmpty())
 	{
 		// The label is "Room name (Floor N)"; the floor is said after the building instead.

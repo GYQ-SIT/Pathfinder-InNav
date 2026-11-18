@@ -1,4 +1,5 @@
 #include "MobileNavigatePageWidget.h"
+#include "LayoutValidation.h"
 
 #include "MobileIcons.h"
 #include "MobileStyle.h"
@@ -225,7 +226,7 @@ void UMobileNavigatePageWidget::Refresh()
 		Label = FString::Printf(TEXT("Reached %s"), *After.LevelLabel);
 		if (After.Level > 0)
 		{
-			Hint = FString::Printf(TEXT("Check the building signage, then confirm Level %d."), After.Level);
+			Hint = FString::Printf(TEXT("Check the building signage, then confirm Level %s."), *LayoutValidation::LevelLabel(After.Level));
 		}
 	}
 	else if (Step.Kind == EMobileStepKind::ExitBuilding)

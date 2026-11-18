@@ -89,6 +89,7 @@
         "offset": { "description": "Where the building stands among the others, in footprint units.", "$ref": "#/definitions/point" },
         "buildingType": { "description": "One of the types of the editor (BuildingTypes.h), as written there (Other too).", "type": "string" },
         "floorCount": { "type": "integer", "minimum": 1, "maximum": 200 },
+        "firstLevel": { "description": "The level of the lowest floor: 1 is the ground floor, -1 is B1 (there is no level 0, which the editor and the layout validator check). The floors go up from it for floorCount floors. Written only when it is not 1.", "type": "integer", "minimum": -20, "maximum": 200, "not": { "const": 0 } },
         "floorHeight": { "description": "In centimetres; the file's floorHeight when absent.", "type": "number", "exclusiveMinimum": 0 },
         "footprint": {
           "description": "The outline, in order; edge i runs from point i to point i + 1 (the last to the first).",
@@ -112,7 +113,7 @@
       "required": ["level"],
       "additionalProperties": false,
       "properties": {
-        "level": { "description": "1 is the ground floor.", "type": "integer", "minimum": 1, "maximum": 200 },
+        "level": { "description": "1 is the ground floor, -1 is B1 (there is no level 0).", "type": "integer", "minimum": -20, "maximum": 200, "not": { "const": 0 } },
         "wallHeight": { "description": "Centimetres.", "type": "number", "exclusiveMinimum": 0 },
         "wallThickness": { "description": "Centimetres.", "type": "number", "exclusiveMinimum": 0 },
         "rooms": { "type": "array", "items": { "$ref": "#/definitions/room" } },
@@ -162,7 +163,7 @@
         "id": { "type": "string", "minLength": 1 },
         "type": { "type": "string", "enum": ["elevator", "stairs", "escalator", "pathNode"] },
         "position": { "$ref": "#/definitions/point" },
-        "connectsFloors": { "type": "array", "items": { "type": "integer", "minimum": 1 } },
+        "connectsFloors": { "type": "array", "items": { "type": "integer", "minimum": -20, "not": { "const": 0 } } },
         "connectorGroupId": { "type": "string" },
         "rotationDegrees": { "type": "number" },
         "sizeScale": { "type": "number", "exclusiveMinimum": 0 }
@@ -176,7 +177,7 @@
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "kind": { "type": "string", "enum": ["main", "link"] },
-        "level": { "type": "integer", "minimum": 1 },
+        "level": { "type": "integer", "minimum": -20, "not": { "const": 0 } },
         "edge": { "description": "Which edge of the building's footprint.", "type": "integer", "minimum": 0 },
         "offset": { "type": "number", "minimum": 0 },
         "width": { "type": "number", "exclusiveMinimum": 0 },

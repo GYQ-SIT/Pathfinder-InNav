@@ -93,6 +93,10 @@ selected building (picked in the Map panel's list or by clicking it in the scene
 - **Floors**, **Rooms** (all floors) and **Lifts & stairs** (elevators, stairs and escalators; a
   link that reaches several floors counts once). Rooms and links come from the interior data
   saved in the project, so edits made in the interior editor show here once they are saved;
+- **From** and **To** under the numbers: the first and the last floor of the building, typed as `3`, `-1` or `B1` (Enter or
+  clicking away applies them, either order is accepted; a building that goes down reads From B1 To B2). Floors outside the range
+  are removed with everything on them, and **Discard changes** brings them back. The same two boxes are in the interior editor's
+  Floor panel;
 - **STATUS**: an amber **Empty** tag while the building has no rooms, a green **Has rooms** tag
   once it does;
 - **Open 2D floor editor** - opens the building in the interior editor's 2D floor plan - and
@@ -254,7 +258,7 @@ tool that is active is highlighted in blue. Four groups:
 
 - **SELECT** - the select tool (`Q`): click a room (anywhere in its body, not just
   the outline), a door marker, or a connector marker to select it; drag to move it;
-  `Delete` to delete.
+  `Delete` to delete. A connector moves on its own (see "Moving a connector" below).
 - **DRAW & PLACE** - draw a custom room (`P`, click points then `Enter`, `Esc` cancels), draw a
   standalone wall (`L`, same mechanic), or place a prefab rectangle/triangle/circle
   room (`1`/`2`/`3`) centered on the next click.
@@ -271,9 +275,17 @@ overlapping another room will fail, with the reason logged to the Output Log.
 ### Floor panel
 
 The heading shows **Floors** and how many there are, with **+ Add** on the right. Each floor is a row - "Level N"
-and, on the right, how high that level is above the ground floor (for example 0 m, 3 m, 6 m, from the building's
-own floor height); the active floor's row is blue. Click a row to switch to that floor (same as `[`/`]` to cycle
-up/down). **+ Add** and **Delete floor** do the same as `F`/`X`; Delete floor turns red under the mouse.
+(or "Level B1" for a basement) and, on the right, how high that level is above the ground floor (for example -3 m, 0 m,
+3 m, 6 m, from the building's own floor height); the active floor's row is blue. Click a row to switch to that floor (same
+as `[`/`]` to cycle up/down). **+ Add** and **Delete floor** do the same as `F`/`X`; Delete floor turns red under the mouse.
+
+Below the list, **From** and **To** are the first and the last floor of the building, typed as `3`, `-1` or `B1` and applied
+with Enter or by clicking away. A building that goes down is read from B1 downwards (From B1, To B2); either order is
+accepted. A building does not have to start on the ground floor: From 3 To 3 is a walkway that only exists on the third
+floor, 6 m up. Floors outside the range are removed with everything on them (Undo brings them back), and new floors are
+empty. There is no level 0, and a building goes down to B20 and up to 200. The floors keep their numbers: only the highest
+or the lowest floor can be deleted (**Delete floor**), never one in the middle. A **main door** can only be on the ground
+floor, so a building without one (a walkway) is entered through the link doors of the buildings next to it.
 
 ### Properties panel
 
@@ -294,6 +306,19 @@ labels over dark fields, and every kind ends with a red **Delete ...** button (t
 - **Connector**: its type (read-only), and **FLOORS IT REACHES**, a checklist of floors -
   check/uncheck floors and hit **Save changes**. Only shows checkboxes for floors that actually
   exist on the loaded building.
+
+### Moving a connector
+
+A lift, stair or escalator is one connector with a marker on each floor it reaches, and **each floor's marker has its own position,
+turn and size**. Select it on the floor you want, then:
+
+- **drag** it;
+- turn it with `9` / `0` and resize it with `=` / `-` (or the Toolbar buttons).
+
+All of these change the marker of the **floor you are on** and leave the other floors alone. Hold **Shift** to change **every floor of the
+connector** at once (each by the same step, from where it is). A spot outside the building or on a wall or another connector is refused. One drag
+is one Undo step. The route follows the connector by its group, not by where its floors stand, so a stair that is a little
+further along on the next floor still joins them.
 
 ### Doors in the outer wall
 
@@ -503,8 +528,8 @@ clicking in the 3D view instead of the 2D canvas:
 - **Select** — click a room, door, or connector; the selected room/connector tints
   light green (3D's equivalent of 2D's red outline — a selected door highlights its
   own room, same as 2D). Click empty space to deselect.
-- **Move** — drag a selected room to reposition it (connectors are rotate/scale only,
-  never dragged, same restriction as 2D).
+- **Move** — drag a selected room to reposition it (connectors are moved in the 2D plan
+  only, not in the 3D view).
 - **Resize**/**Rotate**/**Delete** — same `=`/`-`, hold `9`/`0`, and Delete
   shortcuts as 2D, now actually work in 3D Edit mode (they're inert in View mode, even
   if something was selected before switching to it).

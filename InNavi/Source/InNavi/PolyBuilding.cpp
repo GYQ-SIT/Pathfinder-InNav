@@ -22,8 +22,38 @@ APolyBuilding::APolyBuilding()
 	BuildingHeight = 0.f;
 }
 
+void APolyBuilding::ClampLevelRange(int32& InOutFirstLevel, int32& InOutFloorCount)
+{
+	// A level that exists (not 0, not deeper than the basements allow, not above the highest) ...
+	InOutFirstLevel = FMath::Clamp(InOutFirstLevel == 0 ? 1 : InOutFirstLevel, -LayoutValidation::MaxBasementFloors, LayoutValidation::MaxBuildingFloors);
+	// ... and as many floors as fit between it and the highest level, at most MaxBuildingFloors.
+	const int32 Room = LayoutValidation::LevelSpan(InOutFirstLevel, LayoutValidation::MaxBuildingFloors);
+	InOutFloorCount = FMath::Clamp(InOutFloorCount, 1, FMath::Min(Room, LayoutValidation::MaxBuildingFloors));
+}
+
+TArray<int32> APolyBuilding::GetLevels() const
+{
+	TArray<int32> Levels;
+	Levels.Reserve(FloorCount);
+	for (int32 Step = 0; Step < FloorCount; ++Step)
+	{
+		Levels.Add(LayoutValidation::LevelAfter(FirstLevel, Step));
+	}
+	return Levels;
+}
+
+int32 APolyBuilding::GetLevelPosition(int32 Level) const
+{
+	if (!LayoutValidation::IsValidLevel(Level))
+	{
+		return 0;
+	}
+	const int32 Position = LayoutValidation::LevelIndex(Level) - LayoutValidation::LevelIndex(FirstLevel) + 1;
+	return Position >= 1 && Position <= FloorCount ? Position : 0;
+}
+
 void APolyBuilding::BuildFromFootprint(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, int32 InFloorCount, float InFloorHeight,
-	bool bBuildMesh)
+	bool bBuildMesh, int32 InFirstLevel)
 {
 	if (Footprint.Num() < 3)
 	{
@@ -36,11 +66,14 @@ void APolyBuilding::BuildFromFootprint(const TArray<FVector2D>& Footprint, float
 	CachedScale = Scale;
 	BuildingOffset = Offset;
 	const int32 PreviousFloorCount = FloorCount;
-	FloorCount = FMath::Clamp(InFloorCount, 1, LayoutValidation::MaxBuildingFloors);
+	const int32 PreviousFirstLevel = FirstLevel;
+	FloorCount = InFloorCount;
+	FirstLevel = InFirstLevel;
+	ClampLevelRange(FirstLevel, FloorCount);
 	FloorHeight = InFloorHeight;
 
 	RebuildMesh();
-	if (FloorCount != PreviousFloorCount) OnFloorCountChanged.Broadcast(this);
+	if (FloorCount != PreviousFloorCount || FirstLevel != PreviousFirstLevel) OnFloorCountChanged.Broadcast(this);
 }
 
 void APolyBuilding::SetFloorCount(int32 NewFloorCount)
@@ -52,9 +85,34 @@ void APolyBuilding::SetFloorCount(int32 NewFloorCount)
 	}
 
 	const int32 PreviousFloorCount = FloorCount;
-	FloorCount = FMath::Clamp(NewFloorCount, 1, LayoutValidation::MaxBuildingFloors);
+	FloorCount = NewFloorCount;
+	ClampLevelRange(FirstLevel, FloorCount);
 	RebuildMesh();
 	if (FloorCount != PreviousFloorCount) OnFloorCountChanged.Broadcast(this);
+}
+
+void APolyBuilding::SetLevelRange(int32 NewFirstLevel, int32 NewLastLevel)
+{
+	if (CachedFootprint.Num() < 3)
+	{
+		UE_LOG(LogTemp, Error, TEXT("SetLevelRange: building '%s' has no footprint yet"), *BuildingId);
+		return;
+	}
+
+	const int32 PreviousFloorCount = FloorCount;
+	const int32 PreviousFirstLevel = FirstLevel;
+	// The last level is never below the first: asking for that gives the one floor.
+	int32 NewFloorCount = FMath::Max(1, LayoutValidation::LevelSpan(NewFirstLevel == 0 ? 1 : NewFirstLevel, NewLastLevel == 0 ? 1 : NewLastLevel));
+	int32 NewFirst = NewFirstLevel;
+	ClampLevelRange(NewFirst, NewFloorCount);
+	FirstLevel = NewFirst;
+	FloorCount = NewFloorCount;
+	if (FloorCount == PreviousFloorCount && FirstLevel == PreviousFirstLevel)
+	{
+		return;
+	}
+	RebuildMesh();
+	OnFloorCountChanged.Broadcast(this);
 }
 
 void APolyBuilding::RebuildMesh()
@@ -161,7 +219,7 @@ void APolyBuilding::RebuildMesh()
 	TArray<int32> GroundTriangles;
 	for (int32 i = 0; i < N; i++)
 	{
-		GroundVertices.Add(FVector(Poly2D[i].X, Poly2D[i].Y, 0.f));
+		GroundVertices.Add(FVector(Poly2D[i].X, Poly2D[i].Y, GetBaseZ()));
 	}
 	// Reverse winding (vs CapTris' own CCW/up-facing order) so this cap faces down.
 	for (int32 i = 0; i < CapTris.Num(); i += 3)
@@ -240,7 +298,7 @@ void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBot
 	// they lie just inside the solid walls of the neighbour, which then win everywhere they overlap.
 	constexpr float SeeThroughInset = 2.f;
 	const float HalfThickness = (bSolidLook ? ExteriorWallThickness : ExteriorWallThickness - 2.f * SeeThroughInset) * 0.5f;
-	const float ZTop = (bSolidLook || Level != FloorCount) ? FullZTop : FullZTop - SeeThroughInset;
+	const float ZTop = (bSolidLook || Level != GetLastLevel()) ? FullZTop : FullZTop - SeeThroughInset;
 
 	TArray<FWallCorner> Corners;
 	ComputeWallCorners(Poly2D, HalfThickness, Corners);
@@ -334,9 +392,9 @@ void APolyBuilding::SetWallOpenings(const TArray<FPolyWallOpening>& Openings)
 TArray<FVector> APolyBuilding::GetWallVerticesForTests(int32 Level) const
 {
 	TArray<FVector> Result;
-	if (MeshComp && Level >= 1 && Level <= FloorCount)
+	if (MeshComp && HasLevel(Level))
 	{
-		if (const FProcMeshSection* Section = MeshComp->GetProcMeshSection(GetWallSectionIndex(Level)))
+		if (const FProcMeshSection* Section = MeshComp->GetProcMeshSection(GetWallSectionIndex(GetLevelPosition(Level))))
 		{
 			for (const FProcMeshVertex& Vertex : Section->ProcVertexBuffer)
 			{
@@ -367,10 +425,16 @@ void APolyBuilding::ApplySlabVisibility()
 		return;
 	}
 
+	// Positions are 1 for the lowest floor up to FloorCount (the mesh sections are numbered by them); the level of a position is
+	// LevelAfter(FirstLevel, Position - 1), and everything is drawn from the bottom of the lowest floor, which is not the ground when the
+	// building starts above it or below it.
+	const float BaseZ = GetBaseZ();
+	const bool bViewing = VisibleInteriorLevel != 0;
+	const int32 ViewedPosition = bViewing ? GetLevelPosition(VisibleInteriorLevel) : 0;
 	for (int32 L = 1; L <= FloorCount; L++)
 	{
 		const int32 SectionIndex = (L == FloorCount) ? 1 : (1 + L);
-		const float Z = (L == FloorCount) ? (FloorCount * FloorHeight) : (L * FloorHeight);
+		const float Z = BaseZ + L * FloorHeight;
 
 		// Show only the viewed floor's own floor cap (L == VisibleInteriorLevel - 1, i.e. the slab at
 		// the viewed floor's own base) - hide every other floor's cap, both above (its ceiling/the
@@ -380,7 +444,7 @@ void APolyBuilding::ApplySlabVisibility()
 		// "visible". The 3D preview camera sits back at an oblique angle though, where every lower
 		// floor's slab was visible past the edge of the one above it - a stack of floors "peeking out"
 		// like the fins on a vent, rather than just the one floor being looked at.
-		const bool bHide = (VisibleInteriorLevel > 0 && L != VisibleInteriorLevel - 1);
+		const bool bHide = (bViewing && L != ViewedPosition - 1);
 
 		// UProceduralMeshComponent has no way to toggle an existing section's collision, so a
 		// visibility change here means recreating the section - the geometry is identical either
@@ -397,9 +461,9 @@ void APolyBuilding::ApplySlabVisibility()
 		// footprint, unlike the near-top-down 2D floor-plan camera) isn't blocked by floors it isn't
 		// looking at.
 		const int32 WallSectionIndex = GetWallSectionIndex(L);
-		const bool bHideWall =
-			(VisibleInteriorLevel > 0 && L != VisibleInteriorLevel);
-		BuildWallSection(CachedPoly2D, (L - 1) * FloorHeight, L * FloorHeight, WallSectionIndex, /*bCreateCollision=*/!bHideWall, L);
+		const bool bHideWall = (bViewing && L != ViewedPosition);
+		BuildWallSection(CachedPoly2D, BaseZ + (L - 1) * FloorHeight, BaseZ + L * FloorHeight, WallSectionIndex, /*bCreateCollision=*/!bHideWall,
+			LayoutValidation::LevelAfter(FirstLevel, L - 1));
 		MeshComp->SetMeshSectionVisible(WallSectionIndex, !bHideWall);
 	}
 
@@ -407,8 +471,8 @@ void APolyBuilding::ApplySlabVisibility()
 	if (bInspectionBottomHidden)
 	{
 		const int32 FloorSection = GetInspectionFloorSectionIndex();
-		const bool bShow = VisibleInteriorLevel <= 1;
-		BuildCapSection(CachedPoly2D, CachedCapTris, 0.f, FloorSection, /*bCreateCollision=*/bShow);
+		const bool bShow = !bViewing || ViewedPosition <= 1;
+		BuildCapSection(CachedPoly2D, CachedCapTris, BaseZ, FloorSection, /*bCreateCollision=*/bShow);
 		MeshComp->SetMeshSectionVisible(FloorSection, bShow);
 	}
 }

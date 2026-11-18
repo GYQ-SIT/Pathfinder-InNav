@@ -87,12 +87,15 @@ and still opens and routes) until the database is opened again and the project i
 | `offset` | `[x, y]` | Where the building stands among the others, in footprint units | `[0, 0]` |
 | `buildingType` | string | One of the types of the editor (`BuildingTypes.h`: University, School, Residential, Commercial, Public, Transport, Utility, Other); the colour and the filter of the building on the map. Always written (Other too). A value that is not on the list reads as Other | Other |
 | `floorCount` | integer >= 1 | How many floors | 10 |
+| `firstLevel` | integer, not 0 (-20 to 200) | The level of the lowest floor: 1 is the ground floor, 3 a building that only exists from the third floor up (a walkway between two buildings), -1 a first basement (B1). The floors go up from it for `floorCount` floors. Written only when it is not 1 | 1 |
 | `floorHeight` | number > 0 | In cm | the file's |
 | `interior` | object | The floors and doors of the building (below) | an empty building |
 
 **The interior** (`interior`): `floors` (array) and `entrances` (array), both optional.
 
-**A floor** (`floors[]`): `level` (integer >= 1, **required**; 1 is the ground floor), `wallHeight` and `wallThickness` (cm), `rooms` and `navNodes` (arrays).
+**Levels.** 1 is the ground floor, 2, 3 ... go up, and the basements are -1 (B1), -2 (B2) ... going down. **There is no level 0** (0 means "no floor" in the editor). A floor is higher than the one before it by one floor height, so level *n* starts at (*n* - 1) floor heights above the ground (B1 at one floor height below it), whatever the building's `firstLevel`. The editor widens the floors of a building to cover every floor of its interior, so an older file that has a floor above its `floorCount` still opens. The main door is only on level 1: a building without a ground floor has no way out of its own and is entered through the link doors of its neighbours.
+
+**A floor** (`floors[]`): `level` (integer, not 0, **required**; 1 is the ground floor, -1 is B1), `wallHeight` and `wallThickness` (cm), `rooms` and `navNodes` (arrays).
 
 **A room** (`rooms[]`)
 
@@ -112,7 +115,7 @@ and still opens and routes) until the database is opened again and the project i
 the opening, **cm**), `width` (**cm**). A window also has `height` and `sillHeight`. A door has `inputId` (what it opens from) and `connectsTo` (what it opens to: a room's id, or `"corridor"`).
 
 **A connector** (`navNodes[]`): `id`, `type` (`"elevator"`, `"stairs"`, `"escalator"` or `"pathNode"`), `position` (`[x, y]`, footprint units), `connectsFloors` (the levels it
-joins), `connectorGroupId` (the instances of one connector on its floors share it; this is what lets a route change floor), and when they are not 0 and 1, `rotationDegrees` and `sizeScale`.
+joins), `connectorGroupId` (the instances of one connector on its floors share it, and each floor has one; this is what lets a route change floor), and when they are not 0 and 1, `rotationDegrees` and `sizeScale`. Each floor's instance has its own `position`, `rotationDegrees` and `sizeScale`: a lift is usually the same on every floor, stairs and escalators often are not, and the instances of a connector do not have to stand in one column.
 
 **A door in the outer wall** (`entrances[]`): `id`, `kind` (`"main"`, the way out of the building, or `"link"`, a door to the building next door), `level`, `edge` (which edge of the
 building's footprint), `offset` and `width` (**cm**), and for a link `connectsTo` (the other building's id). A link door is stored once; the other building shows it as a door that is

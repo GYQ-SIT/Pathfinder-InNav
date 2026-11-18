@@ -607,6 +607,9 @@ public:
 
 	// The selected building's type (BuildingTypes.h). Setting it marks the project as changed when the type actually differs.
 	bool SetSelectedBuildingType(const FString& NewType);
+	// The floors of the selected building, from FirstLevel to LastLevel (see ABuildingGenerator::SetBuildingLevelRange): what the Building panel's
+	// From and To boxes set. Floors outside the range go with everything on them; Discard changes brings them back.
+	bool SetSelectedBuildingFloorRange(int32 FirstLevel, int32 LastLevel);
 	FString GetSelectedBuildingType() const;
 	// The Map panel's type check boxes: what the generator hides and shows by type. Not saved in the project.
 	void SetBuildingTypeVisible(const FString& Type, bool bVisible);
@@ -764,6 +767,13 @@ public:
 	// connector is selected.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool SetSelectedConnectorFloors(const TArray<int32>& NewFloors);
+
+	// Moving the selected connector. Its floors are separate nodes that each stand where they were put, so a move changes the node of the active
+	// floor alone, or, with bAllFloors, every floor of the connector together (what Shift does). The 2D plan drags with these: it takes the
+	// positions at the start of the drag and asks for the start plus how far the mouse went, and ends the drag with one history step.
+	TMap<int32, FVector2D> GetSelectedConnectorPositions(bool bAllFloors) const;
+	bool MoveSelectedConnectorTo(const TMap<int32, FVector2D>& NewPositions);
+
 
 	// Removes a single room/wall by id (see AInteriorGenerator::DeleteRoom) - general-purpose,
 	// explicit-id version. See also DeleteSelection. Also clears the door selection if the deleted
@@ -950,9 +960,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	int32 GetActiveFloor() const;
 
+	// Add the next floor above the highest, or below the lowest (a basement). The new level, or 0 when it could not be added.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	int32 AddFloor();
 
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	int32 AddFloorBelow();
+
+	// The floors of the loaded building, from FirstLevel up to LastLevel (see AInteriorGenerator::SetLevelRange): what the Floors panel's two
+	// boxes set. Floors outside the range go, with everything on them.
+	UFUNCTION(BlueprintCallable, Category = "Interior")
+	bool SetFloorRange(int32 FirstLevel, int32 LastLevel);
+
+	// Only the highest or the lowest floor can be removed (the others keep their numbers).
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool RemoveFloor(int32 Level);
 
@@ -964,6 +984,10 @@ public:
 	// always showing a fixed set of checkboxes. Returns 0 if no building interior is loaded.
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	int32 GetLoadedBuildingFloorCount() const;
+	// The levels of the loaded building from the lowest up (B2, B1, 1, 2 ...; there is no 0), and how high a level's floor is above the ground in
+	// world units. Loop over these, not over 1..GetLoadedBuildingFloorCount().
+	TArray<int32> GetLoadedBuildingLevels() const;
+	float GetLoadedBuildingLevelBaseZ(int32 Level) const;
 
 	// How tall one floor of the loaded building is, in world units (cm); 300 if nothing is loaded.
 	float GetLoadedBuildingFloorHeight() const;
@@ -1388,6 +1412,9 @@ private:
 	// connector (elevator/stairs/escalator) instead of a room - see NudgeSelectedRoomSize's own
 	// comment.
 	void NudgeSelectedRoomSize(float Delta);
+
+	// Shift held: a rotate, resize or move of a connector goes to every floor of it, not just the active floor.
+	bool IsShiftHeld() const { return IsInputKeyDown(EKeys::LeftShift) || IsInputKeyDown(EKeys::RightShift); }
 
 	// See NudgeSelectedRoomSize's connector branch - AInteriorGenerator::ScaleConnectorGroup's own
 	// SizeScale multiplier, not an absolute unit size like a room's Delta.

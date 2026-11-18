@@ -117,7 +117,7 @@ void ANavPlayerController::EnsureCampusInteriorPreview(APolyBuilding* Building, 
 	}
 
 	FCampusPreviewRooms& BuildingPreview = CampusPreview.FindOrAdd(Building->BuildingId);
-	if (BuildingPreview.bAllFloorsBuilt || (RoomFloor > 0 && BuildingPreview.BuiltFloors.Contains(RoomFloor)))
+	if (BuildingPreview.bAllFloorsBuilt || (RoomFloor != 0 && BuildingPreview.BuiltFloors.Contains(RoomFloor)))
 	{
 		return;
 	}
@@ -142,7 +142,7 @@ void ANavPlayerController::EnsureCampusInteriorPreview(APolyBuilding* Building, 
 
 		int32 Level = 1;
 		Floor->TryGetNumberField(TEXT("level"), Level);
-		if ((RoomFloor > 0 && RoomFloor != Level) || BuildingPreview.BuiltFloors.Contains(Level))
+		if ((RoomFloor != 0 && RoomFloor != Level) || BuildingPreview.BuiltFloors.Contains(Level))
 		{
 			continue;
 		}
@@ -226,8 +226,7 @@ void ANavPlayerController::EnsureCampusInteriorPreview(APolyBuilding* Building, 
 			// Preview only: do not interfere with building selection.
 			PreviewRoom->SetActorEnableCollision(false);
 
-			const float FloorBaseZ =
-				(Level - 1) * Building->GetFloorHeight();
+			const float FloorBaseZ = Building->GetLevelBaseZ(Level);
 
 			TArray<FInteriorOpening> PreviewOpenings;
 
@@ -263,7 +262,7 @@ void ANavPlayerController::EnsureCampusInteriorPreview(APolyBuilding* Building, 
 		}
 	}
 
-	if (RoomFloor > 0)
+	if (RoomFloor != 0)
 	{
 		// Also remember a requested floor that has no authored rooms.
 		BuildingPreview.BuiltFloors.Add(RoomFloor);
@@ -575,7 +574,7 @@ void ANavPlayerController::OnClick()
 			const int32 ActiveFloor = InteriorGen ? InteriorGen->GetActiveFloor() : 0;
 			FVector2D FootprintPoint;
 			const FHitResult NoHit;
-			if (ActiveFloor >= 1 && Get3DFloorFootprintPoint(NoHit, FootprintPoint))
+			if (ActiveFloor != 0 && Get3DFloorFootprintPoint(NoHit, FootprintPoint))
 			{
 				SelectNavigationPoint(FootprintPoint, ActiveFloor);
 			}
@@ -609,7 +608,7 @@ void ANavPlayerController::OnClick()
 			}
 
 			const int32 Floor = InteriorGen->GetActiveFloor();
-			if (Floor < 1)
+			if (Floor == 0)
 			{
 				UE_LOG(LogTemp, Error,
 					TEXT("[Navigation] 2D controller fallback rejected: active floor=%d"), Floor);
@@ -922,7 +921,7 @@ void ANavPlayerController::UpdateBuildingTransparency()
 				{
 					if (Room.IsValid())
 					{
-						Room->SetActorHiddenInGame(!(bShowRooms && (RoomFloor <= 0 || Room->FloorLevel == RoomFloor)));
+						Room->SetActorHiddenInGame(!(bShowRooms && (RoomFloor == 0 || Room->FloorLevel == RoomFloor)));
 					}
 				}
 			}
@@ -1004,7 +1003,7 @@ int32 ANavPlayerController::GetBuildingRoomFloor(const FString& BuildingId) cons
 
 void ANavPlayerController::SetBuildingRoomFloor(const FString& BuildingId, int32 Floor)
 {
-	BuildingReveal.FindOrAdd(BuildingId).RoomFloor = FMath::Max(0, Floor);
+	BuildingReveal.FindOrAdd(BuildingId).RoomFloor = Floor;
 	UpdateBuildingTransparency();
 }
 
@@ -2488,7 +2487,6 @@ FString ANavPlayerController::PlaceConnectorAt(FVector2D FootprintPosition)
 	}
 
 	const EInteriorNavNodeType Type = static_cast<EInteriorNavNodeType>(ActiveConnectorType);
-	const int32 FloorCount = Building->GetFloorCount();
 	const int32 ActiveFloorLevel = InteriorGen->GetActiveFloor();
 
 	// An elevator defaults to every floor (real elevators go direct to any floor); stairs/escalator
@@ -2498,21 +2496,20 @@ FString ANavPlayerController::PlaceConnectorAt(FVector2D FootprintPosition)
 	TArray<int32> ConnectsToFloors;
 	if (Type == EInteriorNavNodeType::Elevator)
 	{
-		for (int32 Level = 1; Level <= FloorCount; Level++)
-		{
-			ConnectsToFloors.Add(Level);
-		}
+		ConnectsToFloors = Building->GetLevels();
 	}
 	else
 	{
-		if (ActiveFloorLevel - 1 >= 1)
+		const int32 Below = LayoutValidation::LevelAfter(ActiveFloorLevel, -1);
+		const int32 Above = LayoutValidation::LevelAfter(ActiveFloorLevel, 1);
+		if (Building->HasLevel(Below))
 		{
-			ConnectsToFloors.Add(ActiveFloorLevel - 1);
+			ConnectsToFloors.Add(Below);
 		}
 		ConnectsToFloors.Add(ActiveFloorLevel);
-		if (ActiveFloorLevel + 1 <= FloorCount)
+		if (Building->HasLevel(Above))
 		{
-			ConnectsToFloors.Add(ActiveFloorLevel + 1);
+			ConnectsToFloors.Add(Above);
 		}
 	}
 
@@ -2928,7 +2925,7 @@ void ANavPlayerController::FocusCameraOnBuildingFromExterior(APolyBuilding* Buil
 	// Aim at the middle of the building and back off along the view direction far enough to see all of it.
 	// The current heading (yaw) is kept so the view does not spin; only the pitch is set.
 	const float BuildingHeight = Building->GetFloorCount() * Building->GetFloorHeight();
-	const FVector Target(Center.X, Center.Y, BuildingHeight * 0.5f);
+	const FVector Target(Center.X, Center.Y, Building->GetBaseZ() + BuildingHeight * 0.5f);
 	const FRotator Rotation(-35.f, GetControlRotation().Yaw, 0.f);
 	const float Distance = FMath::Max(Span, BuildingHeight) * 1.8f + 500.f;
 
@@ -3048,7 +3045,7 @@ void ANavPlayerController::PositionCameraFor3DPreview(APolyBuilding* Building, i
 	// Look at the floor's own vertical middle, not its ceiling - a proper 3D view of the floor
 	// itself, unlike PositionCameraForFloor's near-top-down floor-plan pose.
 	const float FloorHeight = Building->GetFloorHeight();
-	const float TargetZ = (Level - 1) * FloorHeight + FloorHeight * 0.5f;
+	const float TargetZ = Building->GetLevelBaseZ(Level) + FloorHeight * 0.5f;
 	const FVector Target(Center.X, Center.Y, TargetZ);
 
 	// Oblique/dimetric angle - ThreeDPreviewYaw/Pitch/CameraDistance are persistent state, set by
@@ -3420,7 +3417,7 @@ bool ANavPlayerController::Get3DFloorFootprintPoint(const FHitResult& Hit, FVect
 		return false;
 	}
 
-	const float PlaneZ = (InteriorGen->GetActiveFloor() - 1) * Building->GetFloorHeight();
+	const float PlaneZ = Building->GetLevelBaseZ(InteriorGen->GetActiveFloor());
 	const FVector WorldPoint = FMath::RayPlaneIntersection(RayOrigin, RayDirection, FPlane(FVector(0.f, 0.f, PlaneZ), FVector::UpVector));
 	OutPoint = FVector2D(WorldPoint.X, WorldPoint.Y) / Scale - Building->BuildingOffset;
 	return true;
@@ -3625,7 +3622,7 @@ void ANavPlayerController::DrawPendingRoomPointMarker3D()
 	const float Scale = Generator->GetScale();
 	// A little above the floor slab (see AInteriorRoom::RebuildMesh's own FloorSlabZOffset) so the
 	// marker doesn't z-fight with it and stays visible from the 3D preview's oblique angle.
-	const float Z = (InteriorGen->GetActiveFloor() - 1) * Building->GetFloorHeight() + 10.f;
+	const float Z = Building->GetLevelBaseZ(InteriorGen->GetActiveFloor()) + 10.f;
 
 	auto ToWorld = [&](const FVector2D& FootprintPoint) -> FVector
 	{
@@ -3745,7 +3742,7 @@ void ANavPlayerController::FocusCameraOnCampusPoint(const FNavigationRoutePoint&
 		}
 		const APolyBuilding* Owner = Generator->FindBuildingById(Spot.BuildingId);
 		return Owner ? FVector((Spot.Position.X + Owner->BuildingOffset.X) * Generator->GetScale(), (Spot.Position.Y + Owner->BuildingOffset.Y) * Generator->GetScale(),
-			FMath::Max(0, Spot.Floor - 1) * Owner->GetFloorHeight()) : FVector::ZeroVector;
+			Owner->GetLevelBaseZ(Spot.Floor)) : FVector::ZeroVector;
 	};
 	// A view of a person's size, in world units (cm): near enough to see the spot and what is around it, far enough to take in the
 	// stretch of the route that goes on from it, and never so far that the spot is lost.
@@ -3765,6 +3762,30 @@ void ANavPlayerController::FocusCameraOnCampusPoint(const FNavigationRoutePoint&
 	const FRotator Rotation(Pitch, GetControlRotation().Yaw, 0.f);
 	ControlledPawn->SetActorLocationAndRotation(Target - Rotation.Vector() * Distance, Rotation);
 	SetControlRotation(Rotation);
+}
+
+TMap<int32, FVector2D> ANavPlayerController::GetSelectedConnectorPositions(bool bAllFloors) const
+{
+	if (SelectedConnectorGroupId.IsEmpty() || !InteriorGen)
+	{
+		return TMap<int32, FVector2D>();
+	}
+	return InteriorGen->GetConnectorPositions(SelectedConnectorGroupId, bAllFloors ? 0 : InteriorGen->GetActiveFloor());
+}
+
+bool ANavPlayerController::MoveSelectedConnectorTo(const TMap<int32, FVector2D>& NewPositions)
+{
+	// Same View-mode edit-proofing as NudgeSelectedRoomSize.
+	if (bInteriorInspectionEnabled || (bIsIn3DPreviewMode && !bIsIn3DEditMode) || SelectedConnectorGroupId.IsEmpty() || !InteriorGen)
+	{
+		return false;
+	}
+	if (!InteriorGen->SetConnectorPositions(SelectedConnectorGroupId, NewPositions))
+	{
+		return false;
+	}
+	bHasUnsavedChanges = true;
+	return true;
 }
 
 void ANavPlayerController::SetPointerOverUICallback(const UObject* ScreenOwner, TFunction<bool(const FVector2D&)> Callback)
@@ -4066,6 +4087,38 @@ bool ANavPlayerController::SetSelectedBuildingType(const FString& NewType)
 	if (Before != Generator->GetBuildingType(Id))
 	{
 		bHasUnsavedChanges = true;
+	}
+	return true;
+}
+
+bool ANavPlayerController::SetSelectedBuildingFloorRange(int32 FirstLevel, int32 LastLevel)
+{
+	const FString Id = GetSelectedBuildingId();
+	if (bInteriorInspectionEnabled || !Generator || Id.IsEmpty())
+	{
+		return false;
+	}
+	const APolyBuilding* Building = Generator->FindBuildingById(Id);
+	if (!Building)
+	{
+		return false;
+	}
+	const int32 BeforeFirst = Building->GetFirstLevel();
+	const int32 BeforeLast = Building->GetLastLevel();
+	// A building that is open in the interior editor has its live floors: they decide, and the editor writes them back.
+	const bool bOpenInEditor = InteriorGen && InteriorGen->GetLoadedBuildingId() == Id;
+	const bool bSuccess = bOpenInEditor ? InteriorGen->SetLevelRange(FirstLevel, LastLevel) : Generator->SetBuildingLevelRange(Id, FirstLevel, LastLevel);
+	if (!bSuccess)
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not use those floors. They go from B%d (-%d) to %d, with no level 0."), LayoutValidation::MaxBasementFloors,
+			LayoutValidation::MaxBasementFloors, LayoutValidation::MaxBuildingFloors), EActionFailureSeverity::Warning);
+		return false;
+	}
+	if (BeforeFirst != Building->GetFirstLevel() || BeforeLast != Building->GetLastLevel())
+	{
+		bHasUnsavedChanges = true;
+		// The campus previews of this building were made for its old floors.
+		BuildCampusInteriorPreview();
 	}
 	return true;
 }
@@ -5063,17 +5116,17 @@ int32 ANavPlayerController::GetActiveFloor() const
 
 int32 ANavPlayerController::AddFloor()
 {
-	if (bInteriorInspectionEnabled) return -1;
+	if (bInteriorInspectionEnabled) return 0;
 	if (!InteriorGen)
 	{
 		OnActionFailed.Broadcast(TEXT("No InteriorGenerator placed in the level."), EActionFailureSeverity::Warning);
-		return -1;
+		return 0;
 	}
 
 	const int32 NewLevel = InteriorGen->AddFloor();
-	if (NewLevel < 0)
+	if (NewLevel == 0)
 	{
-		OnActionFailed.Broadcast(TEXT("Could not add a floor - load a building's interior first."), EActionFailureSeverity::Warning);
+		OnActionFailed.Broadcast(TEXT("Could not add a floor - load a building's interior first, and note that a building has at most 200 floors."), EActionFailureSeverity::Warning);
 	}
 	else
 	{
@@ -5082,6 +5135,53 @@ int32 ANavPlayerController::AddFloor()
 		OnActiveFloorChanged.Broadcast();
 	}
 	return NewLevel;
+}
+
+int32 ANavPlayerController::AddFloorBelow()
+{
+	if (bInteriorInspectionEnabled) return 0;
+	if (!InteriorGen)
+	{
+		OnActionFailed.Broadcast(TEXT("No InteriorGenerator placed in the level."), EActionFailureSeverity::Warning);
+		return 0;
+	}
+
+	const int32 NewLevel = InteriorGen->AddFloorBelow();
+	if (NewLevel == 0)
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not add a floor below - load a building's interior first, and note that a building goes down to B%d at most."), LayoutValidation::MaxBasementFloors), EActionFailureSeverity::Warning);
+	}
+	else
+	{
+		bHasUnsavedChanges = true;
+		RepositionCameraToActiveFloor();
+		OnActiveFloorChanged.Broadcast();
+	}
+	return NewLevel;
+}
+
+bool ANavPlayerController::SetFloorRange(int32 FirstLevel, int32 LastLevel)
+{
+	if (bInteriorInspectionEnabled) return false;
+	if (!InteriorGen)
+	{
+		OnActionFailed.Broadcast(TEXT("No InteriorGenerator placed in the level."), EActionFailureSeverity::Warning);
+		return false;
+	}
+
+	const bool bSuccess = InteriorGen->SetLevelRange(FirstLevel, LastLevel);
+	if (!bSuccess)
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not use those floors. They go from B%d (-%d) to %d, with no level 0."), LayoutValidation::MaxBasementFloors,
+			LayoutValidation::MaxBasementFloors, LayoutValidation::MaxBuildingFloors), EActionFailureSeverity::Warning);
+	}
+	else
+	{
+		bHasUnsavedChanges = true;
+		RepositionCameraToActiveFloor();
+		OnActiveFloorChanged.Broadcast();
+	}
+	return bSuccess;
 }
 
 bool ANavPlayerController::RemoveFloor(int32 Level)
@@ -5096,7 +5196,7 @@ bool ANavPlayerController::RemoveFloor(int32 Level)
 	const bool bSuccess = InteriorGen->RemoveFloor(Level);
 	if (!bSuccess)
 	{
-		OnActionFailed.Broadcast(TEXT("Could not remove that floor - it may not exist, or it's the last remaining floor."), EActionFailureSeverity::Warning);
+		OnActionFailed.Broadcast(TEXT("Could not remove that floor. Only the highest or the lowest floor can be removed, and never the last one."), EActionFailureSeverity::Warning);
 	}
 	else
 	{
@@ -5122,6 +5222,18 @@ float ANavPlayerController::GetLoadedBuildingFloorHeight() const
 		}
 	}
 	return 300.f;
+}
+
+TArray<int32> ANavPlayerController::GetLoadedBuildingLevels() const
+{
+	const APolyBuilding* Building = (InteriorGen && Generator) ? Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()) : nullptr;
+	return Building ? Building->GetLevels() : TArray<int32>();
+}
+
+float ANavPlayerController::GetLoadedBuildingLevelBaseZ(int32 Level) const
+{
+	const APolyBuilding* Building = (InteriorGen && Generator) ? Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()) : nullptr;
+	return Building ? Building->GetLevelBaseZ(Level) : 0.f;
 }
 
 int32 ANavPlayerController::GetLoadedBuildingFloorCount() const
@@ -5275,13 +5387,13 @@ bool ANavPlayerController::SetLoadedBuildingName(const FString& NewName)
 
 void ANavPlayerController::CycleInteriorFloorUp()
 {
-	SetActiveFloor(GetActiveFloor() + 1);
+	SetActiveFloor(LayoutValidation::LevelAfter(GetActiveFloor(), 1));
 	UE_LOG(LogTemp, Warning, TEXT("Active interior floor: %d"), GetActiveFloor());
 }
 
 void ANavPlayerController::CycleInteriorFloorDown()
 {
-	SetActiveFloor(GetActiveFloor() - 1);
+	SetActiveFloor(LayoutValidation::LevelAfter(GetActiveFloor(), -1));
 	UE_LOG(LogTemp, Warning, TEXT("Active interior floor: %d"), GetActiveFloor());
 }
 
@@ -5347,7 +5459,8 @@ void ANavPlayerController::NudgeSelectedRoomSize(float Delta)
 	if (!SelectedConnectorGroupId.IsEmpty() && InteriorGen)
 	{
 		const float ScaleDelta = (Delta > 0.f) ? ConnectorScaleStep : -ConnectorScaleStep;
-		if (InteriorGen->ScaleConnectorGroup(SelectedConnectorGroupId, ScaleDelta))
+		// The active floor's node alone, or every floor of the connector with Shift held.
+		if (InteriorGen->ScaleConnectorGroup(SelectedConnectorGroupId, ScaleDelta, IsShiftHeld() ? 0 : InteriorGen->GetActiveFloor()))
 		{
 			bHasUnsavedChanges = true;
 		}
@@ -5454,7 +5567,7 @@ void ANavPlayerController::RotateSelectedRoom(float DeltaDegrees)
 	// anything when a connector (not a room) is selected.
 	if (!SelectedConnectorGroupId.IsEmpty() && InteriorGen)
 	{
-		if (InteriorGen->RotateConnectorGroup(SelectedConnectorGroupId, DeltaDegrees))
+		if (InteriorGen->RotateConnectorGroup(SelectedConnectorGroupId, DeltaDegrees, IsShiftHeld() ? 0 : InteriorGen->GetActiveFloor()))
 		{
 			bHasUnsavedChanges = true;
 		}

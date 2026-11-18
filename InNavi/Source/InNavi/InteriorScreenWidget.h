@@ -387,6 +387,12 @@ private:
 	UFUNCTION()
 	void OnCameraSpeedTextCommitted(const FText& NewText, ETextCommit::Type CommitType);
 
+	// The Floors panel's "From" and "To" boxes: the lowest and the highest floor of the building, typed as 3, -1 or B1. Enter or clicking away
+	// applies them (floors outside the range go, new floors are empty; Undo brings them back); something that is not a floor puts the old
+	// values back with a message.
+	UFUNCTION()
+	void OnFloorRangeCommitted(const FText& NewText, ETextCommit::Type CommitType);
+
 	// Syncs CameraSpeedTextBox to PC->GetCameraMoveSpeed() - see UEditScreenWidget's own
 	// RefreshCameraSpeedDisplay for the full reasoning.
 	void RefreshCameraSpeedDisplay();
@@ -808,6 +814,13 @@ private:
 	// via per-entry Visibility, not by changing the array size).
 	UPROPERTY()
 	TArray<UCheckBox*> FloorCheckboxes;
+	// The floor each of those boxes stands for (and the label next to it) follows the loaded building's levels, lowest first, so a basement is B1.
+	UPROPERTY()
+	TArray<UTextBlock*> FloorCheckboxLabels;
+	UPROPERTY()
+	UEditableTextBox* FloorFromBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* FloorToBox = nullptr;
 
 	UPROPERTY()
 	UButton* ApplyConnectorButton = nullptr;

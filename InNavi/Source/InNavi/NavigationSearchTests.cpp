@@ -412,10 +412,11 @@ bool FNavigationRoomSearchIndexTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("New room uses the upstairs floor"), Options[0].Floor, 2);
 	TestTrue(TEXT("Floor removal succeeds"), Fixture.Interior->RemoveFloor(1));
 	Options = Fixture.Nav->SearchDestinations(TEXT("Upstairs"));
-	if (TestEqual(TEXT("Room survives floor renumbering"), Options.Num(), 1))
+	if (TestEqual(TEXT("Room survives removing the floor below it"), Options.Num(), 1))
 	{
-		TestEqual(TEXT("Room floor and label are refreshed"), Options[0].Floor, 1);
-		TestTrue(TEXT("New floor appears in cached label"), Options[0].GetDisplayLabel().Contains(TEXT("Floor 1")));
+		// The floors keep their numbers: the room is still on floor 2, which is now the lowest floor of the building.
+		TestEqual(TEXT("Room keeps its floor"), Options[0].Floor, 2);
+		TestTrue(TEXT("and its label"), Options[0].GetDisplayLabel().Contains(TEXT("Floor 2")));
 	}
 	Fixture.Interior->ClearLoadedInterior();
 	TestTrue(TEXT("Clearing interior clears index"), Fixture.Nav->GetSelectableRooms().IsEmpty());
