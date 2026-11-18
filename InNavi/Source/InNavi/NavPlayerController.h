@@ -489,8 +489,17 @@ public:
 	// (see UInteriorFloorPlanWidget) calls on a click, since interior room/wall drawing has no 3D
 	// raycast at all now (OnClick is a no-op in draw room/wall mode). No-op if not currently in
 	// draw room/wall mode.
+	// bSkipSnapping keeps the point exactly where it is given (an axis-locked point must stay on its axis).
 	UFUNCTION(BlueprintCallable, Category = "Interior")
-	void AddRoomPointAtFootprintPosition(FVector2D FootprintPoint);
+	void AddRoomPointAtFootprintPosition(FVector2D FootprintPoint, bool bSkipSnapping = false);
+
+	// Shift while drawing: with bAxisLock and at least one point already placed, Point is moved onto the horizontal or vertical line through the
+	// last point (see InteriorDrawing.h); otherwise Point is returned as it is. The 2D plan uses it for the click and for the preview line.
+	FVector2D ConstrainDrawPoint(FVector2D Point, bool bAxisLock) const;
+
+	// Takes back the last point of the room/wall being drawn (Ctrl+Z while drawing does this instead of undoing an older edit). False if nothing is
+	// being drawn or there is no point yet.
+	bool RemoveLastRoomPoint();
 
 	// The room/wall points drawn so far in the current draw room/wall session - for the 2D floor
 	// plan canvas to draw as it's being clicked out. Empty when not drawing.
@@ -650,6 +659,13 @@ public:
 
 	// The selected room's (or wall's) bounding box in footprint units: its top-left corner and its size. False if none is selected.
 	bool GetSelectedRoomBounds(FVector2D& OutPosition, FVector2D& OutSize) const;
+	// The corners of the selected room (or the points of the selected wall), in footprint units; empty if none is selected.
+	TArray<FVector2D> GetSelectedRoomVertices() const;
+	// Moves one corner of the selected room or wall to NewPosition, the rest stay (see AInteriorGenerator::MoveRoomVertex). The 2D plan calls this on
+	// every mouse move of a corner drag, without history, and records one history step when the drag ends. False when the move is not allowed.
+	bool MoveSelectedRoomVertex(int32 VertexIndex, FVector2D NewPosition);
+	// Whether that move would be allowed, without making it (the corner drag looks for the farthest allowed spot with this).
+	bool CanMoveSelectedRoomVertex(int32 VertexIndex, FVector2D NewPosition) const;
 	bool SetSelectedRoomTags(const TArray<FString>& InTags);
 	TArray<FString> GetSelectedRoomTags() const;
 	// The selected room's type (see RoomTypes.h). Setting marks the project changed when the type actually differs.
@@ -773,6 +789,9 @@ public:
 	// positions at the start of the drag and asks for the start plus how far the mouse went, and ends the drag with one history step.
 	TMap<int32, FVector2D> GetSelectedConnectorPositions(bool bAllFloors) const;
 	bool MoveSelectedConnectorTo(const TMap<int32, FVector2D>& NewPositions);
+	// Tells the user why the last refused move of the selected connector was refused (which floor, what is in the way). The 2D plan calls it once
+	// when a drag ends on a spot that was refused, not on every mouse move.
+	void ReportConnectorMoveRefused();
 
 
 	// Removes a single room/wall by id (see AInteriorGenerator::DeleteRoom) - general-purpose,
@@ -890,6 +909,9 @@ public:
 	AInteriorRoom* PlacePrefabRoomAt(FVector2D FootprintCenter);
 	AInteriorRoom* PlacePrefabRoomInBounds(FVector2D FootprintCenter, FVector2D FootprintSize);
 	TArray<FVector2D> BuildPrefabRoomFootprint(FVector2D FootprintCenter, FVector2D FootprintSize = FVector2D::ZeroVector) const;
+	// Height / width of the armed shape when Shift is held while dragging it out: 1 for the square and the circle, the equilateral triangle's own
+	// proportion for the triangle. 0 when no shape is armed.
+	double GetPrefabShiftAspect() const;
 
 	// Connector (elevator/stairs/escalator) placement: 4/5/6 (for now, not wired into UMG yet) each
 	// arm a different type - while armed, clicking the 2D floor plan canvas places one there (see

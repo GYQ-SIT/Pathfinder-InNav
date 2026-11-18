@@ -68,7 +68,22 @@ private:
 	friend struct FEditorInteractionTestAccess;
 	friend struct FEditorFeedbackTestAccess;
 	TArray<FVector2D> GetResizeHandles(FVector2D WidgetSize) const;
+	// Where the selected room's (or wall's) own corners are in the widget, in the order of its footprint: the dots a single corner is dragged by.
+	// A corner that sits where a resize handle sits needs Ctrl to be grabbed (a plain drag there resizes the whole room, as it always did);
+	// every other corner is grabbed by a plain drag.
+	TArray<FVector2D> GetVertexHandles(FVector2D WidgetSize) const;
+	// The corner under LocalPosition that a drag with or without Ctrl would grab, or INDEX_NONE.
+	int32 FindVertexHandleAt(FVector2D LocalPosition, FVector2D WidgetSize, bool bCtrlHeld) const;
 	TArray<FVector2D> GetPrefabPreview() const;
+	// Shift on a shape drag: the far corner pulled onto the shape's own proportions (square, circle, equilateral triangle).
+	FVector2D ShapeDragEnd(FVector2D RawEnd, bool bShiftHeld) const;
+	bool bIsDraggingVertex = false;
+	bool bVertexMoved = false;
+	int32 DraggingVertexIndex = INDEX_NONE;
+	// Where the pointer last was over the plan (widget space) and whether Shift was down: the line being drawn follows it as a preview.
+	bool bHasPointer = false;
+	FVector2D PointerLocal = FVector2D::ZeroVector;
+	bool bPointerShift = false;
 	bool IsPrefabDragValid() const;
 	void ResizeAtLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize);
 	bool bIsResizingRoom = false;
@@ -163,6 +178,8 @@ private:
 	// held), so each move is computed from there and does not drift.
 	bool bIsDraggingConnector = false;
 	bool bConnectorMoved = false;
+	// The last position tried during the drag was refused (PAT-206): the reason is told once, when the mouse is let go.
+	bool bConnectorMoveRefused = false;
 	TMap<int32, FVector2D> DragStartConnectorPositions;
 	bool bIsDraggingDoor = false;
 	TWeakObjectPtr<AInteriorRoom> DragTarget;

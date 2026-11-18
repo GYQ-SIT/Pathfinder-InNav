@@ -12,6 +12,7 @@
 #include "LayoutValidationSession.h"
 #include "NavigationPanelWidget.h"
 #include "NavigationRouteVisualization.h"
+#include "InteriorDrawing.h"
 #include "PolygonGeometryUtils.h"
 #include "RoomTypes.h"
 #include "EngineUtils.h"
@@ -46,6 +47,49 @@ TArray<FVector2D> UInteriorFloorPlanWidget::GetResizeHandles(FVector2D WidgetSiz
 		Handles.Add(ViewWorldToLocal((Point + Building->BuildingOffset) * Generator->GetScale(), Origin, PixelsPerUnit, WidgetSize));
 	}
 	return Handles;
+}
+
+TArray<FVector2D> UInteriorFloorPlanWidget::GetVertexHandles(FVector2D WidgetSize) const
+{
+	TArray<FVector2D> Handles;
+	if (!PlayerController || !InteriorGen || !Generator || !PlayerController->IsInSelectMode() || PlayerController->IsInteriorInspectionEnabled()) return Handles;
+	const APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building) return Handles;
+	const TArray<FVector2D> Vertices = PlayerController->GetSelectedRoomVertices();
+	if (Vertices.IsEmpty()) return Handles;
+	FVector2D Origin;
+	float PixelsPerUnit = 0;
+	ComputeViewTransform(WidgetSize, Origin, PixelsPerUnit);
+	for (const FVector2D& Vertex : Vertices)
+	{
+		Handles.Add(ViewWorldToLocal((Vertex + Building->BuildingOffset) * Generator->GetScale(), Origin, PixelsPerUnit, WidgetSize));
+	}
+	return Handles;
+}
+
+int32 UInteriorFloorPlanWidget::FindVertexHandleAt(FVector2D LocalPosition, FVector2D WidgetSize, bool bCtrlHeld) const
+{
+	const TArray<FVector2D> Vertices = GetVertexHandles(WidgetSize);
+	const TArray<FVector2D> Resize = GetResizeHandles(WidgetSize);
+	int32 Best = INDEX_NONE;
+	double BestDistance = 81.0;
+	for (int32 Index = 0; Index < Vertices.Num(); ++Index)
+	{
+		const double Distance = FVector2D::DistSquared(LocalPosition, Vertices[Index]);
+		if (Distance > BestDistance) continue;
+		// A corner under a resize handle is left to that handle unless Ctrl is held.
+		const bool bUnderResizeHandle = Resize.ContainsByPredicate([&](const FVector2D& Handle) { return FVector2D::DistSquared(Vertices[Index], Handle) <= 81.0; });
+		if (bUnderResizeHandle && !bCtrlHeld) continue;
+		Best = Index;
+		BestDistance = Distance;
+	}
+	return Best;
+}
+
+FVector2D UInteriorFloorPlanWidget::ShapeDragEnd(FVector2D RawEnd, bool bShiftHeld) const
+{
+	if (!bShiftHeld || !PlayerController) return RawEnd;
+	return InteriorDrawing::ProportionalCorner(PrefabStart, RawEnd, PlayerController->GetPrefabShiftAspect());
 }
 
 bool UInteriorFloorPlanWidget::IsPrefabDragValid() const
@@ -221,6 +265,23 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 
 		if (PlayerController->IsInSelectMode())
 		{
+			// A corner of the selected room: a drag moves that corner alone (a corner under a resize handle needs Ctrl).
+			const int32 VertexIndex = FindVertexHandleAt(LocalPosition, InGeometry.GetLocalSize(), InMouseEvent.IsControlDown());
+			if (VertexIndex != INDEX_NONE && InteriorGen)
+			{
+				DraggingRoomId = PlayerController->GetSelectedRoomId();
+				DragTarget = InteriorGen->GetRoomById(DraggingRoomId);
+				if (DragTarget.IsValid())
+				{
+					bIsDraggingVertex = true;
+					bVertexMoved = false;
+					DraggingVertexIndex = VertexIndex;
+					DragFloor = InteriorGen->GetActiveFloor();
+					DragBuildingId = InteriorGen->GetLoadedBuildingId();
+					return FReply::Handled().CaptureMouse(TakeWidget());
+				}
+			}
+
 			const TArray<FVector2D> Handles = GetResizeHandles(InGeometry.GetLocalSize());
 			for (int32 Index = 0; Index < Handles.Num(); ++Index)
 			{
@@ -342,8 +403,10 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 			return FReply::Handled();
 		}
 
-		const FVector2D FootprintPoint = LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize());
-		PlayerController->AddRoomPointAtFootprintPosition(FootprintPoint);
+		// Shift: the new point goes straight along X or Y from the last one, and is not pulled off that line by snapping.
+		const FVector2D RawPoint = LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize());
+		const FVector2D FootprintPoint = PlayerController->ConstrainDrawPoint(RawPoint, InMouseEvent.IsShiftDown());
+		PlayerController->AddRoomPointAtFootprintPosition(FootprintPoint, /*bSkipSnapping=*/!FootprintPoint.Equals(RawPoint, 1e-9));
 		return FReply::Handled();
 	}
 
@@ -357,7 +420,7 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 		if (IsPrefabDragValid())
 		{
 			const FVector2D Local = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
-			PrefabEnd = LocalPositionToFootprintPoint(Local, InGeometry.GetLocalSize());
+			PrefabEnd = ShapeDragEnd(LocalPositionToFootprintPoint(Local, InGeometry.GetLocalSize()), InMouseEvent.IsShiftDown());
 			bPrefabWasDragged |= FVector2D::DistSquared(Local, PrefabStartLocal) > 36.0;
 			if (bPrefabWasDragged)
 			{
@@ -378,6 +441,12 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 	if (InMouseEvent.GetEffectingButton() == EKeys::RightMouseButton && bIsPanning)
 	{
 		bIsPanning = false;
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsDraggingVertex)
+	{
+		FinishEditDrag();
 		return FReply::Handled().ReleaseMouseCapture();
 	}
 
@@ -405,12 +474,23 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 void UInteriorFloorPlanWidget::FinishEditDrag()
 {
 	bIsDraggingPrefab = false;
+	if (bIsDraggingVertex)
+	{
+		// One history step for the whole corner drag, and only when a corner did move.
+		bIsDraggingVertex = false;
+		if (bVertexMoved && InteriorGen) InteriorGen->RecordHistorySnapshot();
+		bVertexMoved = false;
+		DraggingVertexIndex = INDEX_NONE;
+	}
 	if (bIsDraggingConnector)
 	{
 		// One history step for the whole drag, and only when the connector did move.
 		bIsDraggingConnector = false;
 		if (bConnectorMoved && InteriorGen) InteriorGen->RecordHistorySnapshot();
+		// Let go on a spot that was refused: say why, once (which floor, what is in the way), instead of the connector just not following.
+		if (bConnectorMoveRefused && PlayerController) PlayerController->ReportConnectorMoveRefused();
 		bConnectorMoved = false;
+		bConnectorMoveRefused = false;
 		DragStartConnectorPositions.Reset();
 	}
 	if (bIsResizingRoom)
@@ -442,6 +522,10 @@ void UInteriorFloorPlanWidget::NativeOnMouseCaptureLost(const FCaptureLostEvent&
 
 FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
+	// Where the pointer is, for the preview of the line being drawn.
+	bHasPointer = true;
+	PointerLocal = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+	bPointerShift = InMouseEvent.IsShiftDown();
 	if (bIsDraggingPrefab)
 	{
 		if (!IsPrefabDragValid() || !InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
@@ -450,7 +534,7 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 			return FReply::Handled().ReleaseMouseCapture();
 		}
 		const FVector2D Local = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
-		PrefabEnd = LocalPositionToFootprintPoint(Local, InGeometry.GetLocalSize());
+		PrefabEnd = ShapeDragEnd(LocalPositionToFootprintPoint(Local, InGeometry.GetLocalSize()), InMouseEvent.IsShiftDown());
 		bPrefabWasDragged |= FVector2D::DistSquared(Local, PrefabStartLocal) > 36.0;
 		return FReply::Handled();
 	}
@@ -464,6 +548,42 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 			return FReply::Handled().ReleaseMouseCapture();
 		}
 		ResizeAtLocalPosition(InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition()), InGeometry.GetLocalSize());
+		return FReply::Handled();
+	}
+	if (bIsDraggingVertex)
+	{
+		if (!InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton) || !DragTarget.IsValid() || !PlayerController || !InteriorGen ||
+			!PlayerController->IsInSelectMode() || PlayerController->GetSelectedRoomId() != DraggingRoomId ||
+			InteriorGen->GetActiveFloor() != DragFloor || InteriorGen->GetLoadedBuildingId() != DragBuildingId)
+		{
+			FinishEditDrag();
+			return FReply::Handled().ReleaseMouseCapture();
+		}
+		FVector2D Target = LocalPositionToFootprintPoint(InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition()), InGeometry.GetLocalSize());
+		// Snap the corner to another room's corner, as drawing does (the room's own corners are not offered).
+		if (PlayerController->IsSnapEnabled())
+		{
+			FVector2D SnapOffset;
+			if (InteriorGen->FindSnapOffset(InteriorGen->GetActiveFloor(), { Target }, DraggingRoomId, 80.f / PlayerController->GetBuildingScale(), SnapOffset)) Target += SnapOffset;
+		}
+		const TArray<FVector2D> Vertices = PlayerController->GetSelectedRoomVertices();
+		if (Vertices.IsValidIndex(DraggingVertexIndex) && !Vertices[DraggingVertexIndex].Equals(Target, 1e-6))
+		{
+			// The corner goes where the pointer is, or, where that is not allowed (outside the building, across another room, crossing itself), as
+			// far along the way as it is allowed: it stops at the limit instead of jumping back or freezing.
+			FVector2D Goal = Target;
+			if (!PlayerController->CanMoveSelectedRoomVertex(DraggingVertexIndex, Target))
+			{
+				FVector2D Good = Vertices[DraggingVertexIndex], Bad = Target;
+				for (int32 Step = 0; Step < 16; ++Step)
+				{
+					const FVector2D Mid = (Good + Bad) * 0.5;
+					(PlayerController->CanMoveSelectedRoomVertex(DraggingVertexIndex, Mid) ? Good : Bad) = Mid;
+				}
+				Goal = Good;
+			}
+			if (PlayerController->MoveSelectedRoomVertex(DraggingVertexIndex, Goal)) bVertexMoved = true;
+		}
 		return FReply::Handled();
 	}
 	if (bIsDraggingConnector)
@@ -481,10 +601,12 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 		{
 			NewPositions.Add(Pair.Key, Pair.Value + Delta);
 		}
-		if (PlayerController->MoveSelectedConnectorTo(NewPositions) && !Delta.IsNearlyZero(0.0001))
+		const bool bMoved = PlayerController->MoveSelectedConnectorTo(NewPositions);
+		if (bMoved && !Delta.IsNearlyZero(0.0001))
 		{
 			bConnectorMoved = true;
 		}
+		bConnectorMoveRefused = !bMoved && !Delta.IsNearlyZero(0.0001);
 		return FReply::Handled();
 	}
 	if (bIsDraggingDoor)
@@ -1411,6 +1533,15 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 2, AllottedGeometry.ToPaintGeometry(), LinePoints, ESlateDrawEffect::None, FLinearColor(1.f, 0.6f, 0.f, 1.f), true, 3.f);
 			}
 
+			// The line the next click would add, from the last point to the pointer: straight along X or Y while Shift is held.
+			if (bHasPointer && (PlayerController->IsInDrawRoomMode() || PlayerController->IsInDrawWallMode()))
+			{
+				const FVector2D Next = PlayerController->ConstrainDrawPoint(LocalPositionToFootprintPoint(PointerLocal, AllottedGeometry.GetLocalSize()), bPointerShift);
+				const TArray<FVector2D> Preview2 = { LinePoints.Last(), WorldToLocal((Next + Building->BuildingOffset) * Scale) };
+				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 2, AllottedGeometry.ToPaintGeometry(), Preview2, ESlateDrawEffect::None,
+					FLinearColor(1.f, 0.6f, 0.f, bPointerShift ? 0.9f : 0.5f), true, 2.f);
+			}
+
 			// A dot at each clicked point, so even the very first click (before there's a second
 			// point to draw a line to) gives visible feedback.
 			const FSlateBrush* DotBrush = FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox"));
@@ -1585,6 +1716,19 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			AllottedGeometry.ToPaintGeometry(FVector2f(10,10), FSlateLayoutTransform(Handle - FVector2D(5,5))),
 			FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox")), ESlateDrawEffect::None, FLinearColor(0.2f, 0.7f, 1.f));
 	}
+	// The selected room's own corners: orange-edged white dots a single corner is dragged by (Ctrl for a corner under a blue resize handle).
+	if (!bIsResizingRoom)
+	{
+		for (const FVector2D& Vertex : GetVertexHandles(WidgetSize))
+		{
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 9,
+				AllottedGeometry.ToPaintGeometry(FVector2f(12,12), FSlateLayoutTransform(Vertex - FVector2D(6,6))),
+				FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox")), ESlateDrawEffect::None, FLinearColor(1.f, 0.6f, 0.f));
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 10,
+				AllottedGeometry.ToPaintGeometry(FVector2f(7,7), FSlateLayoutTransform(Vertex - FVector2D(3.5,3.5))),
+				FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox")), ESlateDrawEffect::None, FLinearColor::White);
+		}
+	}
 	TArray<FVector2D> Preview = GetPrefabPreview();
 	if (bIsResizingRoom && DragTarget.IsValid())
 	{
@@ -1608,5 +1752,5 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 9, AllottedGeometry.ToPaintGeometry(), Preview,
 			ESlateDrawEffect::None, FLinearColor(1.f, 0.6f, 0.f), true, 3.f);
 	}
-	return LayerId + 10;
+	return LayerId + 11;
 }

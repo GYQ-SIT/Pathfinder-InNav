@@ -1442,20 +1442,35 @@ bool AInteriorGenerator::DoesFootprintBlockConnector(const TArray<FVector2D>& Fo
 	return false;
 }
 
+FString AInteriorGenerator::ConsumeConnectorFailure() const
+{
+	FString Reason = LastConnectorFailure;
+	LastConnectorFailure.Reset();
+	return Reason;
+}
+
 bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVector2D Position, int32 Level, float RotationDegrees, float SizeScale, const FString& IgnoreGroupId, bool bLogFailures) const
 {
+	LastConnectorFailure.Reset();
+	// The reason always names the floor, because the one in the way is often not the floor being looked at.
+	auto Fail = [this, Level](const FString& Why)
+	{
+		LastConnectorFailure = FString::Printf(TEXT("Floor %s: %s"), *LayoutValidation::LevelLabel(Level), *Why);
+		return false;
+	};
+
 	const FInteriorFloorInfo* FloorInfo = FloorInfoByLevel.Find(Level);
 	if (!FloorInfo)
 	{
 		if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: floor %d doesn't exist"), Level);
-		return false;
+		return Fail(TEXT("the building has no such floor."));
 	}
 
 	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
 	if (!Building)
 	{
 		if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: building '%s' no longer exists"), *LoadedBuildingId);
-		return false;
+		return Fail(TEXT("the building is not loaded."));
 	}
 
 	const float Scale = Generator->GetScale();
@@ -1481,7 +1496,7 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVe
 	if (!IsFootprintFullyInsidePolygon(Corners, Building->GetFootprint()))
 	{
 		if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint doesn't fit inside the building's outline on floor %d"), Level);
-		return false;
+		return Fail(TEXT("it would stick out of the building's outer wall."));
 	}
 
 	// Being inside a room's open interior is fine (that's an explicitly supported placement, unlike
@@ -1512,7 +1527,8 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVe
 					if (InteriorGen_DistanceSegmentToSegment2D(Corners[c], Corners[(c + 1) % 4], EdgeA, EdgeB) < HalfWallThickness)
 					{
 						if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint overlaps a wall on floor %d"), Level);
-						return false;
+						return Fail(FString::Printf(TEXT("it overlaps the wall of %s '%s'."), Room->IsClosedLoop() ? TEXT("room") : TEXT("wall"),
+							Room->RoomName.IsEmpty() ? *Room->RoomId : *Room->RoomName));
 					}
 				}
 			}
@@ -1546,7 +1562,8 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVe
 		if (DoFootprintsOverlap(Corners, true, OtherCorners, true, OverlapToleranceWorldUnits / Scale))
 		{
 			if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint overlaps another connector ('%s') on floor %d"), *Node.ConnectorGroupId, Level);
-			return false;
+			return Fail(FString::Printf(TEXT("it overlaps another %s."),
+				Node.Type == EInteriorNavNodeType::Elevator ? TEXT("elevator") : Node.Type == EInteriorNavNodeType::Stairs ? TEXT("staircase") : TEXT("escalator")));
 		}
 	}
 
@@ -1577,7 +1594,7 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVe
 		if (DoFootprintsOverlap(WorldCorners, true, OtherWorldFootprint, true, OverlapToleranceWorldUnits))
 		{
 			if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint overlaps building '%s'"), *OtherBuilding->BuildingId);
-			return false;
+			return Fail(FString::Printf(TEXT("it overlaps the building '%s'."), OtherBuilding->BuildingName.IsEmpty() ? *OtherBuilding->BuildingId : *OtherBuilding->BuildingName));
 		}
 	}
 
@@ -2102,6 +2119,75 @@ bool AInteriorGenerator::DoesResizeStayInsideBuilding(const FString& RoomId, FVe
 	}
 	const APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
 	return !Building || IsFootprintFullyInsidePolygon(NewFootprint, Building->GetFootprint(), Room->IsClosedLoop());
+}
+
+bool AInteriorGenerator::CanMoveRoomVertex(const FString& RoomId, int32 VertexIndex, FVector2D NewPosition) const
+{
+	if (!FMath::IsFinite(NewPosition.X) || !FMath::IsFinite(NewPosition.Y)) return false;
+	for (const auto& Pair : RoomsByFloor)
+	{
+		for (const AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (!Room || Room->RoomId != RoomId)
+			{
+				continue;
+			}
+
+			const TArray<FVector2D>& OldFootprint = Room->GetFootprint();
+			if (!OldFootprint.IsValidIndex(VertexIndex)) return false;
+			TArray<FVector2D> NewFootprint = OldFootprint;
+			NewFootprint[VertexIndex] = NewPosition;
+
+			// The same rules as drawing the room or wall in the first place, so a corner can never be dragged to a place that drawing it there would
+			// have refused: no corners on top of each other, no crossing itself, inside the building, clear of other rooms and of lifts and stairs.
+			const float Scale = Generator ? Generator->GetScale() : 1.f;
+			const double MinEdge = (InteriorEditing::MinimumDimensionCm * 0.25) / FMath::Max(Scale, KINDA_SMALL_NUMBER);
+			const int32 NumPoints = NewFootprint.Num();
+			const int32 NumEdges = Room->IsClosedLoop() ? NumPoints : NumPoints - 1;
+			for (int32 Edge = 0; Edge < NumEdges; ++Edge)
+			{
+				if (FVector2D::Distance(NewFootprint[Edge], NewFootprint[(Edge + 1) % NumPoints]) < MinEdge) return false;
+			}
+			if (Room->IsClosedLoop() ? InteriorGen_PolygonSelfIntersects(NewFootprint) : InteriorGen_WallSelfIntersects(NewFootprint)) return false;
+
+			const APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+			if (Building && !IsFootprintFullyInsidePolygon(NewFootprint, Building->GetFootprint(), Room->IsClosedLoop())) return false;
+			for (const AInteriorRoom* Other : Pair.Value.Rooms)
+			{
+				if (Other && Other != Room && DoFootprintsOverlap(NewFootprint, Room->IsClosedLoop(), Other->GetFootprint(), Other->IsClosedLoop(),
+					OverlapToleranceWorldUnits / FMath::Max(Scale, KINDA_SMALL_NUMBER))) return false;
+			}
+			return !DoesFootprintBlockConnector(NewFootprint, Room->IsClosedLoop(), Pair.Key);
+		}
+	}
+	return false;
+}
+
+bool AInteriorGenerator::MoveRoomVertex(const FString& RoomId, int32 VertexIndex, FVector2D NewPosition, bool bRecordHistory)
+{
+	for (auto& Pair : RoomsByFloor)
+	{
+		for (AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (!Room || Room->RoomId != RoomId)
+			{
+				continue;
+			}
+			if (!Room->GetFootprint().IsValidIndex(VertexIndex)) return false;
+			if (Room->GetFootprint()[VertexIndex].Equals(NewPosition, 1e-6)) return true;
+			if (!CanMoveRoomVertex(RoomId, VertexIndex, NewPosition)) return false;
+
+			TArray<FVector2D> NewFootprint = Room->GetFootprint();
+			NewFootprint[VertexIndex] = NewPosition;
+			// Doors and windows slide along with their wall; false when they no longer fit on it.
+			if (!Room->ResizeFootprint(NewFootprint, /*bFitOpenings=*/true)) return false;
+			UE_LOG(LogTemp, Warning, TEXT("Moved corner %d of %s to (%.1f, %.1f)"), VertexIndex, *RoomId, NewPosition.X, NewPosition.Y);
+			if (bRecordHistory) RecordHistorySnapshot();
+			else NotifyNavigationLayoutChanged();
+			return true;
+		}
+	}
+	return false;
 }
 
 bool AInteriorGenerator::RotateRoom(const FString& RoomId, float DeltaDegrees)

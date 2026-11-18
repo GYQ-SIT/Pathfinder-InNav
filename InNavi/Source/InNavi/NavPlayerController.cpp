@@ -2,6 +2,7 @@
 
 
 #include "NavPlayerController.h"
+#include "InteriorDrawing.h"
 #include "NavigationPanelWidget.h"
 #include "MobileAppWidget.h"
 #include "MobileSearchPageWidget.h"
@@ -1601,7 +1602,24 @@ void ANavPlayerController::CancelBuilding()
 	OnFootprintPointCountChanged.Broadcast(0);
 }
 
-void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPoint)
+FVector2D ANavPlayerController::ConstrainDrawPoint(FVector2D Point, bool bAxisLock) const
+{
+	return bAxisLock && (bDrawRoomMode || bDrawWallMode) && !PendingRoomFootprint.IsEmpty() ? InteriorDrawing::AxisLocked(PendingRoomFootprint.Last(), Point) : Point;
+}
+
+bool ANavPlayerController::RemoveLastRoomPoint()
+{
+	if ((!bDrawRoomMode && !bDrawWallMode) || PendingRoomFootprint.IsEmpty())
+	{
+		return false;
+	}
+	PendingRoomFootprint.Pop();
+	OnRoomPointCountChanged.Broadcast(PendingRoomFootprint.Num());
+	UE_LOG(LogTemp, Warning, TEXT("Room point removed: %d left"), PendingRoomFootprint.Num());
+	return true;
+}
+
+void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPoint, bool bSkipSnapping)
 {
 	if (!bDrawRoomMode && !bDrawWallMode)
 	{
@@ -1625,7 +1643,7 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 	// exactly instead of the raw click position - same tolerance as dragging a room (see
 	// UInteriorFloorPlanWidget), applied after the building-outline check above so snapping can't
 	// rescue a click that's genuinely outside the building.
-	if (InteriorGen && bSnapEnabled)
+	if (InteriorGen && bSnapEnabled && !bSkipSnapping)
 	{
 		// Fixed WORLD distance (80cm) divided by Scale, not a bare footprint-unit constant - same
 		// "footprint units assumed Scale~10" reasoning as PlacePrefabRoomAt (see its own comment); a
@@ -1791,6 +1809,27 @@ bool ANavPlayerController::GetSelectedRoomBounds(FVector2D& OutPosition, FVector
 	}
 	OutPosition = Min;
 	OutSize = Max - Min;
+	return true;
+}
+
+TArray<FVector2D> ANavPlayerController::GetSelectedRoomVertices() const
+{
+	const AInteriorRoom* Room = (!SelectedRoomId.IsEmpty() && InteriorGen) ? InteriorGen->GetRoomById(SelectedRoomId) : nullptr;
+	return Room ? Room->GetFootprint() : TArray<FVector2D>();
+}
+
+bool ANavPlayerController::CanMoveSelectedRoomVertex(int32 VertexIndex, FVector2D NewPosition) const
+{
+	return !bInteriorInspectionEnabled && !(bIsIn3DPreviewMode && !bIsIn3DEditMode) && !SelectedRoomId.IsEmpty() && InteriorGen
+		&& InteriorGen->CanMoveRoomVertex(SelectedRoomId, VertexIndex, NewPosition);
+}
+
+bool ANavPlayerController::MoveSelectedRoomVertex(int32 VertexIndex, FVector2D NewPosition)
+{
+	// Same edit-proofing as the other drag edits: nothing moves in the isolated view or in 3D View mode.
+	if (bInteriorInspectionEnabled || (bIsIn3DPreviewMode && !bIsIn3DEditMode) || SelectedRoomId.IsEmpty() || !InteriorGen) return false;
+	if (!InteriorGen->MoveRoomVertex(SelectedRoomId, VertexIndex, NewPosition, /*bRecordHistory=*/false)) return false;
+	bHasUnsavedChanges = true;
 	return true;
 }
 
@@ -2275,6 +2314,7 @@ bool ANavPlayerController::SetSelectedConnectorFloors(const TArray<int32>& NewFl
 		return false;
 	}
 
+	InteriorGen->ConsumeConnectorFailure();
 	const bool bSuccess = InteriorGen->SetConnectorFloors(SelectedConnectorGroupId, NewFloors);
 	if (bSuccess)
 	{
@@ -2282,7 +2322,9 @@ bool ANavPlayerController::SetSelectedConnectorFloors(const TArray<int32>& NewFl
 	}
 	else
 	{
-		OnActionFailed.Broadcast(TEXT("Could not update that connector's floors - check each newly-added floor exists, is inside the building, and isn't blocked by a wall."), EActionFailureSeverity::Warning);
+		const FString Reason = InteriorGen->ConsumeConnectorFailure();
+		OnActionFailed.Broadcast(Reason.IsEmpty() ? FString(TEXT("Could not update that connector's floors - check each newly-added floor exists, is inside the building, and isn't blocked by a wall."))
+			: FString::Printf(TEXT("Could not update that connector's floors. %s Untick that floor, or move the connector."), *Reason), EActionFailureSeverity::Warning);
 	}
 	return bSuccess;
 }
@@ -2465,6 +2507,24 @@ TArray<FVector2D> ANavPlayerController::BuildPrefabRoomFootprint(FVector2D Footp
 	return Footprint;
 }
 
+double ANavPlayerController::GetPrefabShiftAspect() const
+{
+	switch (ActivePrefabShape)
+	{
+	case 1: // Rectangle: Shift makes it a square.
+	case 3: // Circle: the 24-sided shape is as high as it is wide.
+		return 1.0;
+	case 2: // Triangle: the equilateral triangle's own height over its width.
+	{
+		const FBox2D Bounds(BuildPrefabRoomFootprint(FVector2D::ZeroVector));
+		const FVector2D Size = Bounds.GetSize();
+		return Size.X > UE_KINDA_SMALL_NUMBER ? Size.Y / Size.X : 0.0;
+	}
+	default:
+		return 0.0;
+	}
+}
+
 FString ANavPlayerController::PlaceConnectorAt(FVector2D FootprintPosition)
 {
 	if (bInteriorInspectionEnabled) return FString();
@@ -2513,10 +2573,14 @@ FString ANavPlayerController::PlaceConnectorAt(FVector2D FootprintPosition)
 		}
 	}
 
+	InteriorGen->ConsumeConnectorFailure();
 	const FString GroupId = InteriorGen->PlaceConnectorNode(Type, FootprintPosition, ConnectsToFloors);
 	if (GroupId.IsEmpty())
 	{
-		OnActionFailed.Broadcast(TEXT("Could not place a connector there - check it's inside the building and not on top of a wall."), EActionFailureSeverity::Warning);
+		// The connector has to fit on every floor it reaches, so the reason names the floor and what is in the way there (it may not be the floor on screen).
+		const FString Reason = InteriorGen->ConsumeConnectorFailure();
+		OnActionFailed.Broadcast(Reason.IsEmpty() ? FString(TEXT("Could not place a connector there - check it's inside the building and not on top of a wall."))
+			: FString::Printf(TEXT("Could not place a connector there. %s Move it, or let it reach fewer floors."), *Reason), EActionFailureSeverity::Warning);
 		return FString();
 	}
 
@@ -3788,6 +3852,13 @@ bool ANavPlayerController::MoveSelectedConnectorTo(const TMap<int32, FVector2D>&
 	return true;
 }
 
+void ANavPlayerController::ReportConnectorMoveRefused()
+{
+	const FString Reason = InteriorGen ? InteriorGen->ConsumeConnectorFailure() : FString();
+	OnActionFailed.Broadcast(Reason.IsEmpty() ? FString(TEXT("The connector stays where it was: it cannot go there."))
+		: FString::Printf(TEXT("The connector stays where it was. %s"), *Reason), EActionFailureSeverity::Warning);
+}
+
 void ANavPlayerController::SetPointerOverUICallback(const UObject* ScreenOwner, TFunction<bool(const FVector2D&)> Callback)
 {
 	PointerOverUIOwner = ScreenOwner;
@@ -4745,6 +4816,8 @@ void ANavPlayerController::RedoInteriorKeyHandler()
 bool ANavPlayerController::UndoInteriorEdit()
 {
 	if (bInteriorInspectionEnabled) return false;
+	// While a room or wall is being clicked out, Undo takes back its last point; the older edits are for after it is finished.
+	if (RemoveLastRoomPoint()) return true;
 	if (InteriorGen && InteriorGen->Undo())
 	{
 		if (NavigationPanel) NavigationPanel->NotifyInteriorChanged();

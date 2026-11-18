@@ -187,6 +187,19 @@ public:
 	// True when ResizeRoomToBounds with these bounds would keep the room inside the building's outline. Changes nothing; the resize drag uses it to stop at the wall (PAT-190).
 	bool DoesResizeStayInsideBuilding(const FString& RoomId, FVector2D Position, FVector2D Size) const;
 
+	// Moves one corner of a room (or one point of a wall) and leaves the others where they are, so a rectangle can become a trapezoid without being
+	// drawn again. Refused (false, nothing changes) when the new shape would have corners on top of each other, cross itself, leave the building,
+	// overlap another room or wall, wall in a lift/stair/escalator, or leave a door without room on its wall. bRecordHistory false is for a drag,
+	// which records one history step itself when it ends.
+	bool MoveRoomVertex(const FString& RoomId, int32 VertexIndex, FVector2D NewPosition, bool bRecordHistory = true);
+	// The geometry part of the same question, without changing anything: would the corner be allowed there? (Whether a door still fits on its wall is
+	// only known when the move is made.) A corner drag uses it to stop at the last allowed spot.
+	bool CanMoveRoomVertex(const FString& RoomId, int32 VertexIndex, FVector2D NewPosition) const;
+
+	// Why the last connector placement check said no, in words that name the floor and what is in the way there ("Floor 2: it overlaps the wall of
+	// room 'Lab'."). Empty after a yes. Reading it clears it, so a later failure for another reason never shows an old one (PAT-206).
+	FString ConsumeConnectorFailure() const;
+
 	// Rotates a room/wall's footprint by DeltaDegrees around its own bounding-box center (positive
 	// = counter-clockwise). Rejects (no-op, returns false) if the rotated footprint would extend
 	// outside the building's outline or overlap another room/wall - checked every call (i.e. every
@@ -498,6 +511,9 @@ private:
 	// Room ids in use for the currently loaded building, for CreateRoomFromFootprint's uniqueness
 	// check. Cleared whenever a different building is loaded.
 	TSet<FString> UsedRoomIds;
+
+	// See ConsumeConnectorFailure. Mutable: CanPlaceConnectorOnFloor is a const question that leaves its answer's reason here.
+	mutable FString LastConnectorFailure;
 
 	// ---- Undo / Redo History ----
 

@@ -272,6 +272,23 @@ tool that is active is highlighted in blue. Four groups:
 Clicking inside the building's outline but on top of a wall, outside the outline, or
 overlapping another room will fail, with the reason logged to the Output Log.
 
+### Drawing controls (Shift, Ctrl+Z, corners)
+
+- **Shift while drawing a room or wall**: the next point goes straight along X or Y from the previous point (whichever way the pointer
+  went further), so the line is exactly horizontal or vertical. A faint line follows the pointer from the last point and shows where the
+  click would land. A Shift point is not pulled off its line by snapping.
+- **Shift while dragging out a shape** (`1`/`2`/`3`): the rectangle becomes a perfect **square**, the circle a perfect circle (as high as
+  wide) and the triangle an **equilateral** triangle. The box grows from the corner where the drag began, the longer pull wins. Without Shift
+  the box is whatever the drag was.
+- **Ctrl+Z (and the Undo button) while a room or wall is being drawn** takes back the **last point**, one per press. Once no point is
+  left, Ctrl+Z undoes the older edits as usual. (Redo does not bring a taken-back point back.)
+- **Moving a single corner**: with a room or wall selected, its own corners show as white dots with an orange rim. Drag one to move that
+  corner alone, so a rectangle can become a trapezoid or an L-shape be reshaped without drawing it again. A corner that sits under a blue
+  resize handle (the box corners and edge middles) is grabbed with **Ctrl+drag**; a plain drag there resizes the whole room, as before.
+  The corner follows the pointer and **stops at the limit** where drawing the room there would have been refused (outside the building,
+  across another room or wall, through a lift or stair, or crossing its own outline); it snaps to other rooms' corners when snapping is
+  on. A door or window slides along with its wall, and the move is refused if it would no longer fit. One drag is one Undo step.
+
 ### Floor panel
 
 The heading shows **Floors** and how many there are, with **+ Add** on the right. Each floor is a row - "Level N"
@@ -325,7 +342,9 @@ turn and size**. Select it on the floor you want, then:
 - turn it with `9` / `0` and resize it with `=` / `-` (or the Toolbar buttons).
 
 All of these change the marker of the **floor you are on** and leave the other floors alone. Hold **Shift** to change **every floor of the
-connector** at once (each by the same step, from where it is). A spot outside the building or on a wall or another connector is refused. One drag
+connector** at once (each by the same step, from where it is). A spot outside the building or on a wall or another connector is refused, and the message says **which floor** and **what is in the
+way there** ("Floor 3: it overlaps the wall of room 'Server room'"): a connector has to fit on every floor it reaches, so the blocked floor
+is often not the one on screen. Placing a connector, adding floors to it and dropping a dragged one all say it. One drag
 is one Undo step. The route follows the connector by its group, not by where its floors stand, so a stair that is a little
 further along on the next floor still joins them.
 

@@ -10,6 +10,7 @@
 #include "PolyBuilding.h"
 #include "UiTestFixture.h"
 
+#include "DebugPanelWidget.h"
 #include "Components/Button.h"
 #include "Components/CheckBox.h"
 #include "Dom/JsonObject.h"
@@ -261,6 +262,71 @@ bool FConnectorSelectAllFloorsTest::RunTest(const FString& Parameters)
 	Floors.Sort();
 	TestEqual(TEXT("saved floors are all four"), Floors, TArray<int32>({ -1, 1, 2, 3 }));
 	Controller->OnSelectedConnectorChanged.Remove(Selected);
+	return true;
+}
+
+// PAT-206: when a connector cannot go somewhere, the message names the floor and what is in the way there (the blocked floor is often not the one
+// on screen), for placing it, for adding floors to it and for dropping it after a drag.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConnectorBlockedReasonTest, "InNavi.Interior.ConnectorFloors.BlockedReason", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConnectorBlockedReasonTest::RunTest(const FString& Parameters)
+{
+	using namespace ConnectorFloorTests;
+	// The refusals are logged as errors on purpose; this test provokes them.
+	AddExpectedError(TEXT("Connector placement:"), EAutomationExpectedErrorFlags::Contains, 0);
+	AddExpectedError(TEXT("SetConnectorFloors:"), EAutomationExpectedErrorFlags::Contains, 0);
+	AddExpectedError(TEXT("PlaceConnectorNode:"), EAutomationExpectedErrorFlags::Contains, 0);
+	FConnectorScene S;
+	if (!TestFalse(TEXT("a lift is placed"), S.Group.IsEmpty())) return false;
+	TestTrue(TEXT("the lift reaches floors 1 and 2 only"), S.Interior->SetConnectorFloors(S.Group, { 1, 2 }));
+
+	// A room on floor 3 whose left wall runs through the lift's column.
+	S.Interior->SetActiveFloor(3);
+	FString Error;
+	if (!TestNotNull(TEXT("a room on floor 3"), S.Interior->CreateRoomFromFootprint({ S.At(30, 5), S.At(40, 5), S.At(40, 25), S.At(30, 25) }, TEXT("R3"), TEXT("Server room"), true, false, false, Error))) return false;
+	S.Interior->SetActiveFloor(1);
+
+	// Adding floor 3 is refused, and the reason says which floor and which room.
+	S.Interior->ConsumeConnectorFailure();
+	TestFalse(TEXT("floor 3 cannot be added"), S.Interior->SetConnectorFloors(S.Group, { 1, 2, 3 }));
+	const FString AddReason = S.Interior->ConsumeConnectorFailure();
+	TestTrue(TEXT("it names floor 3"), AddReason.StartsWith(TEXT("Floor 3:")));
+	TestTrue(TEXT("and the room whose wall is in the way"), AddReason.Contains(TEXT("Server room")));
+	TestTrue(TEXT("the reason is used up once read"), S.Interior->ConsumeConnectorFailure().IsEmpty());
+
+	// A new lift that reaches every floor fails on floor 3 as well, though floors 1 and 2 are clear at that spot.
+	TestTrue(TEXT("a new lift cannot be placed through the wall"), S.Interior->PlaceConnectorNode(EInteriorNavNodeType::Elevator, S.At(30, 8), TArray<int32>{ 1, 2, 3 }).IsEmpty());
+	const FString PlaceReason = S.Interior->ConsumeConnectorFailure();
+	TestTrue(TEXT("placing names floor 3 too"), PlaceReason.StartsWith(TEXT("Floor 3:")) && PlaceReason.Contains(TEXT("Server room")));
+
+	// A yes leaves no reason behind.
+	TestTrue(TEXT("a lift on floors 1 and 2 can be placed there"), !S.Interior->PlaceConnectorNode(EInteriorNavNodeType::Elevator, S.At(30, 8), TArray<int32>{ 1, 2 }).IsEmpty());
+	TestTrue(TEXT("with no reason"), S.Interior->ConsumeConnectorFailure().IsEmpty());
+
+	// What the user sees: the message of the controller, in the debug panel.
+	ANavPlayerController* Controller = S.Fixture.MakeController();
+	S.Fixture.Generator->SetInteriorDataForBuilding(TEXT("CF"), S.Interior->CaptureInteriorSnapshot());
+	Controller->LoadInteriorForBuilding(TEXT("CF"));
+	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>(); Screen->Initialize(); Screen->TakeWidget(); Screen->SetOwningPlayer(Controller);
+	UDebugPanelWidget* Panel = Screen->GetDebugPanelForTests();
+	if (!TestNotNull(TEXT("debug panel"), Panel)) return false;
+	Panel->BindToController();
+	FString Group;
+	for (const FInteriorNavNode& Node : S.Interior->GetNavNodes()) if (Node.Level == 1 && Node.Position.Equals(S.At(30, 15), 0.001)) Group = Node.ConnectorGroupId;
+	if (!TestFalse(TEXT("the first lift is back after opening the building"), Group.IsEmpty())) return false;
+	Controller->SelectConnector(Group);
+	TestFalse(TEXT("the controller cannot add floor 3"), Controller->SetSelectedConnectorFloors({ 1, 2, 3 }));
+	TestTrue(TEXT("the message names floor 3"), Panel->GetLastErrorTextForTests().Contains(TEXT("Floor 3:")));
+	TestTrue(TEXT("and the room"), Panel->GetLastErrorTextForTests().Contains(TEXT("Server room")));
+
+	// Dropping a dragged connector outside the building: refused, and the report says it stays and why.
+	Controller->SetActiveFloor(1);
+	TMap<int32, FVector2D> Outside = Controller->GetSelectedConnectorPositions(false);
+	for (TPair<int32, FVector2D>& Pair : Outside) Pair.Value = S.At(-20, 15);
+	TestFalse(TEXT("outside the building is refused"), Controller->MoveSelectedConnectorTo(Outside));
+	Controller->ReportConnectorMoveRefused();
+	const FString DropText = Panel->GetLastErrorTextForTests();
+	TestTrue(TEXT("the report says it stays where it was"), DropText.Contains(TEXT("stays where it was")));
+	TestTrue(TEXT("and names the floor and the outer wall"), DropText.Contains(TEXT("Floor 1:")) && DropText.Contains(TEXT("outer wall")));
 	return true;
 }
 
