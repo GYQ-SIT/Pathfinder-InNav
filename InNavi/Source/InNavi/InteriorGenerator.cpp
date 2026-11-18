@@ -2526,28 +2526,26 @@ FString AInteriorGenerator::MakeUniqueRoomName(const FString& Desired) const
 		return Desired;
 	}
 
-	// Split a trailing number off ("Lab1" -> "Lab" + 1); no number (or one too long to count) starts at 2 after a space.
-	int32 DigitStart = Desired.Len();
-	while (DigitStart > 0 && FChar::IsDigit(Desired[DigitStart - 1]))
+	// A copy of "Room (2)" counts on from its own bracket ("Room (3)"); anything else gets "(1)" after the whole name ("Lobby 14" -> "Lobby 14 (1)").
+	FString Base = Desired;
+	int32 Number = 1;
+	if (Desired.EndsWith(TEXT(")")))
 	{
-		--DigitStart;
+		int32 Open = INDEX_NONE;
+		Desired.FindLastChar(TEXT('('), Open);
+		const FString Digits = Open == INDEX_NONE ? FString() : Desired.Mid(Open + 1, Desired.Len() - Open - 2);
+		if (Open > 0 && Digits.Len() >= 1 && Digits.Len() <= 9 && Digits.IsNumeric() && !Digits.Contains(TEXT("-")) && !Digits.Contains(TEXT(".")) && !Digits.Contains(TEXT("+")))
+		{
+			Base = Desired.Left(Open).TrimEnd();
+			Number = FCString::Atoi(*Digits) + 1;
+		}
 	}
-	FString Prefix;
-	int32 Number = 2;
-	if (DigitStart < Desired.Len() && Desired.Len() - DigitStart <= 9)
-	{
-		Prefix = Desired.Left(DigitStart);
-		Number = FCString::Atoi(*Desired.Mid(DigitStart)) + 1;
-	}
-	else
-	{
-		Prefix = Desired + TEXT(" ");
-	}
+	const FString Prefix = Base + TEXT(" (");
 
 	FString Candidate;
 	do
 	{
-		Candidate = Prefix + FString::FromInt(Number++);
+		Candidate = Prefix + FString::FromInt(Number++) + TEXT(")");
 	} while (IsRoomNameTaken(Candidate));
 	return Candidate;
 }
