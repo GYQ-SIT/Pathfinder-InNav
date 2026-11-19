@@ -17,6 +17,7 @@ class INNAVI_API AInteriorRoom : public AActor
 
 public:
 	AInteriorRoom();
+	virtual void BeginDestroy() override;
 
 	// Builds this room's walls: one wall-segment box per footprint edge (not a continuous offset
 	// ring - simpler, and avoids self-intersection issues that polygon offsetting has on concave
@@ -120,6 +121,23 @@ private:
 	float CachedFloorBaseZ = 0.f;
 	float CachedWallHeight = 280.f;
 	float CachedWallThickness = 20.f;
+
+	// Z-fighting: two walls on the same line (a room's wall on the building's outer wall, two rooms that share a wall) have faces in the very same plane,
+	// and the GPU cannot tell which is in front, so they flicker. Each room's walls are therefore a hair thicker and taller than the plain size, by a
+	// step that differs from every neighbour's (see ChooseWallBiasLevel); the outer wall has level 0, a room never does.
+	// The steps are in centimetres: 0.4 more on each side and 0.8 taller per level, and there are WallBiasLevels of them.
+public:
+	static constexpr int32 WallBiasLevels = 6;
+	static constexpr float WallBiasThicknessStep = 0.4f;
+	static constexpr float WallBiasHeightStep = 0.8f;
+	int32 GetWallBiasLevel() const { return WallBiasLevel; }
+	// The plan area the walls cover, in world units (the room's footprint grown by the wall thickness); empty before the walls are built.
+	const FBox2D& GetWallBounds() const { return WallBounds; }
+private:
+	// 1..WallBiasLevels: the lowest level that none of the rooms beside this one on the same floor has. 0 until the walls are built.
+	int32 WallBiasLevel = 0;
+	FBox2D WallBounds = FBox2D(ForceInit);
+	int32 ChooseWallBiasLevel() const;
 	TArray<FInteriorOpening> CachedOpenings;
 	bool CachedClosedLoop = true;
 	bool bGenerateCollision = true;

@@ -8,8 +8,44 @@
 #include "KismetProceduralMeshLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
+namespace
+{
+	// Every building that exists, so one can find the buildings it overlaps without walking every actor of the world.
+	TSet<APolyBuilding*>& LiveBuildings()
+	{
+		static TSet<APolyBuilding*> Buildings;
+		return Buildings;
+	}
+}
+
+void APolyBuilding::BeginDestroy()
+{
+	LiveBuildings().Remove(this);
+	Super::BeginDestroy();
+}
+
+int32 APolyBuilding::ChooseZFightLevel() const
+{
+	TSet<int32> Taken;
+	const UWorld* World = GetWorld();
+	for (const APolyBuilding* Other : LiveBuildings())
+	{
+		// One that was destroyed stays in the list until it is collected, and must not count.
+		if (Other == this || !IsValid(Other) || !Other->ZFightBounds.bIsValid || Other->GetWorld() != World) continue;
+		if (Other->ZFightBounds.Intersect(ZFightBounds)) Taken.Add(Other->ZFightLevel);
+	}
+	// A building keeps its level while it is still free, so it does not change look every time it is rebuilt.
+	if (!Taken.Contains(ZFightLevel)) return ZFightLevel;
+	for (int32 Level = 0; Level < ZFightLevels; ++Level)
+	{
+		if (!Taken.Contains(Level)) return Level;
+	}
+	return Taken.Num() % ZFightLevels;
+}
+
 APolyBuilding::APolyBuilding()
 {
+	if (!HasAnyFlags(RF_ClassDefaultObject)) LiveBuildings().Add(this);
 	PrimaryActorTick.bCanEverTick = false;
 
 	MeshComp = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("MeshComp"));
@@ -297,8 +333,9 @@ void APolyBuilding::BuildWallSection(const TArray<FVector2D>& Poly2D, float ZBot
 	// it for those pixels, which flickers. So while the building is see-through its walls are a little thinner and its top ring a little lower:
 	// they lie just inside the solid walls of the neighbour, which then win everywhere they overlap.
 	constexpr float SeeThroughInset = 2.f;
-	const float HalfThickness = (bSolidLook ? ExteriorWallThickness : ExteriorWallThickness - 2.f * SeeThroughInset) * 0.5f;
-	const float ZTop = (bSolidLook || Level != GetLastLevel()) ? FullZTop : FullZTop - SeeThroughInset;
+	const float HalfThickness = (bSolidLook ? ExteriorWallThickness : ExteriorWallThickness - 2.f * SeeThroughInset) * 0.5f + ZFightWallStep * ZFightLevel;
+	const bool bTopRing = Level == GetLastLevel();
+	const float ZTop = ((bSolidLook || !bTopRing) ? FullZTop : FullZTop - SeeThroughInset) + (bTopRing ? ZFightRoofStep * ZFightLevel : 0.f);
 
 	TArray<FWallCorner> Corners;
 	ComputeWallCorners(Poly2D, HalfThickness, Corners);
@@ -445,10 +482,13 @@ void APolyBuilding::ApplySlabVisibility()
 	const float BaseZ = GetBaseZ();
 	const bool bViewing = VisibleInteriorLevel != 0;
 	const int32 ViewedPosition = bViewing ? GetLevelPosition(VisibleInteriorLevel) : 0;
+	// This building's own level against the buildings it overlaps (see the comment in the header).
+	ZFightBounds = FBox2D(CachedPoly2D);
+	ZFightLevel = ChooseZFightLevel();
 	for (int32 L = 1; L <= FloorCount; L++)
 	{
 		const int32 SectionIndex = (L == FloorCount) ? 1 : (1 + L);
-		const float Z = BaseZ + L * FloorHeight;
+		const float Z = BaseZ + L * FloorHeight + (L == FloorCount ? ZFightRoofStep * ZFightLevel : 0.f);
 
 		// Show only the viewed floor's own floor cap (L == VisibleInteriorLevel - 1, i.e. the slab at
 		// the viewed floor's own base) - hide every other floor's cap, both above (its ceiling/the

@@ -605,6 +605,18 @@ while previewing. A found route (and its Start/Destination markers) draws in 3D 
 same per-floor rule as 2D, only the segment(s)/marker(s) on the currently viewed floor
 show.
 
+**Flicker (z-fighting).** Faces that lie in exactly the same plane flicker, because the graphics card cannot tell which is in front. This happens where
+walls lie on one line (a room's wall on the building's outer wall, two rooms that share a wall) and where a stair or lift reaches the slab above. So each
+room's walls are a hair thicker and taller than the plain size (0.4 cm more on each side and 0.8 cm taller per step, up to 6 steps), with a step that differs from
+every neighbouring room's on the same floor; the building's outer wall keeps the plain size. A stair or a lift ends 2 cm under the slab above it, and the posts of a lift
+start 2 cm under their own floor so the floors of one shaft still overlap. The differences are far too small to see, and wall positions, thickness in the project file and
+the checks are unchanged. A room that is moved or resized chooses its step again, keeping the one it had if it is still free.
+
+The same happens between buildings: two buildings that overlap on the map and are as tall as each other (the campus data has many) have roofs and outer walls in
+the same planes. Each building takes a level that differs from that of every building it overlaps (4 levels): its roof is 12 cm higher and its outer wall 3 cm
+thicker on each side per level. A building that overlaps none, and the first of a group, keep the plain size. Levels are chosen when a building is built or rebuilt
+and kept while still free. Buildings that touch but do not overlap are not changed.
+
 Camera controls:
 
 - **WASD** + **mouse-look** — free-fly, same as the pawn's own default movement.
