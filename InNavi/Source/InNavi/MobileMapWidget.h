@@ -10,7 +10,8 @@
 // 3D-looking view of the same plan. A tap on a room or (in the overview) a building is reported. It asks an IMobileNavSource for what to draw.
 //
 // The map fits itself into the part of the widget that is not covered (below the top bar, above the bottom sheet): SetFitInsets says how much
-// of the top and bottom is covered, in design pixels.
+// of the top and bottom is covered, in design pixels. A building that is small enough is shown whole; a big one starts at about 100 metres across the
+// screen (MobileMapScale), around the person, the place looked at or the route, and the whole plan is a pinch away. Icons and names follow the scale.
 UCLASS()
 class INNAVI_API UMobileMapWidget : public UUserWidget
 {
@@ -36,6 +37,7 @@ public:
 	void SetStops(const TArray<FMobileRoutePoint>& InStops);
 	int32 GetStopCount() const { return Stops.Num(); }
 	int32 GetStopsOnLevel() const;
+	// The place looked at is drawn highlighted; if it is out of sight on a map that starts in the middle of a big building, the view moves to it.
 	void SetHighlightPlace(const FString& PlaceId);
 	void SetPosition(const FMobileRoutePoint& InPosition);
 	void ClearPosition();
@@ -43,10 +45,12 @@ public:
 	bool IsShowing3D() const { return bShow3D; }
 	void SetFitInsets(double Top, double Bottom);
 
-	// The view: how far in the person has zoomed (1 = the plan fits) and how far they moved it (design pixels). Zoom is kept between 0.7 and 6 (the
-	// prototype stopped at 2, which left a room small), and the plan cannot be moved out of sight. A different level, the overview, or the tilt starts again
-	// at the fit (ResetView).
+	// The view: how far in the person has zoomed (1 = where the map starts: the plan whole, or 100 metres across for a big building) and how far they moved
+	// it (design pixels). Zoom is kept between 0.7 of the whole plan (GetMinZoom: lower for a big building) and 6 (the prototype stopped at 2, which left a
+	// room small), and the plan cannot be moved out of sight. The overview or the tilt starts again at the start (ResetView); another level of the same
+	// building keeps the view.
 	static constexpr double MinZoom = 0.7;
+	double GetMinZoom() const;
 	static constexpr double MaxZoom = 6.0;
 	static constexpr double ZoomStep = 0.2;
 	double GetZoom() const { return Zoom; }
@@ -58,7 +62,7 @@ public:
 	// ResetRotation (the compass button) puts it back.
 	double GetRotation() const { return Rotation; }
 	void SetRotation(double Radians);
-	void ResetRotation() { SetRotation(0.0); }
+	void ResetRotation();
 	// Turns by DeltaRadians about a point of the widget: what is under that point stays under it (in the flat view).
 	void RotateAround(const FVector2D& Local, double DeltaRadians);
 	// Told the new turn each time it changes, for the compass button.
@@ -68,6 +72,12 @@ public:
 	bool AreGesturesEnabled() const { return bGestures; }
 	// The size the map is drawn at (design pixels); it learns it when it is drawn or touched, tests say it.
 	void SetViewSize(double Width, double Height) { ViewSize = FVector2D(Width, Height); }
+	// Where the view is built around on a big building (the middle of the route, the place looked at, the person, the way in, the plan's middle), and
+	// how many of the site's other buildings are drawn round the level (for the tests).
+	FVector2D FocusPoint() const;
+	int32 GetContextBuildingCount() const;
+	// What a test shows without a source: the level (and the site's other buildings round it).
+	void SetMapsForTest(const FMobileLevelMap& Level, const FMobileCampusMap& Campus);
 	// Zooms by a step about the middle of the uncovered part (the buttons), or by a factor about a point (a pinch, the wheel).
 	void ZoomBy(double Delta);
 	void ZoomAround(const FVector2D& Local, double Factor);
@@ -121,6 +131,19 @@ private:
 	// The middle of the uncovered part of the widget: what zooming and turning are about.
 	FVector2D ViewCentre() const;
 	void ComputeFit(double WidgetWidth, double WidgetHeight, double& OutScale, FVector2D& OutOffset) const;
+	// The scale that fits the whole plan, and the one the map starts at (the larger: see MobileMapScale::StartScale), with the part of the widget the plan has.
+	struct FStart
+	{
+		bool bValid = false;
+		double Fit = 1.0;
+		double Start = 1.0;
+		double AvailW = 0.0;
+		double AvailH = 0.0;
+		FBox2D Bounds = FBox2D(ForceInit);
+	};
+	FStart WorkOutStart(double WidgetWidth, double WidgetHeight) const;
+	// The route's points on the level shown, as a box of the plan; false with fewer than two.
+	bool RouteBoxOnLevel(FBox2D& OutBox) const;
 	TArray<FVector2D> ToWidgetPolygon(const TArray<FVector2D>& Plan, double WidgetWidth, double WidgetHeight, double Lift) const;
 
 	IMobileNavSource* Source = nullptr;
@@ -134,6 +157,8 @@ private:
 	FMobileRoutePoint Position;
 	bool bHasPosition = false;
 	bool bShow3D = false;
+	// Where a big building's view is built around, kept once chosen (so a tap or a drag does not move it), until the view starts again or the route changes.
+	mutable TOptional<FVector2D> LatchedFocus;
 	double InsetTop = 64.0;
 	double InsetBottom = 300.0;
 	double Zoom = 1.0;

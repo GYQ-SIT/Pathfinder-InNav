@@ -587,6 +587,12 @@ bool FMobileMockSource::GetLevelMap(const FString& BuildingId, int32 Level, FMob
 			OutMap.Level = Level;
 			OutMap.Outline = LevelOutline;
 			OutMap.Entrance = Entrance;
+			// A schematic plan with no real size: call its longer side fifty metres, which is small enough to be shown whole.
+			{
+				FBox2D Box(ForceInit);
+				for (const FVector2D& P : LevelOutline) Box += P;
+				if (Box.bIsValid) OutMap.UnitsPerMetre = FMath::Max(Box.GetSize().GetMax() / 50.0, 1e-3);
+			}
 			// A room for each place of the level, around the place's position, as in the prototype's schematic plans.
 			for (const FMobilePlace& Place : Data.Places)
 			{

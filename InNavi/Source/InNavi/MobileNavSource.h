@@ -192,6 +192,9 @@ struct FMobileLevelMap
 	FVector2D Entrance = FVector2D::ZeroVector;
 	// False when the project has no mapped starting point on this level. No positioning is inferred.
 	bool bHasEntrance = true;
+	// How many units of this plan (and of the campus map) make a metre of floor: the real projects are drawn in metres (1); the prototype's schematic
+	// plans are in screen units, so their source says how many make a building of about fifty metres. The map's start scale and the size of its icons use it.
+	double UnitsPerMetre = 1.0;
 };
 
 // The site seen from above: its buildings (and the things between them), in the site's own units.

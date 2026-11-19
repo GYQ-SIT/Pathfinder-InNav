@@ -120,13 +120,12 @@ bool FMobileMapZoomTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("and off to the left and up"), Gone.Max.X > 10.0 && Gone.Max.Y > 64.0 + 10.0);
 	Map->ResetView();
 
-	// The view starts again for another level, the overview and the tilt, and stays for the same level.
+	// The view starts again for the overview and the tilt, and stays for the same level and for another level of the same building (the person keeps their place when they change floor).
 	Map->ZoomBy(0.4);
 	Map->ShowLevel(TEXT("E2"), 1);
 	TestTrue(TEXT("the same level again keeps the zoom"), FMath::IsNearlyEqual(Map->GetZoom(), 1.4));
 	Map->ShowLevel(TEXT("E2"), 2);
-	TestTrue(TEXT("another level starts at the fit"), FMath::IsNearlyEqual(Map->GetZoom(), 1.0));
-	Map->ZoomBy(0.4);
+	TestTrue(TEXT("another level of the same building keeps the zoom"), FMath::IsNearlyEqual(Map->GetZoom(), 1.4));
 	Map->ShowOverview();
 	TestTrue(TEXT("the overview too"), FMath::IsNearlyEqual(Map->GetZoom(), 1.0));
 	Map->ShowLevel(TEXT("E2"), 2);
@@ -260,10 +259,11 @@ bool FMobileMapToolsTest::RunTest(const FString& Parameters)
 	const FMobileLayoutSnapshot Layout = Screen->GetLayoutSnapshot();
 	TestTrue(TEXT("the controls fit above the half-open sheet"), Layout.SheetTop - UMobileAppWidget::ControlsGap - UMobileAppWidget::ControlsHeight >= Layout.TopBarBottom);
 
-	// Choosing another level starts the view again.
+	// Choosing another level of the building keeps the view.
 	Screen->ZoomMap(0.4);
+	const double ZoomBefore = Map->GetZoom();
 	Screen->ChooseMapLevel(2);
-	TestTrue(TEXT("another level, the fit"), FMath::IsNearlyEqual(Map->GetZoom(), 1.0));
+	TestTrue(TEXT("another level, the same zoom"), FMath::IsNearlyEqual(Map->GetZoom(), ZoomBefore));
 	World->DestroyWorld(false);
 	return true;
 }
