@@ -6,7 +6,9 @@
 #include "BuildingSummary.h"
 #include "GameFramework/PlayerController.h"
 #include "InteriorEntrance.h"
+#include "InteriorReferenceImage.h"
 #include "InteriorTypes.h"
+#include "InteriorUtility.h"
 #include "RoadSegmentActor.h"
 #include "NavPlayerController.generated.h"
 
@@ -15,6 +17,8 @@ class AInteriorBuildingPreviewPivot;
 // How dragging turns the model in Isolate: Orbit moves the camera around it (drag right and the model seems to turn left), Grab makes it
 // follow the mouse like a thing held in the hand (drag right and its near side goes right).
 enum class EInspectionRotateStyle : uint8 { Orbit, Grab };
+// The transform gizmo drawn on a selected room, wall or connector in the 2D plan (PAT-202): W moves along X or Y, E turns, R resizes.
+enum class ETransformGizmo : uint8 { None, Translate, Rotate, Scale };
 
 // What a held mouse button does to the model in Isolate: the left one pans it, the right one turns it.
 enum class EInspectionDrag : uint8 { None, Pan, Rotate };
@@ -59,6 +63,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnEditModeChanged);
 // Broadcast whenever the selected room/wall changes on the 2D floor plan canvas (select mode
 // picking a different one, or clicking empty space to deselect - RoomId is empty in that case).
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedRoomChanged, FString, RoomId);
+// Several rooms are selected at once (Count >= 2), or that ended (Count 0). A single room or wall still goes through FOnSelectedRoomChanged.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnMultiSelectionChanged, int32, Count);
 // Broadcast whenever the selected door changes (selecting one, selecting a different one, or
 // deselecting - both ids are empty in that case). Mirrors FOnSelectedRoomChanged for doors, since
 // the two selections are tracked and broadcast separately (see SelectRoom/SelectDoor).
@@ -69,6 +75,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnSelectedDoorChanged, FString, Ro
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedConnectorChanged, FString, GroupId);
 // The same for a door in the building's outer wall; empty when deselecting.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedEntranceChanged, FString, EntranceId);
+// The same for a utility point (PAT-193); empty when deselecting.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnSelectedUtilityChanged, FString, UtilityId);
 // Broadcast after each footprint point is added or cleared, so UI can show a live point count.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFootprintPointCountChanged, int32, PointCount);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnRoomPointCountChanged, int32, PointCount);
@@ -489,8 +497,17 @@ public:
 	// (see UInteriorFloorPlanWidget) calls on a click, since interior room/wall drawing has no 3D
 	// raycast at all now (OnClick is a no-op in draw room/wall mode). No-op if not currently in
 	// draw room/wall mode.
+	// bSkipSnapping keeps the point exactly where it is given (an axis-locked point must stay on its axis).
 	UFUNCTION(BlueprintCallable, Category = "Interior")
-	void AddRoomPointAtFootprintPosition(FVector2D FootprintPoint);
+	void AddRoomPointAtFootprintPosition(FVector2D FootprintPoint, bool bSkipSnapping = false);
+
+	// Shift while drawing: with bAxisLock and at least one point already placed, Point is moved onto the horizontal or vertical line through the
+	// last point (see InteriorDrawing.h); otherwise Point is returned as it is. The 2D plan uses it for the click and for the preview line.
+	FVector2D ConstrainDrawPoint(FVector2D Point, bool bAxisLock) const;
+
+	// Takes back the last point of the room/wall being drawn (Ctrl+Z while drawing does this instead of undoing an older edit). False if nothing is
+	// being drawn or there is no point yet.
+	bool RemoveLastRoomPoint();
 
 	// The room/wall points drawn so far in the current draw room/wall session - for the 2D floor
 	// plan canvas to draw as it's being clicked out. Empty when not drawing.
@@ -638,6 +655,112 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Interior")
 	FOnSelectedRoomChanged OnSelectedRoomChanged;
 
+	// ---- Several rooms at once (PAT-196) ----
+	// With two or more rooms/walls selected, SelectedRoomId is empty (so the resize handles, the corner dots, rotate and the name/size fields all
+	// stay off) and the ids are here instead. Shift+click toggles a room in the selection, and a window dragged across empty plan in Select mode
+	// selects the rooms inside it. Selecting any single thing (SelectRoom, a door, a connector ...) ends it.
+	UPROPERTY(BlueprintAssignable, Category = "Interior")
+	FOnMultiSelectionChanged OnMultiSelectionChanged;
+	bool IsMultiSelection() const { return MultiSelectedRoomIds.Num() >= 2; }
+	const TArray<FString>& GetMultiSelectedRoomIds() const { return MultiSelectedRoomIds; }
+	// Whether the room is part of the selection, single or multiple (what the plan draws in red).
+	bool IsRoomSelected(const FString& RoomId) const { return !RoomId.IsEmpty() && (RoomId == SelectedRoomId || MultiSelectedRoomIds.Contains(RoomId)); }
+	// Sets the selection to exactly these rooms: none clears it, one is a plain single selection, two or more is a multi selection.
+	void SetRoomSelection(const TArray<FString>& RoomIds);
+	// Shift+click: adds the room to the selection, or takes it out when it is already in.
+	void ToggleRoomInSelection(const FString& RoomId);
+	// A selection window: the rooms and walls on the active floor that lie wholly inside Rect (footprint units). bAdd keeps what was selected.
+	// Returns how many are selected afterwards.
+	int32 SelectRoomsInRect(const FBox2D& Rect, bool bAdd);
+	// Deletes every selected room and wall as one Undo step.
+	bool DeleteMultiSelection();
+
+	// The floor being viewed has no outer wall (PAT-205): an open ground floor, a sheltered walkway. The Floor panel has the switch.
+	bool IsActiveFloorOpen() const;
+	// Floor names (PAT-203): the name of a floor, and naming the floor being viewed. A name is only a label next to the level number.
+	FString GetFloorName(int32 Level) const;
+	bool SetActiveFloorName(const FString& NewName);
+	// "+ Special floor": a new floor on top with a name to change ("Special floor"). Returns its level, or 0. (+ Basement is AddFloorBelow.)
+	int32 AddSpecialFloor();
+	bool SetActiveFloorOpen(bool bOpen);
+
+	// ---- Reference image (PAT-201): a PNG under the 2D drawing of the floor being viewed ----
+	// Asks for a PNG with the system's file dialog (Windows) and imports it; false when cancelled or refused.
+	bool BrowseForReferenceImage();
+	// Puts the PNG at FilePath under the plan of the floor being viewed, framed on the building (it can be moved and scaled after). Refuses a file that is not a
+	// readable PNG, or is bigger than InteriorReferenceImage::MaxFileBytes, saying why. A floor has at most one: the new one replaces it.
+	bool ImportReferenceImage(const FString& FilePath);
+	bool GetActiveReferenceImage(FInteriorReferenceImage& Out) const;
+	// Changes the image of the floor being viewed (position, width, opacity, shown or hidden); one Undo step.
+	bool SetActiveReferenceImage(const FInteriorReferenceImage& Image);
+	bool RemoveActiveReferenceImage();
+	// How many centimetres one footprint unit is, to show the image's size and place in metres.
+	float GetFootprintUnitCm() const;
+
+	// ---- Utility points (PAT-193): an AED, a bicycle rack, a drop-off point ----
+	// Placing: Type is one of InteriorUtilityTypes (an unknown one counts as "other"); asking again for the type already armed turns placing off.
+	void ToggleUtilityMode(const FString& Type);
+	void ExitUtilityMode();
+	bool IsInUtilityMode() const { return !ActiveUtilityType.IsEmpty(); }
+	const FString& GetActiveUtilityType() const { return ActiveUtilityType; }
+	// Puts a point of the armed type on the floor being viewed (the plan's click). Returns its id, or an empty string after saying why not.
+	FString PlaceUtilityAt(FVector2D FootprintPosition);
+	// Selecting is exclusive with every other selection, like a room or a connector.
+	void SelectUtility(const FString& UtilityId);
+	const FString& GetSelectedUtilityId() const { return SelectedUtilityId; }
+	// A copy of the selected point; false when none is selected.
+	bool GetSelectedUtility(FInteriorUtility& Out) const;
+	// Moves the selected point (a drag calls this many times; the plan records one Undo step when the drag ends).
+	bool MoveSelectedUtilityTo(FVector2D FootprintPosition);
+	// The Properties panel's Save changes: name and type together, one Undo step.
+	bool SetSelectedUtilityDetails(const FString& Name, const FString& Type);
+	bool DeleteSelectedUtility();
+	UPROPERTY(BlueprintAssignable, Category = "Interior")
+	FOnSelectedUtilityChanged OnSelectedUtilityChanged;
+
+	// ---- Transform gizmos (PAT-202) ----
+	// W, E and R in Select mode switch the gizmo on the selected room, wall or connector: Translate (arrows along X and Y, the middle square moves
+	// freely), Rotate (a ring to turn it by) and Scale (handles to resize along X, along Y, or both). The same key again switches it off. Only a
+	// single room, wall or connector has one: nothing for a door, an entrance or a multiple selection. While a gizmo is on, the plain resize
+	// handles and corner dots are not drawn, so there is one way to do each thing at a time. Every change goes through the same checks as the
+	// keys and the drag (building outline, other rooms, lifts).
+	ETransformGizmo GetTransformGizmo() const { return TransformGizmo; }
+	void SetTransformGizmo(ETransformGizmo Mode) { TransformGizmo = Mode; }
+	void ToggleTransformGizmo(ETransformGizmo Mode) { TransformGizmo = TransformGizmo == Mode ? ETransformGizmo::None : Mode; }
+	// True when the gizmo is on and there is something to put it on (Select mode, 2D plan, one room/wall/connector selected).
+	bool IsTransformGizmoShown() const;
+	// A turn by the gizmo's ring: Begin when it is grabbed, RotateSelectionByDegrees as it moves (positive is counter-clockwise on the plan), End
+	// when it is let go (one Undo step for the whole turn).
+	void BeginTransformRotation() { BeginRotationGestureIfNeeded(); }
+	void RotateSelectionByDegrees(float DeltaDegrees) { RotateSelectedRoom(DeltaDegrees); }
+	void EndTransformRotation() { CommitRotationGesture(); }
+	// The size factor of the selected connector (1 = as placed), and setting it to an absolute value (limits as for the = and - keys).
+	float GetSelectedConnectorScale() const;
+	bool SetSelectedConnectorScale(float Target);
+
+	// ---- Duplicate to floors (PAT-200) ----
+	// A right-click on a room in the 2D plan opens a small menu at the pointer. The room becomes the selection first (unless it is part of a
+	// multiple selection already, which stays), and the menu's one row opens the "Duplicate to Floors" dialog for the selected room or rooms.
+	void OpenRoomContextMenu(const FString& RoomId);
+	bool IsRoomContextMenuOpen() const;
+	UFUNCTION()
+	void OpenDuplicateToFloorsDialog();
+	bool IsDuplicateDialogOpen() const;
+	// Copies the selected room(s) onto each of Levels, in the same place, as ONE Undo step. The floor you are on and the selection stay as they
+	// were. Returns how many copies were made; a copy that does not fit on a floor (another room there, a lift in the way) is skipped and the
+	// message names the floor and the reason.
+	int32 DuplicateSelectionToFloors(const TArray<int32>& Levels);
+	// The closed rooms of the selection (a wall has no type or tags).
+	TArray<FString> GetMultiSelectedClosedRoomIds() const;
+	// The type the selected rooms share; bOutMixed is true (and the result empty) when they differ.
+	FString GetMultiRoomType(bool& bOutMixed) const;
+	// The tags the selected rooms share; bOutMixed is true when their tag lists differ.
+	TArray<FString> GetMultiRoomTags(bool& bOutMixed) const;
+	// Applies a type and/or the tags to every closed room of the selection as ONE Undo step. False when nothing changed.
+	bool SetMultiRoomProperties(const FString* NewType, const TArray<FString>* NewTags);
+	bool SetMultiRoomType(const FString& NewType) { return SetMultiRoomProperties(&NewType, nullptr); }
+	bool SetMultiRoomTags(const TArray<FString>& InTags) { return SetMultiRoomProperties(nullptr, &InTags); }
+
 	// Renames the currently-selected room/wall (see AInteriorGenerator::SetRoomName) - what a room
 	// properties panel's "apply" button should call. No-op (returns false) if nothing is selected.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
@@ -650,7 +773,18 @@ public:
 
 	// The selected room's (or wall's) bounding box in footprint units: its top-left corner and its size. False if none is selected.
 	bool GetSelectedRoomBounds(FVector2D& OutPosition, FVector2D& OutSize) const;
+	// The corners of the selected room (or the points of the selected wall), in footprint units; empty if none is selected.
+	TArray<FVector2D> GetSelectedRoomVertices() const;
+	// Moves one corner of the selected room or wall to NewPosition, the rest stay (see AInteriorGenerator::MoveRoomVertex). The 2D plan calls this on
+	// every mouse move of a corner drag, without history, and records one history step when the drag ends. False when the move is not allowed.
+	bool MoveSelectedRoomVertex(int32 VertexIndex, FVector2D NewPosition);
+	// Whether that move would be allowed, without making it (the corner drag looks for the farthest allowed spot with this).
+	bool CanMoveSelectedRoomVertex(int32 VertexIndex, FVector2D NewPosition) const;
 	bool SetSelectedRoomTags(const TArray<FString>& InTags);
+	// PAT-198: the first time the selected room is saved from the Properties panel in this session, a room with no search tags gets them from its
+	// name and type (NavigationSearch::TagsFromNameAndType). Later saves never fill them again, so tags the user cleared stay cleared, and tags the
+	// user typed are never touched. True when tags were filled.
+	bool AutoFillSelectedRoomTagsOnFirstSave();
 	TArray<FString> GetSelectedRoomTags() const;
 	// The selected room's type (see RoomTypes.h). Setting marks the project changed when the type actually differs.
 	bool SetSelectedRoomType(const FString& NewType);
@@ -773,6 +907,9 @@ public:
 	// positions at the start of the drag and asks for the start plus how far the mouse went, and ends the drag with one history step.
 	TMap<int32, FVector2D> GetSelectedConnectorPositions(bool bAllFloors) const;
 	bool MoveSelectedConnectorTo(const TMap<int32, FVector2D>& NewPositions);
+	// Tells the user why the last refused move of the selected connector was refused (which floor, what is in the way). The 2D plan calls it once
+	// when a drag ends on a spot that was refused, not on every mouse move.
+	void ReportConnectorMoveRefused();
 
 
 	// Removes a single room/wall by id (see AInteriorGenerator::DeleteRoom) - general-purpose,
@@ -831,8 +968,8 @@ public:
 	// FallbackFootprint if it ended up overlapping another room/wall, otherwise leaves it where it
 	// was dropped. Broadcasts OnActionFailed on a revert (unlike MoveRoomTo, this only fires once
 	// per drag, so it won't spam the UI).
-	UFUNCTION(BlueprintCallable, Category = "Interior")
-	bool CommitRoomMove(const FString& RoomId, const TArray<FVector2D>& FallbackFootprint);
+	// bNudgeToFreeSpot: a room dropped on another goes beside it (touching) instead of back (PAT-194); the 2D plan asks for this.
+	bool CommitRoomMove(const FString& RoomId, const TArray<FVector2D>& FallbackFootprint, bool bNudgeToFreeSpot = false);
 
 	// Add-door mode: click a wall edge on the 2D floor plan canvas to add a fixed-size door there
 	// (centered on the click, clamped so it doesn't poke past either end of the edge) - InputId is
@@ -890,6 +1027,9 @@ public:
 	AInteriorRoom* PlacePrefabRoomAt(FVector2D FootprintCenter);
 	AInteriorRoom* PlacePrefabRoomInBounds(FVector2D FootprintCenter, FVector2D FootprintSize);
 	TArray<FVector2D> BuildPrefabRoomFootprint(FVector2D FootprintCenter, FVector2D FootprintSize = FVector2D::ZeroVector) const;
+	// Height / width of the armed shape when Shift is held while dragging it out: 1 for the square and the circle, the equilateral triangle's own
+	// proportion for the triangle. 0 when no shape is armed.
+	double GetPrefabShiftAspect() const;
 
 	// Connector (elevator/stairs/escalator) placement: 4/5/6 (for now, not wired into UMG yet) each
 	// arm a different type - while armed, clicking the 2D floor plan canvas places one there (see
@@ -1285,6 +1425,7 @@ protected:
 private:
 	friend struct FEditorInteractionTestAccess;
 	friend struct FEditorFeedbackTestAccess;
+	friend struct FGizmoTestAccess;
 	UFUNCTION()
 	void HandleActionFailureSound(FString Reason, EActionFailureSeverity Severity);
 	bool bActionFailureSoundEnabled = true;
@@ -1519,12 +1660,31 @@ private:
 	// mutually exclusive with both SelectedRoomId and SelectedDoorRoomId/SelectedDoorId.
 	FString SelectedConnectorGroupId;
 
+	// Utility points (PAT-193): the type being placed ("" = not placing) and the point selected.
+	FString ActiveUtilityType;
+	FString SelectedUtilityId;
+	void ClearSelectedUtility();
+
 	// Whichever AInteriorRoom/AInteriorConnectorMarker is currently tinted as the 3D Edit mode
 	// selection indicator (see RefreshSelectionHighlight) - null if nothing is, or if 3D preview has
 	// never been entered yet. Untyped since it can be either kind of actor; resolved with Cast when
 	// un-highlighting.
 	UPROPERTY()
 	AActor* HighlightedSelectionActor = nullptr;
+
+	TWeakObjectPtr<class URoomContextMenuWidget> RoomContextMenu;
+	TWeakObjectPtr<class UDuplicateToFloorsDialogWidget> DuplicateDialog;
+	void HandleDuplicateFloorsConfirmed(const TArray<int32>& Levels);
+
+	ETransformGizmo TransformGizmo = ETransformGizmo::None;
+	void OnGizmoKeyW();
+	void OnGizmoKeyE();
+	void OnGizmoKeyR();
+
+	// See IsMultiSelection. And the rooms tinted in 3D for it.
+	TArray<FString> MultiSelectedRoomIds;
+	TArray<TWeakObjectPtr<AInteriorRoom>> MultiHighlightedRooms;
+	void ClearMultiSelection();
 
 	// Un-highlights HighlightedSelectionActor, then re-highlights whichever room/connector
 	// SelectedRoomId/SelectedDoorRoomId/SelectedConnectorGroupId now points at (a selected door
@@ -1542,6 +1702,8 @@ private:
 	bool bWallsVisible = true;
 	bool bPathNodesVisible = true;
 	bool bIONodesVisible = true;
+	// Rooms already saved once from the Properties panel in this session (see AutoFillSelectedRoomTagsOnFirstSave).
+	TSet<FString> RoomIdsSavedOnce;
 	TSet<FString> HiddenRoomIds;
 	TSet<FString> HiddenPathNodeIds;
 	TSet<FString> HiddenIONodeIds;
@@ -1755,6 +1917,12 @@ private:
 	// connector branches).
 	void OnLeftMouseDown3DEdit();
 	void OnLeftMouseUp3DEdit();
+	// Dragging a lift, stair or escalator in the 3D view (PAT-192): where its floor node(s) were when it was grabbed (just the viewed floor's, or every
+	// floor's with Shift held), so each tick is computed from there and does not drift. Told once, on release, if the last spot was refused.
+	bool bIsDragging3DConnector = false;
+	bool b3DConnectorMoved = false;
+	bool b3DConnectorRefused = false;
+	TMap<int32, FVector2D> DragStart3DConnectorPositions;
 	bool bIsDragging3DRoom = false;
 	TWeakObjectPtr<AInteriorRoom> Dragging3DRoom;
 	FString Dragging3DRoomId;

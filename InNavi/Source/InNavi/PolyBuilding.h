@@ -117,6 +117,11 @@ public:
 	// Level must be one of the building's levels (see GetLevels); pass 0 to show everything (exterior view).
 	void SetVisibleInteriorLevel(int32 Level);
 
+	// Floors that have no outer wall (PAT-205): a sheltered walkway, an open lobby. Their wall ring is not built or shown; the floor slabs stay.
+	void SetOpenLevels(const TSet<int32>& Levels);
+	void SetLevelOpen(int32 Level, bool bOpen);
+	bool IsLevelOpen(int32 Level) const { return OpenLevels.Contains(Level); }
+
 	// Temporary inspection policy; reapplied after every mesh rebuild, including collision. The bottom platform (section 0) goes, and the
 	// first floor gets a slab of its own while it is the floor being viewed.
 	void SetInspectionBottomHidden(bool bNewHidden);
@@ -191,6 +196,21 @@ private:
 	// The current build's transformed footprint and its ear-clipped triangulation - cached so
 	// ApplySlabVisibility can rebuild roof/slab sections without redoing RebuildMesh's work.
 	TArray<FVector2D> CachedPoly2D;
+
+	// Z-fighting between buildings: two buildings that overlap on the map and are as tall as each other have roofs and walls in the very same planes,
+	// which flicker. Each building therefore takes a level that differs from that of every building it overlaps: its roof lies 12 cm higher and its
+	// outer wall 3 cm thicker on each side per level (4 levels, the first building of a group has level 0 and is unchanged). Far too small to see, and the
+	// outer wall of the building being edited stays thicker than the rooms' steps (see AInteriorRoom::WallBiasLevels), so nothing inside shares its plane.
+public:
+	static constexpr int32 ZFightLevels = 4;
+	static constexpr float ZFightRoofStep = 12.f;
+	static constexpr float ZFightWallStep = 3.f;
+	int32 GetZFightLevel() const { return ZFightLevel; }
+	virtual void BeginDestroy() override;
+private:
+	int32 ZFightLevel = 0;
+	FBox2D ZFightBounds = FBox2D(ForceInit);
+	int32 ChooseZFightLevel() const;
 	TArray<int32> CachedCapTris;
 
 	TArray<FPolyWallOpening> WallOpenings;
@@ -199,6 +219,7 @@ private:
 
 	// See SetVisibleInteriorLevel. 0 = nothing hidden (normal exterior view).
 	int32 VisibleInteriorLevel = 0;
+	TSet<int32> OpenLevels;
 	bool bInspectionBottomHidden = false;
 
 	UPROPERTY()

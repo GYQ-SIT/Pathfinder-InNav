@@ -2,6 +2,10 @@
 
 Versions follow Semantic Versioning. Changes to exported report types or tool interface methods require a major version when incompatible.
 
+## 1.2.0
+
+- Warn (`CONNECTOR_ENCLOSED`) when a lift, stair or escalator stands inside a closed room that has no door, so nobody can reach it. Windows and voids do not count as a way in. A warning only: restricted-access layouts can be intentional.
+
 ## 1.1.1
 
 - Allow a simple open-wall path to return to its starting point without reporting its closing joint as a self-intersection.

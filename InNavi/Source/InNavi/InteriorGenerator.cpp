@@ -59,11 +59,11 @@ void AInteriorGenerator::BeginPlay()
 {
 	Super::BeginPlay();
 
-	for (TActorIterator<ABuildingGenerator> It(GetWorld()); It; ++It)
+	// The first building generator. (Not a loop that stops after its first round: the Android compiler rejects that as a loop that runs at most once.)
+	if (TActorIterator<ABuildingGenerator> It(GetWorld()); It)
 	{
 		Generator = *It;
 		Generator->OnBuildingRemoved.AddUObject(this, &AInteriorGenerator::HandleBuildingRemoved);
-		break;
 	}
 }
 
@@ -373,18 +373,32 @@ static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClos
 			const FVector2D& B0 = FootprintB[j];
 			const FVector2D& B1 = FootprintB[(j + 1) % NumB];
 
+			// Two edges that run along each other, within the tolerance, are one shared wall (PAT-194): the neighbours' walls drawn a hair apart, or at a
+			// hair's angle (imported outlines are never exactly straight), must not read as crossing. Either edge may be the short one.
+			const auto DistanceToLine = [](const FVector2D& P, const FVector2D& L0, const FVector2D& L1)
+			{
+				const FVector2D Direction = (L1 - L0).GetSafeNormal();
+				return FMath::Abs(FVector2D::CrossProduct(Direction, P - L0));
+			};
+			const bool bAlongEachOther = (bBothClosed || (!bAClosed && !bBClosed)) &&
+				((DistanceToLine(B0, A0, A1) <= ToleranceUnits && DistanceToLine(B1, A0, A1) <= ToleranceUnits) ||
+				 (DistanceToLine(A0, B0, B1) <= ToleranceUnits && DistanceToLine(A1, B0, B1) <= ToleranceUnits));
+
 			const bool bSharesEndpoint = NearlySamePoint(A0, B0) || NearlySamePoint(A0, B1) || NearlySamePoint(A1, B0) || NearlySamePoint(A1, B1);
-			if (!bSharesEndpoint && InteriorGen_SegmentsIntersect(A0, A1, B0, B1))
+			// A wall that ends ON a room's wall only touches it (PAT-195: a partition runs from one wall of the room to another). Crossing it does not.
+			const auto EndsOnEdge = [ToleranceUnits](const FVector2D& W0, const FVector2D& W1, const FVector2D& E0, const FVector2D& E1)
+			{
+				return InteriorGen_DistancePointToSegment2D(W0, E0, E1) <= ToleranceUnits || InteriorGen_DistancePointToSegment2D(W1, E0, E1) <= ToleranceUnits;
+			};
+			const bool bWallEndTouches = (bAClosed != bBClosed) && (bAClosed ? EndsOnEdge(B0, B1, A0, A1) : EndsOnEdge(A0, A1, B0, B1));
+			if (!bSharesEndpoint && !bAlongEachOther && !bWallEndTouches && InteriorGen_SegmentsIntersect(A0, A1, B0, B1))
 			{
 				return true;
 			}
 
 			// Collinear boundaries overlap when both closed polygons extend into the same side.
 			// This catches stacked rooms while still allowing adjacent rooms to share a wall.
-			constexpr double CollinearityTolerance = 1e-3;
-			if ((bBothClosed || (!bAClosed && !bBClosed)) &&
-				FMath::Abs(FVector2D::CrossProduct(EdgeDirection, B0 - A0)) < CollinearityTolerance &&
-				FMath::Abs(FVector2D::CrossProduct(EdgeDirection, B1 - A0)) < CollinearityTolerance)
+			if (bAlongEachOther)
 			{
 				const double Start = FVector2D::DotProduct(B0 - A0, EdgeDirection);
 				const double End = FVector2D::DotProduct(B1 - A0, EdgeDirection);
@@ -397,25 +411,11 @@ static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClos
 		}
 	}
 
-	if (bAClosed != bBClosed)
-	{
-		const auto& Wall = bAClosed ? FootprintB : FootprintA;
-		const auto& Room = bAClosed ? FootprintA : FootprintB;
-		for (int32 Edge = 1; Edge < Wall.Num(); ++Edge)
-		{
-			const auto Cuts = InteriorGen_BoundaryCuts(Wall[Edge - 1], Wall[Edge], Room);
-			for (int32 Cut = 1; Cut < Cuts.Num(); ++Cut)
-			{
-				const auto Point = FMath::Lerp(Wall[Edge - 1], Wall[Edge], (Cuts[Cut - 1] + Cuts[Cut]) * 0.5);
-				if (IsPointClearlyInsidePolygon(Point, Room, ToleranceUnits)) return true;
-			}
-		}
-	}
-
-	// Checks every point, not just one representative point - a bend in an open wall (a vertex
-	// that isn't its first point) can land inside a small closed room without either wall segment
-	// either side of that vertex actually crossing the room's boundary.
-	if (bAClosed)
+	// A wall (an open path) inside a closed room is a partition (PAT-195): it is no overlap, however it lies inside, and the wall's own points inside
+	// the room are fine too. A wall that crosses the room's boundary has been caught by the edge crossing test above. Only two closed shapes can lie
+	// inside one another.
+	// Checks every point, not just one representative point - a vertex of one room can land inside the other without any edge crossing.
+	if (bAClosed && bBClosed)
 	{
 		for (const FVector2D& Point : FootprintB)
 		{
@@ -424,9 +424,6 @@ static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClos
 				return true;
 			}
 		}
-	}
-	if (bBClosed)
-	{
 		for (const FVector2D& Point : FootprintA)
 		{
 			if (IsPointClearlyInsidePolygon(Point, FootprintB, ToleranceUnits))
@@ -524,7 +521,12 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 		float WallThickness = 20.f;
 		FloorObject->TryGetNumberField(TEXT("wallThickness"), WallThickness);
 
-		FloorInfoByLevel.Add(Level, FInteriorFloorInfo{ WallHeight, WallThickness });
+		bool bOpenFloor = false;
+		FloorObject->TryGetBoolField(TEXT("open"), bOpenFloor);
+		FString FloorName;
+		FloorObject->TryGetStringField(TEXT("name"), FloorName);
+		FloorInfoByLevel.Add(Level, FInteriorFloorInfo{ WallHeight, WallThickness, FloorName.TrimStartAndEnd().Left(40), bOpenFloor });
+		Building->SetLevelOpen(Level, bOpenFloor);
 
 		const float FloorBaseZ = Building->GetLevelBaseZ(Level);
 
@@ -649,6 +651,56 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 					UsedRoomIds.Add(RoomId);
 					SpawnedCount++;
 				}
+			}
+		}
+
+		const TSharedPtr<FJsonObject>* ReferenceObject = nullptr;
+		if (FloorObject->TryGetObjectField(TEXT("referenceImage"), ReferenceObject) && ReferenceObject->IsValid())
+		{
+			FInteriorReferenceImage Image;
+			double WidthValue = 0, OpacityValue = 0.5;
+			const TArray<TSharedPtr<FJsonValue>>* CenterValues = nullptr;
+			(*ReferenceObject)->TryGetStringField(TEXT("path"), Image.Path);
+			(*ReferenceObject)->TryGetNumberField(TEXT("width"), WidthValue);
+			(*ReferenceObject)->TryGetNumberField(TEXT("opacity"), OpacityValue);
+			(*ReferenceObject)->TryGetBoolField(TEXT("visible"), Image.bVisible);
+			if ((*ReferenceObject)->TryGetArrayField(TEXT("center"), CenterValues) && CenterValues->Num() >= 2)
+			{
+				Image.Center = FVector2D((*CenterValues)[0]->AsNumber(), (*CenterValues)[1]->AsNumber());
+			}
+			Image.Width = static_cast<float>(WidthValue);
+			Image.Opacity = static_cast<float>(OpacityValue);
+			// One that cannot be kept (no path, no width) is left out rather than failing the floor.
+			if (InteriorReferenceImage::Normalize(Image)) ReferenceImages.Add(Level, Image);
+		}
+
+		const TArray<TSharedPtr<FJsonValue>>* UtilitiesArray = nullptr;
+		if (FloorObject->TryGetArrayField(TEXT("utilities"), UtilitiesArray))
+		{
+			for (const TSharedPtr<FJsonValue>& UtilityValue : *UtilitiesArray)
+			{
+				const TSharedPtr<FJsonObject> UtilityObject = UtilityValue.IsValid() ? UtilityValue->AsObject() : nullptr;
+				const TArray<TSharedPtr<FJsonValue>>* PositionValues = nullptr;
+				if (!UtilityObject.IsValid() || !UtilityObject->TryGetArrayField(TEXT("position"), PositionValues) || PositionValues->Num() < 2) continue;
+				FInteriorUtility Utility;
+				UtilityObject->TryGetStringField(TEXT("id"), Utility.Id);
+				FString TypeText, NameText;
+				UtilityObject->TryGetStringField(TEXT("type"), TypeText);
+				UtilityObject->TryGetStringField(TEXT("name"), NameText);
+				Utility.Type = InteriorUtilityTypes::Normalize(TypeText);
+				Utility.Name = NameText.TrimStartAndEnd().Left(InteriorUtilityTypes::MaxNameLength);
+				Utility.Level = Level;
+				Utility.Position = FVector2D((*PositionValues)[0]->AsNumber(), (*PositionValues)[1]->AsNumber());
+				if (!FMath::IsFinite(Utility.Position.X) || !FMath::IsFinite(Utility.Position.Y)) continue;
+				// An id that is missing or taken is replaced, so every point can be told apart.
+				const auto IdTaken = [this](const FString& Id) { return Utilities.ContainsByPredicate([&Id](const FInteriorUtility& Other) { return Other.Id == Id; }); };
+				if (Utility.Id.IsEmpty() || IdTaken(Utility.Id))
+				{
+					int32 Number = Utilities.Num() + 1;
+					while (IdTaken(FString::Printf(TEXT("util-%d"), Number))) ++Number;
+					Utility.Id = FString::Printf(TEXT("util-%d"), Number);
+				}
+				Utilities.Add(MoveTemp(Utility));
 			}
 		}
 
@@ -799,6 +851,8 @@ void AInteriorGenerator::ClearLoadedInterior()
 		}
 	}
 	NavNodes.Empty();
+	Utilities.Empty();
+	ReferenceImages.Empty();
 	Entrances.Empty();
 	AllEntrances.Empty();
 	FloorInfoByLevel.Empty();
@@ -932,6 +986,7 @@ bool AInteriorGenerator::SetLevelRange(int32 NewFirstLevel, int32 NewLastLevel)
 		}
 		RoomsByFloor.Remove(Level);
 		FloorInfoByLevel.Remove(Level);
+		ReferenceImages.Remove(Level);
 	}
 
 	// Connectors and doors in the outer wall go with their floor: those on a removed floor are removed, and a connector that reached a removed
@@ -951,6 +1006,7 @@ bool AInteriorGenerator::SetLevelRange(int32 NewFirstLevel, int32 NewLastLevel)
 		Node.ConnectsFloors.RemoveAll([&InRange](int32 Level) { return !InRange(Level); });
 	}
 	Entrances.RemoveAll([&InRange](const FInteriorEntrance& Entrance) { return !InRange(Entrance.Level); });
+	Utilities.RemoveAll([&InRange](const FInteriorUtility& Utility) { return !InRange(Utility.Level); });
 
 	// The floors that come: empty, with the wall height and thickness of the nearest floor that is there.
 	for (int32 Step = 0, Count = LayoutValidation::LevelSpan(NewFirstLevel, NewLastLevel); Step < Count; ++Step)
@@ -1281,10 +1337,8 @@ bool AInteriorGenerator::ValidateWallPath(const TArray<FVector2D>& Points, FStri
 		{
 			if (!Other) continue;
 			const auto& Outline = Other->GetFootprint();
-			bool bInside = Points.Num() == 1 && Other->IsClosedLoop() && InteriorGen_IsPointInPolygon(Points[0], Outline);
-			for (int32 Edge = 0; bInside && Edge < Outline.Num(); ++Edge)
-				if (InteriorGen_DistancePointToSegment2D(Points[0], Outline[Edge], Outline[(Edge + 1) % Outline.Num()]) <= 1e-5) bInside = false;
-			if (bInside || DoFootprintsOverlap(Points, false, Outline, Other->IsClosedLoop(), OverlapToleranceWorldUnits / Generator->GetScale()))
+			// A wall may start or run inside a room: it is a partition there (PAT-195).
+			if (DoFootprintsOverlap(Points, false, Outline, Other->IsClosedLoop(), OverlapToleranceWorldUnits / Generator->GetScale()))
 			{
 				OutError = FString::Printf(TEXT("It overlaps an existing room/wall ('%s')."), *Other->RoomId);
 				return false;
@@ -1442,20 +1496,48 @@ bool AInteriorGenerator::DoesFootprintBlockConnector(const TArray<FVector2D>& Fo
 	return false;
 }
 
+FString AInteriorGenerator::ConsumeConnectorFailure() const
+{
+	FString Reason = LastConnectorFailure;
+	LastConnectorFailure.Reset();
+	return Reason;
+}
+
+const AInteriorRoom* AInteriorGenerator::FindEnclosingRoomWithoutDoor(FVector2D Position, int32 Level) const
+{
+	const FInteriorRoomList* RoomList = RoomsByFloor.Find(Level);
+	if (!RoomList) return nullptr;
+	for (const AInteriorRoom* Room : RoomList->Rooms)
+	{
+		if (!Room || !Room->IsClosedLoop() || !InteriorGen_IsPointInPolygon(Position, Room->GetFootprint())) continue;
+		const bool bHasDoor = Room->GetOpenings().ContainsByPredicate([](const FInteriorOpening& Opening) { return Opening.Type == EInteriorOpeningType::Door; });
+		if (!bHasDoor) return Room;
+	}
+	return nullptr;
+}
+
 bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVector2D Position, int32 Level, float RotationDegrees, float SizeScale, const FString& IgnoreGroupId, bool bLogFailures) const
 {
+	LastConnectorFailure.Reset();
+	// The reason always names the floor, because the one in the way is often not the floor being looked at.
+	auto Fail = [this, Level](const FString& Why)
+	{
+		LastConnectorFailure = FString::Printf(TEXT("Floor %s: %s"), *LayoutValidation::LevelLabel(Level), *Why);
+		return false;
+	};
+
 	const FInteriorFloorInfo* FloorInfo = FloorInfoByLevel.Find(Level);
 	if (!FloorInfo)
 	{
 		if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: floor %d doesn't exist"), Level);
-		return false;
+		return Fail(TEXT("the building has no such floor."));
 	}
 
 	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
 	if (!Building)
 	{
 		if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: building '%s' no longer exists"), *LoadedBuildingId);
-		return false;
+		return Fail(TEXT("the building is not loaded."));
 	}
 
 	const float Scale = Generator->GetScale();
@@ -1481,7 +1563,7 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVe
 	if (!IsFootprintFullyInsidePolygon(Corners, Building->GetFootprint()))
 	{
 		if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint doesn't fit inside the building's outline on floor %d"), Level);
-		return false;
+		return Fail(TEXT("it would stick out of the building's outer wall."));
 	}
 
 	// Being inside a room's open interior is fine (that's an explicitly supported placement, unlike
@@ -1512,7 +1594,8 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVe
 					if (InteriorGen_DistanceSegmentToSegment2D(Corners[c], Corners[(c + 1) % 4], EdgeA, EdgeB) < HalfWallThickness)
 					{
 						if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint overlaps a wall on floor %d"), Level);
-						return false;
+						return Fail(FString::Printf(TEXT("it overlaps the wall of %s '%s'."), Room->IsClosedLoop() ? TEXT("room") : TEXT("wall"),
+							Room->RoomName.IsEmpty() ? *Room->RoomId : *Room->RoomName));
 					}
 				}
 			}
@@ -1546,7 +1629,8 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVe
 		if (DoFootprintsOverlap(Corners, true, OtherCorners, true, OverlapToleranceWorldUnits / Scale))
 		{
 			if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint overlaps another connector ('%s') on floor %d"), *Node.ConnectorGroupId, Level);
-			return false;
+			return Fail(FString::Printf(TEXT("it overlaps another %s."),
+				Node.Type == EInteriorNavNodeType::Elevator ? TEXT("elevator") : Node.Type == EInteriorNavNodeType::Stairs ? TEXT("staircase") : TEXT("escalator")));
 		}
 	}
 
@@ -1577,7 +1661,7 @@ bool AInteriorGenerator::CanPlaceConnectorOnFloor(EInteriorNavNodeType Type, FVe
 		if (DoFootprintsOverlap(WorldCorners, true, OtherWorldFootprint, true, OverlapToleranceWorldUnits))
 		{
 			if (bLogFailures) UE_LOG(LogTemp, Error, TEXT("Connector placement: its footprint overlaps building '%s'"), *OtherBuilding->BuildingId);
-			return false;
+			return Fail(FString::Printf(TEXT("it overlaps the building '%s'."), OtherBuilding->BuildingName.IsEmpty() ? *OtherBuilding->BuildingId : *OtherBuilding->BuildingName));
 		}
 	}
 
@@ -2082,6 +2166,233 @@ bool AInteriorGenerator::ResizeRoomToBounds(const FString& RoomId, FVector2D Pos
 	return false;
 }
 
+bool AInteriorGenerator::DoesResizeStayInsideBuilding(const FString& RoomId, FVector2D Position, FVector2D Size) const
+{
+	// The same stretch of the footprint as ResizeRoomToBounds, and the same outline rule, without changing anything: the drag asks this for every
+	// candidate size so the preview can stop at the wall instead of showing a room outside the building and refusing it on release.
+	const AInteriorRoom* Room = GetRoomById(RoomId);
+	if (!Room || Room->GetFootprint().IsEmpty() || !FMath::IsFinite(Position.X) || !FMath::IsFinite(Position.Y) || !FMath::IsFinite(Size.X) || !FMath::IsFinite(Size.Y)) return false;
+	const TArray<FVector2D>& OldFootprint = Room->GetFootprint();
+	const FBox2D Bounds(OldFootprint);
+	const double OldWidth = Bounds.Max.X - Bounds.Min.X;
+	const double OldDepth = Bounds.Max.Y - Bounds.Min.Y;
+	const double ScaleX = OldWidth < KINDA_SMALL_NUMBER ? 1.0 : Size.X / OldWidth;
+	const double ScaleY = OldDepth < KINDA_SMALL_NUMBER ? 1.0 : Size.Y / OldDepth;
+	TArray<FVector2D> NewFootprint;
+	NewFootprint.Reserve(OldFootprint.Num());
+	for (const FVector2D& Point : OldFootprint)
+	{
+		NewFootprint.Add(Position + FVector2D((Point.X - Bounds.Min.X) * ScaleX, (Point.Y - Bounds.Min.Y) * ScaleY));
+	}
+	const APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+	return !Building || IsFootprintFullyInsidePolygon(NewFootprint, Building->GetFootprint(), Room->IsClosedLoop());
+}
+
+bool AInteriorGenerator::SetFloorName(int32 Level, const FString& NewName)
+{
+	FInteriorFloorInfo* Info = FloorInfoByLevel.Find(Level);
+	const FString Clean = NewName.TrimStartAndEnd().Left(40);
+	if (!Info || Info->Name == Clean) return false;
+	Info->Name = Clean;
+	RecordHistorySnapshot();
+	return true;
+}
+
+const FInteriorUtility* AInteriorGenerator::FindUtility(const FString& Id) const
+{
+	return Utilities.FindByPredicate([&Id](const FInteriorUtility& Utility) { return Utility.Id == Id; });
+}
+
+FString AInteriorGenerator::AddUtility(int32 Level, const FString& Type, const FString& Name, FVector2D Position, FString* OutError)
+{
+	const auto Refuse = [OutError](const TCHAR* Why) { if (OutError) *OutError = Why; return FString(); };
+	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+	if (!Building) return Refuse(TEXT("Load a building's interior first."));
+	if (!FloorInfoByLevel.Contains(Level)) return Refuse(TEXT("The building has no such floor."));
+	if (!FMath::IsFinite(Position.X) || !FMath::IsFinite(Position.Y) || !InteriorGen_IsPointInPolygon(Position, Building->GetFootprint()))
+		return Refuse(TEXT("A utility point has to be inside the building."));
+
+	FInteriorUtility Utility;
+	int32 Number = Utilities.Num() + 1;
+	while (FindUtility(FString::Printf(TEXT("util-%d"), Number))) ++Number;
+	Utility.Id = FString::Printf(TEXT("util-%d"), Number);
+	Utility.Type = InteriorUtilityTypes::Normalize(Type);
+	Utility.Name = Name.TrimStartAndEnd().Left(InteriorUtilityTypes::MaxNameLength);
+	Utility.Level = Level;
+	Utility.Position = Position;
+	const FString Id = Utility.Id;
+	Utilities.Add(MoveTemp(Utility));
+	RecordHistorySnapshot();
+	return Id;
+}
+
+bool AInteriorGenerator::MoveUtility(const FString& Id, FVector2D Position, FString* OutError)
+{
+	FInteriorUtility* Utility = Utilities.FindByPredicate([&Id](const FInteriorUtility& Item) { return Item.Id == Id; });
+	if (!Utility) return false;
+	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+	if (!Building || !FMath::IsFinite(Position.X) || !FMath::IsFinite(Position.Y) || !InteriorGen_IsPointInPolygon(Position, Building->GetFootprint()))
+	{
+		if (OutError) *OutError = TEXT("A utility point has to be inside the building.");
+		return false;
+	}
+	if (Utility->Position.Equals(Position, 1e-6)) return false;
+	Utility->Position = Position;
+	return true;
+}
+
+bool AInteriorGenerator::SetUtilityDetails(const FString& Id, const FString& Name, const FString& Type)
+{
+	FInteriorUtility* Utility = Utilities.FindByPredicate([&Id](const FInteriorUtility& Item) { return Item.Id == Id; });
+	if (!Utility) return false;
+	const FString NewName = Name.TrimStartAndEnd().Left(InteriorUtilityTypes::MaxNameLength);
+	const FString NewType = InteriorUtilityTypes::Normalize(Type);
+	if (Utility->Name == NewName && Utility->Type == NewType) return false;
+	Utility->Name = NewName;
+	Utility->Type = NewType;
+	RecordHistorySnapshot();
+	return true;
+}
+
+bool AInteriorGenerator::SetReferenceImage(int32 Level, FInteriorReferenceImage Image)
+{
+	if (!FloorInfoByLevel.Contains(Level) || !InteriorReferenceImage::Normalize(Image)) return false;
+	const FInteriorReferenceImage* Existing = ReferenceImages.Find(Level);
+	if (Existing && *Existing == Image) return false;
+	ReferenceImages.Add(Level, MoveTemp(Image));
+	RecordHistorySnapshot();
+	return true;
+}
+
+bool AInteriorGenerator::RemoveReferenceImage(int32 Level)
+{
+	if (ReferenceImages.Remove(Level) == 0) return false;
+	RecordHistorySnapshot();
+	return true;
+}
+
+bool AInteriorGenerator::RemoveUtility(const FString& Id)
+{
+	if (Utilities.RemoveAll([&Id](const FInteriorUtility& Item) { return Item.Id == Id; }) == 0) return false;
+	RecordHistorySnapshot();
+	return true;
+}
+
+bool AInteriorGenerator::SetFloorOpen(int32 Level, bool bOpen)
+{
+	FInteriorFloorInfo* Info = FloorInfoByLevel.Find(Level);
+	if (!Info || Info->bOpen == bOpen) return false;
+	Info->bOpen = bOpen;
+	if (APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr) Building->SetLevelOpen(Level, bOpen);
+	RecordHistorySnapshot();
+	return true;
+}
+
+AInteriorRoom* AInteriorGenerator::DuplicateRoomToFloor(const FString& RoomId, int32 TargetLevel, FString& OutError)
+{
+	OutError.Empty();
+	const AInteriorRoom* Source = GetRoomById(RoomId);
+	if (!Source)
+	{
+		OutError = TEXT("The room no longer exists.");
+		return nullptr;
+	}
+	if (!FloorInfoByLevel.Contains(TargetLevel))
+	{
+		OutError = FString::Printf(TEXT("The building has no floor %s."), *LayoutValidation::LevelLabel(TargetLevel));
+		return nullptr;
+	}
+	int32 SourceLevel = 0;
+	for (const auto& Pair : RoomsByFloor)
+	{
+		if (Pair.Value.Rooms.Contains(Source)) { SourceLevel = Pair.Key; break; }
+	}
+	if (SourceLevel == TargetLevel)
+	{
+		OutError = TEXT("That is the floor the room is on.");
+		return nullptr;
+	}
+
+	// The create functions work on the active floor: go there, make the copy, come back.
+	const int32 PreviousFloor = ActiveFloor;
+	SetActiveFloor(TargetLevel);
+	AInteriorRoom* Copy = Source->IsClosedLoop()
+		? CreateRoomFromFootprintWithTags(Source->GetFootprint(), FString(), Source->RoomName, Source->bIsPublic, Source->bRequiresKey, /*bAllowOverlap=*/false,
+			OutError, Source->RoomTags, Source->RoomType, Source->GetOpenings())
+		: CreateWallFromPoints(Source->GetFootprint(), FString(), OutError, Source->GetOpenings(), Source->RoomName);
+	SetActiveFloor(PreviousFloor);
+	return Copy;
+}
+
+bool AInteriorGenerator::CanMoveRoomVertex(const FString& RoomId, int32 VertexIndex, FVector2D NewPosition) const
+{
+	if (!FMath::IsFinite(NewPosition.X) || !FMath::IsFinite(NewPosition.Y)) return false;
+	for (const auto& Pair : RoomsByFloor)
+	{
+		for (const AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (!Room || Room->RoomId != RoomId)
+			{
+				continue;
+			}
+
+			const TArray<FVector2D>& OldFootprint = Room->GetFootprint();
+			if (!OldFootprint.IsValidIndex(VertexIndex)) return false;
+			TArray<FVector2D> NewFootprint = OldFootprint;
+			NewFootprint[VertexIndex] = NewPosition;
+
+			// The same rules as drawing the room or wall in the first place, so a corner can never be dragged to a place that drawing it there would
+			// have refused: no corners on top of each other, no crossing itself, inside the building, clear of other rooms and of lifts and stairs.
+			const float Scale = Generator ? Generator->GetScale() : 1.f;
+			const double MinEdge = (InteriorEditing::MinimumDimensionCm * 0.25) / FMath::Max(Scale, KINDA_SMALL_NUMBER);
+			const int32 NumPoints = NewFootprint.Num();
+			const int32 NumEdges = Room->IsClosedLoop() ? NumPoints : NumPoints - 1;
+			for (int32 Edge = 0; Edge < NumEdges; ++Edge)
+			{
+				if (FVector2D::Distance(NewFootprint[Edge], NewFootprint[(Edge + 1) % NumPoints]) < MinEdge) return false;
+			}
+			if (Room->IsClosedLoop() ? InteriorGen_PolygonSelfIntersects(NewFootprint) : InteriorGen_WallSelfIntersects(NewFootprint)) return false;
+
+			const APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+			if (Building && !IsFootprintFullyInsidePolygon(NewFootprint, Building->GetFootprint(), Room->IsClosedLoop())) return false;
+			for (const AInteriorRoom* Other : Pair.Value.Rooms)
+			{
+				if (Other && Other != Room && DoFootprintsOverlap(NewFootprint, Room->IsClosedLoop(), Other->GetFootprint(), Other->IsClosedLoop(),
+					OverlapToleranceWorldUnits / FMath::Max(Scale, KINDA_SMALL_NUMBER))) return false;
+			}
+			return !DoesFootprintBlockConnector(NewFootprint, Room->IsClosedLoop(), Pair.Key);
+		}
+	}
+	return false;
+}
+
+bool AInteriorGenerator::MoveRoomVertex(const FString& RoomId, int32 VertexIndex, FVector2D NewPosition, bool bRecordHistory)
+{
+	for (auto& Pair : RoomsByFloor)
+	{
+		for (AInteriorRoom* Room : Pair.Value.Rooms)
+		{
+			if (!Room || Room->RoomId != RoomId)
+			{
+				continue;
+			}
+			if (!Room->GetFootprint().IsValidIndex(VertexIndex)) return false;
+			if (Room->GetFootprint()[VertexIndex].Equals(NewPosition, 1e-6)) return true;
+			if (!CanMoveRoomVertex(RoomId, VertexIndex, NewPosition)) return false;
+
+			TArray<FVector2D> NewFootprint = Room->GetFootprint();
+			NewFootprint[VertexIndex] = NewPosition;
+			// Doors and windows slide along with their wall; false when they no longer fit on it.
+			if (!Room->ResizeFootprint(NewFootprint, /*bFitOpenings=*/true)) return false;
+			UE_LOG(LogTemp, Warning, TEXT("Moved corner %d of %s to (%.1f, %.1f)"), VertexIndex, *RoomId, NewPosition.X, NewPosition.Y);
+			if (bRecordHistory) RecordHistorySnapshot();
+			else NotifyNavigationLayoutChanged();
+			return true;
+		}
+	}
+	return false;
+}
+
 bool AInteriorGenerator::RotateRoom(const FString& RoomId, float DeltaDegrees)
 {
 	for (auto& Pair : RoomsByFloor)
@@ -2211,7 +2522,75 @@ bool AInteriorGenerator::MoveRoom(const FString& RoomId, const TArray<FVector2D>
 	return false;
 }
 
-bool AInteriorGenerator::CommitRoomMove(const FString& RoomId, const TArray<FVector2D>& FallbackFootprint)
+bool AInteriorGenerator::NudgeFootprintClear(TArray<FVector2D>& Footprint, bool bClosed, const FString& IgnoreRoomId, FString* OutBlockerName) const
+{
+	const FInteriorRoomList* RoomList = RoomsByFloor.Find(ActiveFloor);
+	if (!RoomList || Footprint.Num() < 2) return false;
+	const float Scale = FMath::Max(Generator ? Generator->GetScale() : 1.f, KINDA_SMALL_NUMBER);
+	const float Tolerance = OverlapToleranceWorldUnits / Scale;
+	const APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
+
+	// The first room or wall that is in the way, or null.
+	const auto Blocker = [&](const TArray<FVector2D>& Candidate) -> const AInteriorRoom*
+	{
+		for (const AInteriorRoom* Other : RoomList->Rooms)
+		{
+			if (Other && Other->RoomId != IgnoreRoomId && DoFootprintsOverlap(Candidate, bClosed, Other->GetFootprint(), Other->IsClosedLoop(), Tolerance)) return Other;
+		}
+		return nullptr;
+	};
+	const auto IsFree = [&](const TArray<FVector2D>& Candidate)
+	{
+		return !Blocker(Candidate) && (!Building || IsFootprintFullyInsidePolygon(Candidate, Building->GetFootprint(), bClosed))
+			&& !DoesFootprintBlockConnector(Candidate, bClosed, ActiveFloor);
+	};
+	if (IsFree(Footprint)) return true;
+
+	// Pushes the shape clear of one blocker along an axis, so it ends up touching it (a shared wall), whichever way is the shortest first.
+	const auto Moved = [](const TArray<FVector2D>& Shape, FVector2D Offset)
+	{
+		TArray<FVector2D> Result = Shape;
+		for (FVector2D& Point : Result) Point += Offset;
+		return Result;
+	};
+	const auto Pushes = [&](const TArray<FVector2D>& Shape, const AInteriorRoom* In)
+	{
+		const FBox2D Mine(Shape), Theirs(In->GetFootprint());
+		TArray<FVector2D> Offsets = {
+			FVector2D(Theirs.Max.X - Mine.Min.X, 0), FVector2D(Theirs.Min.X - Mine.Max.X, 0),
+			FVector2D(0, Theirs.Max.Y - Mine.Min.Y), FVector2D(0, Theirs.Min.Y - Mine.Max.Y) };
+		Offsets.Sort([](const FVector2D& A, const FVector2D& B) { return A.SizeSquared() < B.SizeSquared(); });
+		return Offsets;
+	};
+
+	// The shortest way out: try each push of the first blocker; if another room is then in the way, push again from there (a second round).
+	TArray<FVector2D> Best;
+	double BestLength = TNumericLimits<double>::Max();
+	const AInteriorRoom* FirstBlocker = Blocker(Footprint);
+	for (const FVector2D& First : Pushes(Footprint, FirstBlocker))
+	{
+		const TArray<FVector2D> AfterFirst = Moved(Footprint, First);
+		if (IsFree(AfterFirst))
+		{
+			if (First.Size() < BestLength) { BestLength = First.Size(); Best = AfterFirst; }
+			continue;
+		}
+		if (const AInteriorRoom* Second = Blocker(AfterFirst))
+		{
+			for (const FVector2D& Next : Pushes(AfterFirst, Second))
+			{
+				const TArray<FVector2D> AfterSecond = Moved(AfterFirst, Next);
+				if (IsFree(AfterSecond) && (First + Next).Size() < BestLength) { BestLength = (First + Next).Size(); Best = AfterSecond; }
+			}
+		}
+	}
+	if (Best.IsEmpty()) return false;
+	if (OutBlockerName && FirstBlocker) *OutBlockerName = FirstBlocker->RoomName.IsEmpty() ? FirstBlocker->RoomId : FirstBlocker->RoomName;
+	Footprint = Best;
+	return true;
+}
+
+bool AInteriorGenerator::CommitRoomMove(const FString& RoomId, const TArray<FVector2D>& FallbackFootprint, bool bNudgeToFreeSpot, FString* OutNudgedBeside)
 {
 	for (auto& Pair : RoomsByFloor)
 	{
@@ -2235,6 +2614,14 @@ bool AInteriorGenerator::CommitRoomMove(const FString& RoomId, const TArray<FVec
 
 				if (DoFootprintsOverlap(Room->GetFootprint(), Room->IsClosedLoop(), Other->GetFootprint(), Other->IsClosedLoop(), OverlapToleranceWorldUnits / (Generator ? Generator->GetScale() : 1.f)))
 				{
+					// Dropped on another room: with bNudgeToFreeSpot the room goes to the nearest spot beside it instead of back to where it was.
+					TArray<FVector2D> Nudged = Room->GetFootprint();
+					if (bNudgeToFreeSpot && NudgeFootprintClear(Nudged, Room->IsClosedLoop(), RoomId, OutNudgedBeside) && Room->ResizeFootprint(Nudged))
+					{
+						NotifyNavigationLayoutChanged();
+						RecordHistorySnapshot();
+						return true;
+					}
 					Room->ResizeFootprint(FallbackFootprint);
 					NotifyNavigationLayoutChanged();
 					UE_LOG(LogTemp, Warning, TEXT("CommitRoomMove: '%s' would overlap '%s' - reverted to its position before the drag"), *RoomId, *Other->RoomId);
@@ -3137,6 +3524,9 @@ TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 		FloorObject->SetNumberField(TEXT("level"), Level);
 		FloorObject->SetNumberField(TEXT("wallHeight"), FloorInfo.WallHeight);
 		FloorObject->SetNumberField(TEXT("wallThickness"), FloorInfo.WallThickness);
+		// Written only when there is something to say, so older files and plain floors read as before.
+		if (!FloorInfo.Name.IsEmpty()) FloorObject->SetStringField(TEXT("name"), FloorInfo.Name);
+		if (FloorInfo.bOpen) FloorObject->SetBoolField(TEXT("open"), true);
 
 		TArray<TSharedPtr<FJsonValue>> RoomsArray;
 		if (const FInteriorRoomList* RoomList = RoomsByFloor.Find(Level))
@@ -3254,6 +3644,31 @@ TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 			NavNodesArray.Add(MakeShared<FJsonValueObject>(NodeObject));
 		}
 		FloorObject->SetArrayField(TEXT("navNodes"), NavNodesArray);
+
+		// Written only when the floor has some, so older files read as before.
+		TArray<TSharedPtr<FJsonValue>> UtilitiesArray;
+		for (const FInteriorUtility& Utility : Utilities)
+		{
+			if (Utility.Level != Level) continue;
+			TSharedRef<FJsonObject> UtilityObject = MakeShared<FJsonObject>();
+			UtilityObject->SetStringField(TEXT("id"), Utility.Id);
+			UtilityObject->SetStringField(TEXT("type"), Utility.Type);
+			if (!Utility.Name.IsEmpty()) UtilityObject->SetStringField(TEXT("name"), Utility.Name);
+			UtilityObject->SetArrayField(TEXT("position"), { MakeShared<FJsonValueNumber>(Utility.Position.X), MakeShared<FJsonValueNumber>(Utility.Position.Y) });
+			UtilitiesArray.Add(MakeShared<FJsonValueObject>(UtilityObject));
+		}
+		if (!UtilitiesArray.IsEmpty()) FloorObject->SetArrayField(TEXT("utilities"), UtilitiesArray);
+
+		if (const FInteriorReferenceImage* Image = ReferenceImages.Find(Level))
+		{
+			TSharedRef<FJsonObject> ImageObject = MakeShared<FJsonObject>();
+			ImageObject->SetStringField(TEXT("path"), Image->Path);
+			ImageObject->SetArrayField(TEXT("center"), { MakeShared<FJsonValueNumber>(Image->Center.X), MakeShared<FJsonValueNumber>(Image->Center.Y) });
+			ImageObject->SetNumberField(TEXT("width"), Image->Width);
+			ImageObject->SetNumberField(TEXT("opacity"), Image->Opacity);
+			if (!Image->bVisible) ImageObject->SetBoolField(TEXT("visible"), false);
+			FloorObject->SetObjectField(TEXT("referenceImage"), ImageObject);
+		}
 
 		FloorsArray.Add(MakeShared<FJsonValueObject>(FloorObject));
 	}
@@ -3409,6 +3824,36 @@ TSharedPtr<FJsonObject> AInteriorGenerator::CreateTranslatedInteriorCopy(
 				RoomObject->SetArrayField(
 					TEXT("footprint"),
 					NewFootprint);
+			}
+		}
+
+		// -------------------------
+		// Move the reference image
+		// -------------------------
+		const TSharedPtr<FJsonObject>* MovedImage = nullptr;
+		const TArray<TSharedPtr<FJsonValue>>* MovedCenter = nullptr;
+		if (FloorObject->TryGetObjectField(TEXT("referenceImage"), MovedImage) && MovedImage->IsValid()
+			&& (*MovedImage)->TryGetArrayField(TEXT("center"), MovedCenter) && MovedCenter->Num() >= 2)
+		{
+			(*MovedImage)->SetArrayField(TEXT("center"), { MakeShared<FJsonValueNumber>((*MovedCenter)[0]->AsNumber() + MoveOffset.X),
+				MakeShared<FJsonValueNumber>((*MovedCenter)[1]->AsNumber() + MoveOffset.Y) });
+		}
+
+		// -------------------------
+		// Move utility points
+		// -------------------------
+		const TArray<TSharedPtr<FJsonValue>>* UtilityValues = nullptr;
+		if (FloorObject->TryGetArrayField(TEXT("utilities"), UtilityValues))
+		{
+			for (const TSharedPtr<FJsonValue>& UtilityValue : *UtilityValues)
+			{
+				const TSharedPtr<FJsonObject> UtilityObject = UtilityValue.IsValid() ? UtilityValue->AsObject() : nullptr;
+				const TArray<TSharedPtr<FJsonValue>>* UtilityPosition = nullptr;
+				if (UtilityObject.IsValid() && UtilityObject->TryGetArrayField(TEXT("position"), UtilityPosition) && UtilityPosition->Num() >= 2)
+				{
+					UtilityObject->SetArrayField(TEXT("position"), { MakeShared<FJsonValueNumber>((*UtilityPosition)[0]->AsNumber() + MoveOffset.X),
+						MakeShared<FJsonValueNumber>((*UtilityPosition)[1]->AsNumber() + MoveOffset.Y) });
+				}
 			}
 		}
 

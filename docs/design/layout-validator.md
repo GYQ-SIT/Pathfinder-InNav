@@ -20,6 +20,7 @@ If opening a building materialises defaults from an older file, Show on plan ref
 - Closed polygon degeneracy/self-intersection and containment inside the building. Two-point open wall paths are supported. Suspicious room overlaps are warnings because intentional overlap is allowed.
 - Opening edge, width and offset bounds in **world centimetres**; overlapping openings; stale door metadata. `corridor` and `outside` are supported special values. Door metadata warnings are distinct from geometry reachability.
 - Floor levels and cross-floor connector instances, grouping, placement and reciprocal served-floor lists. Legacy connectors without group IDs or served-floor lists retain the planner's fallback behaviour. Single-floor connectors are allowed.
+- A lift, stair or escalator inside a closed room with **no door** (`CONNECTOR_ENCLOSED`): nobody can reach it. A warning, not an error, because restricted-access layouts can be intentional; a window or a void is not a way in.
 - Main entrance placement and link references. Link entrances are stored once; their mirrors are derived. Navigation diagnostics check the same cross-building doorway edges as normal routing, including distance and floor elevation.
 - Room reachability from at least one campus exterior entry, using one valid representative destination per closed room. Candidate points come from triangulation and must meet the planner's wall clearance. A room with no suitable candidate is **skipped with a warning**, rather than labelled unreachable.
 

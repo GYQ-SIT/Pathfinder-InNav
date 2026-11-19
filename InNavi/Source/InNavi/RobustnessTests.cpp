@@ -528,8 +528,10 @@ bool FProjectGeometryEditTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("a valid room can be created"), Fixture.Interior->CreateRoomFromFootprint(Left, TEXT("Left"), TEXT("Left"), true, false, false, Error));
 	TestNotNull(TEXT("its neighbour can be created"), Fixture.Interior->CreateRoomFromFootprint(
 		{{220,100},{290,100},{290,200},{220,200}}, TEXT("Right"), TEXT("Right"), true, false, false, Error));
+	// PAT-195: a wall inside a room is a partition, even across two opposite corners; one that crosses the room's wall into the neighbour is not.
+	TestNotNull(TEXT("a partition may run across a room, corner to corner"), Fixture.Interior->CreateWallFromPoints({Left[0], Left[2]}, TEXT("Diagonal"), Error));
 	AddExpectedError(TEXT("wall overlaps existing room"), EAutomationExpectedErrorFlags::Contains, 1);
-	TestNull(TEXT("a wall cannot cut through two opposite corners"), Fixture.Interior->CreateWallFromPoints({Left[0], Left[2]}, TEXT("Diagonal"), Error));
+	TestNull(TEXT("a wall cannot cross a room's wall into the next room"), Fixture.Interior->CreateWallFromPoints({{150,150},{250,150}}, TEXT("Across"), Error));
 	TestFalse(TEXT("a resize cannot overlap a neighbouring room"), Fixture.Interior->ResizeRoom(TEXT("Left"), 180, 100));
 	return true;
 }

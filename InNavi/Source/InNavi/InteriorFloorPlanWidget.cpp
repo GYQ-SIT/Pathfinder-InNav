@@ -12,12 +12,14 @@
 #include "LayoutValidationSession.h"
 #include "NavigationPanelWidget.h"
 #include "NavigationRouteVisualization.h"
+#include "InteriorDrawing.h"
 #include "PolygonGeometryUtils.h"
 #include "RoomTypes.h"
 #include "EngineUtils.h"
 #include "Rendering/DrawElements.h"
 #include "Styling/CoreStyle.h"
 #include "Engine/Texture2D.h"
+#include "ImageUtils.h"
 
 static const FVector2D FloorPlanResizeDirections[] = {
 	{-1,-1}, {0,-1}, {1,-1}, {1,0}, {1,1}, {0,1}, {-1,1}, {-1,0}
@@ -34,6 +36,8 @@ TArray<FVector2D> UInteriorFloorPlanWidget::GetResizeHandles(FVector2D WidgetSiz
 {
 	TArray<FVector2D> Handles;
 	if (!PlayerController || !InteriorGen || !Generator || !PlayerController->IsInSelectMode() || PlayerController->IsInteriorInspectionEnabled()) return Handles;
+	// With a gizmo on, it is the way to move, turn and resize: the plain handles stay out of its way.
+	if (PlayerController->GetTransformGizmo() != ETransformGizmo::None) return Handles;
 	const APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
 	FVector2D Position, Size, Origin;
 	float PixelsPerUnit = 0;
@@ -46,6 +50,50 @@ TArray<FVector2D> UInteriorFloorPlanWidget::GetResizeHandles(FVector2D WidgetSiz
 		Handles.Add(ViewWorldToLocal((Point + Building->BuildingOffset) * Generator->GetScale(), Origin, PixelsPerUnit, WidgetSize));
 	}
 	return Handles;
+}
+
+TArray<FVector2D> UInteriorFloorPlanWidget::GetVertexHandles(FVector2D WidgetSize) const
+{
+	TArray<FVector2D> Handles;
+	if (!PlayerController || !InteriorGen || !Generator || !PlayerController->IsInSelectMode() || PlayerController->IsInteriorInspectionEnabled()) return Handles;
+	if (PlayerController->GetTransformGizmo() != ETransformGizmo::None) return Handles;
+	const APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building) return Handles;
+	const TArray<FVector2D> Vertices = PlayerController->GetSelectedRoomVertices();
+	if (Vertices.IsEmpty()) return Handles;
+	FVector2D Origin;
+	float PixelsPerUnit = 0;
+	ComputeViewTransform(WidgetSize, Origin, PixelsPerUnit);
+	for (const FVector2D& Vertex : Vertices)
+	{
+		Handles.Add(ViewWorldToLocal((Vertex + Building->BuildingOffset) * Generator->GetScale(), Origin, PixelsPerUnit, WidgetSize));
+	}
+	return Handles;
+}
+
+int32 UInteriorFloorPlanWidget::FindVertexHandleAt(FVector2D LocalPosition, FVector2D WidgetSize, bool bCtrlHeld) const
+{
+	const TArray<FVector2D> Vertices = GetVertexHandles(WidgetSize);
+	const TArray<FVector2D> Resize = GetResizeHandles(WidgetSize);
+	int32 Best = INDEX_NONE;
+	double BestDistance = 81.0;
+	for (int32 Index = 0; Index < Vertices.Num(); ++Index)
+	{
+		const double Distance = FVector2D::DistSquared(LocalPosition, Vertices[Index]);
+		if (Distance > BestDistance) continue;
+		// A corner under a resize handle is left to that handle unless Ctrl is held.
+		const bool bUnderResizeHandle = Resize.ContainsByPredicate([&](const FVector2D& Handle) { return FVector2D::DistSquared(Vertices[Index], Handle) <= 81.0; });
+		if (bUnderResizeHandle && !bCtrlHeld) continue;
+		Best = Index;
+		BestDistance = Distance;
+	}
+	return Best;
+}
+
+FVector2D UInteriorFloorPlanWidget::ShapeDragEnd(FVector2D RawEnd, bool bShiftHeld) const
+{
+	if (!bShiftHeld || !PlayerController) return RawEnd;
+	return InteriorDrawing::ProportionalCorner(PrefabStart, RawEnd, PlayerController->GetPrefabShiftAspect());
 }
 
 bool UInteriorFloorPlanWidget::IsPrefabDragValid() const
@@ -78,6 +126,48 @@ void UInteriorFloorPlanWidget::ResizeAtLocalPosition(FVector2D LocalPosition, FV
 	if (ResizeDirection.X < 0) Min.X = FMath::Min(Point.X, Max.X - MinX);
 	if (ResizeDirection.Y > 0) Max.Y = FMath::Max(Point.Y, Min.Y + MinY);
 	if (ResizeDirection.Y < 0) Min.Y = FMath::Min(Point.Y, Max.Y - MinY);
+	if (bResizeUniform)
+	{
+		// The corner handle of the scale gizmo: the far corner follows the pointer along the room's own proportions.
+		const FVector2D Corner = InteriorDrawing::ProportionalCorner(ResizeStartPosition, Point, ResizeStartAspect);
+		Max.X = FMath::Max(Corner.X, Min.X + MinX);
+		Max.Y = FMath::Max(Corner.Y, Min.Y + MinY);
+	}
+
+	// Stop at the building's wall: the preview never goes beyond what the release would accept (PAT-190). If the pointer is past the wall, each axis is
+	// pulled back to the farthest size that still fits, one axis at a time, so a corner handle slides along the wall instead of freezing. A room that
+	// already sticks out of the outline (an old project) is left alone.
+	const FVector2D StartMin = ResizeStartPosition, StartMax = ResizeStartPosition + ResizeStartSize;
+	auto FitsBuilding = [this](FVector2D A, FVector2D B) { return InteriorGen->DoesResizeStayInsideBuilding(DraggingRoomId, A, B - A); };
+	if (!FitsBuilding(Min, Max) && FitsBuilding(StartMin, StartMax))
+	{
+		FVector2D ResolvedMin = StartMin, ResolvedMax = StartMax;
+		for (int32 Axis = 0; Axis < 2; ++Axis)
+		{
+			FVector2D TryMin = ResolvedMin, TryMax = ResolvedMax;
+			TryMin[Axis] = Min[Axis];
+			TryMax[Axis] = Max[Axis];
+			if (FitsBuilding(TryMin, TryMax))
+			{
+				ResolvedMin = TryMin;
+				ResolvedMax = TryMax;
+				continue;
+			}
+			double Good = 0.0, Bad = 1.0;
+			for (int32 Step = 0; Step < 20; ++Step)
+			{
+				const double Mid = (Good + Bad) * 0.5;
+				FVector2D MidMin = ResolvedMin, MidMax = ResolvedMax;
+				MidMin[Axis] = FMath::Lerp(ResolvedMin[Axis], Min[Axis], Mid);
+				MidMax[Axis] = FMath::Lerp(ResolvedMax[Axis], Max[Axis], Mid);
+				(FitsBuilding(MidMin, MidMax) ? Good : Bad) = Mid;
+			}
+			ResolvedMin[Axis] = FMath::Lerp(ResolvedMin[Axis], Min[Axis], Good);
+			ResolvedMax[Axis] = FMath::Lerp(ResolvedMax[Axis], Max[Axis], Good);
+		}
+		Min = ResolvedMin;
+		Max = ResolvedMax;
+	}
 	ResizePreviewPosition = Min;
 	ResizePreviewSize = Max - Min;
 	bResizeChanged = !ResizePreviewPosition.Equals(ResizeStartPosition, 1e-6) || !ResizePreviewSize.Equals(ResizeStartSize, 1e-6);
@@ -186,6 +276,30 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 
 		if (PlayerController->IsInSelectMode())
 		{
+			// The transform gizmo, when there is one: grabbing a part of it starts the move, turn or resize it stands for.
+			if (const EGizmoPart Part = HitGizmo(LocalPosition, InGeometry.GetLocalSize()); Part != EGizmoPart::None &&
+				StartGizmoDrag(Part, LocalPosition, InGeometry.GetLocalSize(), InMouseEvent.IsShiftDown()))
+			{
+				return FReply::Handled().CaptureMouse(TakeWidget());
+			}
+
+			// A corner of the selected room: a drag moves that corner alone (a corner under a resize handle needs Ctrl).
+			const int32 VertexIndex = FindVertexHandleAt(LocalPosition, InGeometry.GetLocalSize(), InMouseEvent.IsControlDown());
+			if (VertexIndex != INDEX_NONE && InteriorGen)
+			{
+				DraggingRoomId = PlayerController->GetSelectedRoomId();
+				DragTarget = InteriorGen->GetRoomById(DraggingRoomId);
+				if (DragTarget.IsValid())
+				{
+					bIsDraggingVertex = true;
+					bVertexMoved = false;
+					DraggingVertexIndex = VertexIndex;
+					DragFloor = InteriorGen->GetActiveFloor();
+					DragBuildingId = InteriorGen->GetLoadedBuildingId();
+					return FReply::Handled().CaptureMouse(TakeWidget());
+				}
+			}
+
 			const TArray<FVector2D> Handles = GetResizeHandles(InGeometry.GetLocalSize());
 			for (int32 Index = 0; Index < Handles.Num(); ++Index)
 			{
@@ -221,6 +335,18 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 				return FReply::Handled().CaptureMouse(TakeWidget());
 			}
 
+			// A utility point (PAT-193): a click selects it, a drag moves it.
+			FString UtilityId;
+			if (FindUtilityNearLocalPosition(LocalPosition, InGeometry.GetLocalSize(), UtilityId))
+			{
+				PlayerController->SelectUtility(UtilityId);
+				const FInteriorUtility* Utility = InteriorGen ? InteriorGen->FindUtility(UtilityId) : nullptr;
+				bIsDraggingUtility = Utility != nullptr;
+				bUtilityMoved = false;
+				DragUtilityGrabOffset = Utility ? Utility->Position - LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize()) : FVector2D::ZeroVector;
+				return FReply::Handled().CaptureMouse(TakeWidget());
+			}
+
 			FString ConnectorGroupId;
 			if (FindConnectorNearLocalPosition(LocalPosition, InGeometry.GetLocalSize(), ConnectorGroupId))
 			{
@@ -252,6 +378,12 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 
 			if (Room)
 			{
+				// Shift+click adds the room to the selection, or takes it out; no drag starts.
+				if (InMouseEvent.IsShiftDown())
+				{
+					PlayerController->ToggleRoomInSelection(Room->RoomId);
+					return FReply::Handled();
+				}
 				PlayerController->SelectRoom(Room->RoomId);
 
 				// Same idea as the door drag above - a plain click just selects; dragging slides the
@@ -265,8 +397,11 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 				return FReply::Handled().CaptureMouse(TakeWidget());
 			}
 
-			PlayerController->SelectRoom(FString());
-			return FReply::Handled();
+			// Empty plan: a click deselects, a drag draws a selection window (Shift adds to the selection) - see FinishSelectBox.
+			bIsDraggingSelectBox = true;
+			bSelectBoxAdd = InMouseEvent.IsShiftDown();
+			SelectBoxStart = SelectBoxEnd = LocalPosition;
+			return FReply::Handled().CaptureMouse(TakeWidget());
 		}
 
 		if (PlayerController->IsInAddDoorMode())
@@ -307,8 +442,16 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 			return FReply::Handled();
 		}
 
-		const FVector2D FootprintPoint = LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize());
-		PlayerController->AddRoomPointAtFootprintPosition(FootprintPoint);
+		if (PlayerController->IsInUtilityMode())
+		{
+			PlayerController->PlaceUtilityAt(LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize()));
+			return FReply::Handled();
+		}
+
+		// Shift: the new point goes straight along X or Y from the last one, and is not pulled off that line by snapping.
+		const FVector2D RawPoint = LocalPositionToFootprintPoint(LocalPosition, InGeometry.GetLocalSize());
+		const FVector2D FootprintPoint = PlayerController->ConstrainDrawPoint(RawPoint, InMouseEvent.IsShiftDown());
+		PlayerController->AddRoomPointAtFootprintPosition(FootprintPoint, /*bSkipSnapping=*/!FootprintPoint.Equals(RawPoint, 1e-9));
 		return FReply::Handled();
 	}
 
@@ -322,7 +465,7 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 		if (IsPrefabDragValid())
 		{
 			const FVector2D Local = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
-			PrefabEnd = LocalPositionToFootprintPoint(Local, InGeometry.GetLocalSize());
+			PrefabEnd = ShapeDragEnd(LocalPositionToFootprintPoint(Local, InGeometry.GetLocalSize()), InMouseEvent.IsShiftDown());
 			bPrefabWasDragged |= FVector2D::DistSquared(Local, PrefabStartLocal) > 36.0;
 			if (bPrefabWasDragged)
 			{
@@ -343,10 +486,37 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 	if (InMouseEvent.GetEffectingButton() == EKeys::RightMouseButton && bIsPanning)
 	{
 		bIsPanning = false;
+		// A right-click that did not pan (the pointer stayed put) on a room opens its menu.
+		const FVector2D UpLocal = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+		if (PlayerController && PlayerController->IsInSelectMode() && FVector2D::DistSquared(UpLocal, PanStartLocalPosition) < 25.0)
+		{
+			AInteriorRoom* Room = FindRoomNearLocalPosition(UpLocal, InGeometry.GetLocalSize());
+			if (!Room) Room = FindRoomContainingLocalPosition(UpLocal, InGeometry.GetLocalSize());
+			if (Room) PlayerController->OpenRoomContextMenu(Room->RoomId);
+		}
 		return FReply::Handled().ReleaseMouseCapture();
 	}
 
-	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsDraggingConnector)
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && (bIsRotatingGizmo || bIsScalingConnector))
+	{
+		FinishEditDrag();
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsDraggingSelectBox)
+	{
+		SelectBoxEnd = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+		FinishSelectBox(InGeometry.GetLocalSize(), true);
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsDraggingVertex)
+	{
+		FinishEditDrag();
+		return FReply::Handled().ReleaseMouseCapture();
+	}
+
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && (bIsDraggingConnector || bIsDraggingUtility))
 	{
 		FinishEditDrag();
 		return FReply::Handled().ReleaseMouseCapture();
@@ -367,15 +537,63 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeomet
 	return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
 }
 
+void UInteriorFloorPlanWidget::FinishSelectBox(FVector2D WidgetSize, bool bApply)
+{
+	const bool bWasDragging = bIsDraggingSelectBox;
+	bIsDraggingSelectBox = false;
+	if (!bWasDragging || !bApply || !PlayerController) return;
+	if (FVector2D::DistSquared(SelectBoxStart, SelectBoxEnd) > 36.0)
+	{
+		const FBox2D Rect(TArray<FVector2D>{ LocalPositionToFootprintPoint(SelectBoxStart, WidgetSize), LocalPositionToFootprintPoint(SelectBoxEnd, WidgetSize) });
+		PlayerController->SelectRoomsInRect(Rect, bSelectBoxAdd);
+	}
+	else if (!bSelectBoxAdd)
+	{
+		PlayerController->SelectRoom(FString());
+	}
+}
+
 void UInteriorFloorPlanWidget::FinishEditDrag()
 {
 	bIsDraggingPrefab = false;
+	if (bIsRotatingGizmo)
+	{
+		// One Undo step for the whole turn.
+		bIsRotatingGizmo = false;
+		if (PlayerController) PlayerController->EndTransformRotation();
+	}
+	if (bIsScalingConnector)
+	{
+		bIsScalingConnector = false;
+		if (bConnectorScaled && InteriorGen) InteriorGen->RecordHistorySnapshot();
+		bConnectorScaled = false;
+	}
+	// A selection window that loses the mouse (focus lost, Esc) is dropped without selecting anything.
+	bIsDraggingSelectBox = false;
+	if (bIsDraggingVertex)
+	{
+		// One history step for the whole corner drag, and only when a corner did move.
+		bIsDraggingVertex = false;
+		if (bVertexMoved && InteriorGen) InteriorGen->RecordHistorySnapshot();
+		bVertexMoved = false;
+		DraggingVertexIndex = INDEX_NONE;
+	}
+	if (bIsDraggingUtility)
+	{
+		// One history step for the whole drag, and only when the point did move.
+		bIsDraggingUtility = false;
+		if (bUtilityMoved && InteriorGen) InteriorGen->RecordHistorySnapshot();
+		bUtilityMoved = false;
+	}
 	if (bIsDraggingConnector)
 	{
 		// One history step for the whole drag, and only when the connector did move.
 		bIsDraggingConnector = false;
 		if (bConnectorMoved && InteriorGen) InteriorGen->RecordHistorySnapshot();
+		// Let go on a spot that was refused: say why, once (which floor, what is in the way), instead of the connector just not following.
+		if (bConnectorMoveRefused && PlayerController) PlayerController->ReportConnectorMoveRefused();
 		bConnectorMoved = false;
+		bConnectorMoveRefused = false;
 		DragStartConnectorPositions.Reset();
 	}
 	if (bIsResizingRoom)
@@ -393,9 +611,11 @@ void UInteriorFloorPlanWidget::FinishEditDrag()
 	if (bIsDraggingRoom)
 	{
 		bIsDraggingRoom = false;
-		if (PlayerController && DragTarget.IsValid()) PlayerController->CommitRoomMove(DraggingRoomId, DragStartRoomFootprint);
+		if (PlayerController && DragTarget.IsValid()) PlayerController->CommitRoomMove(DraggingRoomId, DragStartRoomFootprint, /*bNudgeToFreeSpot=*/true);
 	}
 	DragTarget.Reset();
+	DragAxisLock = 0;
+	bResizeUniform = false;
 }
 
 void UInteriorFloorPlanWidget::NativeOnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
@@ -407,6 +627,10 @@ void UInteriorFloorPlanWidget::NativeOnMouseCaptureLost(const FCaptureLostEvent&
 
 FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
+	// Where the pointer is, for the preview of the line being drawn.
+	bHasPointer = true;
+	PointerLocal = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+	bPointerShift = InMouseEvent.IsShiftDown();
 	if (bIsDraggingPrefab)
 	{
 		if (!IsPrefabDragValid() || !InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
@@ -415,7 +639,7 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 			return FReply::Handled().ReleaseMouseCapture();
 		}
 		const FVector2D Local = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
-		PrefabEnd = LocalPositionToFootprintPoint(Local, InGeometry.GetLocalSize());
+		PrefabEnd = ShapeDragEnd(LocalPositionToFootprintPoint(Local, InGeometry.GetLocalSize()), InMouseEvent.IsShiftDown());
 		bPrefabWasDragged |= FVector2D::DistSquared(Local, PrefabStartLocal) > 36.0;
 		return FReply::Handled();
 	}
@@ -431,6 +655,94 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 		ResizeAtLocalPosition(InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition()), InGeometry.GetLocalSize());
 		return FReply::Handled();
 	}
+	if (bIsDraggingSelectBox)
+	{
+		if (!InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton) || !PlayerController || !PlayerController->IsInSelectMode())
+		{
+			bIsDraggingSelectBox = false;
+			return FReply::Handled().ReleaseMouseCapture();
+		}
+		SelectBoxEnd = PointerLocal;
+		bSelectBoxAdd = InMouseEvent.IsShiftDown();
+		return FReply::Handled();
+	}
+	if (bIsRotatingGizmo)
+	{
+		if (!InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton) || !PlayerController || !PlayerController->IsTransformGizmoShown())
+		{
+			FinishEditDrag();
+			return FReply::Handled().ReleaseMouseCapture();
+		}
+		// The turn is the angle the pointer has gone round the centre, in the plan's own axes (so it is right whatever the plan is turned to).
+		const FVector2D At = LocalPositionToFootprintPoint(PointerLocal, InGeometry.GetLocalSize()) - GizmoCenterFootprint;
+		if (At.SizeSquared() > KINDA_SMALL_NUMBER)
+		{
+			const float Angle = FMath::RadiansToDegrees(FMath::Atan2(At.Y, At.X));
+			const float Delta = FMath::UnwindDegrees(Angle - GizmoLastAngle);
+			if (!FMath::IsNearlyZero(Delta, 0.01f)) PlayerController->RotateSelectionByDegrees(Delta);
+			GizmoLastAngle = Angle;
+		}
+		return FReply::Handled();
+	}
+	if (bIsScalingConnector)
+	{
+		if (!InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton) || !PlayerController || !PlayerController->IsTransformGizmoShown())
+		{
+			FinishEditDrag();
+			return FReply::Handled().ReleaseMouseCapture();
+		}
+		// The connector grows with the pointer's distance from its middle, from the size it had when grabbed.
+		const float Factor = FVector2D::Distance(PointerLocal, GizmoCenterLocal) / FMath::Max(ScaleStartDistance, 1.f);
+		if (PlayerController->SetSelectedConnectorScale(ScaleStartValue * Factor)) bConnectorScaled = true;
+		return FReply::Handled();
+	}
+	if (bIsDraggingVertex)
+	{
+		if (!InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton) || !DragTarget.IsValid() || !PlayerController || !InteriorGen ||
+			!PlayerController->IsInSelectMode() || PlayerController->GetSelectedRoomId() != DraggingRoomId ||
+			InteriorGen->GetActiveFloor() != DragFloor || InteriorGen->GetLoadedBuildingId() != DragBuildingId)
+		{
+			FinishEditDrag();
+			return FReply::Handled().ReleaseMouseCapture();
+		}
+		FVector2D Target = LocalPositionToFootprintPoint(InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition()), InGeometry.GetLocalSize());
+		// Snap the corner to another room's corner, as drawing does (the room's own corners are not offered).
+		if (PlayerController->IsSnapEnabled())
+		{
+			FVector2D SnapOffset;
+			if (InteriorGen->FindSnapOffset(InteriorGen->GetActiveFloor(), { Target }, DraggingRoomId, 80.f / PlayerController->GetBuildingScale(), SnapOffset)) Target += SnapOffset;
+		}
+		const TArray<FVector2D> Vertices = PlayerController->GetSelectedRoomVertices();
+		if (Vertices.IsValidIndex(DraggingVertexIndex) && !Vertices[DraggingVertexIndex].Equals(Target, 1e-6))
+		{
+			// The corner goes where the pointer is, or, where that is not allowed (outside the building, across another room, crossing itself), as
+			// far along the way as it is allowed: it stops at the limit instead of jumping back or freezing.
+			FVector2D Goal = Target;
+			if (!PlayerController->CanMoveSelectedRoomVertex(DraggingVertexIndex, Target))
+			{
+				FVector2D Good = Vertices[DraggingVertexIndex], Bad = Target;
+				for (int32 Step = 0; Step < 16; ++Step)
+				{
+					const FVector2D Mid = (Good + Bad) * 0.5;
+					(PlayerController->CanMoveSelectedRoomVertex(DraggingVertexIndex, Mid) ? Good : Bad) = Mid;
+				}
+				Goal = Good;
+			}
+			if (PlayerController->MoveSelectedRoomVertex(DraggingVertexIndex, Goal)) bVertexMoved = true;
+		}
+		return FReply::Handled();
+	}
+	if (bIsDraggingUtility)
+	{
+		if (!InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton) || !PlayerController)
+		{
+			FinishEditDrag();
+			return FReply::Handled().ReleaseMouseCapture();
+		}
+		FVector2D Target = LocalPositionToFootprintPoint(InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition()), InGeometry.GetLocalSize()) + DragUtilityGrabOffset;
+		if (PlayerController->MoveSelectedUtilityTo(Target)) bUtilityMoved = true;
+		return FReply::Handled();
+	}
 	if (bIsDraggingConnector)
 	{
 		// Same defensive check as the door drag below.
@@ -440,16 +752,20 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 			return FReply::Handled().ReleaseMouseCapture();
 		}
 		const FVector2D CurrentFootprintPosition = LocalPositionToFootprintPoint(InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition()), InGeometry.GetLocalSize());
-		const FVector2D Delta = CurrentFootprintPosition - DragStartFootprintPosition;
+		FVector2D Delta = CurrentFootprintPosition - DragStartFootprintPosition;
+		if (DragAxisLock == 1) Delta.Y = 0.0;
+		if (DragAxisLock == 2) Delta.X = 0.0;
 		TMap<int32, FVector2D> NewPositions;
 		for (const TPair<int32, FVector2D>& Pair : DragStartConnectorPositions)
 		{
 			NewPositions.Add(Pair.Key, Pair.Value + Delta);
 		}
-		if (PlayerController->MoveSelectedConnectorTo(NewPositions) && !Delta.IsNearlyZero(0.0001))
+		const bool bMoved = PlayerController->MoveSelectedConnectorTo(NewPositions);
+		if (bMoved && !Delta.IsNearlyZero(0.0001))
 		{
 			bConnectorMoved = true;
 		}
+		bConnectorMoveRefused = !bMoved && !Delta.IsNearlyZero(0.0001);
 		return FReply::Handled();
 	}
 	if (bIsDraggingDoor)
@@ -482,7 +798,9 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 
 		const FVector2D CurrentLocalPosition = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
 		const FVector2D CurrentFootprintPosition = LocalPositionToFootprintPoint(CurrentLocalPosition, InGeometry.GetLocalSize());
-		const FVector2D Delta = CurrentFootprintPosition - DragStartFootprintPosition;
+		FVector2D Delta = CurrentFootprintPosition - DragStartFootprintPosition;
+		if (DragAxisLock == 1) Delta.Y = 0.0;
+		if (DragAxisLock == 2) Delta.X = 0.0;
 
 		TArray<FVector2D> NewFootprint;
 		NewFootprint.Reserve(DragStartRoomFootprint.Num());
@@ -567,6 +885,153 @@ static float DistancePointToSegment2D(const FVector2D& Point, const FVector2D& A
 
 	const float T = FMath::Clamp(FVector2D::DotProduct(Point - A, AB) / LengthSq, 0.f, 1.f);
 	return FVector2D::Distance(Point, A + AB * T);
+}
+
+UInteriorFloorPlanWidget::FGizmoLayout UInteriorFloorPlanWidget::ComputeGizmoLayout(FVector2D WidgetSize) const
+{
+	FGizmoLayout Layout;
+	if (!PlayerController || !InteriorGen || !Generator || !PlayerController->IsTransformGizmoShown()) return Layout;
+	const APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building) return Layout;
+	FVector2D Center, Position, Size;
+	bool bRoom = false;
+	if (PlayerController->GetSelectedRoomBounds(Position, Size))
+	{
+		Center = Position + Size * 0.5;
+		bRoom = true;
+	}
+	else
+	{
+		const TMap<int32, FVector2D> Positions = PlayerController->GetSelectedConnectorPositions(false);
+		if (Positions.IsEmpty()) return Layout;
+		Center = Positions.CreateConstIterator().Value();
+	}
+	FVector2D Origin;
+	float PixelsPerUnit = 0.f;
+	ComputeViewTransform(WidgetSize, Origin, PixelsPerUnit);
+	const auto ToLocal = [&](const FVector2D& Footprint)
+	{
+		return ViewWorldToLocal((Footprint + Building->BuildingOffset) * Generator->GetScale(), Origin, PixelsPerUnit, WidgetSize);
+	};
+	Layout.CenterFootprint = Center;
+	Layout.bRoom = bRoom;
+	Layout.Center = ToLocal(Center);
+	Layout.DirX = (ToLocal(Center + FVector2D(1, 0)) - Layout.Center).GetSafeNormal();
+	Layout.DirY = (ToLocal(Center + FVector2D(0, 1)) - Layout.Center).GetSafeNormal();
+	Layout.XTip = Layout.Center + Layout.DirX * 70.0;
+	Layout.YTip = Layout.Center + Layout.DirY * 70.0;
+	Layout.RingRadius = 55.f;
+	if (bRoom)
+	{
+		// The scale handles sit on the room itself: the middle of its X side, the middle of its Y side and the corner between them.
+		Layout.ScaleX = ToLocal(FVector2D(Position.X + Size.X, Center.Y));
+		Layout.ScaleY = ToLocal(FVector2D(Center.X, Position.Y + Size.Y));
+		Layout.ScaleUniform = ToLocal(Position + Size);
+	}
+	else
+	{
+		Layout.ScaleX = Layout.XTip;
+		Layout.ScaleY = Layout.YTip;
+		Layout.ScaleUniform = Layout.Center + (Layout.DirX + Layout.DirY).GetSafeNormal() * 60.0;
+	}
+	Layout.bValid = true;
+	return Layout;
+}
+
+UInteriorFloorPlanWidget::EGizmoPart UInteriorFloorPlanWidget::HitGizmo(FVector2D LocalPosition, FVector2D WidgetSize) const
+{
+	const FGizmoLayout Layout = ComputeGizmoLayout(WidgetSize);
+	if (!Layout.bValid) return EGizmoPart::None;
+	switch (PlayerController->GetTransformGizmo())
+	{
+	case ETransformGizmo::Translate:
+		if (FVector2D::Distance(LocalPosition, Layout.Center) <= 9.0) return EGizmoPart::Center;
+		if (DistancePointToSegment2D(LocalPosition, Layout.Center, Layout.XTip) <= 8.0) return EGizmoPart::ArrowX;
+		if (DistancePointToSegment2D(LocalPosition, Layout.Center, Layout.YTip) <= 8.0) return EGizmoPart::ArrowY;
+		break;
+	case ETransformGizmo::Rotate:
+		if (FMath::Abs(FVector2D::Distance(LocalPosition, Layout.Center) - Layout.RingRadius) <= 8.0) return EGizmoPart::Ring;
+		break;
+	case ETransformGizmo::Scale:
+		if (FVector2D::Distance(LocalPosition, Layout.ScaleUniform) <= 10.0) return EGizmoPart::ScaleUniform;
+		if (Layout.bRoom && FVector2D::Distance(LocalPosition, Layout.ScaleX) <= 10.0) return EGizmoPart::ScaleX;
+		if (Layout.bRoom && FVector2D::Distance(LocalPosition, Layout.ScaleY) <= 10.0) return EGizmoPart::ScaleY;
+		break;
+	default:
+		break;
+	}
+	return EGizmoPart::None;
+}
+
+bool UInteriorFloorPlanWidget::StartGizmoDrag(EGizmoPart Part, FVector2D LocalPosition, FVector2D WidgetSize, bool bShift)
+{
+	if (!PlayerController || !InteriorGen) return false;
+	const FGizmoLayout Layout = ComputeGizmoLayout(WidgetSize);
+	if (!Layout.bValid) return false;
+	const FString RoomId = PlayerController->GetSelectedRoomId();
+	AInteriorRoom* Room = RoomId.IsEmpty() ? nullptr : InteriorGen->GetRoomById(RoomId);
+	DragFloor = InteriorGen->GetActiveFloor();
+	DragBuildingId = InteriorGen->GetLoadedBuildingId();
+	switch (Part)
+	{
+	case EGizmoPart::ArrowX:
+	case EGizmoPart::ArrowY:
+	case EGizmoPart::Center:
+		DragAxisLock = Part == EGizmoPart::ArrowX ? 1 : Part == EGizmoPart::ArrowY ? 2 : 0;
+		DragStartFootprintPosition = LocalPositionToFootprintPoint(LocalPosition, WidgetSize);
+		if (Room)
+		{
+			// The same drag as pulling the room by its body, along one axis or free.
+			bIsDraggingRoom = true;
+			DragTarget = Room;
+			DraggingRoomId = RoomId;
+			DragStartRoomFootprint = Room->GetFootprint();
+			return true;
+		}
+		bIsDraggingConnector = true;
+		bConnectorMoved = false;
+		bConnectorMoveRefused = false;
+		DragStartConnectorPositions = PlayerController->GetSelectedConnectorPositions(bShift);
+		return !DragStartConnectorPositions.IsEmpty();
+	case EGizmoPart::Ring:
+		bIsRotatingGizmo = true;
+		GizmoCenterFootprint = Layout.CenterFootprint;
+		{
+			const FVector2D At = LocalPositionToFootprintPoint(LocalPosition, WidgetSize) - GizmoCenterFootprint;
+			GizmoLastAngle = FMath::RadiansToDegrees(FMath::Atan2(At.Y, At.X));
+		}
+		PlayerController->BeginTransformRotation();
+		return true;
+	case EGizmoPart::ScaleX:
+	case EGizmoPart::ScaleY:
+	case EGizmoPart::ScaleUniform:
+		if (Room)
+		{
+			// The same resize as pulling the room's side or corner, with the corner keeping the room's proportions.
+			FVector2D Position;
+			if (!PlayerController->GetSelectedRoomBounds(Position, ResizeStartSize)) return false;
+			ResizeStartPosition = ResizePreviewPosition = Position;
+			ResizePreviewSize = ResizeStartSize;
+			bIsResizingRoom = true;
+			bResizeChanged = false;
+			bResizeUniform = Part == EGizmoPart::ScaleUniform;
+			ResizeStartAspect = ResizeStartSize.X > KINDA_SMALL_NUMBER ? ResizeStartSize.Y / ResizeStartSize.X : 1.0;
+			ResizeDirection = Part == EGizmoPart::ScaleX ? FVector2D(1, 0) : Part == EGizmoPart::ScaleY ? FVector2D(0, 1) : FVector2D(1, 1);
+			DraggingRoomId = RoomId;
+			DragTarget = Room;
+			DragStartRoomFootprint = Room->GetFootprint();
+			return true;
+		}
+		// A connector has one size: it grows or shrinks as a whole.
+		bIsScalingConnector = true;
+		bConnectorScaled = false;
+		GizmoCenterLocal = Layout.Center;
+		ScaleStartDistance = FMath::Max(static_cast<float>(FVector2D::Distance(LocalPosition, Layout.Center)), 1.f);
+		ScaleStartValue = PlayerController->GetSelectedConnectorScale();
+		return true;
+	default:
+		return false;
+	}
 }
 
 AInteriorRoom* UInteriorFloorPlanWidget::FindRoomNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, int32* OutEdgeIndex, float* OutOffsetWorldUnits) const
@@ -817,6 +1282,33 @@ bool UInteriorFloorPlanWidget::FindDoorNearLocalPosition(FVector2D LocalPosition
 	}
 
 	return false;
+}
+
+bool UInteriorFloorPlanWidget::FindUtilityNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, FString& OutUtilityId) const
+{
+	if (!InteriorGen || !Generator) return false;
+	APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building) return false;
+	FVector2D Origin;
+	float PixelsPerUnit;
+	ComputeViewTransform(WidgetSize, Origin, PixelsPerUnit);
+	constexpr float ClickTolerancePixels = 12.f;
+	// The nearest one wins when several are close together.
+	float BestDistance = ClickTolerancePixels;
+	bool bFound = false;
+	for (const FInteriorUtility& Utility : InteriorGen->GetUtilities())
+	{
+		if (Utility.Level != InteriorGen->GetActiveFloor()) continue;
+		const FVector2D MarkerLocal = ViewWorldToLocal((Utility.Position + Building->BuildingOffset) * Generator->GetScale(), Origin, PixelsPerUnit, WidgetSize);
+		const float Distance = static_cast<float>(FVector2D::Distance(LocalPosition, MarkerLocal));
+		if (Distance <= BestDistance)
+		{
+			BestDistance = Distance;
+			OutUtilityId = Utility.Id;
+			bFound = true;
+		}
+	}
+	return bFound;
 }
 
 bool UInteriorFloorPlanWidget::FindConnectorNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, FString& OutGroupId) const
@@ -1121,6 +1613,34 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		}
 	}
 
+	// ---- Reference image (PAT-201): under the drawing, never part of it ----
+	if (const FInteriorReferenceImage* Image = InteriorGen->GetReferenceImage(InteriorGen->GetActiveFloor()); Image && Image->bVisible)
+	{
+		if (Image->Path != ReferenceImagePath && Image->Path != ReferenceImageFailedPath)
+		{
+			ReferenceImageTexture = FPaths::FileExists(Image->Path) ? FImageUtils::ImportFileAsTexture2D(Image->Path) : nullptr;
+			ReferenceImagePath = ReferenceImageTexture ? Image->Path : FString();
+			ReferenceImageFailedPath = ReferenceImageTexture ? FString() : Image->Path;
+			if (ReferenceImageTexture)
+			{
+				ReferenceImageBrush = FSlateBrush();
+				ReferenceImageBrush.SetResourceObject(ReferenceImageTexture);
+				ReferenceImageBrush.ImageSize = FVector2f(ReferenceImageTexture->GetSizeX(), ReferenceImageTexture->GetSizeY());
+				ReferenceImageBrush.DrawAs = ESlateBrushDrawType::Image;
+			}
+		}
+		if (ReferenceImageTexture && Image->Path == ReferenceImagePath && ReferenceImageTexture->GetSizeX() > 0)
+		{
+			const float Aspect = static_cast<float>(ReferenceImageTexture->GetSizeY()) / static_cast<float>(ReferenceImageTexture->GetSizeX());
+			const FVector2D PixelSize(Image->Width * Scale * PixelsPerUnit, Image->Width * Aspect * Scale * PixelsPerUnit);
+			const FVector2D CenterLocal = WorldToLocal((Image->Center + Building->BuildingOffset) * Scale);
+			// Turned with the view, about its own middle, like the connector icons.
+			FSlateDrawElement::MakeRotatedBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(PixelSize), FSlateLayoutTransform(CenterLocal - PixelSize * 0.5)),
+				&ReferenceImageBrush, ESlateDrawEffect::None, FMath::DegreesToRadians(90.f * ViewQuarterTurns), FVector2f(PixelSize) * 0.5f,
+				FSlateDrawElement::RelativeToElement, FLinearColor(1.f, 1.f, 1.f, Image->Opacity));
+		}
+	}
+
 	// ---- Building boundary ----
 	if (!PlayerController || PlayerController->IsBoundaryVisible())
 	{
@@ -1166,7 +1686,6 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 	}
 
 	// ---- Rooms/walls on the active floor ----
-	const FString SelectedRoomId = PlayerController ? PlayerController->GetSelectedRoomId() : FString();
 	for (const AInteriorRoom* Room : InteriorGen->GetRoomsOnFloor(InteriorGen->GetActiveFloor()))
 	{
 		if (!Room)
@@ -1232,7 +1751,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			}
 		}
 
-		const bool bIsSelected = !SelectedRoomId.IsEmpty() && Room->RoomId == SelectedRoomId;
+		const bool bIsSelected = PlayerController && PlayerController->IsRoomSelected(Room->RoomId);
 		const FLinearColor LineColor = bIsSelected ? FLinearColor(1.f, 0.15f, 0.15f, 1.f) : FLinearColor::Black;
 		const float LineThickness = bIsSelected ? 4.f : 3.f;
 
@@ -1358,6 +1877,38 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		}
 	}
 
+	// ---- Utility points (PAT-193) on the active floor: a coloured square with the letter of its type, and its name beside it ----
+	if (PlayerController)
+	{
+		constexpr float UtilitySize = 18.f;
+		const FSlateBrush* Box = FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox"));
+		const FString SelectedUtilityId = PlayerController->GetSelectedUtilityId();
+		for (const FInteriorUtility& Utility : InteriorGen->GetUtilities())
+		{
+			if (Utility.Level != InteriorGen->GetActiveFloor()) continue;
+			const FVector2D At = WorldToLocal((Utility.Position + Building->BuildingOffset) * Scale);
+			if (Utility.Id == SelectedUtilityId)
+			{
+				const float Highlight = UtilitySize + 8.f;
+				FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 2, AllottedGeometry.ToPaintGeometry(FVector2f(Highlight, Highlight), FSlateLayoutTransform(At - FVector2D(Highlight * 0.5f, Highlight * 0.5f))),
+					Box, ESlateDrawEffect::None, FLinearColor(1.f, 0.15f, 0.15f, 1.f));
+			}
+			FLinearColor Colour(0.6f, 0.5f, 0.85f, 1.f);
+			if (Utility.Type == InteriorUtilityTypes::Aed) Colour = FLinearColor(0.2f, 0.7f, 0.35f, 1.f);
+			else if (Utility.Type == InteriorUtilityTypes::Bicycle) Colour = FLinearColor(0.25f, 0.55f, 0.95f, 1.f);
+			else if (Utility.Type == InteriorUtilityTypes::DropOff) Colour = FLinearColor(0.95f, 0.7f, 0.15f, 1.f);
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 3, AllottedGeometry.ToPaintGeometry(FVector2f(UtilitySize, UtilitySize), FSlateLayoutTransform(At - FVector2D(UtilitySize * 0.5f, UtilitySize * 0.5f))),
+				Box, ESlateDrawEffect::None, Colour);
+			FSlateDrawElement::MakeText(OutDrawElements, LayerId + 4, AllottedGeometry.ToPaintGeometry(FVector2f(UtilitySize, UtilitySize), FSlateLayoutTransform(At - FVector2D(4.f, 8.f))),
+				FText::FromString(InteriorUtilityTypes::Letter(Utility.Type)), FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 11), ESlateDrawEffect::None, FLinearColor::White);
+			if (!Utility.Name.IsEmpty())
+			{
+				FSlateDrawElement::MakeText(OutDrawElements, LayerId + 4, AllottedGeometry.ToPaintGeometry(FVector2f(160.f, 14.f), FSlateLayoutTransform(At + FVector2D(UtilitySize * 0.5f + 4.f, -7.f))),
+					FText::FromString(Utility.Name), FCoreStyle::GetDefaultFontStyle(TEXT("Regular"), 10), ESlateDrawEffect::None, FLinearColor(0.95f, 0.95f, 0.95f, 1.f));
+			}
+		}
+	}
+
 	// ---- In-progress room/wall being clicked out right now (if any) - not closed into a loop even
 	// in draw room mode, since the last edge back to the first point doesn't exist until Finish. ----
 	if (PlayerController)
@@ -1374,6 +1925,15 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			if (LinePoints.Num() >= 2)
 			{
 				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 2, AllottedGeometry.ToPaintGeometry(), LinePoints, ESlateDrawEffect::None, FLinearColor(1.f, 0.6f, 0.f, 1.f), true, 3.f);
+			}
+
+			// The line the next click would add, from the last point to the pointer: straight along X or Y while Shift is held.
+			if (bHasPointer && (PlayerController->IsInDrawRoomMode() || PlayerController->IsInDrawWallMode()))
+			{
+				const FVector2D Next = PlayerController->ConstrainDrawPoint(LocalPositionToFootprintPoint(PointerLocal, AllottedGeometry.GetLocalSize()), bPointerShift);
+				const TArray<FVector2D> Preview2 = { LinePoints.Last(), WorldToLocal((Next + Building->BuildingOffset) * Scale) };
+				FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 2, AllottedGeometry.ToPaintGeometry(), Preview2, ESlateDrawEffect::None,
+					FLinearColor(1.f, 0.6f, 0.f, bPointerShift ? 0.9f : 0.5f), true, 2.f);
 			}
 
 			// A dot at each clicked point, so even the very first click (before there's a second
@@ -1550,6 +2110,19 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 			AllottedGeometry.ToPaintGeometry(FVector2f(10,10), FSlateLayoutTransform(Handle - FVector2D(5,5))),
 			FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox")), ESlateDrawEffect::None, FLinearColor(0.2f, 0.7f, 1.f));
 	}
+	// The selected room's own corners: orange-edged white dots a single corner is dragged by (Ctrl for a corner under a blue resize handle).
+	if (!bIsResizingRoom)
+	{
+		for (const FVector2D& Vertex : GetVertexHandles(WidgetSize))
+		{
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 9,
+				AllottedGeometry.ToPaintGeometry(FVector2f(12,12), FSlateLayoutTransform(Vertex - FVector2D(6,6))),
+				FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox")), ESlateDrawEffect::None, FLinearColor(1.f, 0.6f, 0.f));
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 10,
+				AllottedGeometry.ToPaintGeometry(FVector2f(7,7), FSlateLayoutTransform(Vertex - FVector2D(3.5,3.5))),
+				FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox")), ESlateDrawEffect::None, FLinearColor::White);
+		}
+	}
 	TArray<FVector2D> Preview = GetPrefabPreview();
 	if (bIsResizingRoom && DragTarget.IsValid())
 	{
@@ -1573,5 +2146,75 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 9, AllottedGeometry.ToPaintGeometry(), Preview,
 			ESlateDrawEffect::None, FLinearColor(1.f, 0.6f, 0.f), true, 3.f);
 	}
-	return LayerId + 10;
+	// The transform gizmo (PAT-202): what the keys W, E and R switch on.
+	if (const FGizmoLayout Layout = ComputeGizmoLayout(WidgetSize); Layout.bValid)
+	{
+		const FLinearColor Red(0.95f, 0.25f, 0.25f), Green(0.3f, 0.85f, 0.35f), Blue(0.3f, 0.6f, 1.f), White(0.95f, 0.95f, 0.95f);
+		const FSlateBrush* Box = FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox"));
+		const auto Square = [&](const FVector2D& At, float Side, const FLinearColor& Colour)
+		{
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 10, AllottedGeometry.ToPaintGeometry(FVector2f(Side, Side), FSlateLayoutTransform(At - FVector2D(Side * 0.5, Side * 0.5))),
+				Box, ESlateDrawEffect::None, Colour);
+		};
+		const auto Line = [&](const FVector2D& From, const FVector2D& To, const FLinearColor& Colour, float Width)
+		{
+			FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 10, AllottedGeometry.ToPaintGeometry(), TArray<FVector2D>{ From, To }, ESlateDrawEffect::None, Colour, true, Width);
+		};
+		const auto Label = [&](const FVector2D& At, const TCHAR* Text, const FLinearColor& Colour)
+		{
+			FSlateDrawElement::MakeText(OutDrawElements, LayerId + 10, AllottedGeometry.ToPaintGeometry(FVector2f(14.f, 16.f), FSlateLayoutTransform(At + FVector2D(6, -18))),
+				FText::FromString(Text), FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 11), ESlateDrawEffect::None, Colour);
+		};
+		const auto Arrowhead = [&](const FVector2D& Tip, const FVector2D& Dir, const FLinearColor& Colour)
+		{
+			const FVector2D Side(-Dir.Y, Dir.X);
+			Line(Tip, Tip - Dir * 12.0 + Side * 6.0, Colour, 3.f);
+			Line(Tip, Tip - Dir * 12.0 - Side * 6.0, Colour, 3.f);
+		};
+		switch (PlayerController->GetTransformGizmo())
+		{
+		case ETransformGizmo::Translate:
+			Line(Layout.Center, Layout.XTip, Red, 3.f); Arrowhead(Layout.XTip, Layout.DirX, Red); Label(Layout.XTip, TEXT("X"), Red);
+			Line(Layout.Center, Layout.YTip, Green, 3.f); Arrowhead(Layout.YTip, Layout.DirY, Green); Label(Layout.YTip, TEXT("Y"), Green);
+			Square(Layout.Center, 12.f, White);
+			break;
+		case ETransformGizmo::Rotate:
+		{
+			TArray<FVector2D> Ring;
+			for (int32 Step = 0; Step <= 48; ++Step)
+			{
+				const double Angle = Step * 2.0 * PI / 48;
+				Ring.Add(Layout.Center + (Layout.DirX * FMath::Cos(Angle) + Layout.DirY * FMath::Sin(Angle)) * Layout.RingRadius);
+			}
+			FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 10, AllottedGeometry.ToPaintGeometry(), Ring, ESlateDrawEffect::None, Blue, true, 3.f);
+			Square(Layout.Center + Layout.DirX * Layout.RingRadius, 10.f, Blue);
+			Label(Layout.Center + Layout.DirX * Layout.RingRadius, TEXT("turn"), Blue);
+			break;
+		}
+		case ETransformGizmo::Scale:
+			if (Layout.bRoom)
+			{
+				Line(Layout.Center, Layout.ScaleX, Red, 2.f); Square(Layout.ScaleX, 12.f, Red); Label(Layout.ScaleX, TEXT("X"), Red);
+				Line(Layout.Center, Layout.ScaleY, Green, 2.f); Square(Layout.ScaleY, 12.f, Green); Label(Layout.ScaleY, TEXT("Y"), Green);
+			}
+			Line(Layout.Center, Layout.ScaleUniform, White, 2.f);
+			Square(Layout.ScaleUniform, 12.f, White);
+			break;
+		default:
+			break;
+		}
+	}
+
+	// The selection window being dragged: a faint blue fill with a blue rim.
+	if (bIsDraggingSelectBox)
+	{
+		const FVector2D Min(FMath::Min(SelectBoxStart.X, SelectBoxEnd.X), FMath::Min(SelectBoxStart.Y, SelectBoxEnd.Y));
+		const FVector2D Max(FMath::Max(SelectBoxStart.X, SelectBoxEnd.X), FMath::Max(SelectBoxStart.Y, SelectBoxEnd.Y));
+		FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 10,
+			AllottedGeometry.ToPaintGeometry(FVector2f(Max - Min), FSlateLayoutTransform(Min)),
+			FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox")), ESlateDrawEffect::None, FLinearColor(0.2f, 0.6f, 1.f, 0.15f));
+		const TArray<FVector2D> Rim = { Min, FVector2D(Max.X, Min.Y), Max, FVector2D(Min.X, Max.Y), Min };
+		FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 10, AllottedGeometry.ToPaintGeometry(), Rim, ESlateDrawEffect::None, FLinearColor(0.2f, 0.6f, 1.f, 0.9f), true, 1.5f);
+	}
+	return LayerId + 11;
 }

@@ -6,7 +6,9 @@
 #include "HistorySnapshotText.h"
 #include "GameFramework/Actor.h"
 #include "InteriorEntrance.h"
+#include "InteriorReferenceImage.h"
 #include "InteriorTypes.h"
+#include "InteriorUtility.h"
 #include "InteriorGenerator.generated.h"
 
 class ABuildingGenerator;
@@ -45,6 +47,10 @@ struct FInteriorFloorInfo
 {
 	float WallHeight = 280.f;
 	float WallThickness = 20.f;
+	// What the floor is called besides its number ("Mezzanine", "Lobby level"); empty for none (PAT-203). Only a label: the floor keeps its level.
+	FString Name;
+	// No outer wall on this floor (PAT-205): the building's outline is open, so it can be walked through anywhere on the ground floor.
+	bool bOpen = false;
 };
 
 DECLARE_MULTICAST_DELEGATE(FOnInteriorNavigationLayoutChanged);
@@ -184,6 +190,57 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	bool ResizeRoom(const FString& RoomId, float NewWidth, float NewDepth, bool bRecordHistory = true);
 	bool ResizeRoomToBounds(const FString& RoomId, FVector2D Position, FVector2D Size, bool bRecordHistory = true);
+	// True when ResizeRoomToBounds with these bounds would keep the room inside the building's outline. Changes nothing; the resize drag uses it to stop at the wall (PAT-190).
+	bool DoesResizeStayInsideBuilding(const FString& RoomId, FVector2D Position, FVector2D Size) const;
+
+	// Moves one corner of a room (or one point of a wall) and leaves the others where they are, so a rectangle can become a trapezoid without being
+	// drawn again. Refused (false, nothing changes) when the new shape would have corners on top of each other, cross itself, leave the building,
+	// overlap another room or wall, wall in a lift/stair/escalator, or leave a door without room on its wall. bRecordHistory false is for a drag,
+	// which records one history step itself when it ends.
+	bool MoveRoomVertex(const FString& RoomId, int32 VertexIndex, FVector2D NewPosition, bool bRecordHistory = true);
+	// Whether the floor is open (has no outer wall), and setting it: the wall ring of that floor goes (or comes back) in the 3D view and, for the ground
+	// floor, the whole outline becomes a way in for routes. One Undo step; false when the floor does not exist or nothing changed.
+	// The floor's own name (empty if it has none) and giving it one; one Undo step. Names are trimmed and cut at 40 characters.
+	FString GetFloorName(int32 Level) const { const FInteriorFloorInfo* Info = FloorInfoByLevel.Find(Level); return Info ? Info->Name : FString(); }
+	bool SetFloorName(int32 Level, const FString& NewName);
+	bool IsFloorOpen(int32 Level) const { const FInteriorFloorInfo* Info = FloorInfoByLevel.Find(Level); return Info && Info->bOpen; }
+	bool SetFloorOpen(int32 Level, bool bOpen);
+
+	// ---- Utility points (PAT-193) ----
+	const TArray<FInteriorUtility>& GetUtilities() const { return Utilities; }
+	const FInteriorUtility* FindUtility(const FString& Id) const;
+	// Places one on a floor, inside the building's outline. Returns its id, or an empty string with the reason in OutError. One Undo step.
+	FString AddUtility(int32 Level, const FString& Type, const FString& Name, FVector2D Position, FString* OutError = nullptr);
+	// Moves it (to a spot inside the outline). Records no Undo step: a drag moves it many times and records once when it ends.
+	bool MoveUtility(const FString& Id, FVector2D Position, FString* OutError = nullptr);
+	// Renames it and/or changes its type; false when nothing changed. One Undo step.
+	bool SetUtilityDetails(const FString& Id, const FString& Name, const FString& Type);
+	bool RemoveUtility(const FString& Id);
+
+	// ---- Reference image (PAT-201): a PNG under the 2D drawing of a floor, at most one per floor ----
+	const FInteriorReferenceImage* GetReferenceImage(int32 Level) const { return ReferenceImages.Find(Level); }
+	// Sets or replaces the floor's image. False when the floor does not exist, the image cannot be kept (see InteriorReferenceImage::Normalize) or nothing changed.
+	// One Undo step.
+	bool SetReferenceImage(int32 Level, FInteriorReferenceImage Image);
+	bool RemoveReferenceImage(int32 Level);
+
+	// PAT-200: a copy of a room or wall on another floor, in the same place: same outline, doors and windows, type, tags and flags. It gets its own
+	// id and a name made unique the way a pasted room's is ("Lift lobby (1)"). Refused with the reason in OutError when it does not fit there (another
+	// room or wall, a lift or stair in the way). The active floor is left as it was. No history step of its own: the caller batches the copies
+	// (BeginHistoryBatch / EndHistoryBatch).
+	AInteriorRoom* DuplicateRoomToFloor(const FString& RoomId, int32 TargetLevel, FString& OutError);
+
+	// The geometry part of the same question, without changing anything: would the corner be allowed there? (Whether a door still fits on its wall is
+	// only known when the move is made.) A corner drag uses it to stop at the last allowed spot.
+	bool CanMoveRoomVertex(const FString& RoomId, int32 VertexIndex, FVector2D NewPosition) const;
+
+	// Why the last connector placement check said no, in words that name the floor and what is in the way there ("Floor 2: it overlaps the wall of
+	// room 'Lab'."). Empty after a yes. Reading it clears it, so a later failure for another reason never shows an old one (PAT-206).
+	FString ConsumeConnectorFailure() const;
+
+	// The closed room on Level that stands around Position and has no door (a window or a void is no way in), or null. A lift, stair or escalator in
+	// such a room cannot be reached, which the editor tells the user without blocking the placement (PAT-204).
+	const AInteriorRoom* FindEnclosingRoomWithoutDoor(FVector2D Position, int32 Level) const;
 
 	// Rotates a room/wall's footprint by DeltaDegrees around its own bounding-box center (positive
 	// = counter-clockwise). Rejects (no-op, returns false) if the rotated footprint would extend
@@ -218,8 +275,14 @@ public:
 	// room/wall on the same floor (allowed to happen transiently while dragging - see MoveRoom),
 	// reverts it to FallbackFootprint (the drag-start snapshot) and returns false; otherwise leaves
 	// it where it was dropped and returns true. Returns false if no room with that id exists.
-	UFUNCTION(BlueprintCallable, Category = "Interior")
-	bool CommitRoomMove(const FString& RoomId, const TArray<FVector2D>& FallbackFootprint);
+	// bNudgeToFreeSpot (PAT-194): instead of reverting, a room dropped on another goes to the nearest spot beside it (touching, a shared wall) that is
+	// inside the building and clear of everything; OutNudgedBeside then names what it was moved beside. It still reverts when no such spot exists.
+	bool CommitRoomMove(const FString& RoomId, const TArray<FVector2D>& FallbackFootprint, bool bNudgeToFreeSpot = false, FString* OutNudgedBeside = nullptr);
+
+	// Moves Footprint (a room or wall about to be placed, on the active floor) the shortest way along X or Y to where it overlaps nothing, stays inside
+	// the building and walls in no lift or stair; it then touches what it was moved beside. True when it was already clear or has been moved; false
+	// (Footprint unchanged) when there is no such spot nearby. OutBlockerName names the first room it was moved away from.
+	bool NudgeFootprintClear(TArray<FVector2D>& Footprint, bool bClosed, const FString& IgnoreRoomId, FString* OutBlockerName = nullptr) const;
 
 	// Snapping: finds the closest point, across every edge of every OTHER room/wall on Level
 	// (RoomIdToExclude skips one room's own edges, e.g. so a room being dragged doesn't snap to
@@ -401,6 +464,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Interior|History")
 	void RecordHistorySnapshot();
 
+	// Edits between BeginHistoryBatch and EndHistoryBatch make one Undo step instead of one each (deleting or retyping several rooms at once).
+	// EndHistoryBatch(false) records nothing, for a batch in which nothing changed. Batches do not nest.
+	void BeginHistoryBatch() { bBulkEditing = true; }
+	void EndHistoryBatch(bool bChanged)
+	{
+		bBulkEditing = false;
+		if (bChanged) RecordHistorySnapshot();
+	}
+
 	// Go back to the previous interior state.
 	UFUNCTION(BlueprintCallable, Category = "Interior|History")
 	bool Undo();
@@ -493,9 +565,18 @@ private:
 	TArray<FInteriorEntrance> Entrances;
 	TArray<FInteriorEntrance> AllEntrances;
 
+	// The loaded building's utility points, all floors (each has its Level).
+	TArray<FInteriorUtility> Utilities;
+
+	// The loaded building's reference images by floor.
+	TMap<int32, FInteriorReferenceImage> ReferenceImages;
+
 	// Room ids in use for the currently loaded building, for CreateRoomFromFootprint's uniqueness
 	// check. Cleared whenever a different building is loaded.
 	TSet<FString> UsedRoomIds;
+
+	// See ConsumeConnectorFailure. Mutable: CanPlaceConnectorOnFloor is a const question that leaves its answer's reason here.
+	mutable FString LastConnectorFailure;
 
 	// ---- Undo / Redo History ----
 

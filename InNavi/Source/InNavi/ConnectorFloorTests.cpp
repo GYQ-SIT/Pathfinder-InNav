@@ -2,6 +2,7 @@
 
 #include "BuildingGenerator.h"
 #include "InteriorGenerator.h"
+#include "InteriorScreenWidget.h"
 #include "InteriorTypes.h"
 #include "LayoutValidation.h"
 #include "NavPlayerController.h"
@@ -9,6 +10,9 @@
 #include "PolyBuilding.h"
 #include "UiTestFixture.h"
 
+#include "DebugPanelWidget.h"
+#include "Components/Button.h"
+#include "Components/CheckBox.h"
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
@@ -191,6 +195,170 @@ bool FConnectorFloorControllerTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("floor 1 where it was"), S.Node(1)->Position.Equals(Saved1, 0.001));
 		TestTrue(TEXT("floor 2 where it was"), S.Node(2)->Position.Equals(Saved2, 0.001));
 	}
+	return true;
+}
+
+// PAT-199: the connector panel has a "Select all floors" button. One click ticks every floor box the building uses (a basement included, boxes
+// beyond the building's floors stay hidden and unticked); the floors only change when Save changes is pressed, and floors can be unticked first.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConnectorSelectAllFloorsTest, "InNavi.Interior.ConnectorFloors.SelectAllFloors", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConnectorSelectAllFloorsTest::RunTest(const FString& Parameters)
+{
+	using namespace ConnectorFloorTests;
+	FConnectorScene S;
+	if (!TestFalse(TEXT("a lift is placed"), S.Group.IsEmpty())) return false;
+	// The lift reaches floors 1 and 2 only; the building also gets a basement, so it has B1, 1, 2, 3.
+	TestTrue(TEXT("the lift is cut down to two floors"), S.Interior->SetConnectorFloors(S.Group, { 1, 2 }));
+	ANavPlayerController* Controller = S.Fixture.MakeController();
+	S.Fixture.Generator->SetInteriorDataForBuilding(TEXT("CF"), S.Interior->CaptureInteriorSnapshot());
+	Controller->LoadInteriorForBuilding(TEXT("CF"));
+	if (!TestNotEqual(TEXT("a basement is added"), S.Interior->AddFloorBelow(), 0)) return false;
+	S.Group = S.Interior->GetNavNodes().IsEmpty() ? FString() : S.Interior->GetNavNodes()[0].ConnectorGroupId;
+	if (!TestFalse(TEXT("the lift is there"), S.Group.IsEmpty())) return false;
+
+	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>(); Screen->Initialize(); Screen->TakeWidget(); Screen->SetOwningPlayer(Controller);
+	FScriptDelegate Selected; Selected.BindUFunction(Screen, TEXT("HandleSelectedConnectorChanged")); Controller->OnSelectedConnectorChanged.AddUnique(Selected);
+	Controller->SelectConnector(S.Group);
+
+	auto Box = [Screen](int32 Index) { return Cast<UCheckBox>(Screen->FindScreenWidget(*FString::Printf(TEXT("Chk_Floor%d"), Index))); };
+	auto* SelectAll = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_SelectAllFloors")));
+	auto* Save = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_ApplyConnector")));
+	if (!TestNotNull(TEXT("select all button"), SelectAll) || !TestNotNull(TEXT("save button"), Save)) return false;
+	for (int32 Index = 1; Index <= 5; ++Index) if (!TestNotNull(TEXT("floor box"), Box(Index))) return false;
+
+	// Only the building's four floors are listed: the fifth entry (its box and its number) is hidden, the fourth is shown.
+	TestEqual(TEXT("the fifth entry is hidden with its number"), Box(5)->GetParent()->GetVisibility(), ESlateVisibility::Collapsed);
+	TestNotEqual(TEXT("the fourth entry is shown"), Box(4)->GetParent()->GetVisibility(), ESlateVisibility::Collapsed);
+
+	// Boxes are in building order: B1, 1, 2, 3.
+	TestFalse(TEXT("B1 is not reached yet"), Box(1)->IsChecked());
+	TestTrue(TEXT("floor 1 is reached"), Box(2)->IsChecked());
+	TestTrue(TEXT("floor 2 is reached"), Box(3)->IsChecked());
+	TestFalse(TEXT("floor 3 is not reached yet"), Box(4)->IsChecked());
+
+	SelectAll->OnClicked.Broadcast();
+	for (int32 Index = 1; Index <= 4; ++Index) TestTrue(*FString::Printf(TEXT("box %d is ticked"), Index), Box(Index)->IsChecked());
+	TestFalse(TEXT("a box beyond the building stays unticked"), Box(5)->IsChecked());
+	TestFalse(TEXT("and stays hidden"), Box(5)->GetVisibility() != ESlateVisibility::Collapsed);
+	TestEqual(TEXT("nothing changed in the building yet"), Controller->GetSelectedConnectorFloors().Num(), 2);
+
+	// A second click, with every floor ticked, clears them all (a toggle); a third ticks them again.
+	SelectAll->OnClicked.Broadcast();
+	for (int32 Index = 1; Index <= 4; ++Index) TestFalse(*FString::Printf(TEXT("box %d is cleared"), Index), Box(Index)->IsChecked());
+	TestFalse(TEXT("the hidden box is still unticked"), Box(5)->IsChecked());
+	SelectAll->OnClicked.Broadcast();
+	for (int32 Index = 1; Index <= 4; ++Index) TestTrue(*FString::Printf(TEXT("box %d is ticked again"), Index), Box(Index)->IsChecked());
+
+	// Unticking one floor and saving keeps just that one out.
+	Box(3)->SetIsChecked(false);
+	Save->OnClicked.Broadcast();
+	TArray<int32> Floors = Controller->GetSelectedConnectorFloors();
+	Floors.Sort();
+	TestEqual(TEXT("saved floors are B1, 1 and 3"), Floors, TArray<int32>({ -1, 1, 3 }));
+
+	// And Select all floors then Save reaches every floor.
+	SelectAll->OnClicked.Broadcast();
+	Save->OnClicked.Broadcast();
+	Floors = Controller->GetSelectedConnectorFloors();
+	Floors.Sort();
+	TestEqual(TEXT("saved floors are all four"), Floors, TArray<int32>({ -1, 1, 2, 3 }));
+	Controller->OnSelectedConnectorChanged.Remove(Selected);
+	return true;
+}
+
+// PAT-206: when a connector cannot go somewhere, the message names the floor and what is in the way there (the blocked floor is often not the one
+// on screen), for placing it, for adding floors to it and for dropping it after a drag.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConnectorBlockedReasonTest, "InNavi.Interior.ConnectorFloors.BlockedReason", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConnectorBlockedReasonTest::RunTest(const FString& Parameters)
+{
+	using namespace ConnectorFloorTests;
+	// The refusals are logged as errors on purpose; this test provokes them.
+	AddExpectedError(TEXT("Connector placement:"), EAutomationExpectedErrorFlags::Contains, 0);
+	AddExpectedError(TEXT("SetConnectorFloors:"), EAutomationExpectedErrorFlags::Contains, 0);
+	AddExpectedError(TEXT("PlaceConnectorNode:"), EAutomationExpectedErrorFlags::Contains, 0);
+	FConnectorScene S;
+	if (!TestFalse(TEXT("a lift is placed"), S.Group.IsEmpty())) return false;
+	TestTrue(TEXT("the lift reaches floors 1 and 2 only"), S.Interior->SetConnectorFloors(S.Group, { 1, 2 }));
+
+	// A room on floor 3 whose left wall runs through the lift's column.
+	S.Interior->SetActiveFloor(3);
+	FString Error;
+	if (!TestNotNull(TEXT("a room on floor 3"), S.Interior->CreateRoomFromFootprint({ S.At(30, 5), S.At(40, 5), S.At(40, 25), S.At(30, 25) }, TEXT("R3"), TEXT("Server room"), true, false, false, Error))) return false;
+	S.Interior->SetActiveFloor(1);
+
+	// Adding floor 3 is refused, and the reason says which floor and which room.
+	S.Interior->ConsumeConnectorFailure();
+	TestFalse(TEXT("floor 3 cannot be added"), S.Interior->SetConnectorFloors(S.Group, { 1, 2, 3 }));
+	const FString AddReason = S.Interior->ConsumeConnectorFailure();
+	TestTrue(TEXT("it names floor 3"), AddReason.StartsWith(TEXT("Floor 3:")));
+	TestTrue(TEXT("and the room whose wall is in the way"), AddReason.Contains(TEXT("Server room")));
+	TestTrue(TEXT("the reason is used up once read"), S.Interior->ConsumeConnectorFailure().IsEmpty());
+
+	// A new lift that reaches every floor fails on floor 3 as well, though floors 1 and 2 are clear at that spot.
+	TestTrue(TEXT("a new lift cannot be placed through the wall"), S.Interior->PlaceConnectorNode(EInteriorNavNodeType::Elevator, S.At(30, 8), TArray<int32>{ 1, 2, 3 }).IsEmpty());
+	const FString PlaceReason = S.Interior->ConsumeConnectorFailure();
+	TestTrue(TEXT("placing names floor 3 too"), PlaceReason.StartsWith(TEXT("Floor 3:")) && PlaceReason.Contains(TEXT("Server room")));
+
+	// A yes leaves no reason behind.
+	TestTrue(TEXT("a lift on floors 1 and 2 can be placed there"), !S.Interior->PlaceConnectorNode(EInteriorNavNodeType::Elevator, S.At(30, 8), TArray<int32>{ 1, 2 }).IsEmpty());
+	TestTrue(TEXT("with no reason"), S.Interior->ConsumeConnectorFailure().IsEmpty());
+
+	// What the user sees: the message of the controller, in the debug panel.
+	ANavPlayerController* Controller = S.Fixture.MakeController();
+	S.Fixture.Generator->SetInteriorDataForBuilding(TEXT("CF"), S.Interior->CaptureInteriorSnapshot());
+	Controller->LoadInteriorForBuilding(TEXT("CF"));
+	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>(); Screen->Initialize(); Screen->TakeWidget(); Screen->SetOwningPlayer(Controller);
+	UDebugPanelWidget* Panel = Screen->GetDebugPanelForTests();
+	if (!TestNotNull(TEXT("debug panel"), Panel)) return false;
+	Panel->BindToController();
+	FString Group;
+	for (const FInteriorNavNode& Node : S.Interior->GetNavNodes()) if (Node.Level == 1 && Node.Position.Equals(S.At(30, 15), 0.001)) Group = Node.ConnectorGroupId;
+	if (!TestFalse(TEXT("the first lift is back after opening the building"), Group.IsEmpty())) return false;
+	Controller->SelectConnector(Group);
+	TestFalse(TEXT("the controller cannot add floor 3"), Controller->SetSelectedConnectorFloors({ 1, 2, 3 }));
+	TestTrue(TEXT("the message names floor 3"), Panel->GetLastErrorTextForTests().Contains(TEXT("Floor 3:")));
+	TestTrue(TEXT("and the room"), Panel->GetLastErrorTextForTests().Contains(TEXT("Server room")));
+
+	// Dropping a dragged connector outside the building: refused, and the report says it stays and why.
+	Controller->SetActiveFloor(1);
+	TMap<int32, FVector2D> Outside = Controller->GetSelectedConnectorPositions(false);
+	for (TPair<int32, FVector2D>& Pair : Outside) Pair.Value = S.At(-20, 15);
+	TestFalse(TEXT("outside the building is refused"), Controller->MoveSelectedConnectorTo(Outside));
+	Controller->ReportConnectorMoveRefused();
+	const FString DropText = Panel->GetLastErrorTextForTests();
+	TestTrue(TEXT("the report says it stays where it was"), DropText.Contains(TEXT("stays where it was")));
+	TestTrue(TEXT("and names the floor and the outer wall"), DropText.Contains(TEXT("Floor 1:")) && DropText.Contains(TEXT("outer wall")));
+	return true;
+}
+
+// PAT-204: a connector placed inside a closed room with no door is placed all the same, with a warning that nobody can reach it.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConnectorEnclosedWarningTest, "InNavi.Interior.ConnectorFloors.EnclosedWarning", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FConnectorEnclosedWarningTest::RunTest(const FString& Parameters)
+{
+	using namespace ConnectorFloorTests;
+	FConnectorScene S;
+	FString Error;
+	AInteriorRoom* Vault = S.Interior->CreateRoomFromFootprint({ S.At(10, 5), S.At(20, 5), S.At(20, 15), S.At(10, 15) }, TEXT("V1"), TEXT("Vault"), true, false, false, Error);
+	if (!TestNotNull(TEXT("a room without a door"), Vault)) return false;
+	TestTrue(TEXT("a spot in it is enclosed"), S.Interior->FindEnclosingRoomWithoutDoor(S.At(15, 10), 1) == Vault);
+	TestNull(TEXT("a spot outside it is not"), S.Interior->FindEnclosingRoomWithoutDoor(S.At(40, 10), 1));
+	TestNull(TEXT("the same spot on another floor is not"), S.Interior->FindEnclosingRoomWithoutDoor(S.At(15, 10), 2));
+
+	// The user's side: placing a lift in it still works, and says why nobody can get to it.
+	ANavPlayerController* Controller = S.Fixture.MakeController();
+	S.Fixture.Generator->SetInteriorDataForBuilding(TEXT("CF"), S.Interior->CaptureInteriorSnapshot());
+	Controller->LoadInteriorForBuilding(TEXT("CF"));
+	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>(); Screen->Initialize(); Screen->TakeWidget(); Screen->SetOwningPlayer(Controller);
+	UDebugPanelWidget* Panel = Screen->GetDebugPanelForTests();
+	if (!TestNotNull(TEXT("debug panel"), Panel)) return false;
+	Panel->BindToController();
+	Controller->ToggleElevatorMode();
+	TestFalse(TEXT("the lift is placed"), Controller->PlaceConnectorAt(S.At(15, 10)).IsEmpty());
+	TestTrue(TEXT("and the message names the room"), Panel->GetLastErrorTextForTests().Contains(TEXT("Vault")));
+	TestTrue(TEXT("and says it has no door"), Panel->GetLastErrorTextForTests().Contains(TEXT("no door")));
+
+	// With a door the room is open and the lift needs no warning.
+	S.Interior->AddDoorToRoom(TEXT("V1"), 0, 100.f);
+	TestNull(TEXT("a room with a door is not enclosed"), S.Interior->FindEnclosingRoomWithoutDoor(S.At(15, 10), 1));
 	return true;
 }
 

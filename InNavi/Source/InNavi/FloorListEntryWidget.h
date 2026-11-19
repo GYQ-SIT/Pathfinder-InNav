@@ -27,7 +27,8 @@ public:
 	UFloorListEntryWidget(const FObjectInitializer& ObjectInitializer);
 
 	// ElevationMeters is how high the floor's level is above the ground floor, shown at the right of the row.
-	void SetFloorNumber(int32 InFloorNumber, bool bInIsActive, float InElevationMeters = 0.f);
+	// Name is the floor's own name, shown after the level ("Level 2 - Mezzanine"); empty for none.
+	void SetFloorNumber(int32 InFloorNumber, bool bInIsActive, float InElevationMeters = 0.f, const FString& InName = FString());
 
 	// Lets UInteriorScreenWidget::RefreshSidebarContentWidths keep this row's width in sync with the
 	// right sidebar bar as it's dragged - same "not realized yet" caveat as SetFloorNumber, so this
@@ -70,6 +71,7 @@ private:
 
 	int32 FloorNumber = 0;
 	float ElevationMeters = 0.f;
+	FString FloorName;
 	bool bIsActive = false;
 	float Width = 150.f;
 };
