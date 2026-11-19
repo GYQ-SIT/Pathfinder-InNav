@@ -1,4 +1,6 @@
 #include "MobileMapWidget.h"
+#include "MobileIcons.h"
+#include "MobileMapScale.h"
 
 #include "MobileMapLabels.h"
 #include "MobileStyle.h"
@@ -99,9 +101,9 @@ namespace
 		return Points;
 	}
 
-	FVector2D LabelSize(const FString& Text, float PixelSize)
+	FVector2D LabelSize(const FString& Text, float PixelSize, bool bBold = true)
 	{
-		const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", FMath::RoundToInt(PixelSize * StartStyle::PixelsToFont));
+		const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle(bBold ? "Bold" : "Regular", FMath::RoundToInt(PixelSize * StartStyle::PixelsToFont));
 		FVector2D Size(Text.Len() * PixelSize * 0.55, PixelSize);
 		if (FSlateApplication::IsInitialized())
 		{
@@ -111,10 +113,10 @@ namespace
 	}
 
 	// Text with a soft outline in the colour of the page, so a label stays readable over a room's colour or its edge.
-	void DrawLabel(FSlateWindowElementList& Out, int32 Layer, const FGeometry& Geometry, const FString& Text, const FVector2D& CentreAt, float PixelSize, const FLinearColor& Colour, bool bHalo = true)
+	void DrawLabel(FSlateWindowElementList& Out, int32 Layer, const FGeometry& Geometry, const FString& Text, const FVector2D& CentreAt, float PixelSize, const FLinearColor& Colour, bool bHalo = true, bool bBold = true)
 	{
-		FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Bold", FMath::RoundToInt(PixelSize * StartStyle::PixelsToFont));
-		const FVector2D Size = LabelSize(Text, PixelSize);
+		FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle(bBold ? "Bold" : "Regular", FMath::RoundToInt(PixelSize * StartStyle::PixelsToFont));
+		const FVector2D Size = LabelSize(Text, PixelSize, bBold);
 		if (bHalo)
 		{
 			Font.OutlineSettings.OutlineSize = 2;
@@ -133,6 +135,8 @@ namespace
 		FLinearColor Colour = FLinearColor::Black;
 		double Priority = 0.0;
 		int32 Layer = 0;
+		// The names of rooms are drawn light, the names of buildings and places on the route bold.
+		bool bBold = true;
 	};
 
 	// Draws the labels that fit: the important ones first, none over another or over an obstacle.
@@ -141,7 +145,7 @@ namespace
 		TArray<MobileMapLabels::FCandidate> Candidates;
 		for (const FMapLabel& Label : Labels)
 		{
-			const FVector2D Size = LabelSize(Label.Text, Label.PixelSize);
+			const FVector2D Size = LabelSize(Label.Text, Label.PixelSize, Label.bBold);
 			MobileMapLabels::FCandidate Candidate;
 			Candidate.Box = FBox2D(Label.At - Size * 0.5, Label.At + Size * 0.5);
 			Candidate.Priority = Label.Priority;
@@ -152,7 +156,7 @@ namespace
 		{
 			if (Chosen[Index])
 			{
-				DrawLabel(Out, Labels[Index].Layer, Geometry, Labels[Index].Text, Labels[Index].At, Labels[Index].PixelSize, Labels[Index].Colour);
+				DrawLabel(Out, Labels[Index].Layer, Geometry, Labels[Index].Text, Labels[Index].At, Labels[Index].PixelSize, Labels[Index].Colour, true, Labels[Index].bBold);
 			}
 		}
 	}
@@ -168,8 +172,8 @@ namespace
 		return Box;
 	}
 
-	// A room whose longest side is shorter than this (in design pixels) gets no name until the map is zoomed in.
-	constexpr double MinRoomSizeForLabel = 14.0;
+	// The size of a room's name on the map and its colour: light and grey, so the plan is not covered in black text.
+	constexpr float RoomLabelPixels = 9.f;
 
 	// How tall the tilted view stands the plan, in design pixels.
 	constexpr double SlabHeight = 7.0;
@@ -182,10 +186,19 @@ void UMobileMapWidget::SetSource(IMobileNavSource* InSource, const FString& InSi
 	CampusMap = Source ? Source->GetCampusMap(SiteId) : FMobileCampusMap();
 }
 
+void UMobileMapWidget::SetMapsForTest(const FMobileLevelMap& Level, const FMobileCampusMap& Campus)
+{
+	LevelMap = Level;
+	CampusMap = Campus;
+	bOverview = false;
+	ResetView();
+}
+
 void UMobileMapWidget::ShowLevel(const FString& BuildingId, int32 Level)
 {
-	// The screen asks again whenever anything on the map changes; the view starts again only for another level (or from the overview).
-	const bool bSame = !bOverview && LevelMap.BuildingId == BuildingId && LevelMap.Level == Level;
+	// The screen asks again whenever anything on the map changes; the view starts again only for another building (or from the overview): another level
+	// of the same building keeps it, so the person does not lose their place when they change floor.
+	const bool bSameBuilding = !bOverview && LevelMap.BuildingId == BuildingId;
 	bOverview = false;
 	FMobileLevelMap Loaded;
 	if (Source && Source->GetLevelMap(BuildingId, Level, Loaded))
@@ -196,7 +209,7 @@ void UMobileMapWidget::ShowLevel(const FString& BuildingId, int32 Level)
 	{
 		LevelMap = FMobileLevelMap();
 	}
-	if (!bSame)
+	if (!bSameBuilding)
 	{
 		ResetView();
 	}
@@ -211,8 +224,18 @@ void UMobileMapWidget::ShowOverview()
 	bOverview = true;
 }
 
-void UMobileMapWidget::SetRoute(const FMobileRoute& InRoute) { Route = InRoute; }
-void UMobileMapWidget::ClearRoute() { Route = FMobileRoute(); }
+void UMobileMapWidget::SetRoute(const FMobileRoute& InRoute)
+{
+	// A different route is looked at from its own middle; the screen sets the same one again whenever anything changes, and that must not move the view.
+	const bool bChanged = Route.bFound != InRoute.bFound || Route.Points.Num() != InRoute.Points.Num()
+		|| (!Route.Points.IsEmpty() && (!Route.Points[0].Position.Equals(InRoute.Points[0].Position) || !Route.Points.Last().Position.Equals(InRoute.Points.Last().Position)));
+	Route = InRoute;
+	if (bChanged)
+	{
+		LatchedFocus.Reset();
+	}
+}
+void UMobileMapWidget::ClearRoute() { SetRoute(FMobileRoute()); }
 void UMobileMapWidget::SetStops(const TArray<FMobileRoutePoint>& InStops) { Stops = InStops; }
 
 int32 UMobileMapWidget::GetStopsOnLevel() const
@@ -224,7 +247,32 @@ int32 UMobileMapWidget::GetStopsOnLevel() const
 	}
 	return Count;
 }
-void UMobileMapWidget::SetHighlightPlace(const FString& PlaceId) { HighlightPlaceId = PlaceId; }
+void UMobileMapWidget::SetHighlightPlace(const FString& PlaceId)
+{
+	const bool bChanged = HighlightPlaceId != PlaceId;
+	HighlightPlaceId = PlaceId;
+	if (!bChanged || PlaceId.IsEmpty() || bOverview)
+	{
+		return;
+	}
+	// A place chosen from the list that is out of sight (the map starts in the middle of a long building) is brought into view; one tapped on the map is
+	// already in view, and the view stays where it is.
+	for (const FMobileMapRoom& Room : LevelMap.Rooms)
+	{
+		if (Room.PlaceId == PlaceId)
+		{
+			const FVector2D At = ToWidget(Centre(Room.Polygon), ViewSize.X, ViewSize.Y);
+			const double Edge = 30.0;
+			const bool bInView = At.X > Edge && At.X < ViewSize.X - Edge && At.Y > InsetTop + Edge && At.Y < ViewSize.Y - InsetBottom - Edge;
+			if (!bInView)
+			{
+				LatchedFocus = Centre(Room.Polygon);
+				Pan = FVector2D::ZeroVector;
+			}
+			return;
+		}
+	}
+}
 void UMobileMapWidget::SetPosition(const FMobileRoutePoint& InPosition) { Position = InPosition; bHasPosition = true; }
 void UMobileMapWidget::ClearPosition() { bHasPosition = false; }
 void UMobileMapWidget::Set3D(bool bInShow3D)
@@ -253,7 +301,46 @@ int32 UMobileMapWidget::GetRoutePointsOnLevel() const
 	return Count;
 }
 
-FVector2D UMobileMapWidget::Project(const FVector2D& P) const
+FVector2D UMobileMapWidget::Turn(const FVector2D& P, const FVector2D& About) const
+{
+	if (FMath::IsNearlyZero(Rotation))
+	{
+		return P;
+	}
+	const double Cos = FMath::Cos(Rotation);
+	const double Sin = FMath::Sin(Rotation);
+	const FVector2D D = P - About;
+	return About + FVector2D(D.X * Cos - D.Y * Sin, D.X * Sin + D.Y * Cos);
+}
+
+FBox2D UMobileMapWidget::RawPlanBounds() const
+{
+	FBox2D Bounds(ForceInit);
+	auto Add = [&Bounds](const TArray<FVector2D>& Poly)
+	{
+		for (const FVector2D& P : Poly)
+		{
+			Bounds += P;
+		}
+	};
+	if (bOverview)
+	{
+		for (const FMobileCampusBuilding& Building : CampusMap.Buildings) Add(Building.Outline);
+		for (const FMobileCampusFeature& Feature : CampusMap.Features) Add(Feature.Outline);
+	}
+	else
+	{
+		Add(LevelMap.Outline);
+	}
+	return Bounds;
+}
+
+FVector2D UMobileMapWidget::ViewCentre() const
+{
+	return FVector2D(ViewSize.X * 0.5, InsetTop + FMath::Max(ViewSize.Y - InsetTop - InsetBottom - (bShow3D ? SlabHeight : 0.0), 10.0) * 0.5);
+}
+
+FVector2D UMobileMapWidget::ProjectFlat(const FVector2D& P) const
 {
 	if (!bShow3D)
 	{
@@ -270,14 +357,14 @@ FBox2D UMobileMapWidget::PlanBounds() const
 	{
 		for (const FVector2D& P : Poly)
 		{
-			Bounds += Project(P);
+			Bounds += ProjectFlat(P);
 		}
 	};
 	if (bOverview)
 	{
 		for (const FMobileCampusBuilding& Building : CampusMap.Buildings) Add(Building.Outline);
 		for (const FMobileCampusFeature& Feature : CampusMap.Features) Add(Feature.Outline);
-		if (Route.bFound) for (const auto& Point : Route.Points) Bounds += Project(MobileCampusPosition(Point, CampusMap));
+		if (Route.bFound) for (const auto& Point : Route.Points) Bounds += ProjectFlat(MobileCampusPosition(Point, CampusMap));
 	}
 	else
 	{
@@ -286,25 +373,139 @@ FBox2D UMobileMapWidget::PlanBounds() const
 	return Bounds;
 }
 
+bool UMobileMapWidget::RouteBoxOnLevel(FBox2D& OutBox) const
+{
+	OutBox = FBox2D(ForceInit);
+	int32 Count = 0;
+	for (const FMobileRoutePoint& Point : Route.Points)
+	{
+		if (Point.BuildingId == LevelMap.BuildingId && Point.Level == LevelMap.Level)
+		{
+			OutBox += Point.Position;
+			++Count;
+		}
+	}
+	return Count >= 2;
+}
+
+FVector2D UMobileMapWidget::FocusPoint() const
+{
+	if (LatchedFocus)
+	{
+		return *LatchedFocus;
+	}
+	FVector2D Focus = RawPlanBounds().GetCenter();
+	FBox2D RouteBox;
+	if (RouteBoxOnLevel(RouteBox))
+	{
+		// A route on this level: the middle of it.
+		Focus = RouteBox.GetCenter();
+	}
+	else
+	{
+		bool bFound = false;
+		if (!HighlightPlaceId.IsEmpty())
+		{
+			for (const FMobileMapRoom& Room : LevelMap.Rooms)
+			{
+				if (Room.PlaceId == HighlightPlaceId)
+				{
+					Focus = Centre(Room.Polygon);
+					bFound = true;
+					break;
+				}
+			}
+		}
+		if (!bFound && bHasPosition && Position.BuildingId == LevelMap.BuildingId && Position.Level == LevelMap.Level)
+		{
+			Focus = Position.Position;
+		}
+		else if (!bFound && LevelMap.Level == 1 && LevelMap.bHasEntrance)
+		{
+			Focus = LevelMap.Entrance;
+		}
+	}
+	LatchedFocus = Focus;
+	return Focus;
+}
+
+int32 UMobileMapWidget::GetContextBuildingCount() const
+{
+	if (bOverview)
+	{
+		return 0;
+	}
+	int32 Count = 0;
+	for (const FMobileCampusBuilding& Building : CampusMap.Buildings)
+	{
+		Count += Building.BuildingId != LevelMap.BuildingId ? 1 : 0;
+	}
+	return Count;
+}
+
+UMobileMapWidget::FStart UMobileMapWidget::WorkOutStart(double WidgetWidth, double WidgetHeight) const
+{
+	FStart Result;
+	Result.Bounds = PlanBounds();
+	if (!Result.Bounds.bIsValid)
+	{
+		return Result;
+	}
+	Result.bValid = true;
+	const double Margin = 16.0;
+	Result.AvailW = FMath::Max(WidgetWidth - 2.0 * Margin, 10.0);
+	Result.AvailH = FMath::Max(WidgetHeight - InsetTop - InsetBottom - (bShow3D ? SlabHeight : 0.0), 10.0);
+	const FVector2D Size = Result.Bounds.GetSize();
+	Result.Fit = FMath::Min(Result.AvailW / FMath::Max(Size.X, 1e-6), Result.AvailH / FMath::Max(Size.Y, 1e-6));
+	Result.Start = Result.Fit;
+	if (!bOverview)
+	{
+		// A big building starts at about 100 metres across the screen; if a route is on the level and fits that, the whole route is shown.
+		double Start = MobileMapScale::StartScale(Result.Fit, Result.AvailW, LevelMap.UnitsPerMetre);
+		FBox2D RouteBox;
+		if (Start > Result.Fit && RouteBoxOnLevel(RouteBox))
+		{
+			const double Pad = 10.0 * LevelMap.UnitsPerMetre;
+			const FVector2D RouteSize = RouteBox.GetSize() + FVector2D(2.0 * Pad, 2.0 * Pad);
+			Start = FMath::Max(Result.Fit, FMath::Min(Start, FMath::Min(Result.AvailW / RouteSize.X, Result.AvailH / RouteSize.Y)));
+		}
+		Result.Start = Start;
+	}
+	return Result;
+}
+
+double UMobileMapWidget::GetMinZoom() const
+{
+	const FStart Found = WorkOutStart(ViewSize.X, ViewSize.Y);
+	return Found.bValid ? MobileMapScale::MinZoomFor(Found.Fit, Found.Start, MinZoom) : MinZoom;
+}
+
 void UMobileMapWidget::ComputeFit(double WidgetWidth, double WidgetHeight, double& OutScale, FVector2D& OutOffset) const
 {
-	const FBox2D Bounds = PlanBounds();
 	OutScale = 1.0;
 	OutOffset = FVector2D::ZeroVector;
-	if (!Bounds.bIsValid)
+	const FStart Found = WorkOutStart(WidgetWidth, WidgetHeight);
+	if (!Found.bValid)
 	{
 		return;
 	}
 	const double Margin = 16.0;
-	const double AvailW = FMath::Max(WidgetWidth - 2.0 * Margin, 10.0);
-	const double AvailH = FMath::Max(WidgetHeight - InsetTop - InsetBottom - (bShow3D ? SlabHeight : 0.0), 10.0);
-	const FVector2D Size = Bounds.GetSize();
-	const double FitScale = FMath::Min(AvailW / FMath::Max(Size.X, 1e-6), AvailH / FMath::Max(Size.Y, 1e-6));
-	// The plan is centred in the part that is not covered.
-	const FVector2D FitOffset = FVector2D(Margin + (AvailW - Size.X * FitScale) * 0.5, InsetTop + (AvailH - Size.Y * FitScale) * 0.5) - Bounds.Min * FitScale;
+	const FVector2D Size = Found.Bounds.GetSize();
+	const FVector2D Centre(WidgetWidth * 0.5, InsetTop + Found.AvailH * 0.5);
+	FVector2D FitOffset;
+	if (Found.Start > Found.Fit * 1.0001)
+	{
+		// A big building: the focus is in the middle of the part that is not covered (turned like the plan is, so turning keeps it there).
+		const FVector2D About = FMath::IsNearlyZero(Rotation) ? FVector2D::ZeroVector : RawPlanBounds().GetCenter();
+		FitOffset = Centre - ProjectFlat(Turn(FocusPoint(), About)) * Found.Start;
+	}
+	else
+	{
+		// The plan is centred in the part that is not covered.
+		FitOffset = FVector2D(Margin + (Found.AvailW - Size.X * Found.Fit) * 0.5, InsetTop + (Found.AvailH - Size.Y * Found.Fit) * 0.5) - Found.Bounds.Min * Found.Fit;
+	}
 	// Then zoomed about the middle of that part, and moved by the person's pan.
-	const FVector2D Centre(WidgetWidth * 0.5, InsetTop + AvailH * 0.5);
-	OutScale = FitScale * Zoom;
+	OutScale = Found.Start * Zoom;
 	OutOffset = (FitOffset - Centre) * Zoom + Centre + Pan;
 }
 
@@ -313,7 +514,8 @@ FVector2D UMobileMapWidget::ToWidget(const FVector2D& PlanPoint, double WidgetWi
 	double Scale;
 	FVector2D Offset;
 	ComputeFit(WidgetWidth, WidgetHeight, Scale, Offset);
-	return Project(PlanPoint) * Scale + Offset;
+	const FVector2D About = FMath::IsNearlyZero(Rotation) ? FVector2D::ZeroVector : RawPlanBounds().GetCenter();
+	return ProjectFlat(Turn(PlanPoint, About)) * Scale + Offset;
 }
 
 TArray<FVector2D> UMobileMapWidget::ToWidgetPolygon(const TArray<FVector2D>& Plan, double WidgetWidth, double WidgetHeight, double Lift) const
@@ -323,9 +525,10 @@ TArray<FVector2D> UMobileMapWidget::ToWidgetPolygon(const TArray<FVector2D>& Pla
 	ComputeFit(WidgetWidth, WidgetHeight, Scale, Offset);
 	TArray<FVector2D> Result;
 	Result.Reserve(Plan.Num());
+	const FVector2D About = FMath::IsNearlyZero(Rotation) ? FVector2D::ZeroVector : RawPlanBounds().GetCenter();
 	for (const FVector2D& P : Plan)
 	{
-		Result.Add(Project(P) * Scale + Offset - FVector2D(0.0, Lift));
+		Result.Add(ProjectFlat(Turn(P, About)) * Scale + Offset - FVector2D(0.0, Lift));
 	}
 	return Result;
 }
@@ -459,6 +662,36 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 		return Layer;
 	}
 
+	// The rest of the site round the building, faint and nameless: something to judge the size of the building by, as a street map has. They are drawn
+	// in the building's own frame (the campus map is in the site's: its offset takes one to the other).
+	{
+		const FMobileCampusBuilding* Current = CampusMap.Buildings.FindByPredicate([&](const FMobileCampusBuilding& B) { return B.BuildingId == LevelMap.BuildingId; });
+		const FVector2D Shift = Current ? Current->Offset : FVector2D::ZeroVector;
+		const FLinearColor ContextFill = FMath::Lerp(MapColours.BuildingTop, MapColours.Slab, 0.18f);
+		const FLinearColor ContextEdge = FMath::Lerp(MapColours.BuildingTop, MapColours.Edge, 0.35f);
+		auto ToLocal = [&](const TArray<FVector2D>& Campus)
+		{
+			TArray<FVector2D> Local;
+			Local.Reserve(Campus.Num());
+			for (const FVector2D& P : Campus) Local.Add(P - Shift);
+			return ToWidgetPolygon(Local, W, H, 0.0);
+		};
+		for (const FMobileCampusFeature& Feature : CampusMap.Features)
+		{
+			FillPolygon(OutDrawElements, Layer, AllottedGeometry, ToLocal(Feature.Outline), Feature.Name == TEXT("Pond") ? MapColours.Water : MapColours.Grass);
+		}
+		for (const FMobileCampusBuilding& Building : CampusMap.Buildings)
+		{
+			if (Building.BuildingId == LevelMap.BuildingId)
+			{
+				continue;
+			}
+			const TArray<FVector2D> Shape = ToLocal(Building.Outline);
+			FillPolygon(OutDrawElements, Layer, AllottedGeometry, Shape, ContextFill);
+			OutlinePolygon(OutDrawElements, Layer, AllottedGeometry, Shape, ContextEdge, 1.f);
+		}
+	}
+
 	// The floor: in the tilted view it stands on a slab.
 	if (bShow3D)
 	{
@@ -471,6 +704,11 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 	// The rooms. Their names are placed after everything is drawn (see DrawChosenLabels): the chosen place first, then the biggest rooms; a
 	// room too small to read a name in (until the map is zoomed in) gets none.
 	TArray<FMapLabel> RoomLabels;
+	// How big things are on the floor now: design pixels for a metre.
+	double PlanScale;
+	FVector2D PlanOffset;
+	ComputeFit(W, H, PlanScale, PlanOffset);
+	const double PixelsPerMetre = PlanScale * LevelMap.UnitsPerMetre;
 	for (const FMobileMapRoom& Room : LevelMap.Rooms)
 	{
 		const TArray<FVector2D> Shape = ToWidgetPolygon(Room.Polygon, W, H, Lift);
@@ -478,20 +716,80 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 		FillPolygon(OutDrawElements, Layer + 2, AllottedGeometry, Shape, bHighlight ? MapColours.Highlight : RoomColour(Room.Category, Room.bAvailable));
 		OutlinePolygon(OutDrawElements, Layer + 3, AllottedGeometry, Shape, bHighlight ? Blue : MapColours.RoomEdge, bHighlight ? 3.f : 1.2f);
 		const FBox2D Extent = BoundsOf(Shape);
-		if (bHighlight || FMath::Max(Extent.GetSize().X, Extent.GetSize().Y) >= MinRoomSizeForLabel)
+		// The name of a room is the short one (without the code after the comma), and only if it fits in the room: zooming in is what makes the names
+		// appear. The place looked at is always named, in full. A room with no name of its own (its id) is not named.
+		if (bHighlight)
 		{
-			RoomLabels.Add({ Room.Name, Centre(Shape), 10.f, Ink, bHighlight ? 1.0e9 : Extent.GetSize().X * Extent.GetSize().Y, Layer + 4 });
+			RoomLabels.Add({ Room.Name, Centre(Shape), 11.f, Blue, 1.0e9, Layer + 4, true });
+		}
+		else if (!MobileMapScale::LooksLikeRawId(Room.Name))
+		{
+			const FString Short = MobileMapScale::ShortName(Room.Name);
+			if (MobileMapScale::LabelFits(LabelSize(Short, RoomLabelPixels, false).X, Extent.GetSize().X))
+			{
+				RoomLabels.Add({ Short, Centre(Shape), RoomLabelPixels, Grey, Extent.GetSize().X * Extent.GetSize().Y, Layer + 4, false });
+			}
 		}
 	}
 
-	// The lifts and stairs. Their circles are kept clear of the room names.
+	// The lifts and stairs. The circle is as big as a staircase is on the floor at this scale (within limits), the picture of the kind of connector is in it only
+	// when it is big enough to be seen, and of the ones that would overlap only the most important is drawn: the ones by the route, then lifts, escalators, stairs.
+	// The circles are kept clear of the room names.
+	const double MarkerDiameter = MobileMapScale::MarkerDiameter(PixelsPerMetre);
+	const bool bGlyph = MobileMapScale::ShowsGlyph(MarkerDiameter);
 	TArray<FBox2D> Obstacles;
-	for (const FMobileMapConnector& Connector : LevelMap.Connectors)
 	{
-		const FVector2D At = ToWidgetPolygon({ Connector.Position }, W, H, Lift)[0];
-		Obstacles.Add(FBox2D(At - FVector2D(9.0, 9.0), At + FVector2D(9.0, 9.0)));
-		FillPolygon(OutDrawElements, Layer + 4, AllottedGeometry, Circle(At, 8.0), Connector.Kind == EMobileConnectorKind::Lift ? StartStyle::Rgb(30, 100, 240) : (Connector.Kind == EMobileConnectorKind::Stairs ? StartStyle::Rgb(100, 116, 139) : StartStyle::Rgb(13, 148, 136)));
-		DrawLabel(OutDrawElements, Layer + 5, AllottedGeometry, Connector.Kind == EMobileConnectorKind::Lift ? TEXT("L") : (Connector.Kind == EMobileConnectorKind::Stairs ? TEXT("S") : TEXT("E")), At, 9.f, FLinearColor::White, false);
+		TArray<FVector2D> MarkerAt;
+		TArray<MobileMapLabels::FCandidate> Markers;
+		for (const FMobileMapConnector& Connector : LevelMap.Connectors)
+		{
+			const FVector2D At = ToWidgetPolygon({ Connector.Position }, W, H, Lift)[0];
+			MarkerAt.Add(At);
+			MobileMapLabels::FCandidate Candidate;
+			Candidate.Box = FBox2D(At - FVector2D(MarkerDiameter * 0.5, MarkerDiameter * 0.5), At + FVector2D(MarkerDiameter * 0.5, MarkerDiameter * 0.5));
+			Candidate.Priority = Connector.Kind == EMobileConnectorKind::Lift ? 3.0 : (Connector.Kind == EMobileConnectorKind::Escalator ? 2.0 : 1.0);
+			for (const FMobileRoutePoint& Point : Route.Points)
+			{
+				if (Point.BuildingId == LevelMap.BuildingId && Point.Level == LevelMap.Level && FVector2D::Distance(Point.Position, Connector.Position) < 3.0 * LevelMap.UnitsPerMetre)
+				{
+					Candidate.Priority += 100.0;
+					break;
+				}
+			}
+			Markers.Add(Candidate);
+		}
+		const TArray<bool> Shown = MobileMapLabels::Choose(Markers, TArray<FBox2D>(), FBox2D(FVector2D::ZeroVector, FVector2D(W, H)), 1.0);
+		for (int32 Index = 0; Index < LevelMap.Connectors.Num(); ++Index)
+		{
+			if (!Shown[Index])
+			{
+				continue;
+			}
+			const FMobileMapConnector& Connector = LevelMap.Connectors[Index];
+			const FVector2D At = MarkerAt[Index];
+			Obstacles.Add(FBox2D(At - FVector2D(MarkerDiameter * 0.5 + 1.0, MarkerDiameter * 0.5 + 1.0), At + FVector2D(MarkerDiameter * 0.5 + 1.0, MarkerDiameter * 0.5 + 1.0)));
+			FillPolygon(OutDrawElements, Layer + 4, AllottedGeometry, Circle(At, MarkerDiameter * 0.5), Connector.Kind == EMobileConnectorKind::Lift ? StartStyle::Rgb(30, 100, 240) : (Connector.Kind == EMobileConnectorKind::Stairs ? StartStyle::Rgb(100, 116, 139) : StartStyle::Rgb(13, 148, 136)));
+			if (!bGlyph)
+			{
+				continue;
+			}
+			// The design team's picture of the kind of connector (white, in the circle); a kind whose picture is not imported yet keeps its letter.
+			const TCHAR* IconName = Connector.Kind == EMobileConnectorKind::Lift ? TEXT("Lift") : (Connector.Kind == EMobileConnectorKind::Stairs ? TEXT("Stairs") : TEXT("Escalator"));
+			if (UTexture2D* IconTexture = MobileIcons::LoadTexture(IconName))
+			{
+				const double IconSize = MarkerDiameter * 0.62;
+				FSlateBrush IconBrush;
+				IconBrush.SetResourceObject(IconTexture);
+				IconBrush.ImageSize = FVector2f(IconTexture->GetSizeX(), IconTexture->GetSizeY());
+				IconBrush.DrawAs = ESlateBrushDrawType::Image;
+				FSlateDrawElement::MakeBox(OutDrawElements, Layer + 5, AllottedGeometry.ToPaintGeometry(FVector2f(IconSize, IconSize), FSlateLayoutTransform(FVector2f(At - FVector2D(IconSize * 0.5, IconSize * 0.5)))),
+					&IconBrush, ESlateDrawEffect::None, FLinearColor::White);
+			}
+			else
+			{
+				DrawLabel(OutDrawElements, Layer + 5, AllottedGeometry, Connector.Kind == EMobileConnectorKind::Lift ? TEXT("L") : (Connector.Kind == EMobileConnectorKind::Stairs ? TEXT("S") : TEXT("E")), At, 9.f, FLinearColor::White, false);
+			}
+		}
 	}
 
 	DrawChosenLabels(OutDrawElements, AllottedGeometry, RoomLabels, Obstacles, W, H);
@@ -580,14 +878,15 @@ void UMobileMapWidget::ResetView()
 {
 	Zoom = 1.0;
 	Pan = FVector2D::ZeroVector;
+	LatchedFocus.Reset();
 }
 
 void UMobileMapWidget::ZoomAround(const FVector2D& Local, double Factor)
 {
-	const double NewZoom = FMath::Clamp(Zoom * Factor, MinZoom, MaxZoom);
+	const double NewZoom = FMath::Clamp(Zoom * Factor, GetMinZoom(), MaxZoom);
 	const double Actual = NewZoom / Zoom;
 	// The point under the finger (or the middle) stays where it is: the plan is scaled about the middle of the uncovered part, then moved.
-	const FVector2D Centre(ViewSize.X * 0.5, InsetTop + FMath::Max(ViewSize.Y - InsetTop - InsetBottom - (bShow3D ? SlabHeight : 0.0), 10.0) * 0.5);
+	const FVector2D Centre = ViewCentre();
 	Pan = (Local - Centre) - (Local - Centre - Pan) * Actual;
 	Zoom = NewZoom;
 	ClampPan();
@@ -595,9 +894,58 @@ void UMobileMapWidget::ZoomAround(const FVector2D& Local, double Factor)
 
 void UMobileMapWidget::ZoomBy(double Delta)
 {
-	const double Target = FMath::Clamp(Zoom + Delta, MinZoom, MaxZoom);
-	const FVector2D Centre(ViewSize.X * 0.5, InsetTop + FMath::Max(ViewSize.Y - InsetTop - InsetBottom - (bShow3D ? SlabHeight : 0.0), 10.0) * 0.5);
-	ZoomAround(Centre, Target / Zoom);
+	const double Target = FMath::Clamp(Zoom + Delta, GetMinZoom(), MaxZoom);
+	ZoomAround(ViewCentre(), Target / Zoom);
+}
+
+void UMobileMapWidget::SetRotation(double Radians)
+{
+	// Kept within a half turn either way.
+	double Turned = FMath::Fmod(Radians, UE_DOUBLE_TWO_PI);
+	if (Turned > UE_DOUBLE_PI) Turned -= UE_DOUBLE_TWO_PI;
+	if (Turned < -UE_DOUBLE_PI) Turned += UE_DOUBLE_TWO_PI;
+	if (FMath::IsNearlyEqual(Turned, Rotation, 1e-9))
+	{
+		return;
+	}
+	Rotation = Turned;
+	if (OnRotationChanged)
+	{
+		OnRotationChanged(Rotation);
+	}
+}
+
+void UMobileMapWidget::ResetRotation()
+{
+	// Back to north about the middle of the view: what is there stays there (the plan turns about its own middle, which on a big building is far from it).
+	RotateAround(ViewCentre(), -Rotation);
+}
+
+void UMobileMapWidget::RotateAround(const FVector2D& Local, double DeltaRadians)
+{
+	if (FMath::IsNearlyZero(DeltaRadians, 1e-9))
+	{
+		return;
+	}
+	// The plan turns about its own middle, which stays where it is on the screen; so the middle is moved as a point turning about Local, and what is
+	// under Local stays under it. (The tilted view only turns about the middle: a turn of the tilted picture is not a turn of the screen.)
+	const bool bKeepUnder = !bShow3D && RawPlanBounds().bIsValid;
+	FVector2D MiddleBefore = FVector2D::ZeroVector;
+	if (bKeepUnder)
+	{
+		MiddleBefore = ToWidget(RawPlanBounds().GetCenter(), ViewSize.X, ViewSize.Y);
+	}
+	SetRotation(Rotation + DeltaRadians);
+	if (bKeepUnder)
+	{
+		const double Cos = FMath::Cos(DeltaRadians);
+		const double Sin = FMath::Sin(DeltaRadians);
+		const FVector2D D = MiddleBefore - Local;
+		const FVector2D MiddleWanted = Local + FVector2D(D.X * Cos - D.Y * Sin, D.X * Sin + D.Y * Cos);
+		// Where the middle is now (on a big building turning moves it, as the view is built around the focus, not the middle).
+		const FVector2D MiddleNow = ToWidget(RawPlanBounds().GetCenter(), ViewSize.X, ViewSize.Y);
+		PanBy(MiddleWanted - MiddleNow);
+	}
 }
 
 void UMobileMapWidget::PanBy(const FVector2D& Delta)
@@ -647,6 +995,8 @@ FReply UMobileMapWidget::HandlePointerDown(const FGeometry& Geometry, const FPoi
 		PressLocal = Local;
 		bPressMoved = false;
 		bMultiTouch = false;
+		TwistSoFar = 0.0;
+		bTwisting = false;
 	}
 	else
 	{
@@ -677,7 +1027,24 @@ FReply UMobileMapWidget::HandlePointerMove(const FGeometry& Geometry, const FPoi
 		}
 		if (bPressMoved && bGestures)
 		{
-			PanBy(Local - Before);
+			if (Event.IsShiftDown())
+			{
+				// A mouse has no second finger: Shift and a drag turn the map about the middle of the view, as far as the pointer goes round it.
+				const FVector2D Centre = ViewCentre();
+				const FVector2D From = Before - Centre;
+				const FVector2D To = Local - Centre;
+				if (From.Size() > 4.0 && To.Size() > 4.0)
+				{
+					double Delta = FMath::Atan2(To.Y, To.X) - FMath::Atan2(From.Y, From.X);
+					if (Delta > UE_DOUBLE_PI) Delta -= UE_DOUBLE_TWO_PI;
+					if (Delta < -UE_DOUBLE_PI) Delta += UE_DOUBLE_TWO_PI;
+					RotateAround(Centre, Delta);
+				}
+			}
+			else
+			{
+				PanBy(Local - Before);
+			}
 		}
 	}
 	else if (Pointers.Num() == 2 && bGestures)
@@ -699,6 +1066,24 @@ FReply UMobileMapWidget::HandlePointerMove(const FGeometry& Geometry, const FPoi
 		if (OldDistance > 1.0)
 		{
 			ZoomAround(OldMiddle, NewDistance / OldDistance);
+		}
+		// The line between the fingers turning is a twist, which turns the map once it is past a few degrees.
+		if (OldDistance > 20.0 && NewDistance > 20.0)
+		{
+			const FVector2D OldLine = Before - Other;
+			const FVector2D NewLine = Local - Other;
+			double Twist = FMath::Atan2(NewLine.Y, NewLine.X) - FMath::Atan2(OldLine.Y, OldLine.X);
+			if (Twist > UE_DOUBLE_PI) Twist -= UE_DOUBLE_TWO_PI;
+			if (Twist < -UE_DOUBLE_PI) Twist += UE_DOUBLE_TWO_PI;
+			if (!bTwisting)
+			{
+				TwistSoFar += Twist;
+				bTwisting = FMath::Abs(TwistSoFar) > FMath::DegreesToRadians(8.0);
+			}
+			else
+			{
+				RotateAround(NewMiddle, Twist);
+			}
 		}
 		PanBy(NewMiddle - OldMiddle);
 	}

@@ -71,7 +71,7 @@ git commit -m "PAT-123 Short summary of what changed"
 ```
 
 - Start every commit message with the Jira key, then one short sentence in English that says what changed and why it matters.
-- Add files by name. Do not use `git add .` blindly: it picks up personal files (your own `buildings.json`, saved layouts, keys) that must
+- Add files by name. Do not use `git add .` blindly: it picks up personal files (your own project files, saved layouts, keys) that must
   never be committed. `python scripts/lint.py` fails on some of these, but do not rely on it.
 - Commit often. Ten small commits are easier to review than one huge one.
 

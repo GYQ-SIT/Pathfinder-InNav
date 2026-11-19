@@ -47,7 +47,7 @@ bool FProjectLibraryScanTest::RunTest(const FString& Parameters)
 
 	WriteLibraryFile(Folder / TEXT("plain.json"), TEXT("{\"buildings\":[]}"), Now - FTimespan::FromDays(3));
 	WriteLibraryFile(Folder / TEXT("named.json"), TEXT("{\"projectName\":\"Campus North\",\"description\":\"Two blocks\",\"buildings\":[{},{}]}"), Now - FTimespan::FromDays(1));
-	WriteLibraryFile(Folder / TEXT("buildings.json"), TEXT("{\"buildings\":[{}]}"), Now - FTimespan::FromDays(2));
+	WriteLibraryFile(Folder / TEXT("E2_Filled.json"), TEXT("{\"buildings\":[{}]}"), Now - FTimespan::FromDays(2));
 	WriteLibraryFile(Folder / TEXT("layout.json"), TEXT("{\"layoutVersion\":3}"), Now);
 	WriteLibraryFile(Folder / TEXT("broken.json"), TEXT("{ not json"), Now);
 	WriteLibraryFile(Folder / TEXT("notes.txt"), TEXT("hello"), Now);
@@ -74,7 +74,7 @@ bool FProjectLibraryScanTest::RunTest(const FString& Parameters)
 	if (Entries.Num() == 4)
 	{
 		TestEqual(TEXT("newest first"), Entries[0].FileName, FString(TEXT("named.json")));
-		TestEqual(TEXT("then the older ones in order"), Entries[1].FileName, FString(TEXT("buildings.json")));
+		TestEqual(TEXT("then the older ones in order"), Entries[1].FileName, FString(TEXT("E2_Filled.json")));
 		TestEqual(TEXT("..."), Entries[2].FileName, FString(TEXT("plain.json")));
 		TestEqual(TEXT("the oldest last"), Entries[3].FileName, FString(TEXT("map.db")));
 	}
@@ -91,7 +91,7 @@ bool FProjectLibraryScanTest::RunTest(const FString& Parameters)
 		TestEqual(TEXT("without a name, the file name is shown"), Plain->DisplayName, FString(TEXT("plain")));
 		TestEqual(TEXT("an empty project has no buildings"), Plain->BuildingCount, 0);
 	}
-	if (const FProjectLibraryEntry* Sample = Find(Entries, TEXT("buildings.json")))
+	if (const FProjectLibraryEntry* Sample = Find(Entries, TEXT("E2_Filled.json")))
 	{
 		TestTrue(TEXT("the shipped sample is marked"), Sample->bIsSample);
 	}
@@ -114,7 +114,7 @@ bool FProjectLibraryEditTest::RunTest(const FString& Parameters)
 	const FDateTime Now = FDateTime(2026, 10, 20, 12, 0, 0);
 	WriteLibraryFile(Folder / TEXT("a.json"), TEXT("{\"projectName\":\"Alpha\",\"description\":\"First\",\"scale\":10,\"buildings\":[{\"id\":\"X\"}]}"), Now);
 	WriteLibraryFile(Folder / TEXT("b.json"), TEXT("{\"projectName\":\"Beta\",\"buildings\":[]}"), Now);
-	WriteLibraryFile(Folder / TEXT("buildings.json"), TEXT("{\"buildings\":[{}]}"), Now);
+	WriteLibraryFile(Folder / TEXT("E2_Filled.json"), TEXT("{\"buildings\":[{}]}"), Now);
 
 	auto Load = [&Folder](const TCHAR* FileName) { return *ProjectLibraryTests::Find(ProjectLibrary::Scan(Folder), FileName); };
 	FString NewPath, Error;
@@ -129,7 +129,7 @@ bool FProjectLibraryEditTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("the original keeps its name"), Load(TEXT("a.json")).DisplayName, FString(TEXT("Alpha")));
 	TestTrue(TEXT("a second copy gets the next free name"), ProjectLibrary::Duplicate(Load(TEXT("a.json")), Folder, NewPath, Error));
 	TestEqual(TEXT("with a number"), FPaths::GetCleanFilename(NewPath), FString(TEXT("Alpha copy 2.json")));
-	TestTrue(TEXT("the shipped sample can be duplicated"), ProjectLibrary::Duplicate(Load(TEXT("buildings.json")), Folder, NewPath, Error));
+	TestTrue(TEXT("the shipped sample can be duplicated"), ProjectLibrary::Duplicate(Load(TEXT("E2_Filled.json")), Folder, NewPath, Error));
 
 	// Rename: the name inside and the file name change together.
 	TestTrue(TEXT("a project can be renamed"), ProjectLibrary::Rename(Load(TEXT("b.json")), TEXT("  Gamma  "), Folder, NewPath, Error));
@@ -143,8 +143,8 @@ bool FProjectLibraryEditTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("with the reason"), Error.Contains(TEXT("already exists")));
 	TestFalse(TEXT("an empty name is refused"), ProjectLibrary::Rename(Alpha, TEXT("  "), Folder, NewPath, Error));
 	TestFalse(TEXT("so is one with nothing usable in it"), ProjectLibrary::Rename(Alpha, TEXT("???"), Folder, NewPath, Error));
-	TestFalse(TEXT("the shipped sample is not renamed"), ProjectLibrary::Rename(Load(TEXT("buildings.json")), TEXT("Mine"), Folder, NewPath, Error));
-	TestTrue(TEXT("it is still there"), IFileManager::Get().FileExists(*(Folder / TEXT("buildings.json"))));
+	TestFalse(TEXT("the shipped sample is not renamed"), ProjectLibrary::Rename(Load(TEXT("E2_Filled.json")), TEXT("Mine"), Folder, NewPath, Error));
+	TestTrue(TEXT("it is still there"), IFileManager::Get().FileExists(*(Folder / TEXT("E2_Filled.json"))));
 	TestEqual(TEXT("Alpha is unchanged"), Load(TEXT("a.json")).DisplayName, FString(TEXT("Alpha")));
 
 	// Only the case of the name changes: the same file, not a clash with itself.
@@ -199,7 +199,7 @@ bool FProjectLibraryDeleteTest::RunTest(const FString& Parameters)
 	IFileManager::Get().MakeDirectory(*Folder, true);
 	const FDateTime Now = FDateTime(2026, 10, 20, 12, 0, 0);
 	WriteLibraryFile(Folder / TEXT("a.json"), TEXT("{\"projectName\":\"Alpha\",\"buildings\":[{}]}"), Now);
-	WriteLibraryFile(Folder / TEXT("buildings.json"), TEXT("{\"buildings\":[{}]}"), Now);
+	WriteLibraryFile(Folder / TEXT("E2_Filled.json"), TEXT("{\"buildings\":[{}]}"), Now);
 
 	auto Load = [&Folder](const TCHAR* FileName) { return *ProjectLibraryTests::Find(ProjectLibrary::Scan(Folder), FileName); };
 	FString DeletedPath, Error;
@@ -216,9 +216,9 @@ bool FProjectLibraryDeleteTest::RunTest(const FString& Parameters)
 	IFileManager::Get().FindFiles(Kept, *(Folder / TEXT("Deleted") / TEXT("*.json")), true, false);
 	TestEqual(TEXT("both are kept"), Kept.Num(), 2);
 
-	TestFalse(TEXT("the shipped sample cannot be deleted"), ProjectLibrary::SoftDelete(Load(TEXT("buildings.json")), Folder, DeletedPath, Error));
+	TestFalse(TEXT("the shipped sample cannot be deleted"), ProjectLibrary::SoftDelete(Load(TEXT("E2_Filled.json")), Folder, DeletedPath, Error));
 	TestTrue(TEXT("with the reason"), Error.Contains(TEXT("sample")));
-	TestTrue(TEXT("and it is still there"), IFileManager::Get().FileExists(*(Folder / TEXT("buildings.json"))));
+	TestTrue(TEXT("and it is still there"), IFileManager::Get().FileExists(*(Folder / TEXT("E2_Filled.json"))));
 
 	FProjectLibraryEntry Gone;
 	Gone.FilePath = Folder / TEXT("not here.json");
@@ -241,7 +241,7 @@ bool FProjectLibraryWidgetTest::RunTest(const FString& Parameters)
 	const FDateTime Now = FDateTime(2026, 10, 20, 12, 0, 0);
 	WriteLibraryFile(Folder / TEXT("alpha.json"), TEXT("{\"projectName\":\"Alpha Campus\",\"description\":\"Two blocks\",\"buildings\":[{},{}]}"), Now);
 	WriteLibraryFile(Folder / TEXT("empty.json"), TEXT("{\"projectName\":\"Blank\",\"buildings\":[]}"), Now - FTimespan::FromDays(1));
-	WriteLibraryFile(Folder / TEXT("buildings.json"), TEXT("{\"buildings\":[{}]}"), Now - FTimespan::FromDays(2));
+	WriteLibraryFile(Folder / TEXT("E2_Filled.json"), TEXT("{\"buildings\":[{}]}"), Now - FTimespan::FromDays(2));
 
 	UProjectLibraryWidget* Library = NewObject<UProjectLibraryWidget>();
 	Library->Initialize();

@@ -340,7 +340,7 @@ bool FNavigationBuildingRefreshTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("Bulk clear empties results"), Controller->GetFilteredBuildingOptions().IsEmpty());
 	TestEqual(TEXT("Bulk clear empties count"), Controller->GetEditableBuildingCount(), 0);
 	Controller->SetBuildingFilter(TEXT("E2"), 0, 0);
-	Fixture.Generator->LoadBuildingsFromFile(FPaths::ProjectDir() / TEXT("Data/buildings.json"));
+	Fixture.Generator->LoadBuildingsFromFile(FPaths::ProjectDir() / TEXT("../docs/test-data/e2-test-fixture.json"));
 	TestTrue(TEXT("Project reload populates fresh results"), Controller->GetFilteredBuildingOptions().FindKey(TEXT("E2")) != nullptr);
 	return true;
 }

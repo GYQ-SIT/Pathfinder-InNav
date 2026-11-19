@@ -81,7 +81,7 @@ bool FNavigationRoutePlannerIntegrationTest::RunTest(const FString& Parameters)
 	AInteriorGenerator* Interior = World->SpawnActor<AInteriorGenerator>();
 	Interior->DispatchBeginPlay();
 
-	const FString DataPath = FPaths::ProjectDir() / TEXT("Data") / TEXT("buildings.json");
+	const FString DataPath = FPaths::ProjectDir() / TEXT("../docs/test-data/e2-test-fixture.json");
 	TestTrue(TEXT("Example building data loads"), Generator->LoadBuildingsFromFile(DataPath) > 0);
 	TestTrue(TEXT("E2 interior loads"), Interior->LoadInteriorForBuilding(TEXT("E2")) >= 0);
 	APolyBuilding* Building = Generator->FindBuildingById(TEXT("E2"));

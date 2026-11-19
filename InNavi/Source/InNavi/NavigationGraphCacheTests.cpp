@@ -5,6 +5,12 @@
 #include "PolyBuilding.h"
 #include "NavigationRoutePlanner.h"
 #include "Misc/AutomationTest.h"
+#include "HAL/PlatformProcess.h"
+#include "HAL/FileManager.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
+#include "Misc/ScopeExit.h"
+#include "Misc/Paths.h"
 
 // The part of the route graph that does not depend on the route is kept between routes (PAT-142): the next route in the same building joins
 // only its start and destination to it. These tests check that it is found when nothing has changed, made again when something has, and that
@@ -167,6 +173,221 @@ bool FNavigationGraphCacheLegsTest::RunTest(const FString& Parameters)
 	FNavigationRoutePlanner::FindCampusRoute(*B.Fixture.Generator, *B.Fixture.Interior, OutsideOf(TEXT("OUT2")), Room, FromSecond);
 	TestEqual(TEXT("a leg that starts at another building builds nothing"), FNavigationRoutePlanner::GetGraphCacheMisses(), Misses);
 	TestTrue(TEXT("it finds the graph that was kept"), FNavigationRoutePlanner::GetGraphCacheHits() > Hits);
+	return true;
+}
+
+// The graph can be made before anyone asks for a route (FNavigationGraphWarmup, on a worker thread): the first route then finds it ready and builds nothing,
+// and a route asked for while it works waits for it instead of making the graph again. The routes are the same as without it.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationGraphWarmupTest, "InNavi.Navigation.GraphCache.WarmedBeforeTheFirstRoute", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationGraphWarmupTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationGraphCacheTests;
+	FGeneratedBuilding B;
+	if (!TestTrue(TEXT("a generated building with rooms to route between"), B.bReady && B.Rooms.Num() >= 3)) return false;
+	auto PointOf = [](const UNavigationPanelWidget::FNavigationRoomOption& Room)
+	{
+		FNavigationRoutePoint Point;
+		Point.BuildingId = TEXT("CACHE"); Point.Floor = Room.Floor; Point.Position = Room.Centroid;
+		return Point;
+	};
+	const auto WaitFor = [](const FNavigationGraphWarmup& Warmup)
+	{
+		for (int32 Waited = 0; Waited < 12000 && !Warmup.IsDone(); ++Waited) FPlatformProcess::Sleep(0.005f);
+		return Warmup.IsDone();
+	};
+
+	// The route without any warm-up, as the reference.
+	FNavigationRoutePlanner::ClearGraphCache();
+	FNavigationRouteResult Reference;
+	TestTrue(TEXT("a route is found without a warm-up"), FNavigationRoutePlanner::FindCampusRoute(*B.Fixture.Generator, *B.Fixture.Interior, PointOf(B.Rooms[0]), PointOf(B.Rooms[1]), Reference));
+
+	// Warmed first: the graph is built by the warm-up, and the first route builds nothing.
+	FNavigationRoutePlanner::ClearGraphCache();
+	{
+		FNavigationGraphWarmup Warmup(*B.Fixture.Generator, *B.Fixture.Interior);
+		TestTrue(TEXT("the warm-up finishes"), WaitFor(Warmup));
+		TestTrue(TEXT("and kept the graph"), Warmup.WasKept());
+	}
+	// The warm-up makes the graphs a route can ask for: this building alone (it has no link to another) and the campus.
+	const int32 MadeByWarmup = FNavigationRoutePlanner::GetGraphCacheMisses();
+	TestTrue(TEXT("the graphs were built by the warm-up"), MadeByWarmup >= 1);
+	FNavigationRouteResult Warmed;
+	TestTrue(TEXT("the first route is found"), FNavigationRoutePlanner::FindCampusRoute(*B.Fixture.Generator, *B.Fixture.Interior, PointOf(B.Rooms[0]), PointOf(B.Rooms[1]), Warmed));
+	TestEqual(TEXT("and built no graph"), FNavigationRoutePlanner::GetGraphCacheMisses(), MadeByWarmup);
+	TestTrue(TEXT("it found the one the warm-up kept"), FNavigationRoutePlanner::GetGraphCacheHits() >= 1);
+	TestTrue(TEXT("and it is the same route as without a warm-up"), SameRoute(Reference, Warmed));
+
+	// A route asked for while the warm-up works waits for it (a little at a time, as the screens run it) and does not join the graph a second time.
+	FNavigationRoutePlanner::ClearGraphCache();
+	FNavigationGraphWarmup Working(*B.Fixture.Generator, *B.Fixture.Interior);
+	FNavigationRouteJob Job(*B.Fixture.Generator, *B.Fixture.Interior, PointOf(B.Rooms[0]), PointOf(B.Rooms[1]));
+	bool bDone = false;
+	for (int32 Slices = 0; Slices < 20000 && !bDone; ++Slices)
+	{
+		bDone = Job.Step(0.002);
+		if (!bDone) FPlatformProcess::Sleep(0.002f);
+	}
+	TestTrue(TEXT("the route that was asked for meanwhile is found"), bDone && Job.Succeeded());
+	TestTrue(TEXT("it is the same route"), SameRoute(Reference, Job.GetResult()));
+	TestEqual(TEXT("and the graphs were joined once, not twice"), FNavigationRoutePlanner::GetGraphCacheMisses(), MadeByWarmup);
+
+	// A warm-up that is dropped at once stops, and does not leave a route waiting for it.
+	FNavigationRoutePlanner::ClearGraphCache();
+	{
+		FNavigationGraphWarmup Dropped(*B.Fixture.Generator, *B.Fixture.Interior);
+	}
+	FNavigationRouteResult After;
+	TestTrue(TEXT("a route is found after a warm-up was dropped"), FNavigationRoutePlanner::FindCampusRoute(*B.Fixture.Generator, *B.Fixture.Interior, PointOf(B.Rooms[0]), PointOf(B.Rooms[1]), After));
+	TestTrue(TEXT("and it is the same route"), SameRoute(Reference, After));
+	return true;
+}
+
+// The kept graph also lives in files: a graph that is built is written, the next start reads it instead of joining it, a file that is damaged or made for
+// other data is ignored, and the route is the same every way.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationGraphFilesTest, "InNavi.Navigation.GraphCache.FilesKeepTheGraph", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationGraphFilesTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationGraphCacheTests;
+	FGeneratedBuilding B;
+	if (!TestTrue(TEXT("a generated building with rooms to route between"), B.bReady && B.Rooms.Num() >= 3)) return false;
+	auto PointOf = [](const UNavigationPanelWidget::FNavigationRoomOption& Room)
+	{
+		FNavigationRoutePoint Point;
+		Point.BuildingId = TEXT("CACHE"); Point.Floor = Room.Floor; Point.Position = Room.Centroid;
+		return Point;
+	};
+	const auto Route = [&](FNavigationRouteResult& Result)
+	{
+		return FNavigationRoutePlanner::FindCampusRoute(*B.Fixture.Generator, *B.Fixture.Interior, PointOf(B.Rooms[0]), PointOf(B.Rooms[1]), Result);
+	};
+	const FString Directory = FPaths::ProjectSavedDir() / TEXT("AutomationTemp") / FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	const auto Files = [&Directory]()
+	{
+		TArray<FString> Found;
+		IFileManager::Get().FindFiles(Found, *(Directory / TEXT("*.bin")), true, false);
+		return Found;
+	};
+	ON_SCOPE_EXIT
+	{
+		FNavigationRoutePlanner::SetGraphFiles(FString(), FString());
+		IFileManager::Get().DeleteDirectory(*Directory, false, true);
+	};
+
+	// Files are off until they are asked for: nothing is written.
+	FNavigationRoutePlanner::SetGraphFiles(FString(), FString());
+	FNavigationRoutePlanner::ClearGraphCache();
+	FNavigationRouteResult Reference;
+	TestTrue(TEXT("a route is found without files"), Route(Reference));
+	FNavigationRoutePlanner::WaitForGraphFiles();
+	TestTrue(TEXT("with files off nothing is written"), Files().IsEmpty());
+
+	// On: the graph that is built is written.
+	FNavigationRoutePlanner::SetGraphFiles(Directory, FString());
+	FNavigationRoutePlanner::ClearGraphCache();
+	FNavigationRouteResult Built;
+	TestTrue(TEXT("a route is found and its graph built"), Route(Built));
+	FNavigationRoutePlanner::WaitForGraphFiles();
+	TestTrue(TEXT("the graph was written to a file"), !Files().IsEmpty());
+	TestTrue(TEXT("and the route is the same as without files"), SameRoute(Reference, Built));
+
+	// A start that has nothing in memory reads the file and builds nothing.
+	FNavigationRoutePlanner::ClearGraphCache();
+	FNavigationRouteResult FromFile;
+	TestTrue(TEXT("a route is found from the file"), Route(FromFile));
+	TestEqual(TEXT("it built no graph"), FNavigationRoutePlanner::GetGraphCacheMisses(), 0);
+	TestTrue(TEXT("it read the file"), FNavigationRoutePlanner::GetGraphFileReads() >= 1);
+	TestTrue(TEXT("and it is the same route"), SameRoute(Reference, FromFile));
+
+	// Files that come with the app are read, and never written to.
+	FNavigationRoutePlanner::SetGraphFiles(FString(), Directory);
+	FNavigationRoutePlanner::ClearGraphCache();
+	FNavigationRouteResult Shipped;
+	TestTrue(TEXT("a route is found from a file that came with the app"), Route(Shipped));
+	TestTrue(TEXT("it read it"), FNavigationRoutePlanner::GetGraphFileReads() >= 1 && FNavigationRoutePlanner::GetGraphCacheMisses() == 0);
+	TestTrue(TEXT("with the same route"), SameRoute(Reference, Shipped));
+
+	// A file that is cut off, or damaged, is ignored: the graph is built, and the route is the same.
+	FNavigationRoutePlanner::SetGraphFiles(Directory, FString());
+	for (const FString& Name : Files())
+	{
+		TArray<uint8> Bytes;
+		FFileHelper::LoadFileToArray(Bytes, *(Directory / Name));
+		Bytes.SetNum(Bytes.Num() / 2);
+		FFileHelper::SaveArrayToFile(Bytes, *(Directory / Name));
+	}
+	FNavigationRoutePlanner::ClearGraphCache();
+	FNavigationRouteResult AfterCut;
+	TestTrue(TEXT("a route is found when the file is cut off"), Route(AfterCut));
+	TestTrue(TEXT("the graph was built, not read"), FNavigationRoutePlanner::GetGraphFileReads() == 0 && FNavigationRoutePlanner::GetGraphCacheMisses() >= 1);
+	TestTrue(TEXT("and the route is the same"), SameRoute(Reference, AfterCut));
+	FNavigationRoutePlanner::WaitForGraphFiles();
+
+	// Another building is another key: the old file is not found, the graph is built, and a file is written for it.
+	FString Error;
+	B.Fixture.Interior->SetActiveFloor(B.Rooms.Last().Floor);
+	TestTrue(TEXT("a room is taken out of the building"), B.Fixture.Interior->DeleteRoom(B.Rooms.Last().RoomId));
+	FNavigationRoutePlanner::ClearGraphCache();
+	FNavigationRouteResult Changed;
+	TestTrue(TEXT("a route is found in the changed building"), Route(Changed));
+	TestTrue(TEXT("its graph was built, not read from the file of the other data"), FNavigationRoutePlanner::GetGraphFileReads() == 0 && FNavigationRoutePlanner::GetGraphCacheMisses() >= 1);
+	FNavigationRoutePlanner::WaitForGraphFiles();
+	TestTrue(TEXT("and kept in a file of its own"), Files().Num() >= 2);
+	return true;
+}
+
+// A route job that may use a worker thread (the phone's, which reads its project into a world of its own) joins the graph there, at full speed instead of a
+// few milliseconds a frame, and finds the same route.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationRouteJobWorkerTest, "InNavi.Navigation.GraphCache.JoinOnAWorkerThread", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FNavigationRouteJobWorkerTest::RunTest(const FString& Parameters)
+{
+	using namespace NavigationGraphCacheTests;
+	FGeneratedBuilding B;
+	if (!TestTrue(TEXT("a generated building with rooms to route between"), B.bReady && B.Rooms.Num() >= 3)) return false;
+	auto PointOf = [](const UNavigationPanelWidget::FNavigationRoomOption& Room)
+	{
+		FNavigationRoutePoint Point;
+		Point.BuildingId = TEXT("CACHE"); Point.Floor = Room.Floor; Point.Position = Room.Centroid;
+		return Point;
+	};
+	FNavigationRoutePlanner::SetGraphFiles(FString(), FString());
+	FNavigationRoutePlanner::ClearGraphCache();
+	FNavigationRouteResult Reference;
+	TestTrue(TEXT("a route is found a little at a time, as before"), FNavigationRoutePlanner::FindCampusRoute(*B.Fixture.Generator, *B.Fixture.Interior, PointOf(B.Rooms[0]), PointOf(B.Rooms[1]), Reference));
+
+	FNavigationRoutePlanner::ClearGraphCache();
+	{
+		FNavigationRouteJob Job(*B.Fixture.Generator, *B.Fixture.Interior, PointOf(B.Rooms[0]), PointOf(B.Rooms[1]));
+		Job.AllowWorkerThread();
+		bool bDone = false;
+		for (int32 Slices = 0; Slices < 20000 && !bDone; ++Slices)
+		{
+			bDone = Job.Step(0.002);
+			if (!bDone) FPlatformProcess::Sleep(0.002f);
+		}
+		TestTrue(TEXT("the job that may use a worker finishes"), bDone && Job.Succeeded());
+		TestTrue(TEXT("and finds the same route"), SameRoute(Reference, Job.GetResult()));
+		TestEqual(TEXT("its graph was joined once"), FNavigationRoutePlanner::GetGraphCacheMisses(), 1);
+		const int32 Hits = FNavigationRoutePlanner::GetGraphCacheHits();
+		// The next one finds the graph the worker joined, and has no worker to wait for.
+		FNavigationRouteJob Second(*B.Fixture.Generator, *B.Fixture.Interior, PointOf(B.Rooms[0]), PointOf(B.Rooms[2]));
+		Second.AllowWorkerThread();
+		bool bSecondDone = false;
+		for (int32 Slices = 0; Slices < 20000 && !bSecondDone; ++Slices) bSecondDone = Second.Step(0.002);
+		TestTrue(TEXT("the next route is found"), bSecondDone && Second.Succeeded());
+		TestTrue(TEXT("with the graph the worker joined"), FNavigationRoutePlanner::GetGraphCacheHits() > Hits && FNavigationRoutePlanner::GetGraphCacheMisses() == 1);
+	}
+
+	// A job that is dropped while its worker is busy stops it and does not crash.
+	FNavigationRoutePlanner::ClearGraphCache();
+	{
+		FNavigationRouteJob Dropped(*B.Fixture.Generator, *B.Fixture.Interior, PointOf(B.Rooms[0]), PointOf(B.Rooms[1]));
+		Dropped.AllowWorkerThread();
+		Dropped.Step(0.002);
+		Dropped.Step(0.002);
+	}
+	FNavigationRouteResult After;
+	TestTrue(TEXT("a route is found after a job was dropped"), FNavigationRoutePlanner::FindCampusRoute(*B.Fixture.Generator, *B.Fixture.Interior, PointOf(B.Rooms[0]), PointOf(B.Rooms[1]), After));
+	TestTrue(TEXT("and it is the same route"), SameRoute(Reference, After));
 	return true;
 }
 

@@ -38,7 +38,7 @@
 
 | Choice | Reason |
 |---|---|
-| **JSON** (`buildings.json` and friends) | The primary save/load format for hand-authored building + interior data (rooms, walls, doors, connectors). Human-readable, diffable in git, and UE's own `FJsonObject`/`FJsonSerializer` read/write it with no extra dependency. |
+| **JSON** (project files such as `E2_Filled.json`) | The primary save/load format for hand-authored building + interior data (rooms, walls, doors, connectors). Human-readable, diffable in git, and UE's own `FJsonObject`/`FJsonSerializer` read/write it with no extra dependency. |
 | **SQLite (`.db`)** | A second, additional loading path (not a replacement for JSON) for real-world campus data - roads, POIs, and building footprints sourced from OSM-derived data in the same schema the course's own reference material uses. Chosen because that source data already ships in this format, and `SQLiteCore` (above) reads it natively. |
 | **WAV** (`InNavi/Data/Audio/*.wav`) | Confirmed sufficient by the professor for this project's UI/feedback sound needs (button clicks, selection sound, notification sound, plus arbitrary background audio) - avoids needing the mp3-decoding third-party plugin mentioned above. |
 

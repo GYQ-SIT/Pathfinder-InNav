@@ -338,7 +338,8 @@ void ANavPlayerController::BeginPlay()
 			MobileSplash->AddToViewport(UMobileSplashWidget::ZOrder);
 		}
 		FTimerHandle Handle;
-		GetWorldTimerManager().SetTimer(Handle, this, &ANavPlayerController::MobileApp, 0.5f, false);
+		// The app is built when the logo has come in all the way: the build is one long frame, and the splash is still then (see UMobileSplashWidget).
+		GetWorldTimerManager().SetTimer(Handle, this, &ANavPlayerController::MobileApp, static_cast<float>(UMobileSplashWidget::AppBuildSeconds), false);
 	}
 }
 
@@ -4978,7 +4979,7 @@ void ANavPlayerController::FocusCameraOnAllBuildings()
 	}
 
 	// The free-fly pawn's WASD speed defaults to whatever ADefaultPawn ships with (1200 cm/s) -
-	// tuned for buildings.json's own small hand-placed campus (spans roughly 1000 units), but a
+	// tuned for the test fixture's own small hand-placed campus (spans roughly 1000 units), but a
 	// database-loaded campus at real-world scale (see ABuildingGenerator::LoadBuildingsFromDatabase)
 	// can span hundreds of real meters, at which point that speed reads as "barely moving". Scale it
 	// to cross the whole loaded span in about 4 seconds instead - ApplyExteriorCameraSpeed clamps to

@@ -44,7 +44,7 @@ description and when the file was last written, with:
   nothing is destroyed: put the file back into `Data` by hand to restore it. The keyboard focus starts on Cancel, so Enter never
   deletes.
 
-The sample files that ship with the project (`buildings.json`, `map_extended.db`) cannot be renamed or deleted, because tests and
+The sample files that ship with the project (`E2_Filled.json`, `map_extended.db`) cannot be renamed or deleted, because the app's
 defaults refer to them by name; a database cannot be duplicated. A database card's building count is the number of campus buildings
 (tagged `university`) in it.
 
@@ -106,7 +106,7 @@ selected building (picked in the Map panel's list or by clicking it in the scene
 
 Hidden or shown via Window > Map. Only appears once a database (`.db`) has been loaded
 (roads/POIs/context buildings only come from that loading path - a plain
-`buildings.json` project has nothing for this panel to filter).
+project file such as `E2_Filled.json` has nothing for this panel to filter).
 
 **Exterior screen: site overview.** The panel is laid out like the design team's "Site overview" page:
 
@@ -154,7 +154,7 @@ Pinned across the very top of the interior editor screen.
 
 - **Save** — same as `Ctrl+S`, left of File.
 - **File** — **New** starts a blank project, **Generate floor** fills the current floor,
-  and **Load** opens the OS file picker for an existing `buildings.json` or `.db`.
+  and **Load** opens the OS file picker for an existing project (`.json`) or `.db`.
   **Save As** writes the current project to a path you choose. New and Load check for unsaved
   changes first and prompt to save/discard/cancel, exactly like leaving to the
   exterior does.

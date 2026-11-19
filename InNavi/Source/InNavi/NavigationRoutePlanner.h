@@ -98,6 +98,10 @@ public:
 	FNavigationRouteJob(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior, const FNavigationRoutePoint& Start,
 		const FNavigationRoutePoint& Destination, const FNavigationRoutePreferences& Preferences = FNavigationRoutePreferences());
 	~FNavigationRouteJob();
+	// Joins the graph of the buildings on a worker thread, at full speed, instead of a few milliseconds a frame on the calling thread: on a phone the slices
+	// stretched ten seconds of work to forty. Only for a job whose buildings nobody changes or destroys while it runs (the phone app reads its project into
+	// a world of its own); the editor's live buildings must keep the slices, which check for a change every one. Call before the first Step.
+	void AllowWorkerThread();
 	// Works for about BudgetSeconds (at least one small step); true once the search is over. The result does not depend on how it was sliced.
 	bool Step(double BudgetSeconds);
 	// Whether a route was found; the route, or why not (Error), is in GetResult.
@@ -109,6 +113,32 @@ public:
 	// True when the route was found without the outside: a trip within one building that nothing outside could have shortened.
 	// Such a search skips the work of the outdoor graph, which is most of the work on a large campus.
 	bool WasIndoorOnly() const;
+
+private:
+	struct FImpl;
+	TUniquePtr<FImpl> Impl;
+};
+
+// Builds the part of the route graph that does not depend on where a route starts and ends (the places of the buildings and which of them see each
+// other) before anyone asks for a route, so that the first route does not have to: in a big building it is nearly all the work of a route (the whole
+// campus of the real project has 8000 places and takes about 5 s on a PC, more on a phone). The buildings are read now, on the calling thread and
+// quickly; the joining runs on a worker thread and keeps its result in the graph cache, which every later route (FNavigationRouteJob, FindCampusRoute)
+// finds ready. A route that is asked for while this is working waits for it to finish instead of joining the same graph a second time.
+//
+// The buildings and the generators they belong to must stay as they are until IsDone(): the worker reads them. Destroying this stops it at its next batch.
+// It makes the graph for routes that allow every lift, stair and escalator, the default.
+class INNAVI_API FNavigationGraphWarmup
+{
+public:
+	FNavigationGraphWarmup(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior,
+		const FNavigationRoutePreferences& Preferences = FNavigationRoutePreferences());
+	~FNavigationGraphWarmup();
+	// True once the worker has stopped (finished, nothing to build, or told to stop).
+	bool IsDone() const;
+	// True when the graph was built and kept.
+	bool WasKept() const;
+	// Tells the worker to stop at its next batch; the destructor does this and waits.
+	void Cancel();
 
 private:
 	struct FImpl;
@@ -144,4 +174,17 @@ public:
 	static int32 GetGraphCacheHits();
 	static int32 GetGraphCacheMisses();
 	static void ClearGraphCache();
+
+	// The kept graph can also live in files, so that even the first route after the app starts does not have to join the graph: it is read from the file
+	// (a few MB, well under a second) when it is not in memory, and every graph that is built is written to a file in the background. A file is named by
+	// the same key as the graph in memory (everything it is made from) and by the version of the way graphs are made, so a file of other data, or of an
+	// older version of the planner, is simply not found, and a file that cannot be read (cut off, damaged) is ignored and the graph is built as before.
+	//   SavedDirectory: where files are written, and read from (the app's own storage).
+	//   ShippedDirectory: where files that were made beforehand and come with the app are read from (Data/RouteGraphs); never written.
+	// Either may be empty. Off until this is called (the tests and the editor do not use files).
+	static void SetGraphFiles(const FString& SavedDirectory, const FString& ShippedDirectory);
+	// Waits until the files that are being written are written (for the tests, and before the app is closed by a tool).
+	static void WaitForGraphFiles();
+	// How many graphs were read from files since the cache was last cleared.
+	static int32 GetGraphFileReads();
 };

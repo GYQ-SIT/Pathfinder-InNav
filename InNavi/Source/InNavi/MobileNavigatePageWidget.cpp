@@ -176,7 +176,8 @@ void UMobileNavigatePageWidget::Refresh()
 		return;
 	}
 	const FMobileStep& Step = Route.Steps[Index];
-	// The arrow of the kind of step: straight on for most, the turns, a check for the arrival.
+	// The arrow of the kind of step: straight on for most, the turns, a check for the arrival, and the lift, the stairs and the escalator for the steps
+	// that change level. A picture that is not imported yet (a fresh checkout, a test) is replaced by the straight arrow.
 	if (InstructionIcon)
 	{
 		const TCHAR* IconName = TEXT("Straight");
@@ -185,9 +186,16 @@ void UMobileNavigatePageWidget::Refresh()
 		case EMobileStepKind::TurnLeft: case EMobileStepKind::TurnAround: IconName = TEXT("TurnLeft"); break;
 		case EMobileStepKind::TurnRight: IconName = TEXT("TurnRight"); break;
 		case EMobileStepKind::Arrive: IconName = TEXT("Success"); break;
+		case EMobileStepKind::TakeLift: IconName = TEXT("Lift"); break;
+		case EMobileStepKind::TakeStairs: IconName = TEXT("Stairs"); break;
+		case EMobileStepKind::TakeEscalator: IconName = TEXT("Escalator"); break;
 		default: break;
 		}
 		UWidget* Arrow = MobileIcons::Picture(WidgetTree, IconName, 24.f, Blue);
+		if (!Arrow && FCString::Strcmp(IconName, TEXT("Straight")) != 0)
+		{
+			Arrow = MobileIcons::Picture(WidgetTree, TEXT("Straight"), 24.f, Blue);
+		}
 		InstructionIcon->SetContent(Arrow ? Arrow : static_cast<UWidget*>(MakeText(WidgetTree, FString(), TEXT("\u2191"), 22.f, Blue, true)));
 	}
 	if (ProgressFill && ProgressFill->GetChildrenCount() == 2)

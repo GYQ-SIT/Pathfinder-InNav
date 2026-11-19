@@ -13,7 +13,7 @@ See [the design notes](design/mobile-app-data-interface.md) for the screen contr
 - Missing data does not select the mock. An empty catalogue displays an explanatory message.
 - Authored floors above a legacy shell count remain visible and routable. When rooms share a mobile place ID, the validator flags the conflict and the app uses distinct floor-and-room IDs. A saved place that can no longer be resolved stays visible as unavailable and can be removed individually.
 
-`Data/buildings.json` contains the authored exterior and room data. `Data/map_extended.db` supplies campus footprints through the existing database loader; it has no authored rooms. Empty interiors remain empty. The adapter does not generate rooms, doors or routes to fill gaps in a project.
+`Data/E2_Filled.json` contains the authored exterior and room data (the campus with the real ten-floor E2/3). `Data/map_extended.db` supplies campus footprints through the existing database loader; it has no authored rooms. Empty interiors remain empty. The adapter does not generate rooms, doors or routes to fill gaps in a project.
 
 The shipped room with code `E2-01-02` has no openings. Expect it to be unreachable; this is a finding about the authored data, not a reason to substitute a simulated route.
 

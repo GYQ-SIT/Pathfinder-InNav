@@ -176,6 +176,48 @@ bool FMobileJourneyWalkTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileMapTapInterruptsTest, "InNavi.Mobile.Journey.MapTapInterrupts", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileMapTapInterruptsTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	UMobileAppWidget* Screen = MakeJourneyScreen(World);
+	if (!TestNotNull(TEXT("the screen is created"), Screen)) return false;
+
+	// Arrived: a tap on another room opens it, with no cross to press first, and the trip is over.
+	Screen->GetSearchPage()->ChoosePlace(TEXT("E2-01-101"));
+	Screen->SendSheetEvent(EMobileSheetEvent::DirectionsRequested);
+	Screen->SendSheetEvent(EMobileSheetEvent::NavigationStarted);
+	Screen->SendSheetEvent(EMobileSheetEvent::ArrivedAtDestination);
+	TestEqual(TEXT("arrived"), Screen->GetFlow().GetState(), EMobileSheetState::Arrived);
+	Screen->HandleMapPlaceTapped(TEXT("E2-02-101"));
+	TestEqual(TEXT("a tap after arriving opens the new place"), Screen->GetFlow().GetState(), EMobileSheetState::Place);
+	TestEqual(TEXT("it is the room tapped"), Screen->GetSelectedPlace().Id, FString(TEXT("E2-02-101")));
+	TestTrue(TEXT("and the old trip is gone"), Screen->GetTripDraft().IsEmpty() && Screen->GetLegs().IsEmpty());
+
+	// Walking: the walk is interrupted for the new place.
+	Screen->SendSheetEvent(EMobileSheetEvent::DirectionsRequested);
+	Screen->SendSheetEvent(EMobileSheetEvent::NavigationStarted);
+	TestEqual(TEXT("walking"), Screen->GetFlow().GetState(), EMobileSheetState::Navigating);
+	Screen->HandleMapPlaceTapped(TEXT("E6-2M-102"));
+	TestEqual(TEXT("a tap while walking opens the new place"), Screen->GetFlow().GetState(), EMobileSheetState::Place);
+	TestEqual(TEXT("it is the room tapped (walking)"), Screen->GetSelectedPlace().Id, FString(TEXT("E6-2M-102")));
+	TestTrue(TEXT("the walk is gone"), Screen->GetTripDraft().IsEmpty() && Screen->GetLegs().IsEmpty());
+
+	// A route only being looked at: the new place opens, and the trip stays so it can be added as a stop.
+	Screen->SendSheetEvent(EMobileSheetEvent::DirectionsRequested);
+	TestEqual(TEXT("the route page"), Screen->GetFlow().GetState(), EMobileSheetState::Route);
+	Screen->HandleMapPlaceTapped(TEXT("E2-02-101"));
+	TestEqual(TEXT("a tap on the route page opens the new place"), Screen->GetFlow().GetState(), EMobileSheetState::Place);
+	TestEqual(TEXT("it is the room tapped (route)"), Screen->GetSelectedPlace().Id, FString(TEXT("E2-02-101")));
+	TestEqual(TEXT("the trip is kept for Add stop"), JoinIds(Screen->GetTripDraft()), FString(TEXT("E6-2M-102")));
+
+	// A tap on nothing known changes nothing.
+	Screen->HandleMapPlaceTapped(TEXT("no-such-room"));
+	TestEqual(TEXT("an unknown room is ignored"), Screen->GetSelectedPlace().Id, FString(TEXT("E2-02-101")));
+	World->DestroyWorld(false);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileJourneyTripTest, "InNavi.Mobile.Journey.Trip", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FMobileJourneyTripTest::RunTest(const FString& Parameters)
 {

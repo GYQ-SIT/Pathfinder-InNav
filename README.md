@@ -63,7 +63,7 @@ cd Pathfinder-InNav
    Close the editor before building from outside it: Unreal cannot build while it is open.
 3. Hit **Play** in the Editor. Sample data lives under `InNavi/Data/`: the campus/
    exterior layer loads from `map_extended.db` (SQL-backed), and interior building
-   layouts save/load as JSON (e.g. `buildings.json`). For several buildings with doors
+   layouts save/load as JSON (e.g. `E2_Filled.json`, the real ten-floor E2/3). For several buildings with doors
    and generated floors, **File > Load** `docs/test-data/entrance-test-2-with-doors.json`.
 
 The editor has a full on-screen UI on both its screens (the campus and a building's
@@ -90,7 +90,8 @@ More than 240 automation tests (`InNavi.*`), including the measurements of `InNa
 UnrealEditor-Cmd.exe InNavi/InNavi.uproject -ExecCmds="Automation RunTests InNavi; Quit" -unattended -nullrhi -nosplash
 ```
 
-(`UnrealEditor-Cmd.exe` is in `Engine/Binaries/Win64` of the Unreal install.) A part can be run on its own, e.g. `InNavi.Mobile` or
+(`UnrealEditor-Cmd.exe` is in `Engine/Binaries/Win64` of the Unreal install.) Most tests open `docs/test-data/e2-test-fixture.json` (buildings E1, E2 and E6 with generated floors): it is a test
+file, the app never loads it, so edit it only to change what the tests check. A part can be run on its own, e.g. `InNavi.Mobile` or
 `InNavi.Navigation`. The Windows CI job runs **all** of them on every push to `main` and fails when one fails (the editor exits 0 either way, so
 `scripts/check-test-report.ps1` reads the report); a pull request gets the hosted lint and JSON checks only, so run the tests (and the
 static analysis, see below) on your own machine before opening one. Before a pull request, `python scripts/lint.py` runs the repository checks of `lint.yml`
@@ -130,7 +131,7 @@ epic with an owner, and the epics of the four technical deliverables are named i
 - **Branch** from `main`, named for what it is (`YQ_nav_panel`), and open a **pull request** that **someone other than you reviews and approves** (step by step: [`docs/pull-request-guide.md`](docs/pull-request-guide.md)); the lint and JSON checks have to be green before it is merged, and you run the tests and the static analysis yourself first (the Windows build, analysis and tests run on `main` after the merge).
 - **Name the Jira issue** in the pull request (the template asks for it) and start each commit message with its key when there is one: `PAT-123 Short summary`.
 - **One owner per story**; a pull request that closes a story says so, and the story is moved to Done when it is merged.
-- Do not commit personal files (your own `buildings.json` edits, saved layouts); `lint.py` also fails on keys and addresses in the source.
+- Do not commit personal files (your own edits of a project file, saved layouts); `lint.py` also fails on keys and addresses in the source.
 
 ## Performance budget
 

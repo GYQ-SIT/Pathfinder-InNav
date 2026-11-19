@@ -27,7 +27,8 @@ namespace
 		{
 			GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
 			Interior->DispatchBeginPlay();
-			Generator->LoadBuildingsFromFile(FPaths::ProjectDir() / TEXT("Data/buildings.json"));
+			// Not an app file: the test project in docs/test-data (E1, E2 and E6 with generated floors), which the app never loads.
+			Generator->LoadBuildingsFromFile(FPaths::ProjectDir() / TEXT("../docs/test-data/e2-test-fixture.json"));
 			Interior->LoadInteriorForBuilding(TEXT("E2"));
 			Nav->SetNavigationContext(Generator, Interior);
 		}

@@ -23,7 +23,7 @@ This is for teammates who want to **try the phone app** on their own phone. You 
 4. If Google Play Protect or the phone's security scan says the app is from an unknown developer or has not been scanned, choose **Install anyway** (仍然安装) or **Continue**. That is expected: this is a signed test release, not published in a store.
 5. Tap **Open**. The first start takes up to about half a minute while the app sets up; later starts are quicker.
 
-You should see **Explore** with sites from the packaged project library (`buildings.json` and the footprint-only `map_extended.db`) and a tab bar at the bottom. The old prototype's mall/centre/demo-campus sites are available only when a build is launched with `-MobileMock`.
+You should see **Explore** with sites from the packaged project library (`E2_Filled.json`, the real E2/3 project, and the footprint-only `map_extended.db`) and a tab bar at the bottom. The old prototype's mall/centre/demo-campus sites are available only when a build is launched with `-MobileMock`.
 
 ## Things to try
 

@@ -1,6 +1,8 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "MobileRealSource.h"
+#include "MobileMockSource.h"
+#include "NavigationRoutePlanner.h"
 #include "MobileNavSourceContract.h"
 #include "MobileAppWidget.h"
 #include "MobileExplorePageWidget.h"
@@ -449,6 +451,95 @@ bool FMobileRealMissingDataTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("missing data does not fall back to invented places"), Empty.ListSites().IsEmpty());
 	FMobileRouteRequest Request; Request.ToPlaceId = TEXT("no-such-place");
 	const auto Route = Empty.FindRoute(Request); TestTrue(TEXT("missing destinations produce an explanation"), !Route.bFound && !Route.Error.IsEmpty());
+	return true;
+}
+
+// The route graph is got ready in the background (IMobileNavSource::BeginWarmup) so that the first route does not make it: after the warm-up the first
+// route finds the graph and builds none, and it is the same route as without the warm-up.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRealWarmupTest, "InNavi.Mobile.Source.RealRouteGraphWarmup", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileRealWarmupTest::RunTest(const FString& Parameters)
+{
+	MobileRealTests::FProjectFiles Files;
+	FMobileRealSource Source(Files.Write());
+	const auto Places = MobileRealTests::Places(Source);
+	FMobileRouteRequest Request; Request.FromPlaceId = Places[0].Id; Request.ToPlaceId = Places[1].Id;
+
+	FNavigationRoutePlanner::SetGraphFiles(FString(), FString());
+	FNavigationRoutePlanner::ClearGraphCache();
+	const FMobileRoute Reference = Source.FindRoute(Request);
+	if (!TestTrue(TEXT("a route is found without a warm-up"), Reference.bFound)) return false;
+
+	FNavigationRoutePlanner::ClearGraphCache();
+	const auto Sites = Source.ListSites();
+	auto Warmup = Source.BeginWarmup(Sites[0].Id);
+	if (!TestNotNull(TEXT("the real source has something to get ready"), Warmup.Get())) return false;
+	FMobileRoute Placeholder;
+	bool bDone = false;
+	for (int32 Step = 0; Step < 60000 && !bDone; ++Step)
+	{
+		bDone = Warmup->Step(0.003, Placeholder);
+		if (!bDone) FPlatformProcess::Sleep(0.002f);
+	}
+	TestTrue(TEXT("the warm-up finishes"), bDone);
+	Warmup.Reset();
+	const int32 MadeByWarmup = FNavigationRoutePlanner::GetGraphCacheMisses();
+	TestTrue(TEXT("it made the graphs"), MadeByWarmup >= 1);
+	const FMobileRoute Warmed = Source.FindRoute(Request);
+	TestTrue(TEXT("the first route after it is found"), Warmed.bFound);
+	TestEqual(TEXT("and made no graph"), FNavigationRoutePlanner::GetGraphCacheMisses(), MadeByWarmup);
+	TestTrue(TEXT("it found the graph that was kept"), FNavigationRoutePlanner::GetGraphCacheHits() >= 1);
+	TestTrue(TEXT("and it is the same route"), Warmed.Steps.Num() == Reference.Steps.Num() && FMath::IsNearlyEqual(Warmed.Metres, Reference.Metres, 0.001));
+
+	// A source with nothing to get ready (the prototype's) gives no job.
+	FMobileMockSource Mock;
+	TestNull(TEXT("the prototype's data has nothing to get ready"), Mock.BeginWarmup(TEXT("sit-punggol")).Get());
+	return true;
+}
+
+// A project folder can hold several projects (sites), each with a graph of its own, and a route can be asked for in any of them: getting the graph of
+// one site ready does not do for another, so each site has its own warm-up, and after all of them a route in either finds its graph.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRealWarmupSitesTest, "InNavi.Mobile.Source.RealRouteGraphWarmupEverySite", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileRealWarmupSitesTest::RunTest(const FString& Parameters)
+{
+	MobileRealTests::FProjectFiles Files;
+	Files.Write(TEXT("first.json"));
+	// A second project: the same valid layout under another name, with its building known by another id.
+	Files.Root->SetStringField(TEXT("projectName"), TEXT("Second campus"));
+	Files.Building()->SetStringField(TEXT("id"), TEXT("B2"));
+	Files.Building()->SetStringField(TEXT("name"), TEXT("Second building"));
+	Files.Write(TEXT("second.json"));
+	FMobileRealSource Source(Files.Directory);
+	const auto Sites = Source.ListSites();
+	if (!TestEqual(TEXT("two sites"), Sites.Num(), 2)) return false;
+
+	FNavigationRoutePlanner::SetGraphFiles(FString(), FString());
+	FNavigationRoutePlanner::ClearGraphCache();
+	for (const auto& Site : Sites)
+	{
+		auto Warmup = Source.BeginWarmup(Site.Id);
+		if (!TestNotNull(*FString::Printf(TEXT("a warm-up for %s"), *Site.Id), Warmup.Get())) return false;
+		FMobileRoute Placeholder;
+		bool bDone = false;
+		for (int32 Step = 0; Step < 60000 && !bDone; ++Step)
+		{
+			bDone = Warmup->Step(0.003, Placeholder);
+			if (!bDone) FPlatformProcess::Sleep(0.002f);
+		}
+		TestTrue(*FString::Printf(TEXT("the warm-up of %s finishes"), *Site.Id), bDone);
+	}
+	const int32 MadeByWarmups = FNavigationRoutePlanner::GetGraphCacheMisses();
+	for (const auto& Site : Sites)
+	{
+		// Two places of one building.
+		const auto SitePlaces = Source.SearchPlaces(Site.Id, FString(), FMobilePlaceFilter());
+		const FMobilePlace* From = SitePlaces.IsEmpty() ? nullptr : &SitePlaces[0];
+		const FMobilePlace* To = From ? SitePlaces.FindByPredicate([From](const FMobilePlace& Place) { return Place.Id != From->Id && Place.BuildingId == From->BuildingId; }) : nullptr;
+		if (!TestTrue(TEXT("a site has two places in one building to go between"), From && To)) continue;
+		FMobileRouteRequest Request; Request.FromPlaceId = From->Id; Request.ToPlaceId = To->Id;
+		const FMobileRoute SiteRoute = Source.FindRoute(Request);
+		TestTrue(*FString::Printf(TEXT("a route is found in %s (%s)"), *Site.Id, *SiteRoute.Error), SiteRoute.bFound);
+	}
+	TestEqual(TEXT("and no route made a graph: each site's was ready"), FNavigationRoutePlanner::GetGraphCacheMisses(), MadeByWarmups);
 	return true;
 }
 

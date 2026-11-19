@@ -51,7 +51,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	APolyBuilding* CreateRegularPolygonBuilding(const FString& Id, const FString& Name, FVector2D Position, int32 Sides, float Radius, float RotationDegrees, int32 FloorCount, float FloorHeight);
 
-	// Parses a buildings.json-format file (same schema as Data/buildings.json - "scale",
+	// Parses a project-format file (same schema as the sample projects - "scale",
 	// "floorHeight", "buildings": [...]) and spawns everything in it via SpawnBuildingFromData.
 	// Nothing loads automatically at BeginPlay - the start screen's Open/New choice is what decides
 	// whether (and which) building data gets loaded. The file's top-level "scale" overwrites Scale
@@ -79,7 +79,7 @@ public:
 	// no interior data is involved here at all, unlike LoadBuildingsFromFile's "interior" field:
 	// interiors are always hand-authored through the interior editor regardless of where a building's
 	// exterior came from. Sets Scale to 100 (footprint units become real-world meters directly, since
-	// this data - unlike buildings.json's hand-authored, non-geographic footprints - already IS the
+	// this data - unlike the hand-authored test fixture's, non-geographic footprints - already IS the
 	// real campus at real scale). Returns how many buildings were successfully spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingsFromDatabase(const FString& DatabasePath);
@@ -220,7 +220,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Building")
 	FString FindBuildingIdByName(const FString& Name) const;
 
-	// Writes every currently-spawned building back out as a buildings.json-format file (the same
+	// Writes every currently-spawned building back out as a project-format file (the same
 	// schema LoadBuildingsFromFile reads) - the "Save" side of the Open/New + Ctrl+S save flow
 	// (see NavPlayerController::SaveCurrentProject). Each building's stored interior data (see
 	// GetInteriorDataForBuilding) is written back out as that building's "interior" field, if any -
@@ -330,7 +330,7 @@ private:
 	TSharedPtr<FJsonObject> WithoutRemovedBuildingLinks(const TSharedPtr<FJsonObject>& Interior) const;
 
 	// LoadBuildingsFromDatabase's fallback FloorCount/FloorHeight - the buildings/building_nodes
-	// schema has no floor data at all (it's OSM footprint+type only), unlike buildings.json's
+	// schema has no floor data at all (it's OSM footprint+type only), unlike the test fixture's
 	// per-building "floorCount"/"floorHeight" fields.
 	static constexpr int32 DefaultFloorCountForDatabaseBuildings = 5;
 	static constexpr float DefaultFloorHeightForDatabaseBuildings = 300.f;
