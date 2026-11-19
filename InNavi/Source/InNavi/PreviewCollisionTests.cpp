@@ -24,10 +24,12 @@ namespace PreviewCollisionTests
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPreviewCollisionGeometryTest, "InNavi.Building.SeeThrough.VisualOnlyCollision", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FPreviewCollisionGeometryTest::RunTest(const FString& Parameters)
 {
+	// Two worlds: rooms in one world on the same spot take different wall steps (see AInteriorRoom::GetWallBiasLevel), and this test compares the looks.
 	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
-	ON_SCOPE_EXIT { World->DestroyWorld(false); };
+	UWorld* PreviewWorld = UWorld::CreateWorld(EWorldType::Game, false);
+	ON_SCOPE_EXIT { World->DestroyWorld(false); PreviewWorld->DestroyWorld(false); };
 	auto* Editable = World->SpawnActor<AInteriorRoom>();
-	auto* Preview = World->SpawnActor<AInteriorRoom>();
+	auto* Preview = PreviewWorld->SpawnActor<AInteriorRoom>();
 	const TArray<FVector2D> Outline = { {0,0}, {500,0}, {500,400}, {0,400} };
 	Editable->BuildWalls(Outline, 1.f, FVector2D::ZeroVector, 0.f, 280.f, 20.f, {}, true);
 	Preview->BuildWalls(Outline, 1.f, FVector2D::ZeroVector, 0.f, 280.f, 20.f, {}, true, false);

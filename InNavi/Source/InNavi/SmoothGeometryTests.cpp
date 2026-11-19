@@ -345,7 +345,10 @@ bool FRoomWallRingTest::RunTest(const FString& Parameters)
 	TArray<int32> Indices;
 	UProceduralMeshComponent* Mesh = SectionOf(Room, Vertices, Normals, Indices);
 	TestEqual(TEXT("a room: two long faces, a top and a bottom for each of four walls, no cap between them"), Vertices.Num(), 4 * 4 * 4);
-	TestTrue(TEXT("the outer corner is the mitre point, no notch"), HasVertexAt(Vertices, FVector(-10, -10, 0)) && HasVertexAt(Vertices, FVector(1010, 1010, 300)));
+	// The walls are a hair thicker and taller by the room's own step (see AInteriorRoom::GetWallBiasLevel), so that they never share a plane with a neighbour's.
+	const float Out = 10.f + AInteriorRoom::WallBiasThicknessStep * Room->GetWallBiasLevel();
+	const float Top = 300.f + AInteriorRoom::WallBiasHeightStep * Room->GetWallBiasLevel();
+	TestTrue(TEXT("the outer corner is the mitre point, no notch"), HasVertexAt(Vertices, FVector(-Out, -Out, 0)) && HasVertexAt(Vertices, FVector(1000 + Out, 1000 + Out, Top)));
 	TestTrue(TEXT("every face points the way its normals say"), FacesAgreeWithNormals(Vertices, Indices, Normals));
 	if (Mesh && Mesh->GetMaterial(0) && Mesh->GetMaterial(0)->GetBaseMaterial())
 	{

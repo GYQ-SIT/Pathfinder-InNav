@@ -1,6 +1,10 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "UiTestFixture.h"
+#include "InteriorDrawing.h"
+#include "NavigationSearchUtils.h"
+#include "Components/ComboBoxString.h"
+#include "Components/TextBlock.h"
 #include "InteriorFloorPlanWidget.h"
 #include "InteriorScreenWidget.h"
 #include "InteriorRoom.h"
@@ -8,6 +12,7 @@
 #include "NavCameraPawn.h"
 #include "NavGameMode.h"
 #include "NavigationDockPanelWidget.h"
+#include "PolyBuilding.h"
 #include "Components/Button.h"
 #include "Components/EditableTextBox.h"
 #include "Components/InputComponent.h"
@@ -30,6 +35,8 @@ struct FEditorInteractionTestAccess
 	static FReply Up(UInteriorFloorPlanWidget* W, const FGeometry& G, const FPointerEvent& E) { return W->NativeOnMouseButtonUp(G,E); }
 	static TArray<FVector2D> Handles(UInteriorFloorPlanWidget* W, FVector2D Size) { return W->GetResizeHandles(Size); }
 	static TArray<FVector2D> Preview(UInteriorFloorPlanWidget* W) { return W->GetPrefabPreview(); }
+	static void ResizePreview(const UInteriorFloorPlanWidget* W, FVector2D& Position, FVector2D& Size) { Position = W->ResizePreviewPosition; Size = W->ResizePreviewSize; }
+	static TArray<FVector2D> Vertices(UInteriorFloorPlanWidget* W, FVector2D Size) { return W->GetVertexHandles(Size); }
 	static FReply SearchKey(UNavigationPlaceCombo* Combo, FKey Key)
 	{
 		return Combo->HandleSearchKey(FGeometry(), FKeyEvent(Key,FModifierKeysState(),0,false,0,0));
@@ -53,6 +60,13 @@ namespace EditorInteractionTests
 		TSet<FKey> Held;
 		if (bHeld) Held.Add(EKeys::LeftMouseButton);
 		return FPointerEvent(0, Position, Position, Held, EKeys::LeftMouseButton, 0.f, FModifierKeysState());
+	}
+	// The same, with Shift and/or Ctrl held.
+	FPointerEvent MouseWith(FVector2D Position, bool bHeld, bool bShift, bool bCtrl)
+	{
+		TSet<FKey> Held;
+		if (bHeld) Held.Add(EKeys::LeftMouseButton);
+		return FPointerEvent(0, Position, Position, Held, EKeys::LeftMouseButton, 0.f, FModifierKeysState(bShift, false, bCtrl, false, false, false, false, false, false));
 	}
 	UInteriorFloorPlanWidget* Plan(FNavigationSearchFixture& F, ANavPlayerController* PC)
 	{
@@ -201,7 +215,425 @@ bool FEditorResizeTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorCameraControlsTest, "InNavi.EditorUX.CameraControls", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+// PAT-190: dragging a resize handle never shows the room outside the building. The preview stops at the wall, a corner handle slides along it, and
+// letting go applies exactly what was shown (no "Unable to resize" after the fact).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorResizeStopsAtWallTest, "InNavi.EditorUX.ResizeStopsAtWall", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FEditorResizeStopsAtWallTest::RunTest(const FString& Parameters)
+{
+	using namespace EditorInteractionTests;
+	FNavigationSearchFixture F; Prepare(F); ANavPlayerController* PC = F.MakeController();
+	FString Error;
+	AInteriorRoom* Room = F.Interior->CreateRoomFromFootprint({{450,450},{550,450},{550,550},{450,550}}, TEXT("Wall"), TEXT("Wall"), true,false,false,Error);
+	if (!TestNotNull(TEXT("room created"), Room)) return false;
+	PC->ToggleSelectMode(); PC->SelectRoom(TEXT("Wall"));
+
+	// The check the drag relies on, against the real outline of the building.
+	const APolyBuilding* Building = F.Generator->FindBuildingById(TEXT("UX"));
+	if (!TestNotNull(TEXT("building"), Building)) return false;
+	const FBox2D Walls(Building->GetFootprint());
+	TestTrue(TEXT("a size inside the building fits"), F.Interior->DoesResizeStayInsideBuilding(TEXT("Wall"), {450,450}, {100,100}));
+	TestFalse(TEXT("a size past the wall does not"), F.Interior->DoesResizeStayInsideBuilding(TEXT("Wall"), {450,450}, {Walls.GetSize().X * 2.0, 100}));
+	TestFalse(TEXT("an unknown room does not"), F.Interior->DoesResizeStayInsideBuilding(TEXT("Nope"), {400,400}, {200,200}));
+
+	FVector2D Position, Start; PC->GetSelectedRoomBounds(Position, Start);
+	UInteriorFloorPlanWidget* W = Plan(F, PC);
+	const FGeometry G = FGeometry::MakeRoot(FVector2f(1000,1000), FSlateLayoutTransform());
+	const TArray<FVector2D> Handles = FEditorInteractionTestAccess::Handles(W, G.GetLocalSize());
+	if (!TestEqual(TEXT("eight resize handles"), Handles.Num(), 8)) return false;
+
+	// Bottom-right corner, pulled far past the building in both directions.
+	FEditorInteractionTestAccess::Down(W, G, Mouse(Handles[4], true));
+	FEditorInteractionTestAccess::Move(W, G, Mouse(Handles[4] + FVector2D(4000,4000), true));
+	FVector2D PreviewPosition, PreviewSize;
+	FEditorInteractionTestAccess::ResizePreview(W, PreviewPosition, PreviewSize);
+	TestTrue(TEXT("the preview grew"), PreviewSize.X > Start.X + 1.0 && PreviewSize.Y > Start.Y + 1.0);
+	TestTrue(TEXT("the preview is inside the building"), F.Interior->DoesResizeStayInsideBuilding(TEXT("Wall"), PreviewPosition, PreviewSize));
+	TestTrue(TEXT("it stopped at the far wall on X"), FMath::IsNearlyEqual(PreviewPosition.X + PreviewSize.X, Walls.Max.X, Walls.GetSize().X * 0.01));
+	TestTrue(TEXT("and on Y"), FMath::IsNearlyEqual(PreviewPosition.Y + PreviewSize.Y, Walls.Max.Y, Walls.GetSize().Y * 0.01));
+	TestTrue(TEXT("the top-left corner did not move"), PreviewPosition.Equals(FVector2D(450,450), 0.01));
+
+	// Pulled past the right wall only: X stops at the wall, Y follows the pointer (the corner slides along the wall).
+	FEditorInteractionTestAccess::Move(W, G, Mouse(Handles[4] + FVector2D(4000,20), true));
+	FEditorInteractionTestAccess::ResizePreview(W, PreviewPosition, PreviewSize);
+	TestTrue(TEXT("X stays at the wall"), FMath::IsNearlyEqual(PreviewPosition.X + PreviewSize.X, Walls.Max.X, Walls.GetSize().X * 0.01));
+	TestTrue(TEXT("Y is not stuck at the wall"), PreviewPosition.Y + PreviewSize.Y < Walls.Max.Y - Walls.GetSize().Y * 0.05);
+
+	// Letting go applies the shown size.
+	FEditorInteractionTestAccess::Move(W, G, Mouse(Handles[4] + FVector2D(4000,4000), true));
+	FEditorInteractionTestAccess::ResizePreview(W, PreviewPosition, PreviewSize);
+	FEditorInteractionTestAccess::Up(W, G, Mouse(Handles[4] + FVector2D(4000,4000), false));
+	FVector2D After; PC->GetSelectedRoomBounds(Position, After);
+	TestTrue(TEXT("the room has the size that was shown"), After.Equals(PreviewSize, 0.05));
+	const AInteriorRoom* Resized = F.Interior->GetRoomById(TEXT("Wall"));
+	TestTrue(TEXT("and is still inside the building"), Resized && F.Interior->DoesResizeStayInsideBuilding(TEXT("Wall"), Position, After));
+	return true;
+}
+
+// PAT-191, drawing: Shift keeps a drawn line straight and a dragged shape square (circle) or equilateral (triangle), and Ctrl+Z while drawing takes
+// back the last point instead of an older edit.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorDrawingControlsTest, "InNavi.EditorUX.DrawingControls", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FEditorDrawingControlsTest::RunTest(const FString& Parameters)
+{
+	using namespace EditorInteractionTests;
+
+	// The rules themselves.
+	TestTrue(TEXT("axis lock goes along X when the pointer went further in X"), InteriorDrawing::AxisLocked({10,10}, {50,14}).Equals({50,10}, 1e-9));
+	TestTrue(TEXT("axis lock goes along Y when it went further in Y"), InteriorDrawing::AxisLocked({10,10}, {12,60}).Equals({10,60}, 1e-9));
+	TestTrue(TEXT("a square keeps the longer pull"), InteriorDrawing::ProportionalCorner({0,0}, {100,40}, 1.0).Equals({100,100}, 1e-9));
+	TestTrue(TEXT("and the direction of the drag"), InteriorDrawing::ProportionalCorner({0,0}, {-30,10}, 1.0).Equals({-30,30}, 1e-9));
+	TestTrue(TEXT("a triangle's proportion"), InteriorDrawing::ProportionalCorner({0,0}, {100,10}, 0.866).Equals({100,86.6}, 1e-6));
+
+	FNavigationSearchFixture F; Prepare(F); ANavPlayerController* PC = F.MakeController();
+	if (PC->IsSnapEnabled()) PC->ToggleSnapEnabled();
+	UInteriorFloorPlanWidget* W = Plan(F, PC);
+	const FGeometry G = FGeometry::MakeRoot(FVector2f(1000,1000), FSlateLayoutTransform());
+
+	// Shift while clicking out a room: the second point is straight along X from the first.
+	PC->ToggleDrawRoomMode();
+	const FVector2D First(300,300);
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(First, true, false, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(First, false, false, false));
+	if (!TestEqual(TEXT("one point is placed"), PC->GetPendingRoomFootprint().Num(), 1)) return false;
+	FEditorInteractionTestAccess::Down(W, G, MouseWith({500,330}, true, true, false));
+	if (!TestEqual(TEXT("two points"), PC->GetPendingRoomFootprint().Num(), 2)) return false;
+	TestTrue(TEXT("with Shift the second point has the first point's Y"), FMath::IsNearlyEqual(PC->GetPendingRoomFootprint()[1].Y, PC->GetPendingRoomFootprint()[0].Y, 1e-6));
+	TestFalse(TEXT("and it did go somewhere else along X"), FMath::IsNearlyEqual(PC->GetPendingRoomFootprint()[1].X, PC->GetPendingRoomFootprint()[0].X, 1.0));
+	FEditorInteractionTestAccess::Down(W, G, MouseWith({350,500}, true, false, false));
+	if (!TestEqual(TEXT("three points"), PC->GetPendingRoomFootprint().Num(), 3)) return false;
+	TestFalse(TEXT("without Shift the point stays where it was clicked"), FMath::IsNearlyEqual(PC->GetPendingRoomFootprint()[2].X, PC->GetPendingRoomFootprint()[1].X, 1.0));
+
+	// Ctrl+Z while drawing: the last point goes, one at a time, and only then does Undo reach the older edits.
+	PC->CancelRoom();
+	FString Error;
+	AInteriorRoom* Kept = F.Interior->CreateRoomFromFootprint({{100,100},{150,100},{150,150},{100,150}}, TEXT("Keep"), TEXT("Keep"), true, false, false, Error);
+	if (!TestNotNull(TEXT("an older edit to keep"), Kept)) return false;
+	TestTrue(TEXT("still drawing"), PC->IsInDrawRoomMode());
+	PC->AddRoomPointAtFootprintPosition({300,300});
+	PC->AddRoomPointAtFootprintPosition({400,300});
+	PC->AddRoomPointAtFootprintPosition({400,400});
+	TestEqual(TEXT("three points"), PC->GetPendingRoomFootprint().Num(), 3);
+	TestTrue(TEXT("Undo takes back a point"), PC->UndoInteriorEdit());
+	TestEqual(TEXT("two points left"), PC->GetPendingRoomFootprint().Num(), 2);
+	TestTrue(TEXT("and the older edit is untouched"), F.Interior->GetRoomById(TEXT("Keep")) != nullptr);
+	TestTrue(TEXT("again"), PC->UndoInteriorEdit());
+	TestTrue(TEXT("and again"), PC->UndoInteriorEdit());
+	TestTrue(TEXT("no points left"), PC->GetPendingRoomFootprint().IsEmpty());
+	TestTrue(TEXT("the older edit is still there"), F.Interior->GetRoomById(TEXT("Keep")) != nullptr);
+	TestTrue(TEXT("with nothing drawn Undo goes back to the older edits"), PC->UndoInteriorEdit());
+	TestNull(TEXT("and takes the room back"), F.Interior->GetRoomById(TEXT("Keep")));
+	PC->ToggleDrawRoomMode();
+
+	// Shift while dragging a shape: a square, a circle that is as high as wide, an equilateral triangle.
+	for (int32 Shape = 1; Shape <= 3; ++Shape)
+	{
+		if (Shape == 1) PC->TogglePrefabRectangleMode();
+		else if (Shape == 2) PC->TogglePrefabTriangleMode();
+		else PC->TogglePrefabCircleMode();
+		const FVector2D Start(600,600), End(780,640);
+		FEditorInteractionTestAccess::Down(W, G, MouseWith(Start, true, true, false));
+		FEditorInteractionTestAccess::Move(W, G, MouseWith(End, true, true, false));
+		const TArray<FVector2D> Preview = FEditorInteractionTestAccess::Preview(W);
+		if (!TestFalse(TEXT("the shape has a preview"), Preview.IsEmpty())) return false;
+		const FVector2D Size = FBox2D(Preview).GetSize();
+		const double Expected = Shape == 2 ? PC->GetPrefabShiftAspect() : 1.0;
+		TestTrue(*FString::Printf(TEXT("shape %d keeps its proportion with Shift"), Shape), FMath::IsNearlyEqual(Size.Y / Size.X, Expected, 0.01));
+		FEditorInteractionTestAccess::Up(W, G, MouseWith(End, false, true, false));
+		FVector2D Position, PlacedSize;
+		if (TestTrue(TEXT("the shape is placed"), PC->GetSelectedRoomBounds(Position, PlacedSize)))
+		{
+			TestTrue(*FString::Printf(TEXT("shape %d is placed with that proportion"), Shape), FMath::IsNearlyEqual(PlacedSize.Y / PlacedSize.X, Expected, 0.01));
+			F.Interior->DeleteRoom(PC->GetSelectedRoomId()); PC->SelectRoom(FString());
+		}
+		// Without Shift the box is whatever the drag was.
+		FEditorInteractionTestAccess::Down(W, G, MouseWith(Start, true, false, false));
+		FEditorInteractionTestAccess::Move(W, G, MouseWith(End, true, false, false));
+		const FVector2D Free = FBox2D(FEditorInteractionTestAccess::Preview(W)).GetSize();
+		TestFalse(*FString::Printf(TEXT("shape %d is free without Shift"), Shape), FMath::IsNearlyEqual(Free.Y / Free.X, Expected, 0.01));
+		FEditorInteractionTestAccess::Up(W, G, MouseWith(End, false, false, false));
+		if (PC->GetSelectedRoomBounds(Position, PlacedSize)) { F.Interior->DeleteRoom(PC->GetSelectedRoomId()); PC->SelectRoom(FString()); }
+	}
+	return true;
+}
+
+// PAT-191, corners: a corner of a room or wall moves on its own, without drawing the room again. A corner under a resize handle needs Ctrl (a plain
+// drag there resizes the room as before); the others move with a plain drag. It never goes where drawing the room would have been refused.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorRoomCornersTest, "InNavi.EditorUX.RoomCorners", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FEditorRoomCornersTest::RunTest(const FString& Parameters)
+{
+	using namespace EditorInteractionTests;
+	FNavigationSearchFixture F; Prepare(F); ANavPlayerController* PC = F.MakeController();
+	if (PC->IsSnapEnabled()) PC->ToggleSnapEnabled();
+	FString Error;
+	const APolyBuilding* Building = F.Generator->FindBuildingById(TEXT("UX"));
+	if (!TestNotNull(TEXT("building"), Building)) return false;
+	const FBox2D Walls(Building->GetFootprint());
+
+	// The rules, on a rectangle.
+	if (!TestNotNull(TEXT("a room"), F.Interior->CreateRoomFromFootprint({{450,450},{550,450},{550,550},{450,550}}, TEXT("Quad"), TEXT("Quad"), true, false, false, Error))) return false;
+	if (!TestNotNull(TEXT("a neighbour"), F.Interior->CreateRoomFromFootprint({{600,450},{700,450},{700,550},{600,550}}, TEXT("Next"), TEXT("Next"), true, false, false, Error))) return false;
+	TestTrue(TEXT("a corner can move inside the building"), F.Interior->CanMoveRoomVertex(TEXT("Quad"), 2, {570,560}));
+	TestFalse(TEXT("not outside the building"), F.Interior->CanMoveRoomVertex(TEXT("Quad"), 2, {Walls.Max.X + 500, Walls.Max.Y + 500}));
+	TestFalse(TEXT("not into the neighbouring room"), F.Interior->CanMoveRoomVertex(TEXT("Quad"), 1, {650,450}));
+	TestFalse(TEXT("not so the outline crosses itself"), F.Interior->CanMoveRoomVertex(TEXT("Quad"), 0, {600,500}));
+	TestFalse(TEXT("not onto another corner"), F.Interior->CanMoveRoomVertex(TEXT("Quad"), 0, {550,450}));
+	TestFalse(TEXT("an unknown corner"), F.Interior->CanMoveRoomVertex(TEXT("Quad"), 9, {500,500}));
+	TestTrue(TEXT("the move itself"), F.Interior->MoveRoomVertex(TEXT("Quad"), 2, {570,560}));
+	TestTrue(TEXT("changes just that corner"), F.Interior->GetRoomById(TEXT("Quad"))->GetFootprint()[2].Equals({570,560}, 1e-6) && F.Interior->GetRoomById(TEXT("Quad"))->GetFootprint()[0].Equals({450,450}, 1e-6));
+	TestTrue(TEXT("and is one Undo step"), F.Interior->Undo() && F.Interior->GetRoomById(TEXT("Quad"))->GetFootprint()[2].Equals({550,550}, 1e-6));
+	F.Interior->DeleteRoom(TEXT("Next"));
+	F.Interior->DeleteRoom(TEXT("Quad"));
+
+	// An L-shaped room: its inner corner is under no resize handle.
+	if (!TestNotNull(TEXT("an L-shaped room"), F.Interior->CreateRoomFromFootprint({{450,450},{650,450},{650,500},{500,500},{500,650},{450,650}}, TEXT("L"), TEXT("L"), true, false, false, Error))) return false;
+	PC->ToggleSelectMode(); PC->SelectRoom(TEXT("L"));
+	UInteriorFloorPlanWidget* W = Plan(F, PC);
+	const FGeometry G = FGeometry::MakeRoot(FVector2f(1000,1000), FSlateLayoutTransform());
+	const TArray<FVector2D> Dots = FEditorInteractionTestAccess::Vertices(W, G.GetLocalSize());
+	if (!TestEqual(TEXT("a dot for each of the six corners"), Dots.Num(), 6)) return false;
+	auto Corner = [&](int32 Index) { return F.Interior->GetRoomById(TEXT("L"))->GetFootprint()[Index]; };
+	const FVector2D Inner = Corner(3), Outer = Corner(1), Far = Corner(0);
+
+	// A plain drag on the inner corner moves that corner alone, and one Undo takes it back.
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(Dots[3], true, false, false));
+	FEditorInteractionTestAccess::Move(W, G, MouseWith(Dots[3] + FVector2D(20,15), true, false, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(Dots[3] + FVector2D(20,15), false, false, false));
+	TestFalse(TEXT("the inner corner moved"), Corner(3).Equals(Inner, 0.5));
+	TestTrue(TEXT("the others did not"), Corner(1).Equals(Outer, 1e-6) && Corner(0).Equals(Far, 1e-6));
+	TestTrue(TEXT("the project is marked as changed"), PC->HasUnsavedChanges());
+	TestTrue(TEXT("one Undo takes the corner back"), F.Interior->Undo() && Corner(3).Equals(Inner, 1e-6));
+	PC->SelectRoom(TEXT("L"));
+
+	// A plain drag on a corner under a resize handle still resizes the whole room (every corner follows); Ctrl moves just that corner.
+	const FVector2D Before3 = Corner(3);
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(Dots[1], true, false, false));
+	FEditorInteractionTestAccess::Move(W, G, MouseWith(Dots[1] + FVector2D(-40,0), true, false, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(Dots[1] + FVector2D(-40,0), false, false, false));
+	TestFalse(TEXT("a plain drag on a bounding-box corner resizes: the inner corner follows"), Corner(3).Equals(Before3, 0.5));
+	F.Interior->Undo(); PC->SelectRoom(TEXT("L"));
+	const TArray<FVector2D> Dots2 = FEditorInteractionTestAccess::Vertices(W, G.GetLocalSize());
+	const FVector2D Inner2 = Corner(3), Outer2 = Corner(1);
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(Dots2[1], true, false, true));
+	FEditorInteractionTestAccess::Move(W, G, MouseWith(Dots2[1] + FVector2D(-40,0), true, false, true));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(Dots2[1] + FVector2D(-40,0), false, false, true));
+	TestTrue(TEXT("Ctrl moves just that corner"), Corner(3).Equals(Inner2, 1e-6) && !Corner(1).Equals(Outer2, 0.5));
+
+	// Dragged far outside the building, the corner stops at the wall.
+	const TArray<FVector2D> Dots3 = FEditorInteractionTestAccess::Vertices(W, G.GetLocalSize());
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(Dots3[3], true, false, false));
+	FEditorInteractionTestAccess::Move(W, G, MouseWith(Dots3[3] + FVector2D(6000,6000), true, false, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(Dots3[3] + FVector2D(6000,6000), false, false, false));
+	const FVector2D Stopped = Corner(3);
+	TestTrue(TEXT("the corner is still inside the building"), Stopped.X <= Walls.Max.X + 0.01 && Stopped.Y <= Walls.Max.Y + 0.01);
+	TestTrue(TEXT("and moved toward the wall as far as it could"), Stopped.X > Inner2.X + 1.0 || Stopped.Y > Inner2.Y + 1.0);
+	return true;
+}
+
+// PAT-198: the first save of a room without tags fills them from its name and type; later saves and tags the user typed are left alone.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorAutoTagsTest, "InNavi.EditorUX.AutoTags", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FEditorAutoTagsTest::RunTest(const FString& Parameters)
+{
+	using namespace EditorInteractionTests;
+	TestEqual(TEXT("the words of the name, then the type"), NavigationSearch::TagsFromNameAndType(TEXT("Male Toilet L2"), TEXT("Toilet")), TArray<FString>({ TEXT("male"), TEXT("toilet"), TEXT("l2") }));
+	TestEqual(TEXT("the type Other adds nothing, and a word of digits only is no tag"), NavigationSearch::TagsFromNameAndType(TEXT("Lab 3"), TEXT("Other")), TArray<FString>({ TEXT("lab") }));
+	TestEqual(TEXT("a two-word type is one tag"), NavigationSearch::TagsFromNameAndType(TEXT("Level 2 Lobby"), TEXT("Lift lobby")), TArray<FString>({ TEXT("level"), TEXT("lobby"), TEXT("lift lobby") }));
+	TestTrue(TEXT("a database id as the name gives no tags of its own"), NavigationSearch::TagsFromNameAndType(TEXT("SQL-1161271361-01-02"), TEXT("Other")).IsEmpty());
+	TestEqual(TEXT("only the type is used then"), NavigationSearch::TagsFromNameAndType(TEXT("SQL-1161271361-01-02"), TEXT("Toilet")), TArray<FString>({ TEXT("toilet") }));
+	TestTrue(TEXT("nothing to derive from nothing"), NavigationSearch::TagsFromNameAndType(FString(), TEXT("Other")).IsEmpty());
+
+	FNavigationSearchFixture F; Prepare(F); ANavPlayerController* PC = F.MakeController();
+	FString Error;
+	if (!TestNotNull(TEXT("room A"), F.Interior->CreateRoomFromFootprint({{100,100},{150,100},{150,150},{100,150}}, TEXT("A"), TEXT("Room A"), true, false, false, Error))) return false;
+	if (!TestNotNull(TEXT("room B"), F.Interior->CreateRoomFromFootprint({{200,100},{250,100},{250,150},{200,150}}, TEXT("B"), TEXT("Room B"), true, false, false, Error))) return false;
+	PC->ToggleSelectMode();
+	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>(); Screen->Initialize(); Screen->TakeWidget(); Screen->SetOwningPlayer(PC);
+	FScriptDelegate Selected; Selected.BindUFunction(Screen, TEXT("HandleSelectedRoomChanged")); PC->OnSelectedRoomChanged.AddUnique(Selected);
+	auto* Name = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_RoomName")));
+	auto* Tags = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_RoomTags")));
+	auto* Type = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cmb_RoomType")));
+	auto* Save = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_ApplyRoom")));
+	if (!TestNotNull(TEXT("name field"), Name) || !TestNotNull(TEXT("tags field"), Tags) || !TestNotNull(TEXT("type"), Type) || !TestNotNull(TEXT("save"), Save)) return false;
+
+	// Room A: first save, no tags: they are filled and the box shows them.
+	PC->SelectRoom(TEXT("A"));
+	Name->SetText(FText::FromString(TEXT("Male Toilet L2"))); Type->SetSelectedOption(TEXT("Toilet"));
+	Save->OnClicked.Broadcast();
+	TestEqual(TEXT("tags were filled from the name and type"), PC->GetSelectedRoomTags(), TArray<FString>({ TEXT("male"), TEXT("toilet"), TEXT("l2") }));
+	TestEqual(TEXT("and the box shows them"), Tags->GetText().ToString(), FString(TEXT("male, toilet, l2")));
+
+	// A later save does not fill them again: cleared tags stay cleared.
+	Tags->SetText(FText::GetEmpty()); Name->SetText(FText::FromString(TEXT("Female Toilet L2")));
+	Save->OnClicked.Broadcast();
+	TestTrue(TEXT("a second save leaves the tags the user cleared"), PC->GetSelectedRoomTags().IsEmpty());
+
+	// Room B: tags the user typed are kept as typed.
+	PC->SelectRoom(TEXT("B"));
+	Name->SetText(FText::FromString(TEXT("Seminar room"))); Type->SetSelectedOption(TEXT("Classroom")); Tags->SetText(FText::FromString(TEXT("projector")));
+	Save->OnClicked.Broadcast();
+	TestEqual(TEXT("typed tags are not touched"), PC->GetSelectedRoomTags(), TArray<FString>({ TEXT("projector") }));
+	PC->OnSelectedRoomChanged.Remove(Selected);
+	return true;
+}
+
+// PAT-196: several rooms are selected with Shift+click and with a selection window; a plain click goes back to one room, Delete removes them all as one Undo step.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorMultiSelectTest, "InNavi.EditorUX.MultiSelect", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FEditorMultiSelectTest::RunTest(const FString& Parameters)
+{
+	using namespace EditorInteractionTests;
+	FNavigationSearchFixture F; Prepare(F); ANavPlayerController* PC = F.MakeController();
+	FString Error;
+	for (const TPair<FString, double>& Room : TArray<TPair<FString, double>>{ { TEXT("A"), 100 }, { TEXT("B"), 200 }, { TEXT("C"), 300 } })
+	{
+		if (!TestNotNull(TEXT("a room"), F.Interior->CreateRoomFromFootprint({ {Room.Value, 100}, {Room.Value + 50, 100}, {Room.Value + 50, 150}, {Room.Value, 150} }, Room.Key, Room.Key, true, false, false, Error))) return false;
+	}
+	PC->ToggleSelectMode();
+	UInteriorFloorPlanWidget* W = Plan(F, PC);
+	const FGeometry G = FGeometry::MakeRoot(FVector2f(1000,1000), FSlateLayoutTransform());
+	auto Ids = [&]() { TArray<FString> Result = PC->GetMultiSelectedRoomIds(); Result.Sort(); return Result; };
+
+	// The controller's rules.
+	PC->SelectRoom(TEXT("A"));
+	PC->ToggleRoomInSelection(TEXT("B"));
+	TestTrue(TEXT("two rooms are a multi selection"), PC->IsMultiSelection());
+	TestTrue(TEXT("with no single room selected"), PC->GetSelectedRoomId().IsEmpty());
+	TestEqual(TEXT("they are A and B"), Ids(), TArray<FString>({ TEXT("A"), TEXT("B") }));
+	PC->ToggleRoomInSelection(TEXT("C"));
+	TestEqual(TEXT("three"), PC->GetMultiSelectedRoomIds().Num(), 3);
+	PC->ToggleRoomInSelection(TEXT("B"));
+	TestEqual(TEXT("B taken out again"), Ids(), TArray<FString>({ TEXT("A"), TEXT("C") }));
+	PC->ToggleRoomInSelection(TEXT("A"));
+	TestFalse(TEXT("one left is a plain selection"), PC->IsMultiSelection());
+	TestEqual(TEXT("of C"), PC->GetSelectedRoomId(), FString(TEXT("C")));
+	PC->SetRoomSelection({ TEXT("A"), TEXT("B") });
+	PC->SelectRoom(TEXT("C"));
+	TestFalse(TEXT("selecting a single room ends the multi selection"), PC->IsMultiSelection());
+	TestTrue(TEXT("every selected room is drawn as selected"), PC->IsRoomSelected(TEXT("C")) && !PC->IsRoomSelected(TEXT("A")));
+
+	// Where things are on the plan: the corners of a selected room.
+	auto Box = [&](const FString& Id) { PC->SelectRoom(Id); return FBox2D(FEditorInteractionTestAccess::Vertices(W, G.GetLocalSize())); };
+	const FBox2D A = Box(TEXT("A")), B = Box(TEXT("B")), C = Box(TEXT("C"));
+	PC->SelectRoom(FString());
+
+	// Shift+click adds and removes.
+	PC->SelectRoom(TEXT("A"));
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(B.GetCenter(), true, true, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(B.GetCenter(), false, true, false));
+	TestEqual(TEXT("Shift+click adds a room"), Ids(), TArray<FString>({ TEXT("A"), TEXT("B") }));
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(C.GetCenter(), true, true, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(C.GetCenter(), false, true, false));
+	TestEqual(TEXT("and another"), PC->GetMultiSelectedRoomIds().Num(), 3);
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(B.GetCenter(), true, true, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(B.GetCenter(), false, true, false));
+	TestEqual(TEXT("Shift+click on a selected room takes it out"), Ids(), TArray<FString>({ TEXT("A"), TEXT("C") }));
+
+	// A plain click goes back to one room.
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(A.GetCenter(), true, false, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(A.GetCenter(), false, false, false));
+	TestFalse(TEXT("a plain click ends the multi selection"), PC->IsMultiSelection());
+	TestEqual(TEXT("and selects that room"), PC->GetSelectedRoomId(), FString(TEXT("A")));
+
+	// A selection window selects the rooms wholly inside it.
+	const FVector2D Pad(12, 12);
+	const FBox2D AB = A + B;
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(AB.Min - Pad, true, false, false));
+	FEditorInteractionTestAccess::Move(W, G, MouseWith(AB.Max + Pad, true, false, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(AB.Max + Pad, false, false, false));
+	TestEqual(TEXT("a window around A and B selects both"), Ids(), TArray<FString>({ TEXT("A"), TEXT("B") }));
+	// With Shift it adds.
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(C.Min - Pad, true, true, false));
+	FEditorInteractionTestAccess::Move(W, G, MouseWith(C.Max + Pad, true, true, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(C.Max + Pad, false, true, false));
+	TestEqual(TEXT("Shift keeps the selection and adds C"), PC->GetMultiSelectedRoomIds().Num(), 3);
+	// A window that only touches a room does not select it.
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(A.Min - Pad, true, false, false));
+	FEditorInteractionTestAccess::Move(W, G, MouseWith(A.GetCenter(), true, false, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(A.GetCenter(), false, false, false));
+	TestFalse(TEXT("half a room is not inside the window"), PC->IsMultiSelection() || !PC->GetSelectedRoomId().IsEmpty());
+	// A click on empty plan deselects.
+	PC->SelectRoom(TEXT("A"));
+	FEditorInteractionTestAccess::Down(W, G, MouseWith(A.Min - Pad, true, false, false));
+	FEditorInteractionTestAccess::Up(W, G, MouseWith(A.Min - Pad, false, false, false));
+	TestTrue(TEXT("a click on empty plan deselects"), PC->GetSelectedRoomId().IsEmpty() && !PC->IsMultiSelection());
+
+	// Delete removes them all as one Undo step.
+	PC->SetRoomSelection({ TEXT("A"), TEXT("B") });
+	TestTrue(TEXT("Delete works on the selection"), PC->DeleteSelection());
+	TestTrue(TEXT("A and B are gone"), F.Interior->GetRoomById(TEXT("A")) == nullptr && F.Interior->GetRoomById(TEXT("B")) == nullptr);
+	TestNotNull(TEXT("C is not"), F.Interior->GetRoomById(TEXT("C")));
+	TestFalse(TEXT("nothing is selected afterwards"), PC->IsMultiSelection());
+	TestTrue(TEXT("one Undo brings both back"), F.Interior->Undo() && F.Interior->GetRoomById(TEXT("A")) != nullptr && F.Interior->GetRoomById(TEXT("B")) != nullptr);
+	return true;
+}
+
+// PAT-197: with several rooms selected the Properties panel edits what they share. A value that differs shows "-" and is left alone unless changed;
+// a change goes to every selected room as one Undo step; name, position and size are not offered.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorMultiEditTest, "InNavi.EditorUX.MultiEdit", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FEditorMultiEditTest::RunTest(const FString& Parameters)
+{
+	using namespace EditorInteractionTests;
+	FNavigationSearchFixture F; Prepare(F); ANavPlayerController* PC = F.MakeController();
+	FString Error;
+	for (const TPair<FString, double>& Room : TArray<TPair<FString, double>>{ { TEXT("A"), 100 }, { TEXT("B"), 200 }, { TEXT("C"), 300 } })
+	{
+		if (!TestNotNull(TEXT("a room"), F.Interior->CreateRoomFromFootprint({ {Room.Value, 100}, {Room.Value + 50, 100}, {Room.Value + 50, 150}, {Room.Value, 150} }, Room.Key, Room.Key, true, false, false, Error))) return false;
+	}
+	F.Interior->SetRoomType(TEXT("A"), TEXT("Classroom")); F.Interior->SetRoomTags(TEXT("A"), { TEXT("x") });
+	F.Interior->SetRoomType(TEXT("B"), TEXT("Toilet"));
+	F.Interior->SetRoomType(TEXT("C"), TEXT("Toilet"));
+	PC->ToggleSelectMode();
+	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>(); Screen->Initialize(); Screen->TakeWidget(); Screen->SetOwningPlayer(PC);
+	FScriptDelegate Multi; Multi.BindUFunction(Screen, TEXT("HandleMultiSelectionChanged")); PC->OnMultiSelectionChanged.AddUnique(Multi);
+	FScriptDelegate Single; Single.BindUFunction(Screen, TEXT("HandleSelectedRoomChanged")); PC->OnSelectedRoomChanged.AddUnique(Single);
+	auto* Title = Cast<UTextBlock>(Screen->FindScreenWidget(TEXT("Txt_PropertiesTitle")));
+	auto* Tags = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Txt_RoomTags")));
+	auto* Type = Cast<UComboBoxString>(Screen->FindScreenWidget(TEXT("Cmb_RoomType")));
+	auto* Save = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_ApplyRoom")));
+	if (!TestNotNull(TEXT("title"), Title) || !TestNotNull(TEXT("tags"), Tags) || !TestNotNull(TEXT("type"), Type) || !TestNotNull(TEXT("save"), Save)) return false;
+
+	// A and B differ in type and in tags: both show "-".
+	PC->SetRoomSelection({ TEXT("A"), TEXT("B") });
+	TestEqual(TEXT("the panel says how many"), Title->GetText().ToString(), FString(TEXT("2 rooms selected")));
+	TestEqual(TEXT("the type differs"), Type->GetSelectedOption(), FString(TEXT("-")));
+	TestEqual(TEXT("the tags differ"), Tags->GetText().ToString(), FString(TEXT("-")));
+
+	// Save with nothing changed changes nothing.
+	Save->OnClicked.Broadcast();
+	TestTrue(TEXT("the types are as they were"), F.Interior->GetRoomType(TEXT("A")) == TEXT("Classroom") && F.Interior->GetRoomType(TEXT("B")) == TEXT("Toilet"));
+	TestEqual(TEXT("and the tags"), F.Interior->GetRoomTags(TEXT("A")), TArray<FString>({ TEXT("x") }));
+	TestTrue(TEXT("a dash is not saved as a tag"), F.Interior->GetRoomTags(TEXT("B")).IsEmpty());
+
+	// A new type goes to both, and C is untouched; one Undo takes it back.
+	Type->SetSelectedOption(TEXT("Lab"));
+	Save->OnClicked.Broadcast();
+	TestTrue(TEXT("both are Lab"), F.Interior->GetRoomType(TEXT("A")) == TEXT("Lab") && F.Interior->GetRoomType(TEXT("B")) == TEXT("Lab"));
+	TestEqual(TEXT("C is not selected, so it stays"), F.Interior->GetRoomType(TEXT("C")), FString(TEXT("Toilet")));
+	TestEqual(TEXT("the type is now shared"), Type->GetSelectedOption(), FString(TEXT("Lab")));
+	TestTrue(TEXT("one Undo takes the type back in both"), F.Interior->Undo() && F.Interior->GetRoomType(TEXT("A")) == TEXT("Classroom") && F.Interior->GetRoomType(TEXT("B")) == TEXT("Toilet"));
+	F.Interior->Redo();
+
+	// New tags go to both too; a type and tags in one Save are one Undo step.
+	PC->SetRoomSelection({ TEXT("A"), TEXT("B") });
+	Type->SetSelectedOption(TEXT("Office")); Tags->SetText(FText::FromString(TEXT("staff, floor one")));
+	Save->OnClicked.Broadcast();
+	TestEqual(TEXT("both have the new tags"), F.Interior->GetRoomTags(TEXT("A")), TArray<FString>({ TEXT("staff"), TEXT("floor one") }));
+	TestEqual(TEXT("in B too"), F.Interior->GetRoomTags(TEXT("B")), TArray<FString>({ TEXT("staff"), TEXT("floor one") }));
+	TestEqual(TEXT("the tags are shown as shared"), Tags->GetText().ToString(), FString(TEXT("staff, floor one")));
+	TestTrue(TEXT("one Undo takes back the type and the tags"), F.Interior->Undo() && F.Interior->GetRoomType(TEXT("A")) == TEXT("Lab") && F.Interior->GetRoomTags(TEXT("B")).IsEmpty());
+
+	// Rooms that agree show the value, without a dash.
+	PC->SetRoomSelection({ TEXT("A"), TEXT("B") });
+	TestEqual(TEXT("A and B are both Lab again: the type shows, with no dash"), Type->GetSelectedOption(), FString(TEXT("Lab")));
+	PC->SetRoomSelection({ TEXT("B"), TEXT("C") });
+	TestEqual(TEXT("B is a Lab and C a Toilet: a dash"), Type->GetSelectedOption(), FString(TEXT("-")));
+	TestEqual(TEXT("B and C both have no tags: shown empty, not as a dash"), Tags->GetText().ToString(), FString());
+
+	// Back to one room: the single room panel returns.
+	PC->SelectRoom(TEXT("A"));
+	TestEqual(TEXT("the title is the room's again"), Title->GetText().ToString(), FString(TEXT("Room properties")));
+	PC->OnMultiSelectionChanged.Remove(Multi); PC->OnSelectedRoomChanged.Remove(Single);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FEditorCameraControlsTest,"InNavi.EditorUX.CameraControls", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FEditorCameraControlsTest::RunTest(const FString& Parameters)
 {
 	FNavigationSearchFixture F; ANavPlayerController* PC = F.MakeController();

@@ -1,4 +1,6 @@
 #include "BuildingInfoPanelWidget.h"
+#include "UiToolTip.h"
+#include "LayoutValidation.h"
 
 #include "BuildingSummary.h"
 #include "BuildingTypes.h"
@@ -10,6 +12,7 @@
 #include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/ComboBoxString.h"
+#include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Overlay.h"
@@ -71,6 +74,36 @@ void UBuildingInfoPanelWidget::HandleTypeSelected(FString SelectedItem, ESelectI
 		return;
 	}
 	PC->SetSelectedBuildingType(SelectedItem);
+}
+
+void UBuildingInfoPanelWidget::HandleFloorRangeCommitted(const FText&, ETextCommit::Type CommitType)
+{
+	if (CommitType != ETextCommit::OnEnter && CommitType != ETextCommit::OnUserMovedFocus)
+	{
+		return;
+	}
+	ANavPlayerController* PC = GetController();
+	if (!PC || !FloorFromBox || !FloorToBox || DisplayedId.IsEmpty())
+	{
+		return;
+	}
+	int32 First = 0;
+	int32 Last = 0;
+	if (!LayoutValidation::ParseLevel(FloorFromBox->GetText().ToString(), First) || !LayoutValidation::ParseLevel(FloorToBox->GetText().ToString(), Last))
+	{
+		PC->OnActionFailed.Broadcast(TEXT("Type a floor as 3, -1 or B1. Floors go from B20 to 200, and there is no floor 0."), EActionFailureSeverity::Warning);
+	}
+	else
+	{
+		// Either order: From B1 To B2 is the natural way to say a building that goes down, and it is the same two floors as B2 and B1.
+		if (LayoutValidation::LevelIndex(Last) < LayoutValidation::LevelIndex(First))
+		{
+			Swap(First, Last);
+		}
+		PC->SetSelectedBuildingFloorRange(First, Last);
+	}
+	// What the building has now: what was typed when it was applied, the old values when it was not.
+	Refresh();
 }
 
 TSharedRef<SWidget> UBuildingInfoPanelWidget::RebuildWidget()
@@ -174,6 +207,27 @@ TSharedRef<SWidget> UBuildingInfoPanelWidget::RebuildWidget()
 		Grid->AddChildToVerticalBox(BottomRow);
 		AddCell(BottomRow, TEXT("Links"), TEXT("Lifts & stairs"), LinksValue);
 		Content->AddChildToVerticalBox(Stats)->SetPadding(FMargin(0.f, 18.f * DesignToUi, 0.f, 0.f));
+
+		// ---- Floors: where the building starts and ends (3, -1 or B1) ----
+		UHorizontalBox* RangeRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BuildingFloorRangeRow"));
+		auto AddRangeBox = [this, RangeRow](const TCHAR* Caption, const TCHAR* CaptionName, const TCHAR* BoxName, const TCHAR* Hint, UEditableTextBox*& OutBox)
+		{
+			UHorizontalBoxSlot* CaptionSlot = RangeRow->AddChildToHorizontalBox(StartStyle::Text(WidgetTree, CaptionName, Caption, 11.f, StartStyle::Rgb(150, 170, 196), true));
+			CaptionSlot->SetVerticalAlignment(VAlign_Center);
+			CaptionSlot->SetPadding(FMargin(0.f, 0.f, 6.f * StartStyle::DesignToUi, 0.f));
+			OutBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), BoxName);
+			OutBox->SetJustification(ETextJustify::Center);
+			OutBox->SetToolTip(UiToolTip::Make(WidgetTree, Hint));
+			OutBox->OnTextCommitted.AddUniqueDynamic(this, &UBuildingInfoPanelWidget::HandleFloorRangeCommitted);
+			ApplyStandardFont(OutBox);
+			OutBox->SetWidgetStyle(StartStyle::Field(13.f));
+			UHorizontalBoxSlot* BoxSlot = RangeRow->AddChildToHorizontalBox(OutBox);
+			BoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			BoxSlot->SetPadding(FMargin(0.f, 0.f, 12.f * StartStyle::DesignToUi, 0.f));
+		};
+		AddRangeBox(TEXT("From"), TEXT("Txt_BuildingFloorFrom"), TEXT("Edt_BuildingFloorFrom"), TEXT("Where the building starts: 1 is the ground floor, 3 the third floor. For basements it goes down from B1 (From B1 To B2). Press Enter to apply."), FloorFromBox);
+		AddRangeBox(TEXT("To"), TEXT("Txt_BuildingFloorTo"), TEXT("Edt_BuildingFloorTo"), TEXT("Where the building ends. Floors outside From and To are removed with everything on them (Discard changes brings them back). Press Enter to apply."), FloorToBox);
+		Content->AddChildToVerticalBox(RangeRow)->SetPadding(FMargin(0.f, 10.f * DesignToUi, 0.f, 0.f));
 
 		// ---- Status: Empty (no rooms yet) or Has rooms ----
 		UHorizontalBox* StatusRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BuildingStatusRow"));
@@ -319,9 +373,13 @@ void UBuildingInfoPanelWidget::HandleRoomFloorSelected(FString SelectedItem, ESe
 	{
 		return;
 	}
-	// "All floors" is 0; "Floor 3" is 3.
+	// "All floors" is 0; "Floor 3" is 3 and "Floor B1" is -1.
 	const FString Prefix(TEXT("Floor "));
-	const int32 Floor = SelectedItem.StartsWith(Prefix) ? FCString::Atoi(*SelectedItem.RightChop(Prefix.Len())) : 0;
+	int32 Floor = 0;
+	if (SelectedItem.StartsWith(Prefix))
+	{
+		LayoutValidation::ParseLevel(SelectedItem.RightChop(Prefix.Len()), Floor);
+	}
 	PC->SetBuildingRoomFloor(DisplayedId, Floor);
 }
 
@@ -407,23 +465,43 @@ void UBuildingInfoPanelWidget::Refresh()
 	if (RoomFloorCombo)
 	{
 		// One item per floor of this building, so the list follows the selection.
-		if (RoomFloorCombo->GetOptionCount() != Summary.Floors + 1)
+		const FString FirstOption = TEXT("Floor ") + LayoutValidation::LevelLabel(Summary.FirstLevel);
+		if (RoomFloorCombo->GetOptionCount() != Summary.Floors + 1 || RoomFloorCombo->GetOptionAtIndex(1) != FirstOption)
 		{
 			RoomFloorCombo->ClearOptions();
 			RoomFloorCombo->AddOption(TEXT("All floors"));
-			for (int32 Level = 1; Level <= Summary.Floors; ++Level)
+			for (int32 Step = 0; Step < Summary.Floors; ++Step)
 			{
-				RoomFloorCombo->AddOption(FString::Printf(TEXT("Floor %d"), Level));
+				RoomFloorCombo->AddOption(TEXT("Floor ") + LayoutValidation::LevelLabel(LayoutValidation::LevelAfter(Summary.FirstLevel, Step)));
 			}
 		}
-		const int32 ChosenFloor = PC ? FMath::Clamp(PC->GetBuildingRoomFloor(Summary.Id), 0, Summary.Floors) : 0;
-		RoomFloorCombo->SetSelectedOption(ChosenFloor == 0 ? FString(TEXT("All floors")) : FString::Printf(TEXT("Floor %d"), ChosenFloor));
+		// A floor this building does not have (the choice was made for another range of floors) is "All floors".
+		int32 ChosenFloor = PC ? PC->GetBuildingRoomFloor(Summary.Id) : 0;
+		const int32 ChosenPosition = LayoutValidation::LevelIndex(ChosenFloor) - LayoutValidation::LevelIndex(Summary.FirstLevel);
+		if (ChosenFloor != 0 && (!LayoutValidation::IsValidLevel(ChosenFloor) || ChosenPosition < 0 || ChosenPosition >= Summary.Floors))
+		{
+			ChosenFloor = 0;
+		}
+		RoomFloorCombo->SetSelectedOption(ChosenFloor == 0 ? FString(TEXT("All floors")) : TEXT("Floor ") + LayoutValidation::LevelLabel(ChosenFloor));
 	}
 	bRefreshingReveal = false;
 	ShowTransparentState(PC && PC->IsBuildingMadeTransparent(Summary.Id));
 	if (FloorsValue)
 	{
 		FloorsValue->SetText(FText::AsNumber(Summary.Floors));
+	}
+	{
+		// From and To read in the direction the building goes: up from its lowest floor, or, for a building that is all basement, down from B1.
+		const int32 LastLevel = LayoutValidation::LevelAfter(Summary.FirstLevel, Summary.Floors - 1);
+		const bool bAllBasement = LastLevel < 0;
+		if (FloorFromBox)
+		{
+			FloorFromBox->SetText(FText::FromString(LayoutValidation::LevelLabel(bAllBasement ? LastLevel : Summary.FirstLevel)));
+		}
+		if (FloorToBox)
+		{
+			FloorToBox->SetText(FText::FromString(LayoutValidation::LevelLabel(bAllBasement ? Summary.FirstLevel : LastLevel)));
+		}
 	}
 	if (RoomsValue)
 	{
@@ -447,6 +525,14 @@ void UBuildingInfoPanelWidget::Refresh()
 
 FString UBuildingInfoPanelWidget::GetNameTextForTests() const { return NameText ? NameText->GetText().ToString() : FString(); }
 FString UBuildingInfoPanelWidget::GetIdTextForTests() const { return IdText ? IdText->GetText().ToString() : FString(); }
+FString UBuildingInfoPanelWidget::GetFloorFromTextForTests() const { return FloorFromBox ? FloorFromBox->GetText().ToString() : FString(); }
+FString UBuildingInfoPanelWidget::GetFloorToTextForTests() const { return FloorToBox ? FloorToBox->GetText().ToString() : FString(); }
+void UBuildingInfoPanelWidget::CommitFloorRangeForTests(const FString& From, const FString& To)
+{
+	if (FloorFromBox) FloorFromBox->SetText(FText::FromString(From));
+	if (FloorToBox) FloorToBox->SetText(FText::FromString(To));
+	HandleFloorRangeCommitted(FText::GetEmpty(), ETextCommit::OnEnter);
+}
 FString UBuildingInfoPanelWidget::GetFloorsTextForTests() const { return FloorsValue ? FloorsValue->GetText().ToString() : FString(); }
 FString UBuildingInfoPanelWidget::GetRoomsTextForTests() const { return RoomsValue ? RoomsValue->GetText().ToString() : FString(); }
 FString UBuildingInfoPanelWidget::GetLinksTextForTests() const { return LinksValue ? LinksValue->GetText().ToString() : FString(); }

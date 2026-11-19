@@ -31,7 +31,8 @@ public:
 	// Spawns one building directly from already-parsed data. Used both by JSON loading
 	// (LoadBuildingsFromFile) and by runtime building creation (e.g. NavPlayerController's build mode).
 	// Returns nullptr if Id is empty, already used, or Footprint has fewer than 3 points.
-	APolyBuilding* SpawnBuildingFromData(const FString& Id, const FString& Name, const TArray<FVector2D>& Footprint, int32 FloorCount, float FloorHeight, FVector2D Offset);
+	// FirstLevel is the level of the lowest floor (see APolyBuilding::BuildFromFootprint): 1 for a building that starts on the ground.
+	APolyBuilding* SpawnBuildingFromData(const FString& Id, const FString& Name, const TArray<FVector2D>& Footprint, int32 FloorCount, float FloorHeight, FVector2D Offset, int32 FirstLevel = 1);
 
 	// SpawnBuildingFromData multiplies footprint+offset by this. Callers building a footprint
 	// out of world-space coordinates (e.g. from a raycast) must divide by this first.
@@ -261,6 +262,13 @@ public:
 	// False if there is no such building.
 	bool GetBuildingSummary(const FString& BuildingId, FBuildingSummary& OutSummary) const;
 
+	// Gives a building the floors from NewFirstLevel to NewLastLevel (both included; level 0 does not exist, B1 is -1; a last level below the
+	// first is the one floor). The shell is rebuilt, and the saved interior loses what is on the floors that go: their rooms, walls, lifts and
+	// stairs, the doors in the outer wall, and the floors a connector reached there. A building that is open in the interior editor must
+	// change through AInteriorGenerator::SetLevelRange instead (its live floors are the truth). Returns false for a building that is not there
+	// or a level that does not exist.
+	bool SetBuildingLevelRange(const FString& BuildingId, int32 NewFirstLevel, int32 NewLastLevel);
+
 	// Stashes the interior data for a building id, overwriting whatever was there before (e.g.
 	// InteriorGenerator syncing its current in-memory state before a project save).
 	// A live-to-stored sync passes false: model edits already notified navigation, while saving/viewing is not an edit.
@@ -335,6 +343,7 @@ private:
 	struct FBuildingBaseline
 	{
 		int32 FloorCount = 1;
+		int32 FirstLevel = 1;
 		FString Name;
 		FString Type;
 		bool bHadInterior = false;

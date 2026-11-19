@@ -278,14 +278,22 @@ void FMobileRealSource::IndexProject(FProject& Project)
 		if (FloorCount < 1 || FloorCount > LayoutValidation::MaxBuildingFloors || FloorCount != FMath::FloorToDouble(FloorCount)) continue;
 		const auto Interior = Child(Json, TEXT("interior"));
 		const auto& Floors = Array(Interior, TEXT("floors"));
-		int32 Count = static_cast<int32>(FloorCount);
+		// The floors of the building: Count of them from FirstLevel (1 = ground floor, -1 = B1, no level 0; a file from before basements has no
+		// firstLevel). The editor widens the shell to cover every authored floor; so does the phone.
+		const double FirstLevelValue = Number(Json, TEXT("firstLevel"), 1);
+		if (FirstLevelValue != FMath::FloorToDouble(FirstLevelValue) || !LayoutValidation::IsValidLevel(static_cast<int32>(FirstLevelValue))) continue;
+		int32 FirstLevel = static_cast<int32>(FirstLevelValue);
+		int32 LastLevel = LayoutValidation::LevelAfter(FirstLevel, static_cast<int32>(FloorCount) - 1);
 		TMap<FString, int32> NavigationIdCounts;
 		for (const auto& FloorValue : Floors)
 		{
 			const auto Floor = Object(FloorValue);
 			const double Level = Number(Floor, TEXT("level"), 1);
-			if (Level >= 1 && Level <= LayoutValidation::MaxBuildingFloors && Level == FMath::FloorToDouble(Level))
-				Count = FMath::Max(Count, static_cast<int32>(Level));
+			if (Level == FMath::FloorToDouble(Level) && LayoutValidation::IsValidLevel(static_cast<int32>(Level)))
+			{
+				if (LayoutValidation::LevelIndex(static_cast<int32>(Level)) < LayoutValidation::LevelIndex(FirstLevel)) FirstLevel = static_cast<int32>(Level);
+				if (LayoutValidation::LevelIndex(static_cast<int32>(Level)) > LayoutValidation::LevelIndex(LastLevel)) LastLevel = static_cast<int32>(Level);
+			}
 			for (const auto& RoomValue : Array(Floor, TEXT("rooms")))
 			{
 				const FString Id = String(Object(RoomValue), TEXT("navigationId"));
@@ -294,12 +302,17 @@ void FMobileRealSource::IndexProject(FProject& Project)
 		}
 		// The editor expands legacy shells to include authored upper floors. Normalize the mobile
 		// snapshot too, so the catalogue, validation and the route world's floor count agree.
+		const int32 Count = LayoutValidation::LevelSpan(FirstLevel, LastLevel);
 		if (Count > FloorCount && (!Json->HasField(TEXT("floorCount")) || Json->HasTypedField<EJson::Number>(TEXT("floorCount"))))
-			Json->SetNumberField(TEXT("floorCount"), Count);
-		auto& Maps = Project.Maps.Add(BuildingId);
-		for (int32 Level = 1; Level <= Count; ++Level)
 		{
-			FMobileLevel Label; Label.Level = Level; Label.Label = FString::Printf(TEXT("L%d"), Level); Building.Levels.Add(Label);
+			Json->SetNumberField(TEXT("floorCount"), Count);
+			if (FirstLevel != 1) Json->SetNumberField(TEXT("firstLevel"), FirstLevel);
+		}
+		auto& Maps = Project.Maps.Add(BuildingId);
+		for (int32 Step = 0; Step < Count; ++Step)
+		{
+			const int32 Level = LayoutValidation::LevelAfter(FirstLevel, Step);
+			FMobileLevel Label; Label.Level = Level; Label.Label = Level < 0 ? FString::Printf(TEXT("B%d"), -Level) : FString::Printf(TEXT("L%d"), Level); Building.Levels.Add(Label);
 			FMobileLevelMap Map; Map.BuildingId = BuildingId; Map.Level = Level; Map.Outline = Outline; Map.bHasEntrance = false;
 			TSharedPtr<FJsonObject> Floor;
 			for (const auto& F : Floors) if (Number(Object(F), TEXT("level"), 1) == Level) { Floor = Object(F); break; }
@@ -408,7 +421,7 @@ TArray<FMobilePlace> FMobileRealSource::SearchPlaces(const FString& SiteId, cons
 	TArray<FString> Words; Query.ToLower().ParseIntoArrayWS(Words);
 	for (const auto& Place : Project->Places)
 	{
-		if ((!Filter.BuildingId.IsEmpty() && Place.BuildingId != Filter.BuildingId) || (Filter.Level != INDEX_NONE && Filter.Level != Place.Level)
+		if ((!Filter.BuildingId.IsEmpty() && Place.BuildingId != Filter.BuildingId) || (Filter.Level != 0 && Filter.Level != Place.Level)
 			|| (!Filter.Categories.IsEmpty() && !Filter.Categories.Contains(Place.Category)) || (Filter.bAvailableOnly && !Place.bAvailable)) continue;
 		if (NavigationSearch::MatchesWords(Words, Project->SearchText.FindChecked(Place.Id))) Result.Add(Place);
 	}
@@ -556,7 +569,7 @@ FMobileRoute FMobileRealSource::FRouteJob::BuildRoute(const FNavigationRouteResu
 		const auto& Point = Planned.Points[Instruction.PointIndex];
 		FMobileStep Step; Step.Text = Instruction.Text; Step.Metres = Instruction.Metres;
 		Step.BuildingId = MobileId(Point.BuildingId); Step.BuildingName = BuildingName(Point.BuildingId); Step.Level = Point.Floor; Step.Position = Point.Position;
-		Step.LevelLabel = Point.Floor == 0 ? TEXT("Outside") : FString::Printf(TEXT("L%d"), Point.Floor);
+		Step.LevelLabel = Point.Floor == 0 ? FString(TEXT("Outside")) : Point.Floor < 0 ? FString::Printf(TEXT("B%d"), -Point.Floor) : FString::Printf(TEXT("L%d"), Point.Floor);
 		switch (Instruction.Kind)
 		{
 		case ENavigationInstructionKind::TurnLeft: Step.Kind = EMobileStepKind::TurnLeft; break;

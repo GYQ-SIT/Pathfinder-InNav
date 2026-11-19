@@ -1,4 +1,5 @@
 #include "FloorListEntryWidget.h"
+#include "LayoutValidation.h"
 
 #include "NavPlayerController.h"
 #include "Blueprint/WidgetTree.h"
@@ -71,8 +72,9 @@ TSharedRef<SWidget> UFloorListEntryWidget::RebuildWidget()
 	return Super::RebuildWidget();
 }
 
-void UFloorListEntryWidget::SetFloorNumber(int32 InFloorNumber, bool bInIsActive, float InElevationMeters)
+void UFloorListEntryWidget::SetFloorNumber(int32 InFloorNumber, bool bInIsActive, float InElevationMeters, const FString& InName)
 {
+	FloorName = InName;
 	FloorNumber = InFloorNumber;
 	bIsActive = bInIsActive;
 	ElevationMeters = InElevationMeters;
@@ -92,7 +94,7 @@ void UFloorListEntryWidget::ApplyVisuals()
 {
 	if (Label)
 	{
-		Label->SetText(FText::FromString(FString::Printf(TEXT("Level %d"), FloorNumber)));
+		Label->SetText(FText::FromString(TEXT("Level ") + LayoutValidation::LevelLabel(FloorNumber) + (FloorName.IsEmpty() ? FString() : TEXT(" - ") + FloorName)));
 	}
 	if (ElevationLabel)
 	{

@@ -88,8 +88,10 @@ bool FInteriorPasteGeometryTest::RunTest(const FString& Parameters)
 		TestFalse(TEXT("the pasted wall remains open"), Wall->IsClosedLoop());
 		TestEqual(TEXT("the wall retains its opening"), Wall->GetOpenings().Num(), 1);
 		const double OldZ = Wall->GetComponentsBoundingBox().Min.Z;
-		TestTrue(TEXT("the lower floor can be removed"), Interior->RemoveFloor(2));
-		TestEqual(TEXT("the wall moves down with the floor"), Wall->GetComponentsBoundingBox().Min.Z, OldZ - 300);
+		TestFalse(TEXT("a floor in the middle cannot be removed"), Interior->RemoveFloor(2));
+		TestEqual(TEXT("so the wall has not moved"), Wall->GetComponentsBoundingBox().Min.Z, OldZ);
+		TestTrue(TEXT("the lowest floor can be removed"), Interior->RemoveFloor(1));
+		TestEqual(TEXT("the floors above keep their numbers, and the wall its height"), Wall->GetComponentsBoundingBox().Min.Z, OldZ);
 	}
 	FInteriorEntrance Link;
 	Link.Kind = EInteriorEntranceKind::Link;
@@ -107,9 +109,10 @@ bool FInteriorPasteGeometryTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// Deleting a floor takes the lifts, stairs and doors in the outer wall of that floor with it, and renumbers the lifts and stairs of the floors
-// above. (A main door is only ever on the ground floor; the doors of the floors above are link doors to a neighbouring building, which
-// this test has no neighbour for, so their renumbering is not tested here.)
+// Deleting the highest or the lowest floor takes the lifts, stairs and doors in the outer wall of that floor with it; the floors that are left
+// keep their numbers (a floor in the middle cannot be deleted). The lifts and stairs of the other floors no longer reach the deleted one. (A main
+// door is only ever on the entry floor; the doors of the floors above are link doors to a neighbouring building, which this test has no
+// neighbour for.)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMinorFixRemoveFloorTest, "InNavi.Interior.RemoveFloor.TakesConnectorsAndDoorsAlong", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FMinorFixRemoveFloorTest::RunTest(const FString& Parameters)
 {
@@ -146,14 +149,17 @@ bool FMinorFixRemoveFloorTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("the lift is on every floor"), SortedLevels(Interior->GetNavNodes()) == TArray<int32>({ 1, 2, 3 }));
 	TestTrue(TEXT("the doors are on the first floor"), SortedLevels(Interior->GetEntrances()) == TArray<int32>({ 1, 1 }));
 
-	TestTrue(TEXT("the middle floor is deleted"), Interior->RemoveFloor(2));
-	TestTrue(TEXT("the lift is on the two floors that are left, the upper one renumbered"), SortedLevels(Interior->GetNavNodes()) == TArray<int32>({ 1, 2 }));
-	TestTrue(TEXT("and it reaches those two floors by their new numbers"), AllReachOnly(Interior->GetNavNodes(), { 1, 2 }));
+	TestFalse(TEXT("the middle floor cannot be deleted"), Interior->RemoveFloor(2));
+	TestTrue(TEXT("so the lift is still on every floor"), SortedLevels(Interior->GetNavNodes()) == TArray<int32>({ 1, 2, 3 }));
+
+	TestTrue(TEXT("the highest floor is deleted"), Interior->RemoveFloor(3));
+	TestTrue(TEXT("the lift is on the two floors that are left"), SortedLevels(Interior->GetNavNodes()) == TArray<int32>({ 1, 2 }));
+	TestTrue(TEXT("and it reaches only those two"), AllReachOnly(Interior->GetNavNodes(), { 1, 2 }));
 	TestTrue(TEXT("the doors of the first floor are still there"), SortedLevels(Interior->GetEntrances()) == TArray<int32>({ 1, 1 }));
 
 	TestTrue(TEXT("the first floor is deleted"), Interior->RemoveFloor(1));
-	TestTrue(TEXT("the lift of the first floor is gone, the other one is on the first floor now"), SortedLevels(Interior->GetNavNodes()) == TArray<int32>({ 1 }));
-	TestTrue(TEXT("and it reaches only that floor"), AllReachOnly(Interior->GetNavNodes(), { 1 }));
+	TestTrue(TEXT("the lift of the first floor is gone, the other one keeps its floor, the second"), SortedLevels(Interior->GetNavNodes()) == TArray<int32>({ 2 }));
+	TestTrue(TEXT("and it reaches only that floor"), AllReachOnly(Interior->GetNavNodes(), { 2 }));
 	TestEqual(TEXT("the doors of the first floor are gone with it"), Interior->GetEntrances().Num(), 0);
 	return true;
 }
@@ -360,19 +366,21 @@ bool FInteriorUniqueRoomNamesTest::RunTest(const FString& Parameters)
 
 	TestEqual(TEXT("a free name is kept"), Make(100, TEXT("Lab1")), FString(TEXT("Lab1")));
 	TestEqual(TEXT("a second room keeps its own free name"), Make(300, TEXT("Lab2")), FString(TEXT("Lab2")));
-	TestEqual(TEXT("copying Lab1 when Lab2 exists takes the next free number"), Make(500, TEXT("Lab1")), FString(TEXT("Lab3")));
-	TestEqual(TEXT("copying Lab1 again counts on"), Make(700, TEXT("Lab1")), FString(TEXT("Lab4")));
-	TestEqual(TEXT("a name without a number gets one"), Make(900, TEXT("Hall")), FString(TEXT("Hall")));
-	TestEqual(TEXT("the copy of a name without a number is numbered from 2"), Make(1100, TEXT("Hall")), FString(TEXT("Hall 2")));
-	TestEqual(TEXT("and then 3"), Make(1300, TEXT("Hall")), FString(TEXT("Hall 3")));
-	TestEqual(TEXT("a name with a space and a number keeps its space"), Interior->MakeUniqueRoomName(TEXT("Hall 2")), FString(TEXT("Hall 4")));
-	TestEqual(TEXT("the comparison does not care about case"), Interior->MakeUniqueRoomName(TEXT("lab1")), FString(TEXT("lab5")));
+	TestEqual(TEXT("a copy of Lab1 gets a number in brackets, so it is not mistaken for the next room"), Make(500, TEXT("Lab1")), FString(TEXT("Lab1 (1)")));
+	TestEqual(TEXT("copying Lab1 again counts on"), Make(700, TEXT("Lab1")), FString(TEXT("Lab1 (2)")));
+	TestEqual(TEXT("a name without a number gets one in brackets"), Make(900, TEXT("Hall")), FString(TEXT("Hall")));
+	TestEqual(TEXT("the copy is (1)"), Make(1100, TEXT("Hall")), FString(TEXT("Hall (1)")));
+	TestEqual(TEXT("and then (2)"), Make(1300, TEXT("Hall")), FString(TEXT("Hall (2)")));
+	TestEqual(TEXT("Lobby 14 is free"), Make(100, TEXT("Lobby 14"), 300.f), FString(TEXT("Lobby 14")));
+	TestEqual(TEXT("its copy keeps the 14 and adds the bracket, so it is not mistaken for Lobby 15"), Interior->MakeUniqueRoomName(TEXT("Lobby 14")), FString(TEXT("Lobby 14 (1)")));
+	TestEqual(TEXT("a copy of a copy counts on from its own bracket"), Interior->MakeUniqueRoomName(TEXT("Hall (2)")), FString(TEXT("Hall (3)")));
+	TestEqual(TEXT("the comparison does not care about case"), Interior->MakeUniqueRoomName(TEXT("lab1")), FString(TEXT("lab1 (3)")));
 
 	// A wall copied with the same name is numbered too.
 	AInteriorRoom* Wall = Interior->CreateWallFromPoints({{100, 600}, {500, 600}}, FString(), Error, {}, TEXT("Hall"));
 	if (TestNotNull(TEXT("the wall is created"), Wall))
 	{
-		TestEqual(TEXT("a wall does not repeat a room's name"), Wall->RoomName, FString(TEXT("Hall 4")));
+		TestEqual(TEXT("a wall does not repeat a room's name"), Wall->RoomName, FString(TEXT("Hall (3)")));
 	}
 
 	// An empty name becomes the room's id, which is unique.

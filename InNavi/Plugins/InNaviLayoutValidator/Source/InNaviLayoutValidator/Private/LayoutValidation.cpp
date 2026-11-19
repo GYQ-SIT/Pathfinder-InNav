@@ -113,7 +113,7 @@ namespace LayoutValidation
         struct FContext
         {
             FString Building, Id, Owner, Path = TEXT("$");
-            int32 Floor = INDEX_NONE;
+            int32 Floor = 0; // no floor (0 is not a level; -1 is B1)
             EObjectKind Kind = EObjectKind::Project;
         };
         struct FNode
@@ -130,8 +130,11 @@ namespace LayoutValidation
             FContext Context;
             FBox2D Bounds{ForceInit};
             TArray<TStaticArray<FVector2D, 3>> Triangles;
+            // The outline, and whether the room has a door (a window or a void is not a way in): what CONNECTOR_ENCLOSED looks at.
+            TArray<FVector2D> Outline;
+            bool bHasDoor = false;
 
-            FRoomShape(const FContext& InContext, const TArray<FVector2D>& Points) : Context(InContext)
+            FRoomShape(const FContext& InContext, const TArray<FVector2D>& Points) : Context(InContext), Outline(Points)
             {
                 for (const FVector2D& Point : Points) Bounds += Point;
                 TArray<UE::Geometry::FIndex3i> Indices;
@@ -295,8 +298,15 @@ namespace LayoutValidation
                 }
                 if (Type.IsEmpty() || Type == TEXT("door")) References.Add({ C, String(Obj, TEXT("inputId")), String(Obj, TEXT("connectsTo")) });
             }
-            void Interior(const TSharedPtr<FJsonObject>& Obj, const TArray<FVector2D>& Boundary, int32 FloorCount, double Scale)
+            void Interior(const TSharedPtr<FJsonObject>& Obj, const TArray<FVector2D>& Boundary, int32 FloorCount, double Scale, int32 FirstLevel = 1)
             {
+                // The floors a building has: FloorCount of them from FirstLevel up (see LevelAfter: level 0 does not exist, B1 is -1).
+                const auto HasLevel = [FirstLevel, FloorCount](int32 Level)
+                {
+                    if (!IsValidLevel(Level)) return false;
+                    const int32 Position = LevelIndex(Level) - LevelIndex(FirstLevel);
+                    return Position >= 0 && Position < FloorCount;
+                };
                 const auto Base = C;
                 TSet<int32> FloorIds;
                 TSet<FString> RoomIds, NavigationIds, NodeIds, EntranceIds;
@@ -311,7 +321,7 @@ namespace LayoutValidation
                     C = Base; C.Kind = EObjectKind::Floor; C.Path = Base.Path + FString::Printf(TEXT(".floors[%d]"), I);
                     const auto Floor = Object(Floors[I]); if (!Floor) continue;
                     C.Floor = Integer(Floor, TEXT("level"), 1);
-                    if (C.Floor < 1 || C.Floor > FloorCount) Issue(TEXT("FLOOR_RANGE"), TEXT("Floor level is outside this building's floor count."), TEXT("Correct the floor level or building floor count."));
+                    if (!HasLevel(C.Floor)) Issue(TEXT("FLOOR_RANGE"), TEXT("Floor level is outside this building's floor count."), TEXT("Correct the floor level or building floor count."));
                     if (FloorIds.Contains(C.Floor)) Issue(TEXT("FLOOR_DUPLICATE"), TEXT("The same floor level is defined twice."), TEXT("Keep a single definition of each floor."));
                     FloorIds.Add(C.Floor);
                     if (Number(Floor, TEXT("wallHeight"), 280) <= 0 || Number(Floor, TEXT("wallThickness"), 20) < 0) Invalid(TEXT("wall dimensions"));
@@ -334,7 +344,7 @@ namespace LayoutValidation
                         const int32 IssuesBeforeShape = Report.Issues.Num();
                         const auto Points = Shape(Room, bClosed);
                         if (ShouldCancel()) return;
-                        if (bClosed && Report.Issues.Num() == IssuesBeforeShape) Shapes.Emplace(C, Points);
+                        const int32 ShapeIndex = (bClosed && Report.Issues.Num() == IssuesBeforeShape) ? Shapes.Emplace(C, Points) : INDEX_NONE;
                         Containment(Points, bClosed, Boundary);
                         const auto RoomContext = C;
                         TSet<FString> OpeningIds;
@@ -343,6 +353,15 @@ namespace LayoutValidation
                         {
                             C = RoomContext; C.Kind = EObjectKind::Opening; C.Owner = RoomContext.Id; C.Path += FString::Printf(TEXT(".openings[%d]"), O);
                             if (const auto Item = Object(Openings[O])) Opening(Item, Points, bClosed, Scale, OpeningIds, References);
+                        }
+                        if (ShapeIndex != INDEX_NONE)
+                        {
+                            for (const auto& Item : Openings)
+                            {
+                                if (!Item.IsValid() || Item->Type != EJson::Object) continue;
+                                const FString OpeningType = String(Item->AsObject(), TEXT("type")).ToLower();
+                                if (OpeningType.IsEmpty() || OpeningType == TEXT("door")) Shapes[ShapeIndex].bHasDoor = true;
+                            }
                         }
                         // Overlaps are advisory: the authoring tools allow intentional overlap.
                         for (int32 O = 0; O < Openings.Num(); ++O) for (int32 P = O + 1; P < Openings.Num(); ++P)
@@ -378,7 +397,7 @@ namespace LayoutValidation
                         if (Node.Size <= 0) Invalid(TEXT("connector sizeScale"));
                         for (const auto& Level : Array(ObjNode, TEXT("connectsFloors")))
                         {
-                            if (!Level.IsValid() || Level->Type != EJson::Number || !FMath::IsFinite(Level->AsNumber()) || Level->AsNumber() < 1 || Level->AsNumber() > FloorCount || FMath::FloorToDouble(Level->AsNumber()) != Level->AsNumber()) Invalid(TEXT("connectsFloors level"));
+                            if (!Level.IsValid() || Level->Type != EJson::Number || !FMath::IsFinite(Level->AsNumber()) || FMath::Abs(Level->AsNumber()) > MaxBuildingFloors || FMath::FloorToDouble(Level->AsNumber()) != Level->AsNumber() || !HasLevel(static_cast<int32>(Level->AsNumber()))) Invalid(TEXT("connectsFloors level"));
                             else Node.Floors.AddUnique(static_cast<int32>(Level->AsNumber()));
                         }
                         Nodes.Add(MoveTemp(Node));
@@ -392,6 +411,20 @@ namespace LayoutValidation
                     {
                         C = Shapes[A].Context;
                         Issue(TEXT("ROOM_OVERLAP"), TEXT("Room footprint overlaps ") + Shapes[B].Context.Id + TEXT("."), TEXT("Review the overlap; keep it if it is intentional."), ESeverity::Warning);
+                    }
+                }
+                // A lift, stair or escalator inside a closed room without a door cannot be reached. A warning, not an error: a restricted-access layout can
+                // be intentional, and the tools do not stop the placement.
+                for (const auto& Node : Nodes)
+                {
+                    if (Node.Type != TEXT("elevator") && Node.Type != TEXT("stairs") && Node.Type != TEXT("escalator")) continue;
+                    for (const auto& Shape : Shapes)
+                    {
+                        if (Shape.Context.Floor != Node.Context.Floor || Shape.bHasDoor || !Inside(Node.Position, Shape.Outline)) continue;
+                        C = Node.Context;
+                        Issue(TEXT("CONNECTOR_ENCLOSED"), FString::Printf(TEXT("The %s is inside room %s, which has no door, so nobody can reach it."), *Node.Type, *Shape.Context.Id),
+                            TEXT("Add a door to the room, or move the connector out of it. Keep it only if access is restricted on purpose."), ESeverity::Warning);
+                        break;
                     }
                 }
                 for (const auto& Reference : References)
@@ -410,8 +443,9 @@ namespace LayoutValidation
                     for (const auto& Other : Nodes)
                     {
                         if (&Node == &Other || Node.Group != Other.Group) continue;
-                        if (Node.Context.Floor == Other.Context.Floor || Node.Type != Other.Type || !Node.Position.Equals(Other.Position, 0.01) || !FMath::IsNearlyEqual(Node.Size, Other.Size, Epsilon) || !FMath::IsNearlyEqual(Node.Rotation, Other.Rotation, Epsilon))
-                        { Issue(TEXT("CONNECTOR_GROUP_INCONSISTENT"), TEXT("Copies of this connector disagree on type, position, size or floor."), TEXT("Edit the connector group so its floor instances agree.")); break; }
+                        // Each floor's node stands where it was put, turned and sized as its floor needs: only the type has to agree, and one floor has one node.
+                        if (Node.Context.Floor == Other.Context.Floor || Node.Type != Other.Type)
+                        { Issue(TEXT("CONNECTOR_GROUP_INCONSISTENT"), TEXT("Copies of this connector disagree on type, or two of them are on one floor."), TEXT("Edit the connector group so each floor has one instance of the same type.")); break; }
                     }
                     for (int32 Level : Node.Floors)
                     {
@@ -429,7 +463,7 @@ namespace LayoutValidation
                     Id(Entrance, EntranceIds); C.Floor = Integer(Entrance, TEXT("level"), 1);
                     const FString Kind = String(Entrance, TEXT("kind")).ToLower();
                     if (!Kind.IsEmpty() && Kind != TEXT("main") && Kind != TEXT("link")) Invalid(TEXT("entrance kind"));
-                    if (C.Floor < 1 || C.Floor > FloorCount || (Kind != TEXT("link") && C.Floor != 1)) Issue(TEXT("ENTRANCE_FLOOR"), TEXT("Entrance is on an invalid floor; main entrances belong on level 1."), TEXT("Correct the entrance floor or kind."));
+                    if (!HasLevel(C.Floor) || (Kind != TEXT("link") && C.Floor != 1)) Issue(TEXT("ENTRANCE_FLOOR"), TEXT("Entrance is on an invalid floor; main entrances belong on level 1."), TEXT("Correct the entrance floor or kind."));
                     const int32 Edge = Integer(Entrance, TEXT("edge"), 0);
                     const double Offset = Number(Entrance, TEXT("offset"), 0), Width = Number(Entrance, TEXT("width"), 240);
                     if (!Boundary.IsValidIndex(Edge) || Offset < 0 || Width <= 0 || (Boundary.IsValidIndex(Edge) && Offset + Width > FVector2D::Distance(Boundary[Edge], Boundary[(Edge + 1) % Boundary.Num()]) * Scale + Epsilon))
@@ -476,6 +510,9 @@ namespace LayoutValidation
             ById.Add(Reader.C.Building, Building);
             Reader.String(Building, TEXT("name"), true);
             const int32 Count = Reader.Integer(Building, TEXT("floorCount"), 10);
+            // The level of the lowest floor (1 when there is none: a file from before basements).
+            const int32 FirstLevel = Reader.Integer(Building, TEXT("firstLevel"), 1);
+            if (!IsValidLevel(FirstLevel)) Reader.Invalid(TEXT("building firstLevel"));
             if (Count < 1 || Count > MaxBuildingFloors || Reader.Number(Building, TEXT("floorHeight"), Reader.Number(Project, TEXT("floorHeight"), 300)) <= 0) Reader.Invalid(TEXT("building floor dimensions"));
             const auto Boundary = Reader.Shape(Building, true);
             if (const auto Offset = Building->Values.Find(TEXT("offset"))) Reader.XY(*Offset);
@@ -483,7 +520,7 @@ namespace LayoutValidation
             if (Interior)
             {
                 Reader.C.Path += TEXT(".interior");
-                if (auto Object = Reader.Object(*Interior)) Reader.Interior(Object, Boundary, Count, Scale);
+                if (auto Object = Reader.Object(*Interior)) Reader.Interior(Object, Boundary, Count, Scale, IsValidLevel(FirstLevel) ? FirstLevel : 1);
             }
             else Reader.Issue(TEXT("INTERIOR_UNAUTHORED"), TEXT("This building has no authored interior."), TEXT("Author its interior before checking room reachability."), ESeverity::Info);
         }

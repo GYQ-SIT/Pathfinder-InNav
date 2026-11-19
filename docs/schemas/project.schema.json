@@ -89,6 +89,7 @@
         "offset": { "description": "Where the building stands among the others, in footprint units.", "$ref": "#/definitions/point" },
         "buildingType": { "description": "One of the types of the editor (BuildingTypes.h), as written there (Other too).", "type": "string" },
         "floorCount": { "type": "integer", "minimum": 1, "maximum": 200 },
+        "firstLevel": { "description": "The level of the lowest floor: 1 is the ground floor, -1 is B1 (there is no level 0, which the editor and the layout validator check). The floors go up from it for floorCount floors. Written only when it is not 1.", "type": "integer", "minimum": -20, "maximum": 200, "not": { "const": 0 } },
         "floorHeight": { "description": "In centimetres; the file's floorHeight when absent.", "type": "number", "exclusiveMinimum": 0 },
         "footprint": {
           "description": "The outline, in order; edge i runs from point i to point i + 1 (the last to the first).",
@@ -112,11 +113,40 @@
       "required": ["level"],
       "additionalProperties": false,
       "properties": {
-        "level": { "description": "1 is the ground floor.", "type": "integer", "minimum": 1, "maximum": 200 },
+        "level": { "description": "1 is the ground floor, -1 is B1 (there is no level 0).", "type": "integer", "minimum": -20, "maximum": 200, "not": { "const": 0 } },
         "wallHeight": { "description": "Centimetres.", "type": "number", "exclusiveMinimum": 0 },
         "wallThickness": { "description": "Centimetres.", "type": "number", "exclusiveMinimum": 0 },
+        "name": { "description": "What the floor is called besides its number (a mezzanine, a lobby level). Left out when there is none.", "type": "string", "maxLength": 40 },
+        "open": { "description": "True for a floor without an outer wall (an open ground floor, a sheltered walkway). Left out when false.", "type": "boolean" },
         "rooms": { "type": "array", "items": { "$ref": "#/definitions/room" } },
-        "navNodes": { "type": "array", "items": { "$ref": "#/definitions/navNode" } }
+        "navNodes": { "type": "array", "items": { "$ref": "#/definitions/navNode" } },
+        "referenceImage": { "$ref": "#/definitions/referenceImage" },
+        "utilities": { "description": "Utility points on this floor (an AED, a bicycle rack, a drop-off point). Left out when there are none.", "type": "array", "items": { "$ref": "#/definitions/utility" } }
+      }
+    },
+    "referenceImage": {
+      "description": "A PNG shown under the 2D drawing of the floor, to trace over. Only a guide: it takes no part in routes, checks or the 3D view. The file is not stored in the project, only its path.",
+      "type": "object",
+      "required": ["path", "center", "width"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "description": "Full path of the PNG on the computer that made the project.", "type": "string", "minLength": 1 },
+        "center": { "description": "Where the middle of the picture lies, in footprint units.", "$ref": "#/definitions/point" },
+        "width": { "description": "Footprint units; the height follows the picture's own proportions.", "type": "number", "exclusiveMinimum": 0 },
+        "opacity": { "description": "0.05 to 1; 0.5 when left out.", "type": "number", "minimum": 0.05, "maximum": 1 },
+        "visible": { "description": "False when hidden; left out when shown.", "type": "boolean" }
+      }
+    },
+    "utility": {
+      "description": "A point people may look for that is not a room. Only a marker: routes do not go through it.",
+      "type": "object",
+      "required": ["id", "type", "position"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "description": "Unique in the building.", "type": "string", "minLength": 1 },
+        "type": { "description": "An unknown type reads as other.", "type": "string", "enum": ["aed", "bicycle", "dropoff", "other"] },
+        "name": { "description": "Up to 60 characters; left out when empty.", "type": "string", "maxLength": 60 },
+        "position": { "$ref": "#/definitions/point" }
       }
     },
     "room": {
@@ -162,7 +192,7 @@
         "id": { "type": "string", "minLength": 1 },
         "type": { "type": "string", "enum": ["elevator", "stairs", "escalator", "pathNode"] },
         "position": { "$ref": "#/definitions/point" },
-        "connectsFloors": { "type": "array", "items": { "type": "integer", "minimum": 1 } },
+        "connectsFloors": { "type": "array", "items": { "type": "integer", "minimum": -20, "not": { "const": 0 } } },
         "connectorGroupId": { "type": "string" },
         "rotationDegrees": { "type": "number" },
         "sizeScale": { "type": "number", "exclusiveMinimum": 0 }
@@ -176,7 +206,7 @@
       "properties": {
         "id": { "type": "string", "minLength": 1 },
         "kind": { "type": "string", "enum": ["main", "link"] },
-        "level": { "type": "integer", "minimum": 1 },
+        "level": { "type": "integer", "minimum": -20, "not": { "const": 0 } },
         "edge": { "description": "Which edge of the building's footprint.", "type": "integer", "minimum": 0 },
         "offset": { "type": "number", "minimum": 0 },
         "width": { "type": "number", "exclusiveMinimum": 0 },

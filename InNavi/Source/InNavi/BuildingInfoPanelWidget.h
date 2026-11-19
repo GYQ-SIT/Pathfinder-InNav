@@ -7,6 +7,7 @@
 
 class UBorder;
 class UButton;
+class UEditableTextBox;
 class UFootprintPreviewWidget;
 class USizeBox;
 class UTextBlock;
@@ -53,6 +54,10 @@ public:
 	int32 GetRoomFloorOptionCountForTests() const;
 	void ClickTransparentForTests() { HandleTransparentClicked(); }
 	void SelectRoomFloorForTests(const FString& Item) { HandleRoomFloorSelected(Item, ESelectInfo::OnMouseClick); }
+	// The From and To boxes: what they show, and the user typing into both and pressing Enter.
+	FString GetFloorFromTextForTests() const;
+	FString GetFloorToTextForTests() const;
+	void CommitFloorRangeForTests(const FString& From, const FString& To);
 	UButton* GetOpen2DButtonForTests() const { return Open2DButton; }
 	UButton* GetOpen3DButtonForTests() const { return Open3DButton; }
 
@@ -68,6 +73,10 @@ private:
 	// The user chose a type in the drop-down.
 	UFUNCTION()
 	void HandleTypeSelected(FString SelectedItem, ESelectInfo::Type SelectionType);
+	// The From and To boxes: the lowest and the highest floor of the building, typed as 3, -1 or B1 (either order). Enter or clicking away
+	// applies them; something that is not a floor puts the old values back with a message.
+	UFUNCTION()
+	void HandleFloorRangeCommitted(const FText& NewText, ETextCommit::Type CommitType);
 	// An item of the drop-down: the type's colour as a small square before its name.
 	UFUNCTION()
 	UWidget* HandleGenerateTypeItem(FString Item);
@@ -119,6 +128,10 @@ private:
 	bool bRefreshingReveal = false;
 	UPROPERTY()
 	UTextBlock* FloorsValue = nullptr;
+	UPROPERTY()
+	UEditableTextBox* FloorFromBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* FloorToBox = nullptr;
 	UPROPERTY()
 	UTextBlock* RoomsValue = nullptr;
 	UPROPERTY()

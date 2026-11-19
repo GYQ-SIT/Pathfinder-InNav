@@ -8,6 +8,9 @@
 
 namespace
 {
+	// How far a connector stays under the slab above it (centimetres): its top must not lie in the plane of the floor cap, which is where the cap is.
+	constexpr float SlabClearance = 2.f;
+
 	// Appends an axis-aligned box (in local XY, Z up) - used for the elevator's corner posts and
 	// each stair/escalator step. "Local" here means centered on the connector's own origin, before
 	// TransformFootprintVertices below applies its actual position/rotation/scale.
@@ -123,14 +126,17 @@ void AInteriorConnectorMarker::BuildElevatorShaft(const FVector2D& WorldCenter, 
 		FVector2D(-HalfSize.X,  HalfSize.Y),
 	};
 
-	const float Top = FloorBaseZ + FloorHeight;
+	// The posts end a little under the slab above (the building's floor cap lies exactly at FloorBaseZ + FloorHeight, and a top in that plane flickers
+	// against it), and start the same little under this floor's own slab, so the posts of floors stacked into one shaft still overlap.
+	const float Top = FloorBaseZ + FloorHeight - SlabClearance;
+	const float PostBottom = FloorBaseZ - SlabClearance;
 	const float HalfPost = PostThickness * 0.5f;
 	for (const FVector2D& Corner : Corners)
 	{
 		AppendAxisAlignedBox(Vertices, Triangles,
 			FVector2D(Corner.X - HalfPost, Corner.Y - HalfPost),
 			FVector2D(Corner.X + HalfPost, Corner.Y + HalfPost),
-			FloorBaseZ, Top);
+			PostBottom, Top);
 	}
 
 	for (int32 i = 0; i < 4; i++)
@@ -187,7 +193,8 @@ void AInteriorConnectorMarker::BuildStairsSteps(const FVector2D& WorldCenter, fl
 	for (int32 i = 0; i < NumSteps; i++)
 	{
 		const float StepStartX = StartX + i * StepDepth;
-		const float StepTopZ = FloorBaseZ + (i + 1) * StepRise;
+		// The last step ends a little under the slab above, not in its plane (see SlabClearance).
+		const float StepTopZ = FloorBaseZ + (i + 1) * StepRise - (i + 1 == NumSteps ? SlabClearance : 0.f);
 		AppendAxisAlignedBox(Vertices, Triangles,
 			FVector2D(StepStartX, -HalfWidth),
 			FVector2D(EndX, HalfWidth),

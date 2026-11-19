@@ -8,8 +8,26 @@
 #include "KismetProceduralMeshLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
+
+namespace
+{
+	// Every room that exists, so a room can find the ones beside it without walking every actor of the world (a campus has thousands of rooms).
+	TSet<AInteriorRoom*>& LiveRooms()
+	{
+		static TSet<AInteriorRoom*> Rooms;
+		return Rooms;
+	}
+}
+
+void AInteriorRoom::BeginDestroy()
+{
+	LiveRooms().Remove(this);
+	Super::BeginDestroy();
+}
+
 AInteriorRoom::AInteriorRoom()
 {
+	if (!HasAnyFlags(RF_ClassDefaultObject)) LiveRooms().Add(this);
 	PrimaryActorTick.bCanEverTick = false;
 
 	MeshComp = CreateDefaultSubobject<UProceduralMeshComponent>(TEXT("MeshComp"));
@@ -65,6 +83,27 @@ static void BuildWallSpansForEdge(float EdgeLength, float WallHeight, const TArr
 	{
 		OutSpans.Add({ Cursor, EdgeLength, 0.f, WallHeight });
 	}
+}
+
+int32 AInteriorRoom::ChooseWallBiasLevel() const
+{
+	// Levels in use by the rooms (and free walls) on the same floor whose walls could touch this one's.
+	TSet<int32> Taken;
+	const UWorld* World = GetWorld();
+	for (const AInteriorRoom* Other : LiveRooms())
+	{
+		// A room that was destroyed stays in the list until it is collected, and must not count.
+		if (Other == this || !IsValid(Other) || Other->WallBiasLevel == 0 || Other->FloorLevel != FloorLevel || !Other->WallBounds.bIsValid || Other->GetWorld() != World) continue;
+		if (Other->WallBounds.Intersect(WallBounds)) Taken.Add(Other->WallBiasLevel);
+	}
+	// Keeping the level it already had when that is still free keeps a room from changing look on every rebuild.
+	if (WallBiasLevel > 0 && !Taken.Contains(WallBiasLevel)) return WallBiasLevel;
+	for (int32 Level = 1; Level <= WallBiasLevels; ++Level)
+	{
+		if (!Taken.Contains(Level)) return Level;
+	}
+	// More touching neighbours than levels: share the least crowded one rather than none.
+	return 1 + (Taken.Num() % WallBiasLevels);
 }
 
 void AInteriorRoom::BuildWalls(const TArray<FVector2D>& Footprint, float Scale, FVector2D Offset, float FloorBaseZ, float WallHeight, float WallThickness, const TArray<FInteriorOpening>& Openings, bool bClosedLoop, bool bCreateCollision)
@@ -206,7 +245,11 @@ void AInteriorRoom::RebuildMesh()
 		Poly2D[i] = FVector2D((CachedFootprint[i].X + CachedOffset.X) * CachedScale, (CachedFootprint[i].Y + CachedOffset.Y) * CachedScale);
 	}
 
-	const float HalfThickness = CachedWallThickness * 0.5f;
+	// Where the walls are, for the neighbours' choice of level, then this room's own level (see the comment in the header).
+	WallBounds = FBox2D(Poly2D).ExpandBy(CachedWallThickness);
+	WallBiasLevel = ChooseWallBiasLevel();
+	const float HalfThickness = CachedWallThickness * 0.5f + WallBiasThicknessStep * WallBiasLevel;
+	const float BiasedWallHeight = CachedWallHeight + WallBiasHeightStep * WallBiasLevel;
 
 	// The walls of a room are one continuous wall, not one box per edge: the spans of two edges meet at a mitred corner point
 	// (ComputeWallCorners), so there is no notch on the outside of a corner and no cap inside the wall, and the normals are set here instead
@@ -245,7 +288,7 @@ void AInteriorRoom::RebuildMesh()
 		EdgeOpenings.Sort([](const FInteriorOpening& A, const FInteriorOpening& B) { return A.Offset < B.Offset; });
 
 		TArray<FWallSpan> Spans;
-		BuildWallSpansForEdge(EdgeLength, CachedWallHeight, EdgeOpenings, Spans);
+		BuildWallSpansForEdge(EdgeLength, BiasedWallHeight, EdgeOpenings, Spans);
 		for (const FWallSpan& Span : Spans)
 		{
 			FWallPiece Piece;

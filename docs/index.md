@@ -11,7 +11,8 @@ the same places and routes on a phone.
 ## Pages
 
 - [Proposal](proposal.md) - what we are building and why
-- [Architecture](architecture.md) - system design and tech stack
+- [Architecture](architecture.md) - system design on one page, with two diagrams
+- [Architecture in detail](architecture-details.md) - the long version: safeguards, delivery, who owns what
 - [Toolchain Decision](toolchain-decision.md) - stack/platform decisions and the reasoning behind them
 - [Deliverables](deliverables.md) - ownership and M1/M2/M3 targets
 - [Interior Editor Guide](design/interior-editor-guide.md) - how to use the editor (both screens)

@@ -62,7 +62,7 @@ bool AInteriorBuildingPreviewPivot::Initialize(APolyBuilding* Building, AInterio
 	for (const FVector2D& Point : Building->GetFootprint())
 	{
 		const FVector2D XY = (Point + Building->BuildingOffset) * Generator->GetScale();
-		Bounds += Building->GetActorTransform().TransformPosition(FVector(XY, (LowestFloor - 1) * Building->GetFloorHeight()));
+		Bounds += Building->GetActorTransform().TransformPosition(FVector(XY, Building->GetLevelBaseZ(LowestFloor)));
 	}
 	if (!Bounds.IsValid) return false;
 	DefaultPivot = Bounds.GetCenter();
@@ -70,7 +70,7 @@ bool AInteriorBuildingPreviewPivot::Initialize(APolyBuilding* Building, AInterio
 	OriginalBuildingWorld = Building->GetActorTransform();
 	ViewedBuilding = Building;
 	OriginalVisibleLevel = Building->GetVisibleInteriorLevel();
-	const float Height = (Building->GetFloorCount() - LowestFloor + 1) * Building->GetFloorHeight();
+	const float Height = Building->GetTopZ() - Building->GetLevelBaseZ(LowestFloor);
 	SweepRadius = FMath::Max(100.f, FMath::Sqrt(FMath::Square(Bounds.GetExtent().Size()) + FMath::Square(Height)));
 
 	bool bGrouped = GroupActor(Building);

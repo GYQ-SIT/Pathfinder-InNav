@@ -1,4 +1,5 @@
 #include "InteriorScreenWidget.h"
+#include "LayoutValidation.h"
 #include "DockHostUMG.h"
 #include "InteriorDockLayout.h"
 #include "DockSharedPanels.h"
@@ -21,6 +22,7 @@
 #include "EditScreenWidget.h"
 #include "FloorListEntryWidget.h"
 #include "InteriorFloorPlanWidget.h"
+#include "InteriorGenerator.h"
 #include "InteriorTypes.h"
 #include "LayerRowWidget.h"
 #include "NavigationPanelWidget.h"
@@ -263,7 +265,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 			UImage* Icon = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), FName(FString(Name) + TEXT("Icon")));
 			const FString IconPath = FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), IconAssetName, IconAssetName);
-			if (UTexture2D* IconTexture = LoadObject<UTexture2D>(nullptr, *IconPath))
+			// A row with no icon asset (the utility types) keeps the space, so the names line up with the other rows.
+			if (UTexture2D* IconTexture = *IconAssetName ? LoadObject<UTexture2D>(nullptr, *IconPath) : nullptr)
 			{
 				Icon->SetBrushFromTexture(IconTexture, false);
 				Icon->SetDesiredSizeOverride(FVector2D(22.f, 22.f));
@@ -289,6 +292,8 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			Key_Badge->SetContent(Text(WidgetTree, FString(Name) + TEXT("KeyText"), Key, 11.f, Rgb(170, 190, 214), true));
 			UHorizontalBoxSlot* KeySlot = Row->AddChildToHorizontalBox(Key_Badge);
 			KeySlot->SetVerticalAlignment(VAlign_Center);
+			// No shortcut for this row: no badge.
+			if (!*Key) Key_Badge->SetVisibility(ESlateVisibility::Collapsed);
 
 			LeftSidebar->AddChildToVerticalBox(Button)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f * DesignToUi));
 			return Button;
@@ -319,6 +324,18 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		AddElevatorModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddElevatorModeClicked);
 		AddEscalatorModeButton = AddToolRow(TEXT("Add_Escalator_Button"), TEXT("Icon_AddEscalator"), TEXT("Escalator"), TEXT("6"), TEXT("Add Escalator Mode [6] (click a point to place an escalator, connecting the floor above and below by default)"));
 		AddEscalatorModeButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddEscalatorModeClicked);
+
+		// Utility points (PAT-193): things people look for that are not rooms. No shortcut keys; the tooltip says how placing works.
+		AddToolGroupLabel(TEXT("Txt_GroupUtility"), TEXT("UTILITY"));
+		const TCHAR* UtilityHow = TEXT(" (click the plan to place one; click it again to select, drag to move; Delete removes it)");
+		UtilityAedButton = AddToolRow(TEXT("Btn_UtilityAed"), TEXT(""), TEXT("AED"), TEXT(""), *(FString(TEXT("Place an AED (defibrillator)")) + UtilityHow));
+		UtilityAedButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnUtilityAedClicked);
+		UtilityBicycleButton = AddToolRow(TEXT("Btn_UtilityBicycle"), TEXT(""), TEXT("Bicycle rack"), TEXT(""), *(FString(TEXT("Place a bicycle rack")) + UtilityHow));
+		UtilityBicycleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnUtilityBicycleClicked);
+		UtilityDropOffButton = AddToolRow(TEXT("Btn_UtilityDropOff"), TEXT(""), TEXT("Drop-off point"), TEXT(""), *(FString(TEXT("Place a drop-off point")) + UtilityHow));
+		UtilityDropOffButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnUtilityDropOffClicked);
+		UtilityOtherButton = AddToolRow(TEXT("Btn_UtilityOther"), TEXT(""), TEXT("Other"), TEXT(""), *(FString(TEXT("Place any other point worth finding; name it in Properties")) + UtilityHow));
+		UtilityOtherButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnUtilityOtherClicked);
 
 		// Grow/Shrink and Rotate mirror the room keys = - 9 0 exactly (see OnGrowRoomClicked etc.). Rotate keeps turning while the
 		// button is held.
@@ -381,6 +398,144 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		FloorListSizeBox->SetContent(FloorListBox);
 		UVerticalBoxSlot* FloorListSlot = FloorStack->AddChildToVerticalBox(FloorListSizeBox);
 		FloorListSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f * StartStyle::DesignToUi));
+
+		// From / To: the lowest and the highest floor of the building, typed as 3, -1 or B1 (see OnFloorRangeCommitted).
+		{
+			UHorizontalBox* RangeRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("FloorRangeRow"));
+			auto AddRangeBox = [this, RangeRow](const TCHAR* Caption, const TCHAR* CaptionName, const TCHAR* BoxName, const TCHAR* Hint, UEditableTextBox*& OutBox)
+			{
+				UTextBlock* CaptionText = StartStyle::Text(WidgetTree, CaptionName, Caption, 12.f, StartStyle::Rgb(150, 172, 202), true);
+				UHorizontalBoxSlot* CaptionSlot = RangeRow->AddChildToHorizontalBox(CaptionText);
+				CaptionSlot->SetVerticalAlignment(VAlign_Center);
+				CaptionSlot->SetPadding(FMargin(0.f, 0.f, 6.f * StartStyle::DesignToUi, 0.f));
+				OutBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), BoxName);
+				OutBox->SetJustification(ETextJustify::Center);
+				OutBox->SetToolTip(MakeToolTipWidget(Hint));
+				OutBox->OnTextCommitted.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFloorRangeCommitted);
+				ApplyStandardFont(OutBox);
+				OutBox->SetWidgetStyle(StartStyle::Field(13.f));
+				USizeBox* BoxSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+				BoxSize->SetWidthOverride(64.f);
+				BoxSize->SetContent(OutBox);
+				RangeRow->AddChildToHorizontalBox(BoxSize)->SetPadding(FMargin(0.f, 0.f, 12.f * StartStyle::DesignToUi, 0.f));
+			};
+			AddRangeBox(TEXT("From"), TEXT("Txt_FloorFrom"), TEXT("Edt_FloorFrom"), TEXT("Where the building starts: 1 is the ground floor, 3 the third floor. For basements it goes down from B1 (From B1 To B2). Press Enter to apply."), FloorFromBox);
+			AddRangeBox(TEXT("To"), TEXT("Txt_FloorTo"), TEXT("Edt_FloorTo"), TEXT("Where the building ends. Floors outside From and To are removed with everything on them (Undo brings them back). Press Enter to apply."), FloorToBox);
+			FloorStack->AddChildToVerticalBox(RangeRow)->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f * StartStyle::DesignToUi));
+		}
+
+		// Name of the floor being viewed (a mezzanine, a lobby level ...), and the buttons for a basement and a special floor.
+		{
+			UHorizontalBox* NameRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("FloorNameRow"));
+			UHorizontalBoxSlot* NameCaptionSlot = NameRow->AddChildToHorizontalBox(StartStyle::Text(WidgetTree, TEXT("Txt_FloorName"), TEXT("Name"), 12.f, StartStyle::Rgb(150, 172, 202), true));
+			NameCaptionSlot->SetVerticalAlignment(VAlign_Center);
+			NameCaptionSlot->SetPadding(FMargin(0.f, 0.f, 6.f * StartStyle::DesignToUi, 0.f));
+			FloorNameBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Edt_FloorName"));
+			FloorNameBox->SetHintText(FText::FromString(TEXT("e.g. Mezzanine")));
+			FloorNameBox->SetToolTip(MakeToolTipWidget(TEXT("What this floor is called besides its number, for example Mezzanine or Lobby level. Press Enter to apply. It is only a label: the floor keeps its level.")));
+			FloorNameBox->OnTextCommitted.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFloorNameCommitted);
+			ApplyStandardFont(FloorNameBox);
+			FloorNameBox->SetWidgetStyle(StartStyle::Field(13.f));
+			NameRow->AddChildToHorizontalBox(FloorNameBox)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			FloorStack->AddChildToVerticalBox(NameRow)->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f * StartStyle::DesignToUi));
+
+			UHorizontalBox* AddRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("FloorAddRow"));
+			const auto AddSmallButton = [this, AddRow](UButton*& OutButton, const TCHAR* Name, const TCHAR* Label, const TCHAR* Hint)
+			{
+				OutButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+				OutButton->SetStyle(StartStyle::SecondaryButton());
+				OutButton->SetBackgroundColor(FLinearColor::White);
+				UTextBlock* Text = StartStyle::Text(WidgetTree, FString(Name) + TEXT("Label"), Label, 12.f, FLinearColor::White, true);
+				Text->SetJustification(ETextJustify::Center);
+				UBorder* Pad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(Name) + TEXT("Pad")));
+				Pad->SetBrushColor(FLinearColor::Transparent);
+				Pad->SetPadding(FMargin(8.f * StartStyle::DesignToUi, 7.f * StartStyle::DesignToUi));
+				Pad->SetContent(Text);
+				OutButton->SetContent(Pad);
+				OutButton->SetToolTip(MakeToolTipWidget(Hint));
+				UHorizontalBoxSlot* Slot = AddRow->AddChildToHorizontalBox(OutButton);
+				Slot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+				Slot->SetPadding(FMargin(0.f, 0.f, 6.f * StartStyle::DesignToUi, 0.f));
+			};
+			AddSmallButton(AddBasementButton, TEXT("Btn_AddBasement"), TEXT("+ Basement"), TEXT("Adds a basement under the lowest floor (B1, then B2 ...). New floors go where they belong: basements below, the others on top."));
+			AddSmallButton(AddSpecialFloorButton, TEXT("Btn_AddSpecialFloor"), TEXT("+ Special"), TEXT("Adds a floor on top with a name to change, such as Mezzanine."));
+			FloorStack->AddChildToVerticalBox(AddRow)->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f * StartStyle::DesignToUi));
+		}
+
+		// Open floor: no outer wall on the floor being viewed (an open ground floor, a sheltered walkway).
+		{
+			UHorizontalBox* OpenRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("OpenFloorRow"));
+			OpenFloorCheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), TEXT("Chk_OpenFloor"));
+			StartStyle::DarkCheckBox(OpenFloorCheckBox);
+			OpenFloorCheckBox->SetToolTip(MakeToolTipWidget(TEXT("Open floor: this floor has no outer wall, like a sheltered walkway or an open lobby. The outline is not walled in the 3D view and, on the ground floor, routes can enter and leave anywhere along it.")));
+			OpenFloorCheckBox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnOpenFloorChanged);
+			OpenRow->AddChildToHorizontalBox(OpenFloorCheckBox)->SetVerticalAlignment(VAlign_Center);
+			UHorizontalBoxSlot* OpenLabelSlot = OpenRow->AddChildToHorizontalBox(StartStyle::Text(WidgetTree, TEXT("Txt_OpenFloor"), TEXT("Open floor (no outer wall)"), 12.f, StartStyle::Rgb(214, 226, 242)));
+			OpenLabelSlot->SetPadding(FMargin(6.f * StartStyle::DesignToUi, 0.f, 0.f, 0.f));
+			OpenLabelSlot->SetVerticalAlignment(VAlign_Center);
+			FloorStack->AddChildToVerticalBox(OpenRow)->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f * StartStyle::DesignToUi));
+		}
+
+		// Reference image: a PNG under the 2D drawing of the floor being viewed, to trace over (PAT-201).
+		{
+			FloorStack->AddChildToVerticalBox(StartStyle::Text(WidgetTree, TEXT("Txt_ReferenceImage"), TEXT("Reference image (PNG)"), 12.f, StartStyle::Rgb(150, 172, 202), true))
+				->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f * StartStyle::DesignToUi));
+			UHorizontalBox* ReferenceRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ReferenceRow"));
+			const auto AddReferenceButton = [this, ReferenceRow](UButton*& OutButton, const TCHAR* Name, const TCHAR* Label, const TCHAR* Hint)
+			{
+				OutButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), Name);
+				OutButton->SetStyle(StartStyle::SecondaryButton());
+				OutButton->SetBackgroundColor(FLinearColor::White);
+				UTextBlock* Caption = StartStyle::Text(WidgetTree, FString(Name) + TEXT("Label"), Label, 12.f, FLinearColor::White, true);
+				Caption->SetJustification(ETextJustify::Center);
+				UBorder* Pad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(Name) + TEXT("Pad")));
+				Pad->SetBrushColor(FLinearColor::Transparent);
+				Pad->SetPadding(FMargin(8.f * StartStyle::DesignToUi, 7.f * StartStyle::DesignToUi));
+				Pad->SetContent(Caption);
+				OutButton->SetContent(Pad);
+				OutButton->SetToolTip(MakeToolTipWidget(Hint));
+				UHorizontalBoxSlot* Slot = ReferenceRow->AddChildToHorizontalBox(OutButton);
+				Slot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+				Slot->SetPadding(FMargin(0.f, 0.f, 6.f * StartStyle::DesignToUi, 0.f));
+			};
+			AddReferenceButton(ImportReferenceButton, TEXT("Btn_ImportReference"), TEXT("Import PNG"), TEXT("Pick a PNG (a scanned floor plan, a photo of a plan) to show under the drawing of this floor. It is only a guide to trace over: it never affects routes or checks, and is not in the 3D view. The project keeps the file's path, not the picture."));
+			AddReferenceButton(RemoveReferenceButton, TEXT("Btn_RemoveReference"), TEXT("Remove"), TEXT("Takes the reference image off this floor. The PNG file itself is not touched."));
+			FloorStack->AddChildToVerticalBox(ReferenceRow)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f * StartStyle::DesignToUi));
+
+			ReferenceFieldsBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ReferenceFieldsBox"));
+			UHorizontalBox* ShownRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ReferenceShownRow"));
+			ReferenceShownCheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), TEXT("Chk_ReferenceShown"));
+			StartStyle::DarkCheckBox(ReferenceShownCheckBox);
+			ReferenceShownCheckBox->SetToolTip(MakeToolTipWidget(TEXT("Show or hide the reference image of this floor without removing it.")));
+			ReferenceShownCheckBox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnReferenceShownChanged);
+			ShownRow->AddChildToHorizontalBox(ReferenceShownCheckBox)->SetVerticalAlignment(VAlign_Center);
+			UHorizontalBoxSlot* ShownLabelSlot = ShownRow->AddChildToHorizontalBox(StartStyle::Text(WidgetTree, TEXT("Txt_ReferenceShown"), TEXT("Show image"), 12.f, StartStyle::Rgb(214, 226, 242)));
+			ShownLabelSlot->SetPadding(FMargin(6.f * StartStyle::DesignToUi, 0.f, 0.f, 0.f));
+			ShownLabelSlot->SetVerticalAlignment(VAlign_Center);
+			ReferenceFieldsBox->AddChildToVerticalBox(ShownRow)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f * StartStyle::DesignToUi));
+			const auto AddReferenceField = [this](UEditableTextBox*& OutBox, const TCHAR* Name, const TCHAR* Caption, const TCHAR* Hint)
+			{
+				UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), FName(FString(Name) + TEXT("Row")));
+				UHorizontalBoxSlot* CaptionSlot = Row->AddChildToHorizontalBox(StartStyle::Text(WidgetTree, FString(Name) + TEXT("Caption"), Caption, 12.f, StartStyle::Rgb(150, 172, 202), true, 90));
+				CaptionSlot->SetVerticalAlignment(VAlign_Center);
+				CaptionSlot->SetPadding(FMargin(0.f, 0.f, 6.f * StartStyle::DesignToUi, 0.f));
+				OutBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), Name);
+				OutBox->SetToolTip(MakeToolTipWidget(Hint));
+				OutBox->OnTextCommitted.AddUniqueDynamic(this, &UInteriorScreenWidget::OnReferenceFieldCommitted);
+				ApplyStandardFont(OutBox);
+				OutBox->SetWidgetStyle(StartStyle::Field(13.f));
+				Row->AddChildToHorizontalBox(OutBox)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+				ReferenceFieldsBox->AddChildToVerticalBox(Row)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f * StartStyle::DesignToUi));
+			};
+			AddReferenceField(ReferenceWidthBox, TEXT("Edt_ReferenceWidth"), TEXT("Width (m)"), TEXT("How wide the picture is, in metres; its height follows its proportions. Press Enter to apply."));
+			AddReferenceField(ReferenceXBox, TEXT("Edt_ReferenceX"), TEXT("Centre X (m)"), TEXT("Where the middle of the picture is, along X, in metres. Press Enter to apply."));
+			AddReferenceField(ReferenceYBox, TEXT("Edt_ReferenceY"), TEXT("Centre Y (m)"), TEXT("Where the middle of the picture is, along Y, in metres. Press Enter to apply."));
+			AddReferenceField(ReferenceOpacityBox, TEXT("Edt_ReferenceOpacity"), TEXT("Opacity (%)"), TEXT("5 to 100. Press Enter to apply."));
+			ReferenceFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
+			FloorStack->AddChildToVerticalBox(ReferenceFieldsBox)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f * StartStyle::DesignToUi));
+			ImportReferenceButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnImportReferenceClicked);
+			RemoveReferenceButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRemoveReferenceClicked);
+		}
 
 		// Delete floor: a quiet button that turns red when the mouse is over it.
 		RemoveFloorButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_RemoveFloor"));
@@ -1167,10 +1322,50 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 			FloorsWrap->AddChildToWrapBox(FloorEntry);
 			FloorCheckboxes.Add(CheckBox);
+			FloorCheckboxLabels.Add(FloorLabel);
 		}
+
+		// One click ticks every floor of the building (a lift that serves twenty floors needs no twenty clicks), and a second click, with all ticked,
+		// clears them; untick the ones that do not belong, then Save changes.
+		SelectAllFloorsButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_SelectAllFloors"));
+		SelectAllFloorsButton->SetStyle(SecondaryButton());
+		SelectAllFloorsButton->SetBackgroundColor(FLinearColor::White);
+		UTextBlock* SelectAllFloorsText = Text(WidgetTree, TEXT("Btn_SelectAllFloorsLabel"), TEXT("Select all floors"), 12.f, FLinearColor::White, true);
+		SelectAllFloorsText->SetJustification(ETextJustify::Center);
+		UBorder* SelectAllFloorsPad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Btn_SelectAllFloorsPad"));
+		SelectAllFloorsPad->SetBrushColor(FLinearColor::Transparent);
+		SelectAllFloorsPad->SetPadding(FMargin(8.f * DesignToUi, 7.f * DesignToUi));
+		SelectAllFloorsPad->SetContent(SelectAllFloorsText);
+		SelectAllFloorsButton->SetContent(SelectAllFloorsPad);
+		SelectAllFloorsButton->SetToolTip(MakeToolTipWidget(TEXT("Tick every floor of this building; click again when all are ticked to clear them. Then press Save changes (a connector needs at least one floor).")));
+		SelectAllFloorsButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnSelectAllFloorsClicked);
+		SelectAllFloorsButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+		ConnectorFieldsBox->AddChildToVerticalBox(InWidthBox(SelectAllFloorsButton))->SetPadding(FMargin(0.f, 4.f * DesignToUi, 0.f, 0.f));
 
 		AddButtonsRow(ConnectorFieldsBox, TEXT("Btn_DeleteConnector"), TEXT("Delete connector"), nullptr, TEXT("Btn_ApplyConnector"), TEXT("Save changes"), ApplyConnectorButton);
 		ApplyConnectorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyConnectorClicked);
+
+		// -- Utility point (PAT-193): its name and type --
+		UtilityFieldsBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("UtilityFieldsBox"));
+		UtilityFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
+		PropertiesStack->AddChildToVerticalBox(UtilityFieldsBox);
+		AddFieldLabel(UtilityFieldsBox, TEXT("Txt_UtilityNameLabel"), TEXT("NAME"));
+		UtilityNameBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_UtilityName"));
+		StyleField(UtilityNameBox, false);
+		UtilityNameBox->SetHintText(FText::FromString(TEXT("e.g. AED by the lifts")));
+		UtilityFieldsBox->AddChildToVerticalBox(UtilityNameBox);
+		AddFieldLabel(UtilityFieldsBox, TEXT("Txt_UtilityTypeLabel"), TEXT("TYPE"));
+		UtilityTypeCombo = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cmb_UtilityType"));
+		UtilityTypeCombo->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
+		DarkCombo(UtilityTypeCombo);
+		for (const FString& TypeName : InteriorUtilityTypes::All())
+		{
+			UtilityTypeCombo->AddOption(InteriorUtilityTypes::Label(TypeName));
+		}
+		UtilityTypeCombo->SetSelectedIndex(InteriorUtilityTypes::All().Num() - 1);
+		UtilityFieldsBox->AddChildToVerticalBox(UtilityTypeCombo);
+		AddButtonsRow(UtilityFieldsBox, TEXT("Btn_DeleteUtility"), TEXT("Delete point"), nullptr, TEXT("Btn_ApplyUtility"), TEXT("Save changes"), ApplyUtilityButton);
+		ApplyUtilityButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnApplyUtilityClicked);
 		}
 
 		// Permanent panel, like Floor/Toolbar/Layers - always shown; RefreshPropertiesPanelVisibility
@@ -1301,6 +1496,16 @@ void UInteriorScreenWidget::NativeConstruct()
 		AddFloorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddFloorClicked);
 		AddFloorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 	}
+	if (AddBasementButton)
+	{
+		AddBasementButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddBasementClicked);
+		AddBasementButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+	}
+	if (AddSpecialFloorButton)
+	{
+		AddSpecialFloorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddSpecialFloorClicked);
+		AddSpecialFloorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
+	}
 	if (RemoveFloorButton)
 	{
 		RemoveFloorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnRemoveFloorClicked);
@@ -1335,7 +1540,9 @@ void UInteriorScreenWidget::NativeConstruct()
 	{
 		PC->OnSelectedDoorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedDoorChanged);
 		PC->OnSelectedRoomChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedRoomChanged);
+		PC->OnMultiSelectionChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleMultiSelectionChanged);
 		PC->OnSelectedConnectorChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedConnectorChanged);
+		PC->OnSelectedUtilityChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleSelectedUtilityChanged);
 		PC->OnEditModeChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleEditModeChanged);
 		// Ctrl+S (or any other trigger of PC->SaveCurrentProject/SaveCurrentProjectAs) doesn't go
 		// through this widget at all - this is what lets the dock layout still get saved when the
@@ -1553,6 +1760,7 @@ void UInteriorScreenWidget::NativeDestruct()
 		PC->OnSelectedDoorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedDoorChanged);
 		PC->OnSelectedRoomChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedRoomChanged);
 		PC->OnSelectedConnectorChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedConnectorChanged);
+		PC->OnSelectedUtilityChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedUtilityChanged);
 		PC->OnEditModeChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleEditModeChanged);
 		PC->OnProjectSaved.RemoveDynamic(this, &UInteriorScreenWidget::HandleProjectSaved);
 		PC->OnSelectedEntranceChanged.RemoveDynamic(this, &UInteriorScreenWidget::HandleSelectedEntranceChanged);
@@ -1688,6 +1896,10 @@ FString UInteriorScreenWidget::BuildDebugInfo() const
 				TEXT("Connector (%d)"),
 				PC->GetActiveConnectorType()
 			);
+		}
+		else if (PC->IsInUtilityMode())
+		{
+			ToolMode = FString::Printf(TEXT("Utility (%s)"), *InteriorUtilityTypes::Label(PC->GetActiveUtilityType()));
 		}
 		else if (PC->IsInSelectMode())
 		{
@@ -1928,12 +2140,13 @@ void UInteriorScreenWidget::HandleBeforeProjectSave()
 	if (ConnectorFieldsBox && ConnectorFieldsBox->GetVisibility() == ESlateVisibility::Visible)
 	{
 		TArray<int32> Checked;
-		for (int32 Index = 0; Index < FloorCheckboxes.Num(); ++Index)
+		const TArray<int32> BuildingLevels = PC->GetLoadedBuildingLevels();
+		for (int32 Index = 0; Index < FloorCheckboxes.Num() && Index < BuildingLevels.Num(); ++Index)
 		{
 			const UCheckBox* CheckBox = FloorCheckboxes[Index];
 			if (CheckBox && CheckBox->GetVisibility() != ESlateVisibility::Collapsed && CheckBox->IsChecked())
 			{
-				Checked.Add(Index + 1);
+				Checked.Add(BuildingLevels[Index]);
 			}
 		}
 		TArray<int32> Current = PC->GetSelectedConnectorFloors();
@@ -2090,7 +2303,7 @@ void UInteriorScreenWidget::HandleInspectionModeChanged(bool bEnabled)
 	if (InspectionHint)
 	{
 		InspectionHint->SetVisibility(bEnabled ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
-		InspectionHint->SetText(FText::FromString(FString::Printf(TEXT("Showing Level %d without the bottom platform. Left-drag to move the model, right-drag to turn it, scroll to zoom. Esc to restore."), PC->GetActiveFloor())));
+		InspectionHint->SetText(FText::FromString(FString::Printf(TEXT("Showing Level %s without the bottom platform. Left-drag to move the model, right-drag to turn it, scroll to zoom. Esc to restore."), *LayoutValidation::LevelLabel(PC->GetActiveFloor()))));
 	}
 	if (!bEnabled && InspectionPivotOverlay) InspectionPivotOverlay->SetVisibility(ESlateVisibility::Collapsed);
 	if (bEnabled && InspectionUiStates.IsEmpty())
@@ -2312,6 +2525,10 @@ void UInteriorScreenWidget::RefreshModeButtonHighlights()
 	SetHighlight(AddElevatorModeButton, PC->GetActiveConnectorType() == static_cast<int32>(EInteriorNavNodeType::Elevator));
 	SetHighlight(AddStairsModeButton, PC->GetActiveConnectorType() == static_cast<int32>(EInteriorNavNodeType::Stairs));
 	SetHighlight(AddEscalatorModeButton, PC->GetActiveConnectorType() == static_cast<int32>(EInteriorNavNodeType::Escalator));
+	SetHighlight(UtilityAedButton, PC->GetActiveUtilityType() == InteriorUtilityTypes::Aed);
+	SetHighlight(UtilityBicycleButton, PC->GetActiveUtilityType() == InteriorUtilityTypes::Bicycle);
+	SetHighlight(UtilityDropOffButton, PC->GetActiveUtilityType() == InteriorUtilityTypes::DropOff);
+	SetHighlight(UtilityOtherButton, PC->GetActiveUtilityType() == InteriorUtilityTypes::Other);
 }
 
 void UInteriorScreenWidget::HandleSelectedEntranceChanged(FString EntranceId)
@@ -2356,8 +2573,8 @@ void UInteriorScreenWidget::HandleSelectedEntranceChanged(FString EntranceId)
 	if (DoorRoomText)
 	{
 		DoorRoomText->SetText(FText::FromString(bMain
-			? FString::Printf(TEXT("Floor %d. The way out: leads outside the building."), Entrance->Level)
-			: FString::Printf(TEXT("Floor %d. Connects to building %s%s."), Entrance->Level, *PC->GetBuildingDisplayName(Entrance->ConnectsTo),
+			? FString::Printf(TEXT("Floor %s. The way out: leads outside the building."), *LayoutValidation::LevelLabel(Entrance->Level))
+			: FString::Printf(TEXT("Floor %s. Connects to building %s%s."), *LayoutValidation::LevelLabel(Entrance->Level), *PC->GetBuildingDisplayName(Entrance->ConnectsTo),
 				Entrance->bMirrored ? TEXT(" (opened from that building)") : TEXT(""))));
 	}
 	RefreshPropertiesPanelVisibility();
@@ -2463,6 +2680,7 @@ void UInteriorScreenWidget::HandleSelectedRoomChanged(FString RoomId)
 	}
 
 	RoomFieldsBox->SetVisibility(ESlateVisibility::Visible);
+	if (RoomNameRowSizeBox) RoomNameRowSizeBox->SetVisibility(ESlateVisibility::Visible);
 	if (DoorFieldsBox)
 	{
 		DoorFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
@@ -2511,8 +2729,76 @@ void UInteriorScreenWidget::HandleSelectedRoomChanged(FString RoomId)
 	RefreshPropertiesPanelVisibility();
 }
 
+void UInteriorScreenWidget::HandleMultiSelectionChanged(int32 Count)
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!RoomFieldsBox || !PC) return;
+
+	if (Count < 2)
+	{
+		// Over: the single selection that may follow shows its own fields; with nothing left the room fields go away.
+		if (bMultiMode)
+		{
+			bMultiMode = false;
+			if (RoomTypeComboBox) RoomTypeComboBox->RemoveOption(TEXT("-"));
+			if (RoomNameRowSizeBox) RoomNameRowSizeBox->SetVisibility(ESlateVisibility::Visible);
+			RoomFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
+			RefreshPropertiesPanelVisibility();
+		}
+		return;
+	}
+
+	bMultiMode = true;
+	RoomFieldsBox->SetVisibility(ESlateVisibility::Visible);
+	if (DoorFieldsBox) DoorFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
+	if (ConnectorFieldsBox) ConnectorFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
+	// Name, position and size belong to one room: rooms given the same position would lie on top of each other.
+	if (RoomNameRowSizeBox) RoomNameRowSizeBox->SetVisibility(ESlateVisibility::Collapsed);
+	if (PropertiesTitleText) PropertiesTitleText->SetText(FText::FromString(FString::Printf(TEXT("%d rooms selected"), Count)));
+	SetKindTag(TEXT("MULTIPLE"), StartStyle::Rgb(60, 78, 104));
+	if (PropertiesKindTag) PropertiesKindTag->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	if (RoomDeleteLabel) RoomDeleteLabel->SetText(FText::FromString(TEXT("Delete rooms")));
+	if (RoomSubtitleText) RoomSubtitleText->SetText(FText::FromString(TEXT("Room type and search tags are changed for all of them. A \"-\" means they differ.")));
+
+	const bool bAnyRoom = !PC->GetMultiSelectedClosedRoomIds().IsEmpty();
+	if (RoomTagsFields) RoomTagsFields->SetVisibility(bAnyRoom ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	bool bTypeMixed = false, bTagsMixed = false;
+	const FString SharedType = PC->GetMultiRoomType(bTypeMixed);
+	const TArray<FString> SharedTags = PC->GetMultiRoomTags(bTagsMixed);
+	if (RoomTypeComboBox)
+	{
+		RoomTypeComboBox->RemoveOption(TEXT("-"));
+		if (bTypeMixed) RoomTypeComboBox->AddOption(TEXT("-"));
+		MultiShownType = bTypeMixed ? FString(TEXT("-")) : SharedType;
+		RoomTypeComboBox->SetSelectedOption(MultiShownType);
+	}
+	MultiShownTags = bTagsMixed ? FString(TEXT("-")) : FString::Join(SharedTags, TEXT(", "));
+	if (RoomTagsTextBox) RoomTagsTextBox->SetText(FText::FromString(MultiShownTags));
+	RefreshPropertiesPanelVisibility();
+}
+
+void UInteriorScreenWidget::ApplyMultiRoomChanges()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC || !PC->IsMultiSelection()) return;
+	const FString NewType = RoomTypeComboBox ? RoomTypeComboBox->GetSelectedOption() : MultiShownType;
+	const FString NewTags = RoomTagsTextBox ? RoomTagsTextBox->GetText().ToString() : MultiShownTags;
+	// Only what the user changed: a type or tags still shown as "-" (different rooms) stay as they are in every room.
+	const bool bTypeChanged = NewType != MultiShownType && NewType != TEXT("-");
+	const bool bTagsChanged = NewTags != MultiShownTags;
+	const FString TypeToSet = NewType;
+	const TArray<FString> TagsToSet = NavigationSearch::ParseTags(NewTags);
+	PC->SetMultiRoomProperties(bTypeChanged ? &TypeToSet : nullptr, bTagsChanged ? &TagsToSet : nullptr);
+	HandleMultiSelectionChanged(PC->GetMultiSelectedRoomIds().Num());
+}
+
 void UInteriorScreenWidget::OnApplyRoomClicked()
 {
+	if (bMultiMode)
+	{
+		ApplyMultiRoomChanges();
+		return;
+	}
 	// Capture every property before resizing or renaming can refresh the panel.
 	const FString NewName = RoomNameTextBox ? RoomNameTextBox->GetText().ToString() : FString();
 	const FString NewTags = RoomTagsTextBox ? RoomTagsTextBox->GetText().ToString() : FString();
@@ -2536,6 +2822,11 @@ void UInteriorScreenWidget::OnApplyRoomClicked()
 	ApplyRoomTags(NewTags);
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
+		// The first save of a room without tags fills them from its name and type; the box shows what was filled.
+		if (PC->AutoFillSelectedRoomTagsOnFirstSave() && RoomTagsTextBox)
+		{
+			RoomTagsTextBox->SetText(FText::FromString(FString::Join(PC->GetSelectedRoomTags(), TEXT(", "))));
+		}
 		if (RoomSubtitleText)
 		{
 			const FString Name = PC->GetSelectedRoomName();
@@ -2738,7 +3029,7 @@ void UInteriorScreenWidget::HandleSelectedConnectorChanged(FString GroupId)
 	}
 
 	const TArray<int32> CurrentFloors = PC->GetSelectedConnectorFloors();
-	const int32 FloorCount = PC->GetLoadedBuildingFloorCount();
+	const TArray<int32> BuildingLevels = PC->GetLoadedBuildingLevels();
 	for (int32 Index = 0; Index < FloorCheckboxes.Num(); ++Index)
 	{
 		UCheckBox* CheckBox = FloorCheckboxes[Index];
@@ -2747,11 +3038,21 @@ void UInteriorScreenWidget::HandleSelectedConnectorChanged(FString GroupId)
 			continue;
 		}
 
-		const int32 FloorNumber = Index + 1;
-		if (FloorNumber <= FloorCount)
+		// The whole entry (box and number) shows or hides, so a ten-floor building lists ten floors, not twenty numbers with ten boxes.
+		if (UWidget* Entry = CheckBox->GetParent())
 		{
+			Entry->SetVisibility(BuildingLevels.IsValidIndex(Index) ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+		}
+
+		if (BuildingLevels.IsValidIndex(Index))
+		{
+			const int32 FloorNumber = BuildingLevels[Index];
 			CheckBox->SetVisibility(ESlateVisibility::Visible);
 			CheckBox->SetIsChecked(CurrentFloors.Contains(FloorNumber));
+			if (FloorCheckboxLabels.IsValidIndex(Index) && FloorCheckboxLabels[Index])
+			{
+				FloorCheckboxLabels[Index]->SetText(FText::FromString(LayoutValidation::LevelLabel(FloorNumber)));
+			}
 		}
 		else
 		{
@@ -2768,7 +3069,7 @@ void UInteriorScreenWidget::RefreshPropertiesPanelVisibility()
 	// placeholder instead of disappearing, like a real editor's Details panel. Showing or hiding it is the
 	// dock system's business (Window menu / tab close button), not selection state's.
 	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
-	const bool bAnySelected = PC && (!PC->GetSelectedRoomId().IsEmpty() || !PC->GetSelectedDoorId().IsEmpty() || !PC->GetSelectedConnectorGroupId().IsEmpty() || !PC->GetSelectedEntranceId().IsEmpty());
+	const bool bAnySelected = PC && (!PC->GetSelectedRoomId().IsEmpty() || PC->IsMultiSelection() || !PC->GetSelectedDoorId().IsEmpty() || !PC->GetSelectedConnectorGroupId().IsEmpty() || !PC->GetSelectedEntranceId().IsEmpty() || !PC->GetSelectedUtilityId().IsEmpty());
 	if (!bAnySelected && PropertiesTitleText)
 	{
 		PropertiesTitleText->SetText(FText::FromString(TEXT("Nothing selected")));
@@ -2776,6 +3077,27 @@ void UInteriorScreenWidget::RefreshPropertiesPanelVisibility()
 	if (!bAnySelected && PropertiesKindTag)
 	{
 		PropertiesKindTag->SetVisibility(ESlateVisibility::Collapsed);
+	}
+}
+
+void UInteriorScreenWidget::OnSelectAllFloorsClicked()
+{
+	// A toggle: when every floor is already ticked the click clears them all, otherwise it ticks them all. Only the boxes the building uses are
+	// visible (HandleSelectedConnectorChanged); the hidden ones stay as they are.
+	bool bAllTicked = true;
+	for (const UCheckBox* CheckBox : FloorCheckboxes)
+	{
+		if (CheckBox && CheckBox->GetVisibility() != ESlateVisibility::Collapsed && !CheckBox->IsChecked())
+		{
+			bAllTicked = false;
+		}
+	}
+	for (UCheckBox* CheckBox : FloorCheckboxes)
+	{
+		if (CheckBox && CheckBox->GetVisibility() != ESlateVisibility::Collapsed)
+		{
+			CheckBox->SetIsChecked(!bAllTicked);
+		}
 	}
 }
 
@@ -2788,16 +3110,109 @@ void UInteriorScreenWidget::OnApplyConnectorClicked()
 	}
 
 	TArray<int32> NewFloors;
-	for (int32 Index = 0; Index < FloorCheckboxes.Num(); ++Index)
+	const TArray<int32> BuildingLevels = PC->GetLoadedBuildingLevels();
+	for (int32 Index = 0; Index < FloorCheckboxes.Num() && Index < BuildingLevels.Num(); ++Index)
 	{
 		const UCheckBox* CheckBox = FloorCheckboxes[Index];
 		if (CheckBox && CheckBox->GetVisibility() != ESlateVisibility::Collapsed && CheckBox->IsChecked())
 		{
-			NewFloors.Add(Index + 1);
+			NewFloors.Add(BuildingLevels[Index]);
 		}
 	}
 
 	PC->SetSelectedConnectorFloors(NewFloors);
+}
+
+void UInteriorScreenWidget::OnOpenFloorChanged(bool bIsChecked)
+{
+	if (bRefreshingOpenFloor) return;
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		if (!PC->SetActiveFloorOpen(bIsChecked) && OpenFloorCheckBox)
+		{
+			// Refused (nothing to change, or the isolated view): the box shows what the floor really is.
+			bRefreshingOpenFloor = true;
+			OpenFloorCheckBox->SetIsChecked(PC->IsActiveFloorOpen());
+			bRefreshingOpenFloor = false;
+		}
+	}
+}
+
+void UInteriorScreenWidget::RefreshReferenceImagePanel()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC || !ReferenceFieldsBox) return;
+	FInteriorReferenceImage Image;
+	const bool bHas = PC->GetActiveReferenceImage(Image);
+	ReferenceFieldsBox->SetVisibility(bHas ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	if (RemoveReferenceButton) RemoveReferenceButton->SetIsEnabled(bHas);
+	if (!bHas) return;
+	// Metres: a footprint unit is GetFootprintUnitCm() centimetres.
+	const double ToMetres = PC->GetFootprintUnitCm() / 100.0;
+	TGuardValue<bool> Guard(bRefreshingReference, true);
+	if (ReferenceShownCheckBox) ReferenceShownCheckBox->SetIsChecked(Image.bVisible);
+	const auto Show = [](UEditableTextBox* Box, double Value)
+	{
+		if (Box && !Box->HasKeyboardFocus()) Box->SetText(FText::FromString(FString::Printf(TEXT("%.2f"), Value)));
+	};
+	Show(ReferenceWidthBox, Image.Width * ToMetres);
+	Show(ReferenceXBox, Image.Center.X * ToMetres);
+	Show(ReferenceYBox, Image.Center.Y * ToMetres);
+	Show(ReferenceOpacityBox, Image.Opacity * 100.0);
+}
+
+void UInteriorScreenWidget::OnImportReferenceClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->BrowseForReferenceImage();
+		RefreshReferenceImagePanel();
+	}
+}
+
+void UInteriorScreenWidget::OnRemoveReferenceClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->RemoveActiveReferenceImage();
+		RefreshReferenceImagePanel();
+	}
+}
+
+void UInteriorScreenWidget::OnReferenceShownChanged(bool bIsChecked)
+{
+	if (bRefreshingReference) return;
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	FInteriorReferenceImage Image;
+	if (!PC || !PC->GetActiveReferenceImage(Image)) return;
+	Image.bVisible = bIsChecked;
+	PC->SetActiveReferenceImage(Image);
+	RefreshReferenceImagePanel();
+}
+
+void UInteriorScreenWidget::OnReferenceFieldCommitted(const FText& Text, ETextCommit::Type CommitType)
+{
+	if (bRefreshingReference || CommitType == ETextCommit::OnCleared) return;
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	FInteriorReferenceImage Image;
+	if (!PC || !PC->GetActiveReferenceImage(Image)) return;
+	const double ToUnits = 100.0 / FMath::Max(PC->GetFootprintUnitCm(), 0.0001f);
+	// A box that does not hold a number leaves its value alone.
+	const auto Read = [](const UEditableTextBox* Box, double& Out)
+	{
+		const FString Typed = Box ? Box->GetText().ToString().TrimStartAndEnd() : FString();
+		if (Typed.IsEmpty() || !Typed.IsNumeric()) return false;
+		Out = FCString::Atod(*Typed);
+		return FMath::IsFinite(Out);
+	};
+	double Value = 0;
+	if (Read(ReferenceWidthBox, Value) && Value > 0.0) Image.Width = static_cast<float>(Value * ToUnits);
+	if (Read(ReferenceXBox, Value)) Image.Center.X = Value * ToUnits;
+	if (Read(ReferenceYBox, Value)) Image.Center.Y = Value * ToUnits;
+	if (Read(ReferenceOpacityBox, Value)) Image.Opacity = static_cast<float>(Value / 100.0);
+	PC->SetActiveReferenceImage(Image);
+	// The boxes show what was kept (an opacity out of range comes back corrected).
+	RefreshReferenceImagePanel();
 }
 
 void UInteriorScreenWidget::RefreshFloorList()
@@ -2807,6 +3222,17 @@ void UInteriorScreenWidget::RefreshFloorList()
 	{
 		return;
 	}
+	if (OpenFloorCheckBox)
+	{
+		bRefreshingOpenFloor = true;
+		OpenFloorCheckBox->SetIsChecked(PC->IsActiveFloorOpen());
+		bRefreshingOpenFloor = false;
+	}
+	if (FloorNameBox && !FloorNameBox->HasKeyboardFocus())
+	{
+		FloorNameBox->SetText(FText::FromString(PC->GetFloorName(PC->GetActiveFloor())));
+	}
+	RefreshReferenceImagePanel();
 
 	FloorListBox->ClearChildren();
 
@@ -2817,16 +3243,32 @@ void UInteriorScreenWidget::RefreshFloorList()
 	{
 		FloorCountText->SetText(FText::AsNumber(FloorCount));
 	}
+	{
+		// From and To read in the direction the building goes: up from its lowest floor, or, for a building that is all basement, down from B1
+		// (From B1 To B2, not the other way round).
+		const TArray<int32> BuildingLevels = PC->GetLoadedBuildingLevels();
+		const bool bAllBasement = !BuildingLevels.IsEmpty() && BuildingLevels.Last() < 0;
+		if (FloorFromBox)
+		{
+			const int32 From = BuildingLevels.IsEmpty() ? 0 : (bAllBasement ? BuildingLevels.Last() : BuildingLevels[0]);
+			FloorFromBox->SetText(FText::FromString(From == 0 ? FString() : LayoutValidation::LevelLabel(From)));
+		}
+		if (FloorToBox)
+		{
+			const int32 To = BuildingLevels.IsEmpty() ? 0 : (bAllBasement ? BuildingLevels[0] : BuildingLevels.Last());
+			FloorToBox->SetText(FText::FromString(To == 0 ? FString() : LayoutValidation::LevelLabel(To)));
+		}
+	}
 	// Lowest floor first (Level 1 at the top) - reversed from the original mockup per explicit
 	// request.
-	for (int32 FloorNumber = 1; FloorNumber <= FloorCount; ++FloorNumber)
+	for (const int32 FloorNumber : PC->GetLoadedBuildingLevels())
 	{
 		UFloorListEntryWidget* Entry = CreateWidget<UFloorListEntryWidget>(PC, UFloorListEntryWidget::StaticClass());
 		if (!Entry)
 		{
 			continue;
 		}
-		Entry->SetFloorNumber(FloorNumber, FloorNumber == ActiveFloor, (FloorNumber - 1) * FloorHeightCm / 100.f);
+		Entry->SetFloorNumber(FloorNumber, FloorNumber == ActiveFloor, PC->GetLoadedBuildingLevelBaseZ(FloorNumber) / 100.f, PC->GetFloorName(FloorNumber));
 		Entry->SetWidth(ComputePanelButtonWidth(EDockPanelId::Floor));
 		Entry->OnEntryClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::HandleFloorEntryClicked);
 
@@ -2875,7 +3317,7 @@ void UInteriorScreenWidget::RefreshLayersList()
 	const int32 ActiveFloor = PC->GetActiveFloor();
 	if (LayersLevelText)
 	{
-		LayersLevelText->SetText(FText::FromString(FString::Printf(TEXT("LEVEL %d"), ActiveFloor)));
+		LayersLevelText->SetText(FText::FromString(TEXT("LEVEL ") + LayoutValidation::LevelLabel(ActiveFloor)));
 	}
 
 	// How many of each kind the active floor has, shown on the category rows.
@@ -2906,7 +3348,7 @@ void UInteriorScreenWidget::RefreshLayersList()
 			FString Label;
 		};
 		TArray<FResult> Results;
-		for (int32 Floor = 1; Floor <= PC->GetLoadedBuildingFloorCount(); ++Floor)
+		for (const int32 Floor : PC->GetLoadedBuildingLevels())
 		{
 			for (const FString& RoomId : PC->GetRoomIdsOnFloor(Floor))
 			{
@@ -2923,7 +3365,7 @@ void UInteriorScreenWidget::RefreshLayersList()
 				{
 					continue;
 				}
-				FString Label = FString::Printf(TEXT("%s [%s] - Floor %d"), RoomName.IsEmpty() ? *RoomId : *RoomName, *RoomId, Floor);
+				FString Label = FString::Printf(TEXT("%s [%s] - Floor %s"), RoomName.IsEmpty() ? *RoomId : *RoomName, *RoomId, *LayoutValidation::LevelLabel(Floor));
 				if (bTyped)
 				{
 					Label += TEXT(" - ") + RoomType;
@@ -3134,7 +3576,7 @@ void UInteriorScreenWidget::HandleLayerRowLabelClicked(FString RowKey)
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
 	{
 		const int32 Floor = FCString::Atoi(*FloorText);
-		if (Floor > 0 && Floor != PC->GetActiveFloor())
+		if (Floor != 0 && Floor != PC->GetActiveFloor())
 		{
 			PC->SetActiveFloor(Floor);
 		}
@@ -3168,6 +3610,47 @@ void UInteriorScreenWidget::OnAddFloorClicked()
 	RefreshLayersList();
 	RefreshNavigationPanelDisplay();
 	RefreshNavRoomDropdowns();
+}
+
+void UInteriorScreenWidget::OnAddBasementClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		const TArray<int32> Levels = PC->GetLoadedBuildingLevels();
+		if (!Levels.IsEmpty() && Levels[0] > 1)
+		{
+			// The floors start above the ground: a floor below the lowest is not a basement. The range boxes say where the building starts.
+			PC->OnActionFailed.Broadcast(FString::Printf(TEXT("This building starts on floor %s, so there is no basement to add under it. Set From to 1 or B1 first."), *LayoutValidation::LevelLabel(Levels[0])), EActionFailureSeverity::Warning);
+			return;
+		}
+		PC->AddFloorBelow();
+	}
+	RefreshFloorList();
+	RefreshLayersList();
+	RefreshNavigationPanelDisplay();
+	RefreshNavRoomDropdowns();
+}
+
+void UInteriorScreenWidget::OnAddSpecialFloorClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->AddSpecialFloor();
+	}
+	RefreshFloorList();
+	RefreshLayersList();
+	RefreshNavigationPanelDisplay();
+	RefreshNavRoomDropdowns();
+}
+
+void UInteriorScreenWidget::OnFloorNameCommitted(const FText& NewText, ETextCommit::Type CommitType)
+{
+	if (CommitType == ETextCommit::OnCleared) return;
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
+	{
+		PC->SetActiveFloorName(NewText.ToString());
+		RefreshFloorList();
+	}
 }
 
 void UInteriorScreenWidget::OnRemoveFloorClicked()
@@ -3520,6 +4003,59 @@ void UInteriorScreenWidget::OnAddEscalatorModeClicked()
 	}
 }
 
+void UInteriorScreenWidget::OnUtilityAedClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) PC->ToggleUtilityMode(InteriorUtilityTypes::Aed);
+}
+
+void UInteriorScreenWidget::OnUtilityBicycleClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) PC->ToggleUtilityMode(InteriorUtilityTypes::Bicycle);
+}
+
+void UInteriorScreenWidget::OnUtilityDropOffClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) PC->ToggleUtilityMode(InteriorUtilityTypes::DropOff);
+}
+
+void UInteriorScreenWidget::OnUtilityOtherClicked()
+{
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) PC->ToggleUtilityMode(InteriorUtilityTypes::Other);
+}
+
+void UInteriorScreenWidget::HandleSelectedUtilityChanged(FString UtilityId)
+{
+	if (!UtilityFieldsBox) return;
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	FInteriorUtility Utility;
+	if (UtilityId.IsEmpty() || !PC || !PC->GetSelectedUtility(Utility))
+	{
+		UtilityFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
+		RefreshPropertiesPanelVisibility();
+		return;
+	}
+
+	UtilityFieldsBox->SetVisibility(ESlateVisibility::Visible);
+	if (DoorFieldsBox) DoorFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
+	if (RoomFieldsBox) RoomFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
+	if (ConnectorFieldsBox) ConnectorFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
+	if (PropertiesTitleText) PropertiesTitleText->SetText(FText::FromString(TEXT("Utility point")));
+	if (PropertiesKindText) SetKindTag(TEXT("UTILITY"), StartStyle::Rgb(60, 78, 104));
+	if (PropertiesKindTag) PropertiesKindTag->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+	if (UtilityNameBox) UtilityNameBox->SetText(FText::FromString(Utility.Name));
+	if (UtilityTypeCombo) UtilityTypeCombo->SetSelectedOption(InteriorUtilityTypes::Label(Utility.Type));
+	RefreshPropertiesPanelVisibility();
+}
+
+void UInteriorScreenWidget::OnApplyUtilityClicked()
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC || !UtilityNameBox || !UtilityTypeCombo) return;
+	const TArray<FString> Types = InteriorUtilityTypes::All();
+	const int32 TypeIndex = UtilityTypeCombo->GetSelectedIndex();
+	PC->SetSelectedUtilityDetails(UtilityNameBox->GetText().ToString(), Types.IsValidIndex(TypeIndex) ? Types[TypeIndex] : InteriorUtilityTypes::Other);
+}
+
 void UInteriorScreenWidget::OnGrowRoomClicked()
 {
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
@@ -3714,6 +4250,45 @@ void UInteriorScreenWidget::OnIncreaseSpeedClicked()
 		PC->IncreaseMoveSpeed3DPreview();
 	}
 	RefreshCameraSpeedDisplay();
+}
+
+void UInteriorScreenWidget::OnFloorRangeCommitted(const FText& NewText, ETextCommit::Type CommitType)
+{
+	if (CommitType != ETextCommit::OnEnter && CommitType != ETextCommit::OnUserMovedFocus)
+	{
+		return;
+	}
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC || !FloorFromBox || !FloorToBox)
+	{
+		return;
+	}
+	const TArray<int32> Current = PC->GetLoadedBuildingLevels();
+	if (Current.IsEmpty())
+	{
+		return;
+	}
+
+	int32 First = 0;
+	int32 Last = 0;
+	if (!LayoutValidation::ParseLevel(FloorFromBox->GetText().ToString(), First) || !LayoutValidation::ParseLevel(FloorToBox->GetText().ToString(), Last))
+	{
+		PC->OnActionFailed.Broadcast(TEXT("Type a floor as 3, -1 or B1. Floors go from B20 to 200, and there is no floor 0."), EActionFailureSeverity::Warning);
+	}
+	else
+	{
+		// Either order is fine: for basements From B1 To B2 is the natural way to say it, and it is the same two floors as B2 and B1.
+		if (LayoutValidation::LevelIndex(Last) < LayoutValidation::LevelIndex(First))
+		{
+			Swap(First, Last);
+		}
+		if (First != Current[0] || Last != Current.Last())
+		{
+			PC->SetFloorRange(First, Last);
+		}
+	}
+	// What the building has now: what was typed when it was applied, the old values when it was not.
+	RefreshFloorList();
 }
 
 void UInteriorScreenWidget::OnCameraSpeedTextCommitted(const FText& NewText, ETextCommit::Type CommitType)

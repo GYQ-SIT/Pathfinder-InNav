@@ -114,6 +114,21 @@ private:
 	UFUNCTION()
 	void OnAddEscalatorModeClicked();
 
+	// Utility group (PAT-193): one button per type; each arms placing points of that type, and clicking it again turns placing off.
+	UFUNCTION()
+	void OnUtilityAedClicked();
+	UFUNCTION()
+	void OnUtilityBicycleClicked();
+	UFUNCTION()
+	void OnUtilityDropOffClicked();
+	UFUNCTION()
+	void OnUtilityOtherClicked();
+	// Shown in the Properties panel while a utility point is selected (empty id: it was deselected).
+	UFUNCTION()
+	void HandleSelectedUtilityChanged(FString UtilityId);
+	UFUNCTION()
+	void OnApplyUtilityClicked();
+
 	// Gizmos group: Grow/Shrink are one-shot nudges (mirrors PC's own =/- keys), Rotate CW/CCW are
 	// hold-to-rotate (mirrors 9/0) - OnPressed/OnReleased on the button itself, not OnClicked, so
 	// holding the mouse down keeps rotating exactly like holding the key does.
@@ -220,6 +235,18 @@ private:
 	UFUNCTION()
 	void HandleSelectedRoomChanged(FString RoomId);
 
+	// Two or more rooms/walls are selected (Count), or that ended (0): the Properties panel then edits what they share - Room Type and Search Tags -
+	// and leaves out name, position and size (PAT-197). See ANavPlayerController::OnMultiSelectionChanged.
+	UFUNCTION()
+	void HandleMultiSelectionChanged(int32 Count);
+	// Applies the type / tags changed in the panel to every selected room as one Undo step. A value shown as "-" (the rooms differ) and left alone
+	// changes nothing.
+	void ApplyMultiRoomChanges();
+	// The panel is showing a multiple selection, and what it showed for the type and the tags (to tell what the user changed).
+	bool bMultiMode = false;
+	FString MultiShownType;
+	FString MultiShownTags;
+
 	UFUNCTION()
 	void OnApplyRoomClicked();
 	UFUNCTION()
@@ -249,6 +276,9 @@ private:
 
 	UFUNCTION()
 	void OnApplyConnectorClicked();
+
+	UFUNCTION()
+	void OnSelectAllFloorsClicked();
 
 	// Shows PropertiesPanel if any of Door/Room/Connector is currently selected on the PC, hides it
 	// if none are - called at the end of each HandleSelected*Changed once that handler has already
@@ -386,6 +416,31 @@ private:
 	// UEditScreenWidget::OnCameraSpeedTextCommitted (Enter or clicking away both commit it).
 	UFUNCTION()
 	void OnCameraSpeedTextCommitted(const FText& NewText, ETextCommit::Type CommitType);
+
+	// The Floors panel's "From" and "To" boxes: the lowest and the highest floor of the building, typed as 3, -1 or B1. Enter or clicking away
+	// applies them (floors outside the range go, new floors are empty; Undo brings them back); something that is not a floor puts the old
+	// values back with a message.
+	UFUNCTION()
+	void OnOpenFloorChanged(bool bIsChecked);
+	// Reference image of the floor being viewed (PAT-201): the picture, and where it lies under the plan.
+	UFUNCTION()
+	void OnImportReferenceClicked();
+	UFUNCTION()
+	void OnRemoveReferenceClicked();
+	UFUNCTION()
+	void OnReferenceShownChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnReferenceFieldCommitted(const FText& Text, ETextCommit::Type CommitType);
+	void RefreshReferenceImagePanel();
+	bool bRefreshingReference = false;
+	UFUNCTION()
+	void OnAddBasementClicked();
+	UFUNCTION()
+	void OnAddSpecialFloorClicked();
+	UFUNCTION()
+	void OnFloorNameCommitted(const FText& NewText, ETextCommit::Type CommitType);
+	UFUNCTION()
+	void OnFloorRangeCommitted(const FText& NewText, ETextCommit::Type CommitType);
 
 	// Syncs CameraSpeedTextBox to PC->GetCameraMoveSpeed() - see UEditScreenWidget's own
 	// RefreshCameraSpeedDisplay for the full reasoning.
@@ -687,6 +742,23 @@ private:
 	UButton* AddEscalatorModeButton = nullptr;
 
 	UPROPERTY()
+	UButton* UtilityAedButton = nullptr;
+	UPROPERTY()
+	UButton* UtilityBicycleButton = nullptr;
+	UPROPERTY()
+	UButton* UtilityDropOffButton = nullptr;
+	UPROPERTY()
+	UButton* UtilityOtherButton = nullptr;
+	UPROPERTY()
+	UVerticalBox* UtilityFieldsBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* UtilityNameBox = nullptr;
+	UPROPERTY()
+	UComboBoxString* UtilityTypeCombo = nullptr;
+	UPROPERTY()
+	UButton* ApplyUtilityButton = nullptr;
+
+	UPROPERTY()
 	UButton* GrowRoomButton = nullptr;
 
 	UPROPERTY()
@@ -808,9 +880,47 @@ private:
 	// via per-entry Visibility, not by changing the array size).
 	UPROPERTY()
 	TArray<UCheckBox*> FloorCheckboxes;
+	// The floor each of those boxes stands for (and the label next to it) follows the loaded building's levels, lowest first, so a basement is B1.
+	UPROPERTY()
+	TArray<UTextBlock*> FloorCheckboxLabels;
+	// "Open floor (no outer wall)" for the floor being viewed (PAT-205); the flag keeps a refresh of the panel from being taken for a click.
+	UPROPERTY()
+	UCheckBox* OpenFloorCheckBox = nullptr;
+	// PAT-203: the name of the floor being viewed, and the buttons that add a basement or a special floor.
+	UPROPERTY()
+	UEditableTextBox* FloorNameBox = nullptr;
+	UPROPERTY()
+	UButton* AddBasementButton = nullptr;
+	UPROPERTY()
+	UButton* AddSpecialFloorButton = nullptr;
+	bool bRefreshingOpenFloor = false;
+	UPROPERTY()
+	UButton* ImportReferenceButton = nullptr;
+	UPROPERTY()
+	UButton* RemoveReferenceButton = nullptr;
+	UPROPERTY()
+	UCheckBox* ReferenceShownCheckBox = nullptr;
+	// Width, centre X, centre Y (metres) and opacity (per cent), shown only while the floor has an image.
+	UPROPERTY()
+	UVerticalBox* ReferenceFieldsBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* ReferenceWidthBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* ReferenceXBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* ReferenceYBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* ReferenceOpacityBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* FloorFromBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* FloorToBox = nullptr;
 
 	UPROPERTY()
 	UButton* ApplyConnectorButton = nullptr;
+	// Toggle: ticks every floor box the building has, or clears them all when all are already ticked (the user still presses Save changes).
+	UPROPERTY()
+	UButton* SelectAllFloorsButton = nullptr;
 
 	// Layers panel - see the comment above HandleLayerRowExpandClicked.
 	UPROPERTY()
