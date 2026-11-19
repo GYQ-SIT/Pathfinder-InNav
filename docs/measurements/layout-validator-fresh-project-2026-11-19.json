@@ -1,0 +1,213 @@
+{
+  "task": "T11: Plugin in a fresh project",
+  "date_local": "2026-11-19",
+  "timezone": "Asia/Singapore",
+  "source_commit": "2cd623639ed861c5d46f5629debe2614cc7178e8",
+  "plugin_version": "1.1.1",
+  "package_pin": "1.0.0",
+  "engine_version": "5.8.2-56702186+++UE5+Release-5.8",
+  "platform": "Win64",
+  "configuration": "Development",
+  "method": "Source copied byte-for-byte into a newly created minimal UE project outside the product and OneDrive; no prebuilt plugin binaries or product Data directory; engine plugins disabled by default and SQLiteCore/SQLiteSupport explicitly disabled.",
+  "project_descriptor": {
+    "FileVersion": 3,
+    "EngineAssociation": "5.8",
+    "DisableEnginePluginsByDefault": true,
+    "Modules": [
+      {
+        "Name": "T11ValidatorProbe",
+        "Type": "Runtime",
+        "LoadingPhase": "Default"
+      },
+      {
+        "Name": "T11ValidatorProbeEditor",
+        "Type": "Editor",
+        "LoadingPhase": "Default"
+      }
+    ],
+    "Plugins": [
+      {
+        "Name": "InNaviLayoutValidator",
+        "Enabled": true
+      },
+      {
+        "Name": "SQLiteCore",
+        "Enabled": false
+      },
+      {
+        "Name": "SQLiteSupport",
+        "Enabled": false
+      }
+    ]
+  },
+  "builds": [
+    {
+      "target": "T11ValidatorProbeEditor",
+      "result": "Succeeded",
+      "log_sha256": "68aef109f371b61234ddf6a6e0562a3bc009846542ca3abe7d93fd1ea0ca9cec"
+    },
+    {
+      "target": "T11ValidatorProbe",
+      "result": "Succeeded",
+      "log_sha256": "7db2edfd13b09bf35d3dc3ff219d3272d0728e422c97a85d068cecc6824c318a"
+    }
+  ],
+  "direct_plugin_modules": {
+    "public": [
+      "Core",
+      "CoreUObject",
+      "Json"
+    ],
+    "private": [
+      "GeometryCore"
+    ]
+  },
+  "host_bridge_modules": [
+    "Core",
+    "CoreUObject",
+    "Engine",
+    "Json",
+    "InNaviLayoutValidator"
+  ],
+  "plugin_source_sha256": {
+    "InNaviLayoutValidator.uplugin": "7d230c8254282d3c95ba144a6cb557fdfb324a6924013c7371b2c12f72436005",
+    "Source/InNaviLayoutValidator/InNaviLayoutValidator.Build.cs": "b398b8ea4aa6faaea83639458683397bc6de5cd5fd252eed11c647898ebdf8f1",
+    "Source/InNaviLayoutValidator/Private/InNaviLayoutValidatorModule.cpp": "cd5f47da67ae7599ff53a0530990a051def4f032d6bdb05a98dcb18a6a585722",
+    "Source/InNaviLayoutValidator/Private/LayoutToolRegistry.cpp": "55409e7ecd906a7d2e4749e4b55c3a51c66056c312d82219009ecda4f4b2872f",
+    "Source/InNaviLayoutValidator/Private/LayoutValidation.cpp": "2d2b78bda01eab72b4128c75e4256969c9e42eb5321153c0b55b4de28f597b25",
+    "Source/InNaviLayoutValidator/Public/LayoutToolPanel.h": "90781a370cfc26b2f33f7974806cff2808f9d00650947d6d6d3881b5c2826254",
+    "Source/InNaviLayoutValidator/Public/LayoutToolRegistry.h": "98f3e7d623edae7bf18f7081916f0b66a096e5f8bec280cd39fc277bbad528aa",
+    "Source/InNaviLayoutValidator/Public/LayoutValidation.h": "d4a0ca77b00a9e3ddd4732639c9cc3aa64185c2797100fd74ff16370bbae292c"
+  },
+  "probe_source": {
+    "Source/T11ValidatorProbe/T11ValidatorProbe.Build.cs": "using UnrealBuildTool;\npublic class T11ValidatorProbe : ModuleRules\n{\n    public T11ValidatorProbe(ReadOnlyTargetRules Target) : base(Target)\n    {\n        PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;\n        PrivateDependencyModuleNames.AddRange(new[] { \"Core\", \"CoreUObject\", \"Engine\", \"InNaviLayoutValidator\" });\n    }\n}\n",
+    "Source/T11ValidatorProbe/T11ValidatorProbe.cpp": "#include \"Modules/ModuleManager.h\"\nIMPLEMENT_PRIMARY_GAME_MODULE(FDefaultGameModuleImpl, T11ValidatorProbe, \"T11ValidatorProbe\");\n",
+    "Source/T11ValidatorProbe.Target.cs": "using UnrealBuildTool;\npublic class T11ValidatorProbeTarget : TargetRules\n{\n    public T11ValidatorProbeTarget(TargetInfo Target) : base(Target)\n    {\n        Type = TargetType.Game;\n        DefaultBuildSettings = BuildSettingsVersion.V7;\n        IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_8;\n        ExtraModuleNames.AddRange(new[] { \"T11ValidatorProbe\" });\n    }\n}\n",
+    "Source/T11ValidatorProbeEditor/T11ValidateCommandlet.cpp": "#include \"T11ValidateCommandlet.h\"\n#include \"LayoutValidation.h\"\n#include \"LayoutToolRegistry.h\"\n#include \"Dom/JsonObject.h\"\n#include \"HAL/FileManager.h\"\n#include \"Misc/EngineVersion.h\"\n#include \"Misc/FileHelper.h\"\n#include \"Misc/Parse.h\"\n#include \"Misc/Paths.h\"\n#include \"Modules/ModuleManager.h\"\n#include \"Serialization/JsonSerializer.h\"\n#include \"Serialization/JsonWriter.h\"\nIMPLEMENT_MODULE(FDefaultModuleImpl, T11ValidatorProbeEditor);\nUT11ValidateCommandlet::UT11ValidateCommandlet()\n{\n    IsClient = false; IsServer = false; IsEditor = true; LogToConsole = true;\n}\nint32 UT11ValidateCommandlet::Main(const FString& Params)\n{\n    FString Input, Output;\n    if (!FParse::Value(*Params, TEXT(\"Input=\"), Input) || !FParse::Value(*Params, TEXT(\"Report=\"), Output)) return 2;\n    if (FPaths::ConvertRelativePathToFull(Input).Equals(FPaths::ConvertRelativePathToFull(Output), ESearchCase::IgnoreCase)) return 2;\n    FModuleManager::LoadModuleChecked<IModuleInterface>(TEXT(\"InNaviLayoutValidator\"));\n    const auto Report = LayoutValidation::ValidateFile(Input);\n    if (!LayoutValidation::ExportReport(Report, Output)) return 2;\n    auto Meta = MakeShared<FJsonObject>();\n    const bool bSQLite = FModuleManager::Get().IsModuleLoaded(TEXT(\"SQLiteCore\")) || FModuleManager::Get().IsModuleLoaded(TEXT(\"SQLiteSupport\"));\n    const bool bProduct = FModuleManager::Get().IsModuleLoaded(TEXT(\"InNavi\"));\n    Meta->SetStringField(TEXT(\"engineVersion\"), FEngineVersion::Current().ToString());\n    Meta->SetBoolField(TEXT(\"sqliteModuleLoaded\"), bSQLite);\n    Meta->SetBoolField(TEXT(\"productModuleLoaded\"), bProduct);\n    Meta->SetBoolField(TEXT(\"productDataDirectoryExists\"), IFileManager::Get().DirectoryExists(*(FPaths::ProjectDir() / TEXT(\"Data\"))));\n    bool bRegistered = false;\n    FString WidgetPath;\n    for (const auto& Tool : LayoutTools::FRegistry::Get().Tools(LayoutTools::EScreen::Interior))\n    {\n        if (Tool.Id == TEXT(\"Validation\")) { bRegistered = true; WidgetPath = Tool.WidgetClassPath; }\n    }\n    Meta->SetBoolField(TEXT(\"validationProviderRegistered\"), bRegistered);\n    Meta->SetStringField(TEXT(\"validationWidgetClassPath\"), WidgetPath);\n    FString Text;\n    if (!FJsonSerializer::Serialize(Meta, TJsonWriterFactory<>::Create(&Text)) || !FFileHelper::SaveStringToFile(Text, *(Output + TEXT(\".meta.json\")))) return 2;\n    UE_LOG(LogTemp, Display, TEXT(\"T11 probe: %d errors, %d warnings; SQL=%d, product=%d, registered=%d\"), Report.Count(LayoutValidation::ESeverity::Error), Report.Count(LayoutValidation::ESeverity::Warning), bSQLite, bProduct, bRegistered);\n    if (bSQLite || bProduct || !bRegistered) return 3;\n    return Report.HasErrors() ? 1 : 0;\n}\n",
+    "Source/T11ValidatorProbeEditor/T11ValidateCommandlet.h": "#pragma once\n#include \"Commandlets/Commandlet.h\"\n#include \"T11ValidateCommandlet.generated.h\"\nUCLASS()\nclass UT11ValidateCommandlet : public UCommandlet\n{\n    GENERATED_BODY()\npublic:\n    UT11ValidateCommandlet();\n    virtual int32 Main(const FString& Params) override;\n};\n",
+    "Source/T11ValidatorProbeEditor/T11ValidatorProbeEditor.Build.cs": "using UnrealBuildTool;\npublic class T11ValidatorProbeEditor : ModuleRules\n{\n    public T11ValidatorProbeEditor(ReadOnlyTargetRules Target) : base(Target)\n    {\n        PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;\n        PrivateDependencyModuleNames.AddRange(new[] { \"Core\", \"CoreUObject\", \"Engine\", \"Json\", \"InNaviLayoutValidator\" });\n    }\n}\n",
+    "Source/T11ValidatorProbeEditor.Target.cs": "using UnrealBuildTool;\npublic class T11ValidatorProbeEditorTarget : TargetRules\n{\n    public T11ValidatorProbeEditorTarget(TargetInfo Target) : base(Target)\n    {\n        Type = TargetType.Editor;\n        DefaultBuildSettings = BuildSettingsVersion.V7;\n        IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_8;\n        ExtraModuleNames.AddRange(new[] { \"T11ValidatorProbe\", \"T11ValidatorProbeEditor\" });\n    }\n}\n"
+  },
+  "cases": [
+    {
+      "name": "independent-valid",
+      "exit_code": 0,
+      "issues": {},
+      "rules": [],
+      "input_sha256": "59d7efad76808ef3d95a03924330dcf4dcc98baf1647399b4a84e1a2d05b8d62",
+      "unchanged": true,
+      "report_sha256": "e50997ab8ebea18b789496adb67e93d6e648f6d046e3f83e03f65ed86c478cad",
+      "metadata": {
+        "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
+        "sqliteModuleLoaded": false,
+        "productModuleLoaded": false,
+        "productDataDirectoryExists": false,
+        "validationProviderRegistered": true,
+        "validationWidgetClassPath": ""
+      },
+      "source_file": null,
+      "navigationChecked": false
+    },
+    {
+      "name": "independent-invalid",
+      "exit_code": 1,
+      "issues": {
+        "Error": 1
+      },
+      "rules": [
+        "OPENING_BOUNDS"
+      ],
+      "input_sha256": "03b75ec38949bd961c5b83b7eea26326ad4fc70a30ae2190920a917bb50291e5",
+      "unchanged": true,
+      "report_sha256": "ef6674ee4e97e22d7aff906b75f48aed6d94e4484af3db99f8068f686fba1474",
+      "metadata": {
+        "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
+        "sqliteModuleLoaded": false,
+        "productModuleLoaded": false,
+        "productDataDirectoryExists": false,
+        "validationProviderRegistered": true,
+        "validationWidgetClassPath": ""
+      },
+      "source_file": null,
+      "navigationChecked": false
+    },
+    {
+      "name": "foreign-json",
+      "exit_code": 1,
+      "issues": {
+        "Error": 1
+      },
+      "rules": [
+        "DATA_TYPE"
+      ],
+      "input_sha256": "b70fe3fe10adf4c8edd5305d927b7085738031ed9d79c2582e789ab03980f93d",
+      "unchanged": true,
+      "report_sha256": "48effb4e0950ac8f53654d4faf0fe59ed5bdd1ceac976a6914133b33075e98b0",
+      "metadata": {
+        "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
+        "sqliteModuleLoaded": false,
+        "productModuleLoaded": false,
+        "productDataDirectoryExists": false,
+        "validationProviderRegistered": true,
+        "validationWidgetClassPath": ""
+      },
+      "source_file": null,
+      "navigationChecked": false
+    },
+    {
+      "name": "authored-project",
+      "exit_code": 0,
+      "issues": {
+        "Info": 3
+      },
+      "rules": [
+        "INTERIOR_UNAUTHORED"
+      ],
+      "input_sha256": "32a56bdb52cd07a40f6b3e7e7a91ad78435b66e55fefbd1d5e8eedda67281678",
+      "unchanged": true,
+      "report_sha256": "5a56514423fd4f4d05e88df6bc91a62b75a47084d2435658986f0a93a819abdf",
+      "metadata": {
+        "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
+        "sqliteModuleLoaded": false,
+        "productModuleLoaded": false,
+        "productDataDirectoryExists": false,
+        "validationProviderRegistered": true,
+        "validationWidgetClassPath": ""
+      },
+      "source_file": "InNavi/Data/buildings.json",
+      "navigationChecked": false
+    },
+    {
+      "name": "campus-sqlite",
+      "exit_code": 1,
+      "issues": {
+        "Error": 1
+      },
+      "rules": [
+        "FILE_READ"
+      ],
+      "input_sha256": "93dab8249c82c5e78112c7a6bf5c2359a05bd9dbce874adebc98e017a0b8e317",
+      "unchanged": true,
+      "report_sha256": "7aed7a82caaa7fcae0887a18fd79770e9c69bc42a30cf8a38a3090168dcf5f0b",
+      "metadata": {
+        "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
+        "sqliteModuleLoaded": false,
+        "productModuleLoaded": false,
+        "productDataDirectoryExists": false,
+        "validationProviderRegistered": true,
+        "validationWidgetClassPath": ""
+      },
+      "source_file": "InNavi/Data/map_extended.db",
+      "navigationChecked": false
+    }
+  ],
+  "limits": [
+    "No UI panel or actor adapter is included; the registered tool descriptor has an empty widget-class path.",
+    "Generic JSON/geometry validation only: navigationChecked is false, so route reachability is not checked.",
+    "Non-layout JSON requires conversion to the layout contract; raw SQLite input is not supported.",
+    "Game target was compiled and linked, not cooked/packaged or run as a game.",
+    "Registry authentication/installation was not tested; root package pin is 1.0.0 while copied source is 1.1.1."
+  ],
+  "local_artifacts": "InNavi/Saved/T11FreshProject-20261119/",
+  "source_archive_sha256": "9592078cc3f6f319850af0a31b2940b22734001c8272dccb3d02d9f1d5b03412"
+}

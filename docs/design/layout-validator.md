@@ -42,7 +42,7 @@ Input JSON is checked before loading. If structural checks pass, routing runs in
 
 ## Implementation
 
-- `InNavi/Plugins/InNaviLayoutValidator/`: versioned Runtime module with JSON rules, report types and a public tool registry. It depends on Core/CoreUObject/Json, without dependencies on game actors or UnrealEd.
+- `InNavi/Plugins/InNaviLayoutValidator/`: versioned Runtime module with JSON rules, report types and a public tool registry. It depends on Core/CoreUObject/Json and private GeometryCore, without dependencies on SQL, game actors or UnrealEd.
 - `LayoutValidationSession`: controller-owned report shared by both screens; detached snapshots, scope, stale detection, focus and report export.
 - `LayoutValidationPanelWidget`: shared dock content. Its one-second UI poll only checks snapshot fingerprints; it never reruns validation. Fingerprinting stops after a report becomes stale.
 - `NavigationRoutePlanner`: ordinary routing and validation share `BuildCampusGraph`. Validation builds the graph once per run and traverses it from exterior entries. Geometry and graph generation run synchronously on demand on the game thread.
@@ -53,6 +53,8 @@ The plugin is enabled and linked by the project. `LayoutTools::IProvider` and `F
 The package-local [README](../../InNavi/Plugins/InNaviLayoutValidator/README.md), [CHANGELOG](../../InNavi/Plugins/InNaviLayoutValidator/CHANGELOG.md) and [standalone example](../../InNavi/Plugins/InNaviLayoutValidator/Examples/README.md) cover installation, API use, extension and release procedures. The root npm manifest pins the published source package. Windows CI verifies the archive against the checkout when their versions match and builds newer plugin versions from the checkout before publication. UnrealBuildTool compiles the native Unreal plugin.
 
 See [M2 compliance evidence](layout-validator-m2-compliance.md) for the D1–D5 mapping.
+
+See the [T11 fresh-project note](../layout-validator-fresh-project.md) for the current standalone build/run results, data dependencies and missing UI/routing integration.
 
 ## Verification
 
