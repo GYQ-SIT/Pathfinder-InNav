@@ -29,11 +29,27 @@ namespace
 	{
 		return MobileStyle::Rounded(FLinearColor::Transparent, Colour, Radius, SplashWidth);
 	}
+
+	const FLinearColor& SplashBlue()
+	{
+		static const FLinearColor Blue = StartStyle::Rgb(52, 142, 255);
+		return Blue;
+	}
+
+	FLinearColor WithOpacity(const FLinearColor& Colour, float Opacity)
+	{
+		return FLinearColor(Colour.R, Colour.G, Colour.B, Colour.A * Opacity);
+	}
 }
 
-float UMobileSplashWidget::LogoOpacity(double Seconds)
+float UMobileSplashWidget::LogoOpacity(double Seconds, double LeaveSeconds)
 {
-	return SplashSoftStep((Seconds - BlackSeconds) / FadeInSeconds);
+	const float In = SplashSoftStep((Seconds - BlackSeconds) / FadeInSeconds);
+	if (LeaveSeconds < 0.0)
+	{
+		return In;
+	}
+	return In * (1.f - SplashSoftStep((Seconds - LeaveSeconds) / (FadeOutSeconds * LogoFadeOutFraction)));
 }
 
 float UMobileSplashWidget::CoverOpacity(double Seconds, double LeaveSeconds)
@@ -62,12 +78,14 @@ TSharedRef<SWidget> UMobileSplashWidget::RebuildWidget()
 		SplashBlackSlot->SetVerticalAlignment(VAlign_Fill);
 
 		// The logo: the blue outlined square with the two-column symbol of the start screen, and the name under it.
-		const FLinearColor LogoBlue = StartStyle::Rgb(52, 142, 255);
+		const FLinearColor LogoBlue = SplashBlue();
 		USizeBox* SplashMarkSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("SplashMarkSize"));
 		SplashMarkSize->SetWidthOverride(88.f);
 		SplashMarkSize->SetHeightOverride(88.f);
 		UBorder* SplashMarkFrame = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SplashMark"));
-		SplashMarkFrame->SetBrush(SplashOutline(LogoBlue, 20.f, 2.5f));
+		// Not there at the start (opacity 0): ApplyOpacities brings the outlines in with the rest.
+		SplashMarkFrame->SetBrush(SplashOutline(WithOpacity(LogoBlue, 0.f), 20.f, 2.5f));
+		MarkFrame = SplashMarkFrame;
 		SplashMarkFrame->SetBrushColor(FLinearColor::White);
 		SplashMarkFrame->SetHorizontalAlignment(HAlign_Center);
 		SplashMarkFrame->SetVerticalAlignment(VAlign_Center);
@@ -76,7 +94,8 @@ TSharedRef<SWidget> UMobileSplashWidget::RebuildWidget()
 		SplashSymbolSize->SetHeightOverride(40.f);
 		UOverlay* SplashSymbol = Tree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("SplashSymbol"));
 		UBorder* SplashSymbolBox = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("SplashSymbolBox"));
-		SplashSymbolBox->SetBrush(SplashOutline(LogoBlue, 4.f, 3.5f));
+		SplashSymbolBox->SetBrush(SplashOutline(WithOpacity(LogoBlue, 0.f), 4.f, 3.5f));
+		SymbolBox = SplashSymbolBox;
 		SplashSymbolBox->SetBrushColor(FLinearColor::White);
 		UOverlaySlot* SplashSymbolBoxSlot = SplashSymbol->AddChildToOverlay(SplashSymbolBox);
 		SplashSymbolBoxSlot->SetHorizontalAlignment(HAlign_Fill);
@@ -103,6 +122,8 @@ TSharedRef<SWidget> UMobileSplashWidget::RebuildWidget()
 		SplashMarkSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 18.f));
 		SplashGroup->AddChildToVerticalBox(SplashName)->SetHorizontalAlignment(HAlign_Center);
 		LogoGroup = SplashGroup;
+		// Not there until the opening says so: its first frame is drawn before the first tick has given it the window's scale.
+		SplashGroup->SetRenderOpacity(0.f);
 
 		// Laid out in a space 375 wide, and blown up to the window's width (NativeTick), as the app is.
 		USizeBox* SplashWidth = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("SplashWidth"));
@@ -121,19 +142,30 @@ TSharedRef<SWidget> UMobileSplashWidget::RebuildWidget()
 
 void UMobileSplashWidget::ApplyOpacities()
 {
+	const float Logo = LogoOpacity(Elapsed, LeaveAt);
 	if (LogoGroup)
 	{
-		LogoGroup->SetRenderOpacity(LogoOpacity(Elapsed));
+		LogoGroup->SetRenderOpacity(Logo);
+	}
+	if (MarkFrame)
+	{
+		MarkFrame->SetBrush(SplashOutline(WithOpacity(SplashBlue(), Logo), 20.f, 2.5f));
+	}
+	if (SymbolBox)
+	{
+		SymbolBox->SetBrush(SplashOutline(WithOpacity(SplashBlue(), Logo), 4.f, 3.5f));
 	}
 	SetRenderOpacity(CoverOpacity(Elapsed, LeaveAt));
 }
 
+float UMobileSplashWidget::GetOutlineOpacity() const
+{
+	return MarkFrame ? MarkFrame->Background.OutlineSettings.Color.GetSpecifiedColor().A : 0.f;
+}
+
 void UMobileSplashWidget::SetAppReady()
 {
-	if (LeaveAt < 0.0)
-	{
-		LeaveAt = FMath::Max(Elapsed, EarliestLeaveSeconds());
-	}
+	bAppReady = true;
 }
 
 void UMobileSplashWidget::Advance(double DeltaSeconds)
@@ -143,6 +175,11 @@ void UMobileSplashWidget::Advance(double DeltaSeconds)
 		return;
 	}
 	Elapsed += FMath::Clamp(DeltaSeconds, 0.0, LongestFrameSeconds);
+	// The app is drawn for a few frames under the cover before the fade-out is fixed to start.
+	if (bAppReady && LeaveAt < 0.0 && ++FramesSinceReady >= FramesBeforeLeave)
+	{
+		LeaveAt = FMath::Max(Elapsed, EarliestLeaveSeconds());
+	}
 	ApplyOpacities();
 	if (LeaveAt >= 0.0 && Elapsed >= LeaveAt + FadeOutSeconds)
 	{

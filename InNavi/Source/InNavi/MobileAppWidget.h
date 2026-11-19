@@ -153,6 +153,10 @@ public:
 	// What the search picked, shown as if it had been chosen from the list under the map, whatever the sheet was doing (a route is left): a place goes
 	// to its page, a building to the map and the list of its places.
 	void OpenSearchedPlace(const FMobilePlace& Place);
+	// A room tapped on the map: its place opens, whatever the sheet was doing; a walk or an arrival ends the trip (a route only looked at keeps it, to add a stop).
+	void OpenPlaceFromMap(const FMobilePlace& Place);
+	// The map's room tap (the same code as the tap itself, so it can be tested).
+	void HandleMapPlaceTapped(const FString& PlaceId);
 	void OpenSearchedBuilding(const FString& BuildingId);
 	// What was searched lately (the lists of the full-screen search). Kept in this file from now on, and read from it.
 	const FMobileSearchHistory& GetSearchHistory() const { return SearchHistory; }
@@ -245,6 +249,10 @@ private:
 	void OnLevelClicked();
 	UFUNCTION()
 	void OnLocateClicked();
+	// The compass appears once the map is turned (a twist of two fingers, or Shift and a drag with a mouse), turns with it, and a tap turns the map back.
+	UFUNCTION()
+	void OnCompassClicked();
+	void UpdateCompass(double RotationRadians);
 	UFUNCTION()
 	void OnShow2DClicked();
 	UFUNCTION()
@@ -305,6 +313,10 @@ private:
 	UTextBlock* OverviewLabel = nullptr;
 	UPROPERTY()
 	UWidget* ControlsBox = nullptr;
+	UPROPERTY()
+	UButton* CompassButton = nullptr;
+	UPROPERTY()
+	UWidget* CompassPicture = nullptr;
 	UPROPERTY()
 	UBorder* ExploreOverlay = nullptr;
 	UPROPERTY()
@@ -379,6 +391,12 @@ private:
 	FMobileRoute CurrentRoute;
 	FMobileRouteRequest ActiveRouteRequest;
 	TUniquePtr<IMobileRouteJob> PendingRoute;
+	// The route graph being got ready in the background (IMobileNavSource::BeginWarmup), started a moment after the app is up so that the first route is quick.
+	TUniquePtr<IMobileRouteJob> PendingWarmup;
+	float WarmupDelay = 0.f;
+	bool bWarmupStarted = false;
+	// The sites whose graph is still to be got ready (the one on show was first), one at a time: a route can be asked for in any of them.
+	TArray<FString> WarmupSites;
 	// The trip: destinations after the first, the route of each leg planned so far, the leg being walked, the leg being planned, and the destinations of
 	// the trip the route page last showed.
 	TArray<FString> StopPlaceIds;

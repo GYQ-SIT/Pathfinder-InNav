@@ -33,6 +33,22 @@ bool FMobileSplashTimelineTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("it is half there in the middle of leaving"), FMath::IsNearlyEqual(Splash::CoverOpacity(2.0 + Splash::FadeOutSeconds * 0.5, 2.0), 0.5f, 0.01f));
 	TestEqual(TEXT("and gone when it has left"), Splash::CoverOpacity(2.0 + Splash::FadeOutSeconds, 2.0), 0.f);
 	TestTrue(TEXT("the logo is held for a moment before the splash can leave"), Splash::EarliestLeaveSeconds() > Splash::BlackSeconds + Splash::FadeInSeconds);
+
+	// Leaving: the logo is gone before the black is, so no ghost of it is left on the app.
+	const double Leave = 2.0;
+	TestEqual(TEXT("the logo is all there until the splash leaves"), Splash::LogoOpacity(Leave, Leave), 1.f);
+	TestEqual(TEXT("and gone a little way into the fade-out"), Splash::LogoOpacity(Leave + Splash::FadeOutSeconds * Splash::LogoFadeOutFraction, Leave), 0.f);
+	TestTrue(TEXT("while the black is still there then"), Splash::CoverOpacity(Leave + Splash::FadeOutSeconds * Splash::LogoFadeOutFraction, Leave) > 0.5f);
+	float LastOut = 1.f;
+	bool bFalls = true;
+	for (double T = Leave; T <= Leave + Splash::FadeOutSeconds; T += 0.01)
+	{
+		const float Now = Splash::LogoOpacity(T, Leave);
+		bFalls &= Now <= LastOut;
+		LastOut = Now;
+	}
+	TestTrue(TEXT("the logo only goes, never comes back"), bFalls);
+	TestTrue(TEXT("the app is built once the logo is all in, not during a fade"), FMath::IsNearlyEqual(Splash::AppBuildSeconds, Splash::BlackSeconds + Splash::FadeInSeconds) && Splash::LogoOpacity(Splash::AppBuildSeconds) == 1.f);
 	return true;
 }
 
@@ -51,9 +67,13 @@ bool FMobileSplashWidgetTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("it stays while the app is not ready"), Splash->IsFinished());
 	TestEqual(TEXT("with the logo all there"), Splash->GetRenderOpacity(), 1.f);
 
-	// Ready after the logo has had its time: it leaves at once, over the fade.
+	// Ready after the logo has had its time: a few frames of the app are drawn under the cover, then it leaves, over the fade.
 	Splash->SetAppReady();
-	TestTrue(TEXT("it leaves at once when the logo has had its time"), FMath::IsNearlyEqual(Splash->GetLeaveSeconds(), Splash->GetElapsedSeconds()));
+	TestTrue(TEXT("it has not decided to leave before the app has been drawn"), Splash->GetLeaveSeconds() < 0.0);
+	for (int32 Frame = 0; Frame < UMobileSplashWidget::FramesBeforeLeave - 1; ++Frame) Splash->Advance(0.02);
+	TestTrue(TEXT("nor after fewer frames than that"), Splash->GetLeaveSeconds() < 0.0 && Splash->GetRenderOpacity() == 1.f);
+	Splash->Advance(0.02);
+	TestTrue(TEXT("it leaves when the logo has had its time and the app has been drawn"), FMath::IsNearlyEqual(Splash->GetLeaveSeconds(), Splash->GetElapsedSeconds()));
 	for (int32 Frame = 0; Frame < 10; ++Frame) Splash->Advance(0.02);
 	TestFalse(TEXT("it is going, not gone"), Splash->IsFinished());
 	TestTrue(TEXT("and less there"), Splash->GetRenderOpacity() < 1.f);
@@ -65,12 +85,30 @@ bool FMobileSplashWidgetTest::RunTest(const FString& Parameters)
 	if (!TestNotNull(TEXT("another splash is created"), Early)) return false;
 	Early->TakeWidget();
 	Early->SetAppReady();
+	for (int32 Frame = 0; Frame < UMobileSplashWidget::FramesBeforeLeave; ++Frame) Early->Advance(0.02);
 	TestTrue(TEXT("a splash whose app is ready at once leaves only after the logo has been shown"), FMath::IsNearlyEqual(Early->GetLeaveSeconds(), UMobileSplashWidget::EarliestLeaveSeconds()));
-	for (int32 Frame = 0; Frame < 80; ++Frame) Early->Advance(0.02);
+	for (int32 Frame = 0; Frame < 20; ++Frame) Early->Advance(0.02);
 	TestFalse(TEXT("and is still there before that time is over"), Early->IsFinished());
 	TestEqual(TEXT("with nothing of it gone yet"), Early->GetRenderOpacity(), 1.f);
 	for (int32 Frame = 0; Frame < 60; ++Frame) Early->Advance(0.02);
 	TestTrue(TEXT("and gone when the time and the fade are over"), Early->IsFinished());
+
+	// The outlines of the logo are drawn in their own colour, which the render opacity does not touch: they must fade with the rest (they used to appear
+	// whole at the first frame and stay on the app while it showed through).
+	UMobileSplashWidget* Fade = CreateWidget<UMobileSplashWidget>(World, UMobileSplashWidget::StaticClass());
+	if (!TestNotNull(TEXT("a fourth splash is created"), Fade)) return false;
+	Fade->TakeWidget();
+	TestEqual(TEXT("at the start the outlines are not there"), Fade->GetOutlineOpacity(), 0.f);
+	for (int32 Frame = 0; Frame < 80; ++Frame) Fade->Advance(0.02);
+	TestEqual(TEXT("when the logo is in the outlines are all there"), Fade->GetOutlineOpacity(), 1.f);
+	Fade->SetAppReady();
+	for (int32 Frame = 0; Frame < UMobileSplashWidget::FramesBeforeLeave; ++Frame) Fade->Advance(0.02);
+	// Into the fade-out: the logo goes first.
+	Fade->Advance(UMobileSplashWidget::FadeOutSeconds * UMobileSplashWidget::LogoFadeOutFraction * 0.5);
+	const float Part = Fade->GetOutlineOpacity();
+	TestTrue(TEXT("the outlines go with the logo, not after it"), Part > 0.f && Part < 1.f);
+	for (int32 Frame = 0; Frame < 10; ++Frame) Fade->Advance(0.02);
+	TestEqual(TEXT("and are gone before the splash is"), Fade->GetOutlineOpacity(), 0.f);
 
 	// A long frame (the app being built) counts for no more than the longest frame, so it cannot skip the fade.
 	UMobileSplashWidget* Slow = CreateWidget<UMobileSplashWidget>(World, UMobileSplashWidget::StaticClass());

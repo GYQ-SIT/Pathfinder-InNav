@@ -9,6 +9,16 @@
 #include "PolygonGeometryUtils.h"
 #include "HAL/PlatformTime.h"
 #include "Async/ParallelFor.h"
+#include "Async/Async.h"
+#include "HAL/ThreadSafeBool.h"
+#include "HAL/ThreadSafeCounter.h"
+#include "HAL/FileManager.h"
+#include "HAL/PlatformProcess.h"
+#include "Misc/Paths.h"
+#include "Misc/ScopeLock.h"
+#include "Serialization/MemoryReader.h"
+#include "Serialization/MemoryWriter.h"
+#include "Misc/FileHelper.h"
 
 namespace
 {
@@ -1014,14 +1024,142 @@ namespace
 		TArray<TPair<uint64, TSharedRef<const FStaticGraph>>> Entries;
 		int32 Hits = 0;
 		int32 Misses = 0;
-		// A few: the whole campus, a building on its own, and the same with other preferences for lifts and stairs.
-		static constexpr int32 MaxEntries = 4;
+		// The whole campus and each building on its own (see FNavigationGraphWarmup), and the same with other preferences for lifts and stairs.
+		static constexpr int32 MaxEntries = 12;
+		int32 FileReads = 0;
 	};
 
 	FGraphCache& GraphCache()
 	{
 		static FGraphCache Cache;
 		return Cache;
+	}
+
+	// ---- The graph in files ----
+	// Bump when the vertices or the edges are made differently (so that files of the old way are not found). 2: one outdoor point at each convex corner of a
+	// building instead of sixteen around every corner.
+	constexpr uint32 GraphFileVersion = 2;
+	constexpr uint32 GraphFileMagic = 0x464B4749u;
+
+	struct FGraphFiles
+	{
+		FCriticalSection Lock;
+		FString SavedDirectory, ShippedDirectory;
+		FThreadSafeCounter Writing;
+	};
+
+	FGraphFiles& GraphFiles()
+	{
+		static FGraphFiles Files;
+		return Files;
+	}
+
+	FString GraphFileName(uint64 Key)
+	{
+		return FString::Printf(TEXT("route-graph-v%u-%016llx.bin"), GraphFileVersion, Key);
+	}
+
+	void WriteVertex(FArchive& Ar, FVertex& Vertex)
+	{
+		FNavigationRoutePoint& P = Vertex.Point;
+		uint8 Type = static_cast<uint8>(P.ConnectorType), Portal = static_cast<uint8>(Vertex.Portal);
+		Ar << P.Position.X << P.Position.Y << P.Floor << P.ConnectorId << Type << P.WorldPosition.X << P.WorldPosition.Y << P.WorldPosition.Z
+			<< P.bHasWorldPosition << P.bIsDoorway << P.BuildingId << Vertex.ConnectsFloors << Portal;
+	}
+
+	// Reads one; false when what is read cannot be a vertex.
+	bool ReadVertex(FArchive& Ar, FVertex& Vertex)
+	{
+		FNavigationRoutePoint& P = Vertex.Point;
+		uint8 Type = 0, Portal = 0;
+		Ar << P.Position.X << P.Position.Y << P.Floor << P.ConnectorId << Type << P.WorldPosition.X << P.WorldPosition.Y << P.WorldPosition.Z
+			<< P.bHasWorldPosition << P.bIsDoorway << P.BuildingId << Vertex.ConnectsFloors << Portal;
+		if (Ar.IsError() || Portal > static_cast<uint8>(EPortal::BuildingLink) || Type > static_cast<uint8>(EInteriorNavNodeType::Escalator)) return false;
+		P.ConnectorType = static_cast<EInteriorNavNodeType>(Type);
+		Vertex.Portal = static_cast<EPortal>(Portal);
+		return FMath::IsFinite(P.Position.X) && FMath::IsFinite(P.Position.Y);
+	}
+
+	// Writes the graph to a file in the background, once (a file that is already there is left alone).
+	void SaveGraphFile(uint64 Key, const TSharedRef<const FStaticGraph>& Graph)
+	{
+		FGraphFiles& Files = GraphFiles();
+		FString Directory;
+		{
+			FScopeLock Guard(&Files.Lock);
+			Directory = Files.SavedDirectory;
+		}
+		if (Directory.IsEmpty()) return;
+		const FString Path = Directory / GraphFileName(Key);
+		if (IFileManager::Get().FileExists(*Path)) return;
+		Files.Writing.Increment();
+		Async(EAsyncExecution::ThreadPool, [Path, Key, Graph]()
+		{
+			TArray<uint8> Bytes;
+			FMemoryWriter Writer(Bytes);
+			uint32 Magic = GraphFileMagic, Version = GraphFileVersion;
+			uint64 KeyCopy = Key;
+			int32 Count = Graph->Vertices.Num();
+			Writer << Magic << Version << KeyCopy << Count;
+			for (const FVertex& Vertex : Graph->Vertices) { FVertex Copy = Vertex; WriteVertex(Writer, Copy); }
+			for (const TArray<FRouteGraphEdge>& List : Graph->Edges)
+			{
+				int32 Edges = List.Num();
+				Writer << Edges;
+				for (const FRouteGraphEdge& Edge : List) { int32 To = Edge.To; float Cost = Edge.Cost; Writer << To << Cost; }
+			}
+			// Written under another name and then renamed, so a file that is read is never one that is half written.
+			const FString Temporary = Path + TEXT(".part");
+			if (FFileHelper::SaveArrayToFile(Bytes, *Temporary))
+			{
+				IFileManager::Get().Move(*Path, *Temporary, true, true);
+			}
+			GraphFiles().Writing.Decrement();
+		});
+	}
+
+	// Reads the graph of this key from a file, if there is a good one made for exactly this many vertices.
+	TSharedPtr<const FStaticGraph> LoadGraphFile(uint64 Key, int32 ExpectedVertices)
+	{
+		FGraphFiles& Files = GraphFiles();
+		TArray<FString> Directories;
+		{
+			FScopeLock Guard(&Files.Lock);
+			if (!Files.SavedDirectory.IsEmpty()) Directories.Add(Files.SavedDirectory);
+			if (!Files.ShippedDirectory.IsEmpty()) Directories.Add(Files.ShippedDirectory);
+		}
+		for (const FString& Directory : Directories)
+		{
+			TArray<uint8> Bytes;
+			const FString Path = Directory / GraphFileName(Key);
+			if (!IFileManager::Get().FileExists(*Path) || !FFileHelper::LoadFileToArray(Bytes, *Path)) continue;
+			FMemoryReader Reader(Bytes);
+			uint32 Magic = 0, Version = 0;
+			uint64 FileKey = 0;
+			int32 Count = 0;
+			Reader << Magic << Version << FileKey << Count;
+			if (Reader.IsError() || Magic != GraphFileMagic || Version != GraphFileVersion || FileKey != Key || Count != ExpectedVertices) continue;
+			TSharedRef<FStaticGraph> Graph = MakeShared<FStaticGraph>();
+			Graph->Vertices.SetNum(Count);
+			bool bGood = true;
+			for (int32 I = 0; I < Count && bGood; ++I) bGood = ReadVertex(Reader, Graph->Vertices[I]);
+			Graph->Edges.SetNum(Count);
+			for (int32 I = 0; I < Count && bGood; ++I)
+			{
+				int32 Edges = 0;
+				Reader << Edges;
+				// An edge takes 8 bytes: a count that the rest of the file cannot hold is a damaged file.
+				if (Reader.IsError() || Edges < 0 || static_cast<int64>(Edges) * 8 > Reader.TotalSize() - Reader.Tell()) { bGood = false; break; }
+				Graph->Edges[I].SetNum(Edges);
+				for (int32 E = 0; E < Edges; ++E)
+				{
+					Reader << Graph->Edges[I][E].To << Graph->Edges[I][E].Cost;
+					if (Graph->Edges[I][E].To < 0 || Graph->Edges[I][E].To >= Count) { bGood = false; break; }
+				}
+			}
+			if (bGood && !Reader.IsError() && Reader.AtEnd()) return Graph;
+		}
+		return nullptr;
 	}
 
 	struct FInputHasher
@@ -1101,6 +1239,8 @@ namespace
 			return static_cast<float>(1.0 - Left * Left);
 		}
 		FCampusGraph Out;
+		uint64 GetKey() const { return Key; }
+		bool bFromFile = false;
 		// For the timing log (see FNavigationRouteJob): the seconds spent joining the vertices of the buildings and joining the start and
 		// the destination to them, and whether the joined vertices of the buildings were found kept from an earlier route.
 		double StaticJoinSeconds = 0.0;
@@ -1126,6 +1266,8 @@ namespace
 			Cache.Entries.RemoveAll([this](const TPair<uint64, TSharedRef<const FStaticGraph>>& Entry) { return Entry.Key == Key; });
 			Cache.Entries.Emplace(Key, Kept);
 			if (Cache.Entries.Num() > FGraphCache::MaxEntries) Cache.Entries.RemoveAt(0);
+			// Not found in a file, so built now: keep it in a file for the next time the app starts (nothing is written when files are off or it is there).
+			if (!bCacheHit) SaveGraphFile(Key, Kept);
 		}
 
 		const TArray<FRouteBuilding>& Models;
@@ -1216,14 +1358,34 @@ namespace
 			}
 			// Outdoor visibility vertices allow a route to go around every building, including
 			// buildings that have no entrances/interior data. Coordinates retain their owner.
-			if (bNeedsOutdoor) for (const auto& Corner : M.Building->GetFootprint()) for (int32 Ray = 0; Ray < 16; ++Ray)
+			// A shortest way round a building bends only at its convex corners, so one point just outside each of them (40 cm out, along the way the corner
+			// points) is enough. There used to be sixteen round every corner: more than two thirds of the vertices of a campus, which are joined in pairs,
+			// so the time to make the graph grew with the square of them.
+			if (bNeedsOutdoor)
 			{
-				const double Angle = Ray * 2 * PI / 16;
-				const FVector2D P = Corner + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * (40.0 / Scale);
-				const FVector2D Campus = P + M.Building->BuildingOffset;
-				bool bFree = true;
-				for (const auto& Other : Models) if (InsideOrOnBoundary(Campus - Other.Building->BuildingOffset, Other.Building->GetFootprint())) { bFree = false; break; }
-				if (bFree) Add(M, P, 0);
+				const TArray<FVector2D>& Footprint = M.Building->GetFootprint();
+				const int32 Corners = Footprint.Num();
+				double TwiceArea = 0.0;
+				for (int32 I = 0; I < Corners; ++I) TwiceArea += static_cast<double>(Footprint[I].X) * Footprint[(I + 1) % Corners].Y - static_cast<double>(Footprint[(I + 1) % Corners].X) * Footprint[I].Y;
+				const double Orientation = TwiceArea >= 0.0 ? 1.0 : -1.0;
+				for (int32 I = 0; I < Corners; ++I)
+				{
+					const FVector2D& Corner = Footprint[I];
+					const FVector2D ToPrevious = Footprint[(I + Corners - 1) % Corners] - Corner;
+					const FVector2D ToNext = Footprint[(I + 1) % Corners] - Corner;
+					if (ToPrevious.IsNearlyZero() || ToNext.IsNearlyZero()) continue;
+					// Convex when the outline turns the way it goes round; a straight stretch or a corner that points into the building needs no point.
+					const double Turn = -(static_cast<double>(ToPrevious.X) * ToNext.Y - static_cast<double>(ToPrevious.Y) * ToNext.X) * Orientation;
+					if (Turn <= 1e-9) continue;
+					FVector2D Outward = -(ToPrevious.GetSafeNormal() + ToNext.GetSafeNormal());
+					if (Outward.IsNearlyZero()) continue;
+					Outward.Normalize();
+					const FVector2D P = Corner + Outward * (40.0 / Scale);
+					const FVector2D Campus = P + M.Building->BuildingOffset;
+					bool bFree = true;
+					for (const auto& Other : Models) if (InsideOrOnBoundary(Campus - Other.Building->BuildingOffset, Other.Building->GetFootprint())) { bFree = false; break; }
+					if (bFree) Add(M, P, 0);
+				}
 			}
 		}
 		// The seeds come after the vertices of the buildings, so that those can be kept for the next route (FStaticGraph).
@@ -1239,6 +1401,23 @@ namespace
 			for (const TPair<uint64, TSharedRef<const FStaticGraph>>& Entry : Cache.Entries) if (Entry.Key == Key) { Found = Entry.Value; break; }
 			if (Found.IsValid() && Found->Vertices.Num() == StaticCount && Found->Edges.Num() == StaticCount) ++Cache.Hits;
 			else { Found.Reset(); ++Cache.Misses; }
+		}
+		if (!Found.IsValid())
+		{
+			// Not in memory: a graph made before (by an earlier run, or shipped with the app) may be in a file.
+			if (TSharedPtr<const FStaticGraph> FromFile = LoadGraphFile(Key, StaticCount); FromFile.IsValid())
+			{
+				FGraphCache& Cache = GraphCache();
+				FScopeLock Guard(&Cache.Lock);
+				Cache.Entries.RemoveAll([this](const TPair<uint64, TSharedRef<const FStaticGraph>>& Entry) { return Entry.Key == Key; });
+				Cache.Entries.Emplace(Key, FromFile.ToSharedRef());
+				if (Cache.Entries.Num() > FGraphCache::MaxEntries) Cache.Entries.RemoveAt(0);
+				--Cache.Misses;
+				++Cache.Hits;
+				++Cache.FileReads;
+				bFromFile = true;
+				Found = FromFile;
+			}
 		}
 		if (Found.IsValid())
 		{
@@ -1519,6 +1698,28 @@ void FNavigationRoutePlanner::ClearGraphCache()
 	Cache.Entries.Reset();
 	Cache.Hits = 0;
 	Cache.Misses = 0;
+	Cache.FileReads = 0;
+}
+
+int32 FNavigationRoutePlanner::GetGraphFileReads()
+{
+	FGraphCache& Cache = GraphCache();
+	FScopeLock Guard(&Cache.Lock);
+	return Cache.FileReads;
+}
+
+void FNavigationRoutePlanner::SetGraphFiles(const FString& SavedDirectory, const FString& ShippedDirectory)
+{
+	FGraphFiles& Files = GraphFiles();
+	FScopeLock Guard(&Files.Lock);
+	Files.SavedDirectory = SavedDirectory;
+	Files.ShippedDirectory = ShippedDirectory;
+	if (!SavedDirectory.IsEmpty()) IFileManager::Get().MakeDirectory(*SavedDirectory, true);
+}
+
+void FNavigationRoutePlanner::WaitForGraphFiles()
+{
+	for (int32 Waited = 0; Waited < 4000 && GraphFiles().Writing.GetValue() > 0; ++Waited) FPlatformProcess::Sleep(0.005f);
 }
 
 bool FNavigationRoutePlanner::FindRoute(const APolyBuilding& Building, const AInteriorGenerator& Interior,
@@ -1841,7 +2042,90 @@ void FNavigationRoutePlanner::ValidateLayoutConnectivity(const ABuildingGenerato
 namespace
 {
 	enum class ERoutePhase : uint8 { Read, Vertices, Joining, Solving, Done };
+
+	// How many graph warm-ups (FNavigationGraphWarmup) are working on a worker thread now.
+	FThreadSafeCounter& WarmupsWorking()
+	{
+		static FThreadSafeCounter Count;
+		return Count;
+	}
 }
+
+struct FNavigationGraphWarmup::FImpl
+{
+	// The copies the worker reads (they point at the buildings, which must stay), and the worker.
+	TArray<FRouteBuilding> Models;
+	float Scale = 1.f;
+	TFuture<void> Worker;
+	FThreadSafeBool bCancel{ false };
+	FThreadSafeBool bDone{ false };
+	FThreadSafeBool bKept{ false };
+};
+
+FNavigationGraphWarmup::FNavigationGraphWarmup(const ABuildingGenerator& Generator, const AInteriorGenerator& Interior, const FNavigationRoutePreferences& Preferences)
+	: Impl(MakeUnique<FImpl>())
+{
+	Impl->Scale = Generator.GetScale();
+	if (Impl->Scale <= KINDA_SMALL_NUMBER)
+	{
+		Impl->bDone = true;
+		return;
+	}
+	// The same reading a route does (FNavigationRouteJob, phase Read), so the graph made here is the one a route would make and finds.
+	Impl->Models = ReadCampusModels(Generator, Interior, false);
+	for (auto& Model : Impl->Models) Model.Nodes.RemoveAll([&](const FInteriorNavNode& Node) { return !Preferences.Allows(Node.Type); });
+	if (Impl->Models.IsEmpty())
+	{
+		Impl->bDone = true;
+		return;
+	}
+	WarmupsWorking().Increment();
+	FImpl* State = Impl.Get();
+	Impl->Worker = Async(EAsyncExecution::ThreadPool, [State]()
+	{
+		const double Started = FPlatformTime::Seconds();
+		// The graphs a route can ask for. A trip within one building that has no link to another is first searched with only that building and its doors to the
+		// outside left out (FNavigationRouteJob::PrepareIndoorOnly), which is a graph of its own and a small one; every other trip uses the whole campus.
+		// The small ones first, so a trip inside a building is quick at once, then the campus.
+		TArray<TArray<FRouteBuilding>> Sets;
+		for (const FRouteBuilding& Model : State->Models)
+		{
+			if (Model.Floors.IsEmpty() || Model.Entrances.ContainsByPredicate([](const FInteriorEntrance& Door) { return Door.Kind == EInteriorEntranceKind::Link; })) continue;
+			TArray<FRouteBuilding>& One = Sets.AddDefaulted_GetRef();
+			One.Add(Model);
+			for (auto& Floor : One[0].Floors) Floor.Value.ExteriorExits.Reset();
+		}
+		Sets.Add(State->Models);
+		bool bAll = true;
+		for (const TArray<FRouteBuilding>& Set : Sets)
+		{
+			if (State->bCancel) { bAll = false; break; }
+			FCampusGraphBuilder Builder(Set, State->Scale);
+			FString Error;
+			if (!Builder.Begin({}, Error)) continue;
+			// Without a start and a destination: only the places of the buildings are joined, and kept when they all are.
+			const double SetStarted = FPlatformTime::Seconds();
+			while (!State->bCancel && !Builder.Step(FPlatformTime::Seconds() + 0.05)) {}
+			if (State->bCancel) bAll = false;
+			UE_LOG(LogTemp, Display, TEXT("[RouteTiming] graph %016llx made ahead of time: %d vertices, %.2f s, %s"), Builder.GetKey(), Builder.Out.StaticCount,
+				FPlatformTime::Seconds() - SetStarted, Builder.bFromFile ? TEXT("read from a file") : Builder.bCacheHit ? TEXT("it was ready already") : TEXT("joined now"));
+		}
+		State->bKept = bAll;
+		UE_LOG(LogTemp, Display, TEXT("[RouteTiming] graphs made ahead of time (%d): %s after %.2f s"), Sets.Num(), bAll ? TEXT("kept") : TEXT("stopped"), FPlatformTime::Seconds() - Started);
+		State->bDone = true;
+		WarmupsWorking().Decrement();
+	});
+}
+
+FNavigationGraphWarmup::~FNavigationGraphWarmup()
+{
+	Cancel();
+	if (Impl && Impl->Worker.IsValid()) Impl->Worker.Wait();
+}
+
+bool FNavigationGraphWarmup::IsDone() const { return Impl->bDone; }
+bool FNavigationGraphWarmup::WasKept() const { return Impl->bKept; }
+void FNavigationGraphWarmup::Cancel() { if (Impl) Impl->bCancel = true; }
 
 // What the route search keeps between slices. As with the layout check, only the Read part looks at live editor data.
 struct FNavigationRouteJob::FImpl
@@ -1859,6 +2143,13 @@ struct FNavigationRouteJob::FImpl
 	TUniquePtr<FRouteSolver> Solver;
 	FNavigationRouteResult Result;
 	bool bFound = false;
+
+	// The graph joined on a worker thread (see AllowWorkerThread): the worker, whether it is finished, and whether it was told to stop.
+	bool bWorkerAllowed = false;
+	bool bWorkerStarted = false;
+	TFuture<void> JoinWorker;
+	FThreadSafeBool bJoinFinished{ false };
+	FThreadSafeBool bJoinCancel{ false };
 
 	// A trip within one building is first searched with only that building and nothing outside it: the outside is where
 	// nearly all the work of a large campus goes. That answer is kept only if it is shorter than anything that goes out
@@ -1885,7 +2176,9 @@ struct FNavigationRouteJob::FImpl
 		++Graphs;
 		GraphNotes += FString::Printf(TEXT("\n    graph %d (%s): %d vertices (%d of the buildings), %d edges, %s; joined %.2f s, start and destination %.2f s"),
 			Graphs, bIndoorOnly ? TEXT("this building only") : TEXT("whole campus"), Graph.Vertices.Num(), Graph.StaticCount, Edges / 2,
-			Builder->bCacheHit ? TEXT("the buildings were found ready") : TEXT("the buildings were joined now"), Builder->StaticJoinSeconds, Builder->SeedJoinSeconds);
+			Builder->bFromFile ? TEXT("the buildings were read from a file") : Builder->bCacheHit ? TEXT("the buildings were found ready") : TEXT("the buildings were joined now"),
+			Builder->StaticJoinSeconds, Builder->SeedJoinSeconds);
+		GraphNotes += FString::Printf(TEXT(" [key %016llx]"), Builder->GetKey());
 	}
 
 	void LogTimings() const
@@ -1943,7 +2236,17 @@ FNavigationRouteJob::FNavigationRouteJob(const ABuildingGenerator& Generator, co
 	Impl->StartedAt = FPlatformTime::Seconds();
 }
 
-FNavigationRouteJob::~FNavigationRouteJob() = default;
+FNavigationRouteJob::~FNavigationRouteJob()
+{
+	// The worker reads the builder and the copies of the buildings, which go with this: stop it and wait.
+	if (Impl)
+	{
+		Impl->bJoinCancel = true;
+		if (Impl->JoinWorker.IsValid()) Impl->JoinWorker.Wait();
+	}
+}
+
+void FNavigationRouteJob::AllowWorkerThread() { Impl->bWorkerAllowed = true; }
 
 bool FNavigationRouteJob::Step(double BudgetSeconds)
 {
@@ -1976,10 +2279,36 @@ bool FNavigationRouteJob::Step(double BudgetSeconds)
 			break;
 		}
 		case ERoutePhase::Vertices:
+			// A graph is being made ahead of time on a worker (FNavigationGraphWarmup): wait for it, and the graph is found ready.
+			if (WarmupsWorking().GetValue() > 0)
+			{
+				State.PhaseSeconds[static_cast<int32>(Running)] += FPlatformTime::Seconds() - PhaseStarted;
+				return false;
+			}
 			State.Builder = MakeUnique<FCampusGraphBuilder>(State.bIndoorOnly ? State.IndoorModels : State.Models, State.Scale);
 			State.Phase = State.Builder->Begin({ State.Start, State.Destination }, State.Result.Error) ? ERoutePhase::Joining : ERoutePhase::Done;
 			break;
 		case ERoutePhase::Joining:
+			if (State.bWorkerAllowed && !State.Builder->bCacheHit)
+			{
+				// The vertices of the buildings are joined on a worker, all at once and as fast as the machine can; this thread only waits and shows progress.
+				if (!State.bWorkerStarted)
+				{
+					State.bWorkerStarted = true;
+					FImpl* Job = &State;
+					State.JoinWorker = Async(EAsyncExecution::ThreadPool, [Job]()
+					{
+						while (!Job->bJoinCancel && !Job->Builder->Step(FPlatformTime::Seconds() + 0.05)) {}
+						Job->bJoinFinished = true;
+					});
+				}
+				if (!State.bJoinFinished)
+				{
+					State.PhaseSeconds[static_cast<int32>(Running)] += FPlatformTime::Seconds() - PhaseStarted;
+					return false;
+				}
+				if (State.bJoinCancel) { State.Phase = ERoutePhase::Done; break; }
+			}
 			if (!State.Builder->Step(Deadline)) break;
 			State.NoteGraph();
 			if (BothEndsFound(State.Builder->Out, State.Result))

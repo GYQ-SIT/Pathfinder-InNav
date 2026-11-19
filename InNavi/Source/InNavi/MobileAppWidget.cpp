@@ -95,21 +95,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		{
 			if (UMobileAppWidget* Screen = WeakMapOwner.Get())
 			{
-				// A tap on a room opens its place while looking for one.
-				FMobilePlace Place;
-				const EMobileSheetState State = Screen->Flow.GetState();
-				if ((State == EMobileSheetState::Search || State == EMobileSheetState::Place) && Screen->Source.IsValid() && Screen->Source->FindPlace(PlaceId, Place))
-				{
-					if (State == EMobileSheetState::Place)
-					{
-						Screen->SelectPlace(Place);
-						Screen->RefreshMap();
-					}
-					else
-					{
-						Screen->ShowPlace(Place);
-					}
-				}
+				Screen->HandleMapPlaceTapped(PlaceId);
 			}
 		});
 		MapView->SetOnBuildingTapped([WeakMapOwner](const FString& BuildingId)
@@ -256,6 +242,14 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		UWidget* LocateIcon = MobileIcons::Picture(Tree, TEXT("Recenter"), 20.f, Ink);
 		UButton* LocateButton = MakeIconButton(TEXT("Btn_Locate"), LocateIcon ? LocateIcon : static_cast<UWidget*>(Target));
 		LocateButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnLocateClicked);
+		// The compass: the design team's coloured one (it keeps its own colours); a letter N until its texture is imported. Shown only while the map is turned.
+		UWidget* CompassIcon = MobileIcons::Picture(Tree, TEXT("CompassColour"), 24.f, FLinearColor::White);
+		CompassPicture = CompassIcon ? CompassIcon : static_cast<UWidget*>(MakeText(Tree, FString(), TEXT("N"), 16.f, Ink, true));
+		CompassButton = MakeIconButton(TEXT("Btn_Compass"), CompassPicture);
+		CompassButton->SetVisibility(ESlateVisibility::Collapsed);
+		CompassButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnCompassClicked);
+		ToolbarRow->AddChildToHorizontalBox(CompassButton);
+		MapView->SetOnRotationChanged([this](double Radians) { UpdateCompass(Radians); });
 		ToolbarRow->AddChildToHorizontalBox(LocateButton);
 		Controls->AddChildToVerticalBox(ToolbarBorder)->SetHorizontalAlignment(HAlign_Right);
 		ControlsBox = Controls;
@@ -764,6 +758,31 @@ void UMobileAppWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime
 	Super::NativeTick(MyGeometry, InDeltaTime);
 	if (StorageErrorSeconds > 0.f && (StorageErrorSeconds -= InDeltaTime) <= 0.f && StorageError)
 		StorageError->SetVisibility(ESlateVisibility::Collapsed);
+	// The route graph is got ready while the person looks at the map, so that their first route is quick (it is the most of the work of a route).
+	if (!bWarmupStarted && Source.IsValid())
+	{
+		WarmupDelay += InDeltaTime;
+		if (WarmupDelay > 1.f)
+		{
+			bWarmupStarted = true;
+			WarmupSites.Reset();
+			WarmupSites.Add(SiteId);
+			for (const FMobileSite& Site : Source->ListSites()) WarmupSites.AddUnique(Site.Id);
+		}
+	}
+	if (!PendingWarmup && !WarmupSites.IsEmpty() && Source.IsValid())
+	{
+		// The next site's graph (a source with nothing to get ready gives no job, and the rest are skipped).
+		const FString NextSite = WarmupSites[0];
+		WarmupSites.RemoveAt(0);
+		PendingWarmup = Source->BeginWarmup(NextSite);
+		if (!PendingWarmup) WarmupSites.Reset();
+	}
+	if (PendingWarmup)
+	{
+		FMobileRoute Placeholder;
+		if (PendingWarmup->Step(0.003, Placeholder)) PendingWarmup.Reset();
+	}
 	if (PendingRoute)
 	{
 		FMobileRoute Result;
@@ -1349,6 +1368,10 @@ void UMobileAppWidget::SetSource(TSharedPtr<IMobileNavSource> InSource, const FS
 {
 	check(!WidgetTree || !WidgetTree->RootWidget);
 	Source = MoveTemp(InSource); SiteId = InitialSite;
+	PendingWarmup.Reset();
+	WarmupSites.Reset();
+	bWarmupStarted = false;
+	WarmupDelay = 0.f;
 }
 
 // ---- Sheet dragging ----
@@ -1551,6 +1574,37 @@ void UMobileAppWidget::ReturnToSearchState()
 	RefreshSheetPage();
 	RefreshNavigation();
 	RefreshArrived();
+}
+
+void UMobileAppWidget::HandleMapPlaceTapped(const FString& PlaceId)
+{
+	// A tap on a room opens its place, whatever the sheet is showing: a route, a walk or the arrival is put aside for the new place.
+	FMobilePlace Place;
+	if (!Source.IsValid() || !Source->FindPlace(PlaceId, Place))
+	{
+		return;
+	}
+	if (Flow.GetState() == EMobileSheetState::Place)
+	{
+		SelectPlace(Place);
+		RefreshMap();
+	}
+	else
+	{
+		OpenPlaceFromMap(Place);
+	}
+}
+
+void UMobileAppWidget::OpenPlaceFromMap(const FMobilePlace& Place)
+{
+	const EMobileSheetState State = Flow.GetState();
+	// Walking or arriving: the trip is over, whatever was left of it. A route that was only being looked at keeps its trip, so the new place can be added to it as a stop.
+	if (State == EMobileSheetState::Navigating || State == EMobileSheetState::Arrived)
+	{
+		ForgetTrip();
+	}
+	ReturnToSearchState();
+	ShowPlace(Place);
 }
 
 void UMobileAppWidget::OpenSearchedPlace(const FMobilePlace& Place)
@@ -1916,6 +1970,29 @@ void UMobileAppWidget::ZoomMap(double Delta)
 void UMobileAppWidget::OnOverviewClicked() { ToggleOverview(); }
 void UMobileAppWidget::OnLevelClicked() { SetLevelPopupOpen(!bLevelPopupOpen); }
 void UMobileAppWidget::OnLocateClicked() { LocateMe(); }
+
+void UMobileAppWidget::OnCompassClicked()
+{
+	if (MapView)
+	{
+		MapView->ResetRotation();
+	}
+}
+
+void UMobileAppWidget::UpdateCompass(double RotationRadians)
+{
+	if (!CompassButton)
+	{
+		return;
+	}
+	// Shown once the map is turned by more than a degree; the picture turns with the map.
+	const double Degrees = FMath::RadiansToDegrees(RotationRadians);
+	CompassButton->SetVisibility(FMath::Abs(Degrees) > 1.0 ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	if (CompassPicture)
+	{
+		CompassPicture->SetRenderTransformAngle(static_cast<float>(Degrees));
+	}
+}
 
 void UMobileAppWidget::RefreshSearchStart()
 {
