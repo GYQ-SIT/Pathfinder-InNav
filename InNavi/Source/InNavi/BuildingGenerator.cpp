@@ -519,7 +519,7 @@ int32 ABuildingGenerator::LoadBuildingsFromDatabase(const FString& DatabasePath)
 	DatabaseRefLon = RefLon;
 	bHasDatabaseRefPoint = true;
 
-	// This data is the real campus at real scale (unlike buildings.json's hand-authored, non-
+	// This data is the real campus at real scale (unlike the hand-authored test fixture's, non-
 	// geographic footprint units) - Scale=100 makes SpawnBuildingFromData's Footprint*Scale land
 	// directly in UE's cm-per-unit convention, so footprint units below can just be real meters with
 	// no further distortion.

@@ -528,7 +528,7 @@ namespace PerformanceTests
 					Test->AddError(TEXT("Campus preview capture requires a rendered -game desktop process."));
 					return true;
 				}
-				for (TActorIterator<ABuildingGenerator> It(Controller->GetWorld()); It; ++It) { Generator = *It; break; }
+				if (TActorIterator<ABuildingGenerator> It(Controller->GetWorld()); It) { Generator = *It; }
 				if (!Generator.IsValid()) { Test->AddError(TEXT("No app building generator.")); return true; }
 				TArray<UUserWidget*> Widgets;
 				UWidgetBlueprintLibrary::GetAllWidgetsOfClass(Controller.Get(), Widgets, UUserWidget::StaticClass(), true);

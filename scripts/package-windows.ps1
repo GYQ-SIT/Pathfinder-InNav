@@ -34,7 +34,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "BuildCookRun failed ($LASTEXITCODE)." }
 
     $root = Join-Path $archive 'Windows'
-    foreach ($needed in 'InNavi.exe', 'InNavi\Data\buildings.json') {
+    foreach ($needed in 'InNavi.exe', 'InNavi\Data\E2_Filled.json') {
         if (-not (Test-Path -LiteralPath (Join-Path $root $needed) -PathType Leaf)) {
             throw "No $needed in $root. The package is not complete."
         }
@@ -53,9 +53,9 @@ try {
             Remove-Item -LiteralPath $resolved -Recurse -Force
         }
     }
-    # The default mobile catalogue lives in buildings.json. Keep it alongside the campus database.
+    # The sample project (E2_Filled.json) is what the app and the phone open by default. Keep it alongside the campus database.
     Get-ChildItem -LiteralPath (Join-Path $root 'InNavi\Data') -File -Filter '*.json' |
-        Where-Object Name -ne 'buildings.json' | Remove-Item -Force
+        Where-Object Name -ne 'E2_Filled.json' | Remove-Item -Force
     $samples = Join-Path $root 'SampleProjects'
     New-Item -ItemType Directory -Force $samples | Out-Null
     Copy-Item (Join-Path $repo 'docs\test-data\*.json') $samples
@@ -86,7 +86,7 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $temporaryZip -PathType Leaf)) { throw 'Zipping failed.' }
     $names = @(& tar.exe -t -f $temporaryZip)
     $entries = @($names | ForEach-Object { $_ -replace '^\./', '' })
-    if ($LASTEXITCODE -ne 0 -or $entries -notcontains 'InNavi.exe' -or $entries -notcontains 'InNavi/Data/buildings.json') {
+    if ($LASTEXITCODE -ne 0 -or $entries -notcontains 'InNavi.exe' -or $entries -notcontains 'InNavi/Data/E2_Filled.json') {
         throw 'The ZIP is incomplete.'
     }
     if (@($names | Where-Object { $_ -eq '.' -or $_ -eq './' -or $_.StartsWith('./') }).Count -gt 0) {

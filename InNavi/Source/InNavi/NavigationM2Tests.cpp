@@ -71,7 +71,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationM2WorldRouteTest, "InNavi.Navigation
 	ABuildingGenerator* Generator = World->SpawnActor<ABuildingGenerator>();
 	AInteriorGenerator* Interior = World->SpawnActor<AInteriorGenerator>();
 	Interior->DispatchBeginPlay();
-	Generator->LoadBuildingsFromFile(FPaths::ProjectDir() / TEXT("Data/buildings.json"));
+	Generator->LoadBuildingsFromFile(FPaths::ProjectDir() / TEXT("../docs/test-data/e2-test-fixture.json"));
 	Interior->LoadInteriorForBuilding(TEXT("E1"));
 	APolyBuilding* Building = Generator->FindBuildingById(TEXT("E1"));
 	if (!TestNotNull(TEXT("Test building exists"), Building))

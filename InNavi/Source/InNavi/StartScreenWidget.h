@@ -12,7 +12,7 @@ class UTexture2D;
 // Pure-C++ replacement for WBP_StartScreen (built the same way as ws/jh's NavigationPanelWidget -
 // RebuildWidget() constructs the layout in code instead of the UMG Designer, so the whole screen
 // lives in a text file git can diff/merge normally). "New" starts a blank project; "Open" browses
-// for and loads an existing buildings.json. Both then hand off to the edit screen.
+// for and loads an existing project file. Both then hand off to the edit screen.
 UCLASS()
 class INNAVI_API UStartScreenWidget : public UUserWidget
 {

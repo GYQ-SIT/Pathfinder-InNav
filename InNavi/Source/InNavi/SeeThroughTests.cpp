@@ -154,7 +154,7 @@ bool FSeeThroughLazyPreviewTest::RunTest(const FString& Parameters)
 	Controller->SetCampusSeeThroughEnabled(false);
 	Controller->Possess(Fixture.World->SpawnActor<ADefaultPawn>());
 	TestTrue(TEXT("the project loads through the app's load path"),
-		Controller->LoadBuildingDataFromPathOrDatabase(FPaths::ProjectDir() / TEXT("Data/buildings.json")) > 0);
+		Controller->LoadBuildingDataFromPathOrDatabase(FPaths::ProjectDir() / TEXT("../docs/test-data/e2-test-fixture.json")) > 0);
 	TestFalse(TEXT("loading an opaque campus creates no interior actors"), static_cast<bool>(TActorIterator<AInteriorRoom>(Fixture.World)));
 	Controller->SetBuildingRoomFloor(TEXT("E2"), 1);
 	TestEqual(TEXT("choosing a floor on an opaque building creates nothing"), Controller->CountCachedCampusRoomsForTests(TEXT("E2")), 0);

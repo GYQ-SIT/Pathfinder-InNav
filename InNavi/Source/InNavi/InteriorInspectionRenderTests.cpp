@@ -72,7 +72,7 @@ bool FInteriorInspectionSceneSmoke::RunTest(const FString& Parameters)
 	TArray<UUserWidget*> Screens;
 	UWidgetBlueprintLibrary::GetAllWidgetsOfClass(GameWorld, Screens, UUserWidget::StaticClass(), true);
 	for (UUserWidget* Screen : Screens) Screen->RemoveFromParent();
-	PC->LoadBuildingDataFromPath(FPaths::ProjectDir() / TEXT("Data/buildings.json"));
+	PC->LoadBuildingDataFromPath(FPaths::ProjectDir() / TEXT("../docs/test-data/e2-test-fixture.json"));
 	PC->LoadInteriorForBuilding(TEXT("E2"));
 	UInteriorScreenWidget* Screen = CreateWidget<UInteriorScreenWidget>(PC);
 	Screen->AddToViewport();

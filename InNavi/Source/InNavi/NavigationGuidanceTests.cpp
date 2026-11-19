@@ -28,7 +28,7 @@ bool FNavigationGuidanceVisibilityTest::RunTest(const FString& Parameters)
 	ABuildingGenerator* Generator = World->SpawnActor<ABuildingGenerator>();
 	AInteriorGenerator* Interior = World->SpawnActor<AInteriorGenerator>();
 	Interior->DispatchBeginPlay();
-	Generator->LoadBuildingsFromFile(FPaths::ProjectDir() / TEXT("Data/buildings.json"));
+	Generator->LoadBuildingsFromFile(FPaths::ProjectDir() / TEXT("../docs/test-data/e2-test-fixture.json"));
 	Interior->LoadInteriorForBuilding(TEXT("E1"));
 	APolyBuilding* Building = Generator->FindBuildingById(TEXT("E1"));
 	if (!TestNotNull(TEXT("Fixture building exists"), Building))

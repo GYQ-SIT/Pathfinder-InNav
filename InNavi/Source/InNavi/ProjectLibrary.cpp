@@ -15,7 +15,7 @@ namespace
 	// Files the project ships with: tests and the editor's defaults refer to them by name, so they are not renamed.
 	bool IsSampleFileName(const FString& FileName)
 	{
-		return FileName.Equals(TEXT("buildings.json"), ESearchCase::IgnoreCase) || FileName.Equals(TEXT("map_extended.db"), ESearchCase::IgnoreCase);
+		return FileName.Equals(TEXT("E2_Filled.json"), ESearchCase::IgnoreCase) || FileName.Equals(TEXT("map_extended.db"), ESearchCase::IgnoreCase);
 	}
 
 	bool ReadProjectJson(const FString& FilePath, TSharedPtr<FJsonObject>& OutRoot)
