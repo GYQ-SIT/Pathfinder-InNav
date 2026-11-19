@@ -24,6 +24,7 @@ int32 ANavPlayerController::GetInspectionLowestFloor() const
 
 void ANavPlayerController::SetInteriorInspectionEnabled(bool bEnable)
 {
+	if (bEnable) SetFullRouteViewEnabled(false);
 	if (bEnable == bInteriorInspectionEnabled) return;
 	if (!bEnable)
 	{
@@ -186,6 +187,7 @@ void ANavPlayerController::TickInteriorInspection()
 
 void ANavPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	SetFullRouteViewEnabled(false);
 	OnActionFailed.RemoveDynamic(this, &ANavPlayerController::HandleActionFailureSound);
 	UnbindGameWindowCloseGuard();
 	SetInteriorInspectionEnabled(false);

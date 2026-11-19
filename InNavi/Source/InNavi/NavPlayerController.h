@@ -222,6 +222,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	bool IsIn3DPreviewMode() const { return bIsIn3DPreviewMode; }
 
+	// Temporary, read-only exterior overview of every floor/leg of the current route.
+	UFUNCTION(BlueprintCallable, Category = "Navigation")
+	void SetFullRouteViewEnabled(bool bEnable);
+	UFUNCTION(BlueprintPure, Category = "Navigation")
+	bool IsFullRouteViewEnabled() const { return bFullRouteViewEnabled; }
+	bool CanShowFullRouteView() const;
+	// Fits both wide and tall viewports; public to allow projection tests without a renderer.
+	static FTransform FullRouteCameraTransform(const FBox& Bounds, float HorizontalFov, float AspectRatio,
+		const FBox* ExteriorBounds = nullptr, float* OutFov = nullptr);
+
 	// Enters/leaves 3D preview mode: positions the camera at a fixed oblique angle over the current
 	// floor (see PositionCameraFor3DPreview), hides every other loaded building
 	// (SetOtherBuildingsHidden), and broadcasts OnPreviewModeChanged so
@@ -1503,6 +1513,31 @@ private:
 	TFunction<bool(const FVector2D&)> PointerOverUICallback;
 	UPROPERTY(VisibleAnywhere, Category = "Navigation")
 	class UNavigationRouteVisualization* RouteVisualization = nullptr;
+
+	bool bFullRouteViewEnabled = false;
+	bool bFullRouteSavedPreview = false;
+	bool bFullRouteSavedEdit = false;
+	bool bFullRouteSavedOutdoor = false;
+	uint32 FullRouteSavedSignature = 0;
+	FIntPoint FullRouteViewportSize = FIntPoint::ZeroValue;
+	float FullRouteSavedFov = 90.f;
+	float FullRouteSavedLockedFov = 0.f;
+	FTransform FullRouteSavedCamera;
+	FRotator FullRouteSavedControl;
+	TWeakObjectPtr<APawn> FullRouteSavedPawn;
+	struct FFullRouteActorState
+	{
+		TWeakObjectPtr<AActor> Actor;
+		bool bHidden = false;
+		bool bCollision = false;
+		int32 InteriorLevel = 0;
+		float Opacity = 1.f;
+	};
+	TArray<FFullRouteActorState> FullRouteSavedActors;
+	void FrameFullRouteView();
+	void ShowFullRouteVisualization();
+	bool ResolveFullRoutePoint(FNavigationRoutePoint& Point) const;
+	uint32 FullRouteSignature() const;
 
 	void SelectBuildingUnderCursor();
 
