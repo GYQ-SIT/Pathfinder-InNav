@@ -32,8 +32,8 @@ namespace
 
 	const FLinearColor& SplashBlue()
 	{
-		static const FLinearColor Blue = StartStyle::Rgb(52, 142, 255);
-		return Blue;
+		static const FLinearColor Logo = StartStyle::Rgb(52, 142, 255);
+		return Logo;
 	}
 
 	FLinearColor WithOpacity(const FLinearColor& Colour, float Opacity)
