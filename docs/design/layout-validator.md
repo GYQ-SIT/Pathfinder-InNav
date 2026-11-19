@@ -54,7 +54,7 @@ The package-local [README](../../InNavi/Plugins/InNaviLayoutValidator/README.md)
 
 See [M2 compliance evidence](layout-validator-m2-compliance.md) for the D1–D5 mapping.
 
-See the [T11 fresh-project note](../layout-validator-fresh-project.md) for the current standalone build/run results, data dependencies and missing UI/routing integration.
+See the [T11 fresh-project note](../layout-validator-fresh-project.md) for standalone results verified on plugin **1.2.0** (main commit `3ceab94`, 2026-11-19), including `CONNECTOR_ENCLOSED` coverage, data dependencies and missing UI/routing integration.
 
 ## Verification
 

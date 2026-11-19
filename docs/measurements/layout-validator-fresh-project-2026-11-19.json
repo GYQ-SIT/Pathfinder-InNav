@@ -2,13 +2,13 @@
   "task": "T11: Plugin in a fresh project",
   "date_local": "2026-11-19",
   "timezone": "Asia/Singapore",
-  "source_commit": "2cd623639ed861c5d46f5629debe2614cc7178e8",
-  "plugin_version": "1.1.1",
+  "source_commit": "3ceab9457ec6079f6b24d526cf33d19c97a49139",
+  "plugin_version": "1.2.0",
   "package_pin": "1.0.0",
   "engine_version": "5.8.2-56702186+++UE5+Release-5.8",
   "platform": "Win64",
   "configuration": "Development",
-  "method": "Source copied byte-for-byte into a newly created minimal UE project outside the product and OneDrive; no prebuilt plugin binaries or product Data directory; engine plugins disabled by default and SQLiteCore/SQLiteSupport explicitly disabled.",
+  "method": "Unchanged plugin source exported from the identified main commit and copied into a new minimal UE project outside the repository/OneDrive, with SQLiteCore/SQLiteSupport disabled and no InNavi module or Data directory.",
   "project_descriptor": {
     "FileVersion": 3,
     "EngineAssociation": "5.8",
@@ -44,12 +44,12 @@
     {
       "target": "T11ValidatorProbeEditor",
       "result": "Succeeded",
-      "log_sha256": "68aef109f371b61234ddf6a6e0562a3bc009846542ca3abe7d93fd1ea0ca9cec"
+      "log_sha256": "a2e8ab2e2e8003cdc902e19853944d69bdf71fcb64a8ec9c02b12ae418510660"
     },
     {
       "target": "T11ValidatorProbe",
       "result": "Succeeded",
-      "log_sha256": "7db2edfd13b09bf35d3dc3ff219d3272d0728e422c97a85d068cecc6824c318a"
+      "log_sha256": "08361a57eeb912c19b466a1f43fc59ad2d6d08004e6410a43af286ec01f9ecbf"
     }
   ],
   "direct_plugin_modules": {
@@ -70,14 +70,14 @@
     "InNaviLayoutValidator"
   ],
   "plugin_source_sha256": {
-    "InNaviLayoutValidator.uplugin": "7d230c8254282d3c95ba144a6cb557fdfb324a6924013c7371b2c12f72436005",
+    "InNaviLayoutValidator.uplugin": "28720fd7b135d442e592e39c5d126be965c94db9748e5fbaa9d5f6ad839e5672",
     "Source/InNaviLayoutValidator/InNaviLayoutValidator.Build.cs": "b398b8ea4aa6faaea83639458683397bc6de5cd5fd252eed11c647898ebdf8f1",
     "Source/InNaviLayoutValidator/Private/InNaviLayoutValidatorModule.cpp": "cd5f47da67ae7599ff53a0530990a051def4f032d6bdb05a98dcb18a6a585722",
     "Source/InNaviLayoutValidator/Private/LayoutToolRegistry.cpp": "55409e7ecd906a7d2e4749e4b55c3a51c66056c312d82219009ecda4f4b2872f",
-    "Source/InNaviLayoutValidator/Private/LayoutValidation.cpp": "2d2b78bda01eab72b4128c75e4256969c9e42eb5321153c0b55b4de28f597b25",
+    "Source/InNaviLayoutValidator/Private/LayoutValidation.cpp": "e2e88c2a6677b4390411de0bc1e2f26d7199a7cd054b985c20635acc2e7be640",
     "Source/InNaviLayoutValidator/Public/LayoutToolPanel.h": "90781a370cfc26b2f33f7974806cff2808f9d00650947d6d6d3881b5c2826254",
     "Source/InNaviLayoutValidator/Public/LayoutToolRegistry.h": "98f3e7d623edae7bf18f7081916f0b66a096e5f8bec280cd39fc277bbad528aa",
-    "Source/InNaviLayoutValidator/Public/LayoutValidation.h": "d4a0ca77b00a9e3ddd4732639c9cc3aa64185c2797100fd74ff16370bbae292c"
+    "Source/InNaviLayoutValidator/Public/LayoutValidation.h": "157f0486421a592dd63c7967a17fb5d9a579b3e366400b220a2d6d077e89ef1e"
   },
   "probe_source": {
     "Source/T11ValidatorProbe/T11ValidatorProbe.Build.cs": "using UnrealBuildTool;\npublic class T11ValidatorProbe : ModuleRules\n{\n    public T11ValidatorProbe(ReadOnlyTargetRules Target) : base(Target)\n    {\n        PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;\n        PrivateDependencyModuleNames.AddRange(new[] { \"Core\", \"CoreUObject\", \"Engine\", \"InNaviLayoutValidator\" });\n    }\n}\n",
@@ -96,7 +96,7 @@
       "rules": [],
       "input_sha256": "59d7efad76808ef3d95a03924330dcf4dcc98baf1647399b4a84e1a2d05b8d62",
       "unchanged": true,
-      "report_sha256": "e50997ab8ebea18b789496adb67e93d6e648f6d046e3f83e03f65ed86c478cad",
+      "report_sha256": "ab006b6cc9ed4c0f165e7080a2eeaa05655e1262697674f4d9ccdf7bc404a2f7",
       "metadata": {
         "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
         "sqliteModuleLoaded": false,
@@ -106,7 +106,9 @@
         "validationWidgetClassPath": ""
       },
       "source_file": null,
-      "navigationChecked": false
+      "navigationChecked": false,
+      "input_archive_member": "project/Samples/independent-valid.json",
+      "report_archive_member": "reports/independent-valid-report.json"
     },
     {
       "name": "independent-invalid",
@@ -119,7 +121,7 @@
       ],
       "input_sha256": "03b75ec38949bd961c5b83b7eea26326ad4fc70a30ae2190920a917bb50291e5",
       "unchanged": true,
-      "report_sha256": "ef6674ee4e97e22d7aff906b75f48aed6d94e4484af3db99f8068f686fba1474",
+      "report_sha256": "40e146464d158cdd57385febe9daa81fb3d8fa5a36c8b59ff13b0b6a54a926f2",
       "metadata": {
         "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
         "sqliteModuleLoaded": false,
@@ -129,7 +131,9 @@
         "validationWidgetClassPath": ""
       },
       "source_file": null,
-      "navigationChecked": false
+      "navigationChecked": false,
+      "input_archive_member": "project/Samples/independent-invalid.json",
+      "report_archive_member": "reports/independent-invalid-report.json"
     },
     {
       "name": "foreign-json",
@@ -142,7 +146,7 @@
       ],
       "input_sha256": "b70fe3fe10adf4c8edd5305d927b7085738031ed9d79c2582e789ab03980f93d",
       "unchanged": true,
-      "report_sha256": "48effb4e0950ac8f53654d4faf0fe59ed5bdd1ceac976a6914133b33075e98b0",
+      "report_sha256": "9c7c76d0a737f8eb3a298e0c725f882362e94cca5e5c3239582ad6eb8add3528",
       "metadata": {
         "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
         "sqliteModuleLoaded": false,
@@ -152,20 +156,24 @@
         "validationWidgetClassPath": ""
       },
       "source_file": null,
-      "navigationChecked": false
+      "navigationChecked": false,
+      "input_archive_member": "project/Samples/foreign-json.json",
+      "report_archive_member": "reports/foreign-json-report.json"
     },
     {
       "name": "authored-project",
       "exit_code": 0,
       "issues": {
+        "Warning": 2,
         "Info": 3
       },
       "rules": [
+        "CONNECTOR_ENCLOSED",
         "INTERIOR_UNAUTHORED"
       ],
-      "input_sha256": "32a56bdb52cd07a40f6b3e7e7a91ad78435b66e55fefbd1d5e8eedda67281678",
+      "input_sha256": "336850b64ff2d8b219a65676b78200939ea266e0ff3d9aba6d687a0973de7da4",
       "unchanged": true,
-      "report_sha256": "5a56514423fd4f4d05e88df6bc91a62b75a47084d2435658986f0a93a819abdf",
+      "report_sha256": "ca4075f32b3211b8703fca6677f052feeaec9c97eeebe5382e02dc52bc693cd1",
       "metadata": {
         "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
         "sqliteModuleLoaded": false,
@@ -175,7 +183,9 @@
         "validationWidgetClassPath": ""
       },
       "source_file": "InNavi/Data/buildings.json",
-      "navigationChecked": false
+      "navigationChecked": false,
+      "input_archive_member": "project/Samples/authored-project.json",
+      "report_archive_member": "reports/authored-project-report.json"
     },
     {
       "name": "campus-sqlite",
@@ -188,7 +198,7 @@
       ],
       "input_sha256": "93dab8249c82c5e78112c7a6bf5c2359a05bd9dbce874adebc98e017a0b8e317",
       "unchanged": true,
-      "report_sha256": "7aed7a82caaa7fcae0887a18fd79770e9c69bc42a30cf8a38a3090168dcf5f0b",
+      "report_sha256": "6270528c4718dd145cb0ac5df4696b198cf688d88b595456989c843ba267bb98",
       "metadata": {
         "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
         "sqliteModuleLoaded": false,
@@ -198,16 +208,194 @@
         "validationWidgetClassPath": ""
       },
       "source_file": "InNavi/Data/map_extended.db",
-      "navigationChecked": false
+      "navigationChecked": false,
+      "input_archive_member": "project/Samples/campus-sqlite.db",
+      "report_archive_member": "reports/campus-sqlite-report.json"
+    },
+    {
+      "name": "connector-enclosed-elevator",
+      "exit_code": 0,
+      "issues": {
+        "Warning": 1
+      },
+      "rules": [
+        "CONNECTOR_ENCLOSED"
+      ],
+      "input_sha256": "ecebd76646385ec0903ad0b30908dec8246d2874c6452ee2deda4dc267a4dc36",
+      "unchanged": true,
+      "report_sha256": "af58286a7e613bd4dda36e5d531cc627c1a439fe37d578f12af7dcf57612342e",
+      "metadata": {
+        "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
+        "sqliteModuleLoaded": false,
+        "productModuleLoaded": false,
+        "productDataDirectoryExists": false,
+        "validationProviderRegistered": true,
+        "validationWidgetClassPath": ""
+      },
+      "source_file": null,
+      "navigationChecked": false,
+      "input_archive_member": "project/Samples/connector-enclosed-elevator.json",
+      "report_archive_member": "reports/connector-enclosed-elevator-report.json"
+    },
+    {
+      "name": "connector-enclosed-stairs",
+      "exit_code": 0,
+      "issues": {
+        "Warning": 1
+      },
+      "rules": [
+        "CONNECTOR_ENCLOSED"
+      ],
+      "input_sha256": "306c8f5717cd1d93a83f1ab2b254c6ed25f90620f7c06ea3e6112a432130e207",
+      "unchanged": true,
+      "report_sha256": "5487837570b12a7b60428dda540c52ba046038de757605dc7088cc5f25aac437",
+      "metadata": {
+        "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
+        "sqliteModuleLoaded": false,
+        "productModuleLoaded": false,
+        "productDataDirectoryExists": false,
+        "validationProviderRegistered": true,
+        "validationWidgetClassPath": ""
+      },
+      "source_file": null,
+      "navigationChecked": false,
+      "input_archive_member": "project/Samples/connector-enclosed-stairs.json",
+      "report_archive_member": "reports/connector-enclosed-stairs-report.json"
+    },
+    {
+      "name": "connector-enclosed-escalator",
+      "exit_code": 0,
+      "issues": {
+        "Warning": 1
+      },
+      "rules": [
+        "CONNECTOR_ENCLOSED"
+      ],
+      "input_sha256": "2d0e46d6229264e0450c27ea29b933a66bacf776bcfa3490f4bda39efac42f27",
+      "unchanged": true,
+      "report_sha256": "6bcbc8f368791e49381ac8d11bf2950a5435103ff7ba28427b584921851d2149",
+      "metadata": {
+        "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
+        "sqliteModuleLoaded": false,
+        "productModuleLoaded": false,
+        "productDataDirectoryExists": false,
+        "validationProviderRegistered": true,
+        "validationWidgetClassPath": ""
+      },
+      "source_file": null,
+      "navigationChecked": false,
+      "input_archive_member": "project/Samples/connector-enclosed-escalator.json",
+      "report_archive_member": "reports/connector-enclosed-escalator-report.json"
+    },
+    {
+      "name": "connector-window-only",
+      "exit_code": 0,
+      "issues": {
+        "Warning": 1
+      },
+      "rules": [
+        "CONNECTOR_ENCLOSED"
+      ],
+      "input_sha256": "fe4876483e54acb8808aad98d3ea185a453fcbae8133fae8bd0d0ca0c7e56a5a",
+      "unchanged": true,
+      "report_sha256": "4df38c75f68bf98f6c77e377e18063363670c4cb5506650ffac7a269e23757a5",
+      "metadata": {
+        "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
+        "sqliteModuleLoaded": false,
+        "productModuleLoaded": false,
+        "productDataDirectoryExists": false,
+        "validationProviderRegistered": true,
+        "validationWidgetClassPath": ""
+      },
+      "source_file": null,
+      "navigationChecked": false,
+      "input_archive_member": "project/Samples/connector-window-only.json",
+      "report_archive_member": "reports/connector-window-only-report.json"
+    },
+    {
+      "name": "connector-void-only",
+      "exit_code": 0,
+      "issues": {
+        "Warning": 1
+      },
+      "rules": [
+        "CONNECTOR_ENCLOSED"
+      ],
+      "input_sha256": "2b7e2d33da1e685fc612d3f01dcbfeca5a1b88b6bc2ceb6050639c6922eb50bd",
+      "unchanged": true,
+      "report_sha256": "d965406b14c533de882e5804289390dc0a0c5ef0506ac5dec26b42658ca36e21",
+      "metadata": {
+        "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
+        "sqliteModuleLoaded": false,
+        "productModuleLoaded": false,
+        "productDataDirectoryExists": false,
+        "validationProviderRegistered": true,
+        "validationWidgetClassPath": ""
+      },
+      "source_file": null,
+      "navigationChecked": false,
+      "input_archive_member": "project/Samples/connector-void-only.json",
+      "report_archive_member": "reports/connector-void-only-report.json"
+    },
+    {
+      "name": "connector-with-door",
+      "exit_code": 0,
+      "issues": {},
+      "rules": [],
+      "input_sha256": "36408516a7c048225ddf5c33a93e1719dc0fc64f6cf14cff8166acafe830f033",
+      "unchanged": true,
+      "report_sha256": "5e1e364375864aa6e7a89684c744d18a271e936463aca62cf166f208463c5ae5",
+      "metadata": {
+        "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
+        "sqliteModuleLoaded": false,
+        "productModuleLoaded": false,
+        "productDataDirectoryExists": false,
+        "validationProviderRegistered": true,
+        "validationWidgetClassPath": ""
+      },
+      "source_file": null,
+      "navigationChecked": false,
+      "input_archive_member": "project/Samples/connector-with-door.json",
+      "report_archive_member": "reports/connector-with-door-report.json"
+    },
+    {
+      "name": "connector-outside-room",
+      "exit_code": 0,
+      "issues": {},
+      "rules": [],
+      "input_sha256": "0a6ef0bec10ba1aa19b710628e093fcccd6f7eac789f51b1b9c2652a41781f46",
+      "unchanged": true,
+      "report_sha256": "70271d5e90bd485876a2fffacf7f27f99147315b51374ae82aa84b8ef9354dd1",
+      "metadata": {
+        "engineVersion": "5.8.2-56702186+++UE5+Release-5.8",
+        "sqliteModuleLoaded": false,
+        "productModuleLoaded": false,
+        "productDataDirectoryExists": false,
+        "validationProviderRegistered": true,
+        "validationWidgetClassPath": ""
+      },
+      "source_file": null,
+      "navigationChecked": false,
+      "input_archive_member": "project/Samples/connector-outside-room.json",
+      "report_archive_member": "reports/connector-outside-room-report.json"
     }
   ],
+  "code_references": {
+    "describe_tool": "https://github.com/GYQ-SIT/Pathfinder-InNav/blob/3ceab9457ec6079f6b24d526cf33d19c97a49139/InNavi/Plugins/InNaviLayoutValidator/Source/InNaviLayoutValidator/Private/InNaviLayoutValidatorModule.cpp#L7-L14",
+    "widget_field": "https://github.com/GYQ-SIT/Pathfinder-InNav/blob/3ceab9457ec6079f6b24d526cf33d19c97a49139/InNavi/Plugins/InNaviLayoutValidator/Source/InNaviLayoutValidator/Public/LayoutToolRegistry.h#L10-L16"
+  },
   "limits": [
-    "No UI panel or actor adapter is included; the registered tool descriptor has an empty widget-class path.",
-    "Generic JSON/geometry validation only: navigationChecked is false, so route reachability is not checked.",
-    "Non-layout JSON requires conversion to the layout contract; raw SQLite input is not supported.",
-    "Game target was compiled and linked, not cooked/packaged or run as a game.",
-    "Registry authentication/installation was not tested; root package pin is 1.0.0 while copied source is 1.1.1."
+    "Data/geometry validation, including CONNECTOR_ENCLOSED warnings; navigationChecked remains false, so no route reachability was checked.",
+    "No default panel/actor adapter: DescribeTool constructs FDescriptor, assigns only Id/Title and returns it; WidgetClassPath stays default-empty.",
+    "Game target compiled/linked only; no packaged-game execution or other platform/UE version test.",
+    "Registry authentication/installation was not tested; main package pin is 1.0.0 while tested source is 1.2.0."
   ],
-  "local_artifacts": "InNavi/Saved/T11FreshProject-20261119/",
-  "source_archive_sha256": "9592078cc3f6f319850af0a31b2940b22734001c8272dccb3d02d9f1d5b03412"
+  "raw_archive": {
+    "path": "docs/measurements/layout-validator-fresh-project-2026-11-19-raw.zip",
+    "sha256": "7ae4e7e1fbd59a5755ca9c5e665cabb4e9d7b58319436f781b2c11b8dfb73028",
+    "bytes": 899063,
+    "manifest_member": "MANIFEST.json",
+    "member_count": 84
+  },
+  "local_artifacts": "InNavi/Saved/T11FreshProject-20261119-v120/"
 }
