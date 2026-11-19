@@ -490,7 +490,10 @@ void ANavPlayerController::SetupInputComponent()
 
 	InputComponent->BindAction("SelectBuilding", IE_Pressed, this, &ANavPlayerController::OnClick);
 	InputComponent->BindKey(EKeys::B, IE_Pressed, this, &ANavPlayerController::ToggleBuildMode);
-	InputComponent->BindKey(EKeys::R, IE_Pressed, this, &ANavPlayerController::ToggleShapeTestMode);
+	// W, E and R switch the transform gizmo (PAT-202). They do not consume the key: W and E also move the camera, which must go on doing so.
+	InputComponent->BindKey(EKeys::W, IE_Pressed, this, &ANavPlayerController::OnGizmoKeyW).bConsumeInput = false;
+	InputComponent->BindKey(EKeys::E, IE_Pressed, this, &ANavPlayerController::OnGizmoKeyE).bConsumeInput = false;
+	InputComponent->BindKey(EKeys::R, IE_Pressed, this, &ANavPlayerController::OnGizmoKeyR);
 	InputComponent->BindKey(EKeys::LeftBracket, IE_Pressed, this, &ANavPlayerController::CycleInteriorFloorUp);
 	InputComponent->BindKey(EKeys::RightBracket, IE_Pressed, this, &ANavPlayerController::CycleInteriorFloorDown);
 	InputComponent->BindKey(EKeys::F, IE_Pressed, this, &ANavPlayerController::AddInteriorFloor);
@@ -1268,6 +1271,8 @@ void ANavPlayerController::TogglePrefabCircleMode()
 
 void ANavPlayerController::ExitConnectorMode()
 {
+	// Every other mode leaves through here, so placing utility points ends with them.
+	ExitUtilityMode();
 	if (ActiveConnectorType != 0)
 	{
 		ActiveConnectorType = 0;
@@ -1317,6 +1322,7 @@ void ANavPlayerController::ToggleConnectorMode(EInteriorNavNodeType Type)
 	ExitAddDoorMode();
 
 	CancelNavigationPicking();
+	ExitUtilityMode();
 	ActiveConnectorType = RequestedType;
 	OnEditModeChanged.Broadcast();
 	UE_LOG(LogTemp, Warning, TEXT("Connector placement ON (type %d): click the 2D canvas to place, press the same key again to stop"), RequestedType);
@@ -1507,6 +1513,10 @@ void ANavPlayerController::OnCancelPressed()
 	{
 		ExitConnectorMode();
 	}
+	else if (IsInUtilityMode())
+	{
+		ExitUtilityMode();
+	}
 }
 
 void ANavPlayerController::AddFootprintPointUnderCursor()
@@ -1672,6 +1682,316 @@ void ANavPlayerController::AddRoomPointAtFootprintPosition(FVector2D FootprintPo
 	OnRoomPointCountChanged.Broadcast(PendingRoomFootprint.Num());
 
 	UE_LOG(LogTemp, Warning, TEXT("Room point %d added: (%.1f, %.1f)"), PendingRoomFootprint.Num(), FootprintPoint.X, FootprintPoint.Y);
+}
+
+bool ANavPlayerController::IsActiveFloorOpen() const
+{
+	return InteriorGen && InteriorGen->IsFloorOpen(InteriorGen->GetActiveFloor());
+}
+
+FString ANavPlayerController::GetFloorName(int32 Level) const
+{
+	return InteriorGen ? InteriorGen->GetFloorName(Level) : FString();
+}
+
+bool ANavPlayerController::SetActiveFloorName(const FString& NewName)
+{
+	if (bInteriorInspectionEnabled || !InteriorGen) return false;
+	if (!InteriorGen->SetFloorName(InteriorGen->GetActiveFloor(), NewName)) return false;
+	bHasUnsavedChanges = true;
+	OnInteriorContentChanged.Broadcast();
+	return true;
+}
+
+int32 ANavPlayerController::AddSpecialFloor()
+{
+	const int32 Level = AddFloor();
+	if (Level != 0 && InteriorGen)
+	{
+		InteriorGen->SetFloorName(Level, TEXT("Special floor"));
+		bHasUnsavedChanges = true;
+	}
+	return Level;
+}
+
+bool ANavPlayerController::BrowseForReferenceImage()
+{
+#if PLATFORM_WINDOWS
+	const void* ParentWindowHandle = nullptr;
+	if (FSlateApplication::IsInitialized())
+	{
+		const TSharedPtr<SWindow> Window = FSlateApplication::Get().GetActiveTopLevelWindow();
+		if (Window && Window->GetNativeWindow()) ParentWindowHandle = Window->GetNativeWindow()->GetOSWindowHandle();
+	}
+	FString Path, Error;
+	DesktopProjectFileDialog::Pick(ParentWindowHandle, GetProjectsDirectory(), false, Path, Error, /*bPng=*/true);
+	if (!Error.IsEmpty()) OnActionFailed.Broadcast(Error, EActionFailureSeverity::Warning);
+	return !Path.IsEmpty() && ImportReferenceImage(Path);
+#else
+	OnActionFailed.Broadcast(TEXT("Choosing a picture is only available on Windows."), EActionFailureSeverity::Warning);
+	return false;
+#endif
+}
+
+float ANavPlayerController::GetFootprintUnitCm() const
+{
+	return Generator ? Generator->GetScale() : 1.f;
+}
+
+bool ANavPlayerController::ImportReferenceImage(const FString& FilePath)
+{
+	if (bInteriorInspectionEnabled || !InteriorGen || !Generator) return false;
+	APolyBuilding* Building = Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId());
+	if (!Building)
+	{
+		OnActionFailed.Broadcast(TEXT("Load a building's interior first, then add a reference image."), EActionFailureSeverity::Warning);
+		return false;
+	}
+	const FString Path = FilePath.TrimStartAndEnd();
+	if (!Path.EndsWith(TEXT(".png"), ESearchCase::IgnoreCase))
+	{
+		OnActionFailed.Broadcast(TEXT("A reference image has to be a PNG file."), EActionFailureSeverity::Warning);
+		return false;
+	}
+	IFileManager& Files = IFileManager::Get();
+	const int64 Size = Files.FileSize(*Path);
+	if (Size <= 0)
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("Could not find or read '%s'."), *Path), EActionFailureSeverity::Warning);
+		return false;
+	}
+	if (Size > InteriorReferenceImage::MaxFileBytes)
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("That picture is too big (%d MB; the most is %d MB). Shrink it first."), static_cast<int32>(Size >> 20), static_cast<int32>(InteriorReferenceImage::MaxFileBytes >> 20)), EActionFailureSeverity::Warning);
+		return false;
+	}
+	// Framed on the building: as wide as it is, centred on it; the fields in the Floor panel move and scale it from there.
+	const FBox2D Bounds(Building->GetFootprint());
+	FInteriorReferenceImage Image;
+	Image.Path = FPaths::ConvertRelativePathToFull(Path);
+	Image.Center = Bounds.GetCenter();
+	Image.Width = FMath::Max(1.f, static_cast<float>(Bounds.GetSize().X));
+	if (!InteriorGen->SetReferenceImage(InteriorGen->GetActiveFloor(), Image)) return false;
+	bHasUnsavedChanges = true;
+	OnInteriorContentChanged.Broadcast();
+	return true;
+}
+
+bool ANavPlayerController::GetActiveReferenceImage(FInteriorReferenceImage& Out) const
+{
+	const FInteriorReferenceImage* Image = InteriorGen ? InteriorGen->GetReferenceImage(InteriorGen->GetActiveFloor()) : nullptr;
+	if (Image) Out = *Image;
+	return Image != nullptr;
+}
+
+bool ANavPlayerController::SetActiveReferenceImage(const FInteriorReferenceImage& Image)
+{
+	if (bInteriorInspectionEnabled || !InteriorGen) return false;
+	if (!InteriorGen->SetReferenceImage(InteriorGen->GetActiveFloor(), Image)) return false;
+	bHasUnsavedChanges = true;
+	OnInteriorContentChanged.Broadcast();
+	return true;
+}
+
+bool ANavPlayerController::RemoveActiveReferenceImage()
+{
+	if (bInteriorInspectionEnabled || !InteriorGen) return false;
+	if (!InteriorGen->RemoveReferenceImage(InteriorGen->GetActiveFloor())) return false;
+	bHasUnsavedChanges = true;
+	OnInteriorContentChanged.Broadcast();
+	return true;
+}
+
+void ANavPlayerController::ToggleUtilityMode(const FString& Type)
+{
+	if (bInteriorInspectionEnabled) return;
+	if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
+	{
+		OnActionFailed.Broadcast(TEXT("Load a building's interior first, then try placing a utility point."), EActionFailureSeverity::Warning);
+		return;
+	}
+	const FString Wanted = InteriorUtilityTypes::Normalize(Type);
+	if (ActiveUtilityType == Wanted)
+	{
+		ExitUtilityMode();
+		return;
+	}
+
+	// Modes are mutually exclusive, the same way a connector's placing is.
+	if (bBuildMode)
+	{
+		CancelBuilding();
+		bBuildMode = false;
+		OnBuildModeChanged.Broadcast(false);
+	}
+	if (bShapeTestMode)
+	{
+		bShapeTestMode = false;
+		OnShapeModeChanged.Broadcast(false);
+	}
+	if (bDrawRoomMode || bDrawWallMode)
+	{
+		ExitDrawRoomMode();
+	}
+	ExitSelectMode();
+	ExitPrefabRoomMode();
+	ExitAddDoorMode();
+	ExitConnectorMode();
+
+	CancelNavigationPicking();
+	ActiveUtilityType = Wanted;
+	OnEditModeChanged.Broadcast();
+}
+
+void ANavPlayerController::ExitUtilityMode()
+{
+	if (ActiveUtilityType.IsEmpty()) return;
+	ActiveUtilityType.Empty();
+	OnEditModeChanged.Broadcast();
+}
+
+FString ANavPlayerController::PlaceUtilityAt(FVector2D FootprintPosition)
+{
+	if (bInteriorInspectionEnabled || ActiveUtilityType.IsEmpty() || !InteriorGen) return FString();
+	FString Error;
+	const FString Id = InteriorGen->AddUtility(InteriorGen->GetActiveFloor(), ActiveUtilityType, FString(), FootprintPosition, &Error);
+	if (Id.IsEmpty())
+	{
+		OnActionFailed.Broadcast(Error.IsEmpty() ? FString(TEXT("Could not place a utility point there.")) : Error, EActionFailureSeverity::Warning);
+		return FString();
+	}
+	bHasUnsavedChanges = true;
+	OnInteriorContentChanged.Broadcast();
+	return Id;
+}
+
+void ANavPlayerController::ClearSelectedUtility()
+{
+	if (SelectedUtilityId.IsEmpty()) return;
+	SelectedUtilityId.Empty();
+	OnSelectedUtilityChanged.Broadcast(FString());
+	RefreshSelectionHighlight();
+}
+
+void ANavPlayerController::SelectUtility(const FString& UtilityId)
+{
+	if (UtilityId == SelectedUtilityId) return;
+	if (!UtilityId.IsEmpty())
+	{
+		// Exclusive with a room, a door, a connector and a door in the outer wall: selecting any of those has the Properties panel show one thing.
+		ClearMultiSelection();
+		FinishRotationGesture();
+		SelectEntrance(FString());
+		if (!SelectedRoomId.IsEmpty())
+		{
+			SelectedRoomId.Empty();
+			OnSelectedRoomChanged.Broadcast(FString());
+		}
+		if (!SelectedDoorId.IsEmpty())
+		{
+			SelectedDoorRoomId.Empty();
+			SelectedDoorId.Empty();
+			OnSelectedDoorChanged.Broadcast(FString(), FString());
+		}
+		if (!SelectedConnectorGroupId.IsEmpty())
+		{
+			SelectedConnectorGroupId.Empty();
+			OnSelectedConnectorChanged.Broadcast(FString());
+		}
+	}
+	SelectedUtilityId = UtilityId;
+	OnSelectedUtilityChanged.Broadcast(SelectedUtilityId);
+	RefreshSelectionHighlight();
+}
+
+bool ANavPlayerController::GetSelectedUtility(FInteriorUtility& Out) const
+{
+	const FInteriorUtility* Found = (InteriorGen && !SelectedUtilityId.IsEmpty()) ? InteriorGen->FindUtility(SelectedUtilityId) : nullptr;
+	if (Found) Out = *Found;
+	return Found != nullptr;
+}
+
+bool ANavPlayerController::MoveSelectedUtilityTo(FVector2D FootprintPosition)
+{
+	if (bInteriorInspectionEnabled || SelectedUtilityId.IsEmpty() || !InteriorGen) return false;
+	if (!InteriorGen->MoveUtility(SelectedUtilityId, FootprintPosition)) return false;
+	bHasUnsavedChanges = true;
+	return true;
+}
+
+bool ANavPlayerController::SetSelectedUtilityDetails(const FString& Name, const FString& Type)
+{
+	if (bInteriorInspectionEnabled || SelectedUtilityId.IsEmpty() || !InteriorGen) return false;
+	if (!InteriorGen->SetUtilityDetails(SelectedUtilityId, Name, Type)) return false;
+	bHasUnsavedChanges = true;
+	OnInteriorContentChanged.Broadcast();
+	return true;
+}
+
+bool ANavPlayerController::DeleteSelectedUtility()
+{
+	if (bInteriorInspectionEnabled || SelectedUtilityId.IsEmpty() || !InteriorGen) return false;
+	if (!InteriorGen->RemoveUtility(SelectedUtilityId)) return false;
+	bHasUnsavedChanges = true;
+	SelectedUtilityId.Empty();
+	OnSelectedUtilityChanged.Broadcast(FString());
+	OnInteriorContentChanged.Broadcast();
+	return true;
+}
+
+bool ANavPlayerController::SetActiveFloorOpen(bool bOpen)
+{
+	if (bInteriorInspectionEnabled || !InteriorGen) return false;
+	if (!InteriorGen->SetFloorOpen(InteriorGen->GetActiveFloor(), bOpen)) return false;
+	bHasUnsavedChanges = true;
+	OnInteriorContentChanged.Broadcast();
+	return true;
+}
+
+bool ANavPlayerController::IsTransformGizmoShown() const
+{
+	if (TransformGizmo == ETransformGizmo::None || !bSelectMode || bInteriorInspectionEnabled || bIsIn3DPreviewMode || !InteriorGen || IsMultiSelection()) return false;
+	return !SelectedRoomId.IsEmpty() || !SelectedConnectorGroupId.IsEmpty();
+}
+
+void ANavPlayerController::OnGizmoKeyW()
+{
+	if (bSelectMode) ToggleTransformGizmo(ETransformGizmo::Translate);
+}
+
+void ANavPlayerController::OnGizmoKeyE()
+{
+	if (bSelectMode) ToggleTransformGizmo(ETransformGizmo::Rotate);
+}
+
+void ANavPlayerController::OnGizmoKeyR()
+{
+	// R was already the shape test key: in Select mode it is the scale gizmo, anywhere else it is what it was.
+	if (bSelectMode) ToggleTransformGizmo(ETransformGizmo::Scale);
+	else ToggleShapeTestMode();
+}
+
+float ANavPlayerController::GetSelectedConnectorScale() const
+{
+	if (!SelectedConnectorGroupId.IsEmpty() && InteriorGen)
+	{
+		for (const FInteriorNavNode& Node : InteriorGen->GetNavNodes())
+		{
+			if (Node.ConnectorGroupId == SelectedConnectorGroupId && Node.Level == InteriorGen->GetActiveFloor()) return Node.SizeScale;
+		}
+	}
+	return 1.f;
+}
+
+bool ANavPlayerController::SetSelectedConnectorScale(float Target)
+{
+	if (bInteriorInspectionEnabled || SelectedConnectorGroupId.IsEmpty() || !InteriorGen) return false;
+	const float Delta = Target - GetSelectedConnectorScale();
+	if (FMath::IsNearlyZero(Delta, 1e-4f)) return true;
+	// The active floor's node, or every floor of the connector with Shift held (the same rule as the keys and the drag).
+	if (!InteriorGen->ScaleConnectorGroup(SelectedConnectorGroupId, Delta, IsShiftHeld() ? 0 : InteriorGen->GetActiveFloor())) return false;
+	bHasUnsavedChanges = true;
+	return true;
 }
 
 void ANavPlayerController::ClearMultiSelection()
@@ -1933,6 +2253,7 @@ bool ANavPlayerController::SetMultiRoomProperties(const FString* NewType, const 
 void ANavPlayerController::SelectRoom(const FString& RoomId)
 {
 	ClearMultiSelection();
+	ClearSelectedUtility();
 	if (SelectedRoomId != RoomId) FinishRotationGesture();
 	SelectEntrance(FString());
 	// Tracked (rather than an early-return once SelectedRoomId itself is unchanged) so
@@ -1971,6 +2292,7 @@ void ANavPlayerController::SelectRoom(const FString& RoomId)
 void ANavPlayerController::SelectDoor(const FString& RoomId, const FString& DoorId)
 {
 	ClearMultiSelection();
+	ClearSelectedUtility();
 	FinishRotationGesture();
 	SelectEntrance(FString());
 	if (!SelectedRoomId.IsEmpty())
@@ -1993,6 +2315,7 @@ void ANavPlayerController::SelectDoor(const FString& RoomId, const FString& Door
 void ANavPlayerController::SelectConnector(const FString& GroupId)
 {
 	ClearMultiSelection();
+	ClearSelectedUtility();
 	if (SelectedConnectorGroupId != GroupId) FinishRotationGesture();
 	SelectEntrance(FString());
 	// See SelectRoom's own comment on why this is tracked rather than an early return.
@@ -2441,6 +2764,11 @@ bool ANavPlayerController::DeleteSelection()
 		return DeleteSelectedConnector();
 	}
 
+	if (!SelectedUtilityId.IsEmpty())
+	{
+		return DeleteSelectedUtility();
+	}
+
 	if (IsMultiSelection())
 	{
 		return DeleteMultiSelection();
@@ -2505,6 +2833,7 @@ void ANavPlayerController::SelectEntrance(const FString& EntranceId, const FStri
 	if (!EntranceId.IsEmpty())
 	{
 		ClearMultiSelection();
+		ClearSelectedUtility();
 		FinishRotationGesture();
 		// A door in the outer wall is selected on its own, like a room, a door or a connector.
 		if (!SelectedRoomId.IsEmpty())
@@ -2649,7 +2978,7 @@ bool ANavPlayerController::MoveRoomTo(const FString& RoomId, const TArray<FVecto
 	return bSuccess;
 }
 
-bool ANavPlayerController::CommitRoomMove(const FString& RoomId, const TArray<FVector2D>& FallbackFootprint)
+bool ANavPlayerController::CommitRoomMove(const FString& RoomId, const TArray<FVector2D>& FallbackFootprint, bool bNudgeToFreeSpot)
 {
 	if (bInteriorInspectionEnabled) return false;
 	if (!InteriorGen)
@@ -2657,10 +2986,18 @@ bool ANavPlayerController::CommitRoomMove(const FString& RoomId, const TArray<FV
 		return false;
 	}
 
-	const bool bSuccess = InteriorGen->CommitRoomMove(RoomId, FallbackFootprint);
+	FString Beside;
+	const AInteriorRoom* Moving = InteriorGen->GetRoomById(RoomId);
+	const TArray<FVector2D> DroppedAt = Moving ? Moving->GetFootprint() : TArray<FVector2D>();
+	const bool bSuccess = InteriorGen->CommitRoomMove(RoomId, FallbackFootprint, bNudgeToFreeSpot, &Beside);
 	if (!bSuccess)
 	{
 		OnActionFailed.Broadcast(TEXT("Can't place a room on top of another room/wall - moved it back."), EActionFailureSeverity::Warning);
+	}
+	else if (!Beside.IsEmpty())
+	{
+		// It was dropped on another room and went to the spot beside it: told, so it does not look like a slip of the mouse.
+		OnActionFailed.Broadcast(FString::Printf(TEXT("There was a room there: moved this one beside '%s'."), *Beside), EActionFailureSeverity::Warning);
 	}
 	bHasUnsavedChanges = true;
 	return bSuccess;
@@ -2710,7 +3047,15 @@ AInteriorRoom* ANavPlayerController::PlacePrefabRoomInBounds(FVector2D Footprint
 		return nullptr;
 	}
 	FString CreateError;
-	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(Footprint, FString(), FString(), true, false, /*bAllowOverlap=*/false, CreateError);
+	// Dropped where another room is: it goes to the nearest spot beside it rather than failing (PAT-194).
+	TArray<FVector2D> Placed = Footprint;
+	FString Beside;
+	if (!InteriorGen->NudgeFootprintClear(Placed, true, FString(), &Beside)) Placed = Footprint;
+	AInteriorRoom* NewRoom = InteriorGen->CreateRoomFromFootprint(Placed, FString(), FString(), true, false, /*bAllowOverlap=*/false, CreateError);
+	if (NewRoom && !Beside.IsEmpty())
+	{
+		OnActionFailed.Broadcast(FString::Printf(TEXT("There was a room there: placed this one beside '%s'."), *Beside), EActionFailureSeverity::Warning);
+	}
 	if (!NewRoom)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("Could not place the prefab room: %s"), *CreateError);
@@ -4244,6 +4589,27 @@ void ANavPlayerController::OnLeftMouseDown3DEdit()
 	FHitResult Hit;
 	GetHitResultUnderCursor(ECC_Visibility, false, Hit);
 
+	// A lift, stair or escalator under the pointer: select it and start dragging it, moving the node of the floor being viewed (all floors with Shift),
+	// with the same checks as the 2D plan.
+	if (const AInteriorConnectorMarker* Marker = Hit.bBlockingHit ? Cast<AInteriorConnectorMarker>(Hit.GetActor()) : nullptr)
+	{
+		FVector2D GrabPoint;
+		if (!Marker->GetOwnerGroupId().IsEmpty() && Get3DFloorFootprintPoint(Hit, GrabPoint))
+		{
+			SelectConnector(Marker->GetOwnerGroupId());
+			DragStart3DConnectorPositions = GetSelectedConnectorPositions(IsShiftHeld());
+			if (!DragStart3DConnectorPositions.IsEmpty())
+			{
+				SetIgnoreLookInput(true);
+				bIsDragging3DConnector = true;
+				b3DConnectorMoved = false;
+				b3DConnectorRefused = false;
+				DragStart3DFootprintPosition = GrabPoint;
+			}
+		}
+		return;
+	}
+
 	AInteriorRoom* Room = Hit.bBlockingHit ? Cast<AInteriorRoom>(Hit.GetActor()) : nullptr;
 	if (!Room)
 	{
@@ -4273,6 +4639,17 @@ void ANavPlayerController::OnLeftMouseDown3DEdit()
 void ANavPlayerController::OnLeftMouseUp3DEdit()
 {
 	if (InspectionDrag == EInspectionDrag::Pan) InspectionDrag = EInspectionDrag::None;
+	if (bIsDragging3DConnector)
+	{
+		// One history step for the whole drag, and only when the connector moved; and why, once, if the last spot was refused.
+		bIsDragging3DConnector = false;
+		SetIgnoreLookInput(false);
+		if (b3DConnectorMoved && InteriorGen) InteriorGen->RecordHistorySnapshot();
+		if (b3DConnectorRefused) ReportConnectorMoveRefused();
+		b3DConnectorMoved = b3DConnectorRefused = false;
+		DragStart3DConnectorPositions.Reset();
+		return;
+	}
 	if (!bIsDragging3DRoom)
 	{
 		return;
@@ -4948,7 +5325,7 @@ FString ANavPlayerController::BrowseForSaveLocation()
 bool ANavPlayerController::SaveCurrentProjectAs(const FString& FilePath)
 {
 	FinishRotationGesture();
-	if (bIsDragging3DRoom) OnLeftMouseUp3DEdit();
+	if (bIsDragging3DRoom || bIsDragging3DConnector) OnLeftMouseUp3DEdit();
 	for (TObjectIterator<UInteriorFloorPlanWidget> It; It; ++It)
 	{
 		if (It->GetWorld() == GetWorld() && It->GetOwningPlayer() == this) It->FinishEditDrag();
@@ -5897,6 +6274,22 @@ void ANavPlayerController::Tick(float DeltaSeconds)
 		return;
 	}
 
+	if (bIsDragging3DConnector && !IsInputKeyDown(EKeys::LeftMouseButton)) OnLeftMouseUp3DEdit();
+	if (bIsDragging3DConnector)
+	{
+		FHitResult Hit;
+		GetHitResultUnderCursor(ECC_Visibility, false, Hit);
+		FVector2D CurrentFootprintPosition;
+		if (Get3DFloorFootprintPoint(Hit, CurrentFootprintPosition))
+		{
+			const FVector2D Delta = CurrentFootprintPosition - DragStart3DFootprintPosition;
+			TMap<int32, FVector2D> NewPositions;
+			for (const TPair<int32, FVector2D>& Pair : DragStart3DConnectorPositions) NewPositions.Add(Pair.Key, Pair.Value + Delta);
+			const bool bMoved = MoveSelectedConnectorTo(NewPositions);
+			if (bMoved && !Delta.IsNearlyZero(0.0001)) b3DConnectorMoved = true;
+			b3DConnectorRefused = !bMoved && !Delta.IsNearlyZero(0.0001);
+		}
+	}
 	if (bIsDragging3DRoom && (!IsInputKeyDown(EKeys::LeftMouseButton) || !Dragging3DRoom.IsValid())) OnLeftMouseUp3DEdit();
 	if (bIsDragging3DRoom)
 	{

@@ -117,6 +117,11 @@ public:
 	// Level must be one of the building's levels (see GetLevels); pass 0 to show everything (exterior view).
 	void SetVisibleInteriorLevel(int32 Level);
 
+	// Floors that have no outer wall (PAT-205): a sheltered walkway, an open lobby. Their wall ring is not built or shown; the floor slabs stay.
+	void SetOpenLevels(const TSet<int32>& Levels);
+	void SetLevelOpen(int32 Level, bool bOpen);
+	bool IsLevelOpen(int32 Level) const { return OpenLevels.Contains(Level); }
+
 	// Temporary inspection policy; reapplied after every mesh rebuild, including collision. The bottom platform (section 0) goes, and the
 	// first floor gets a slab of its own while it is the floor being viewed.
 	void SetInspectionBottomHidden(bool bNewHidden);
@@ -199,6 +204,7 @@ private:
 
 	// See SetVisibleInteriorLevel. 0 = nothing hidden (normal exterior view).
 	int32 VisibleInteriorLevel = 0;
+	TSet<int32> OpenLevels;
 	bool bInspectionBottomHidden = false;
 
 	UPROPERTY()

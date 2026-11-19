@@ -68,6 +68,7 @@ private:
 	friend struct FEditorInteractionTestAccess;
 	friend struct FEditorFeedbackTestAccess;
 	friend struct FDuplicateTestAccess;
+	friend struct FGizmoTestAccess;
 	TArray<FVector2D> GetResizeHandles(FVector2D WidgetSize) const;
 	// Where the selected room's (or wall's) own corners are in the widget, in the order of its footprint: the dots a single corner is dragged by.
 	// A corner that sits where a resize handle sits needs Ctrl to be grabbed (a plain drag there resizes the whole room, as it always did);
@@ -78,6 +79,37 @@ private:
 	TArray<FVector2D> GetPrefabPreview() const;
 	// Shift on a shape drag: the far corner pulled onto the shape's own proportions (square, circle, equilateral triangle).
 	FVector2D ShapeDragEnd(FVector2D RawEnd, bool bShiftHeld) const;
+	// The transform gizmo (PAT-202), in widget space. Center is the middle of the selected room (or the connector); DirX and DirY are the plan's X and
+	// Y axes as they point on screen (the plan can be turned); the rest are the handles of the gizmo in the current mode. Not valid when no gizmo is shown.
+	struct FGizmoLayout
+	{
+		bool bValid = false;
+		bool bRoom = false;
+		FVector2D CenterFootprint = FVector2D::ZeroVector;
+		FVector2D Center = FVector2D::ZeroVector, DirX = FVector2D::ZeroVector, DirY = FVector2D::ZeroVector;
+		FVector2D XTip = FVector2D::ZeroVector, YTip = FVector2D::ZeroVector;
+		FVector2D ScaleX = FVector2D::ZeroVector, ScaleY = FVector2D::ZeroVector, ScaleUniform = FVector2D::ZeroVector;
+		float RingRadius = 0.f;
+	};
+	enum class EGizmoPart : uint8 { None, ArrowX, ArrowY, Center, Ring, ScaleX, ScaleY, ScaleUniform };
+	FGizmoLayout ComputeGizmoLayout(FVector2D WidgetSize) const;
+	EGizmoPart HitGizmo(FVector2D LocalPosition, FVector2D WidgetSize) const;
+	// Starts the drag that grabbing a part of the gizmo means, using the same drags as the plain click on the room or connector. False if it cannot.
+	bool StartGizmoDrag(EGizmoPart Part, FVector2D LocalPosition, FVector2D WidgetSize, bool bShift);
+	// 0 free, 1 only along the plan's X, 2 only along its Y: the arrows of the translate gizmo drag with it set.
+	int32 DragAxisLock = 0;
+	bool bIsRotatingGizmo = false;
+	float GizmoLastAngle = 0.f;
+	FVector2D GizmoCenterFootprint = FVector2D::ZeroVector;
+	bool bIsScalingConnector = false;
+	bool bConnectorScaled = false;
+	float ScaleStartDistance = 1.f;
+	float ScaleStartValue = 1.f;
+	FVector2D GizmoCenterLocal = FVector2D::ZeroVector;
+	// The corner handle of the scale gizmo: both sides grow together, keeping the room's proportions.
+	bool bResizeUniform = false;
+	double ResizeStartAspect = 1.0;
+
 	// The selection window (PAT-196): a drag across empty plan in Select mode. Both ends are in widget space; with Shift it adds to the selection.
 	bool bIsDraggingSelectBox = false;
 	bool bSelectBoxAdd = false;
@@ -154,6 +186,9 @@ private:
 	// Returns false (leaving OutGroupId untouched) if none is close enough.
 	bool FindConnectorNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, FString& OutGroupId) const;
 
+	// The same for a utility point (PAT-193) on the active floor.
+	bool FindUtilityNearLocalPosition(FVector2D LocalPosition, FVector2D WidgetSize, FString& OutUtilityId) const;
+
 	// While dragging an already-selected door (see NativeOnMouseButtonDown/NativeOnMouseMove),
 	// computes the Offset (world units, clamped to fit within the edge - same convention as
 	// FindRoomNearLocalPosition's OutOffsetWorldUnits) the door would have if centered under
@@ -185,6 +220,10 @@ private:
 	// Dragging a connector (select mode): where its floor node(s) were when the drag began (just the active floor's, or every floor's when Shift was
 	// held), so each move is computed from there and does not drift.
 	bool bIsDraggingConnector = false;
+	// Dragging a utility point (PAT-193): where it was grabbed relative to its centre, and whether it has moved (one Undo step when let go).
+	bool bIsDraggingUtility = false;
+	bool bUtilityMoved = false;
+	FVector2D DragUtilityGrabOffset = FVector2D::ZeroVector;
 	bool bConnectorMoved = false;
 	// The last position tried during the drag was refused (PAT-206): the reason is told once, when the mouse is let go.
 	bool bConnectorMoveRefused = false;
@@ -211,6 +250,14 @@ private:
 
 	// How many quarter turns to the right the plan is turned on the screen (0 to 3), see TurnViewBy.
 	int32 ViewQuarterTurns = 0;
+
+	// The picture of the floor's reference image (PAT-201), read from its file the first time it is drawn and again when the path changes. A file that could
+	// not be read is remembered (ReferenceImageFailedPath) so it is not tried on every paint. Mutable: painting is const.
+	UPROPERTY(Transient)
+	mutable UTexture2D* ReferenceImageTexture = nullptr;
+	mutable FSlateBrush ReferenceImageBrush;
+	mutable FString ReferenceImagePath;
+	mutable FString ReferenceImageFailedPath;
 
 	// Connector markers (elevator/stairs/escalator - see NativePaint) are drawn as these icons
 	// instead of a plain colored box. Loaded once in NativeConstruct from Padre's toolbar icon

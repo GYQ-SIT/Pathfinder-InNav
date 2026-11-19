@@ -254,7 +254,7 @@ of the editor are not compatible; the first run after updating uses the team def
 
 Headed **FLOOR EDITOR / 2D floor tools**, in the style of the design team's page: one row per tool with its icon,
 its name and its keyboard shortcut in a small key on the right (hover a row for the full description). The row of the
-tool that is active is highlighted in blue. Four groups:
+tool that is active is highlighted in blue. Five groups:
 
 - **SELECT** - the select tool (`Q`): click a room (anywhere in its body, not just
   the outline), a door marker, or a connector marker to select it; drag to move it;
@@ -267,11 +267,63 @@ tool that is active is highlighted in blue. Four groups:
   an elevator defaults to every floor in the building, stairs/escalator default to the
   floor above and below. A connector placed inside a closed room that has no door is still
   placed, with a warning that nobody can reach it (the validator reports it too, as `CONNECTOR_ENCLOSED`).
+- **UTILITY** - place a point that people look for and that is not a room: an **AED**, a **bicycle rack**, a **drop-off point** or **other** (see "Utility points" below).
 - **TRANSFORM** - grow/shrink the selected room (`=`/`-`), and hold to rotate it
   counter-clockwise/clockwise around its own center (hold `9`/`0`).
 
 Clicking inside the building's outline but on top of a wall, outside the outline, or
 overlapping another room will fail, with the reason logged to the Output Log.
+
+### Utility points
+
+The **UTILITY** group of the toolbar has one row per type (AED, Bicycle rack, Drop-off point, Other; no shortcut keys). Click a row to arm that type, then click the
+2D plan to place a point on the floor being viewed; click the row again (or `Esc`, or any other tool) to stop placing. A point is only a marker - a coloured square with
+the letter of its type (A, B, D, ?) and its name beside it - with no 3D model, and routes do not go through it. It has to be inside the building's outline; a click outside
+says so and places nothing.
+
+In select mode, click a point to select it (the Properties panel then shows **Utility point** with **NAME** and **TYPE**, and **Save changes** saves both as one Undo step),
+drag it to move it (one Undo step for the whole drag; it stays inside the building), and `Delete` (or the red **Delete point** button) removes it. Points are saved with their
+floor (`utilities` in the project file) and come back when the project is opened. Taking a floor away takes its points.
+
+### Reference image (a PNG under the plan)
+
+The Floor panel has a **Reference image (PNG)** section for the floor being viewed: **Import PNG** opens the system file dialog (Windows), and the picture is shown under the 2D drawing,
+framed on the building (as wide as it, centred on it, half clear), so a scanned floor plan can be traced over. Once there is one, the section shows **Show image** (hide it without removing it) and four
+fields in metres and per cent - **Width** (the height follows the picture), **Centre X**, **Centre Y** and **Opacity** (5-100) - each applied on Enter; **Remove** takes it off. A text that is not a number
+changes nothing. Every change is one Undo step.
+
+Each floor has its own image, at most one. It is a guide only: it never takes part in routes or checks, and is not in the 3D view. Only PNG files up to 32 MB are accepted. The project keeps the
+file's **path**, not the picture (`referenceImage` in the project file), so on another computer the floor draws without it until the file is put at the same path.
+
+### Rooms beside each other, and walls inside rooms
+
+- **Neighbours share a wall.** Two rooms whose walls lie along each other, within about 5 cm (drawn a hair apart, or a hair crooked, as imported
+  outlines are), count as sharing that wall: no overlap error. They stay two separate rooms with their own name, type and tags. Really being on top
+  of each other is still refused.
+- **A room dropped on another goes beside it.** Drag a room onto a neighbour and let go: it moves to the nearest spot beside it, touching (the
+  shortest way along X or Y that is inside the building and clear of everything), and the message says "There was a room there: moved this one
+  beside 'X'". A shape from the Toolbar (`1`/`2`/`3`) dropped on a room is placed beside it the same way. Only when there is no such spot does the
+  room go back (or the placement fail), as before. Turning snapping off is no longer needed to put rooms next to each other.
+- **Walls inside rooms.** The wall tool (`L`) may draw inside an existing room: partitions, dividing walls, smaller enclosed sections. A wall may
+  start or end on the room's own wall, or float inside it, and bend; it is saved with the floor like any wall and takes doors like any wall. A wall
+  that **crosses** a room's wall, or another wall, is still refused. The room stays one room; a partition does not split it into two places to
+  search for.
+
+### Transform gizmos (W, E, R)
+
+In Select mode, with **one** room, wall or lift/stair/escalator selected, three keys put a gizmo on it; the same key again takes it off. There is
+none for a door, an outer-wall door or a multiple selection. While a gizmo is on, the plain blue resize handles and the corner dots are not drawn,
+so there is one way to do each thing. Everything goes through the same checks as dragging and the keys (building outline, other rooms, lifts).
+
+- **W - Translate.** A red **X** arrow and a green **Y** arrow, and a square in the middle. Drag an arrow to move along that axis only; drag the
+  square to move freely. A room dropped on another goes beside it (see "Rooms beside each other").
+- **E - Rotate.** A blue ring around the middle. Drag round it: the room or connector turns by the angle you go round, about its own centre. The
+  whole turn is one Undo step. (The `9` and `0` keys still turn while held.)
+- **R - Scale.** On a room or wall: a red handle on its X side widens it, a green handle on its Y side lengthens it, and the white corner handle
+  resizes both together **keeping the proportions**. On a lift, stair or escalator: one white handle, the size grows with the pointer's distance
+  from the middle. (`R` is the shape test key outside Select mode.)
+
+The axes follow the plan when it is turned. `W` and `E` also move the camera; the camera still moves while the gizmo switches.
 
 ### Selecting several rooms
 
@@ -336,9 +388,22 @@ empty. There is no level 0, and a building goes down to B20 and up to 200. The f
 or the lowest floor can be deleted (**Delete floor**), never one in the middle. A **main door** can only be on the ground
 floor, so a building without one (a walkway) is entered through the link doors of the buildings next to it.
 
+**Floor names and special floors (PAT-203).** The **Name** box under From / To gives the floor being viewed a name next to its number
+("Level 2 - Mezzanine"); Enter applies it, and it is saved with the floor (`name`). **+ Basement** adds B1, then B2 ... under the lowest floor
+(refused with the reason when the building starts above the ground, since a floor under floor 3 is not a basement); **+ Special** adds a floor on top
+named "Special floor", to rename; **+ Add** adds a numbered floor on top. New floors always go where they belong (basements below, the rest on top),
+so the order is automatic. A name is only a label: every floor keeps its level number, which is what routes, doors and lifts use, so a mezzanine is
+a floor with a name, a full storey high, not a half storey between two numbers, and the floors cannot be dragged into another order.
+
+**Open floor (no outer wall)** is a tick box under From / To, for the floor being viewed (PAT-205). A sheltered walkway, an open lobby or an open
+ground floor has no outer wall: ticked, the floor's wall ring is not built in the 3D view (the slab stays) and, on the **ground floor**, the whole
+outline is a way in, so a route can enter or leave anywhere along it (about every 4 m) with no main door. Rooms, walls and doors inside are drawn and
+routed as usual. It is saved with the floor (`"open": true`, only when ticked) and is one Undo step. On any other floor it only changes how the
+building looks, since the only way from outside is the ground floor.
+
 ### Properties panel
 
-Headed **Properties**, with a small tag saying what is selected (ROOM, WALL, DOOR or CONNECTOR). With nothing selected
+Headed **Properties**, with a small tag saying what is selected (ROOM, WALL, DOOR, CONNECTOR or UTILITY). With nothing selected
 the section heading reads "Nothing selected"; selecting a room, door, or connector fills it in. Fields have small-capital
 labels over dark fields, and every kind ends with a red **Delete ...** button (the same as `Delete`) and **Save changes**.
 
@@ -361,6 +426,8 @@ labels over dark fields, and every kind ends with a red **Delete ...** button (t
   exist on the loaded building. **Select all floors** ticks every one of them in one click (basements included); click it again while all are
   ticked and it clears them all (a toggle). Untick the floors the connector should not reach, then **Save changes** (a connector needs
   at least one floor).
+
+- **Utility point**: **NAME** (up to 60 characters; may be empty) and **TYPE** (AED, Bicycle rack, Drop-off point, Other).
 
 ### Resizing a room by its handles
 
@@ -592,8 +659,10 @@ clicking in the 3D view instead of the 2D canvas:
 - **Select** — click a room, door, or connector; the selected room/connector tints
   light green (3D's equivalent of 2D's red outline — a selected door highlights its
   own room, same as 2D). Click empty space to deselect.
-- **Move** — drag a selected room to reposition it (connectors are moved in the 2D plan
-  only, not in the 3D view).
+- **Move** — drag a selected room to reposition it. A lift, stair or escalator is dragged the same way:
+  press on its marker and drag along the floor; it moves on the floor being viewed (hold **Shift** to move it on every floor it
+  reaches), with the same checks as in the 2D plan, and if it is let go on a spot that is refused the message says which floor
+  and what is in the way. One drag is one Undo step.
 - **Resize**/**Rotate**/**Delete** — same `=`/`-`, hold `9`/`0`, and Delete
   shortcuts as 2D, now actually work in 3D Edit mode (they're inert in View mode, even
   if something was selected before switching to it).
@@ -644,6 +713,7 @@ arbitrary files under `Data/Audio/` on demand (background music, effects, etc.).
 
 ## Known gaps / not built yet
 
+- Utility points are not searchable in the Navigation panel or on the phone yet, and routes do not pass through them.
 - No dedicated tool for a plain path node (only elevator/stairs/escalator have a
   placement tool right now).
 - No "3D Preview" floating thumbnail overlaid on the 2D view (the mockup's own stretch

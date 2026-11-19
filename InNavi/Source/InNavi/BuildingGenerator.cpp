@@ -243,7 +243,7 @@ static bool CanLoadInteriorRecords(const FJsonObject& Building)
 		int32 Level = 1;
 		Floor->TryGetNumberField(TEXT("level"), Level);
 		if (Levels.Contains(Level) || !ReadProjectRecords(*Floor, TEXT("rooms"), Rooms)
-			|| !ReadProjectRecords(*Floor, TEXT("navNodes"), Records)) return false;
+			|| !ReadProjectRecords(*Floor, TEXT("navNodes"), Records) || !ReadProjectRecords(*Floor, TEXT("utilities"), Records)) return false;
 		Levels.Add(Level);
 		for (const auto& Room : Rooms)
 		{
@@ -1736,6 +1736,24 @@ TSharedPtr<FJsonObject> ABuildingGenerator::GetInteriorDataForBuilding(const FSt
 void ABuildingGenerator::SetInteriorDataForBuilding(const FString& BuildingId, TSharedPtr<FJsonObject> InteriorData, bool bNotifyNavigation)
 {
 	InteriorDataById.Add(BuildingId, WithoutRemovedBuildingLinks(InteriorData));
+	// The floors the data says are open (no outer wall) show so on the building, loaded in the interior editor or not.
+	if (APolyBuilding* Building = FindBuildingById(BuildingId))
+	{
+		TSet<int32> Open;
+		const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
+		if (InteriorData.IsValid() && InteriorData->TryGetArrayField(TEXT("floors"), Floors))
+		{
+			for (const TSharedPtr<FJsonValue>& FloorValue : *Floors)
+			{
+				const TSharedPtr<FJsonObject>* Floor = nullptr;
+				bool bOpen = false;
+				double Level = 0;
+				if (FloorValue.IsValid() && FloorValue->TryGetObject(Floor) && Floor->IsValid() && (*Floor)->TryGetBoolField(TEXT("open"), bOpen) && bOpen
+					&& (*Floor)->TryGetNumberField(TEXT("level"), Level)) Open.Add(static_cast<int32>(Level));
+			}
+		}
+		Building->SetOpenLevels(Open);
+	}
 	RefreshWallOpenings();
 	if (bNotifyNavigation) NotifyNavigationLayoutChanged();
 }

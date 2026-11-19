@@ -5,7 +5,7 @@ It understands the part of JSON Schema (draft-07) that the schemas of this repos
 that a keyword is never silently ignored:
 
   type (one name or a list), enum, const, required, properties, additionalProperties (true, false or a schema), items (one schema),
-  minItems, maxItems, minimum, maximum, exclusiveMinimum, minLength, pattern, not (a value that must not be valid against a schema), $ref (to "#/definitions/name" or "#/$defs/name"), and the
+  minItems, maxItems, minimum, maximum, exclusiveMinimum, minLength, maxLength, pattern, not (a value that must not be valid against a schema), $ref (to "#/definitions/name" or "#/$defs/name"), and the
   annotations $schema, $id, title, description, default, examples, $comment, definitions, $defs.
 
 Usage:
@@ -20,7 +20,7 @@ import sys
 
 ANNOTATIONS = {"$schema", "$id", "title", "description", "default", "examples", "$comment", "definitions", "$defs"}
 KEYWORDS = {"type", "enum", "const", "required", "properties", "additionalProperties", "items", "minItems", "maxItems", "minimum", "maximum",
-            "exclusiveMinimum", "minLength", "pattern", "not", "$ref"}
+            "exclusiveMinimum", "minLength", "maxLength", "pattern", "not", "$ref"}
 
 
 def reject_constant(token):
@@ -121,6 +121,8 @@ def validate(value, schema, root, path="$"):
     if isinstance(value, str):
         if "minLength" in schema and len(value) < schema["minLength"]:
             errors.append(f"{path}: is shorter than {schema['minLength']} characters")
+        if "maxLength" in schema and len(value) > schema["maxLength"]:
+            errors.append(f"{path}: is longer than {schema['maxLength']} characters")
         if "pattern" in schema and not re.search(schema["pattern"], value):
             errors.append(f"{path}: {value!r} does not match {schema['pattern']}")
     if isinstance(value, list):

@@ -95,7 +95,7 @@ and still opens and routes) until the database is opened again and the project i
 
 **Levels.** 1 is the ground floor, 2, 3 ... go up, and the basements are -1 (B1), -2 (B2) ... going down. **There is no level 0** (0 means "no floor" in the editor). A floor is higher than the one before it by one floor height, so level *n* starts at (*n* - 1) floor heights above the ground (B1 at one floor height below it), whatever the building's `firstLevel`. The editor widens the floors of a building to cover every floor of its interior, so an older file that has a floor above its `floorCount` still opens. The main door is only on level 1: a building without a ground floor has no way out of its own and is entered through the link doors of its neighbours.
 
-**A floor** (`floors[]`): `level` (integer, not 0, **required**; 1 is the ground floor, -1 is B1), `wallHeight` and `wallThickness` (cm), `rooms` and `navNodes` (arrays).
+**A floor** (`floors[]`): `level` (integer, not 0, **required**; 1 is the ground floor, -1 is B1), `wallHeight` and `wallThickness` (cm), `name` (text up to 40 characters, a label next to the level such as "Mezzanine"; only written when there is one), `open` (boolean, only written when true: the floor has no outer wall, see below), `rooms` and `navNodes` (arrays), `utilities` (array, only written when the floor has some, see below), `referenceImage` (object, only when the floor has one, see below).
 
 **A room** (`rooms[]`)
 
@@ -116,6 +116,10 @@ the opening, **cm**), `width` (**cm**). A window also has `height` and `sillHeig
 
 **A connector** (`navNodes[]`): `id`, `type` (`"elevator"`, `"stairs"`, `"escalator"` or `"pathNode"`), `position` (`[x, y]`, footprint units), `connectsFloors` (the levels it
 joins), `connectorGroupId` (the instances of one connector on its floors share it, and each floor has one; this is what lets a route change floor), and when they are not 0 and 1, `rotationDegrees` and `sizeScale`. Each floor's instance has its own `position`, `rotationDegrees` and `sizeScale`: a lift is usually the same on every floor, stairs and escalators often are not, and the instances of a connector do not have to stand in one column.
+
+**A utility point** (`utilities[]`): `id` (unique in the building), `type` (`"aed"`, `"bicycle"`, `"dropoff"` or `"other"`; any other text reads as `"other"`), `name` (up to 60 characters, left out when empty) and `position` (`[x, y]`, footprint units, inside the building). A point sits on the floor whose `utilities` array holds it. It is only a marker for people to find: routes do not go through it, and the phone app does not list it yet.
+
+**A reference image** (`referenceImage`, at most one per floor): `path` (full path of a PNG), `center` (`[x, y]`, footprint units), `width` (footprint units; the height follows the picture), `opacity` (0.05 to 1; 0.5 when left out) and `visible` (written only when false). It is shown under the 2D drawing of that floor and nowhere else: routes, checks, the 3D view and the phone app ignore it. The project keeps the path, not the picture, so on another computer the image is missing until the file is put at that path (the floor then draws without it).
 
 **A door in the outer wall** (`entrances[]`): `id`, `kind` (`"main"`, the way out of the building, or `"link"`, a door to the building next door), `level`, `edge` (which edge of the
 building's footprint), `offset` and `width` (**cm**), and for a link `connectsTo` (the other building's id). A link door is stored once; the other building shows it as a door that is

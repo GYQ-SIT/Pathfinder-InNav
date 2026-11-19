@@ -855,6 +855,25 @@ namespace
 		return true;
 	}
 
+	// An open ground floor (PAT-205) has no outer wall: every stretch of the outline is a way out, so routes may leave or enter anywhere along it.
+	// Exits are set about 4 m apart.
+	void AddOpenFloorExits(FFloorGeometry& Geometry, const TArray<FVector2D>& Outline, float Scale)
+	{
+		const double Spacing = 400.0 / FMath::Max(static_cast<double>(Scale), static_cast<double>(KINDA_SMALL_NUMBER));
+		for (int32 Edge = 0; Edge < Outline.Num(); ++Edge)
+		{
+			const FVector2D A = Outline[Edge], B = Outline[(Edge + 1) % Outline.Num()];
+			const int32 Steps = FMath::Max(1, FMath::CeilToInt(FVector2D::Distance(A, B) / Spacing));
+			for (int32 Step = 0; Step < Steps; ++Step)
+			{
+				FExteriorExit Exit;
+				Exit.Id = FString::Printf(TEXT("Open:%d:%d"), Edge, Step);
+				Exit.Position = FMath::Lerp(A, B, (Step + 0.5) / Steps);
+				Geometry.ExteriorExits.Add(Exit);
+			}
+		}
+	}
+
 	FRouteBuilding ReadRouteBuilding(const APolyBuilding& Building, const AInteriorGenerator& Live,
 		const TSharedPtr<FJsonObject>& Saved, const TArray<FInteriorEntrance>& Entrances, float Scale, bool bReadFloors,
 		int32 OnlyFloor = INDEX_NONE)
@@ -866,11 +885,13 @@ namespace
 		const bool bLive = Live.GetLoadedBuildingId() == Building.BuildingId;
 		const TArray<TSharedPtr<FJsonValue>>* SavedFloors = nullptr;
 		if (Saved.IsValid()) Saved->TryGetArrayField(TEXT("floors"), SavedFloors);
+		bool bOpenGroundFloor = false;
 		for (const int32 Level : Building.GetLevels())
 		{
 			if (OnlyFloor != INDEX_NONE && OnlyFloor != Level) continue;
 			if (bLive)
 			{
+				if (Level == 1 && Live.IsFloorOpen(1)) bOpenGroundFloor = true;
 				for (const auto* Room : Live.GetRoomsOnFloor(Level)) if (IsValid(Room))
 					Model.Rooms.FindOrAdd(Level).Add({ Room->RoomId, Room->GetFootprint(), Room->GetOpenings(), Room->IsClosedLoop(), !Room->bIsPublic || Room->bRequiresKey });
 				Model.Floors.Add(Level, MakeFloorGeometry(Live, Scale, Level, Building.GetFootprint()));
@@ -886,6 +907,8 @@ namespace
 				Floor->TryGetNumberField(TEXT("level"), SavedLevel);
 				if (SavedLevel != Level) continue;
 				Floor->TryGetNumberField(TEXT("wallThickness"), Thickness);
+				bool bSavedOpen = false;
+				if (Level == 1 && Floor->TryGetBoolField(TEXT("open"), bSavedOpen) && bSavedOpen) bOpenGroundFloor = true;
 				const TArray<TSharedPtr<FJsonValue>>* Rooms = nullptr;
 				if (Floor->TryGetArrayField(TEXT("rooms"), Rooms)) for (const auto& RoomValue : *Rooms)
 				{
@@ -950,6 +973,10 @@ namespace
 			FVector2D Position;
 			if (Door.Kind == EInteriorEntranceKind::Main && Door.Level == 1 && EntrancePosition(Model, Door, Scale, Position))
 				Model.Floors.FindChecked(1).ExteriorExits.Add({ TEXT("Main:") + Door.Id, Position });
+		}
+		if (bOpenGroundFloor)
+		{
+			if (FFloorGeometry* Ground = Model.Floors.Find(1)) AddOpenFloorExits(*Ground, Building.GetFootprint(), Scale);
 		}
 		return Model;
 	}

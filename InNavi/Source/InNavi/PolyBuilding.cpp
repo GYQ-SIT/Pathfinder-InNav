@@ -418,6 +418,20 @@ void APolyBuilding::SetInspectionBottomHidden(bool bNewHidden)
 	RebuildMesh();
 }
 
+void APolyBuilding::SetOpenLevels(const TSet<int32>& Levels)
+{
+	if (OpenLevels.Num() == Levels.Num() && OpenLevels.Includes(Levels)) return;
+	OpenLevels = Levels;
+	ApplySlabVisibility();
+}
+
+void APolyBuilding::SetLevelOpen(int32 Level, bool bOpen)
+{
+	if (bOpen == OpenLevels.Contains(Level)) return;
+	if (bOpen) OpenLevels.Add(Level); else OpenLevels.Remove(Level);
+	ApplySlabVisibility();
+}
+
 void APolyBuilding::ApplySlabVisibility()
 {
 	if (!MeshComp || CachedPoly2D.Num() == 0)
@@ -461,7 +475,8 @@ void APolyBuilding::ApplySlabVisibility()
 		// footprint, unlike the near-top-down 2D floor-plan camera) isn't blocked by floors it isn't
 		// looking at.
 		const int32 WallSectionIndex = GetWallSectionIndex(L);
-		const bool bHideWall = (bViewing && L != ViewedPosition);
+		// An open floor has no outer wall at all.
+		const bool bHideWall = (bViewing && L != ViewedPosition) || OpenLevels.Contains(LayoutValidation::LevelAfter(FirstLevel, L - 1));
 		BuildWallSection(CachedPoly2D, BaseZ + (L - 1) * FloorHeight, BaseZ + L * FloorHeight, WallSectionIndex, /*bCreateCollision=*/!bHideWall,
 			LayoutValidation::LevelAfter(FirstLevel, L - 1));
 		MeshComp->SetMeshSectionVisible(WallSectionIndex, !bHideWall);
