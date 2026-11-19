@@ -1,4 +1,5 @@
 #include "MobileMapWidget.h"
+#include "MobileIcons.h"
 
 #include "MobileMapLabels.h"
 #include "MobileStyle.h"
@@ -253,7 +254,46 @@ int32 UMobileMapWidget::GetRoutePointsOnLevel() const
 	return Count;
 }
 
-FVector2D UMobileMapWidget::Project(const FVector2D& P) const
+FVector2D UMobileMapWidget::Turn(const FVector2D& P, const FVector2D& About) const
+{
+	if (FMath::IsNearlyZero(Rotation))
+	{
+		return P;
+	}
+	const double Cos = FMath::Cos(Rotation);
+	const double Sin = FMath::Sin(Rotation);
+	const FVector2D D = P - About;
+	return About + FVector2D(D.X * Cos - D.Y * Sin, D.X * Sin + D.Y * Cos);
+}
+
+FBox2D UMobileMapWidget::RawPlanBounds() const
+{
+	FBox2D Bounds(ForceInit);
+	auto Add = [&Bounds](const TArray<FVector2D>& Poly)
+	{
+		for (const FVector2D& P : Poly)
+		{
+			Bounds += P;
+		}
+	};
+	if (bOverview)
+	{
+		for (const FMobileCampusBuilding& Building : CampusMap.Buildings) Add(Building.Outline);
+		for (const FMobileCampusFeature& Feature : CampusMap.Features) Add(Feature.Outline);
+	}
+	else
+	{
+		Add(LevelMap.Outline);
+	}
+	return Bounds;
+}
+
+FVector2D UMobileMapWidget::ViewCentre() const
+{
+	return FVector2D(ViewSize.X * 0.5, InsetTop + FMath::Max(ViewSize.Y - InsetTop - InsetBottom - (bShow3D ? SlabHeight : 0.0), 10.0) * 0.5);
+}
+
+FVector2D UMobileMapWidget::ProjectFlat(const FVector2D& P) const
 {
 	if (!bShow3D)
 	{
@@ -270,14 +310,14 @@ FBox2D UMobileMapWidget::PlanBounds() const
 	{
 		for (const FVector2D& P : Poly)
 		{
-			Bounds += Project(P);
+			Bounds += ProjectFlat(P);
 		}
 	};
 	if (bOverview)
 	{
 		for (const FMobileCampusBuilding& Building : CampusMap.Buildings) Add(Building.Outline);
 		for (const FMobileCampusFeature& Feature : CampusMap.Features) Add(Feature.Outline);
-		if (Route.bFound) for (const auto& Point : Route.Points) Bounds += Project(MobileCampusPosition(Point, CampusMap));
+		if (Route.bFound) for (const auto& Point : Route.Points) Bounds += ProjectFlat(MobileCampusPosition(Point, CampusMap));
 	}
 	else
 	{
@@ -313,7 +353,8 @@ FVector2D UMobileMapWidget::ToWidget(const FVector2D& PlanPoint, double WidgetWi
 	double Scale;
 	FVector2D Offset;
 	ComputeFit(WidgetWidth, WidgetHeight, Scale, Offset);
-	return Project(PlanPoint) * Scale + Offset;
+	const FVector2D About = FMath::IsNearlyZero(Rotation) ? FVector2D::ZeroVector : RawPlanBounds().GetCenter();
+	return ProjectFlat(Turn(PlanPoint, About)) * Scale + Offset;
 }
 
 TArray<FVector2D> UMobileMapWidget::ToWidgetPolygon(const TArray<FVector2D>& Plan, double WidgetWidth, double WidgetHeight, double Lift) const
@@ -323,9 +364,10 @@ TArray<FVector2D> UMobileMapWidget::ToWidgetPolygon(const TArray<FVector2D>& Pla
 	ComputeFit(WidgetWidth, WidgetHeight, Scale, Offset);
 	TArray<FVector2D> Result;
 	Result.Reserve(Plan.Num());
+	const FVector2D About = FMath::IsNearlyZero(Rotation) ? FVector2D::ZeroVector : RawPlanBounds().GetCenter();
 	for (const FVector2D& P : Plan)
 	{
-		Result.Add(Project(P) * Scale + Offset - FVector2D(0.0, Lift));
+		Result.Add(ProjectFlat(Turn(P, About)) * Scale + Offset - FVector2D(0.0, Lift));
 	}
 	return Result;
 }
@@ -489,9 +531,24 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 	for (const FMobileMapConnector& Connector : LevelMap.Connectors)
 	{
 		const FVector2D At = ToWidgetPolygon({ Connector.Position }, W, H, Lift)[0];
-		Obstacles.Add(FBox2D(At - FVector2D(9.0, 9.0), At + FVector2D(9.0, 9.0)));
-		FillPolygon(OutDrawElements, Layer + 4, AllottedGeometry, Circle(At, 8.0), Connector.Kind == EMobileConnectorKind::Lift ? StartStyle::Rgb(30, 100, 240) : (Connector.Kind == EMobileConnectorKind::Stairs ? StartStyle::Rgb(100, 116, 139) : StartStyle::Rgb(13, 148, 136)));
-		DrawLabel(OutDrawElements, Layer + 5, AllottedGeometry, Connector.Kind == EMobileConnectorKind::Lift ? TEXT("L") : (Connector.Kind == EMobileConnectorKind::Stairs ? TEXT("S") : TEXT("E")), At, 9.f, FLinearColor::White, false);
+		Obstacles.Add(FBox2D(At - FVector2D(10.0, 10.0), At + FVector2D(10.0, 10.0)));
+		FillPolygon(OutDrawElements, Layer + 4, AllottedGeometry, Circle(At, 9.0), Connector.Kind == EMobileConnectorKind::Lift ? StartStyle::Rgb(30, 100, 240) : (Connector.Kind == EMobileConnectorKind::Stairs ? StartStyle::Rgb(100, 116, 139) : StartStyle::Rgb(13, 148, 136)));
+		// The design team's picture of the kind of connector (white, in the circle); a kind whose picture is not imported yet keeps its letter.
+		const TCHAR* IconName = Connector.Kind == EMobileConnectorKind::Lift ? TEXT("Lift") : (Connector.Kind == EMobileConnectorKind::Stairs ? TEXT("Stairs") : TEXT("Escalator"));
+		if (UTexture2D* IconTexture = MobileIcons::LoadTexture(IconName))
+		{
+			constexpr double IconSize = 12.0;
+			FSlateBrush IconBrush;
+			IconBrush.SetResourceObject(IconTexture);
+			IconBrush.ImageSize = FVector2f(IconTexture->GetSizeX(), IconTexture->GetSizeY());
+			IconBrush.DrawAs = ESlateBrushDrawType::Image;
+			FSlateDrawElement::MakeBox(OutDrawElements, Layer + 5, AllottedGeometry.ToPaintGeometry(FVector2f(IconSize, IconSize), FSlateLayoutTransform(FVector2f(At - FVector2D(IconSize * 0.5, IconSize * 0.5)))),
+				&IconBrush, ESlateDrawEffect::None, FLinearColor::White);
+		}
+		else
+		{
+			DrawLabel(OutDrawElements, Layer + 5, AllottedGeometry, Connector.Kind == EMobileConnectorKind::Lift ? TEXT("L") : (Connector.Kind == EMobileConnectorKind::Stairs ? TEXT("S") : TEXT("E")), At, 9.f, FLinearColor::White, false);
+		}
 	}
 
 	DrawChosenLabels(OutDrawElements, AllottedGeometry, RoomLabels, Obstacles, W, H);
@@ -587,7 +644,7 @@ void UMobileMapWidget::ZoomAround(const FVector2D& Local, double Factor)
 	const double NewZoom = FMath::Clamp(Zoom * Factor, MinZoom, MaxZoom);
 	const double Actual = NewZoom / Zoom;
 	// The point under the finger (or the middle) stays where it is: the plan is scaled about the middle of the uncovered part, then moved.
-	const FVector2D Centre(ViewSize.X * 0.5, InsetTop + FMath::Max(ViewSize.Y - InsetTop - InsetBottom - (bShow3D ? SlabHeight : 0.0), 10.0) * 0.5);
+	const FVector2D Centre = ViewCentre();
 	Pan = (Local - Centre) - (Local - Centre - Pan) * Actual;
 	Zoom = NewZoom;
 	ClampPan();
@@ -596,8 +653,49 @@ void UMobileMapWidget::ZoomAround(const FVector2D& Local, double Factor)
 void UMobileMapWidget::ZoomBy(double Delta)
 {
 	const double Target = FMath::Clamp(Zoom + Delta, MinZoom, MaxZoom);
-	const FVector2D Centre(ViewSize.X * 0.5, InsetTop + FMath::Max(ViewSize.Y - InsetTop - InsetBottom - (bShow3D ? SlabHeight : 0.0), 10.0) * 0.5);
-	ZoomAround(Centre, Target / Zoom);
+	ZoomAround(ViewCentre(), Target / Zoom);
+}
+
+void UMobileMapWidget::SetRotation(double Radians)
+{
+	// Kept within a half turn either way.
+	double Turned = FMath::Fmod(Radians, UE_DOUBLE_TWO_PI);
+	if (Turned > UE_DOUBLE_PI) Turned -= UE_DOUBLE_TWO_PI;
+	if (Turned < -UE_DOUBLE_PI) Turned += UE_DOUBLE_TWO_PI;
+	if (FMath::IsNearlyEqual(Turned, Rotation, 1e-9))
+	{
+		return;
+	}
+	Rotation = Turned;
+	if (OnRotationChanged)
+	{
+		OnRotationChanged(Rotation);
+	}
+}
+
+void UMobileMapWidget::RotateAround(const FVector2D& Local, double DeltaRadians)
+{
+	if (FMath::IsNearlyZero(DeltaRadians, 1e-9))
+	{
+		return;
+	}
+	// The plan turns about its own middle, which stays where it is on the screen; so the middle is moved as a point turning about Local, and what is
+	// under Local stays under it. (The tilted view only turns about the middle: a turn of the tilted picture is not a turn of the screen.)
+	const bool bKeepUnder = !bShow3D && RawPlanBounds().bIsValid;
+	FVector2D MiddleBefore = FVector2D::ZeroVector;
+	if (bKeepUnder)
+	{
+		MiddleBefore = ToWidget(RawPlanBounds().GetCenter(), ViewSize.X, ViewSize.Y);
+	}
+	SetRotation(Rotation + DeltaRadians);
+	if (bKeepUnder)
+	{
+		const double Cos = FMath::Cos(DeltaRadians);
+		const double Sin = FMath::Sin(DeltaRadians);
+		const FVector2D D = MiddleBefore - Local;
+		const FVector2D MiddleAfter = Local + FVector2D(D.X * Cos - D.Y * Sin, D.X * Sin + D.Y * Cos);
+		PanBy(MiddleAfter - MiddleBefore);
+	}
 }
 
 void UMobileMapWidget::PanBy(const FVector2D& Delta)
@@ -647,6 +745,8 @@ FReply UMobileMapWidget::HandlePointerDown(const FGeometry& Geometry, const FPoi
 		PressLocal = Local;
 		bPressMoved = false;
 		bMultiTouch = false;
+		TwistSoFar = 0.0;
+		bTwisting = false;
 	}
 	else
 	{
@@ -677,7 +777,24 @@ FReply UMobileMapWidget::HandlePointerMove(const FGeometry& Geometry, const FPoi
 		}
 		if (bPressMoved && bGestures)
 		{
-			PanBy(Local - Before);
+			if (Event.IsShiftDown())
+			{
+				// A mouse has no second finger: Shift and a drag turn the map about the middle of the view, as far as the pointer goes round it.
+				const FVector2D Centre = ViewCentre();
+				const FVector2D From = Before - Centre;
+				const FVector2D To = Local - Centre;
+				if (From.Size() > 4.0 && To.Size() > 4.0)
+				{
+					double Delta = FMath::Atan2(To.Y, To.X) - FMath::Atan2(From.Y, From.X);
+					if (Delta > UE_DOUBLE_PI) Delta -= UE_DOUBLE_TWO_PI;
+					if (Delta < -UE_DOUBLE_PI) Delta += UE_DOUBLE_TWO_PI;
+					RotateAround(Centre, Delta);
+				}
+			}
+			else
+			{
+				PanBy(Local - Before);
+			}
 		}
 	}
 	else if (Pointers.Num() == 2 && bGestures)
@@ -699,6 +816,24 @@ FReply UMobileMapWidget::HandlePointerMove(const FGeometry& Geometry, const FPoi
 		if (OldDistance > 1.0)
 		{
 			ZoomAround(OldMiddle, NewDistance / OldDistance);
+		}
+		// The line between the fingers turning is a twist, which turns the map once it is past a few degrees.
+		if (OldDistance > 20.0 && NewDistance > 20.0)
+		{
+			const FVector2D OldLine = Before - Other;
+			const FVector2D NewLine = Local - Other;
+			double Twist = FMath::Atan2(NewLine.Y, NewLine.X) - FMath::Atan2(OldLine.Y, OldLine.X);
+			if (Twist > UE_DOUBLE_PI) Twist -= UE_DOUBLE_TWO_PI;
+			if (Twist < -UE_DOUBLE_PI) Twist += UE_DOUBLE_TWO_PI;
+			if (!bTwisting)
+			{
+				TwistSoFar += Twist;
+				bTwisting = FMath::Abs(TwistSoFar) > FMath::DegreesToRadians(8.0);
+			}
+			else
+			{
+				RotateAround(NewMiddle, Twist);
+			}
 		}
 		PanBy(NewMiddle - OldMiddle);
 	}

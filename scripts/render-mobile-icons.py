@@ -1,5 +1,10 @@
 """Renders the phone app's icons (PNG) from the SVG files in InNavi/Content/ImageAssets/Mobile/Source.
 
+NOTE (2026-11-19): most of the PNGs in InNavi/Content/ImageAssets/Mobile are no longer made by this script. They are the design team's own export
+(their App check list page: Export selected, 128 x 128, Colour = Custom hex #FFFFFF, Fill = Default, Outline = Default), which draws the same icons a
+little crisper. Running this script writes over them with its own, softer render, so run it only for a name you mean to regenerate
+(`py scripts/render-mobile-icons.py <Name>`), never for all of them. CompassColour and any icon that is not in the design team's export still come from here. Escalator was exported at 1024 px and cropped to a square by hand (see docs/design/mobile-app-data-interface.md).
+
 The SVGs are the design team's line icons (Lucide, ISC licence). Each is drawn white on a transparent background, 128 x 128 px, so the app can
 tint it to any colour at run time (the light and the night theme, a blue open tab). The PNG of each icon is written next to the sources as
 Mobile_<Name>.png in InNavi/Content/ImageAssets/Mobile; it is the source of the texture /Game/ImageAssets/Mobile/Mobile_<Name>, which the

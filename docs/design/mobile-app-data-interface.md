@@ -263,12 +263,14 @@ saved places: written on every change, a missing or damaged file is empty lists,
 
 ## Icons
 
-The phone app's icons are the design team's line icons (Lucide, ISC licence): `InNavi/Content/ImageAssets/Mobile/Source/<Name>.svg` are the sources, `scripts/render-mobile-icons.py`
-draws each white on transparent (128 px) as `Mobile_<Name>.png`, and the texture `/Game/ImageAssets/Mobile/Mobile_<Name>` (imported from that PNG, with Compression "Uncompressed (RGBA8)"
+The phone app's icons are the design team's line icons (mostly Lucide, ISC licence; Lift and Escalator are the designers' own drawings): `InNavi/Content/ImageAssets/Mobile/Source/<Name>.svg` are the sources.
+The `Mobile_<Name>.png` are the design team's own export, white on transparent, 128 px (their App check list page > Export selected > PNG 128 x 128, Colour "Custom hex" #FFFFFF, Fill and Outline "Default";
+tick "Include original SVGs" to get the sources too; the export names a file `<Icon>_128x128_customFFFFFF.png`, rename it `Mobile_<Name>.png`). `scripts/render-mobile-icons.py` is the older way of drawing them from the SVGs
+(softer edges); it now serves only the icons that are not in the export, and running it over all of them would overwrite the export. The texture `/Game/ImageAssets/Mobile/Mobile_<Name>` (imported from that PNG, with Compression "Uncompressed (RGBA8)"
 and Mip Gen "NoMipmaps") is what the app loads (`MobileIcons.h`) and tints to the colour it needs, so one icon serves the light and the night theme. The folder is always cooked
 (`DirectoriesToAlwaysCook` of `/Game/ImageAssets`). While a texture is not imported the icon is drawn from shapes (or a character), so a screen always has something to show and
 the tests do not need the textures. So far the search fields, the overlay and its rows (Search, Recent, MoveForward, ClearSearch), the tab bar (NavExplore, NavDirectory, NavSaved, NavProfile), the level button and locate (LevelDropdown,
-Recenter), the filters button (Filter) and the pin of a place row (Location) use them; the other icons are made and wait for the steps that replace the placeholders. `CompassColour` keeps its own colours (it is not tinted).
+Recenter), the filters button (Filter) and the pin of a place row (Location) use them; the step page uses Straight, TurnLeft, TurnRight, Success, and Lift and Stairs for the steps that change level (an escalator step uses `Escalator`; until its texture is imported it shows the straight arrow); the other icons are made and wait for the steps that replace the placeholders. `CompassColour` keeps its own colours (it is not tinted, and is exported with the colour left at Default). `Escalator` is the one that is not exported at 128 px: the design team's drawing has fixed-width lines that turn thin when it is drawn small, so it is exported at 1024 x 1024, cropped to its drawing and put on a square 128 px picture with a 4 px margin, like the lift and the stairs.
 
 ## The Saved tab
 

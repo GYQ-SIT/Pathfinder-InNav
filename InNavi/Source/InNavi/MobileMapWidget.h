@@ -43,14 +43,26 @@ public:
 	bool IsShowing3D() const { return bShow3D; }
 	void SetFitInsets(double Top, double Bottom);
 
-	// The view: how far in the person has zoomed (1 = the plan fits) and how far they moved it (design pixels). Zoom is kept within the prototype's
-	// 0.7 to 2, and the plan cannot be moved out of sight. A different level, the overview, or the tilt starts again at the fit (ResetView).
+	// The view: how far in the person has zoomed (1 = the plan fits) and how far they moved it (design pixels). Zoom is kept between 0.7 and 6 (the
+	// prototype stopped at 2, which left a room small), and the plan cannot be moved out of sight. A different level, the overview, or the tilt starts again
+	// at the fit (ResetView).
 	static constexpr double MinZoom = 0.7;
-	static constexpr double MaxZoom = 2.0;
+	static constexpr double MaxZoom = 6.0;
 	static constexpr double ZoomStep = 0.2;
 	double GetZoom() const { return Zoom; }
 	const FVector2D& GetPan() const { return Pan; }
 	void ResetView();
+
+	// The turn of the whole map, in radians, clockwise as the person sees it (0 = as the plan is drawn). Two fingers twisting turn it, and with a mouse
+	// Shift and a drag; the room names and the icons stay upright. It is the person's own bearing, so another level, the overview or the tilt keep it;
+	// ResetRotation (the compass button) puts it back.
+	double GetRotation() const { return Rotation; }
+	void SetRotation(double Radians);
+	void ResetRotation() { SetRotation(0.0); }
+	// Turns by DeltaRadians about a point of the widget: what is under that point stays under it (in the flat view).
+	void RotateAround(const FVector2D& Local, double DeltaRadians);
+	// Told the new turn each time it changes, for the compass button.
+	void SetOnRotationChanged(TFunction<void(double)> InCallback) { OnRotationChanged = MoveTemp(InCallback); }
 	// Dragging and pinching move the view only when the person has turned gestures on (the prototype's "Move" switch); the zoom buttons always work.
 	void SetGesturesEnabled(bool bEnabled) { bGestures = bEnabled; }
 	bool AreGesturesEnabled() const { return bGestures; }
@@ -100,9 +112,14 @@ protected:
 private:
 	// Keeps some of the plan in the uncovered part of the widget after a move or a zoom.
 	void ClampPan();
-	// The plan's own units to the flat or tilted drawing space, and the fit of that space into the widget.
-	FVector2D Project(const FVector2D& PlanPoint) const;
+	// The plan's own units to the flat or tilted drawing space, and the fit of that space into the widget. The fit is worked out from the plan as it is
+	// drawn unturned (PlanBounds uses ProjectFlat), so turning the map does not zoom it; the drawing turns the plan about its own middle first (Turn).
+	FVector2D ProjectFlat(const FVector2D& PlanPoint) const;
+	FVector2D Turn(const FVector2D& PlanPoint, const FVector2D& About) const;
+	FBox2D RawPlanBounds() const;
 	FBox2D PlanBounds() const;
+	// The middle of the uncovered part of the widget: what zooming and turning are about.
+	FVector2D ViewCentre() const;
 	void ComputeFit(double WidgetWidth, double WidgetHeight, double& OutScale, FVector2D& OutOffset) const;
 	TArray<FVector2D> ToWidgetPolygon(const TArray<FVector2D>& Plan, double WidgetWidth, double WidgetHeight, double Lift) const;
 
@@ -121,6 +138,11 @@ private:
 	double InsetBottom = 300.0;
 	double Zoom = 1.0;
 	FVector2D Pan = FVector2D::ZeroVector;
+	double Rotation = 0.0;
+	// Two fingers twisting turn the map only once they have twisted past a few degrees, so a pinch that wobbles does not.
+	double TwistSoFar = 0.0;
+	bool bTwisting = false;
+	TFunction<void(double)> OnRotationChanged;
 	bool bGestures = false;
 	mutable FVector2D ViewSize = FVector2D(375.0, 812.0);
 
