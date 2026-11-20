@@ -8,6 +8,11 @@
 #include "Misc/ScopeExit.h"
 #include "Framework/Application/SlateApplication.h"
 #include <shobjidl.h>
+// The Windows headers leave macros behind (LoadImage is LoadImageW): the build joins .cpp files into one, and the macro would rename the engine's
+// FImageUtils::LoadImage (declared in ImageUtils.h) in every file after this one.
+#ifdef LoadImage
+#undef LoadImage
+#endif
 #endif
 
 bool DesktopProjectFileDialog::Pick(const void* ParentWindow, const FString& Directory, bool bSave, FString& OutPath, FString& Error, EKind Kind)

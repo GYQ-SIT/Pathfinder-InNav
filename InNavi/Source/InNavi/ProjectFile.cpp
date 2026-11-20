@@ -7,6 +7,11 @@
 
 #if PLATFORM_WINDOWS
 #include "Windows/WindowsHWrapper.h"
+// The Windows headers leave macros behind (LoadImage is LoadImageW): the build joins .cpp files into one, and the macro would rename the engine's
+// FImageUtils::LoadImage (declared in ImageUtils.h) in every file after this one.
+#ifdef LoadImage
+#undef LoadImage
+#endif
 
 static FString ProjectWindowsPath(IFileManager& Files, const FString& Path)
 {
