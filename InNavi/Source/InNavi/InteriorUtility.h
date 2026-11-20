@@ -34,6 +34,14 @@ namespace InteriorUtilityTypes
 		if (Type == DropOff) return TEXT("D");
 		return TEXT("?");
 	}
+	// The design team's picture of the type (Content/ImageAssets/<this>): a coloured circle with a white symbol.
+	inline const TCHAR* IconAsset(const FString& Type)
+	{
+		if (Type == Aed) return TEXT("Icon_UtilityAed");
+		if (Type == Bicycle) return TEXT("Icon_UtilityBicycle");
+		if (Type == DropOff) return TEXT("Icon_UtilityDropOff");
+		return TEXT("Icon_UtilityOther");
+	}
 	constexpr int32 MaxNameLength = 60;
 }
 

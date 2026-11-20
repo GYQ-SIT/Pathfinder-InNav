@@ -203,8 +203,8 @@ private:
 	// Which of Orbit and Grab is on, and whether they can be used.
 	void RefreshInspectionStyleButtons();
 
-	// Bound to ANavPlayerController::OnSnapEnabledChanged - swaps SnapToggleIcon between
-	// Icon_SnappingOn/Icon_SnappingOff so it stays correct even when toggled via the N key.
+	// Bound to ANavPlayerController::OnSnapEnabledChanged - changes SnapToggleIcon to
+	// the colour of the magnet (Icon_Snap: blue on, grey off) so it stays correct even when toggled via the N key.
 	// Parameter isn't called bIsEnabled - that shadows UWidget's own bIsEnabled property.
 	UFUNCTION()
 	void HandleSnapEnabledChanged(bool bNewSnapEnabled);
