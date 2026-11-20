@@ -325,7 +325,7 @@ static bool IsPointClearlyInsidePolygon(const FVector2D& Point, const TArray<FVe
 // ToleranceUnits is a "how close counts as touching, not overlapping" distance, in FootprintA/
 // FootprintB's OWN units - most callers pass footprint-space (pre-scale) points, in which case this
 // should be a small WORLD distance divided by Generator->GetScale() (not a bare constant - a
-// footprint-unit value calibrated for buildings.json's own Scale~10 reads as 10x too generous for a
+// footprint-unit value calibrated for the test fixture's own Scale~10 reads as 10x too generous for a
 // database-loaded building's Scale~100, which is exactly what let two connectors' footprints overlap
 // without being caught - see project memory), but at least one caller (CanPlaceConnectorOnFloor's
 // building-vs-building check) already converts both footprints to world space first, and should pass

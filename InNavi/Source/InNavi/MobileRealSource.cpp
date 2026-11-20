@@ -149,6 +149,20 @@ public:
 	FRouteJob(TSharedPtr<FProject> Project, FMobilePlace InDestination, FMobilePlace InStart, const FMobileRouteRequest& InRequest)
 		: ProjectData(MoveTemp(Project)), Destination(MoveTemp(InDestination)), Start(MoveTemp(InStart)), Request(InRequest)
 	{
+		StartValidation();
+	}
+	// The job that gets the route graph of the project ready ahead of time (IMobileNavSource::BeginWarmup): it does what a route does up to the search,
+	// then lets the graph be made on a worker, and is done when that is.
+	explicit FRouteJob(TSharedPtr<FProject> Project) : ProjectData(MoveTemp(Project)), bWarmupOnly(true)
+	{
+		StartValidation();
+	}
+
+	bool Step(double BudgetSeconds, FMobileRoute& OutRoute) override;
+
+private:
+	void StartValidation()
+	{
 		if (!ProjectData->Validation.IsValid())
 		{
 			// The project JSON is immutable. Only the data validator runs on the worker.
@@ -158,10 +172,6 @@ public:
 			}).Share();
 		}
 	}
-
-	bool Step(double BudgetSeconds, FMobileRoute& OutRoute) override;
-
-private:
 	FMobileRoute BuildRoute(const FNavigationRouteResult& Planned) const;
 	TSharedPtr<FProject> ProjectData;
 	FMobilePlace Destination;
@@ -173,6 +183,9 @@ private:
 	int32 NextBuilding = 0;
 	FNavigationRoutePoint To;
 	TUniquePtr<FNavigationRouteJob> Planner;
+	bool bWarmupOnly = false;
+	// Declared after Context: it reads the buildings of Context, so it is stopped (and waited for) before they go.
+	TUniquePtr<FNavigationGraphWarmup> Warmup;
 };
 
 FMobileRealSource::~FMobileRealSource() = default;
@@ -213,6 +226,12 @@ FMobileRealSource::FMobileRealSource(ABuildingGenerator* Generator, AInteriorGen
 
 TSharedRef<IMobileNavSource> FMobileRealSource::FromWorld(UWorld* World)
 {
+	// The graphs the first route would have to make are kept in files (and the ones that come with the app, in Data/RouteGraphs, are read). Not while the
+	// automation tests run: the setting is global, and a test of the graph must not find the files another test left.
+	if (!GIsAutomationTesting)
+	{
+		FNavigationRoutePlanner::SetGraphFiles(FPaths::ProjectSavedDir() / TEXT("RouteGraphs"), FPaths::ProjectDir() / TEXT("Data") / TEXT("RouteGraphs"));
+	}
 	FString ExplicitProject;
 	if (FParse::Value(FCommandLine::Get(), TEXT("MobileProject="), ExplicitProject))
 		return MakeShared<FMobileRealSource>(FPaths::ConvertRelativePathToFull(ExplicitProject));
@@ -452,6 +471,13 @@ FMobileRoute FMobileRealSource::FindRoute(const FMobileRouteRequest& Request)
 	return Route;
 }
 
+TUniquePtr<IMobileRouteJob> FMobileRealSource::BeginWarmup(const FString& SiteId)
+{
+	if (Projects.IsEmpty()) return nullptr;
+	const TSharedPtr<FProject>* Found = Projects.FindByPredicate([&](const auto& Item) { return Item->Site.Id == SiteId; });
+	return MakeUnique<FRouteJob>(Found ? *Found : Projects[0]);
+}
+
 TUniquePtr<IMobileRouteJob> FMobileRealSource::BeginRoute(const FMobileRouteRequest& Request)
 {
 	using namespace MobileRealData;
@@ -518,6 +544,14 @@ bool FMobileRealSource::FRouteJob::Step(double BudgetSeconds, FMobileRoute& OutR
 		return false;
 	}
 
+	if (bWarmupOnly)
+	{
+		if (!Warmup) Warmup = MakeUnique<FNavigationGraphWarmup>(*Context->Generator, *Context->Interior);
+		if (!Warmup->IsDone()) return false;
+		OutRoute = Failure(TEXT("This was only getting the route graph ready."));
+		return true;
+	}
+
 	To.BuildingId = Project.RawBuildingIds.FindChecked(Destination.BuildingId);
 	To.Floor = Destination.Level;
 	if (!FNavigationRoutePlanner::FindRoomDestination(*Context->Generator, *Context->Interior, To.BuildingId, To.Floor, Project.RoomShapes.FindChecked(Destination.Id), To.Position))
@@ -543,6 +577,8 @@ bool FMobileRealSource::FRouteJob::Step(double BudgetSeconds, FMobileRoute& OutR
 	FNavigationRoutePreferences Preferences; Preferences.bAllowLift = Request.Preferences.bAllowLift;
 	Preferences.bAllowStairs = Request.Preferences.bAllowStairs; Preferences.bAllowEscalator = Request.Preferences.bAllowEscalator;
 	Planner = MakeUnique<FNavigationRouteJob>(*Context->Generator, *Context->Interior, From, To, Preferences);
+	// Context is a world of this job's own: nothing changes its buildings meanwhile, so the graph can be joined on a worker at full speed.
+	Planner->AllowWorkerThread();
 	StagedProject.Reset();
 	return false;
 }

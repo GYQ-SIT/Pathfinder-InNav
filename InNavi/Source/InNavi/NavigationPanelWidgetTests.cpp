@@ -95,7 +95,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationPanelOutdoorPresentationTest,
 	AInteriorGenerator* Interior = World->SpawnActor<AInteriorGenerator>();
 	Interior->DispatchBeginPlay();
 
-	const FString DataPath = FPaths::ProjectDir() / TEXT("Data") / TEXT("buildings.json");
+	const FString DataPath = FPaths::ProjectDir() / TEXT("../docs/test-data/e2-test-fixture.json");
 	TestTrue(TEXT("Example building data loads"), Generator->LoadBuildingsFromFile(DataPath) > 0);
 	TestTrue(TEXT("E1 interior loads"), Interior->LoadInteriorForBuilding(TEXT("E1")) >= 0);
 	APolyBuilding* Building = Generator->FindBuildingById(TEXT("E1"));
@@ -168,7 +168,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FNavigationPanelStopsTest,
 	AInteriorGenerator* Interior = World->SpawnActor<AInteriorGenerator>();
 	Interior->DispatchBeginPlay();
 
-	const FString DataPath = FPaths::ProjectDir() / TEXT("Data") / TEXT("buildings.json");
+	const FString DataPath = FPaths::ProjectDir() / TEXT("../docs/test-data/e2-test-fixture.json");
 	TestTrue(TEXT("Example building data loads"), Generator->LoadBuildingsFromFile(DataPath) > 0);
 	TestTrue(TEXT("E2 interior loads"), Interior->LoadInteriorForBuilding(TEXT("E2")) >= 0);
 	UNavigationPanelWidget* Panel = NewObject<UNavigationPanelWidget>();
@@ -238,7 +238,7 @@ bool FNavigationJourneyTest::RunTest(const FString& Parameters)
 	ABuildingGenerator* Generator = World->SpawnActor<ABuildingGenerator>();
 	AInteriorGenerator* Interior = World->SpawnActor<AInteriorGenerator>();
 	Interior->DispatchBeginPlay();
-	TestTrue(TEXT("Example building data loads"), Generator->LoadBuildingsFromFile(FPaths::ProjectDir() / TEXT("Data") / TEXT("buildings.json")) > 0);
+	TestTrue(TEXT("Example building data loads"), Generator->LoadBuildingsFromFile(FPaths::ProjectDir() / TEXT("../docs/test-data/e2-test-fixture.json")) > 0);
 	TestTrue(TEXT("E2 interior loads"), Interior->LoadInteriorForBuilding(TEXT("E2")) >= 0);
 	UNavigationPanelWidget* Panel = NewObject<UNavigationPanelWidget>();
 	Panel->SetNavigationContext(Generator, Interior);
@@ -359,7 +359,7 @@ bool FNavigationClickStopsTest::RunTest(const FString& Parameters)
 	ABuildingGenerator* Generator = World->SpawnActor<ABuildingGenerator>();
 	AInteriorGenerator* Interior = World->SpawnActor<AInteriorGenerator>();
 	Interior->DispatchBeginPlay();
-	Generator->LoadBuildingsFromFile(FPaths::ProjectDir() / TEXT("Data") / TEXT("buildings.json"));
+	Generator->LoadBuildingsFromFile(FPaths::ProjectDir() / TEXT("../docs/test-data/e2-test-fixture.json"));
 	Interior->LoadInteriorForBuilding(TEXT("E2"));
 	UNavigationPanelWidget* Panel = NewObject<UNavigationPanelWidget>();
 	Panel->SetNavigationContext(Generator, Interior);

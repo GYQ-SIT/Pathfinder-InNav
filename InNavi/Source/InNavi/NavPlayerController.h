@@ -348,8 +348,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	FString BrowseForBuildingDataFile();
 
-	// Loads a buildings.json-format file from an explicit path (typically one
-	// BrowseForBuildingDataFile just returned) the same way the startup buildings.json is loaded.
+	// Loads a project-format file from an explicit path (typically one
+	// BrowseForBuildingDataFile just returned) the same way the startup project is loaded.
 	// Replaces the open project only after the incoming buildings load successfully.
 	// On success, this also becomes the file SaveCurrentProject (Ctrl+S) writes back to.
 	// Returns how many buildings were spawned.
@@ -379,7 +379,7 @@ public:
 	// in the level - what any footprint-space size/distance constant (snap tolerance, prefab room
 	// size, etc.) should divide by to convert to a fixed WORLD size, instead of assuming footprint
 	// units are already sanely sized (see PlacePrefabRoomAt's own comment - that assumption breaks
-	// for a database-loaded building, where Scale is much larger than buildings.json's own ~10).
+	// for a database-loaded building, where Scale is much larger than the test fixture's own ~10).
 	UFUNCTION(BlueprintPure, Category = "Building")
 	float GetBuildingScale() const;
 	ULayoutValidationSession* GetLayoutValidationSession();
@@ -1278,7 +1278,7 @@ public:
 
 	// Lists every playable audio file (.wav) currently sitting in InNavi/Data/Audio/ - just
 	// filenames, sorted, for the Audio panel to list (mirrors the Data/ folder convention
-	// buildings.json already uses - a raw folder next to the .uproject, not imported UE assets).
+	// the project files already use - a raw folder next to the .uproject, not imported UE assets).
 	// Rescans the folder on every call rather than caching it, so a file dropped in while the app is
 	// running shows up the next time the panel refreshes, no restart needed. Empty if the folder
 	// doesn't exist yet.

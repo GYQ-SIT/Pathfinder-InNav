@@ -56,7 +56,7 @@ void UDesktopMemoryCaptureSubsystem::Tick(float DeltaTime)
 	{
 		if (!GetWorld() || !GetWorld()->GetFirstPlayerController()) return;
 		Controller = Cast<ANavPlayerController>(GetWorld()->GetFirstPlayerController());
-		for (TActorIterator<ABuildingGenerator> It(GetWorld()); It; ++It) { Generator = *It; break; }
+		if (TActorIterator<ABuildingGenerator> It(GetWorld()); It) { Generator = *It; }
 		UGameViewportClient* Viewport = GetGameInstance()->GetGameViewportClient();
 		if (!Controller.IsValid() || !Generator.IsValid() || !Viewport || !Viewport->Viewport
 			|| FParse::Param(FCommandLine::Get(), TEXT("nullrhi"))) { Finish(TEXT("Rendered desktop world/viewport unavailable.")); return; }
