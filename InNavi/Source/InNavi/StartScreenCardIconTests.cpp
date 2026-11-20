@@ -28,7 +28,10 @@ bool FStartScreenCardIconsTest::RunTest(const FString& Parameters)
 			TestTrue(*FString::Printf(TEXT("%s is the picture when its texture is imported"), Card.Widget), Cast<UImage>(Icon) != nullptr);
 			// An icon with transparent edges has to be uncompressed and without mips, or its edges turn into a solid square.
 			TestTrue(*FString::Printf(TEXT("%s is Uncompressed (RGBA8)"), Card.Asset), Texture->CompressionSettings == TC_EditorIcon);
+#if WITH_EDITORONLY_DATA
+			// (The import settings exist only in the editor; the Android build compiles this test too.)
 			TestTrue(*FString::Printf(TEXT("%s has no mipmaps"), Card.Asset), Texture->MipGenSettings == TMGS_NoMipmaps);
+#endif
 		}
 		else
 		{
