@@ -16,6 +16,9 @@ class INNAVI_API UProjectCardWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	// The card is drawn this much smaller than it is laid out (on top of the library page's own PageScale): at the page's scale a card was too big.
+	static constexpr float CardScale = 0.85f;
+
 	// Has to be called before the card is shown.
 	void SetEntry(const FProjectLibraryEntry& InEntry) { Entry = InEntry; }
 	const FProjectLibraryEntry& GetEntry() const { return Entry; }

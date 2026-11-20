@@ -22,6 +22,10 @@ class INNAVI_API UProjectLibraryWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	// The whole page is drawn this much bigger than it is laid out, so that its Back button is as big as the start screen's Quit button (120 x 44, label 17;
+	// the page was laid out with 12-pixel labels): the fonts, the icons, the cards and the spaces between them all grow together.
+	static constexpr float PageScale = 17.f / 12.f;
+
 	// Looks at the folder again and rebuilds the cards (those matching the search).
 	void Refresh();
 
@@ -74,11 +78,16 @@ private:
 	UTextBlock* MessageText = nullptr;
 	UPROPERTY()
 	UTextBlock* EmptyText = nullptr;
+	// The open folder over the words when there is nothing to show (null while its texture is not imported).
+	UPROPERTY()
+	UWidget* EmptyIconWidget = nullptr;
 	UPROPERTY()
 	UWrapBox* Grid = nullptr;
 	// The page content: as wide as the window allows, up to 1580 design pixels, centred (see NativeTick).
 	UPROPERTY()
 	USizeBox* ContentLimit = nullptr;
+	UPROPERTY()
+	USizeBox* ContentInner = nullptr;
 	UPROPERTY()
 	UButton* NewButton = nullptr;
 	UPROPERTY()

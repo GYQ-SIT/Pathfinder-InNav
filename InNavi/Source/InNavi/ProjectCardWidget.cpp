@@ -1,5 +1,6 @@
 #include "ProjectCardWidget.h"
 
+#include "EditorIcons.h"
 #include "NavPlayerController.h"
 #include "StartScreenStyle.h"
 
@@ -11,6 +12,7 @@
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Overlay.h"
 #include "Components/OverlaySlot.h"
+#include "Components/ScaleBox.h"
 #include "Components/SizeBox.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
@@ -32,9 +34,14 @@ TSharedRef<SWidget> UProjectCardWidget::RebuildWidget()
 		using namespace StartStyle;
 		const FString Base = TEXT("Card");
 
+		// The card is laid out 378 wide and drawn CardScale of that: everything on it (the fonts, the icons, the spaces) shrinks together.
+		UScaleBox* Scaler = WidgetTree->ConstructWidget<UScaleBox>(UScaleBox::StaticClass(), TEXT("CardScale"));
+		Scaler->SetStretch(EStretch::UserSpecified);
+		Scaler->SetUserSpecifiedScale(CardScale);
+		WidgetTree->RootWidget = Scaler;
 		USizeBox* Root = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("CardRoot"));
 		Root->SetWidthOverride(378.f * DesignToUi);
-		WidgetTree->RootWidget = Root;
+		Scaler->SetContent(Root);
 
 		UBorder* Panel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("CardPanel"));
 		Panel->SetBrush(Rounded(Rgb(27, 43, 66), Rgb(44, 60, 84), 10.f));
@@ -152,14 +159,16 @@ TSharedRef<SWidget> UProjectCardWidget::RebuildWidget()
 
 		// Open (wide), Duplicate, Rename.
 		UHorizontalBox* Buttons = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("CardButtons"));
-		auto AddButton = [this, Buttons](const TCHAR* ButtonName, const TCHAR* Label, const FButtonStyle& Style, bool bFill, float MinWidth, float LeftPadding) -> UButton*
+		// The label is next to the design team's icon when its texture is imported (IconAsset); until then FallbackLabel stands alone.
+		auto AddButton = [this, Buttons](const TCHAR* ButtonName, const TCHAR* Label, const TCHAR* FallbackLabel, const TCHAR* IconAsset, const FButtonStyle& Style, bool bFill, float MinWidth, float LeftPadding) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(ButtonName));
 			Button->SetStyle(Style);
 			Button->SetBackgroundColor(FLinearColor::White);
-			UTextBlock* Caption = Text(WidgetTree, FString(ButtonName) + TEXT("Label"), Label, 12.f, FLinearColor::White, true);
+			const bool bIcon = EditorIcons::Load(IconAsset) != nullptr;
+			UTextBlock* Caption = Text(WidgetTree, FString(ButtonName) + TEXT("Label"), bIcon ? Label : FallbackLabel, 12.f, FLinearColor::White, true);
 			Caption->SetJustification(ETextJustify::Center);
-			Button->SetContent(Caption);
+			Button->SetContent(EditorIcons::IconAndLabel(WidgetTree, FString(ButtonName), IconAsset, 13.f * DesignToUi, 5.f * DesignToUi, Caption, FLinearColor::White));
 			USizeBox* Size = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(ButtonName) + TEXT("Size")));
 			Size->SetMinDesiredWidth(MinWidth * DesignToUi);
 			Size->SetHeightOverride(39.f * DesignToUi);
@@ -172,9 +181,9 @@ TSharedRef<SWidget> UProjectCardWidget::RebuildWidget()
 			}
 			return Button;
 		};
-		OpenButton = AddButton(TEXT("Btn_OpenProject"), TEXT("Open project →"), PrimaryButton(), true, 120.f, 0.f);
-		DuplicateButton = AddButton(TEXT("Btn_DuplicateProject"), TEXT("Duplicate"), SecondaryButton(), false, 74.f, 8.f);
-		RenameButton = AddButton(TEXT("Btn_RenameProject"), TEXT("Rename"), SecondaryButton(), false, 66.f, 8.f);
+		OpenButton = AddButton(TEXT("Btn_OpenProject"), TEXT("Open"), TEXT("Open →"), TEXT("Icon_OpenProject"), PrimaryButton(), true, 70.f, 0.f);
+		DuplicateButton = AddButton(TEXT("Btn_DuplicateProject"), TEXT("Duplicate"), TEXT("Duplicate"), TEXT("Icon_Duplicate"), SecondaryButton(), false, 74.f, 8.f);
+		RenameButton = AddButton(TEXT("Btn_RenameProject"), TEXT("Rename"), TEXT("Rename"), TEXT("Icon_Rename"), SecondaryButton(), false, 66.f, 8.f);
 
 		// Delete: a square button with a trash can drawn from bars, red when hovered.
 		DeleteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_DeleteProject"));
@@ -208,7 +217,15 @@ TSharedRef<SWidget> UProjectCardWidget::RebuildWidget()
 		AddTrashPart(TEXT("TrashLineLeft"), 6.f, 9.f, 2.f, 8.f, nullptr, TrashColor);
 		AddTrashPart(TEXT("TrashLineRight"), 10.f, 9.f, 2.f, 8.f, nullptr, TrashColor);
 		TrashSize->SetContent(Trash);
-		DeleteButton->SetContent(TrashSize);
+		// The design team's trash can when its texture is imported; until then the one drawn from bars above.
+		if (UWidget* TrashIcon = EditorIcons::Picture(WidgetTree, TEXT("TrashIcon"), TEXT("Icon_Delete"), 20.f * DesignToUi, TrashColor))
+		{
+			DeleteButton->SetContent(TrashIcon);
+		}
+		else
+		{
+			DeleteButton->SetContent(TrashSize);
+		}
 		USizeBox* DeleteBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Btn_DeleteProjectSize"));
 		DeleteBox->SetWidthOverride(39.f * DesignToUi);
 		DeleteBox->SetHeightOverride(39.f * DesignToUi);
