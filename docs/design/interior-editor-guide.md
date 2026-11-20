@@ -579,12 +579,17 @@ take (with building names, not ids), and "Step N: **Arrive at ...**" - the last 
 Route** hides or restores the route lines, direction arrows, markers and written steps without clearing the route.
 
 **Full Route View.** On either Plan or Go, click **Full Route View** after finding a route. The camera moves out and frames the entire
-route (not the whole building: a short route in a big building stays readable), with a margin that adapts to the window's aspect ratio.
-The walls, roofs and slabs of the building the route is in become very transparent, and its rooms and lifts stay, drawn see-through, so
-the route is seen against them. Every floor the route goes through is outlined at its level. Every floor and leg is shown together at full
-brightness, with continuous connector lines between floors, Start/Destination markers and numbered stops; there are no texts in the overview
-(the steps are in the panel). Route lines remain visible through the building and ground, including basement routes. Other buildings are
-faded, not hidden, so it is seen where the route is.
+route, with a margin that adapts to the window's aspect ratio (it looks down more steeply when a building the route has nothing to do with
+would be in the way). The overview shows only the floors the route goes through and pulls them apart, evenly (2.5 floor heights between
+two of them, however far apart they really are), so that the part of the route on each floor can be told from the others and a route across
+many floors is read at a glance. The floors are therefore not at their real heights in this view. Each of them is outlined and has a plate in
+the shape of its building (grey, about 70% see-through, so the floor below shows through), with its rooms and lifts on it as they are: the
+rooms and the lifts keep their solid look and their colours. The floors the route does not use, and the shell of the buildings the route is
+in, are not drawn. A route that goes on into another building pulls that building's floors apart too; its rooms are made for the overview from
+its stored data, as in the campus x-ray, and so are its lifts, stairs and escalators, for the floors the route uses. Every building the route
+has nothing to do with stays as it is, solid. Every floor and leg is shown together at full brightness, with the connector lines between
+floors, Start/Destination markers and numbered stops, all drawn thicker the larger the route is; there are no texts in the overview (the steps
+are in the panel). Route lines remain visible through the ground and the buildings, including basement routes.
 
 Click **Return to Previous View** or press **Esc** to restore the previous camera and zoom, 2D/3D editing view and building visibility.
 The overview is read-only and does not change project data, route points or the selected step. Choosing another floor, continuing

@@ -80,6 +80,8 @@ public:
 	static FLinearColor LegColor2D(int32 LegIndex);
 	static TArray<FNavigationDirectionArrow2D> BuildDirectionArrows2D(FVector2D From, FVector2D To);
 	void ShowView(const FNavigation3DView& View);
+	// How much bigger than usual ShowView draws the lines, arrows and balls (the full route overview, seen from far, asks for more than 1).
+	void SetDisplayScale(float Scale) { DisplayScale = FMath::Max(Scale, 0.1f); }
 	static FNavigation3DView TransformView(const FNavigation3DView& View, const FTransform& Transform);
 	void ClearRoute();
 
@@ -90,4 +92,5 @@ protected:
 private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTextRenderComponent>> RouteLabels;
+	float DisplayScale = 1.f;
 };
