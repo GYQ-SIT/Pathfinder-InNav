@@ -19,6 +19,8 @@ class INNAVI_API UStartScreenWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	// A widget of the screen by name (for tests): "Btn_NewIcon" and "Btn_OpenIcon" are the pictures on the two cards, or their symbols while the textures are not imported.
+	class UWidget* FindNamedWidgetForTests(const FName& Name) const;
 	UStartScreenWidget(const FObjectInitializer& ObjectInitializer);
 
 	// The whole screen is in front of the 3D scene (the buildings of the project that was open are still in it): a click on it must not reach
