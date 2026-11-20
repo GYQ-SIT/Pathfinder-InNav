@@ -49,23 +49,31 @@ namespace
 	}
 
 	// A ConnectorSlab whose top never goes over ZMax: where the centre line plus Above would pass it, the slab goes on flat at ZMax (a handrail that
-	// has to stay under the slab above ends in a level stretch).
+	// has to stay under the slab above ends in a level stretch). The centre line may rise or fall from X0 to X1.
 	void ConnectorClippedSlab(FConnectorPart& Part, float X0, float Z0, float X1, float Z1, float Below, float Above, float ZMax, float Y0, float Y1)
 	{
 		const float Limit = ZMax - Above;
-		if (Z0 >= Limit)
-		{
-			ConnectorSlab(Part, X0, Limit, X1, Limit, Below, Above, Y0, Y1);
-		}
-		else if (Z1 <= Limit)
+		if (Z0 <= Limit && Z1 <= Limit)
 		{
 			ConnectorSlab(Part, X0, Z0, X1, Z1, Below, Above, Y0, Y1);
+		}
+		else if (Z0 >= Limit && Z1 >= Limit)
+		{
+			ConnectorSlab(Part, X0, Limit, X1, Limit, Below, Above, Y0, Y1);
 		}
 		else
 		{
 			const float XCorner = X0 + (X1 - X0) * (Limit - Z0) / (Z1 - Z0);
-			ConnectorSlab(Part, X0, Z0, XCorner, Limit, Below, Above, Y0, Y1);
-			ConnectorSlab(Part, XCorner, Limit, X1, Limit, Below, Above, Y0, Y1);
+			if (Z0 < Limit)
+			{
+				ConnectorSlab(Part, X0, Z0, XCorner, Limit, Below, Above, Y0, Y1);
+				ConnectorSlab(Part, XCorner, Limit, X1, Limit, Below, Above, Y0, Y1);
+			}
+			else
+			{
+				ConnectorSlab(Part, X0, Limit, XCorner, Limit, Below, Above, Y0, Y1);
+				ConnectorSlab(Part, XCorner, Limit, X1, Z1, Below, Above, Y0, Y1);
+			}
 		}
 	}
 
@@ -243,21 +251,29 @@ void AInteriorConnectorMarker::BuildElevatorShaft(const FVector2D& WorldCenter, 
 
 void AInteriorConnectorMarker::BuildStairs(const FVector2D& WorldCenter, float FloorBaseZ, float FloorHeight, float RotationDegrees, float SizeScale)
 {
-	// One straight flight rising along +X: a tread and a riser for every step, a stringer along each side, a baluster every third step and a
-	// handrail on both sides that levels out under the slab above.
+	// A switchback, as in a stairwell: one flight rises along +X on one side up to a landing at the far end (half a floor up), and a second
+	// flight, beside it, comes back along -X to the floor above, ending right over where the first one began. So the segments of the floors
+	// stack into one continuous stairwell instead of a row of ramps all leaning the same way. Each flight has a tread and a riser for every
+	// step, a stringer on its outer side, and handrails (outside and along the well between the flights) that level out under the slab above.
 	const FVector2D Half = GetConnectorFootprintHalfSize(EInteriorNavNodeType::Stairs);
 	const float HX = Half.X;
 	const float HY = Half.Y;
-	const float Depth = HX * 2.f;
 	const float Base = FloorBaseZ;
+	const float Mid = FloorBaseZ + FloorHeight * 0.5f;
 	const float Top = FloorBaseZ + FloorHeight - SlabClearance;
-	// About 20 cm to a step. (The rise is not part of the footprint TransformFootprintVertices scales: a scaled-up connector gets a wider, deeper
+	constexpr float LandingDepth = 44.f;
+	constexpr float Wall = 8.f;
+	constexpr float Well = 8.f;
+	const float RunEnd = HX - LandingDepth;
+	const float RunLength = RunEnd + HX;
+	// About 19 cm to a step. (The rise is not part of the footprint TransformFootprintVertices scales: a scaled-up connector gets a wider, deeper
 	// staircase, not a taller one.)
-	const int32 NumSteps = FMath::Clamp(FMath::RoundToInt(FloorHeight / 20.f), 8, 24);
-	const float StepDepth = Depth / NumSteps;
-	const float StepRise = FloorHeight / NumSteps;
-	// The line the noses of the treads lie on (a little below at the first step, at the top of the last).
-	auto NoseZ = [&](float X) { return Base + StepRise + (FloorHeight - StepRise) * (X + HX) / Depth; };
+	const int32 FlightSteps = FMath::Clamp(FMath::RoundToInt(FloorHeight * 0.5f / 19.f), 4, 12);
+	const float StepDepth = RunLength / FlightSteps;
+	const float StepRise = FloorHeight * 0.5f / FlightSteps;
+	// Flight A (rising along +X) lies on the -Y side, flight B (coming back along -X) on the +Y side.
+	const float AY0 = -HY + Wall, AY1 = -Well * 0.5f;
+	const float BY0 = Well * 0.5f, BY1 = HY - Wall;
 
 	TArray<FConnectorPart> Parts;
 	Parts.SetNum(4);
@@ -270,43 +286,69 @@ void AInteriorConnectorMarker::BuildStairs(const FVector2D& WorldCenter, float F
 	Structure.Color = FLinearColor(0.34f, 0.35f, 0.38f);
 	Rails.Color = FLinearColor(0.20f, 0.21f, 0.23f);
 
-	const float TreadHalfWidth = HY - 8.f;
-	for (int32 Step = 0; Step < NumSteps; ++Step)
+	for (int32 Step = 0; Step < FlightSteps; ++Step)
 	{
-		const float X0 = -HX + Step * StepDepth;
-		// The last tread ends a little under the slab above, not in its plane (see SlabClearance).
-		const float TreadTop = Base + (Step + 1) * StepRise - (Step + 1 == NumSteps ? SlabClearance : 0.f);
-		ConnectorBox(Treads, X0, FMath::Min(X0 + StepDepth + 2.f, HX), -TreadHalfWidth, TreadHalfWidth, TreadTop - 4.f, TreadTop);
-		ConnectorBox(Risers, X0, X0 + 3.f, -TreadHalfWidth, TreadHalfWidth, Base + Step * StepRise, TreadTop - 4.f);
+		// Flight A: the step begins at XLow and its riser is on its low side.
+		const float XLow = -HX + Step * StepDepth;
+		const float TopA = Base + (Step + 1) * StepRise;
+		ConnectorBox(Treads, XLow, FMath::Min(XLow + StepDepth + 2.f, RunEnd), AY0, AY1, TopA - 4.f, TopA);
+		ConnectorBox(Risers, XLow, XLow + 3.f, AY0, AY1, Base + Step * StepRise, TopA - 4.f);
+		// Flight B: it climbs towards -X, so the step ends at XHigh (its riser is on its high side). The last tread ends a little under the slab
+		// above, not in its plane (see SlabClearance).
+		const float XHigh = RunEnd - Step * StepDepth;
+		const float TopB = Mid + (Step + 1) * StepRise - (Step + 1 == FlightSteps ? SlabClearance : 0.f);
+		ConnectorBox(Treads, FMath::Max(XHigh - StepDepth - 2.f, -HX), XHigh, BY0, BY1, TopB - 4.f, TopB);
+		ConnectorBox(Risers, XHigh - 3.f, XHigh, BY0, BY1, Mid + Step * StepRise, TopB - 4.f);
 	}
 
-	// A stringer along each side, carrying the treads; it ends under the top of the last tread.
-	for (const float SignY : { -1.f, 1.f })
+	// The landing at the far end, half a floor up, on four posts.
+	ConnectorBox(Treads, RunEnd, HX, -HY + Wall, HY - Wall, Mid - 4.f, Mid);
+	ConnectorBox(Structure, RunEnd, HX, -HY, HY, Mid - 12.f, Mid - 4.f);
+	for (const float PostY : { -HY + 6.f, HY - 6.f })
 	{
-		const float Y0 = SignY > 0.f ? HY - 8.f : -HY;
-		ConnectorSlab(Structure, -HX, Base + StepRise * 0.5f, HX, Base + FloorHeight - StepRise * 0.5f - 4.f, 10.f, 8.f, Y0, Y0 + 8.f);
+		ConnectorBox(Structure, HX - 10.f, HX - 2.f, PostY - 4.f, PostY + 4.f, Base, Mid - 12.f);
 	}
 
-	// The handrail: about 90 cm over the noses, ending in a level stretch under the slab above; balusters under it, and a newel at each end.
+	// A stringer along the outer side of each flight, and a beam in the well between them; they end under the tread tops.
+	ConnectorSlab(Structure, -HX, Base + StepRise * 0.5f, RunEnd, Mid - StepRise * 0.5f - 3.f, 10.f, 8.f, -HY, -HY + Wall);
+	ConnectorSlab(Structure, -HX, Base + FloorHeight - StepRise * 0.5f - 3.f, RunEnd, Mid + StepRise * 0.5f, 10.f, 8.f, HY - Wall, HY);
+	ConnectorSlab(Structure, -HX, Base + StepRise * 0.5f, RunEnd, Mid - StepRise * 0.5f - 3.f, 10.f, 8.f, -Well * 0.5f, 0.f);
+	ConnectorSlab(Structure, -HX, Base + FloorHeight - StepRise * 0.5f - 3.f, RunEnd, Mid + StepRise * 0.5f, 10.f, 8.f, 0.f, Well * 0.5f);
+
+	// The handrails, about 90 cm over the noses: flight A rises with its steps, flight B falls from the top as the steps rise towards it.
 	const float RailTop = Top - 4.f;
-	auto RailZ = [&](float X) { return FMath::Min(NoseZ(X) + 90.f, RailTop); };
-	for (const float SignY : { -1.f, 1.f })
+	auto NoseA = [&](float X) { return Base + StepRise + (Mid - Base - StepRise) * (X + HX) / RunLength; };
+	auto NoseB = [&](float X) { return Mid + StepRise + (Top - SlabClearance - Mid - StepRise) * (RunEnd - X) / RunLength; };
+	for (const float RailY : { -(HY - 4.f), -2.f })
 	{
-		const float RailY = SignY * (HY - 4.f);
-		ConnectorClippedSlab(Rails, -HX, NoseZ(-HX) + 90.f, HX, NoseZ(HX) + 90.f, 2.5f, 2.5f, Top, RailY - 2.5f, RailY + 2.5f);
-		for (int32 Step = 0; Step < NumSteps; Step += 3)
-		{
-			const float X = -HX + (Step + 0.5f) * StepDepth;
-			const float Z0 = Base + (Step + 1) * StepRise;
-			const float Z1 = RailZ(X) - 2.5f;
-			if (Z1 > Z0 + 10.f)
-			{
-				ConnectorBox(Rails, X - 1.5f, X + 1.5f, RailY - 1.5f, RailY + 1.5f, Z0, Z1);
-			}
-		}
-		ConnectorBox(Rails, -HX + 1.f, -HX + 7.f, RailY - 3.f, RailY + 3.f, Base, FMath::Min(NoseZ(-HX + 4.f) + 100.f, RailTop));
-		ConnectorBox(Rails, HX - 7.f, HX - 1.f, RailY - 3.f, RailY + 3.f, Top - 70.f, RailTop);
+		ConnectorClippedSlab(Rails, -HX, NoseA(-HX) + 90.f, RunEnd, NoseA(RunEnd) + 90.f, 2.5f, 2.5f, Top, RailY - 2.5f, RailY + 2.5f);
 	}
+	for (const float RailY : { HY - 4.f, 2.f })
+	{
+		ConnectorClippedSlab(Rails, -HX, NoseB(-HX) + 90.f, RunEnd, NoseB(RunEnd) + 90.f, 2.5f, 2.5f, Top, RailY - 2.5f, RailY + 2.5f);
+	}
+	// Round the landing: the outer rails go on level at the height of the landing, and a rail with posts closes its far edge.
+	for (const float RailY : { -(HY - 4.f), HY - 4.f })
+	{
+		ConnectorBox(Rails, RunEnd, HX - 1.f, RailY - 2.5f, RailY + 2.5f, Mid + 87.5f, Mid + 92.5f);
+		ConnectorBox(Rails, HX - 7.f, HX - 1.f, RailY - 3.f, RailY + 3.f, Mid, Mid + 90.f);
+	}
+	ConnectorBox(Rails, HX - 4.f, HX - 1.f, -(HY - 4.f), HY - 4.f, Mid + 87.5f, Mid + 92.5f);
+	ConnectorBox(Rails, HX - 4.f, HX - 1.f, -1.5f, 1.5f, Mid, Mid + 90.f);
+	// Balusters under the outer rails, every second step, and a newel where flight A begins and where flight B ends.
+	for (int32 Step = 0; Step < FlightSteps; Step += 2)
+	{
+		const float XA = -HX + (Step + 0.5f) * StepDepth;
+		const float ZA0 = Base + (Step + 1) * StepRise;
+		const float ZA1 = FMath::Min(NoseA(XA) + 90.f, RailTop) - 2.5f;
+		if (ZA1 > ZA0 + 10.f) ConnectorBox(Rails, XA - 1.5f, XA + 1.5f, -(HY - 4.f) - 1.5f, -(HY - 4.f) + 1.5f, ZA0, ZA1);
+		const float XB = RunEnd - (Step + 0.5f) * StepDepth;
+		const float ZB0 = Mid + (Step + 1) * StepRise;
+		const float ZB1 = FMath::Min(NoseB(XB) + 90.f, RailTop) - 2.5f;
+		if (ZB1 > ZB0 + 10.f) ConnectorBox(Rails, XB - 1.5f, XB + 1.5f, HY - 4.f - 1.5f, HY - 4.f + 1.5f, ZB0, ZB1);
+	}
+	ConnectorBox(Rails, -HX + 1.f, -HX + 7.f, -(HY - 4.f) - 3.f, -(HY - 4.f) + 3.f, Base, FMath::Min(NoseA(-HX + 4.f) + 100.f, RailTop));
+	ConnectorBox(Rails, -HX + 1.f, -HX + 7.f, HY - 4.f - 3.f, HY - 4.f + 3.f, Top - 70.f, RailTop);
 
 	CommitParts(Parts, WorldCenter, RotationDegrees, SizeScale);
 }
@@ -365,7 +407,10 @@ void AInteriorConnectorMarker::BuildEscalator(const FVector2D& WorldCenter, floa
 	ConnectorBox(Plates, -HX, -HX + 24.f, -StepHalfWidth, StepHalfWidth, Base, Base + 3.f);
 	ConnectorBox(Plates, HX - 24.f, HX, -StepHalfWidth, StepHalfWidth, Top - 3.f, Top);
 
-	CommitParts(Parts, WorldCenter, RotationDegrees, SizeScale);
+	// The escalators of neighbouring floors rise the other way round (as in a shop, where each begins where the one below ends): the footprint
+	// is symmetric, so a turn by half a circle on every second floor keeps it, and the floors stack into a zigzag instead of a row of ramps.
+	const bool bOddFloor = (FMath::RoundToInt(FloorBaseZ / FMath::Max(FloorHeight, 1.f)) & 1) != 0;
+	CommitParts(Parts, WorldCenter, RotationDegrees + (bOddFloor ? 180.f : 0.f), SizeScale);
 }
 
 void AInteriorConnectorMarker::SetHighlighted(bool bHighlighted)
