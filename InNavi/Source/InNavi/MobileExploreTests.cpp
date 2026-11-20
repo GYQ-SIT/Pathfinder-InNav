@@ -4,6 +4,9 @@
 #include "MobileExplorePageWidget.h"
 #include "MobileMapWidget.h"
 #include "MobileMockSource.h"
+#include "MobileRealSource.h"
+#include "ProjectLibrary.h"
+#include "ImageUtils.h"
 #include "MobileNavigatePageWidget.h"
 #include "MobilePlacePageWidget.h"
 #include "MobileRoutePageWidget.h"
@@ -14,7 +17,11 @@
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "Engine/World.h"
+#include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
+#include "Misc/Paths.h"
 
 // The Explore tab: a card for each site, and opening one starts the app again for that site.
 
@@ -105,6 +112,42 @@ bool FMobileOpenSiteTest::RunTest(const FString& Parameters)
 	// A site that is not there changes nothing.
 	Screen->OpenSite(TEXT("nowhere"));
 	TestEqual(TEXT("an unknown site is ignored"), Screen->GetSiteId(), FString(TEXT("sit-punggol")));
+	World->DestroyWorld(false);
+	return true;
+}
+
+// A site whose project has a cover shows it on its card instead of the placeholder drawing; the others keep the drawing.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileExploreCoverTest, "InNavi.Mobile.ExplorePage.Cover", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileExploreCoverTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	UMobileExplorePageWidget* Page = CreateWidget<UMobileExplorePageWidget>(World, UMobileExplorePageWidget::StaticClass());
+	if (!TestNotNull(TEXT("the page is created"), Page)) return false;
+	Page->TakeWidget();
+	FMobileMockSource Mock;
+	Page->SetSource(&Mock);
+	TestEqual(TEXT("the prototype's sites have no covers"), Page->GetCoverCountForTests(), 0);
+
+	// A real project with a cover, and one without.
+	const FString Folder = FPaths::ProjectSavedDir() / TEXT("AutomationTemp") / FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	IFileManager::Get().MakeDirectory(*Folder, true);
+	FString Layout;
+	FFileHelper::LoadFileToString(Layout, *(FPaths::ProjectPluginsDir() / TEXT("InNaviLayoutValidator/Examples/valid-layout.json")));
+	FFileHelper::SaveStringToFile(Layout, *(Folder / TEXT("with.json")));
+	FFileHelper::SaveStringToFile(Layout, *(Folder / TEXT("without.json")));
+	TArray<FColor> Pixels; Pixels.Init(FColor(200, 30, 90, 255), 100 * 40);
+	FImageUtils::SaveImageByExtension(*(Folder / TEXT("picture.png")), FImageView(Pixels.GetData(), 100, 40));
+	FProjectLibraryEntry Entry; Entry.FileName = TEXT("with.json");
+	FString Error;
+	TestTrue(TEXT("a cover is set"), ProjectLibrary::SetCover(Entry, Folder / TEXT("picture.png"), Folder, Error));
+	{
+		FMobileRealSource Real(Folder);
+		Page->SetSource(&Real);
+		TestEqual(TEXT("a card for each project"), Page->GetShownSites().Num(), 2);
+		TestEqual(TEXT("one of them shows its cover"), Page->GetCoverCountForTests(), 1);
+		Page->SetSource(nullptr);
+	}
+	IFileManager::Get().DeleteDirectory(*Folder, false, true);
 	World->DestroyWorld(false);
 	return true;
 }
