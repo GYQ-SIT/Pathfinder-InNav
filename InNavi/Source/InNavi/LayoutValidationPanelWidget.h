@@ -55,7 +55,7 @@ private:
     ULayoutValidationSession* Session() const;
     void RebuildIssues();
     FString ScopeBuildingId() const;
-    UButton* AddButton(class UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label);
+    UButton* AddButton(class UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label, const TCHAR* IconAsset = nullptr);
     UTextBlock* AddText(class UPanelWidget* Parent, const FString& Text, FName Name);
     UPROPERTY() UComboBoxString* Scope = nullptr;
     UPROPERTY() UComboBoxString* Filter = nullptr;

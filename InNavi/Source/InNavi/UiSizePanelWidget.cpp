@@ -2,6 +2,7 @@
 
 #include "UiSizePanelWidget.h"
 
+#include "EditorIcons.h"
 #include "StartScreenStyle.h"
 #include "UiSize.h"
 #include "UiSizeSubsystem.h"
@@ -12,6 +13,7 @@
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
 #include "Components/Spacer.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
@@ -46,7 +48,7 @@ TSharedRef<SWidget> UUiSizePanelWidget::RebuildWidget()
 
 		// Smaller, the size now in a framed box, larger.
 		UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("UiSizeRow"));
-		auto AddStepButton = [this, Row](UButton*& OutButton, const TCHAR* Name, const TCHAR* TextName, const TCHAR* Label, const TCHAR* Hint)
+		auto AddStepButton = [this, Row](UButton*& OutButton, const TCHAR* Name, const TCHAR* TextName, const TCHAR* Label, const TCHAR* Hint, const TCHAR* IconAsset)
 		{
 			OutButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			OutButton->SetStyle(StartStyle::SecondaryButton());
@@ -58,14 +60,26 @@ TSharedRef<SWidget> UUiSizePanelWidget::RebuildWidget()
 			USizeBox* Size = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 			Size->SetWidthOverride(ControlHeight);
 			Size->SetHeightOverride(ControlHeight);
-			Size->SetContent(Glyph);
+			// The design team's lens (zoom out / zoom in) instead of the minus or plus, when its texture is imported.
+			if (UWidget* Lens = EditorIcons::Picture(WidgetTree, FString(Name) + TEXT("Icon"), IconAsset, 16.f, Rgb(241, 246, 255)))
+			{
+				if (USizeBoxSlot* LensSlot = Cast<USizeBoxSlot>(Size->SetContent(Lens)))
+				{
+					LensSlot->SetHorizontalAlignment(HAlign_Center);
+					LensSlot->SetVerticalAlignment(VAlign_Center);
+				}
+			}
+			else
+			{
+				Size->SetContent(Glyph);
+			}
 			OutButton->SetContent(Size);
 			UHorizontalBoxSlot* Slot = Row->AddChildToHorizontalBox(OutButton);
 			Slot->SetVerticalAlignment(VAlign_Center);
 			return Slot;
 		};
 
-		AddStepButton(SmallerButton, TEXT("Btn_UiSizeSmaller"), TEXT("Txt_UiSizeSmaller"), TEXT("-"), SmallerHint);
+		AddStepButton(SmallerButton, TEXT("Btn_UiSizeSmaller"), TEXT("Txt_UiSizeSmaller"), TEXT("-"), SmallerHint, TEXT("Icon_ZoomOut"));
 		SmallerButton->OnClicked.AddUniqueDynamic(this, &UUiSizePanelWidget::OnSmallerClicked);
 
 		// The size now: a dark box with the same outline and height as the buttons beside it, taking the room between them.
@@ -84,7 +98,7 @@ TSharedRef<SWidget> UUiSizePanelWidget::RebuildWidget()
 		ValueSlot->SetVerticalAlignment(VAlign_Center);
 		ValueSlot->SetPadding(FMargin(8.f, 0.f));
 
-		AddStepButton(LargerButton, TEXT("Btn_UiSizeLarger"), TEXT("Txt_UiSizeLarger"), TEXT("+"), LargerHint);
+		AddStepButton(LargerButton, TEXT("Btn_UiSizeLarger"), TEXT("Txt_UiSizeLarger"), TEXT("+"), LargerHint, TEXT("Icon_ZoomIn"));
 		LargerButton->OnClicked.AddUniqueDynamic(this, &UUiSizePanelWidget::OnLargerClicked);
 
 		RowSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Size_UiSizeRow"));
@@ -106,7 +120,8 @@ TSharedRef<SWidget> UUiSizePanelWidget::RebuildWidget()
 		UBorder* ResetPad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
 		ResetPad->SetBrushColor(FLinearColor::Transparent);
 		ResetPad->SetPadding(FMargin(10.f, 3.f));
-		ResetPad->SetContent(ResetText);
+		// The design team's arrow turning back in front of the words, when its texture is imported.
+		ResetPad->SetContent(EditorIcons::IconAndLabel(WidgetTree, TEXT("Btn_UiSizeReset"), TEXT("Icon_Reset"), 14.f, 6.f, ResetText, Rgb(241, 246, 255)));
 		ResetButton->SetContent(ResetPad);
 		Footer->AddChildToHorizontalBox(ResetButton);
 		USpacer* FooterSpacerRight = WidgetTree->ConstructWidget<USpacer>(USpacer::StaticClass());

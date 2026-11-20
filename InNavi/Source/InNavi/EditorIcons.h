@@ -21,7 +21,7 @@ namespace EditorIcons
 		return LoadObject<UTexture2D>(nullptr, *FString::Printf(TEXT("/Game/ImageAssets/%s.%s"), Asset, Asset), nullptr, LOAD_Quiet | LOAD_NoWarn);
 	}
 
-	// The icon as a picture of Size (the size the screen draws it at), tinted, in a box of exactly that size (a picture asked to be a size on its own stays
+	// The icon as a picture of Size (the size the screen draws it at; an empty Name leaves the widgets unnamed), tinted, in a box of exactly that size (a picture asked to be a size on its own stays
 	// 32 x 32, the size of its brush); null when its texture is not imported. The picture itself is called Name, the box Name + "Size".
 	inline UWidget* Picture(UWidgetTree* Tree, const FString& Name, const TCHAR* Asset, float Size, const FLinearColor& Tint)
 	{
@@ -30,15 +30,56 @@ namespace EditorIcons
 		{
 			return nullptr;
 		}
-		UImage* Image = Tree->ConstructWidget<UImage>(UImage::StaticClass(), FName(Name));
+		UImage* Image = Tree->ConstructWidget<UImage>(UImage::StaticClass(), Name.IsEmpty() ? NAME_None : FName(Name));
 		Image->SetBrushFromTexture(Texture, false);
 		Image->SetColorAndOpacity(Tint);
-		USizeBox* Box = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(Name + TEXT("Size")));
+		USizeBox* Box = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), Name.IsEmpty() ? NAME_None : FName(Name + TEXT("Size")));
 		Box->SetWidthOverride(Size);
 		Box->SetHeightOverride(Size);
 		Box->SetVisibility(ESlateVisibility::HitTestInvisible);
 		Box->SetContent(Image);
 		return Box;
+	}
+
+	// The icon as a brush of Size, tinted, for a style that wants one (a drop-down's arrow); false, and Out untouched, when its texture is not imported.
+	inline bool Brush(const TCHAR* Asset, float Size, const FLinearColor& Tint, FSlateBrush& Out)
+	{
+		UTexture2D* Texture = Load(Asset);
+		if (!Texture)
+		{
+			return false;
+		}
+		FSlateBrush Result;
+		Result.SetResourceObject(Texture);
+		Result.ImageSize = FVector2f(Size, Size);
+		Result.DrawAs = ESlateBrushDrawType::Image;
+		Result.TintColor = FSlateColor(Tint);
+		Out = Result;
+		return true;
+	}
+
+	// Puts another icon in a picture made by Picture (a button whose icon changes with its state: an eye that opens and closes).
+	inline void Swap(UWidget* PictureBox, const TCHAR* Asset)
+	{
+		const USizeBox* Box = Cast<USizeBox>(PictureBox);
+		UImage* Image = Box ? Cast<UImage>(Box->GetContent()) : nullptr;
+		if (UTexture2D* Texture = Load(Asset))
+		{
+			if (Image)
+			{
+				Image->SetBrushFromTexture(Texture, false);
+			}
+		}
+	}
+
+	// The colour of a picture made by Picture (an eye that is blue while the layer is shown and dim while it is hidden).
+	inline void Tint(UWidget* PictureBox, const FLinearColor& Color)
+	{
+		const USizeBox* Box = Cast<USizeBox>(PictureBox);
+		if (UImage* Image = Box ? Cast<UImage>(Box->GetContent()) : nullptr)
+		{
+			Image->SetColorAndOpacity(Color);
+		}
 	}
 
 	// What goes inside a button: the icon, then the label, side by side; just the label when the icon is not imported.

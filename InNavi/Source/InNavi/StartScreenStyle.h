@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "EditorIcons.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
@@ -109,13 +110,27 @@ namespace StartStyle
 		return Button(Fill, Shade(Fill, 1.2f), Shade(Fill, 0.8f), Shade(Fill, 1.3f));
 	}
 
-	// Gives a drop-down the page's dark look: a dark button that keeps the engine's arrow (in a light colour), and a dark list
+	// Gives a drop-down the page's dark look: a dark button with the design team's arrow (the engine's, in a light colour, until that is imported), and a dark list
 	// whose rows light up blue. Its items are made by the owner (their text is white), so the list must not be white.
 	inline void DarkCombo(UComboBoxString* Combo)
 	{
+		// The arrow is drawn in the drop-down's foreground colour (as the engine's own arrow was), which is dark by default: a light one, set before the widget is
+		// made (the engine takes it from the property then, and offers no way to change it later; its setter is protected, so it goes through the property).
+		if (FProperty* Foreground = UComboBoxString::StaticClass()->FindPropertyByName(TEXT("ForegroundColor")))
+		{
+			if (FSlateColor* Colour = Foreground->ContainerPtrToValuePtr<FSlateColor>(Combo))
+			{
+				*Colour = FSlateColor(Rgb(170, 190, 214));
+			}
+		}
 		FComboBoxStyle Style = Combo->GetWidgetStyle();
 		Style.ComboButtonStyle.ButtonStyle = Button(Rgb(15, 26, 42), Rgb(24, 40, 62), Rgb(12, 21, 34), Rgb(54, 70, 92), 6.f);
-		Style.ComboButtonStyle.DownArrowImage.TintColor = FSlateColor(Rgb(170, 190, 214));
+		// The design team's arrow (Icon_ChevronDown) when its texture is imported; until then the engine's own, in the same light colour. Every drop-down of the
+		// editor that is dark (the building type, the floors, the validation scope, the routes' places, the rooms' types) comes here.
+		if (!EditorIcons::Brush(TEXT("Icon_ChevronDown"), 12.f * DesignToUi, Rgb(170, 190, 214), Style.ComboButtonStyle.DownArrowImage))
+		{
+			Style.ComboButtonStyle.DownArrowImage.TintColor = FSlateColor(Rgb(170, 190, 214));
+		}
 		Style.ComboButtonStyle.MenuBorderBrush = Rounded(Rgb(15, 26, 42), Rgb(54, 70, 92), 6.f);
 		Style.ComboButtonStyle.MenuBorderPadding = FMargin(4.f);
 		Combo->SetWidgetStyle(Style);
@@ -185,7 +200,7 @@ namespace StartStyle
 	}
 
 	// The menu bar's Save button: a boxed button, a small square indicator in front of the word "Save". The indicator is
-	// yellow while the project has unsaved changes and green once it is saved (see PaintSaveIndicator).
+	// yellow while the project has unsaved changes and green once it is saved (see PaintSaveIndicator); the design team's save icon replaces the square once imported.
 	inline UButton* SaveBarButton(UWidgetTree* Tree, UBorder*& OutOuter, UBorder*& OutInner, float WidthPixels)
 	{
 		UButton* Button = Tree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Save"));
@@ -196,14 +211,25 @@ namespace StartStyle
 
 		OutOuter = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Img_SaveIndicator"));
 		OutOuter->SetBrushColor(FLinearColor::White);
-		OutOuter->SetPadding(FMargin(3.f * DesignToUi));
-		USizeBox* InnerSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Size_SaveIndicator"));
-		InnerSize->SetWidthOverride(6.f * DesignToUi);
-		InnerSize->SetHeightOverride(6.f * DesignToUi);
 		OutInner = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Img_SaveIndicatorCore"));
 		OutInner->SetBrushColor(FLinearColor::White);
-		InnerSize->SetContent(OutInner);
-		OutOuter->SetContent(InnerSize);
+		// The design team's save icon (Icon_SaveState), drawn in the colour of the state, when its texture is imported; until then the small square.
+		if (UWidget* SaveIcon = EditorIcons::Picture(Tree, TEXT("Img_SaveIndicatorIcon"), TEXT("Icon_SaveState"), 16.f * DesignToUi, Rgb(52, 199, 120)))
+		{
+			OutOuter->SetPadding(FMargin(0.f));
+			// The border has no ground of its own here (its default brush is a plain filled box that would show behind the icon).
+			OutOuter->SetBrush(Rounded(FLinearColor::Transparent, FLinearColor::Transparent, 0.f, 0.f));
+			OutOuter->SetContent(SaveIcon);
+		}
+		else
+		{
+			OutOuter->SetPadding(FMargin(3.f * DesignToUi));
+			USizeBox* InnerSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Size_SaveIndicator"));
+			InnerSize->SetWidthOverride(6.f * DesignToUi);
+			InnerSize->SetHeightOverride(6.f * DesignToUi);
+			InnerSize->SetContent(OutInner);
+			OutOuter->SetContent(InnerSize);
+		}
 		UHorizontalBoxSlot* IndicatorSlot = Row->AddChildToHorizontalBox(OutOuter);
 		IndicatorSlot->SetVerticalAlignment(VAlign_Center);
 		IndicatorSlot->SetPadding(FMargin(0.f, 0.f, 8.f * DesignToUi, 0.f));
@@ -226,6 +252,18 @@ namespace StartStyle
 	inline void PaintSaveIndicator(UBorder* Outer, UBorder* Inner, bool bUnsaved)
 	{
 		const FLinearColor Color = bUnsaved ? Rgb(245, 184, 30) : Rgb(52, 199, 120);
+		// With the design team's icon the picture is tinted; without it the square is painted.
+		if (Outer)
+		{
+			if (const USizeBox* IconBox = Cast<USizeBox>(Outer->GetContent()))
+			{
+				if (UImage* Icon = Cast<UImage>(IconBox->GetContent()))
+				{
+					Icon->SetColorAndOpacity(Color);
+					return;
+				}
+			}
+		}
 		if (Outer)
 		{
 			Outer->SetBrush(Rounded(FLinearColor::Transparent, Color, 3.f, 1.5f));

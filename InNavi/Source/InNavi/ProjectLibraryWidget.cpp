@@ -138,7 +138,10 @@ TSharedRef<SWidget> UProjectLibraryWidget::RebuildWidget()
 		if (SearchIcon)
 		{
 			UOverlay* SearchFace = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("SearchFace"));
-			SearchFace->AddChildToOverlay(SearchBox);
+			// An overlay's slot is as big as its content and in the top left corner unless told otherwise: the field fills the whole face.
+			UOverlaySlot* SearchBoxSlot = SearchFace->AddChildToOverlay(SearchBox);
+			SearchBoxSlot->SetHorizontalAlignment(HAlign_Fill);
+			SearchBoxSlot->SetVerticalAlignment(VAlign_Fill);
 			UOverlaySlot* SearchIconSlot = SearchFace->AddChildToOverlay(SearchIcon);
 			SearchIconSlot->SetHorizontalAlignment(HAlign_Left);
 			SearchIconSlot->SetVerticalAlignment(VAlign_Center);

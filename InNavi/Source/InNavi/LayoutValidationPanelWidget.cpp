@@ -1,5 +1,6 @@
 #include "LayoutValidationPanelWidget.h"
 
+#include "EditorIcons.h"
 #include "LayoutValidationSession.h"
 #include "NavPlayerController.h"
 #include "StartScreenStyle.h"
@@ -10,6 +11,7 @@
 #include "Components/ProgressBar.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
@@ -28,13 +30,22 @@ UTextBlock* ULayoutValidationPanelWidget::AddText(UPanelWidget* Parent, const FS
     Label->SetText(FText::FromString(Text)); Label->SetAutoWrapText(true); Label->SetColorAndOpacity(FSlateColor(FLinearColor::White));
     ApplyStandardFont(Label); Parent->AddChild(Label); return Label;
 }
-UButton* ULayoutValidationPanelWidget::AddButton(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Text)
+UButton* ULayoutValidationPanelWidget::AddButton(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Text, const TCHAR* IconAsset)
 {
     auto* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
     Button->SetStyle(StartStyle::SecondaryButton()); Button->SetBackgroundColor(FLinearColor::White);
     Button->OnClicked.AddUniqueDynamic(this, &ULayoutValidationPanelWidget::PlayButtonClickSound);
     auto* Size = WidgetTree->ConstructWidget<USizeBox>(); Size->SetMinDesiredHeight(34.f); Button->SetContent(Size);
     auto* Label = AddText(Size, Text, FName(FString(Name) + TEXT("Label"))); Label->SetJustification(ETextJustify::Center);
+    // The design team's picture in front of the word, when its texture is imported (the word stays where it was otherwise).
+    if (IconAsset && EditorIcons::Load(IconAsset))
+    {
+        Label->RemoveFromParent();
+        if (auto* RowSlot = Cast<USizeBoxSlot>(Size->SetContent(EditorIcons::IconAndLabel(WidgetTree, FString(Name), IconAsset, 16.f, 8.f, Label, FLinearColor::White))))
+        {
+            RowSlot->SetHorizontalAlignment(HAlign_Center); RowSlot->SetVerticalAlignment(VAlign_Center);
+        }
+    }
     Stack->AddChildToVerticalBox(Button)->SetPadding(FMargin(0, 0, 0, 6)); return Button;
 }
 TSharedRef<SWidget> ULayoutValidationPanelWidget::RebuildWidget()
@@ -51,7 +62,7 @@ TSharedRef<SWidget> ULayoutValidationPanelWidget::RebuildWidget()
         Scope->AddOption(TEXT("All buildings")); Scope->AddOption(TEXT("Current building")); Scope->SetSelectedIndex(0);
         Stack->AddChildToVerticalBox(Scope)->SetPadding(FMargin(0, 6, 0, 6));
         Scope->OnSelectionChanged.AddUniqueDynamic(this, &ULayoutValidationPanelWidget::OnScopeChanged);
-        ValidateButton = AddButton(Stack, TEXT("Btn_ValidateLayout"), TEXT("Validate layout"));
+        ValidateButton = AddButton(Stack, TEXT("Btn_ValidateLayout"), TEXT("Validate layout"), TEXT("Icon_ListChecks"));
         ValidateButton->SetStyle(StartStyle::PrimaryButton()); ValidateButton->OnClicked.AddUniqueDynamic(this, &ULayoutValidationPanelWidget::OnValidateClicked);
         Progress = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("Bar_ValidationProgress"));
         Progress->SetFillColorAndOpacity(FLinearColor(.3f, .85f, .4f)); Progress->SetPercent(0.f); Progress->SetVisibility(ESlateVisibility::Collapsed);
@@ -66,7 +77,7 @@ TSharedRef<SWidget> ULayoutValidationPanelWidget::RebuildWidget()
         Stack->AddChildToVerticalBox(Filter)->SetPadding(FMargin(0, 6, 0, 6));
         Issues = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("List_ValidationIssues"));
         auto* ListSlot = Stack->AddChildToVerticalBox(Issues); ListSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        ExportButton = AddButton(Stack, TEXT("Btn_ExportValidation"), TEXT("Export report"));
+        ExportButton = AddButton(Stack, TEXT("Btn_ExportValidation"), TEXT("Export report"), TEXT("Icon_FileOutput"));
         ExportButton->OnClicked.AddUniqueDynamic(this, &ULayoutValidationPanelWidget::OnExportClicked);
         Feedback = AddText(Stack, FString(), TEXT("Txt_ValidationFeedback"));
     }

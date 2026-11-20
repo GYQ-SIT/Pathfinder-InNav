@@ -1,4 +1,5 @@
 #include "EditScreenWidget.h"
+#include "EditorIcons.h"
 
 #include "AudioFileRowWidget.h"
 #include "AudioPanelWidget.h"
@@ -172,7 +173,8 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			CameraMenuSizeBox->SetWidthOverride(EditCameraMenuButtonWidth);
 		}
 
-		auto AddBarButton = [this, MenuBarRow](const TCHAR* Name, const TCHAR* Label, float Width) -> UButton*
+		// IconAsset (the design team's picture, in front of the label) is used when its texture is imported; the button is then wider by what it takes.
+		auto AddBarButton = [this, MenuBarRow](const TCHAR* Name, const TCHAR* Label, float Width, const TCHAR* IconAsset) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetStyle(StartStyle::SecondaryButton());
@@ -183,9 +185,10 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			Text->SetColorAndOpacity(FSlateColor(FLinearColor::White));
 			ApplyStandardFont(Text);
 			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-			SizeBox->SetWidthOverride(Width);
+			const bool bIcon = EditorIcons::Load(IconAsset) != nullptr;
+			SizeBox->SetWidthOverride(bIcon ? Width + 24.f : Width);
 			SizeBox->SetHeightOverride(34.f); // shorter than EditMenuBarHeight so it visibly sits inside the bar
-			if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(SizeBox->SetContent(Text)))
+			if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(SizeBox->SetContent(EditorIcons::IconAndLabel(WidgetTree, FString(Name), IconAsset, 14.f, 6.f, Text, FLinearColor::White))))
 			{
 				TextSlot->SetHorizontalAlignment(HAlign_Center);
 				TextSlot->SetVerticalAlignment(VAlign_Center);
@@ -206,7 +209,7 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 			SpacerSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		}
 
-		BackButton = AddBarButton(TEXT("Btn_Back"), TEXT("Back"), 60.f);
+		BackButton = AddBarButton(TEXT("Btn_Back"), TEXT("Back"), 60.f, TEXT("Icon_Back"));
 		BackButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnBackClicked);
 		BackButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::PlayButtonClickSound);
 

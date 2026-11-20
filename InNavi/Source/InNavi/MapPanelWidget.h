@@ -6,6 +6,7 @@
 
 class UBorder;
 class UButton;
+class UImage;
 class UCheckBox;
 class UEditableTextBox;
 class UMapBuildingRowWidget;
@@ -152,7 +153,10 @@ private:
 
 	// A header button that opens and closes the section under it; Body is the box the section's controls go into.
 	// The header and the body sit in one frame (OutFrame), outlined while the section is open so it is clear which controls belong to which header.
-	UVerticalBox* AddCollapsibleSection(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Title, UButton*& OutHeader, UTextBlock*& OutSign, USizeBox*& OutHeaderBox, UBorder*& OutFrame);
+	UVerticalBox* AddCollapsibleSection(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Title, UButton*& OutHeader, UTextBlock*& OutSign, UImage*& OutSignPicture, USizeBox*& OutHeaderBox, UBorder*& OutFrame);
+	// The sign at the right of a section header: the design team's arrow (right while the section is closed, down while it is open) when its textures are
+	// imported, the + and - until then.
+	static void ApplySectionSign(UTextBlock* Sign, UImage* Picture, bool bOpen);
 	void AddRoadRows(UVerticalBox* Stack);
 	// The "Type" part of the building filters: one check box per type of BuildingTypes::All(), each with the colour of its type.
 	void AddBuildingTypeRows(UVerticalBox* Stack);
@@ -189,6 +193,9 @@ private:
 	TArray<UCheckBox*> BuildingTypeCheckboxes;
 	UPROPERTY()
 	UEditableTextBox* BuildingSearchBox = nullptr;
+	// What the size box around the search field holds: the field itself, or the overlay with its magnifier (SetContentWidth sizes the box by it).
+	UPROPERTY()
+	UWidget* BuildingSearchField = nullptr;
 	UPROPERTY()
 	UScrollBox* BuildingList = nullptr;
 	UPROPERTY()
@@ -211,11 +218,15 @@ private:
 	UPROPERTY()
 	UTextBlock* FiltersSign = nullptr;
 	UPROPERTY()
+	UImage* FiltersSignPicture = nullptr;
+	UPROPERTY()
 	UVerticalBox* FiltersBody = nullptr;
 	UPROPERTY()
 	UButton* RoadsHeader = nullptr;
 	UPROPERTY()
 	UTextBlock* RoadsSign = nullptr;
+	UPROPERTY()
+	UImage* RoadsSignPicture = nullptr;
 	UPROPERTY()
 	UVerticalBox* RoadsBody = nullptr;
 	// The See-through section: how far from a building the camera has to be for it to be solid, and how close for it to be clear (in metres).
@@ -224,11 +235,16 @@ private:
 	UPROPERTY()
 	UTextBlock* ViewSign = nullptr;
 	UPROPERTY()
+	UImage* ViewSignPicture = nullptr;
+	UPROPERTY()
 	UVerticalBox* ViewBody = nullptr;
 	UPROPERTY()
 	UButton* AllSeeThroughButton = nullptr;
 	UPROPERTY()
 	UTextBlock* AllSeeThroughLabel = nullptr;
+	// The eye in front of it (null while the texture is not imported).
+	UPROPERTY()
+	UWidget* AllSeeThroughIcon = nullptr;
 	UPROPERTY()
 	USlider* RevealFarSlider = nullptr;
 	UPROPERTY()
