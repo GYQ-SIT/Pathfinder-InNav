@@ -1011,7 +1011,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		InspectionFrame->SetVisibility(ESlateVisibility::Collapsed);
 		UHorizontalBox* InspectionRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("InspectionRow"));
 		InspectionFrame->SetContent(InspectionRow);
-		auto AddInspectionSegment = [this, InspectionRow](const TCHAR* Name, const TCHAR* Label, UTextBlock** OutCaption) -> UButton*
+		auto AddInspectionSegment = [this, InspectionRow](const TCHAR* Name, const TCHAR* Label, const TCHAR* IconAsset, UTextBlock** OutCaption) -> UButton*
 		{
 			UButton* Segment = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Segment->SetStyle(Button_Style_Segment(false));
@@ -1023,17 +1023,18 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			UBorder* Pad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(Name) + TEXT("Pad")));
 			Pad->SetBrushColor(FLinearColor::Transparent);
 			Pad->SetPadding(FMargin(12.f * StartStyle::DesignToUi, 6.f * StartStyle::DesignToUi));
-			Pad->SetContent(Caption);
+			// The design team's picture in front of the word (floor isolation, orbit, the hand), when its texture is imported.
+			Pad->SetContent(EditorIcons::IconAndLabel(WidgetTree, Name, IconAsset, 14.f, 6.f, Caption, FLinearColor::White));
 			Segment->SetContent(Pad);
 			Segment->SetVisibility(ESlateVisibility::Collapsed);
 			InspectionRow->AddChildToHorizontalBox(Segment)->SetPadding(FMargin(2.f, 0.f));
 			return Segment;
 		};
-		InspectionToggleButton = AddInspectionSegment(TEXT("Btn_InspectionToggle"), TEXT("Isolate"), &InspectionToggleText);
+		InspectionToggleButton = AddInspectionSegment(TEXT("Btn_InspectionToggle"), TEXT("Isolate"), TEXT("Icon_Isolate"), &InspectionToggleText);
 		InspectionToggleButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnInspectionToggleClicked);
-		InspectionOrbitButton = AddInspectionSegment(TEXT("Btn_InspectionOrbit"), TEXT("Orbit"), nullptr);
+		InspectionOrbitButton = AddInspectionSegment(TEXT("Btn_InspectionOrbit"), TEXT("Orbit"), TEXT("Icon_Orbit"), nullptr);
 		InspectionOrbitButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnInspectionOrbitClicked);
-		InspectionGrabButton = AddInspectionSegment(TEXT("Btn_InspectionGrab"), TEXT("Grab"), nullptr);
+		InspectionGrabButton = AddInspectionSegment(TEXT("Btn_InspectionGrab"), TEXT("Grab"), TEXT("Icon_Grab"), nullptr);
 		InspectionGrabButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnInspectionGrabClicked);
 		AddCentered(SwitcherRow, InspectionFrame, FMargin(8.f * DesignToUi, 0.f, 0.f, 0.f));
 
