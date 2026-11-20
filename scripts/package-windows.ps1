@@ -45,7 +45,7 @@ try {
         Get-ChildItem -LiteralPath $root -Recurse -Force -Filter $pattern -ErrorAction SilentlyContinue | Remove-Item -Force
     }
     $rootPrefix = (Get-Item -LiteralPath $root).FullName + [IO.Path]::DirectorySeparatorChar
-    foreach ($folder in 'InNavi\Saved', 'Engine\Saved', 'Engine\Binaries\ThirdParty\Vulkan', 'Engine\Extras\GPUDumpViewer') {
+    foreach ($folder in 'InNavi\Saved', 'InNavi\Data\Deleted', 'Engine\Saved', 'Engine\Binaries\ThirdParty\Vulkan', 'Engine\Extras\GPUDumpViewer') {
         $path = Join-Path $root $folder
         if (Test-Path -LiteralPath $path) {
             $resolved = (Get-Item -LiteralPath $path).FullName
@@ -56,6 +56,12 @@ try {
     # The sample project (E2_Filled.json) is what the app and the phone open by default. Keep it alongside the campus database.
     Get-ChildItem -LiteralPath (Join-Path $root 'InNavi\Data') -File -Filter '*.json' |
         Where-Object Name -ne 'E2_Filled.json' | Remove-Item -Force
+    # The cover pictures of the projects kept (Data/Covers/<file name>.png, shown on the Explore cards of the phone and the project library) stay; those of the
+    # projects that were taken out go with them.
+    $covers = Join-Path $root 'InNavi\Data\Covers'
+    if (Test-Path -LiteralPath $covers) {
+        Get-ChildItem -LiteralPath $covers -File | Where-Object { $_.Name -notin 'E2_Filled.json.png', 'map_extended.db.png' } | Remove-Item -Force
+    }
     $samples = Join-Path $root 'SampleProjects'
     New-Item -ItemType Directory -Force $samples | Out-Null
     Copy-Item (Join-Path $repo 'docs\test-data\*.json') $samples

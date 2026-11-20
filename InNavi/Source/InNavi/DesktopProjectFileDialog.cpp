@@ -10,7 +10,7 @@
 #include <shobjidl.h>
 #endif
 
-bool DesktopProjectFileDialog::Pick(const void* ParentWindow, const FString& Directory, bool bSave, FString& OutPath, FString& Error, bool bPng)
+bool DesktopProjectFileDialog::Pick(const void* ParentWindow, const FString& Directory, bool bSave, FString& OutPath, FString& Error, EKind Kind)
 {
 	OutPath.Reset();
 	Error.Reset();
@@ -35,9 +35,11 @@ bool DesktopProjectFileDialog::Pick(const void* ParentWindow, const FString& Dir
 	Dialog->GetOptions(&Options);
 	Dialog->SetOptions(Options | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR
 		| (bSave ? FOS_OVERWRITEPROMPT : FOS_FILEMUSTEXIST));
-	Dialog->SetTitle(bSave ? TEXT("Save building data") : (bPng ? TEXT("Choose a reference image") : TEXT("Import building data")));
-	const COMDLG_FILTERSPEC Filter = { bSave ? TEXT("JSON files (*.json)") : (bPng ? TEXT("PNG pictures (*.png)") : TEXT("Building data (*.json, *.db)")),
-		bSave ? TEXT("*.json") : (bPng ? TEXT("*.png") : TEXT("*.json;*.db")) };
+	const bool bPng = !bSave && Kind == EKind::Png;
+	const bool bPicture = !bSave && Kind == EKind::Picture;
+	Dialog->SetTitle(bSave ? TEXT("Save building data") : (bPng ? TEXT("Choose a reference image") : (bPicture ? TEXT("Choose a cover picture") : TEXT("Import building data"))));
+	const COMDLG_FILTERSPEC Filter = { bSave ? TEXT("JSON files (*.json)") : (bPng ? TEXT("PNG pictures (*.png)") : (bPicture ? TEXT("Pictures (*.png, *.jpg, *.jpeg, *.bmp)") : TEXT("Building data (*.json, *.db)"))),
+		bSave ? TEXT("*.json") : (bPng ? TEXT("*.png") : (bPicture ? TEXT("*.png;*.jpg;*.jpeg;*.bmp") : TEXT("*.json;*.db"))) };
 	Dialog->SetFileTypes(1, &Filter);
 	if (bSave)
 	{

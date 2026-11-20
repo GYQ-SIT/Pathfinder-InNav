@@ -338,6 +338,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	FString BrowseForBuildingDataFile();
 
+	// Asks for a PNG, JPEG or BMP picture with the system's file dialog (Windows), for a project's cover in the project library. The path, or an empty
+	// string when cancelled or when the dialog cannot be opened (then OnActionFailed says why).
+	FString BrowseForCoverPicture();
+
 	// Loads a project-format file from an explicit path (typically one
 	// BrowseForBuildingDataFile just returned) the same way the startup project is loaded.
 	// Replaces the open project only after the incoming buildings load successfully.

@@ -214,6 +214,16 @@ FMobileRealSource::FMobileRealSource(const FString& ProjectPath, const FString& 
 	if (!OverridesDirectory.IsEmpty()) for (const auto& Entry : ProjectLibrary::Scan(OverridesDirectory)) AddProject(Entry.FilePath);
 }
 
+namespace MobileRealData
+{
+	// The cover picture of a project file, if it has one: Covers/<file name>.png next to it (see ProjectLibrary::CoverPathFor).
+	FString CoverOf(const FString& ProjectFile)
+	{
+		const FString Cover = ProjectLibrary::CoverPathFor(FPaths::GetPath(ProjectFile), FPaths::GetCleanFilename(ProjectFile));
+		return IFileManager::Get().FileExists(*Cover) ? Cover : FString();
+	}
+}
+
 FMobileRealSource::FMobileRealSource(ABuildingGenerator* Generator, AInteriorGenerator* Interior, const FString& ProjectFile)
 {
 	if (!IsValid(Generator) || !IsValid(Interior)) return;
@@ -221,6 +231,7 @@ FMobileRealSource::FMobileRealSource(ABuildingGenerator* Generator, AInteriorGen
 	Project->Site.Id = TEXT("project/") + MobileRealData::Escape(ProjectFile.IsEmpty() ? TEXT("current") : FPaths::GetCleanFilename(ProjectFile).ToLower());
 	Project->Json = ULayoutValidationSession::Capture(*Generator, *Interior);
 	Project->Site.Name = ProjectFile.IsEmpty() ? TEXT("Current project") : FPaths::GetBaseFilename(ProjectFile);
+	if (!ProjectFile.IsEmpty()) Project->Site.CoverPath = MobileRealData::CoverOf(ProjectFile);
 	IndexProject(*Project); Projects.Add(Project);
 }
 
@@ -256,6 +267,7 @@ void FMobileRealSource::AddProject(const FString& Path)
 	auto Project = MakeShared<FProject>();
 	Project->Site.Id = TEXT("project/") + Escape(FPaths::GetCleanFilename(Path).ToLower());
 	Project->Site.Name = FPaths::GetBaseFilename(Path);
+	Project->Site.CoverPath = CoverOf(Path);
 	if (FPaths::GetExtension(Path).Equals(TEXT("db"), ESearchCase::IgnoreCase))
 	{
 		FRouteWorld Context;

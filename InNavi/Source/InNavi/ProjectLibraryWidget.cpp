@@ -8,6 +8,9 @@
 #include "NavPlayerController.h"
 #include "NewProjectDialogWidget.h"
 #include "ProjectCardWidget.h"
+#include "ImageUtils.h"
+#include "Engine/Texture2D.h"
+#include "HAL/FileManager.h"
 #include "StartScreenStyle.h"
 #include "StartScreenWidget.h"
 
@@ -294,6 +297,9 @@ void UProjectLibraryWidget::RebuildCards()
 			continue;
 		}
 		Card->SetEntry(Entry);
+		Card->SetCoverTexture(CoverTextureFor(Entry));
+		Card->OnChangeCover = [this](const FProjectLibraryEntry& Clicked) { ChooseCover(Clicked); };
+		Card->OnRemoveCover = [this](const FProjectLibraryEntry& Clicked) { RemoveCoverOf(Clicked); };
 		Card->OnOpen = [this](const FProjectLibraryEntry& Clicked) { OpenProject(Clicked); };
 		Card->OnDuplicate = [this](const FProjectLibraryEntry& Clicked) { DuplicateProject(Clicked); };
 		Card->OnRename = [this](const FProjectLibraryEntry& Clicked) { RenameProject(Clicked); };
@@ -322,6 +328,75 @@ void UProjectLibraryWidget::RebuildCards()
 			if (EmptyIconWidget) EmptyIconWidget->SetVisibility(ESlateVisibility::Collapsed);
 		}
 	}
+}
+
+UTexture2D* UProjectLibraryWidget::CoverTextureFor(const FProjectLibraryEntry& Entry)
+{
+	if (Entry.CoverPath.IsEmpty())
+	{
+		return nullptr;
+	}
+	// Keyed by the file's own time too, so a new picture for the same project is read again.
+	const FString Key = FString::Printf(TEXT("%s|%lld"), *Entry.CoverPath, IFileManager::Get().GetTimeStamp(*Entry.CoverPath).GetTicks());
+	if (UTexture2D** Known = CoverTextures.Find(Key))
+	{
+		return *Known;
+	}
+	UTexture2D* Texture = FImageUtils::ImportFileAsTexture2D(Entry.CoverPath);
+	if (Texture)
+	{
+		CoverTextures.Add(Key, Texture);
+	}
+	return Texture;
+}
+
+void UProjectLibraryWidget::ChooseCover(const FProjectLibraryEntry& Entry)
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC)
+	{
+		return;
+	}
+	ShowMessage(FString());
+	const FString Picture = PC->BrowseForCoverPicture();
+	if (Picture.IsEmpty())
+	{
+		return; // cancelled, or the dialog said why it could not open
+	}
+	SetCoverFromFile(Entry, Picture);
+}
+
+void UProjectLibraryWidget::SetCoverFromFile(const FProjectLibraryEntry& Entry, const FString& PicturePath)
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC)
+	{
+		return;
+	}
+	FString Error;
+	if (!ProjectLibrary::SetCover(Entry, PicturePath, PC->GetProjectsDirectory(), Error))
+	{
+		ShowMessage(Error);
+		return;
+	}
+	Refresh();
+}
+
+void UProjectLibraryWidget::RemoveCoverOf(const FProjectLibraryEntry& Entry)
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC)
+	{
+		return;
+	}
+	ShowMessage(FString());
+	FString Error;
+	if (!ProjectLibrary::RemoveCover(Entry, PC->GetProjectsDirectory(), Error))
+	{
+		ShowMessage(Error);
+		return;
+	}
+	Refresh();
 }
 
 void UProjectLibraryWidget::HandleSearchChanged(const FText& Text)

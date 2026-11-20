@@ -24,6 +24,9 @@ struct FMobileSite
 	int32 LevelCount = 1;
 	// "2.4 km", or "Demo"
 	FString DistanceLabel;
+	// The picture of the site on its Explore card: the project's cover (Data/Covers/<file name>.png, chosen in the project library of the editor). Empty:
+	// the card draws its own placeholder.
+	FString CoverPath;
 };
 
 struct FMobileLevel

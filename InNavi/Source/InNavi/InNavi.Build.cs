@@ -21,7 +21,7 @@ public class InNavi : ModuleRules
 		// the second, database-backed way to load exterior buildings (see
 		// ABuildingGenerator::LoadBuildingsFromDatabase), alongside the existing JSON path. Must also be
 		// enabled in InNavi.uproject's Plugins list (EnabledByDefault: false upstream).
-		PrivateDependencyModuleNames.AddRange(new string[] { "ApplicationCore", "Slate", "SlateCore", "SQLiteCore", "RenderCore" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "ApplicationCore", "Slate", "SlateCore", "SQLiteCore", "RenderCore", "ImageCore" });
 		// The native file dialog exists on desktop only (the phone app has no import or save-as).
 		if (Target.Platform == UnrealTargetPlatform.Win64)
 		{
