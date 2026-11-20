@@ -3,10 +3,14 @@
 #include "Engine/GameInstance.h"
 
 #include "BrandTopBarWidget.h"
+#include "EditorIcons.h"
 #include "EditScreenWidget.h"
 #include "NavPlayerController.h"
 #include "NewProjectDialogWidget.h"
 #include "ProjectCardWidget.h"
+#include "ImageUtils.h"
+#include "Engine/Texture2D.h"
+#include "HAL/FileManager.h"
 #include "StartScreenStyle.h"
 #include "StartScreenWidget.h"
 
@@ -18,6 +22,10 @@
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
+#include "Components/ScaleBox.h"
 #include "Components/ScrollBox.h"
 #include "Components/ScrollBoxSlot.h"
 #include "Components/SizeBox.h"
@@ -56,10 +64,21 @@ TSharedRef<SWidget> UProjectLibraryWidget::RebuildWidget()
 		UScrollBoxSlot* LimitSlot = Cast<UScrollBoxSlot>(Scroll->AddChild(Limit));
 		LimitSlot->SetHorizontalAlignment(HAlign_Center);
 
+		// The page is laid out at its own size and drawn PageScale bigger: the scale box takes the limit's width, and the page inside is laid out in that width
+		// divided by the scale (NativeTick keeps it so).
+		UScaleBox* PageScaler = WidgetTree->ConstructWidget<UScaleBox>(UScaleBox::StaticClass(), TEXT("PageScale"));
+		PageScaler->SetStretch(EStretch::UserSpecified);
+		PageScaler->SetUserSpecifiedScale(PageScale);
+		Limit->SetContent(PageScaler);
+		USizeBox* Inner = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("PageInner"));
+		Inner->SetWidthOverride(1200.f * DesignToUi / PageScale);
+		ContentInner = Inner;
+		PageScaler->SetContent(Inner);
+
 		UBorder* Page = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Page"));
 		Page->SetBrushColor(FLinearColor::Transparent);
 		Page->SetPadding(FMargin(28.f * DesignToUi, 38.f * DesignToUi, 28.f * DesignToUi, 48.f * DesignToUi));
-		Limit->SetContent(Page);
+		Inner->SetContent(Page);
 		UVerticalBox* Column = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("PageColumn"));
 		Page->SetContent(Column);
 
@@ -74,17 +93,20 @@ TSharedRef<SWidget> UProjectLibraryWidget::RebuildWidget()
 		UHorizontalBoxSlot* TitlesSlot = Header->AddChildToHorizontalBox(Titles);
 		TitlesSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 
-		auto AddHeaderButton = [this, Header](const TCHAR* Name, const TCHAR* Label, const FButtonStyle& Style, float Width, float LeftPadding) -> UButton*
+		// The label is next to the design team's icon when its texture is imported (IconAsset); until then FallbackLabel stands alone.
+		auto AddHeaderButton = [this, Header](const TCHAR* Name, const TCHAR* Label, const TCHAR* FallbackLabel, const TCHAR* IconAsset, const FButtonStyle& Style, float Width, float LeftPadding) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetStyle(Style);
 			Button->SetBackgroundColor(FLinearColor::White);
-			UTextBlock* Caption = StartStyle::Text(WidgetTree, FString(Name) + TEXT("Label"), Label, 12.f, FLinearColor::White, true);
+			const bool bIcon = EditorIcons::Load(IconAsset) != nullptr;
+			UTextBlock* Caption = StartStyle::Text(WidgetTree, FString(Name) + TEXT("Label"), bIcon ? Label : FallbackLabel, 12.f, FLinearColor::White, true);
 			Caption->SetJustification(ETextJustify::Center);
-			Button->SetContent(Caption);
+			Button->SetContent(EditorIcons::IconAndLabel(WidgetTree, FString(Name), IconAsset, 14.f * StartStyle::DesignToUi, 7.f * StartStyle::DesignToUi, Caption, FLinearColor::White));
 			USizeBox* Size = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
-			Size->SetMinDesiredWidth(Width * StartStyle::DesignToUi);
-			Size->SetHeightOverride(39.f * StartStyle::DesignToUi);
+			// Width and height are as they are drawn (after PageScale): Back is 120 x 44, as the start screen's Quit button is.
+			Size->SetMinDesiredWidth(Width * StartStyle::DesignToUi / PageScale);
+			Size->SetHeightOverride(44.f * StartStyle::DesignToUi / PageScale);
 			Size->SetContent(Button);
 			UHorizontalBoxSlot* Slot = Header->AddChildToHorizontalBox(Size);
 			Slot->SetVerticalAlignment(VAlign_Bottom);
@@ -92,8 +114,8 @@ TSharedRef<SWidget> UProjectLibraryWidget::RebuildWidget()
 			return Button;
 		};
 		// New project first, Back at the far right.
-		NewButton = AddHeaderButton(TEXT("Btn_LibraryNew"), TEXT("+  New project"), PrimaryButton(), 126.f, 0.f);
-		BackButton = AddHeaderButton(TEXT("Btn_LibraryBack"), TEXT("Back"), SecondaryButton(), 82.f, 8.f);
+		NewButton = AddHeaderButton(TEXT("Btn_LibraryNew"), TEXT("New project"), TEXT("+  New project"), TEXT("Icon_NewProject"), PrimaryButton(), 160.f, 0.f);
+		BackButton = AddHeaderButton(TEXT("Btn_LibraryBack"), TEXT("Back"), TEXT("Back"), TEXT("Icon_Back"), SecondaryButton(), 120.f, 8.f);
 		Column->AddChildToVerticalBox(Header);
 
 		// Failures from opening a file (the controller reports them; nothing else on this screen would show them).
@@ -105,12 +127,34 @@ TSharedRef<SWidget> UProjectLibraryWidget::RebuildWidget()
 		// ---- Search and count ----
 		UHorizontalBox* SearchRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("SearchRow"));
 		SearchBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_LibrarySearch"));
-		SearchBox->SetWidgetStyle(Field(12.f));
+		FEditableTextBoxStyle SearchStyle = Field(12.f);
+		UWidget* SearchIcon = EditorIcons::Picture(WidgetTree, TEXT("SearchIcon"), TEXT("Icon_Search"), 14.f * DesignToUi, Rgb(150, 170, 196));
+		if (SearchIcon)
+		{
+			SearchStyle.Padding = FMargin(34.f * DesignToUi, 9.f * DesignToUi, 10.f * DesignToUi, 9.f * DesignToUi); // room for the magnifier
+		}
+		SearchBox->SetWidgetStyle(SearchStyle);
 		SearchBox->SetHintText(FText::FromString(TEXT("Search projects by name...")));
 		SearchBox->OnTextChanged.AddUniqueDynamic(this, &UProjectLibraryWidget::HandleSearchChanged);
 		USizeBox* SearchSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("SearchSize"));
 		SearchSize->SetWidthOverride(320.f * DesignToUi);
-		SearchSize->SetContent(SearchBox);
+		if (SearchIcon)
+		{
+			UOverlay* SearchFace = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("SearchFace"));
+			// An overlay's slot is as big as its content and in the top left corner unless told otherwise: the field fills the whole face.
+			UOverlaySlot* SearchBoxSlot = SearchFace->AddChildToOverlay(SearchBox);
+			SearchBoxSlot->SetHorizontalAlignment(HAlign_Fill);
+			SearchBoxSlot->SetVerticalAlignment(VAlign_Fill);
+			UOverlaySlot* SearchIconSlot = SearchFace->AddChildToOverlay(SearchIcon);
+			SearchIconSlot->SetHorizontalAlignment(HAlign_Left);
+			SearchIconSlot->SetVerticalAlignment(VAlign_Center);
+			SearchIconSlot->SetPadding(FMargin(11.f * DesignToUi, 0.f, 0.f, 0.f));
+			SearchSize->SetContent(SearchFace);
+		}
+		else
+		{
+			SearchSize->SetContent(SearchBox);
+		}
 		SearchRow->AddChildToHorizontalBox(SearchSize);
 		UHorizontalBoxSlot* SpacerSlot = SearchRow->AddChildToHorizontalBox(WidgetTree->ConstructWidget<USpacer>(USpacer::StaticClass(), TEXT("SearchSpacer")));
 		SpacerSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
@@ -122,7 +166,15 @@ TSharedRef<SWidget> UProjectLibraryWidget::RebuildWidget()
 		EmptyText = Text(WidgetTree, TEXT("Txt_LibraryEmpty"), TEXT(""), 14.f, Rgb(150, 170, 196));
 		EmptyText->SetAutoWrapText(true);
 		EmptyText->SetVisibility(ESlateVisibility::Collapsed);
-		Column->AddChildToVerticalBox(EmptyText)->SetPadding(FMargin(0.f, 24.f * DesignToUi, 0.f, 0.f));
+		UVerticalBox* EmptyBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("EmptyBox"));
+		if (UWidget* EmptyIcon = EditorIcons::Picture(WidgetTree, TEXT("EmptyIcon"), TEXT("Icon_OpenProject"), 44.f * DesignToUi, Rgb(95, 118, 150)))
+		{
+			EmptyBox->AddChildToVerticalBox(EmptyIcon)->SetPadding(FMargin(0.f, 0.f, 0.f, 12.f * DesignToUi));
+			EmptyIconWidget = EmptyIcon;
+			EmptyIcon->SetVisibility(ESlateVisibility::Collapsed);
+		}
+		EmptyBox->AddChildToVerticalBox(EmptyText);
+		Column->AddChildToVerticalBox(EmptyBox)->SetPadding(FMargin(0.f, 24.f * DesignToUi, 0.f, 0.f));
 
 		Grid = WidgetTree->ConstructWidget<UWrapBox>(UWrapBox::StaticClass(), TEXT("CardGrid"));
 		Grid->SetInnerSlotPadding(FVector2D(19.f * DesignToUi, 19.f * DesignToUi));
@@ -184,7 +236,12 @@ void UProjectLibraryWidget::NativeTick(const FGeometry& MyGeometry, float InDelt
 	const float WindowWidth = MyGeometry.GetLocalSize().X;
 	if (ContentLimit && WindowWidth > 0.f)
 	{
-		ContentLimit->SetWidthOverride(FMath::Min(1580.f * StartStyle::DesignToUi, WindowWidth));
+		const float Width = FMath::Min(1580.f * StartStyle::DesignToUi, WindowWidth);
+		ContentLimit->SetWidthOverride(Width);
+		if (ContentInner)
+		{
+			ContentInner->SetWidthOverride(Width / PageScale);
+		}
 	}
 }
 
@@ -240,6 +297,9 @@ void UProjectLibraryWidget::RebuildCards()
 			continue;
 		}
 		Card->SetEntry(Entry);
+		Card->SetCoverTexture(CoverTextureFor(Entry));
+		Card->OnChangeCover = [this](const FProjectLibraryEntry& Clicked) { ChooseCover(Clicked); };
+		Card->OnRemoveCover = [this](const FProjectLibraryEntry& Clicked) { RemoveCoverOf(Clicked); };
 		Card->OnOpen = [this](const FProjectLibraryEntry& Clicked) { OpenProject(Clicked); };
 		Card->OnDuplicate = [this](const FProjectLibraryEntry& Clicked) { DuplicateProject(Clicked); };
 		Card->OnRename = [this](const FProjectLibraryEntry& Clicked) { RenameProject(Clicked); };
@@ -260,12 +320,83 @@ void UProjectLibraryWidget::RebuildCards()
 		{
 			EmptyText->SetText(FText::FromString(Entries.IsEmpty() ? TEXT("There are no projects in the Data folder yet. Create one with New project.") : TEXT("No project matches your search.")));
 			EmptyText->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+			if (EmptyIconWidget) EmptyIconWidget->SetVisibility(ESlateVisibility::HitTestInvisible);
 		}
 		else
 		{
 			EmptyText->SetVisibility(ESlateVisibility::Collapsed);
+			if (EmptyIconWidget) EmptyIconWidget->SetVisibility(ESlateVisibility::Collapsed);
 		}
 	}
+}
+
+UTexture2D* UProjectLibraryWidget::CoverTextureFor(const FProjectLibraryEntry& Entry)
+{
+	if (Entry.CoverPath.IsEmpty())
+	{
+		return nullptr;
+	}
+	// Keyed by the file's own time too, so a new picture for the same project is read again.
+	const FString Key = FString::Printf(TEXT("%s|%lld"), *Entry.CoverPath, IFileManager::Get().GetTimeStamp(*Entry.CoverPath).GetTicks());
+	if (UTexture2D** Known = CoverTextures.Find(Key))
+	{
+		return *Known;
+	}
+	UTexture2D* Texture = FImageUtils::ImportFileAsTexture2D(Entry.CoverPath);
+	if (Texture)
+	{
+		CoverTextures.Add(Key, Texture);
+	}
+	return Texture;
+}
+
+void UProjectLibraryWidget::ChooseCover(const FProjectLibraryEntry& Entry)
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC)
+	{
+		return;
+	}
+	ShowMessage(FString());
+	const FString Picture = PC->BrowseForCoverPicture();
+	if (Picture.IsEmpty())
+	{
+		return; // cancelled, or the dialog said why it could not open
+	}
+	SetCoverFromFile(Entry, Picture);
+}
+
+void UProjectLibraryWidget::SetCoverFromFile(const FProjectLibraryEntry& Entry, const FString& PicturePath)
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC)
+	{
+		return;
+	}
+	FString Error;
+	if (!ProjectLibrary::SetCover(Entry, PicturePath, PC->GetProjectsDirectory(), Error))
+	{
+		ShowMessage(Error);
+		return;
+	}
+	Refresh();
+}
+
+void UProjectLibraryWidget::RemoveCoverOf(const FProjectLibraryEntry& Entry)
+{
+	ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>();
+	if (!PC)
+	{
+		return;
+	}
+	ShowMessage(FString());
+	FString Error;
+	if (!ProjectLibrary::RemoveCover(Entry, PC->GetProjectsDirectory(), Error))
+	{
+		ShowMessage(Error);
+		return;
+	}
+	Refresh();
 }
 
 void UProjectLibraryWidget::HandleSearchChanged(const FText& Text)

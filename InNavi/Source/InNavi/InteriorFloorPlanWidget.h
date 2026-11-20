@@ -260,8 +260,8 @@ private:
 	mutable FString ReferenceImageFailedPath;
 
 	// Connector markers (elevator/stairs/escalator - see NativePaint) are drawn as these icons
-	// instead of a plain colored box. Loaded once in NativeConstruct from Padre's toolbar icon
-	// assets (/Game/ImageAssets/Icon_Add...) - same icon used both to add a connector and to mark
+	// instead of a plain colored box. Loaded once in NativeConstruct from the design team's tool
+	// icons (/Game/ImageAssets/Icon_ToolElevator, Icon_ToolStairs, Icon_ToolEscalator) - same icon used both to add a connector and to mark
 	// one already placed. Textures are UPROPERTY to keep them from being garbage-collected; the
 	// brushes just wrap them and don't need reflection.
 	UPROPERTY()
@@ -271,6 +271,11 @@ private:
 	UPROPERTY()
 	TObjectPtr<UTexture2D> EscalatorIconTexture = nullptr;
 	FSlateBrush ElevatorIconBrush;
+
+	// The design team's pictures of the utility types (coloured circles), by type; a type whose texture is not imported keeps its square with a letter.
+	UPROPERTY()
+	TMap<FString, TObjectPtr<UTexture2D>> UtilityIconTextures;
+	TMap<FString, FSlateBrush> UtilityIconBrushes;
 	FSlateBrush StairsIconBrush;
 	FSlateBrush EscalatorIconBrush;
 };

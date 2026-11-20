@@ -1,5 +1,6 @@
 #include "LayerRowWidget.h"
 
+#include "EditorIcons.h"
 #include "NavPlayerController.h"
 #include "StartScreenStyle.h"
 #include "Blueprint/WidgetTree.h"
@@ -57,6 +58,15 @@ TSharedRef<SWidget> ULayerRowWidget::RebuildWidget()
 			ExpandGlyphSlot->SetHorizontalAlignment(HAlign_Center);
 			ExpandGlyphSlot->SetVerticalAlignment(VAlign_Center);
 		}
+		ExpandIcon = EditorIcons::Picture(WidgetTree, TEXT("Img_LayerRowExpand"), TEXT("Icon_ChevronRight"), 14.f, StartStyle::Rgb(150, 172, 202));
+		if (ExpandIcon)
+		{
+			if (USizeBoxSlot* ExpandIconSlot = Cast<USizeBoxSlot>(ExpandGlyphSizeBox->SetContent(ExpandIcon)))
+			{
+				ExpandIconSlot->SetHorizontalAlignment(HAlign_Center);
+				ExpandIconSlot->SetVerticalAlignment(VAlign_Center);
+			}
+		}
 		ExpandButton->SetContent(ExpandGlyphSizeBox);
 		UHorizontalBoxSlot* ExpandButtonSlot = Row->AddChildToHorizontalBox(ExpandButton);
 		ExpandButtonSlot->SetVerticalAlignment(VAlign_Center);
@@ -98,6 +108,15 @@ TSharedRef<SWidget> ULayerRowWidget::RebuildWidget()
 		{
 			VisibilityGlyphSlot->SetHorizontalAlignment(HAlign_Center);
 			VisibilityGlyphSlot->SetVerticalAlignment(VAlign_Center);
+		}
+		VisibilityIcon = EditorIcons::Picture(WidgetTree, TEXT("Img_LayerRowVisibility"), TEXT("Icon_Eye"), 16.f, StartStyle::Rgb(96, 170, 255));
+		if (VisibilityIcon)
+		{
+			if (USizeBoxSlot* VisibilityIconSlot = Cast<USizeBoxSlot>(VisibilityGlyphSizeBox->SetContent(VisibilityIcon)))
+			{
+				VisibilityIconSlot->SetHorizontalAlignment(HAlign_Center);
+				VisibilityIconSlot->SetVerticalAlignment(VAlign_Center);
+			}
 		}
 		VisibilityButton->SetContent(VisibilityGlyphSizeBox);
 		UHorizontalBoxSlot* VisibilityButtonSlot = Row->AddChildToHorizontalBox(VisibilityButton);
@@ -177,6 +196,10 @@ void ULayerRowWidget::ApplyVisuals()
 		// up at the same X regardless of whether that particular row shows an arrow.
 		ExpandButton->SetVisibility(bShowExpandArrow ? ESlateVisibility::Visible : ESlateVisibility::Hidden);
 	}
+	if (ExpandIcon)
+	{
+		EditorIcons::Swap(ExpandIcon, bIsExpanded ? TEXT("Icon_ChevronDown") : TEXT("Icon_ChevronRight"));
+	}
 	if (ExpandButtonText)
 	{
 		ExpandButtonText->SetText(FText::FromString(bIsExpanded ? TEXT("\x25BC") : TEXT("\x25B6"))); // ▼ / ▶
@@ -199,6 +222,12 @@ void ULayerRowWidget::ApplyVisuals()
 	if (VisibilityButton)
 	{
 		VisibilityButton->SetVisibility(bSearchResult ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	}
+	if (VisibilityIcon)
+	{
+		// Open and blue while shown, crossed and dim while hidden.
+		EditorIcons::Swap(VisibilityIcon, bIsVisible ? TEXT("Icon_Eye") : TEXT("Icon_EyeOff"));
+		EditorIcons::Tint(VisibilityIcon, bIsVisible ? StartStyle::Rgb(96, 170, 255) : StartStyle::Rgb(112, 130, 154));
 	}
 	if (VisibilityButtonText)
 	{

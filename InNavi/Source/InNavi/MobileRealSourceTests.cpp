@@ -1,5 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "ProjectLibrary.h"
+#include "ImageUtils.h"
 #include "MobileRealSource.h"
 #include "MobileMockSource.h"
 #include "NavigationRoutePlanner.h"
@@ -540,6 +542,29 @@ bool FMobileRealWarmupSitesTest::RunTest(const FString& Parameters)
 		TestTrue(*FString::Printf(TEXT("a route is found in %s (%s)"), *Site.Id, *SiteRoute.Error), SiteRoute.bFound);
 	}
 	TestEqual(TEXT("and no route made a graph: each site's was ready"), FNavigationRoutePlanner::GetGraphCacheMisses(), MadeByWarmups);
+	return true;
+}
+
+// The cover picture of a project (Data/Covers/<file name>.png, chosen in the editor's project library) is on its site, for the phone's Explore card.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRealCoverTest, "InNavi.Mobile.Source.RealCover", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileRealCoverTest::RunTest(const FString& Parameters)
+{
+	MobileRealTests::FProjectFiles Files; Files.Write(); Files.Write(TEXT("plain.json"));
+	TArray<FColor> Pixels; Pixels.Init(FColor(10, 200, 30, 255), 40 * 20);
+	const FString Picture = Files.Directory / TEXT("picture.png");
+	FImageUtils::SaveImageByExtension(*Picture, FImageView(Pixels.GetData(), 40, 20));
+	FProjectLibraryEntry Entry; Entry.FileName = TEXT("campus.json");
+	FString Error;
+	TestTrue(TEXT("a cover is set for campus.json"), ProjectLibrary::SetCover(Entry, Picture, Files.Directory, Error));
+	FMobileRealSource Source(Files.Directory);
+	const auto Sites = Source.ListSites();
+	if (!TestEqual(TEXT("both projects are sites"), Sites.Num(), 2)) return false;
+	int32 WithCover = 0;
+	for (const auto& Site : Sites)
+	{
+		if (!Site.CoverPath.IsEmpty()) { ++WithCover; TestTrue(TEXT("it is the cover of campus.json"), Site.CoverPath.EndsWith(TEXT("campus.json.png"))); TestTrue(TEXT("and the file is there"), IFileManager::Get().FileExists(*Site.CoverPath)); }
+	}
+	TestEqual(TEXT("only the project with a cover has one on its site"), WithCover, 1);
 	return true;
 }
 

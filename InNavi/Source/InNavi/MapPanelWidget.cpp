@@ -1,4 +1,7 @@
 #include "MapPanelWidget.h"
+#include "Components/OverlaySlot.h"
+#include "Components/Overlay.h"
+#include "EditorIcons.h"
 #include "DesktopRenderingSubsystem.h"
 #include "Engine/GameInstance.h"
 
@@ -53,7 +56,22 @@ USizeBox* UMapPanelWidget::WrapInPanelWidth(UWidget* Control, float Inset)
 	return SizeBox;
 }
 
-UVerticalBox* UMapPanelWidget::AddCollapsibleSection(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Title, UButton*& OutHeader, UTextBlock*& OutSign, USizeBox*& OutHeaderBox, UBorder*& OutFrame)
+void UMapPanelWidget::ApplySectionSign(UTextBlock* Sign, UImage* Picture, bool bOpen)
+{
+	if (Picture)
+	{
+		if (UTexture2D* Texture = EditorIcons::Load(bOpen ? TEXT("Icon_ChevronDown") : TEXT("Icon_ChevronRight")))
+		{
+			Picture->SetBrushFromTexture(Texture, false);
+		}
+	}
+	else if (Sign)
+	{
+		Sign->SetText(FText::FromString(bOpen ? TEXT("-") : TEXT("+")));
+	}
+}
+
+UVerticalBox* UMapPanelWidget::AddCollapsibleSection(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Title, UButton*& OutHeader, UTextBlock*& OutSign, UImage*& OutSignPicture, USizeBox*& OutHeaderBox, UBorder*& OutFrame)
 {
 	using namespace StartStyle;
 	const FString Base(Name);
@@ -75,6 +93,14 @@ UVerticalBox* UMapPanelWidget::AddCollapsibleSection(UVerticalBox* Stack, const 
 	UHorizontalBoxSlot* TitleSlot = Row->AddChildToHorizontalBox(Text(WidgetTree, Base + TEXT("Title"), Title, 12.f, Rgb(214, 226, 242), true, 20));
 	TitleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 	OutSign = Text(WidgetTree, Base + TEXT("Sign"), TEXT("+"), 14.f, Rgb(150, 172, 202), true);
+	OutSignPicture = nullptr;
+	if (UWidget* Arrow = EditorIcons::Picture(WidgetTree, Base + TEXT("SignArrow"), TEXT("Icon_ChevronRight"), 14.f * DesignToUi, Rgb(150, 172, 202)))
+	{
+		// The design team's arrow instead of the sign (the picture is the box's content).
+		OutSignPicture = Cast<UImage>(Cast<USizeBox>(Arrow)->GetContent());
+		Row->AddChildToHorizontalBox(Arrow)->SetVerticalAlignment(VAlign_Center);
+		OutSign->SetVisibility(ESlateVisibility::Collapsed);
+	}
 	Row->AddChildToHorizontalBox(OutSign);
 	// The header and the body in one frame, outlined while the section is open (ApplySectionFrame).
 	OutFrame = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(Base + TEXT("Frame")));
@@ -161,10 +187,32 @@ TSharedRef<SWidget> UMapPanelWidget::RebuildWidget()
 		Stack->AddChildToVerticalBox(WrapInPanelWidth(Help))->SetPadding(FMargin(0.f, 5.f * DesignToUi, 0.f, 0.f));
 
 		BuildingSearchBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_BuildingSearch"));
-		BuildingSearchBox->SetWidgetStyle(Field(12.f));
+		FEditableTextBoxStyle SearchStyle = Field(12.f);
+		UWidget* SearchIcon = EditorIcons::Picture(WidgetTree, TEXT("BuildingSearchIcon"), TEXT("Icon_Search"), 14.f * DesignToUi, Rgb(150, 170, 196));
+		if (SearchIcon)
+		{
+			SearchStyle.Padding = FMargin(34.f * DesignToUi, 9.f * DesignToUi, 10.f * DesignToUi, 9.f * DesignToUi); // room for the magnifier
+		}
+		BuildingSearchBox->SetWidgetStyle(SearchStyle);
 		BuildingSearchBox->SetHintText(FText::FromString(TEXT("Find a building...")));
 		BuildingSearchBox->OnTextChanged.AddUniqueDynamic(this, &UMapPanelWidget::HandleBuildingSearchChanged);
-		Stack->AddChildToVerticalBox(WrapInPanelWidth(BuildingSearchBox))->SetPadding(FMargin(0.f, 16.f * DesignToUi, 0.f, 0.f));
+		UWidget* SearchField = BuildingSearchBox;
+		if (SearchIcon)
+		{
+			// The design team's magnifier inside the left edge of the field (the picture does not take clicks: they go to the field).
+			UOverlay* SearchFace = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("BuildingSearchFace"));
+			// An overlay's slot is as big as its content and in the top left corner unless told otherwise: the field fills the whole face.
+			UOverlaySlot* SearchBoxSlot = SearchFace->AddChildToOverlay(BuildingSearchBox);
+			SearchBoxSlot->SetHorizontalAlignment(HAlign_Fill);
+			SearchBoxSlot->SetVerticalAlignment(VAlign_Fill);
+			UOverlaySlot* SearchIconSlot = SearchFace->AddChildToOverlay(SearchIcon);
+			SearchIconSlot->SetHorizontalAlignment(HAlign_Left);
+			SearchIconSlot->SetVerticalAlignment(VAlign_Center);
+			SearchIconSlot->SetPadding(FMargin(11.f * DesignToUi, 0.f, 0.f, 0.f));
+			SearchField = SearchFace;
+		}
+		BuildingSearchField = SearchField;
+		Stack->AddChildToVerticalBox(WrapInPanelWidth(SearchField))->SetPadding(FMargin(0.f, 16.f * DesignToUi, 0.f, 0.f));
 
 		BuildingFilterResultsText = Text(WidgetTree, TEXT("Txt_BuildingFilterResults"), TEXT(""), 11.f, Rgb(136, 156, 182));
 		BuildingFilterResultsText->SetAutoWrapText(true);
@@ -178,7 +226,7 @@ TSharedRef<SWidget> UMapPanelWidget::RebuildWidget()
 
 		// ---- Filters (collapsed) ----
 		USizeBox* FiltersHeaderBox = nullptr;
-		FiltersBody = AddCollapsibleSection(Stack, TEXT("Filters"), TEXT("FILTERS"), FiltersHeader, FiltersSign, FiltersHeaderBox, FiltersFrame);
+		FiltersBody = AddCollapsibleSection(Stack, TEXT("Filters"), TEXT("FILTERS"), FiltersHeader, FiltersSign, FiltersSignPicture, FiltersHeaderBox, FiltersFrame);
 		FiltersHeader->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::OnFiltersHeaderClicked);
 		FiltersHeader->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::PlayButtonClickSound);
 
@@ -238,14 +286,14 @@ TSharedRef<SWidget> UMapPanelWidget::RebuildWidget()
 
 		// ---- Roads (collapsed) ----
 		USizeBox* RoadsHeaderBox = nullptr;
-		RoadsBody = AddCollapsibleSection(Stack, TEXT("Roads"), TEXT("ROADS"), RoadsHeader, RoadsSign, RoadsHeaderBox, RoadsFrame);
+		RoadsBody = AddCollapsibleSection(Stack, TEXT("Roads"), TEXT("ROADS"), RoadsHeader, RoadsSign, RoadsSignPicture, RoadsHeaderBox, RoadsFrame);
 		RoadsHeader->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::OnRoadsHeaderClicked);
 		RoadsHeader->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::PlayButtonClickSound);
 		AddRoadRows(RoadsBody);
 
 		// ---- See-through (collapsed) ----
 		USizeBox* ViewHeaderBox = nullptr;
-		ViewBody = AddCollapsibleSection(Stack, TEXT("View"), TEXT("SEE-THROUGH"), ViewHeader, ViewSign, ViewHeaderBox, ViewFrame);
+		ViewBody = AddCollapsibleSection(Stack, TEXT("View"), TEXT("SEE-THROUGH"), ViewHeader, ViewSign, ViewSignPicture, ViewHeaderBox, ViewFrame);
 		ViewHeader->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::OnViewHeaderClicked);
 		ViewHeader->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::PlayButtonClickSound);
 		AllSeeThroughButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_SeeThroughAll"));
@@ -256,7 +304,22 @@ TSharedRef<SWidget> UMapPanelWidget::RebuildWidget()
 		UBorder* AllSeeThroughPad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Btn_SeeThroughAllPad"));
 		AllSeeThroughPad->SetBrushColor(FLinearColor::Transparent);
 		AllSeeThroughPad->SetPadding(FMargin(10.f * DesignToUi, 10.f * DesignToUi));
-		AllSeeThroughPad->SetContent(AllSeeThroughLabel);
+		// The design team's eye in front of the words (open while See-through is on, crossed while it is off), when its texture is imported.
+		AllSeeThroughIcon = EditorIcons::Picture(WidgetTree, TEXT("Btn_SeeThroughAllIcon"), TEXT("Icon_Eye"), 14.f * DesignToUi, FLinearColor::White);
+		if (AllSeeThroughIcon)
+		{
+			UHorizontalBox* AllSeeThroughRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("Btn_SeeThroughAllRow"));
+			AllSeeThroughRow->AddChildToHorizontalBox(AllSeeThroughIcon)->SetVerticalAlignment(VAlign_Center);
+			UHorizontalBoxSlot* AllSeeThroughLabelSlot = AllSeeThroughRow->AddChildToHorizontalBox(AllSeeThroughLabel);
+			AllSeeThroughLabelSlot->SetVerticalAlignment(VAlign_Center);
+			AllSeeThroughLabelSlot->SetPadding(FMargin(7.f * DesignToUi, 0.f, 0.f, 0.f));
+			AllSeeThroughPad->SetHorizontalAlignment(HAlign_Center);
+			AllSeeThroughPad->SetContent(AllSeeThroughRow);
+		}
+		else
+		{
+			AllSeeThroughPad->SetContent(AllSeeThroughLabel);
+		}
 		AllSeeThroughButton->SetContent(AllSeeThroughPad);
 		AllSeeThroughButton->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::OnAllSeeThroughClicked);
 		AllSeeThroughButton->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::PlayButtonClickSound);
@@ -319,7 +382,7 @@ void UMapPanelWidget::SetContentWidth(float Width)
 	}
 	ContentWidth = Width;
 	// Every SizeBox the panel put its controls in follows the panel's width.
-	TArray<UWidget*> Controls = { BuildingSearchBox, BuildingFilterResultsText, BuildingList, FiltersFrame, RoadsFrame, ViewFrame, RenderingPresetButton };
+	TArray<UWidget*> Controls = { BuildingSearchField, BuildingFilterResultsText, BuildingList, FiltersFrame, RoadsFrame, ViewFrame, RenderingPresetButton };
 	// The controls inside the frames are narrower than the panel by what the frames take.
 	TArray<UWidget*> InnerControls = { ResetBuildingFiltersButton, AllSeeThroughButton, RevealFarSlider, RevealNearSlider };
 	if (WidgetTree)
@@ -494,10 +557,7 @@ void UMapPanelWidget::SetSectionOpen(bool bFilters, bool bOpen)
 	{
 		Body->SetVisibility(bOpen ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
 	}
-	if (UTextBlock* Sign = bFilters ? FiltersSign : RoadsSign)
-	{
-		Sign->SetText(FText::FromString(bOpen ? TEXT("-") : TEXT("+")));
-	}
+	ApplySectionSign(bFilters ? FiltersSign : RoadsSign, bFilters ? FiltersSignPicture : RoadsSignPicture, bOpen);
 }
 
 void UMapPanelWidget::SetSectionOpenForTests(bool bFilters, bool bOpen)
@@ -523,10 +583,7 @@ void UMapPanelWidget::OnViewHeaderClicked()
 	{
 		ViewBody->SetVisibility(bViewOpen ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
 	}
-	if (ViewSign)
-	{
-		ViewSign->SetText(FText::FromString(bViewOpen ? TEXT("-") : TEXT("+")));
-	}
+	ApplySectionSign(ViewSign, ViewSignPicture, bViewOpen);
 }
 
 void UMapPanelWidget::RefreshRevealControls()
@@ -545,6 +602,10 @@ void UMapPanelWidget::RefreshRevealControls()
 		if (AllSeeThroughLabel)
 		{
 			AllSeeThroughLabel->SetText(FText::FromString(bAllOn ? TEXT("See-through ON") : TEXT("See-through OFF")));
+			if (AllSeeThroughIcon)
+			{
+				EditorIcons::Swap(AllSeeThroughIcon, bAllOn ? TEXT("Icon_Eye") : TEXT("Icon_EyeOff"));
+			}
 		}
 	}
 	const float FarMetres = PC->GetCampusRevealFarDistance() / 100.f;

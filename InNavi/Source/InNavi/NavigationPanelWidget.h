@@ -208,6 +208,7 @@ public:
 	// private state (FSelectedEndpoint::BuildingId) that has no other public accessor.
 	FString GetDisplayStatusMessage() const;
 	FLinearColor GetStatusColor() const;
+	ENavigationMessageKind GetStatusKind() const { return StatusKind; }
 	// The directions of the route found, one step after another: where to start, each door, lift or staircase to take, and the
 	// arrival. The last step is marked (the panel shows it in green). Empty until a route is found.
 	struct FNavigationRouteStep

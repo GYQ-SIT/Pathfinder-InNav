@@ -7,6 +7,7 @@
 #include "LayoutValidationPanelWidget.generated.h"
 
 class UComboBoxString;
+class UHorizontalBox;
 class UProgressBar;
 class UScrollBox;
 class USizeBox;
@@ -55,11 +56,16 @@ private:
     ULayoutValidationSession* Session() const;
     void RebuildIssues();
     FString ScopeBuildingId() const;
-    UButton* AddButton(class UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label);
+    UButton* AddButton(class UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Label, const TCHAR* IconAsset = nullptr);
     UTextBlock* AddText(class UPanelWidget* Parent, const FString& Text, FName Name);
     UPROPERTY() UComboBoxString* Scope = nullptr;
     UPROPERTY() UComboBoxString* Filter = nullptr;
     UPROPERTY() UTextBlock* Status = nullptr;
+    // The counts of the report as icons with numbers: errors, warnings, and the rooms checked (the design team's Errors / Warnings / Passed counts).
+    UPROPERTY() UHorizontalBox* CountsRow = nullptr;
+    UPROPERTY() UTextBlock* ErrorCountText = nullptr;
+    UPROPERTY() UTextBlock* WarningCountText = nullptr;
+    UPROPERTY() UTextBlock* CheckedCountText = nullptr;
     UPROPERTY() UTextBlock* Feedback = nullptr;
     UPROPERTY() UScrollBox* Issues = nullptr;
     UPROPERTY() UButton* ValidateButton = nullptr;

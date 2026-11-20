@@ -8,6 +8,7 @@
 #include "UiTestFixture.h"
 
 #include "Components/Button.h"
+#include "ImageUtils.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/AutomationTest.h"
@@ -360,6 +361,212 @@ bool FStartScreensBlockShortcutsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("the start screen going away does not unblock the library"), Controller->AreKeyShortcutsBlocked());
 	Controller->UnblockKeyShortcuts(Library);
 	TestFalse(TEXT("the library going away gives the shortcuts back"), Controller->AreKeyShortcutsBlocked());
+	return true;
+}
+
+namespace ProjectLibraryTests
+{
+	// A picture of three vertical bands: the left 40% red, the next 20% green, the rest blue.
+	void WriteBandsPicture(const FString& Path, int32 Width, int32 Height)
+	{
+		TArray<FColor> Pixels;
+		Pixels.SetNumUninitialized(Width * Height);
+		for (int32 Y = 0; Y < Height; ++Y)
+		{
+			for (int32 X = 0; X < Width; ++X)
+			{
+				Pixels[Y * Width + X] = X < Width * 4 / 10 ? FColor(255, 0, 0, 255) : (X < Width * 6 / 10 ? FColor(0, 255, 0, 255) : FColor(0, 0, 255, 255));
+			}
+		}
+		FImageUtils::SaveImageByExtension(*Path, FImageView(Pixels.GetData(), Width, Height));
+	}
+
+	void WriteSolidPicture(const FString& Path, int32 Width, int32 Height, const FColor& Colour)
+	{
+		TArray<FColor> Pixels;
+		Pixels.Init(Colour, Width * Height);
+		FImageUtils::SaveImageByExtension(*Path, FImageView(Pixels.GetData(), Width, Height));
+	}
+
+	FColor PixelOf(const FString& Path, int32 X, int32 Y, int32& OutWidth, int32& OutHeight)
+	{
+		FImage Image;
+		if (!FImageUtils::LoadImage(*Path, Image)) return FColor::Black;
+		Image.ChangeFormat(ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+		OutWidth = Image.SizeX;
+		OutHeight = Image.SizeY;
+		return Image.AsBGRA8()[static_cast<int64>(Y) * Image.SizeX + X];
+	}
+}
+
+// The cover picture of a project card: cut to the card's proportions from the middle of the picture, kept as a PNG of its own in Data/Covers (the project file is
+// not touched), replaced, removed, and carried along when the project is duplicated, renamed or deleted.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectLibraryCoverTest, "InNavi.Project.Library.Cover", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FProjectLibraryCoverTest::RunTest(const FString& Parameters)
+{
+	using namespace ProjectLibraryTests;
+	const FString Folder = MakeFolder();
+	IFileManager::Get().MakeDirectory(*Folder, true);
+	const FDateTime Now = FDateTime(2026, 10, 20, 12, 0, 0);
+	const FString ProjectText = TEXT("{\"projectName\":\"Alpha\",\"buildings\":[]}");
+	WriteLibraryFile(Folder / TEXT("alpha.json"), ProjectText, Now);
+	WriteBandsPicture(Folder / TEXT("source.png"), 1000, 300);
+	FString Error;
+
+	TArray<FProjectLibraryEntry> Entries = ProjectLibrary::Scan(Folder);
+	if (!TestEqual(TEXT("the project is listed"), Entries.Num(), 1)) return false;
+	TestTrue(TEXT("a project starts without a cover"), Entries[0].CoverPath.IsEmpty());
+	TestEqual(TEXT("its cover would be kept in Data/Covers under the file name"), ProjectLibrary::CoverPathFor(Folder, TEXT("alpha.json")), Folder / TEXT("Covers") / TEXT("alpha.json.png"));
+
+	// A wide picture: the card's proportions are cut from its middle (the red and the blue edges are cut away unevenly, the green is in the middle).
+	TestTrue(TEXT("a picture becomes the cover"), ProjectLibrary::SetCover(Entries[0], Folder / TEXT("source.png"), Folder, Error));
+	TestTrue(TEXT("no error"), Error.IsEmpty());
+	const FString CoverPath = ProjectLibrary::CoverPathFor(Folder, TEXT("alpha.json"));
+	int32 W = 0, H = 0;
+	const FColor Left = PixelOf(CoverPath, 10, ProjectLibrary::CoverHeight / 2, W, H);
+	const FColor Middle = PixelOf(CoverPath, ProjectLibrary::CoverWidth / 2, ProjectLibrary::CoverHeight / 2, W, H);
+	const FColor Right = PixelOf(CoverPath, ProjectLibrary::CoverWidth - 10, ProjectLibrary::CoverHeight / 2, W, H);
+	TestTrue(TEXT("the cover has the size of the card's picture, twice over"), W == ProjectLibrary::CoverWidth && H == ProjectLibrary::CoverHeight);
+	TestTrue(TEXT("its left is the red of the picture"), Left.R > 200 && Left.G < 60 && Left.B < 60);
+	TestTrue(TEXT("its middle is the green"), Middle.G > 200 && Middle.R < 60 && Middle.B < 60);
+	TestTrue(TEXT("its right is the blue"), Right.B > 200 && Right.R < 60 && Right.G < 60);
+	TestTrue(TEXT("the picture that was chosen is left as it is"), IFileManager::Get().FileExists(*(Folder / TEXT("source.png"))));
+	FString ProjectAfter;
+	FFileHelper::LoadFileToString(ProjectAfter, *(Folder / TEXT("alpha.json")));
+	TestEqual(TEXT("and so is the project file"), ProjectAfter, ProjectText);
+
+	Entries = ProjectLibrary::Scan(Folder);
+	TestEqual(TEXT("the library finds the cover"), Entries[0].CoverPath, CoverPath);
+
+	// A small picture is scaled up; a new one replaces the old cover.
+	WriteSolidPicture(Folder / TEXT("small.png"), 40, 30, FColor(250, 250, 250, 255));
+	TestTrue(TEXT("a small picture works too"), ProjectLibrary::SetCover(Entries[0], Folder / TEXT("small.png"), Folder, Error));
+	const FColor Replaced = PixelOf(CoverPath, 300, 100, W, H);
+	TestTrue(TEXT("and replaces the old cover"), Replaced.R > 240 && Replaced.G > 240 && Replaced.B > 240 && W == ProjectLibrary::CoverWidth);
+	TestFalse(TEXT("no half-written file is left behind"), IFileManager::Get().FileExists(*(Folder / TEXT("Covers") / TEXT("alpha.json.new.png"))));
+
+	// What is refused, with the reason, and the old cover stays.
+	WriteLibraryFile(Folder / TEXT("notes.txt"), TEXT("hello"), Now);
+	WriteLibraryFile(Folder / TEXT("broken.png"), TEXT("this is not a picture"), Now);
+	TestFalse(TEXT("a file that is not a picture is refused"), ProjectLibrary::SetCover(Entries[0], Folder / TEXT("notes.txt"), Folder, Error));
+	TestFalse(TEXT("and says why"), Error.IsEmpty());
+	TestFalse(TEXT("a broken picture is refused"), ProjectLibrary::SetCover(Entries[0], Folder / TEXT("broken.png"), Folder, Error));
+	TestFalse(TEXT("so is a missing one"), ProjectLibrary::SetCover(Entries[0], Folder / TEXT("nothing.png"), Folder, Error));
+	TestTrue(TEXT("the old cover is still there"), IFileManager::Get().FileExists(*CoverPath));
+
+	// A sample or a database can have a cover too: it is a file of its own.
+	FProjectLibraryEntry Sample;
+	Sample.FileName = TEXT("map_extended.db");
+	Sample.bIsSample = true;
+	Sample.bIsDatabase = true;
+	TestTrue(TEXT("a database can have a cover"), ProjectLibrary::SetCover(Sample, Folder / TEXT("source.png"), Folder, Error));
+	TestTrue(TEXT("kept under its own name"), IFileManager::Get().FileExists(*ProjectLibrary::CoverPathFor(Folder, TEXT("map_extended.db"))));
+
+	// Taking it away.
+	TestTrue(TEXT("a cover can be removed"), ProjectLibrary::RemoveCover(Entries[0], Folder, Error));
+	TestFalse(TEXT("the file is gone"), IFileManager::Get().FileExists(*CoverPath));
+	TestTrue(TEXT("removing it again is no error"), ProjectLibrary::RemoveCover(Entries[0], Folder, Error));
+	TestTrue(TEXT("the library shows the drawing again"), ProjectLibrary::Scan(Folder).FilterByPredicate([](const FProjectLibraryEntry& E) { return E.FileName == TEXT("alpha.json"); })[0].CoverPath.IsEmpty());
+
+	IFileManager::Get().DeleteDirectory(*Folder, false, true);
+	return true;
+}
+
+// The cover goes with the project: a copy has the same one, a renamed project keeps it, a deleted one is put away with it.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectLibraryCoverFollowsTest, "InNavi.Project.Library.CoverFollowsTheProject", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FProjectLibraryCoverFollowsTest::RunTest(const FString& Parameters)
+{
+	using namespace ProjectLibraryTests;
+	const FString Folder = MakeFolder();
+	IFileManager::Get().MakeDirectory(*Folder, true);
+	WriteLibraryFile(Folder / TEXT("alpha.json"), TEXT("{\"projectName\":\"Alpha\",\"buildings\":[]}"), FDateTime(2026, 10, 20, 12, 0, 0));
+	WriteSolidPicture(Folder / TEXT("source.png"), 800, 400, FColor(10, 200, 30, 255));
+	FString Error, NewPath, DeletedPath;
+	auto AlphaEntry = [&Folder]() { return ProjectLibrary::Scan(Folder).FilterByPredicate([](const FProjectLibraryEntry& E) { return E.FileName == TEXT("alpha.json"); })[0]; };
+	TestTrue(TEXT("a cover is set"), ProjectLibrary::SetCover(AlphaEntry(), Folder / TEXT("source.png"), Folder, Error));
+
+	TestTrue(TEXT("the project is duplicated"), ProjectLibrary::Duplicate(AlphaEntry(), Folder, NewPath, Error));
+	TestTrue(TEXT("the copy has the cover too"), IFileManager::Get().FileExists(*ProjectLibrary::CoverPathFor(Folder, FPaths::GetCleanFilename(NewPath))));
+	TestTrue(TEXT("and the original keeps its own"), IFileManager::Get().FileExists(*ProjectLibrary::CoverPathFor(Folder, TEXT("alpha.json"))));
+
+	TestTrue(TEXT("the project is renamed"), ProjectLibrary::Rename(AlphaEntry(), TEXT("Beta"), Folder, NewPath, Error));
+	TestTrue(TEXT("the cover has the new file name"), IFileManager::Get().FileExists(*ProjectLibrary::CoverPathFor(Folder, TEXT("Beta.json"))));
+	TestFalse(TEXT("and is not left under the old one"), IFileManager::Get().FileExists(*ProjectLibrary::CoverPathFor(Folder, TEXT("alpha.json"))));
+
+	const FProjectLibraryEntry Beta = ProjectLibrary::Scan(Folder).FilterByPredicate([](const FProjectLibraryEntry& E) { return E.FileName == TEXT("Beta.json"); })[0];
+	TestFalse(TEXT("the library finds it under the new name"), Beta.CoverPath.IsEmpty());
+	TestTrue(TEXT("the project is deleted"), ProjectLibrary::SoftDelete(Beta, Folder, DeletedPath, Error));
+	TestFalse(TEXT("its cover is no longer in the covers"), IFileManager::Get().FileExists(*ProjectLibrary::CoverPathFor(Folder, TEXT("Beta.json"))));
+	TestTrue(TEXT("it is in the Deleted folder beside the project"), IFileManager::Get().FileExists(*(DeletedPath + TEXT(".png"))));
+
+	IFileManager::Get().DeleteDirectory(*Folder, false, true);
+	return true;
+}
+
+// The picture area of a card: a button that asks for a cover; with a cover it shows the picture and a cross to take it away; the hint shows over it.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FProjectCardCoverTest, "InNavi.UI.ProjectLibrary.Cover", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FProjectCardCoverTest::RunTest(const FString& Parameters)
+{
+	using namespace ProjectLibraryTests;
+	FNavigationSearchFixture Fixture;
+	ANavPlayerController* Controller = Fixture.MakeController();
+	const FString Folder = MakeFolder();
+	IFileManager::Get().MakeDirectory(*Folder, true);
+	Controller->SetProjectsDirectoryOverrideForTests(Folder);
+	const FDateTime Now = FDateTime(2026, 10, 20, 12, 0, 0);
+	WriteLibraryFile(Folder / TEXT("alpha.json"), TEXT("{\"projectName\":\"Alpha\",\"buildings\":[{}]}"), Now);
+	WriteLibraryFile(Folder / TEXT("beta.json"), TEXT("{\"projectName\":\"Beta\",\"buildings\":[{}]}"), Now - FTimespan::FromDays(1));
+	WriteSolidPicture(Folder / TEXT("source.png"), 800, 400, FColor(10, 200, 30, 255));
+	FString Error;
+	const FProjectLibraryEntry Alpha = ProjectLibrary::Scan(Folder).FilterByPredicate([](const FProjectLibraryEntry& E) { return E.FileName == TEXT("alpha.json"); })[0];
+	ProjectLibrary::SetCover(Alpha, Folder / TEXT("source.png"), Folder, Error);
+
+	UProjectLibraryWidget* Library = NewObject<UProjectLibraryWidget>();
+	Library->Initialize();
+	const TSharedRef<SWidget> LibrarySlate = Library->TakeWidget();
+	Library->SetOwningPlayer(Controller);
+	Library->Refresh();
+	auto CardOf = [&Library](const TCHAR* FileName) -> UProjectCardWidget*
+	{
+		for (UProjectCardWidget* Card : Library->GetCardsForTests()) if (Card->GetEntry().FileName == FileName) return Card;
+		return nullptr;
+	};
+	UProjectCardWidget* WithCover = CardOf(TEXT("alpha.json"));
+	UProjectCardWidget* Without = CardOf(TEXT("beta.json"));
+	if (!TestNotNull(TEXT("the card with a cover"), WithCover) || !TestNotNull(TEXT("the card without"), Without)) return false;
+
+	TestTrue(TEXT("a project with a cover shows it"), WithCover->ShowsCoverForTests());
+	TestFalse(TEXT("instead of the drawing"), WithCover->ShowsDrawingForTests());
+	TestNotNull(TEXT("with a cross to remove it"), WithCover->GetRemoveCoverButtonForTests());
+	TestFalse(TEXT("one without shows the drawing"), Without->ShowsCoverForTests());
+	TestTrue(TEXT("(the drawing)"), Without->ShowsDrawingForTests());
+	TestNull(TEXT("and has nothing to remove"), Without->GetRemoveCoverButtonForTests());
+	TestNotNull(TEXT("every card has the button over its picture"), Without->GetPictureButtonForTests());
+
+	// The hint over the picture while the pointer is on it.
+	TestFalse(TEXT("no hint until the pointer is on the picture"), Without->ShowsHoverHintForTests());
+	Without->HoverPictureForTests(true);
+	TestTrue(TEXT("the hint shows over it"), Without->ShowsHoverHintForTests());
+	Without->HoverPictureForTests(false);
+	TestFalse(TEXT("and goes when the pointer leaves"), Without->ShowsHoverHintForTests());
+
+	// A click on the picture asks for a cover for that project.
+	FString AskedFor;
+	Without->OnChangeCover = [&AskedFor](const FProjectLibraryEntry& Entry) { AskedFor = Entry.FileName; };
+	Without->GetPictureButtonForTests()->OnClicked.Broadcast();
+	TestEqual(TEXT("a click on the picture asks for a cover for its project"), AskedFor, FString(TEXT("beta.json")));
+
+	// What the screen does with the answer.
+	Library->SetCoverFromFile(Without->GetEntry(), Folder / TEXT("source.png"));
+	TestTrue(TEXT("a picture chosen for Beta is kept"), IFileManager::Get().FileExists(*ProjectLibrary::CoverPathFor(Folder, TEXT("beta.json"))));
+	TestTrue(TEXT("and its card shows it"), CardOf(TEXT("beta.json")) && CardOf(TEXT("beta.json"))->ShowsCoverForTests());
+	Library->SetCoverFromFile(Without->GetEntry(), Folder / TEXT("nothing.png"));
+	TestFalse(TEXT("a picture that cannot be read says so on the screen"), Library->GetMessageTextForTests().IsEmpty());
+	Library->RemoveCoverOf(Alpha);
+	TestFalse(TEXT("the cross takes Alpha's cover away"), IFileManager::Get().FileExists(*ProjectLibrary::CoverPathFor(Folder, TEXT("alpha.json"))));
+	TestTrue(TEXT("and its card shows the drawing again"), CardOf(TEXT("alpha.json")) && CardOf(TEXT("alpha.json"))->ShowsDrawingForTests());
+
+	IFileManager::Get().DeleteDirectory(*Folder, false, true);
 	return true;
 }
 

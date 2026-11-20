@@ -9,6 +9,7 @@
 class UButton;
 class UEditableTextBox;
 class UProjectCardWidget;
+class UTexture2D;
 class USizeBox;
 class UTextBlock;
 class UWrapBox;
@@ -22,6 +23,10 @@ class INNAVI_API UProjectLibraryWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
+	// The whole page is drawn this much bigger than it is laid out, so that its Back button is as big as the start screen's Quit button (120 x 44, label 17;
+	// the page was laid out with 12-pixel labels): the fonts, the icons, the cards and the spaces between them all grow together.
+	static constexpr float PageScale = 17.f / 12.f;
+
 	// Looks at the folder again and rebuilds the cards (those matching the search).
 	void Refresh();
 
@@ -29,6 +34,10 @@ public:
 	void OpenProject(const FProjectLibraryEntry& Entry);
 	void DuplicateProject(const FProjectLibraryEntry& Entry);
 	void RenameProject(const FProjectLibraryEntry& Entry);
+	// The picture area of a card: asks for a picture (the system's file dialog) and makes it the project's cover, or takes the cover away.
+	void ChooseCover(const FProjectLibraryEntry& Entry);
+	void SetCoverFromFile(const FProjectLibraryEntry& Entry, const FString& PicturePath);
+	void RemoveCoverOf(const FProjectLibraryEntry& Entry);
 	// Asks first, then moves the file into the Data/Deleted folder (see ProjectLibrary::SoftDelete).
 	void DeleteProject(const FProjectLibraryEntry& Entry);
 	void GoBack();
@@ -65,6 +74,11 @@ private:
 	void GoToEditScreen();
 	void ShowMessage(const FString& Message);
 	void RebuildCards();
+	// The cover of an entry as a texture, read once and kept until the file changes (the cards are rebuilt on every key of the search).
+	UTexture2D* CoverTextureFor(const FProjectLibraryEntry& Entry);
+
+	UPROPERTY()
+	TMap<FString, UTexture2D*> CoverTextures;
 
 	UPROPERTY()
 	UEditableTextBox* SearchBox = nullptr;
@@ -74,11 +88,16 @@ private:
 	UTextBlock* MessageText = nullptr;
 	UPROPERTY()
 	UTextBlock* EmptyText = nullptr;
+	// The open folder over the words when there is nothing to show (null while its texture is not imported).
+	UPROPERTY()
+	UWidget* EmptyIconWidget = nullptr;
 	UPROPERTY()
 	UWrapBox* Grid = nullptr;
 	// The page content: as wide as the window allows, up to 1580 design pixels, centred (see NativeTick).
 	UPROPERTY()
 	USizeBox* ContentLimit = nullptr;
+	UPROPERTY()
+	USizeBox* ContentInner = nullptr;
 	UPROPERTY()
 	UButton* NewButton = nullptr;
 	UPROPERTY()

@@ -2,6 +2,7 @@
 
 
 #include "InteriorFloorPlanWidget.h"
+#include "EditorIcons.h"
 #include "InteriorDoorColors.h"
 #include "InteriorGenerator.h"
 #include "InteriorRoom.h"
@@ -201,9 +202,21 @@ void UInteriorFloorPlanWidget::NativeConstruct()
 			OutBrush.DrawAs = ESlateBrushDrawType::Image;
 		}
 	};
-	LoadConnectorIcon(TEXT("/Game/ImageAssets/Icon_AddElevator.Icon_AddElevator"), ElevatorIconTexture, ElevatorIconBrush);
-	LoadConnectorIcon(TEXT("/Game/ImageAssets/Icon_AddStairs.Icon_AddStairs"), StairsIconTexture, StairsIconBrush);
-	LoadConnectorIcon(TEXT("/Game/ImageAssets/Icon_AddEscalator.Icon_AddEscalator"), EscalatorIconTexture, EscalatorIconBrush);
+	LoadConnectorIcon(TEXT("/Game/ImageAssets/Icon_ToolElevator.Icon_ToolElevator"), ElevatorIconTexture, ElevatorIconBrush);
+	LoadConnectorIcon(TEXT("/Game/ImageAssets/Icon_ToolStairs.Icon_ToolStairs"), StairsIconTexture, StairsIconBrush);
+	LoadConnectorIcon(TEXT("/Game/ImageAssets/Icon_ToolEscalator.Icon_ToolEscalator"), EscalatorIconTexture, EscalatorIconBrush);
+	for (const FString& UtilityType : InteriorUtilityTypes::All())
+	{
+		if (UTexture2D* UtilityTexture = EditorIcons::Load(InteriorUtilityTypes::IconAsset(UtilityType)))
+		{
+			UtilityIconTextures.Add(UtilityType, UtilityTexture);
+			FSlateBrush UtilityBrush;
+			UtilityBrush.SetResourceObject(UtilityTexture);
+			UtilityBrush.ImageSize = FVector2D(UtilityTexture->GetSizeX(), UtilityTexture->GetSizeY());
+			UtilityBrush.DrawAs = ESlateBrushDrawType::Image;
+			UtilityIconBrushes.Add(UtilityType, UtilityBrush);
+		}
+	}
 
 	UE_LOG(LogTemp, Warning,
 		TEXT("[Navigation] Floor-plan constructed: PlayerController=%s Generator=%s Interior=%s BuildingId=%s Floor=%d"),
@@ -1893,14 +1906,25 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 				FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 2, AllottedGeometry.ToPaintGeometry(FVector2f(Highlight, Highlight), FSlateLayoutTransform(At - FVector2D(Highlight * 0.5f, Highlight * 0.5f))),
 					Box, ESlateDrawEffect::None, FLinearColor(1.f, 0.15f, 0.15f, 1.f));
 			}
-			FLinearColor Colour(0.6f, 0.5f, 0.85f, 1.f);
-			if (Utility.Type == InteriorUtilityTypes::Aed) Colour = FLinearColor(0.2f, 0.7f, 0.35f, 1.f);
-			else if (Utility.Type == InteriorUtilityTypes::Bicycle) Colour = FLinearColor(0.25f, 0.55f, 0.95f, 1.f);
-			else if (Utility.Type == InteriorUtilityTypes::DropOff) Colour = FLinearColor(0.95f, 0.7f, 0.15f, 1.f);
-			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 3, AllottedGeometry.ToPaintGeometry(FVector2f(UtilitySize, UtilitySize), FSlateLayoutTransform(At - FVector2D(UtilitySize * 0.5f, UtilitySize * 0.5f))),
-				Box, ESlateDrawEffect::None, Colour);
-			FSlateDrawElement::MakeText(OutDrawElements, LayerId + 4, AllottedGeometry.ToPaintGeometry(FVector2f(UtilitySize, UtilitySize), FSlateLayoutTransform(At - FVector2D(4.f, 8.f))),
-				FText::FromString(InteriorUtilityTypes::Letter(Utility.Type)), FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 11), ESlateDrawEffect::None, FLinearColor::White);
+				const FSlateBrush* UtilityPicture = UtilityIconBrushes.Find(Utility.Type);
+				if (UtilityPicture)
+				{
+					// The design team's circle of the type (a coloured disc with a white symbol).
+					constexpr float PictureSize = UtilitySize + 4.f;
+					FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 3, AllottedGeometry.ToPaintGeometry(FVector2f(PictureSize, PictureSize), FSlateLayoutTransform(At - FVector2D(PictureSize * 0.5f, PictureSize * 0.5f))),
+						UtilityPicture, ESlateDrawEffect::None, FLinearColor::White);
+				}
+				else
+				{
+					FLinearColor Colour(0.6f, 0.5f, 0.85f, 1.f);
+					if (Utility.Type == InteriorUtilityTypes::Aed) Colour = FLinearColor(0.2f, 0.7f, 0.35f, 1.f);
+					else if (Utility.Type == InteriorUtilityTypes::Bicycle) Colour = FLinearColor(0.25f, 0.55f, 0.95f, 1.f);
+					else if (Utility.Type == InteriorUtilityTypes::DropOff) Colour = FLinearColor(0.95f, 0.7f, 0.15f, 1.f);
+					FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 3, AllottedGeometry.ToPaintGeometry(FVector2f(UtilitySize, UtilitySize), FSlateLayoutTransform(At - FVector2D(UtilitySize * 0.5f, UtilitySize * 0.5f))),
+						Box, ESlateDrawEffect::None, Colour);
+					FSlateDrawElement::MakeText(OutDrawElements, LayerId + 4, AllottedGeometry.ToPaintGeometry(FVector2f(UtilitySize, UtilitySize), FSlateLayoutTransform(At - FVector2D(4.f, 8.f))),
+						FText::FromString(InteriorUtilityTypes::Letter(Utility.Type)), FCoreStyle::GetDefaultFontStyle(TEXT("Bold"), 11), ESlateDrawEffect::None, FLinearColor::White);
+				}
 			if (!Utility.Name.IsEmpty())
 			{
 				FSlateDrawElement::MakeText(OutDrawElements, LayerId + 4, AllottedGeometry.ToPaintGeometry(FVector2f(160.f, 14.f), FSlateLayoutTransform(At + FVector2D(UtilitySize * 0.5f + 4.f, -7.f))),

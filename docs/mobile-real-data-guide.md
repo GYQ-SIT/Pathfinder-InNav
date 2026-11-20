@@ -7,6 +7,7 @@ See [the design notes](design/mobile-app-data-interface.md) for the screen contr
 ## Data selection
 
 - Normally the source scans `InNavi/Data/`: each JSON project or SQLite map database is an Explore site. JSON projects precede footprint-only databases.
+- The Explore card of a site shows the project's cover picture when `InNavi/Data/Covers/<file name>.png` exists (chosen in the editor's project library, see [interior-editor-guide.md](design/interior-editor-guide.md)); the middle of the picture is shown in the card's proportions, with rounded corners. A project without a cover keeps the placeholder drawing. `Data` is packaged into the APK whole, so the covers go with it.
 - `Saved/MobileProjects/` supplies local projects. A file with the same name replaces a shipped project, preserving place IDs. Restart after changing files: the source caches a detached snapshot.
 - When opened from an editor session with a known project file, the phone view uses that project's current applied data, including unsaved edits. It does not switch editor buildings.
 - `-MobileProject="<project.json>"` selects one file explicitly and takes precedence over the editor session.
