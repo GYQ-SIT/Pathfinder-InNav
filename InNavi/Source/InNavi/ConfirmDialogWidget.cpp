@@ -1,5 +1,6 @@
 #include "ConfirmDialogWidget.h"
 
+#include "EditorIcons.h"
 #include "NavPlayerController.h"
 #include "StartScreenStyle.h"
 #include "Blueprint/WidgetTree.h"
@@ -27,7 +28,7 @@ TSharedRef<SWidget> UConfirmDialogWidget::RebuildWidget()
 		// UInteriorScreenWidget::StandardFontSize/DockPanelColor) - this dialog predates that pass and
 		// was left at UMG's 24pt default with plain white/black boxes, which is why button labels like
 		// "Discard changes and leave" overflowed their own button at that size.
-		constexpr int32 DialogFontSize = 15;
+		constexpr int32 DialogFontSize = 18;
 
 		// Dims whatever's behind instead of blacking it out entirely - still blocks clicks through to
 		// it (same modal purpose as before), but reads as a dialog over the app rather than a jarring
@@ -43,7 +44,7 @@ TSharedRef<SWidget> UConfirmDialogWidget::RebuildWidget()
 		UBorder* Card = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Card"));
 		Card->SetBrush(StartStyle::Rounded(StartStyle::Rgb(17, 31, 50), StartStyle::Rgb(54, 70, 92), 12.f));
 		Card->SetBrushColor(FLinearColor::White);
-		Card->SetPadding(FMargin(20.f));
+		Card->SetPadding(FMargin(28.f));
 		UCanvasPanelSlot* CardSlot = Canvas->AddChildToCanvas(Card);
 		CardSlot->SetAnchors(FAnchors(0.5f, 0.5f));
 		CardSlot->SetAlignment(FVector2D(0.5f, 0.5f));
@@ -55,7 +56,7 @@ TSharedRef<SWidget> UConfirmDialogWidget::RebuildWidget()
 		// Capped width + word wrap, rather than assuming the message is always one short sentence -
 		// keeps the card a sensible size even for a longer message later.
 		USizeBox* MessageSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-		MessageSizeBox->SetMaxDesiredWidth(360.f);
+		MessageSizeBox->SetMaxDesiredWidth(460.f);
 
 		UTextBlock* MessageText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), TEXT("Txt_Message"));
 		MessageText->SetText(FText::FromString(TEXT("You have unsaved changes. Do you want to save them?")));
@@ -69,9 +70,17 @@ TSharedRef<SWidget> UConfirmDialogWidget::RebuildWidget()
 		}
 		MessageSizeBox->SetContent(MessageText);
 
+		// The design team's warning triangle above the message (the "Unsaved changes confirmation" icon), when its texture is imported.
+		if (UWidget* WarningIcon = EditorIcons::Picture(WidgetTree, TEXT("Img_ConfirmWarning"), TEXT("Icon_Warning"), 36.f, StartStyle::Rgb(245, 184, 30)))
+		{
+			UVerticalBoxSlot* IconSlot = Stack->AddChildToVerticalBox(WarningIcon);
+			IconSlot->SetHorizontalAlignment(HAlign_Center);
+			IconSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 12.f));
+		}
+
 		UVerticalBoxSlot* MessageSlot = Stack->AddChildToVerticalBox(MessageSizeBox);
 		MessageSlot->SetHorizontalAlignment(HAlign_Center);
-		MessageSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 16.f));
+		MessageSlot->SetPadding(FMargin(0.f, 0.f, 0.f, 22.f));
 
 		UHorizontalBox* ButtonRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ButtonRow"));
 		UVerticalBoxSlot* ButtonRowSlot = Stack->AddChildToVerticalBox(ButtonRow);
@@ -99,7 +108,7 @@ TSharedRef<SWidget> UConfirmDialogWidget::RebuildWidget()
 
 			USizeBox* SizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(Name) + TEXT("Size")));
 			SizeBox->SetWidthOverride(Width);
-			SizeBox->SetHeightOverride(36.f);
+			SizeBox->SetHeightOverride(46.f);
 			if (USizeBoxSlot* TextSlot = Cast<USizeBoxSlot>(SizeBox->SetContent(Text)))
 			{
 				TextSlot->SetHorizontalAlignment(HAlign_Center);
@@ -108,7 +117,7 @@ TSharedRef<SWidget> UConfirmDialogWidget::RebuildWidget()
 			Button->SetContent(SizeBox);
 
 			UHorizontalBoxSlot* ButtonSlot = ButtonRow->AddChildToHorizontalBox(Button);
-			ButtonSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
+			ButtonSlot->SetPadding(FMargin(0.f, 0.f, 10.f, 0.f));
 			return Button;
 		};
 
@@ -116,9 +125,9 @@ TSharedRef<SWidget> UConfirmDialogWidget::RebuildWidget()
 		const FButtonStyle NeutralStyle = StartStyle::SecondaryButton();
 		const FButtonStyle DestructiveStyle = StartStyle::StatusButton(StartStyle::Rgb(150, 40, 48));
 
-		SaveAndLeaveButton = AddButton(TEXT("Btn_SaveAndLeave"), TEXT("Save and Exit"), 140.f, PrimaryStyle);
-		DiscardAndLeaveButton = AddButton(TEXT("Btn_DiscardAndLeave"), TEXT("Discard and Leave"), 150.f, DestructiveStyle);
-		CancelButton = AddButton(TEXT("Btn_Cancel"), TEXT("Cancel"), 90.f, NeutralStyle);
+		SaveAndLeaveButton = AddButton(TEXT("Btn_SaveAndLeave"), TEXT("Save and Exit"), 176.f, PrimaryStyle);
+		DiscardAndLeaveButton = AddButton(TEXT("Btn_DiscardAndLeave"), TEXT("Discard and Leave"), 216.f, DestructiveStyle);
+		CancelButton = AddButton(TEXT("Btn_Cancel"), TEXT("Cancel"), 120.f, NeutralStyle);
 		// Last button in the row - no trailing gap needed.
 		if (UHorizontalBoxSlot* CancelSlot = Cast<UHorizontalBoxSlot>(CancelButton->Slot))
 		{

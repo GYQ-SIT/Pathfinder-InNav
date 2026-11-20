@@ -35,7 +35,8 @@ namespace
 		TEXT("Icon_UtilityAed"), TEXT("Icon_UtilityBicycle"), TEXT("Icon_UtilityDropOff"), TEXT("Icon_UtilityOther"),
 		TEXT("Icon_RoomClassroom"), TEXT("Icon_RoomLectureHall"), TEXT("Icon_RoomLab"), TEXT("Icon_RoomOffice"), TEXT("Icon_RoomStudyArea"), TEXT("Icon_RoomMeetingRoom"),
 		TEXT("Icon_RoomCanteen"), TEXT("Icon_RoomToilet"), TEXT("Icon_RoomLiftLobby"), TEXT("Icon_RoomCorridor"), TEXT("Icon_RoomStorage"), TEXT("Icon_RoomOther"),
-		TEXT("Icon_HistoryUndo"), TEXT("Icon_HistoryRedo"), TEXT("Icon_Snap"), TEXT("Icon_Mode2D"), TEXT("Icon_Mode3D") };
+		TEXT("Icon_HistoryUndo"), TEXT("Icon_HistoryRedo"), TEXT("Icon_Snap"), TEXT("Icon_Mode2D"), TEXT("Icon_Mode3D"),
+		TEXT("Icon_CircleAlert"), TEXT("Icon_CircleCheck"), TEXT("Icon_Isolate"), TEXT("Icon_Orbit"), TEXT("Icon_Grab") };
 }
 
 // An icon with transparent edges has to be uncompressed and without mips, or its edges turn into a solid square.
