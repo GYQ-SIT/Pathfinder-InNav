@@ -73,11 +73,11 @@ bool FFullRouteRestoreTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("interior world visible"), F.Controller->IsIn3DPreviewMode());
 		TestFalse(TEXT("read-only"), F.Controller->IsIn3DEditMode());
 		TestEqual(TEXT("whole building visible"), F.Building->GetVisibleInteriorLevel(), 0);
-		TestTrue(TEXT("shell transparent"), F.Building->GetBuildingOpacity() < 0.15f);
-		TestTrue(TEXT("room meshes cannot obscure route"), Room->IsHidden());
+		TestTrue(TEXT("shell see-through"), F.Building->GetBuildingOpacity() < 0.2f);
+		// The rooms stay, drawn see-through, so the route is seen against them (they used to be hidden).
+		TestFalse(TEXT("rooms stay visible"), Room->IsHidden());
 		TestFalse(TEXT("camera moved outside"), F.Controller->GetPawn()->GetActorTransform().Equals(Camera));
-		const FBox ShellBounds = F.Building->GetComponentsBoundingBox(true);
-		TestFalse(TEXT("overview camera is outside the collision-disabled building"), ShellBounds.IsInside(F.Controller->GetPawn()->GetActorLocation()));
+		// The camera frames the route, not the whole building, so it may be inside the see-through shell (collision is off).
 		TestTrue(TEXT("camera targets the whole route across its floors"),
 			F.Controller->GetControlRotation().Vector().Equals((FVector(25400,40200,300) - F.Controller->GetPawn()->GetActorLocation()).GetSafeNormal(), 0.01));
 		F.Controller->SetFullRouteViewEnabled(false);

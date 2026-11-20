@@ -578,12 +578,13 @@ on a building, inside one, or too far from every building is refused, and the st
 take (with building names, not ids), and "Step N: **Arrive at ...**" - the last step in green. In Go the route is shown as a line of its places above the directions. Before a route is found the places are in Plan. **Clear Route** resets the list and the route. **Hide Route** / **Show
 Route** hides or restores the route lines, direction arrows, markers and written steps without clearing the route.
 
-**Full Route View.** On either Plan or Go, click **Full Route View** after finding a route. The camera moves outside the buildings
-and zooms to frame the entire route, with a margin that adapts to the window's aspect ratio. Short routes remain readable even in
-large buildings. Building walls, roofs and slabs
-become transparent; room meshes are temporarily hidden. Every floor and leg is shown together at full brightness, with continuous
-connector lines between floors, Start/Destination markers and numbered stops. Route lines remain visible through the building and
-ground, including basement routes. Other buildings are temporarily hidden to keep the route clear.
+**Full Route View.** On either Plan or Go, click **Full Route View** after finding a route. The camera moves out and frames the entire
+route (not the whole building: a short route in a big building stays readable), with a margin that adapts to the window's aspect ratio.
+The walls, roofs and slabs of the building the route is in become very transparent, and its rooms and lifts stay, drawn see-through, so
+the route is seen against them. Every floor the route goes through is outlined at its level. Every floor and leg is shown together at full
+brightness, with continuous connector lines between floors, Start/Destination markers and numbered stops; there are no texts in the overview
+(the steps are in the panel). Route lines remain visible through the building and ground, including basement routes. Other buildings are
+faded, not hidden, so it is seen where the route is.
 
 Click **Return to Previous View** or press **Esc** to restore the previous camera and zoom, 2D/3D editing view and building visibility.
 The overview is read-only and does not change project data, route points or the selected step. Choosing another floor, continuing

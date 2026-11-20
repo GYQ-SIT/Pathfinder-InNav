@@ -80,20 +80,13 @@ void ANavPlayerController::FrameFullRouteView()
 		if (!ResolveFullRoutePoint(Point)) continue;
 		Bounds += Point.WorldPosition;
 	}
-	FBox ExteriorBounds(ForceInit);
-	for (const FFullRouteActorState& State : FullRouteSavedActors)
-	{
-		const APolyBuilding* Building = Cast<APolyBuilding>(State.Actor.Get());
-		// Overview disables collision so free flight cannot hit the shell; still include its full geometry.
-		if (Building && !Building->IsHidden()) ExteriorBounds += Building->GetComponentsBoundingBox(true);
-	}
 	if (!Bounds.IsValid) return;
 	int32 Width = 0, Height = 0;
 	GetViewportSize(Width, Height);
 	FullRouteViewportSize = FIntPoint(Width, Height);
 	const float Aspect = Width > 0 && Height > 0 ? float(Width) / Height : 16.f / 9.f;
 	float Fov = FullRouteSavedFov;
-	const FTransform Camera = FullRouteCameraTransform(Bounds, FullRouteSavedFov, Aspect, &ExteriorBounds, &Fov);
+	const FTransform Camera = FullRouteCameraTransform(Bounds, FullRouteSavedFov, Aspect, nullptr, &Fov);
 	if (PlayerCameraManager) PlayerCameraManager->SetFOV(Fov);
 	if (UPawnMovementComponent* Movement = GetPawn()->GetMovementComponent()) Movement->StopMovementImmediately();
 	GetPawn()->SetActorTransform(Camera);
@@ -119,6 +112,7 @@ void ANavPlayerController::SetFullRouteViewEnabled(bool bEnable)
 			{
 				Actor->SetActorHiddenInGame(State.bHidden);
 				Actor->SetActorEnableCollision(State.bCollision);
+				if (AInteriorRoom* Room = Cast<AInteriorRoom>(Actor)) Room->SetOverviewOpacity(-1.f);
 				if (APolyBuilding* Building = Cast<APolyBuilding>(Actor))
 				{
 					Building->SetVisibleInteriorLevel(State.InteriorLevel);
@@ -184,12 +178,16 @@ void ANavPlayerController::SetFullRouteViewEnabled(bool bEnable)
 		{
 			APolyBuilding* Building = Cast<APolyBuilding>(Actor);
 			const bool bRouteBuilding = Building && RouteBuildings.Contains(Building->BuildingId);
-			Actor->SetActorHiddenInGame(!bRouteBuilding);
+			// The rooms and the lifts of the building that is open (when the route is in it) stay, so the route is seen against them; the other buildings
+			// are faded rather than hidden, to keep where the route is.
+			const bool bOpenRouteContent = !Building && InteriorGen && RouteBuildings.Contains(InteriorGen->GetLoadedBuildingId());
+			Actor->SetActorHiddenInGame(!(Building || bOpenRouteContent));
 			Actor->SetActorEnableCollision(false);
-			if (bRouteBuilding)
+			if (AInteriorRoom* Room = Cast<AInteriorRoom>(Actor)) Room->SetOverviewOpacity(0.3f);
+			if (Building)
 			{
 				Building->SetVisibleInteriorLevel(0);
-				Building->SetBuildingOpacity(0.08f);
+				Building->SetBuildingOpacity(bRouteBuilding ? 0.16f : 0.05f);
 			}
 		}
 	}
@@ -206,6 +204,29 @@ void ANavPlayerController::ShowFullRouteVisualization()
 	TArray<FNavigationStop> Stops = NavigationPanel->GetStops();
 	for (FNavigationStop& Stop : Stops) ResolveFullRoutePoint(Stop.Point);
 	// The route's exact first/last points take precedence over room-centre endpoint selections.
-	RouteVisualization->ShowView(UNavigationRouteVisualization::BuildView(Points, &Points[0], &Points.Last(),
-		FVector2D::ZeroVector, 1.f, 1.f, 0, true, FString(), &Stops, &NavigationPanel->GetRouteLegs(), nullptr, true));
+	FNavigation3DView View = UNavigationRouteVisualization::BuildView(Points, &Points[0], &Points.Last(),
+		FVector2D::ZeroVector, 1.f, 1.f, 0, true, FString(), &Stops, &NavigationPanel->GetRouteLegs(), nullptr, true);
+	// No texts in the overview: from this far they pile up on each other and hide the route (the steps are in the panel).
+	View.Labels.Reset();
+	RouteVisualization->ShowView(View);
+
+	// The floors the route goes through, each outlined at its level, so it is seen which floor each part of the route is on.
+	TSet<TPair<FString, int32>> Floors;
+	for (const FNavigationRoutePoint& Point : Points)
+	{
+		if (Point.Floor != 0) Floors.Add(TPair<FString, int32>(Point.BuildingId, Point.Floor));
+	}
+	const FLinearColor OutlineColor(0.45f, 0.72f, 1.f, 1.f);
+	for (const TPair<FString, int32>& Floor : Floors)
+	{
+		const APolyBuilding* Building = Generator ? Generator->FindBuildingById(Floor.Key) : nullptr;
+		const TArray<FVector2D>& Footprint = Building ? Building->GetFootprint() : TArray<FVector2D>();
+		if (!Building || Footprint.Num() < 3) continue;
+		const float Z = Building->GetLevelBaseZ(Floor.Value) + 6.f;
+		auto World = [&](int32 Index) { return FVector((Footprint[Index % Footprint.Num()] + Building->BuildingOffset) * Generator->GetScale(), Z); };
+		for (int32 Index = 0; Index < Footprint.Num(); ++Index)
+		{
+			RouteVisualization->DrawLine(World(Index), World(Index + 1), OutlineColor, SDPG_Foreground, 3.f, -1.f);
+		}
+	}
 }

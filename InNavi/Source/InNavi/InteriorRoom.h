@@ -131,6 +131,9 @@ public:
 	static constexpr float WallBiasThicknessStep = 0.4f;
 	static constexpr float WallBiasHeightStep = 0.8f;
 	int32 GetWallBiasLevel() const { return WallBiasLevel; }
+	// The full route overview shows the room see-through (Opacity 0..1, the walls and the floor) so the route is seen inside it; a negative
+	// Opacity gives the solid look back.
+	void SetOverviewOpacity(float Opacity);
 	// The plan area the walls cover, in world units (the room's footprint grown by the wall thickness); empty before the walls are built.
 	const FBox2D& GetWallBounds() const { return WallBounds; }
 private:
@@ -147,6 +150,9 @@ private:
 
 	UPROPERTY()
 	UMaterialInstanceDynamic* DynMaterial;
+
+	UPROPERTY()
+	UMaterialInstanceDynamic* OverviewMaterial = nullptr;
 
 	// Separate material for the floor slab (section 1, see RebuildMesh) - a distinct, plain tint
 	// from the walls' own DynMaterial rather than sharing it, so the floor and walls read as
