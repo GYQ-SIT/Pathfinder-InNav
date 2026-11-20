@@ -356,6 +356,12 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 		GoTabButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnGoTabClicked);
 		AddShare(Tabs, GoTabButton);
 		AddToStack(Stack, TabsSize, 8.f);
+		// Keep the overview accessible above long route instructions, on either tab.
+		FullRouteViewButton = MakeButton(TEXT("Btn_NavFullRouteView"), TEXT("Full Route View"), FullRouteViewButtonLabel);
+		FullRouteViewButton->SetIsEnabled(false);
+		FullRouteViewButton->SetToolTipText(FText::FromString(TEXT("View the entire route from outside transparent buildings. Click again or press Esc to return.")));
+		FullRouteViewButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnFullRouteViewClicked);
+		AddToStack(Stack, FullRouteViewButton, 6.f);
 
 		PlanBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Box_NavPlan"));
 		GoBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Box_NavGo"));
@@ -620,7 +626,7 @@ void UNavigationDockPanelWidget::SetContentWidth(float Width)
 			Size->SetWidthOverride(Width);
 		}
 	}
-	for (UButton* Button : { FindRouteButton, CancelFindRouteButton, ClearRouteButton, ToggleRouteButton, StepModeButton, EditRouteButton })
+	for (UButton* Button : { FindRouteButton, CancelFindRouteButton, ClearRouteButton, ToggleRouteButton, StepModeButton, EditRouteButton, FullRouteViewButton })
 	{
 		SetButtonWidth(Button, Width);
 	}
@@ -884,6 +890,12 @@ void UNavigationDockPanelWidget::OnStepModeClicked()
 	}
 }
 
+void UNavigationDockPanelWidget::OnFullRouteViewClicked()
+{
+	if (ANavPlayerController* PC = GetController()) PC->SetFullRouteViewEnabled(!PC->IsFullRouteViewEnabled());
+	RefreshDisplay();
+}
+
 void UNavigationDockPanelWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
@@ -925,6 +937,11 @@ void UNavigationDockPanelWidget::RefreshDisplay()
 	}
 	const int32 Count = Nav->GetPlaceCount();
 	const bool bHasRoute = !Nav->GetRoutePoints().IsEmpty();
+	if (FullRouteViewButton)
+	{
+		FullRouteViewButton->SetIsEnabled(PC->IsFullRouteViewEnabled() || PC->CanShowFullRouteView());
+		FullRouteViewButtonLabel->SetText(FText::FromString(PC->IsFullRouteViewEnabled() ? TEXT("Return to Previous View") : TEXT("Full Route View")));
+	}
 	// A route that has just been found is gone through (Go); with no route there is nothing to go through, and the places are set.
 	if (bHasRoute && !bHadRoute)
 	{

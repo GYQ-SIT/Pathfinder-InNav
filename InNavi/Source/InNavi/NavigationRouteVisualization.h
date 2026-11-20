@@ -43,6 +43,7 @@ struct FNavigation3DView
 	// Where the person is, at the step being shown.
 	TOptional<FVector> Here;
 	FQuat DisplayRotation = FQuat::Identity;
+	bool bForeground = false;
 };
 
 // Arrow geometry in local map pixels, so zooming does not make direction cues unreadable.
@@ -64,7 +65,8 @@ public:
 		const FNavigationRoutePoint* Start, const FNavigationRoutePoint* Destination,
 		FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible = true,
 		const FString& ActiveBuildingId = FString(), const TArray<FNavigationStop>* Stops = nullptr,
-		const TArray<FNavigationRouteLeg>* RouteLegs = nullptr, const FNavigationRouteFocus* Focus = nullptr);
+		const TArray<FNavigationRouteLeg>* RouteLegs = nullptr, const FNavigationRouteFocus* Focus = nullptr,
+		bool bFullRoute = false);
 	static bool IsPointVisible(const FNavigationRoutePoint& Point, const FString& ActiveBuildingId, int32 ActiveFloor);
 	// The route as the exterior screen draws it: the parts outside, a label where it enters or leaves a building, and the Start and
 	// Destination markers (also when they are indoors, then at their spot inside the building). Points carry their world positions.

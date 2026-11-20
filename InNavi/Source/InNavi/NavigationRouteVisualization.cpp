@@ -58,11 +58,12 @@ UNavigationRouteVisualization::UNavigationRouteVisualization()
 FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigationRoutePoint>& Route,
 	const FNavigationRoutePoint* Start, const FNavigationRoutePoint* Destination,
 	FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible, const FString& ActiveBuildingId,
-	const TArray<FNavigationStop>* Stops, const TArray<FNavigationRouteLeg>* RouteLegs, const FNavigationRouteFocus* Focus)
+	const TArray<FNavigationStop>* Stops, const TArray<FNavigationRouteLeg>* RouteLegs, const FNavigationRouteFocus* Focus, bool bFullRoute)
 {
 	FNavigation3DView View;
+	View.bForeground = bFullRoute;
 	if (!bGuidanceVisible) return View;
-	auto Visible = [&](const FNavigationRoutePoint& Point) { return IsPointVisible(Point, ActiveBuildingId, ActiveFloor); };
+	auto Visible = [&](const FNavigationRoutePoint& Point) { return bFullRoute || IsPointVisible(Point, ActiveBuildingId, ActiveFloor); };
 	auto WorldPoint = [&](const FNavigationRoutePoint& Point)
 	{
 		return NavigationWorldPoint(Point, BuildingOffset, Scale, FloorHeight);
@@ -79,15 +80,15 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 		return INDEX_NONE;
 	};
 	// When a step is being shown, the rest of the route is faint.
-	auto Dimmed = [Focus](int32 SegmentEndPointIndex)
+	auto Dimmed = [Focus, bFullRoute](int32 SegmentEndPointIndex)
 	{
-		return Focus && Focus->IsSet() && !(SegmentEndPointIndex > Focus->FirstPointIndex && SegmentEndPointIndex <= Focus->LastPointIndex);
+		return !bFullRoute && Focus && Focus->IsSet() && !(SegmentEndPointIndex > Focus->FirstPointIndex && SegmentEndPointIndex <= Focus->LastPointIndex);
 	};
 	for (int32 I = 1; I < Route.Num(); ++I)
 	{
 		const FNavigationRoutePoint& From = Route[I - 1];
 		const FNavigationRoutePoint& To = Route[I];
-		if (From.Floor != 0 && To.Floor != 0 && From.BuildingId != To.BuildingId)
+		if (!bFullRoute && From.Floor != 0 && To.Floor != 0 && From.BuildingId != To.BuildingId)
 		{
 			for (bool bDeparting : { true, false })
 			{
@@ -108,6 +109,10 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 			continue;
 		}
 		const bool bExterior = From.Floor == 0 || To.Floor == 0;
+		if (bFullRoute && !WorldPoint(From).Equals(WorldPoint(To), KINDA_SMALL_NUMBER))
+		{
+			View.Segments.Add({ WorldPoint(From), WorldPoint(To), true, LegOf(I), false });
+		}
 		// Show a local connector indicator, not a straight path through hidden floors/walls.
 		for (bool bDeparting : { true, false })
 		{
@@ -287,6 +292,7 @@ FNavigation3DView UNavigationRouteVisualization::TransformView(const FNavigation
 void UNavigationRouteVisualization::ShowView(const FNavigation3DView& View)
 {
 	ClearRoute();
+	const uint8 Depth = View.bForeground ? SDPG_Foreground : SDPG_World;
 	for (const FNavigationDisplaySegment& Segment : View.Segments)
 	{
 		FLinearColor Color(Segment.bTransition ? NavigationTransitionColor
@@ -294,10 +300,10 @@ void UNavigationRouteVisualization::ShowView(const FNavigation3DView& View)
 		if (Segment.bDimmed)
 		{
 			// Not the step being shown: a thin, dark line, without arrows.
-			DrawLine(Segment.From, Segment.To, Color * 0.25f, 0, 2.f, -1.f);
+			DrawLine(Segment.From, Segment.To, Color * 0.25f, Depth, 2.f, -1.f);
 			continue;
 		}
-		DrawLine(Segment.From, Segment.To, Color, 0, 6.f, -1.f);
+		DrawLine(Segment.From, Segment.To, Color, Depth, 6.f, -1.f);
 		const float Length = FVector::Distance(Segment.From, Segment.To);
 		const FVector Direction = (Segment.To - Segment.From).GetSafeNormal();
 		const int32 Arrows = FMath::Clamp(FMath::CeilToInt(Length / 250.f), 1, 32);
@@ -309,15 +315,15 @@ void UNavigationRouteVisualization::ShowView(const FNavigation3DView& View)
 			FVector Side = FVector::CrossProduct(Direction, View.DisplayRotation.RotateVector(FVector::UpVector)).GetSafeNormal();
 			if (Side.IsNearlyZero()) Side = View.DisplayRotation.RotateVector(FVector::RightVector);
 			const float HeadSize = FMath::Min(20.f, HalfLength);
-			DrawLine(Center - Direction * HalfLength, Tip, Color, 0, 4.f, -1.f);
-			DrawLine(Tip, Tip - Direction * HeadSize + Side * HeadSize * 0.5f, Color, 0, 4.f, -1.f);
-			DrawLine(Tip, Tip - Direction * HeadSize - Side * HeadSize * 0.5f, Color, 0, 4.f, -1.f);
+			DrawLine(Center - Direction * HalfLength, Tip, Color, Depth, 4.f, -1.f);
+			DrawLine(Tip, Tip - Direction * HeadSize + Side * HeadSize * 0.5f, Color, Depth, 4.f, -1.f);
+			DrawLine(Tip, Tip - Direction * HeadSize - Side * HeadSize * 0.5f, Color, Depth, 4.f, -1.f);
 		}
 	}
-	if (View.Start.IsSet()) DrawSphere(View.Start.GetValue(), 25.f, 12, FLinearColor::Green, -1.f, 0, 3.f);
-	if (View.Destination.IsSet()) DrawSphere(View.Destination.GetValue(), 25.f, 12, FLinearColor::Red, -1.f, 0, 3.f);
-	if (View.Here.IsSet()) DrawSphere(View.Here.GetValue(), 40.f, 12, FLinearColor::White, -1.f, 0, 4.f);
-	for (const FNavigationDisplayStop& Stop : View.Stops) DrawSphere(Stop.Position, 20.f, 12, FLinearColor(Stop.Color), -1.f, 0, 3.f);
+	if (View.Start.IsSet()) DrawSphere(View.Start.GetValue(), 25.f, 12, FLinearColor::Green, -1.f, Depth, 3.f);
+	if (View.Destination.IsSet()) DrawSphere(View.Destination.GetValue(), 25.f, 12, FLinearColor::Red, -1.f, Depth, 3.f);
+	if (View.Here.IsSet()) DrawSphere(View.Here.GetValue(), 40.f, 12, FLinearColor::White, -1.f, Depth, 4.f);
+	for (const FNavigationDisplayStop& Stop : View.Stops) DrawSphere(Stop.Position, 20.f, 12, FLinearColor(Stop.Color), -1.f, Depth, 3.f);
 	if (!GetOwner()) return;
 	for (const FNavigationDisplayLabel& Input : View.Labels)
 	{

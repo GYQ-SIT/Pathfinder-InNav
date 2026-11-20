@@ -145,6 +145,8 @@ private:
 	UFUNCTION()
 	void OnStepModeClicked();
 	UFUNCTION()
+	void OnFullRouteViewClicked();
+	UFUNCTION()
 	UWidget* HandleGenerateComboBoxItem(FString Item);
 
 	// Which place each row of the list shows: a row of the route, PendingRow for the row a stop is being added in, or INDEX_NONE for a
@@ -256,6 +258,10 @@ private:
 	UButton* StepModeButton = nullptr;
 	UPROPERTY()
 	UTextBlock* StepModeButtonLabel = nullptr;
+	UPROPERTY()
+	UButton* FullRouteViewButton = nullptr;
+	UPROPERTY()
+	UTextBlock* FullRouteViewButtonLabel = nullptr;
 	UPROPERTY()
 	UButton* EditRouteButton = nullptr;
 

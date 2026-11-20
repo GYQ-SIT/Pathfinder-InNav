@@ -578,6 +578,18 @@ on a building, inside one, or too far from every building is refused, and the st
 take (with building names, not ids), and "Step N: **Arrive at ...**" - the last step in green. In Go the route is shown as a line of its places above the directions. Before a route is found the places are in Plan. **Clear Route** resets the list and the route. **Hide Route** / **Show
 Route** hides or restores the route lines, direction arrows, markers and written steps without clearing the route.
 
+**Full Route View.** On either Plan or Go, click **Full Route View** after finding a route. The camera moves outside the buildings
+and zooms to frame the entire route, with a margin that adapts to the window's aspect ratio. Short routes remain readable even in
+large buildings. Building walls, roofs and slabs
+become transparent; room meshes are temporarily hidden. Every floor and leg is shown together at full brightness, with continuous
+connector lines between floors, Start/Destination markers and numbered stops. Route lines remain visible through the building and
+ground, including basement routes. Other buildings are temporarily hidden to keep the route clear.
+
+Click **Return to Previous View** or press **Esc** to restore the previous camera and zoom, 2D/3D editing view and building visibility.
+The overview is read-only and does not change project data, route points or the selected step. Choosing another floor, continuing
+to the next/previous step, hiding or clearing the route, editing its places, or leaving the editor also exits the overview. In 3D,
+**Reset Camera** frames the full route again while the overview is active; resizing the window refits it automatically.
+
 ### Audio panel
 
 Hidden by default (Window > Audio to show it). Lists every wav file under
