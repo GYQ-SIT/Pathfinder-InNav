@@ -37,6 +37,15 @@ project or file name, **+ New project** starts a new one, and **Back** returns t
 Each card shows the number of buildings (and an **Empty** tag when there are none yet), the project's name, its file name, its
 description and when the file was last written, with:
 
+- **The picture at the top (cover)** - a click on it opens a file dialog for a PNG, JPEG or BMP picture, which becomes the project's cover
+  (the hint "Click to add a cover picture" shows while the pointer is over it). The picture is cut from the middle to the card's
+  proportions, scaled to 760 x 390 and kept as a PNG of its own, `Data/Covers/<file name>.png` (the file name with its extension, so
+  `SIT.json` and `SIT.db` do not share one). The project file itself is not touched, so a sample or a map database can have a cover too.
+  A cross at the corner of a cover takes it away (the card shows its drawing again). A picture over 32 MB or 16384 pixels on a side, or
+  one that cannot be read, is refused with the reason under the header. The cover goes with the project: **Duplicate** copies it, **Rename**
+  renames it, **Delete** moves it into `Data/Deleted/` with the project. The covers are part of the project's files: commit
+  `Data/Covers/<file name>.png` together with the project, and the phone app's Explore card for the project shows it too
+  ([mobile-real-data-guide.md](../mobile-real-data-guide.md)). The release package keeps the covers of the projects it ships.
 - **Open project** - loads it and opens the editor. A project with no buildings yet opens like any other.
 - **Duplicate** - copies a `.json` project to "<name> copy" (then "copy 2", ...) with that name inside; the original is untouched.
 - **Rename** - changes the project's name and its file name together; a name another project already has is refused.

@@ -1725,7 +1725,7 @@ bool ANavPlayerController::BrowseForReferenceImage()
 		if (Window && Window->GetNativeWindow()) ParentWindowHandle = Window->GetNativeWindow()->GetOSWindowHandle();
 	}
 	FString Path, Error;
-	DesktopProjectFileDialog::Pick(ParentWindowHandle, GetProjectsDirectory(), false, Path, Error, /*bPng=*/true);
+	DesktopProjectFileDialog::Pick(ParentWindowHandle, GetProjectsDirectory(), false, Path, Error, DesktopProjectFileDialog::EKind::Png);
 	if (!Error.IsEmpty()) OnActionFailed.Broadcast(Error, EActionFailureSeverity::Warning);
 	return !Path.IsEmpty() && ImportReferenceImage(Path);
 #else
@@ -3357,6 +3357,25 @@ APolyBuilding* ANavPlayerController::CreateRegularPolygonBuilding(const FString&
 		MarkBuildingCreated(Result);
 	}
 	return Result;
+}
+
+FString ANavPlayerController::BrowseForCoverPicture()
+{
+#if PLATFORM_WINDOWS
+	const void* ParentWindowHandle = nullptr;
+	if (FSlateApplication::IsInitialized())
+	{
+		const TSharedPtr<SWindow> Window = FSlateApplication::Get().GetActiveTopLevelWindow();
+		if (Window && Window->GetNativeWindow()) ParentWindowHandle = Window->GetNativeWindow()->GetOSWindowHandle();
+	}
+	FString Path, Error;
+	DesktopProjectFileDialog::Pick(ParentWindowHandle, FPlatformProcess::UserDir(), false, Path, Error, DesktopProjectFileDialog::EKind::Picture);
+	if (!Error.IsEmpty()) OnActionFailed.Broadcast(Error, EActionFailureSeverity::Warning);
+	return Path;
+#else
+	OnActionFailed.Broadcast(TEXT("Choosing a picture is only available on Windows."), EActionFailureSeverity::Warning);
+	return FString();
+#endif
 }
 
 FString ANavPlayerController::BrowseForBuildingDataFile()

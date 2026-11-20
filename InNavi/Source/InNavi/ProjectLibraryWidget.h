@@ -9,6 +9,7 @@
 class UButton;
 class UEditableTextBox;
 class UProjectCardWidget;
+class UTexture2D;
 class USizeBox;
 class UTextBlock;
 class UWrapBox;
@@ -29,6 +30,10 @@ public:
 	void OpenProject(const FProjectLibraryEntry& Entry);
 	void DuplicateProject(const FProjectLibraryEntry& Entry);
 	void RenameProject(const FProjectLibraryEntry& Entry);
+	// The picture area of a card: asks for a picture (the system's file dialog) and makes it the project's cover, or takes the cover away.
+	void ChooseCover(const FProjectLibraryEntry& Entry);
+	void SetCoverFromFile(const FProjectLibraryEntry& Entry, const FString& PicturePath);
+	void RemoveCoverOf(const FProjectLibraryEntry& Entry);
 	// Asks first, then moves the file into the Data/Deleted folder (see ProjectLibrary::SoftDelete).
 	void DeleteProject(const FProjectLibraryEntry& Entry);
 	void GoBack();
@@ -65,6 +70,11 @@ private:
 	void GoToEditScreen();
 	void ShowMessage(const FString& Message);
 	void RebuildCards();
+	// The cover of an entry as a texture, read once and kept until the file changes (the cards are rebuilt on every key of the search).
+	UTexture2D* CoverTextureFor(const FProjectLibraryEntry& Entry);
+
+	UPROPERTY()
+	TMap<FString, UTexture2D*> CoverTextures;
 
 	UPROPERTY()
 	UEditableTextBox* SearchBox = nullptr;
