@@ -5,6 +5,7 @@
 #include "MobileSelectWidget.generated.h"
 
 class UBorder;
+class UButton;
 class UOverlay;
 class UOverlaySlot;
 class USizeBox;
@@ -98,9 +99,17 @@ private:
 	UOverlay* PopupHost = nullptr;
 	UPROPERTY()
 	USizeBox* PopupWidth = nullptr;
+	// Over the page and under the list while it is open: it takes any touch that is not on the list and closes it, so that a tap on the page under it, or a
+	// scroll of it, does not act (a list open over a page that still answers is a list nobody can tell is open).
+	UPROPERTY()
+	UButton* Catcher = nullptr;
+	UFUNCTION()
+	void HandleCatcherPressed();
 	UPROPERTY()
 	UOverlaySlot* PopupSlot = nullptr;
 	float MaxListHeight = 190.f;
+	// The most the list is allowed now (less than MaxListHeight where the page has no room for more), so it is not set again every frame.
+	float ListHeightNow = -1.f;
 
 	FString Caption;
 	TArray<FMobileSelectOption> Options;

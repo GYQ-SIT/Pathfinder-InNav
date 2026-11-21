@@ -472,6 +472,11 @@ void UMobileSearchPageWidget::AddPlaceRow(const FMobilePlace& Place)
 	ListBox->AddChildToVerticalBox(Divider)->SetPadding(FMargin(16.f, 0.f));
 }
 
+bool UMobileSearchPageWidget::HasOpenSelect() const
+{
+	return (CategorySelect && CategorySelect->IsOpen()) || (BuildingSelect && BuildingSelect->IsOpen()) || (LevelSelect && LevelSelect->IsOpen());
+}
+
 void UMobileSearchPageWidget::SetMinimized(bool bInMinimized)
 {
 	if (bMinimized == bInMinimized)

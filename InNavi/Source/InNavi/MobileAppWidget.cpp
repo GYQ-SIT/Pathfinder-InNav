@@ -797,6 +797,11 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 void UMobileAppWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	// The map's list of levels and a drop-down list are not open together (two lists over one screen, and a touch has to close one of them).
+	if (bLevelPopupOpen && ((SearchPage && SearchPage->HasOpenSelect()) || (RoutePage && RoutePage->HasOpenSelect())))
+	{
+		SetLevelPopupOpen(false);
+	}
 	if (StorageErrorSeconds > 0.f && (StorageErrorSeconds -= InDeltaTime) <= 0.f && StorageError)
 		StorageError->SetVisibility(ESlateVisibility::Collapsed);
 	// The route graph is got ready while the person looks at the map, so that their first route is quick (it is the most of the work of a route).
@@ -1579,6 +1584,9 @@ FVector2D UMobileAppWidget::ToDesign(const FGeometry& Geometry, const FVector2D&
 
 FReply UMobileAppWidget::HandlePointerDown(const FGeometry& Geometry, const FPointerEvent& Event)
 {
+	// A touch that reaches here is not on a drop-down list (those take theirs, and so does the page under an open one): a list that is open closes.
+	if (SearchPage) SearchPage->CloseSelects();
+	if (RoutePage) RoutePage->CloseSelects();
 	// A second press while a drag is on (the mouse of the same click) is not a new drag.
 	if (!bDraggingSheet && BeginSheetDrag(ToDesign(Geometry, Event.GetScreenSpacePosition())))
 	{
@@ -2033,6 +2041,11 @@ void UMobileAppWidget::ApplyMap()
 
 void UMobileAppWidget::SetLevelPopupOpen(bool bOpen)
 {
+	if (bOpen)
+	{
+		if (SearchPage) SearchPage->CloseSelects();
+		if (RoutePage) RoutePage->CloseSelects();
+	}
 	bLevelPopupOpen = bOpen && !bMapOverview;
 	ApplyMap();
 }
