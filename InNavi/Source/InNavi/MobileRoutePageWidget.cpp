@@ -104,7 +104,7 @@ USizeBox* UMobileRoutePageWidget::AddStopRow(UWidget* Badge, UWidget* Content, U
 	Row->AddChildToHorizontalBox(RouteSized(WidgetTree, Left, 24.f, StopRowHeight));
 	UHorizontalBoxSlot* ContentSlot = Row->AddChildToHorizontalBox(Content);
 	ContentSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-	ContentSlot->SetPadding(FMargin(12.f, 0.f, 0.f, 0.f));
+	ContentSlot->SetPadding(FMargin(12.f, 0.f, 8.f, 0.f));
 	ContentSlot->SetVerticalAlignment(VAlign_Center);
 	if (Actions)
 	{
@@ -115,7 +115,11 @@ USizeBox* UMobileRoutePageWidget::AddStopRow(UWidget* Badge, UWidget* Content, U
 	// A hairline under the row, from the text to the right edge, between one place and the next (the prototype has it; the line between the badges
 	// already joins them, this one tells the places apart).
 	UOverlay* Layers = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass());
-	Layers->AddChildToOverlay(Row);
+	// (An overlay slot is aligned left and top unless it is told to fill: the row was only as wide as its words, and the cross and the handle
+	// followed the words instead of standing at the right edge.)
+	UOverlaySlot* RowSlot = Layers->AddChildToOverlay(Row);
+	RowSlot->SetHorizontalAlignment(HAlign_Fill);
+	RowSlot->SetVerticalAlignment(VAlign_Fill);
 	if (bLineBelow)
 	{
 		USizeBox* Hairline = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
@@ -487,6 +491,8 @@ void UMobileRoutePageWidget::RefreshStops()
 		if (Old) Old->ClosePopup();
 	}
 	if (AddSelect) AddSelect->ClosePopup();
+	EndDragGhost();
+	StopGhosts.Reset();
 	StopsBox->ClearChildren();
 	StopRowBoxes.Reset();
 	ReorderHandles.Reset();
@@ -591,28 +597,38 @@ void UMobileRoutePageWidget::RefreshStops()
 		}
 		USizeBox* RowBox = AddStopRow(Badge, Texts, Actions, true, true);
 		StopRowBoxes.Add(RowBox);
+		FStopGhost Ghost;
+		Ghost.Name = Select->GetSelectedShortLabel();
+		Ghost.Where = WhereLine;
+		Ghost.BadgeFill = bLast ? RouteDestinationRed() : Blue;
+		Ghost.BadgeNumber = FString::FromInt(Index + 1);
+		Ghost.bPin = bLast;
+		Ghost.bRemovable = Count > 1;
+		Ghost.bHandle = Count > 1;
+		StopGhosts.Add(Ghost);
 
 		UMobileReorderHandle* Handle = nullptr;
 		if (Count > 1)
 		{
 			Handle = CreateWidget<UMobileReorderHandle>(this, UMobileReorderHandle::StaticClass());
 			TWeakObjectPtr<USizeBox> WeakRow(RowBox);
-			Handle->SetOnDragged([WeakRow](float DeltaY)
+			Handle->SetOnDragged([WeakThis, Index](float DeltaY)
 			{
-				// The row follows the pointer while it is dragged.
-				if (USizeBox* Row = WeakRow.Get())
-				{
-					Row->SetRenderTranslation(FVector2D(0.0, DeltaY));
-				}
-			});
-			Handle->SetOnDropped([WeakThis, WeakRow, Index, Count](float DeltaY)
-			{
-				if (USizeBox* Row = WeakRow.Get())
-				{
-					Row->SetRenderTranslation(FVector2D::ZeroVector);
-				}
+				// The row is a card that follows the pointer while it is dragged.
 				if (UMobileRoutePageWidget* Self = WeakThis.Get())
 				{
+					if (!Self->IsDragGhostShown())
+					{
+						Self->BeginDragGhost(Index);
+					}
+					Self->MoveDragGhost(DeltaY);
+				}
+			});
+			Handle->SetOnDropped([WeakThis, Index, Count](float DeltaY)
+			{
+				if (UMobileRoutePageWidget* Self = WeakThis.Get())
+				{
+					Self->EndDragGhost();
 					Self->MoveDestination(Index, FMath::Clamp(Index + FMath::RoundToInt(DeltaY / StopRowHeight), 0, Count - 1));
 				}
 			});
@@ -813,6 +829,116 @@ void UMobileRoutePageWidget::SetStepsOpen(bool bOpen)
 {
 	bStepsOpen = bOpen;
 	RefreshSections();
+}
+
+bool UMobileRoutePageWidget::HasOpenSelect() const
+{
+	TArray<UMobileSelectWidget*> All = { FromSelect, BuildingSelect, LevelSelect, AddSelect };
+	All.Append(DestinationSelects);
+	return All.ContainsByPredicate([](const UMobileSelectWidget* Select) { return Select && Select->IsOpen(); });
+}
+
+void UMobileRoutePageWidget::BeginDragGhost(int32 Index)
+{
+	if (!PopupRoot || !StopGhosts.IsValidIndex(Index) || !StopRowBoxes.IsValidIndex(Index) || DragGhost)
+	{
+		return;
+	}
+	const FStopGhost& Spec = StopGhosts[Index];
+	// The card: the badge, the name and its place, the cross and the handle, as the row has them, on white.
+	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+	UWidget* Face = Spec.bPin ? MobileIcons::Picture(WidgetTree, TEXT("Destination"), 14.f, OnBlue) : nullptr;
+	Row->AddChildToHorizontalBox(MakeBadge(Spec.BadgeFill, Face ? Face : static_cast<UWidget*>(MakeText(WidgetTree, FString(), Spec.BadgeNumber, 12.f, OnBlue, true))))->SetVerticalAlignment(VAlign_Center);
+	UVerticalBox* Texts = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
+	UTextBlock* Name = MakeText(WidgetTree, FString(), Spec.Name, 15.f, Ink);
+	Name->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+	Name->SetClipping(EWidgetClipping::ClipToBounds);
+	Texts->AddChildToVerticalBox(Name);
+	if (!Spec.Where.IsEmpty())
+	{
+		Texts->AddChildToVerticalBox(MakeText(WidgetTree, FString(), Spec.Where, 11.f, Grey));
+	}
+	UHorizontalBoxSlot* TextSlot = Row->AddChildToHorizontalBox(Texts);
+	TextSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+	TextSlot->SetPadding(FMargin(12.f, 0.f, 8.f, 0.f));
+	TextSlot->SetVerticalAlignment(VAlign_Center);
+	// The cross and the handle as the row has them: the icon in the middle of a box 28 wide and 40 tall.
+	auto Action = [this](const TCHAR* IconName, const TCHAR* Glyph) -> UWidget*
+	{
+		UWidget* Icon = MobileIcons::Picture(WidgetTree, IconName, 20.f, Grey);
+		UBorder* Centre = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+		Centre->SetBrushColor(FLinearColor::Transparent);
+		Centre->SetHorizontalAlignment(HAlign_Center);
+		Centre->SetVerticalAlignment(VAlign_Center);
+		Centre->SetContent(Icon ? Icon : static_cast<UWidget*>(MakeText(WidgetTree, FString(), Glyph, 20.f, Grey, true)));
+		return RouteSized(WidgetTree, Centre, 28.f, 40.f);
+	};
+	if (Spec.bRemovable)
+	{
+		Row->AddChildToHorizontalBox(Action(TEXT("Remove"), TEXT("×")))->SetVerticalAlignment(VAlign_Center);
+	}
+	if (Spec.bHandle)
+	{
+		Row->AddChildToHorizontalBox(Action(TEXT("Reorder"), TEXT("≡")))->SetVerticalAlignment(VAlign_Center);
+	}
+	UBorder* Card = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("DragCard"));
+	Card->SetBrush(Rounded(White, FLinearColor::Transparent, 14.f, 0.f));
+	Card->SetBrushColor(FLinearColor::White);
+	Card->SetPadding(FMargin(12.f, 0.f, 4.f, 0.f));
+	Card->SetVerticalAlignment(VAlign_Center);
+	Card->SetContent(Row);
+	// A shadow under it: two darker rounded layers, a little lower, that show as a soft edge at the bottom.
+	UBorder* ShadowNear = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	ShadowNear->SetBrush(Rounded(FLinearColor(0.f, 0.f, 0.f, 0.14f), FLinearColor::Transparent, 14.f, 0.f));
+	ShadowNear->SetBrushColor(FLinearColor::White);
+	ShadowNear->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
+	ShadowNear->SetContent(Card);
+	UBorder* ShadowFar = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	ShadowFar->SetBrush(Rounded(FLinearColor(0.f, 0.f, 0.f, 0.07f), FLinearColor::Transparent, 16.f, 0.f));
+	ShadowFar->SetBrushColor(FLinearColor::White);
+	ShadowFar->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+	ShadowFar->SetContent(ShadowNear);
+	USizeBox* Sized = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+	const FGeometry RowGeometry = StopRowBoxes[Index]->GetCachedGeometry();
+	const FGeometry HostGeometry = PopupRoot->GetCachedGeometry();
+	const FVector2D TopLeft = HostGeometry.AbsoluteToLocal(RowGeometry.GetAbsolutePositionAtCoordinates(FVector2D::ZeroVector));
+	Sized->SetWidthOverride(static_cast<float>(RowGeometry.GetLocalSize().X) > 1.f ? static_cast<float>(RowGeometry.GetLocalSize().X) : 320.f);
+	Sized->SetHeightOverride(StopRowHeight + 7.f);
+	Sized->SetContent(ShadowFar);
+	DragGhostSlot = PopupRoot->AddChildToOverlay(Sized);
+	DragGhostSlot->SetHorizontalAlignment(HAlign_Left);
+	DragGhostSlot->SetVerticalAlignment(VAlign_Top);
+	DragGhostTop = static_cast<float>(TopLeft.Y);
+	DragGhostSlot->SetPadding(FMargin(static_cast<float>(TopLeft.X), DragGhostTop, 0.f, 0.f));
+	DragGhost = Sized;
+	DragGhostIndex = Index;
+	// The row it leaves is faint, so that it is seen where it was.
+	StopRowBoxes[Index]->SetRenderOpacity(0.25f);
+	StopRowBoxes[Index]->SetRenderTranslation(FVector2D::ZeroVector);
+}
+
+void UMobileRoutePageWidget::MoveDragGhost(float DeltaY)
+{
+	if (DragGhost && DragGhostSlot)
+	{
+		const FMargin Now = DragGhostSlot->GetPadding();
+		DragGhostSlot->SetPadding(FMargin(Now.Left, DragGhostTop + DeltaY, 0.f, 0.f));
+	}
+}
+
+void UMobileRoutePageWidget::EndDragGhost()
+{
+	if (DragGhost && PopupRoot)
+	{
+		PopupRoot->RemoveChild(DragGhost);
+	}
+	if (StopRowBoxes.IsValidIndex(DragGhostIndex) && StopRowBoxes[DragGhostIndex])
+	{
+		StopRowBoxes[DragGhostIndex]->SetRenderOpacity(1.f);
+	}
+	DragGhost = nullptr;
+	DragGhostSlot = nullptr;
+	DragGhostIndex = INDEX_NONE;
 }
 
 void UMobileRoutePageWidget::CloseOtherSelects(const UMobileSelectWidget* Keep)
