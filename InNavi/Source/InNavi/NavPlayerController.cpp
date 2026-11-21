@@ -1707,17 +1707,6 @@ bool ANavPlayerController::SetActiveFloorName(const FString& NewName)
 	return true;
 }
 
-int32 ANavPlayerController::AddSpecialFloor()
-{
-	const int32 Level = AddFloor();
-	if (Level != 0 && InteriorGen)
-	{
-		InteriorGen->SetFloorName(Level, TEXT("Special floor"));
-		bHasUnsavedChanges = true;
-	}
-	return Level;
-}
-
 bool ANavPlayerController::BrowseForReferenceImage()
 {
 #if PLATFORM_WINDOWS

@@ -436,8 +436,6 @@ private:
 	UFUNCTION()
 	void OnAddBasementClicked();
 	UFUNCTION()
-	void OnAddSpecialFloorClicked();
-	UFUNCTION()
 	void OnFloorNameCommitted(const FText& NewText, ETextCommit::Type CommitType);
 	UFUNCTION()
 	void OnFloorRangeCommitted(const FText& NewText, ETextCommit::Type CommitType);
@@ -891,8 +889,6 @@ private:
 	UEditableTextBox* FloorNameBox = nullptr;
 	UPROPERTY()
 	UButton* AddBasementButton = nullptr;
-	UPROPERTY()
-	UButton* AddSpecialFloorButton = nullptr;
 	bool bRefreshingOpenFloor = false;
 	UPROPERTY()
 	UButton* ImportReferenceButton = nullptr;

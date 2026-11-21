@@ -696,8 +696,6 @@ public:
 	// Floor names (PAT-203): the name of a floor, and naming the floor being viewed. A name is only a label next to the level number.
 	FString GetFloorName(int32 Level) const;
 	bool SetActiveFloorName(const FString& NewName);
-	// "+ Special floor": a new floor on top with a name to change ("Special floor"). Returns its level, or 0. (+ Basement is AddFloorBelow.)
-	int32 AddSpecialFloor();
 	bool SetActiveFloorOpen(bool bOpen);
 
 	// ---- Reference image (PAT-201): a PNG under the 2D drawing of the floor being viewed ----

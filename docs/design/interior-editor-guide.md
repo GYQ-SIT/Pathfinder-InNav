@@ -397,12 +397,15 @@ empty. There is no level 0, and a building goes down to B20 and up to 200. The f
 or the lowest floor can be deleted (**Delete floor**), never one in the middle. A **main door** can only be on the ground
 floor, so a building without one (a walkway) is entered through the link doors of the buildings next to it.
 
-**Floor names and special floors (PAT-203).** The **Name** box under From / To gives the floor being viewed a name next to its number
-("Level 2 - Mezzanine"); Enter applies it, and it is saved with the floor (`name`). **+ Basement** adds B1, then B2 ... under the lowest floor
-(refused with the reason when the building starts above the ground, since a floor under floor 3 is not a basement); **+ Special** adds a floor on top
-named "Special floor", to rename; **+ Add** adds a numbered floor on top. New floors always go where they belong (basements below, the rest on top),
-so the order is automatic. A name is only a label: every floor keeps its level number, which is what routes, doors and lifts use, so a mezzanine is
-a floor with a name, a full storey high, not a half storey between two numbers, and the floors cannot be dragged into another order.
+**Floor names (PAT-203).** Every floor card says "Level 1", "Level 2" ... ("Level B1" for a basement) until it is named. The **Name** box under
+From / To gives the floor being viewed its own name, which the card shows **instead of** "Level N": type 1M, Floor 1 or Ground Floor and the card
+says exactly that; empty it and the card goes back to "Level N". Enter applies it, and it is saved with the floor (`name`, up to 40 characters).
+There is no separate special floor: any floor, a basement too, is named this way. **+ Basement** adds B1, then B2 ... under the lowest floor
+(refused with the reason when the building starts above the ground, since a floor under floor 3 is not a basement); **+ Add** adds a numbered
+floor on top. A basement's card is **red** (dark red, bright red while it is the floor being viewed), so the floors under the ground stand out.
+New floors always go where they belong (basements below, the rest on top), so the order is automatic. A name is only a label: every floor keeps its
+level number, which is what routes, doors and lifts use, so a mezzanine is a floor with a name, a full storey high, not a half storey between two
+numbers, and the floors cannot be dragged into another order.
 
 **Open floor (no outer wall)** is a tick box under From / To, for the floor being viewed (PAT-205). A sheltered walkway, an open lobby or an open
 ground floor has no outer wall: ticked, the floor's wall ring is not built in the 3D view (the slab stays) and, on the **ground floor**, the whole
