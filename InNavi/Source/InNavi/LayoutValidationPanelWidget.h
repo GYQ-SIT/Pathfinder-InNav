@@ -77,6 +77,8 @@ private:
     UPROPERTY() TArray<TObjectPtr<UWidget>> RetainedComboItems;
     float ContentWidth = 260.f;
     float PollElapsed = 0.f;
+    // What the issues were listed for: the words under each ("Show on plan", "Show in 3D") follow the view, so the list is made again when the view changes.
+    bool bListedFor3D = false;
     bool bExterior = false;
     bool bDisplayedStale = false;
     bool bWasBusy = false;

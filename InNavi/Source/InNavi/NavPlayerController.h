@@ -221,6 +221,11 @@ public:
 	// IsSelectingNavigationPoint, and UInteriorFloorPlanWidget being hidden entirely while active).
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	bool IsIn3DPreviewMode() const { return bIsIn3DPreviewMode; }
+	// An issue of the validation, shown in the 3D view: a translucent beam over the place (red for an error, yellow for the rest) from the floor up, and the
+	// camera moved near it, looking at it. It stays until another issue is shown, or the 3D view, the building or the project is left.
+	void ShowValidationIssueIn3D(const FString& BuildingId, int32 Floor, const FVector2D& PlanPosition, bool bError);
+	void ClearValidationMarker();
+	bool HasValidationMarker() const { return ValidationBeacon.IsValid(); }
 
 	// Temporary, read-only exterior overview of every floor/leg of the current route.
 	UFUNCTION(BlueprintCallable, Category = "Navigation")
@@ -1545,6 +1550,7 @@ private:
 	TMap<FString, float> FullRouteFloorShifts;
 	// A solid plate at each of those floors (the shape of the building), made when the overview starts and destroyed when it ends.
 	TArray<TWeakObjectPtr<AActor>> FullRouteFloorPlates;
+	TWeakObjectPtr<AActor> ValidationBeacon;
 
 	void BuildFullRouteFloorShifts();
 	void FrameFullRouteView();
