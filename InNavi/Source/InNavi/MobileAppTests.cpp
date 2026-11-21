@@ -15,6 +15,9 @@
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "Components/EditableTextBox.h"
+#include "Components/Overlay.h"
+#include "Components/VerticalBox.h"
+#include "Blueprint/WidgetTree.h"
 #include "Components/WidgetSwitcher.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
@@ -322,6 +325,64 @@ bool FMobileSearchPageTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("all 28 places of the mall"), Page->GetShownPlaces().Num(), 28);
 	TestEqual(TEXT("a mall has no building drop-down"), Page->GetBuildingSelect()->GetVisibility(), ESlateVisibility::Collapsed);
 	TestFalse(TEXT("a new site closes the filters"), Page->AreFiltersOpen());
+
+	World->DestroyWorld(false);
+	return true;
+}
+
+// The filter lists of the directory open over the places (an overlay over the page), not in the page where they would push the places down; they
+// are not taller than five rows; and a long name of a place is cut with "..." before the building and level at the right.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileDirectoryPopupTest, "InNavi.Mobile.DirectoryPopup", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileDirectoryPopupTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	FMobileMockSource Source;
+	UMobileSearchPageWidget* Page = CreateWidget<UMobileSearchPageWidget>(World, UMobileSearchPageWidget::StaticClass());
+	if (!TestNotNull(TEXT("the page is created"), Page)) return false;
+	Page->TakeWidget();
+	Page->SetSource(&Source, TEXT("sit-punggol"));
+	UOverlay* Root = Cast<UOverlay>(Page->FindNamedWidget(TEXT("SearchRoot")));
+	if (!TestNotNull(TEXT("the page sits in an overlay"), Root)) return false;
+	TestEqual(TEXT("the page is its only layer at first"), Root->GetChildrenCount(), 1);
+
+	Page->SetFiltersOpen(true);
+	UMobileSelectWidget* Category = Page->GetCategorySelect();
+	UMobileSelectWidget* Building = Page->GetBuildingSelect();
+	Category->ToggleOpen();
+	TestEqual(TEXT("an open list is a layer over the page"), Root->GetChildrenCount(), 2);
+	TestEqual(TEXT("the page under it keeps its place"), Root->GetChildAt(0), Cast<UWidget>(Page->FindNamedWidget(TEXT("SearchPage"))));
+	Building->ToggleOpen();
+	TestTrue(TEXT("only one is open"), Building->IsOpen() && !Category->IsOpen());
+	Page->SetFiltersOpen(false);
+	TestFalse(TEXT("closing the filters closes the list that floats over the page"), Building->IsOpen());
+
+	for (UMobileSelectWidget* Select : { Category, Building, Page->GetLevelSelect() })
+	{
+		TestTrue(TEXT("a list is about five rows at most"), Select->GetMaxListHeight() > 150.f && Select->GetMaxListHeight() < 230.f);
+	}
+
+	// A long name is cut at the end with an ellipsis; the building and level tag is as wide as it is, not squeezed.
+	const FString FirstName = Page->GetShownPlaces()[0].Name;
+	bool bFound = false;
+	const UVerticalBox* List = Cast<UVerticalBox>(Page->FindNamedWidget(TEXT("ListBox")));
+	for (int32 Index = 0; List && Index < List->GetChildrenCount(); ++Index)
+	{
+		const UMobileTapTarget* Tap = Cast<UMobileTapTarget>(List->GetChildAt(Index));
+		if (!Tap || !Tap->WidgetTree) continue;
+		TArray<UWidget*> All;
+		Tap->WidgetTree->GetAllWidgets(All);
+		for (UWidget* Widget : All)
+		{
+			const UTextBlock* Text = Cast<UTextBlock>(Widget);
+			if (Text && Text->GetText().ToString() == FirstName)
+			{
+				bFound = true;
+				TestEqual(TEXT("a place name ends in an ellipsis when it is too long"), Text->GetTextOverflowPolicy(), ETextOverflowPolicy::Ellipsis);
+			}
+		}
+		if (bFound) break;
+	}
+	TestTrue(TEXT("the name of a place is in the list"), bFound);
 
 	World->DestroyWorld(false);
 	return true;

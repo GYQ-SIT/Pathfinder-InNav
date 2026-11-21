@@ -97,6 +97,9 @@ private:
 	UTextBlock* FiltersBadgeText = nullptr;
 	UPROPERTY()
 	UVerticalBox* FilterPanel = nullptr;
+	// How tall a filter list gets before it scrolls: five and a half rows of the small drop-down (the category list is five, and the half row
+	// that shows under a longer list says that it goes on, as there is no scroll bar).
+	static constexpr float FilterListHeight = 190.f;
 	UPROPERTY()
 	UMobileSelectWidget* CategorySelect = nullptr;
 	UPROPERTY()
