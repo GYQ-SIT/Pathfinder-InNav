@@ -4468,8 +4468,14 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 
 void ANavPlayerController::FollowNavigationStep()
 {
-	if (bFullRouteViewEnabled) SetFullRouteViewEnabled(false);
-	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
+	// In the full route view a step does not take the person out of it (nor move the camera or change the floor): only the route follows, drawn grey where
+	// it is walked, orange for this step and blue for what is to come.
+	if (bFullRouteViewEnabled)
+	{
+		RefreshRoute3DVisualization();
+		return;
+	}
+	if (bInteriorInspectionEnabled) return;
 	const FNavigationRoutePoint* Point = NavigationPanel ? NavigationPanel->GetGuidedPoint() : nullptr;
 	APolyBuilding* Building = Point && Generator ? Generator->FindBuildingById(Point->BuildingId) : nullptr;
 	if (!Point || !Building)
@@ -6359,6 +6365,10 @@ void ANavPlayerController::Tick(float DeltaSeconds)
 			FIntPoint Size;
 			GetViewportSize(Size.X, Size.Y);
 			if (Size != FullRouteViewportSize) FrameFullRouteView();
+			// The width of the lines follows how far the camera is from the route: when it has gone nearer or further, they are drawn again.
+			const float Distance = FullRouteCameraDistance();
+			if (FullRouteDrawnDistance > 0.f && FMath::Abs(Distance - FullRouteDrawnDistance) > 0.08f * FullRouteDrawnDistance && NavigationPanel) ShowFullRouteVisualization();
+			UpdateFullRouteCallouts();
 			return;
 		}
 	}

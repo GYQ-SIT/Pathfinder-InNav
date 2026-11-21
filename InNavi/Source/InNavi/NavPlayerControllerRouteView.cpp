@@ -10,6 +10,18 @@
 #include "NavigationRouteVisualization.h"
 #include "PolyBuilding.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Blueprint/UserWidget.h"
+#include "FullRouteCalloutLayer.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/Border.h"
+#include "Components/CanvasPanel.h"
+#include "Components/CanvasPanelSlot.h"
+#include "Components/SizeBox.h"
+#include "Components/TextBlock.h"
+#include "Components/VerticalBox.h"
+#include "Components/VerticalBoxSlot.h"
+#include "StartScreenStyle.h"
 #include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PawnMovementComponent.h"
@@ -194,6 +206,12 @@ void ANavPlayerController::SetFullRouteViewEnabled(bool bEnable)
 		}
 		FullRouteSavedActors.Empty();
 		FullRouteFloorShifts.Reset();
+		ClearFullRouteCallouts();
+		if (FullRouteCalloutLayer)
+		{
+			FullRouteCalloutLayer->RemoveFromParent();
+			FullRouteCalloutLayer = nullptr;
+		}
 		for (const TWeakObjectPtr<AActor>& Plate : FullRouteFloorPlates)
 		{
 			if (Plate.IsValid()) Plate->Destroy();
@@ -418,6 +436,114 @@ void ANavPlayerController::SetFullRouteViewEnabled(bool bEnable)
 	NavigationPanel->OnStateChanged.Broadcast();
 }
 
+float ANavPlayerController::FullRouteCameraDistance() const
+{
+	if (!FullRouteDrawnBounds.IsValid) return 1000.f;
+	FVector Eye = GetPawn() ? GetPawn()->GetActorLocation() : FVector::ZeroVector;
+	if (PlayerCameraManager) Eye = PlayerCameraManager->GetCameraLocation();
+	return FMath::Max(50.f, static_cast<float>(FVector::Distance(Eye, FullRouteDrawnBounds.GetCenter())));
+}
+
+void ANavPlayerController::ClearFullRouteCallouts()
+{
+	if (FullRouteCalloutLayer && FullRouteCalloutLayer->GetCanvas())
+	{
+		FullRouteCalloutLayer->GetCanvas()->ClearChildren();
+	}
+	FullRouteCalloutWidgets.Reset();
+	FullRouteCalloutPoints.Reset();
+	FullRouteCalloutStems.Reset();
+	FullRouteCalloutWidths.Reset();
+}
+
+void ANavPlayerController::AddFullRouteCallout(const FVector& Point, const FString& Text, const FColor& Color)
+{
+	if (!FullRouteCalloutLayer)
+	{
+		FullRouteCalloutLayer = CreateWidget<UFullRouteCalloutLayer>(this, UFullRouteCalloutLayer::StaticClass());
+		if (!FullRouteCalloutLayer) return;
+		FullRouteCalloutLayer->TakeWidget();
+		FullRouteCalloutLayer->SetVisibility(ESlateVisibility::HitTestInvisible);
+		// Under the panels, over the world.
+		FullRouteCalloutLayer->AddToViewport(-10);
+	}
+	UCanvasPanel* Canvas = FullRouteCalloutLayer->GetCanvas();
+	if (!Canvas) return;
+	UWidgetTree* Tree = FullRouteCalloutLayer->WidgetTree;
+	// A tag in the colour of what it marks, with dark words, and a short stem down to the point.
+	UTextBlock* Words = StartStyle::Text(Tree, FString(), Text, 13.f, StartStyle::Rgb(12, 18, 28), true);
+	UBorder* Tag = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	Tag->SetBrush(StartStyle::Rounded(FLinearColor::FromSRGBColor(Color), FLinearColor(0.f, 0.f, 0.f, 0.55f), 6.f, 1.f));
+	Tag->SetBrushColor(FLinearColor::White);
+	Tag->SetPadding(FMargin(8.f, 4.f));
+	Tag->SetContent(Words);
+	UBorder* Stem = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	Stem->SetBrushColor(FLinearColor::FromSRGBColor(Color));
+	USizeBox* StemSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+	StemSize->SetWidthOverride(3.f);
+	StemSize->SetHeightOverride(18.f);
+	StemSize->SetContent(Stem);
+	FullRouteCalloutStems.Add(StemSize);
+	FullRouteCalloutWidths.Add(Text.Len() * 7.5f + 18.f);
+	UVerticalBox* Pin = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
+	Pin->AddChildToVerticalBox(Tag)->SetHorizontalAlignment(HAlign_Center);
+	Pin->AddChildToVerticalBox(StemSize)->SetHorizontalAlignment(HAlign_Center);
+	UCanvasPanelSlot* Slot = Canvas->AddChildToCanvas(Pin);
+	Slot->SetAutoSize(true);
+	Slot->SetAlignment(FVector2D(0.5f, 1.f));
+	FullRouteCalloutWidgets.Add(Pin);
+	FullRouteCalloutPoints.Add(Point);
+}
+
+void ANavPlayerController::UpdateFullRouteCallouts()
+{
+	const float Scale = FMath::Max(UWidgetLayoutLibrary::GetViewportScale(this), 0.01f);
+	constexpr float TagHeight = 26.f;
+	constexpr float StemHeight = 18.f;
+	// Where each point is on the screen; the tags that would sit on each other are lifted apart (the lowest on the screen keeps its place).
+	TArray<int32> Order;
+	TArray<FVector2D> Places;
+	Places.SetNum(FullRouteCalloutWidgets.Num());
+	TArray<bool> OnScreen;
+	OnScreen.SetNum(FullRouteCalloutWidgets.Num());
+	for (int32 Index = 0; Index < FullRouteCalloutWidgets.Num(); ++Index)
+	{
+		FVector2D Screen;
+		OnScreen[Index] = FullRouteCalloutWidgets[Index] && ProjectWorldLocationToScreen(FullRouteCalloutPoints[Index], Screen, false);
+		Places[Index] = Screen / Scale;
+		if (OnScreen[Index]) Order.Add(Index);
+	}
+	Order.Sort([&Places](int32 A, int32 B) { return Places[A].Y > Places[B].Y; });
+	TArray<FBox2D> Taken;
+	for (const int32 Index : Order)
+	{
+		const float Width = FullRouteCalloutWidths.IsValidIndex(Index) ? FullRouteCalloutWidths[Index] : 120.f;
+		float Lift = 0.f;
+		for (int32 Tries = 0; Tries < 12; ++Tries)
+		{
+			const float Top = Places[Index].Y - StemHeight - Lift - TagHeight;
+			const FBox2D Box(FVector2D(Places[Index].X - Width * 0.5f, Top), FVector2D(Places[Index].X + Width * 0.5f, Top + TagHeight));
+			if (!Taken.ContainsByPredicate([&Box](const FBox2D& Other) { return Box.Intersect(Other); }))
+			{
+				Taken.Add(Box);
+				break;
+			}
+			Lift += TagHeight + 4.f;
+		}
+		if (FullRouteCalloutStems.IsValidIndex(Index) && FullRouteCalloutStems[Index]) FullRouteCalloutStems[Index]->SetHeightOverride(StemHeight + Lift);
+	}
+	for (int32 Index = 0; Index < FullRouteCalloutWidgets.Num(); ++Index)
+	{
+		UWidget* Pin = FullRouteCalloutWidgets[Index];
+		if (!Pin) continue;
+		Pin->SetVisibility(OnScreen[Index] ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+		if (OnScreen[Index])
+		{
+			if (UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(Pin->Slot)) Slot->SetPosition(Places[Index]);
+		}
+	}
+}
+
 void ANavPlayerController::ShowFullRouteVisualization()
 {
 	TArray<FNavigationRoutePoint> Points = NavigationPanel->GetRoutePoints();
@@ -432,18 +558,49 @@ void ANavPlayerController::ShowFullRouteVisualization()
 		ResolveFullRoutePoint(Stop.Point);
 		Stop.Point.WorldPosition.Z += FullRouteFloorShift(Stop.Point.BuildingId, Stop.Point.Floor);
 	}
-	// The route's exact first/last points take precedence over room-centre endpoint selections.
+	// The route's exact first/last points take precedence over room-centre endpoint selections. When the route is gone through a step at a time the
+	// overview follows it: what is walked is grey, the step being shown orange, what is to come blue, and the person is marked.
+	const FNavigationRouteFocus Focus = NavigationPanel->GetGuidedFocus();
 	FNavigation3DView View = UNavigationRouteVisualization::BuildView(Points, &Points[0], &Points.Last(),
-		FVector2D::ZeroVector, 1.f, 1.f, 0, true, FString(), &Stops, &NavigationPanel->GetRouteLegs(), nullptr, true);
-	// No texts in the overview: from this far they pile up on each other and hide the route (the steps are in the panel).
+		FVector2D::ZeroVector, 1.f, 1.f, 0, true, FString(), &Stops, &NavigationPanel->GetRouteLegs(), &Focus, true);
+	// The texts of the view are not used: from this far they pile up on each other and hide the route (the steps are in the panel). A few call-outs
+	// are: where it starts, where it ends, each stop and where the person is.
 	View.Labels.Reset();
-	// Seen from far the lines and the balls have to be bigger: they grow with the size of the route.
 	FBox Bounds(ForceInit);
 	for (const FNavigationRoutePoint& Point : Points) Bounds += Point.WorldPosition;
-	RouteVisualization->SetDisplayScale(Bounds.IsValid ? FMath::Clamp(Bounds.GetExtent().Size() / 2500.f, 1.f, 8.f) : 1.f);
+	// Seen from far the lines and the balls have to be bigger: they grow with how far the camera is from the route (a width of 20 units is a few pixels at
+	// a thousand units, and the same few pixels at ten thousand when it is ten times as wide).
+	FullRouteDrawnBounds = Bounds;
+	const float CameraDistance = FullRouteCameraDistance();
+	FullRouteDrawnDistance = CameraDistance;
+	RouteVisualization->SetDisplayScale(FMath::Clamp(CameraDistance / 1500.f, 0.03f, 40.f));
 	RouteVisualization->ShowView(View);
-	RouteVisualization->SetDisplayScale(1.f);
 	const float LineScale = FMath::Clamp(Bounds.IsValid ? Bounds.GetExtent().Size() / 2500.f : 1.f, 1.f, 8.f);
+	// The call-outs: where it starts, where it ends, each stop and where the person is.
+	ClearFullRouteCallouts();
+	{
+		auto Name = [](FString Label)
+		{
+			// "Lectorial 6 (Floor 1)" -> "Lectorial 6".
+			int32 Bracket = INDEX_NONE;
+			if (Label.FindChar(TEXT('('), Bracket) && Bracket > 0) Label.LeftInline(Bracket);
+			return Label.TrimStartAndEnd();
+		};
+		FString StartName = Name(NavigationPanel->GetStartRoomLabel());
+		if (StartName.IsEmpty()) StartName = Name(NavigationPanel->GetStartOtherBuildingLabel());
+		FString DestinationName = Name(NavigationPanel->GetDestinationRoomLabel());
+		if (DestinationName.IsEmpty()) DestinationName = Name(NavigationPanel->GetDestinationOtherBuildingLabel());
+		if (View.Start.IsSet()) AddFullRouteCallout(View.Start.GetValue(), StartName.IsEmpty() ? FString(TEXT("Start")) : TEXT("Start: ") + StartName, FColor(60, 230, 110));
+		if (View.Destination.IsSet()) AddFullRouteCallout(View.Destination.GetValue(), DestinationName.IsEmpty() ? FString(TEXT("Destination")) : TEXT("Destination: ") + DestinationName, FColor(255, 100, 100));
+		for (const FNavigationDisplayStop& Stop : View.Stops)
+		{
+			const FString StopName = Stops.IsValidIndex(Stop.Number - 1) ? Name(Stops[Stop.Number - 1].RoomOptionLabel) : FString();
+			AddFullRouteCallout(Stop.Position, StopName.IsEmpty() ? FString::Printf(TEXT("Stop %d"), Stop.Number) : FString::Printf(TEXT("Stop %d: %s"), Stop.Number, *StopName), FColor(255, 210, 70));
+		}
+		if (View.Here.IsSet()) AddFullRouteCallout(View.Here.GetValue(), TEXT("You are here"), FColor(90, 215, 255));
+	}
+	UpdateFullRouteCallouts();
+	RouteVisualization->SetDisplayScale(1.f);
 
 	// The floors the route goes through, each outlined at its level, so it is seen which floor each part of the route is on.
 	TSet<TPair<FString, int32>> Floors;
