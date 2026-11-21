@@ -1,5 +1,6 @@
 #include "MapBuildingRowWidget.h"
 
+#include "EditorIcons.h"
 #include "NavPlayerController.h"
 #include "StartScreenStyle.h"
 
@@ -40,12 +41,19 @@ TSharedRef<SWidget> UMapBuildingRowWidget::RebuildWidget()
 				ContentSlot->SetVerticalAlignment(VAlign_Fill);
 			}
 
-		// The building mark: an outlined block with two vertical lines.
+		// The building mark: the design team's building (Icon_Building) when it is imported; else an outlined block with two vertical lines.
+		const FLinearColor MarkColor = bSelected ? Rgb(190, 220, 255) : Rgb(150, 176, 210);
+		UWidget* BuildingPicture = EditorIcons::Picture(WidgetTree, TEXT("RowMarkIcon"), TEXT("Icon_Building"), 22.f * DesignToUi, MarkColor);
+		if (BuildingPicture)
+		{
+			UHorizontalBoxSlot* PictureSlot = Content->AddChildToHorizontalBox(BuildingPicture);
+			PictureSlot->SetVerticalAlignment(VAlign_Center);
+			PictureSlot->SetPadding(FMargin(0.f, 0.f, 2.f * DesignToUi, 0.f));
+		}
 		USizeBox* MarkSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("RowMarkSize"));
 		MarkSize->SetWidthOverride(20.f * DesignToUi);
 		MarkSize->SetHeightOverride(22.f * DesignToUi);
 		UCanvasPanel* Mark = WidgetTree->ConstructWidget<UCanvasPanel>(UCanvasPanel::StaticClass(), TEXT("RowMark"));
-		const FLinearColor MarkColor = bSelected ? Rgb(190, 220, 255) : Rgb(150, 176, 210);
 		UBorder* Block = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("RowMarkBlock"));
 		Block->SetBrush(Rounded(FLinearColor::Transparent, MarkColor, 2.f, 1.5f));
 		Block->SetBrushColor(FLinearColor::White);
@@ -61,8 +69,11 @@ TSharedRef<SWidget> UMapBuildingRowWidget::RebuildWidget()
 			BarSlot->SetSize(FVector2D(1.5f, 14.f) * DesignToUi);
 		}
 		MarkSize->SetContent(Mark);
-		UHorizontalBoxSlot* MarkSlot = Content->AddChildToHorizontalBox(MarkSize);
-		MarkSlot->SetVerticalAlignment(VAlign_Center);
+		if (!BuildingPicture)
+		{
+			UHorizontalBoxSlot* MarkSlot = Content->AddChildToHorizontalBox(MarkSize);
+			MarkSlot->SetVerticalAlignment(VAlign_Center);
+		}
 
 		UVerticalBox* Texts = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RowTexts"));
 		UTextBlock* NameText = Text(WidgetTree, TEXT("Txt_RowName"), Name, 14.f, Rgb(241, 246, 255), true);
