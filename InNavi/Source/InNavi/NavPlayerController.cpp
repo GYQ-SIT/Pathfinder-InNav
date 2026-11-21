@@ -18,6 +18,9 @@
 #include "InteriorFloorPlanWidget.h"
 #include "Blueprint/UserWidget.h"
 #include "GameFramework/Pawn.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "PolyBuilding.h"
 #include "InteriorBuildingPreviewPivot.h"
 #include "GameFramework/FloatingPawnMovement.h"
@@ -3527,6 +3530,7 @@ void ANavPlayerController::CloseProject()
 
 void ANavPlayerController::ClearProjectState()
 {
+	ClearValidationMarker();
 	SetFullRouteViewEnabled(false);
 	FinishRotationGesture();
 	ExitAllMouseTools();
@@ -3958,8 +3962,55 @@ float ANavPlayerController::GetCameraMoveSpeed() const
 	return 0.f;
 }
 
+void ANavPlayerController::ClearValidationMarker()
+{
+	if (AActor* Beacon = ValidationBeacon.Get()) Beacon->Destroy();
+	ValidationBeacon.Reset();
+}
+
+void ANavPlayerController::ShowValidationIssueIn3D(const FString& BuildingId, int32 Floor, const FVector2D& PlanPosition, bool bError)
+{
+	ClearValidationMarker();
+	const APolyBuilding* Building = Generator ? Generator->FindBuildingById(BuildingId) : nullptr;
+	if (!Building || !GetWorld()) return;
+	const FVector2D XY = (PlanPosition + Building->BuildingOffset) * Generator->GetScale();
+	const float BaseZ = Floor == 0 ? 0.f : Building->GetLevelBaseZ(Floor);
+	const float Height = FMath::Max(Building->GetFloorHeight() * 1.6f, 300.f);
+	const FVector Where(XY.X, XY.Y, BaseZ);
+	// The beam: a thin translucent cylinder standing on the floor.
+	AStaticMeshActor* Beacon = GetWorld()->SpawnActor<AStaticMeshActor>(FVector(Where.X, Where.Y, Where.Z + Height * 0.5f), FRotator::ZeroRotator);
+	UStaticMesh* Cylinder = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/ImageAssets/Materials/M_BuildingTransparent.M_BuildingTransparent"));
+	if (Beacon && Cylinder && Base)
+	{
+		UStaticMeshComponent* Mesh = Beacon->GetStaticMeshComponent();
+		Mesh->SetMobility(EComponentMobility::Movable);
+		Mesh->SetStaticMesh(Cylinder);
+		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Mesh->SetCastShadow(false);
+		Mesh->SetWorldScale3D(FVector(0.6f, 0.6f, Height / 100.f));
+		UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(Base, Beacon);
+		Material->SetVectorParameterValue(TEXT("Color"), bError ? FLinearColor(1.f, 0.18f, 0.12f) : FLinearColor(1.f, 0.85f, 0.15f));
+		Material->SetScalarParameterValue(TEXT("Opacity"), 0.6f);
+		Mesh->SetMaterial(0, Material);
+		ValidationBeacon = Beacon;
+	}
+	else if (Beacon)
+	{
+		Beacon->Destroy();
+	}
+	// The camera near it, above and to the side, looking at the place.
+	if (GetPawn())
+	{
+		const FVector Eye = Where + FVector(-700.f, -700.f, 700.f);
+		GetPawn()->SetActorLocation(Eye);
+		SetControlRotation((Where + FVector(0.f, 0.f, 100.f) - Eye).Rotation());
+	}
+}
+
 void ANavPlayerController::SetIn3DPreviewMode(bool bEnable)
 {
+	if (!bEnable) ClearValidationMarker();
 	if (bFullRouteViewEnabled) SetFullRouteViewEnabled(false);
 	if (!bEnable) SetInteriorInspectionEnabled(false);
 	if (bEnable == bIsIn3DPreviewMode || !Generator || !InteriorGen)
@@ -4417,8 +4468,14 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 
 void ANavPlayerController::FollowNavigationStep()
 {
-	if (bFullRouteViewEnabled) SetFullRouteViewEnabled(false);
-	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
+	// In the full route view a step does not take the person out of it (nor move the camera or change the floor): only the route follows, drawn grey where
+	// it is walked, orange for this step and blue for what is to come.
+	if (bFullRouteViewEnabled)
+	{
+		RefreshRoute3DVisualization();
+		return;
+	}
+	if (bInteriorInspectionEnabled) return;
 	const FNavigationRoutePoint* Point = NavigationPanel ? NavigationPanel->GetGuidedPoint() : nullptr;
 	APolyBuilding* Building = Point && Generator ? Generator->FindBuildingById(Point->BuildingId) : nullptr;
 	if (!Point || !Building)
@@ -6308,6 +6365,10 @@ void ANavPlayerController::Tick(float DeltaSeconds)
 			FIntPoint Size;
 			GetViewportSize(Size.X, Size.Y);
 			if (Size != FullRouteViewportSize) FrameFullRouteView();
+			// The width of the lines follows how far the camera is from the route: when it has gone nearer or further, they are drawn again.
+			const float Distance = FullRouteCameraDistance();
+			if (FullRouteDrawnDistance > 0.f && FMath::Abs(Distance - FullRouteDrawnDistance) > 0.08f * FullRouteDrawnDistance && NavigationPanel) ShowFullRouteVisualization();
+			UpdateFullRouteCallouts();
 			return;
 		}
 	}

@@ -16,6 +16,7 @@
 #include "Components/TextBlock.h"
 #include "Components/EditableTextBox.h"
 #include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/VerticalBox.h"
@@ -351,7 +352,17 @@ bool FMobileDirectoryPopupTest::RunTest(const FString& Parameters)
 	UMobileSelectWidget* Category = Page->GetCategorySelect();
 	UMobileSelectWidget* Building = Page->GetBuildingSelect();
 	Category->ToggleOpen();
-	TestEqual(TEXT("an open list is a layer over the page"), Root->GetChildrenCount(), 2);
+	// Two layers over the page: one that takes any touch outside the list and closes it, and the list.
+	TestEqual(TEXT("an open list is a layer over the page, with one that takes the touches outside it"), Root->GetChildrenCount(), 3);
+	const UButton* Catcher = Cast<UButton>(Root->GetChildAt(1));
+	if (TestNotNull(TEXT("the layer that takes the touches"), Catcher))
+	{
+		TestEqual(TEXT("it takes them while the list is open"), Catcher->GetVisibility(), ESlateVisibility::Visible);
+		const_cast<UButton*>(Catcher)->OnClicked.Broadcast();
+		TestFalse(TEXT("and a touch on it closes the list"), Category->IsOpen());
+		TestEqual(TEXT("and it goes away"), Catcher->GetVisibility(), ESlateVisibility::Collapsed);
+		Category->ToggleOpen();
+	}
 	TestEqual(TEXT("the page under it keeps its place"), Root->GetChildAt(0), Cast<UWidget>(Page->FindNamedWidget(TEXT("SearchPage"))));
 	Building->ToggleOpen();
 	TestTrue(TEXT("only one is open"), Building->IsOpen() && !Category->IsOpen());
@@ -475,6 +486,12 @@ bool FMobileRouteRowsTest::RunTest(const FString& Parameters)
 		const USizeBox* Row = Cast<USizeBox>(Stops->GetChildAt(Index));
 		const UOverlay* Layers = Row ? Cast<UOverlay>(Row->GetContent()) : nullptr;
 		if (Layers && Layers->GetChildrenCount() > 1) ++Dividers;
+		// The row fills the row: the cross and the handle stand at the right edge, not after the words.
+		const UOverlaySlot* RowSlot = Layers && Layers->GetSlots().Num() > 0 ? Cast<UOverlaySlot>(Layers->GetSlots()[0]) : nullptr;
+		if (TestNotNull(TEXT("a row slot"), RowSlot))
+		{
+			TestTrue(TEXT("fills the width"), RowSlot->GetHorizontalAlignment() == HAlign_Fill);
+		}
 	}
 	// My location, two destinations and Add stop: a line under each but the last.
 	TestEqual(TEXT("a line between the places, not under the last"), Dividers, Stops->GetChildrenCount() - 1);
@@ -524,6 +541,12 @@ bool FMobilePagesOpenAtTopTest::RunTest(const FString& Parameters)
 	Screen->SetActiveTab(UMobileAppWidget::ETab::Profile);
 	TestEqual(TEXT("but the same tab again does not"), Screen->GetPagesScrolledToTop(), Before + 1);
 
+	// A long name on the place page wraps to two lines and is cut, so it does not run under the close button.
+	const UTextBlock* PlaceTitle = Cast<UTextBlock>(Screen->GetPlacePage()->FindNamedWidget(TEXT("Txt_PlaceTitle")));
+	if (TestNotNull(TEXT("the place's name"), PlaceTitle))
+	{
+		TestEqual(TEXT("is cut after two lines"), PlaceTitle->GetTextOverflowPolicy(), ETextOverflowPolicy::MultilineEllipsis);
+	}
 	World->DestroyWorld(false);
 	return true;
 }

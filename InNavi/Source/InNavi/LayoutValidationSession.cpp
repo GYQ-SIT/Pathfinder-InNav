@@ -213,9 +213,12 @@ bool ULayoutValidationSession::ShowIssue(ANavPlayerController& Controller, int32
     if (bRunning || bStale || !Report.Issues.IsValidIndex(Index) || !IsValid(Buildings) || !IsValid(Interior)) return false;
     const auto Issue = Report.Issues[Index];
     if (Issue.BuildingId.IsEmpty() || !Buildings->FindBuildingById(Issue.BuildingId)) return false;
+    const bool bWasIn3D = Controller.IsIn3DPreviewMode();
     // This explicit view action follows the controller's normal building-switch path, which preserves unsaved edits.
     if (Controller.GetLoadedBuildingId() != Issue.BuildingId && Controller.LoadInteriorForBuilding(Issue.BuildingId) < 0) return false;
-    Controller.SetIn3DPreviewMode(false);
+    // Shown from the 3D view it is shown in the 3D view (a beam over the place and the camera near it); from the plan, on the plan.
+    const bool bIn3D = bWasIn3D;
+    Controller.SetIn3DPreviewMode(bIn3D);
     if (Issue.Floor != 0) Controller.SetActiveFloor(Issue.Floor);
     switch (Issue.Kind)
     {
@@ -225,6 +228,8 @@ bool ULayoutValidationSession::ShowIssue(ANavPlayerController& Controller, int32
     case LayoutValidation::EObjectKind::Entrance: Controller.SelectEntrance(Issue.ObjectId); break;
     default: Controller.SelectRoom(FString()); break;
     }
+    if (bIn3D) Controller.ShowValidationIssueIn3D(Issue.BuildingId, Issue.Floor, Issue.Position, Issue.Severity == LayoutValidation::ESeverity::Error);
+    else Controller.ClearValidationMarker();
     // Opening older JSON materialises defaults in the live model. Refresh read-only diagnostics after
     // that explicit view action, rather than mislabelling a representation change as an author edit.
     if (LayoutValidation::Fingerprint(Capture(*Buildings, *Interior)) != Report.Fingerprint)

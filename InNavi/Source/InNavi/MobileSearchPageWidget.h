@@ -54,6 +54,9 @@ public:
 	// The sheet is down at its lowest: only the title is shown (no filters button, filters, starting line or list), as in the prototype.
 	void SetMinimized(bool bInMinimized);
 	bool IsMinimized() const { return bMinimized; }
+	// A drop-down list is open (it floats over the page), and closing whichever is.
+	bool HasOpenSelect() const;
+	void CloseSelects() { CloseOtherSelects(nullptr); }
 	const FMobilePlaceFilter& GetFilter() const { return Filter; }
 	int32 GetActiveFilterCount() const;
 	// The site's name, or the name of the building the filter or the map has.

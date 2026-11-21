@@ -79,6 +79,13 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 		}
 		return INDEX_NONE;
 	};
+	// In the overview, with a step being shown: what has been walked, this step, and what is still to walk.
+	auto ProgressOf = [Focus, bFullRoute](int32 SegmentEndPointIndex)
+	{
+		if (!bFullRoute || !Focus || !Focus->IsSet()) return ENavigationSegmentProgress::Unspecified;
+		if (SegmentEndPointIndex <= Focus->FirstPointIndex) return ENavigationSegmentProgress::Done;
+		return SegmentEndPointIndex <= Focus->LastPointIndex ? ENavigationSegmentProgress::Current : ENavigationSegmentProgress::Pending;
+	};
 	// When a step is being shown, the rest of the route is faint.
 	auto Dimmed = [Focus, bFullRoute](int32 SegmentEndPointIndex)
 	{
@@ -104,14 +111,14 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 			if (Visible(From) && Visible(To)
 				&& !WorldPoint(From).Equals(WorldPoint(To), KINDA_SMALL_NUMBER))
 			{
-				View.Segments.Add({ WorldPoint(From), WorldPoint(To), false, LegOf(I), Dimmed(I) });
+				View.Segments.Add({ WorldPoint(From), WorldPoint(To), false, LegOf(I), Dimmed(I), ProgressOf(I) });
 			}
 			continue;
 		}
 		const bool bExterior = From.Floor == 0 || To.Floor == 0;
 		if (bFullRoute && !WorldPoint(From).Equals(WorldPoint(To), KINDA_SMALL_NUMBER))
 		{
-			View.Segments.Add({ WorldPoint(From), WorldPoint(To), true, LegOf(I), false });
+			View.Segments.Add({ WorldPoint(From), WorldPoint(To), true, LegOf(I), false, ProgressOf(I) });
 		}
 		// Show a local connector indicator, not a straight path through hidden floors/walls.
 		for (bool bDeparting : { true, false })
@@ -142,7 +149,7 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 					: FString::Printf(TEXT("Arrive via %s from %s"), *Connector, *NavigationFloorLabel(Other.Floor));
 				const FVector Upper = Position + FVector(0, 0, 70.f);
 				const bool bUpward = To.Floor > From.Floor;
-				View.Segments.Add({ bUpward ? Position : Upper, bUpward ? Upper : Position, true, LegOf(I), Dimmed(I) });
+				View.Segments.Add({ bUpward ? Position : Upper, bUpward ? Upper : Position, true, LegOf(I), Dimmed(I), ProgressOf(I) });
 			}
 			View.Labels.Add({ Position + FVector(0, 0, 95.f), Text, NavigationTransitionColor });
 		}
@@ -289,6 +296,45 @@ FNavigation3DView UNavigationRouteVisualization::TransformView(const FNavigation
 	return Result;
 }
 
+// A stretch of the overview that follows the person: a thick line with an outline round it (so it stands out on the rooms behind it), and chevrons on it
+// that point the way. Walked: grey. The step being shown: orange. Still to walk: blue.
+void UNavigationRouteVisualization::DrawProgressSegment(const FNavigationDisplaySegment& Segment, const FQuat& DisplayRotation, uint8 Depth)
+{
+	FLinearColor Line, Outline, Chevron;
+	float Width = 0.f;
+	switch (Segment.Progress)
+	{
+	case ENavigationSegmentProgress::Done:
+		Line = FLinearColor(0.66f, 0.68f, 0.72f); Outline = FLinearColor(0.20f, 0.21f, 0.24f); Chevron = FLinearColor(0.92f, 0.93f, 0.95f); Width = 13.f;
+		break;
+	case ENavigationSegmentProgress::Current:
+		Line = FLinearColor(1.f, 0.55f, 0.f); Outline = FLinearColor(0.42f, 0.16f, 0.f); Chevron = FLinearColor::White; Width = 20.f;
+		break;
+	default:
+		Line = FLinearColor(0.10f, 0.50f, 1.f); Outline = FLinearColor(0.f, 0.12f, 0.40f); Chevron = FLinearColor::White; Width = 16.f;
+		break;
+	}
+	DrawLine(Segment.From, Segment.To, Outline, Depth, (Width + 8.f) * DisplayScale, -1.f);
+	DrawLine(Segment.From, Segment.To, Line, Depth, Width * DisplayScale, -1.f);
+	const float Length = FVector::Distance(Segment.From, Segment.To);
+	if (Length < 1.f) return;
+	const FVector Direction = (Segment.To - Segment.From).GetSafeNormal();
+	// Chevrons, big and near each other, on the line.
+	const int32 Count = FMath::Clamp(FMath::CeilToInt(Length / (170.f * DisplayScale)), 1, 48);
+	FVector Side = FVector::CrossProduct(Direction, DisplayRotation.RotateVector(FVector::UpVector)).GetSafeNormal();
+	if (Side.IsNearlyZero()) Side = DisplayRotation.RotateVector(FVector::RightVector);
+	for (int32 Index = 0; Index < Count; ++Index)
+	{
+		const FVector Centre = FMath::Lerp(Segment.From, Segment.To, (Index + 0.5f) / Count);
+		const float Reach = FMath::Min(30.f * DisplayScale, Length / (Count * 4.f));
+		const FVector Tip = Centre + Direction * Reach;
+		const FVector Left = Tip - Direction * Reach * 1.5f + Side * Reach * 0.9f;
+		const FVector Right = Tip - Direction * Reach * 1.5f - Side * Reach * 0.9f;
+		DrawLine(Left, Tip, Chevron, Depth, 9.f * DisplayScale, -1.f);
+		DrawLine(Right, Tip, Chevron, Depth, 9.f * DisplayScale, -1.f);
+	}
+}
+
 void UNavigationRouteVisualization::ShowView(const FNavigation3DView& View)
 {
 	ClearRoute();
@@ -297,6 +343,11 @@ void UNavigationRouteVisualization::ShowView(const FNavigation3DView& View)
 	{
 		FLinearColor Color(Segment.bTransition ? NavigationTransitionColor
 			: (Segment.RouteLegIndex == INDEX_NONE ? NavigationRouteColor : LegColor(Segment.RouteLegIndex)));
+		if (Segment.Progress != ENavigationSegmentProgress::Unspecified)
+		{
+			DrawProgressSegment(Segment, View.DisplayRotation, Depth);
+			continue;
+		}
 		if (Segment.bDimmed)
 		{
 			// Not the step being shown: a thin, dark line, without arrows.
@@ -320,10 +371,14 @@ void UNavigationRouteVisualization::ShowView(const FNavigation3DView& View)
 			DrawLine(Tip, Tip - Direction * HeadSize - Side * HeadSize * 0.5f, Color, Depth, 4.f * DisplayScale, -1.f);
 		}
 	}
-	if (View.Start.IsSet()) DrawSphere(View.Start.GetValue(), 25.f * DisplayScale, 12, FLinearColor::Green, -1.f, Depth, 3.f);
-	if (View.Destination.IsSet()) DrawSphere(View.Destination.GetValue(), 25.f * DisplayScale, 12, FLinearColor::Red, -1.f, Depth, 3.f);
-	if (View.Here.IsSet()) DrawSphere(View.Here.GetValue(), 40.f * DisplayScale, 12, FLinearColor::White, -1.f, Depth, 4.f);
-	for (const FNavigationDisplayStop& Stop : View.Stops) DrawSphere(Stop.Position, 20.f * DisplayScale, 12, FLinearColor(Stop.Color), -1.f, Depth, 3.f);
+	// The overview (it draws in the foreground) marks these points with call-outs, and a ball over each of them only hid the line: no balls there.
+	if (!View.bForeground)
+	{
+		if (View.Start.IsSet()) DrawSphere(View.Start.GetValue(), 25.f * DisplayScale, 12, FLinearColor::Green, -1.f, Depth, 3.f);
+		if (View.Destination.IsSet()) DrawSphere(View.Destination.GetValue(), 25.f * DisplayScale, 12, FLinearColor::Red, -1.f, Depth, 3.f);
+		if (View.Here.IsSet()) DrawSphere(View.Here.GetValue(), 40.f * DisplayScale, 12, FLinearColor::White, -1.f, Depth, 4.f);
+		for (const FNavigationDisplayStop& Stop : View.Stops) DrawSphere(Stop.Position, 20.f * DisplayScale, 12, FLinearColor(Stop.Color), -1.f, Depth, 3.f);
+	}
 	if (!GetOwner()) return;
 	for (const FNavigationDisplayLabel& Input : View.Labels)
 	{

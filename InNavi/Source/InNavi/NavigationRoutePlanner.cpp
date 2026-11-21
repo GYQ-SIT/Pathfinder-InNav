@@ -1949,9 +1949,43 @@ void FNavigationLayoutCheck::FImpl::Finish(LayoutValidation::FReport& Report)
 		if (!bConnected)
 		{
 			FVector2D Position = FVector2D::ZeroVector; EntrancePosition(Model, Door, Scale, Position);
-			AddIssue(Report, TEXT("LINK_UNUSABLE"), ESeverity::Error, Model.Building->BuildingId, Door.Level, EObjectKind::Entrance, Door.Id,
-				TEXT("The route planner cannot join this link entrance to the target building."),
-				TEXT("Check target floors, floor elevations, wall proximity and whether the mirrored opening fits."), Position);
+			// Why: say which of the few causes it is, in the words of what the person sees (this used to be one sentence for all of them, and the
+			// commonest, a target building that has no interior drawn yet, was not in it).
+			const FRouteBuilding* Target = Models.FindByPredicate([&Door](const FRouteBuilding& Other) { return Other.Building && Other.Building->BuildingId == Door.ConnectsTo; });
+			const FString TargetName = !Target || Target->Building->BuildingName.IsEmpty() ? Door.ConnectsTo : Target->Building->BuildingName;
+			const FString Level = LayoutValidation::LevelLabel(Door.Level);
+			FString Message, Suggestion;
+			// A building with nothing drawn (yet) at the other end is unfinished work, a warning; the other causes are broken links, errors.
+			ESeverity LinkSeverity = ESeverity::Error;
+			if (!Target)
+			{
+				Message = FString::Printf(TEXT("This link door leads to the building '%s', which is not in the project."), *Door.ConnectsTo);
+				Suggestion = TEXT("Remove this link door, or link to a building that exists.");
+			}
+			else if (Target->Floors.IsEmpty())
+			{
+				LinkSeverity = ESeverity::Warning;
+				Message = FString::Printf(TEXT("This link door leads to %s, which has no interior drawn yet. A route can go through the door but has nowhere to go inside, and cannot leave that building."), *TargetName);
+				Suggestion = FString::Printf(TEXT("Open %s and draw its Level %s (a room, or a door that leads out), or remove this link."), *TargetName, *Level);
+			}
+			else if (!Target->Floors.Contains(Door.Level))
+			{
+				LinkSeverity = ESeverity::Warning;
+				Message = FString::Printf(TEXT("This link door leads to Level %s of %s, but that level has nothing drawn in it, so a route that goes through has nowhere to go."), *Level, *TargetName);
+				Suggestion = FString::Printf(TEXT("Open %s and draw Level %s, or move this link to a level it has."), *TargetName, *Level);
+			}
+			else if (!FMath::IsNearlyEqual(Model.Building->GetLevelBaseZ(Door.Level), Target->Building->GetLevelBaseZ(Door.Level), 1.f))
+			{
+				Message = FString::Printf(TEXT("This link door cannot meet %s: its Level %s is at a different height there (%.1f m, here %.1f m), so the two doorways do not line up."),
+					*TargetName, *Level, Target->Building->GetLevelBaseZ(Door.Level) / 100.f, Model.Building->GetLevelBaseZ(Door.Level) / 100.f);
+				Suggestion = TEXT("Give both buildings the same floor height, or link floors that are at the same height.");
+			}
+			else
+			{
+				Message = FString::Printf(TEXT("This link door cannot be joined to %s: the matching doorway in its wall could not be made."), *TargetName);
+				Suggestion = FString::Printf(TEXT("Check that the door is next to %s, that its wall has a clear stretch of the door's width, and add a door there by hand if it still fails."), *TargetName);
+			}
+			AddIssue(Report, TEXT("LINK_UNUSABLE"), LinkSeverity, Model.Building->BuildingId, Door.Level, EObjectKind::Entrance, Door.Id, Message, Suggestion, Position);
 		}
 	}
 	if (Queue.IsEmpty()) { NoEntryPoints(Report); return; }
