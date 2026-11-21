@@ -51,6 +51,8 @@ public:
 	// The most the open list shows before it scrolls (the same as five rows of the directory's small drop-down), so that it never runs off the
 	// screen when the sheet is only half open.
 	void SetMaxListHeight(float Height);
+	// Takes the popup list out of its host (the page rebuilds its rows, and the selects of the old ones go).
+	void ClosePopup();
 	float GetMaxListHeight() const { return MaxListHeight; }
 
 	void SetOpen(bool bInOpen);
@@ -64,6 +66,9 @@ public:
 	// What the field shows: the short label of the chosen option, else its label.
 	FString GetSelectedShortLabel() const;
 	int32 GetOptionCount() const { return Options.Num(); }
+	// The text that shows the chosen option, and whether the field has an arrow.
+	const UTextBlock* GetValueText() const { return ValueText; }
+	bool HasArrow() const { return bHasArrow; }
 	const TArray<FMobileSelectOption>& GetOptions() const { return Options; }
 
 protected:
@@ -95,12 +100,13 @@ private:
 	USizeBox* PopupWidth = nullptr;
 	UPROPERTY()
 	UOverlaySlot* PopupSlot = nullptr;
-	float MaxListHeight = 232.f;
+	float MaxListHeight = 190.f;
 
 	FString Caption;
 	TArray<FMobileSelectOption> Options;
 	FString Selected;
 	bool bOpen = false;
+	bool bHasArrow = false;
 	EMobileSelectLook Look = EMobileSelectLook::Normal;
 
 	TFunction<void(const FString&)> OnChanged;

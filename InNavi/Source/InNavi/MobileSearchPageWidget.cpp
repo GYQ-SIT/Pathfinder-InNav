@@ -31,7 +31,10 @@ TSharedRef<SWidget> UMobileSearchPageWidget::RebuildWidget()
 		UOverlay* Root = Tree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("SearchRoot"));
 		Tree->RootWidget = Root;
 		UVerticalBox* Page = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("SearchPage"));
-		Root->AddChildToOverlay(Page);
+		// (An overlay slot is aligned left and top unless it is told to fill.)
+		UOverlaySlot* PageSlot = Root->AddChildToOverlay(Page);
+		PageSlot->SetHorizontalAlignment(HAlign_Fill);
+		PageSlot->SetVerticalAlignment(VAlign_Fill);
 
 		// The title (the site, or the building when one is chosen) and, at the right, the filters button with the number of filters that are on.
 		UHorizontalBox* Header = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("SearchHeader"));
@@ -285,7 +288,7 @@ void UMobileSearchPageWidget::RefreshHeader()
 	}
 	if (FilterPanel)
 	{
-		FilterPanel->SetVisibility(bFiltersOpen ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		FilterPanel->SetVisibility(bFiltersOpen && !bMinimized ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (!Source || !CategorySelect || !BuildingSelect || !LevelSelect)
 	{
@@ -469,12 +472,30 @@ void UMobileSearchPageWidget::AddPlaceRow(const FMobilePlace& Place)
 	ListBox->AddChildToVerticalBox(Divider)->SetPadding(FMargin(16.f, 0.f));
 }
 
+void UMobileSearchPageWidget::SetMinimized(bool bInMinimized)
+{
+	if (bMinimized == bInMinimized)
+	{
+		return;
+	}
+	bMinimized = bInMinimized;
+	const ESlateVisibility Shown = bMinimized ? ESlateVisibility::Collapsed : ESlateVisibility::Visible;
+	if (FiltersButton) FiltersButton->SetVisibility(Shown);
+	if (ListScroll) ListScroll->SetVisibility(Shown);
+	if (StartRow) StartRow->SetVisibility(bMinimized || StartLabel.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	if (FilterPanel) FilterPanel->SetVisibility(bMinimized || !bFiltersOpen ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	if (bMinimized)
+	{
+		CloseOtherSelects(nullptr);
+	}
+}
+
 void UMobileSearchPageWidget::SetStartLabel(const FString& Label)
 {
 	StartLabel = Label;
 	if (StartRow && StartText)
 	{
-		StartRow->SetVisibility(Label.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+		StartRow->SetVisibility(Label.IsEmpty() || bMinimized ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 		StartText->SetText(FText::FromString(Label.IsEmpty() ? FString() : TEXT("Starting from ") + Label));
 	}
 }

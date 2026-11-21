@@ -16,6 +16,7 @@
 #include "Components/TextBlock.h"
 #include "Components/EditableTextBox.h"
 #include "Components/Overlay.h"
+#include "Components/SizeBox.h"
 #include "Components/VerticalBox.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/WidgetSwitcher.h"
@@ -122,7 +123,7 @@ bool FMobileScreenLayoutTest::RunTest(const FString& Parameters)
 			TestNearlyEqual(*(Where + TEXT(": the design height follows the window shape")), static_cast<float>(L.DesignHeight), static_cast<float>(Phone.Height / (Phone.Width / 375.0)), 0.01f);
 			TestTrue(*(Where + TEXT(": the sheet sits on the tab bar")), FMath::IsNearlyEqual(L.SheetTop + L.SheetHeight, L.TabBarTop, 0.01));
 			TestTrue(*(Where + TEXT(": the sheet stays below the top bar")), L.SheetTop >= L.TopBarBottom - 0.01);
-			TestTrue(*(Where + TEXT(": and has room for its handle and a button")), L.SheetHeight >= 100.0);
+			TestTrue(*(Where + TEXT(": and has room for its handle and a title")), L.SheetHeight >= 76.0);
 			TestTrue(*(Where + TEXT(": the tab bar is on the screen")), L.TabBarTop >= 0.0 && L.TabBarTop + L.TabBarHeight <= L.DesignHeight + 0.01);
 			// The level and locate buttons ride on the sheet, and go away when it is open so far that they would cover the top bar.
 			if (L.bControlsVisible)
@@ -384,6 +385,110 @@ bool FMobileDirectoryPopupTest::RunTest(const FString& Parameters)
 	}
 	TestTrue(TEXT("the name of a place is in the list"), bFound);
 
+	World->DestroyWorld(false);
+	return true;
+}
+
+// Minimised (the sheet at its lowest) the sheet keeps its handle and a title, and the button of a place or a route, as the prototype does: the map gets
+// the screen. Open again, everything is back.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileMinimizedSheetTest, "InNavi.Mobile.MinimizedSheet", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileMinimizedSheetTest::RunTest(const FString& Parameters)
+{
+	TestEqual(TEXT("76 for the directory"), MobileSheet::MinimizedHeight(EMobileSheetState::Search), 76.0);
+	TestEqual(TEXT("and the arrival"), MobileSheet::MinimizedHeight(EMobileSheetState::Arrived), 76.0);
+	TestEqual(TEXT("136 for a place, with its button"), MobileSheet::MinimizedHeight(EMobileSheetState::Place), 136.0);
+	TestEqual(TEXT("and a route"), MobileSheet::MinimizedHeight(EMobileSheetState::Route), 136.0);
+	TestEqual(TEXT("walking keeps its own height"), MobileSheet::MinimizedHeight(EMobileSheetState::Navigating), 0.0);
+
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	UMobileAppWidget* Screen = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
+	if (Screen) Screen->SetSource(MakeShared<FMobileMockSource>(), TEXT("sit-punggol"));
+	if (!TestNotNull(TEXT("the screen is created"), Screen)) return false;
+	Screen->TakeWidget();
+	Screen->ApplyViewportSize(375.0, 812.0);
+	Screen->SetActiveTab(UMobileAppWidget::ETab::Directory);
+	auto Rest = [&](EMobileSheetSnap Snap) { Screen->SetSnap(Snap); Screen->SnapSheetNow(); };
+
+	// The directory: a title only.
+	Rest(EMobileSheetSnap::Collapsed);
+	TestTrue(TEXT("the sheet is minimised"), Screen->IsSheetMinimized());
+	TestTrue(TEXT("76 tall"), FMath::IsNearlyEqual(Screen->GetLayoutSnapshot().SheetHeight, 76.0, 0.01));
+	TestTrue(TEXT("the directory page says so"), Screen->GetSearchPage()->IsMinimized());
+	TestEqual(TEXT("its list is hidden"), Screen->GetSearchPage()->FindNamedWidget(TEXT("ListScroll"))->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("and its filters button"), Screen->GetSearchPage()->FindNamedWidget(TEXT("Btn_Filters"))->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("the title stays"), Screen->GetSearchPage()->FindNamedWidget(TEXT("Txt_SearchTitle"))->GetVisibility(), ESlateVisibility::Visible);
+	Rest(EMobileSheetSnap::Half);
+	TestFalse(TEXT("opened again it is not"), Screen->IsSheetMinimized());
+	TestEqual(TEXT("and the list is back"), Screen->GetSearchPage()->FindNamedWidget(TEXT("ListScroll"))->GetVisibility(), ESlateVisibility::Visible);
+	TestEqual(TEXT("with the filters button"), Screen->GetSearchPage()->FindNamedWidget(TEXT("Btn_Filters"))->GetVisibility(), ESlateVisibility::Visible);
+
+	// A place: the name and its button, not the photo and the rest.
+	Screen->GetSearchPage()->ChoosePlace(TEXT("E2-01-102"));
+	Rest(EMobileSheetSnap::Collapsed);
+	TestTrue(TEXT("136 tall"), FMath::IsNearlyEqual(Screen->GetLayoutSnapshot().SheetHeight, 136.0, 0.01));
+	TestEqual(TEXT("the place page's body is hidden"), Screen->GetPlacePage()->FindNamedWidget(TEXT("PlaceScroll"))->GetVisibility(), ESlateVisibility::Collapsed);
+	TestNotEqual(TEXT("and Get directions is not"), Screen->GetPlacePage()->FindNamedWidget(TEXT("Btn_GetDirections"))->GetVisibility(), ESlateVisibility::Collapsed);
+	Rest(EMobileSheetSnap::Half);
+	TestEqual(TEXT("opened again the body is back"), Screen->GetPlacePage()->FindNamedWidget(TEXT("PlaceScroll"))->GetVisibility(), ESlateVisibility::Visible);
+
+	// A route: "Your route" with the travel mode, and Start navigation.
+	Cast<UButton>(Screen->GetPlacePage()->FindNamedWidget(TEXT("Btn_GetDirections")))->OnClicked.Broadcast();
+	Rest(EMobileSheetSnap::Collapsed);
+	TestEqual(TEXT("the route page's body is hidden"), Screen->GetRoutePage()->FindNamedWidget(TEXT("RouteScroll"))->GetVisibility(), ESlateVisibility::Collapsed);
+	TestNotEqual(TEXT("and Start navigation is not"), Screen->GetRoutePage()->FindNamedWidget(TEXT("Btn_StartNavigation"))->GetVisibility(), ESlateVisibility::Collapsed);
+	TestNotEqual(TEXT("the travel mode shows under the title"), Screen->GetRoutePage()->FindNamedWidget(TEXT("Txt_RouteSubtitle"))->GetVisibility(), ESlateVisibility::Collapsed);
+	TestTrue(TEXT("and says it"), Cast<UTextBlock>(Screen->GetRoutePage()->FindNamedWidget(TEXT("Txt_RouteSubtitle")))->GetText().ToString().StartsWith(TEXT("Travel mode")));
+	Rest(EMobileSheetSnap::Half);
+	TestEqual(TEXT("opened again the travel mode goes"), Screen->GetRoutePage()->FindNamedWidget(TEXT("Txt_RouteSubtitle"))->GetVisibility(), ESlateVisibility::Collapsed);
+
+	// While walking the sheet keeps its own low height and is not minimised.
+	Cast<UButton>(Screen->GetRoutePage()->FindNamedWidget(TEXT("Btn_StartNavigation")))->OnClicked.Broadcast();
+	Rest(EMobileSheetSnap::Collapsed);
+	TestFalse(TEXT("walking is not minimised"), Screen->IsSheetMinimized());
+	TestTrue(TEXT("it keeps the height of what it shows"), Screen->GetLayoutSnapshot().SheetHeight >= UMobileAppWidget::NavigationSheetHeight - 0.01);
+
+	World->DestroyWorld(false);
+	return true;
+}
+
+// The stops of a route: a hairline between the places, no arrow on a row, and a long name cut.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileRouteRowsTest, "InNavi.Mobile.RouteRows", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileRouteRowsTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	UMobileAppWidget* Screen = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
+	if (Screen) Screen->SetSource(MakeShared<FMobileMockSource>(), TEXT("sit-punggol"));
+	if (!TestNotNull(TEXT("the screen is created"), Screen)) return false;
+	Screen->TakeWidget();
+	Screen->SetActiveTab(UMobileAppWidget::ETab::Directory);
+	Screen->GetSearchPage()->ChoosePlace(TEXT("E2-01-102"));
+	Cast<UButton>(Screen->GetPlacePage()->FindNamedWidget(TEXT("Btn_GetDirections")))->OnClicked.Broadcast();
+	UMobileRoutePageWidget* Route = Screen->GetRoutePage();
+	Route->AddStop(TEXT("E6-2M-103"));
+
+	const UVerticalBox* Stops = Cast<UVerticalBox>(Route->FindNamedWidget(TEXT("RouteStops")));
+	if (!TestNotNull(TEXT("the stops are there"), Stops)) return false;
+	int32 Dividers = 0;
+	for (int32 Index = 0; Index < Stops->GetChildrenCount(); ++Index)
+	{
+		const USizeBox* Row = Cast<USizeBox>(Stops->GetChildAt(Index));
+		const UOverlay* Layers = Row ? Cast<UOverlay>(Row->GetContent()) : nullptr;
+		if (Layers && Layers->GetChildrenCount() > 1) ++Dividers;
+	}
+	// My location, two destinations and Add stop: a line under each but the last.
+	TestEqual(TEXT("a line between the places, not under the last"), Dividers, Stops->GetChildrenCount() - 1);
+
+	for (UMobileSelectWidget* Select : { Route->GetFromSelect(), Route->GetDestinationSelect(0) })
+	{
+		if (!TestNotNull(TEXT("a select"), Select)) continue;
+		Select->TakeWidget();
+		TestFalse(TEXT("a row of a card has no arrow"), Select->HasArrow());
+		const UTextBlock* Value = Select->GetValueText();
+		if (TestNotNull(TEXT("its text"), Value))
+		{
+			TestEqual(TEXT("is cut with an ellipsis"), Value->GetTextOverflowPolicy(), ETextOverflowPolicy::Ellipsis);
+		}
+	}
 	World->DestroyWorld(false);
 	return true;
 }

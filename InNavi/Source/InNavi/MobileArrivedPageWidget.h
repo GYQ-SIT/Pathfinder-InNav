@@ -27,6 +27,9 @@ public:
 	FString GetPlaceString() const;
 	FString GetSaveLabelString() const;
 	bool IsSaved() const { return bSaved; }
+	// The sheet is down at its lowest: the title and the place, and none of the buttons (as in the prototype).
+	void SetMinimized(bool bInMinimized);
+	bool IsMinimized() const { return bMinimized; }
 	UWidget* FindNamedWidget(const FName& Name) const;
 
 protected:
@@ -43,6 +46,10 @@ private:
 	void HandleViewClicked();
 
 	void Refresh();
+
+	UPROPERTY()
+	TArray<TObjectPtr<UWidget>> BodyWidgets;
+	bool bMinimized = false;
 
 	UPROPERTY()
 	UTextBlock* PlaceText = nullptr;

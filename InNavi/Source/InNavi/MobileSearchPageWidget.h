@@ -51,6 +51,9 @@ public:
 	const TArray<FMobilePlace>& GetShownPlaces() const { return ShownPlaces; }
 	int32 GetGroupCount() const { return GroupCount; }
 	bool AreFiltersOpen() const { return bFiltersOpen; }
+	// The sheet is down at its lowest: only the title is shown (no filters button, filters, starting line or list), as in the prototype.
+	void SetMinimized(bool bInMinimized);
+	bool IsMinimized() const { return bMinimized; }
 	const FMobilePlaceFilter& GetFilter() const { return Filter; }
 	int32 GetActiveFilterCount() const;
 	// The site's name, or the name of the building the filter or the map has.
@@ -117,6 +120,7 @@ private:
 	FMobilePlaceFilter Filter;
 	FString ContextBuildingId;
 	bool bFiltersOpen = false;
+	bool bMinimized = false;
 	TArray<FMobilePlace> ShownPlaces;
 	int32 GroupCount = 0;
 	FString LastGroup;

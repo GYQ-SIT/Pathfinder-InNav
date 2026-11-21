@@ -142,6 +142,8 @@ public:
 
 	UMobileSearchPageWidget* GetSearchPage() const { return SearchPage; }
 	UMobilePlacePageWidget* GetPlacePage() const { return PlacePage; }
+	// Whether the sheet is down at its lowest (the pages then show only a title and their button); not while walking.
+	bool IsSheetMinimized() const;
 	UMobileRoutePageWidget* GetRoutePage() const { return RoutePage; }
 	UMobileNavigatePageWidget* GetNavigatePage() const { return NavigatePage; }
 	UMobileMapWidget* GetMapView() const { return MapView; }
@@ -286,6 +288,10 @@ private:
 	// Whether the sheet is open to the top (80 percent of the space between the header and the tab bar or more).
 	bool SheetIsOpen() const;
 	double RestHeight(EMobileSheetSnap Target) const;
+	// The rest height (of the three) closest to a height the sheet was dragged to.
+	EMobileSheetSnap NearestRestSnap(double Height) const;
+	// Minimised: the sheet is down at its lowest (not while walking), so its pages show only a title and their button.
+	void ApplyMinimized();
 
 	UPROPERTY()
 	UScaleBox* PhoneScaleBox = nullptr;

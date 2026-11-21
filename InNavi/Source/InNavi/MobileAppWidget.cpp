@@ -892,6 +892,11 @@ double UMobileAppWidget::RestHeight(EMobileSheetSnap Target) const
 		// Walking: the sheet is kept low for the map, but not lower than what it shows.
 		Height = FMath::Max(Height, NavigationSheetHeight);
 	}
+	else if (Target == EMobileSheetSnap::Collapsed)
+	{
+		// Minimised, as in the prototype: just the handle and a title (and the button of a place or a route), so the map gets the screen.
+		Height = MobileSheet::MinimizedHeight(Flow.GetState());
+	}
 	if (Target != EMobileSheetSnap::Full)
 	{
 		return Height;
@@ -899,6 +904,36 @@ double UMobileAppWidget::RestHeight(EMobileSheetSnap Target) const
 	// The sheet open to its top stops under the top row of the map (the search field and 2D | 3D) and does not cover it; it is never lower than half.
 	const double Room = DesignHeight - (TabAreaHeight()) - (HeaderHeight + SafeTop + TopRowTop + TopRowHeight + TopRowGap);
 	return FMath::Min(Height, FMath::Max(Room, MobileSheet::SnapHeight(EMobileSheetSnap::Half, DesignHeight, TabAreaHeight(), HeaderHeight + SafeTop)));
+}
+
+EMobileSheetSnap UMobileAppWidget::NearestRestSnap(double Height) const
+{
+	EMobileSheetSnap Best = EMobileSheetSnap::Collapsed;
+	double BestDistance = TNumericLimits<double>::Max();
+	for (const EMobileSheetSnap Candidate : { EMobileSheetSnap::Collapsed, EMobileSheetSnap::Half, EMobileSheetSnap::Full })
+	{
+		const double Distance = FMath::Abs(Height - RestHeight(Candidate));
+		if (Distance < BestDistance)
+		{
+			BestDistance = Distance;
+			Best = Candidate;
+		}
+	}
+	return Best;
+}
+
+bool UMobileAppWidget::IsSheetMinimized() const
+{
+	return Flow.GetState() != EMobileSheetState::Navigating && SheetHeight <= RestHeight(EMobileSheetSnap::Collapsed) + 24.0;
+}
+
+void UMobileAppWidget::ApplyMinimized()
+{
+	const bool bMinimized = IsSheetMinimized();
+	if (SearchPage) SearchPage->SetMinimized(bMinimized);
+	if (PlacePage) PlacePage->SetMinimized(bMinimized);
+	if (RoutePage) RoutePage->SetMinimized(bMinimized);
+	if (ArrivedPage) ArrivedPage->SetMinimized(bMinimized);
 }
 
 void UMobileAppWidget::PositionSheet()
@@ -978,6 +1013,7 @@ void UMobileAppWidget::PositionSheet()
 		MapView->SetFitInsets(HeaderTotal + TopRowTop + TopRowHeight + 4.0, TabTotal + SheetHeight + ControlsGap + ControlsHeight + 8.0);
 		MapView->SetVisibility(bOpen ? ESlateVisibility::Hidden : ESlateVisibility::Visible);
 	}
+	ApplyMinimized();
 	SheetBorder->SetVisibility(bMapPage ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	ControlsBox->SetVisibility(bMapPage && ControlsFit() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	TopBarBorder->SetVisibility(bMapPage ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
@@ -1423,12 +1459,12 @@ void UMobileAppWidget::EndSheetDrag(const FVector2D& DesignPosition)
 	bDraggingSheet = false;
 	if (bSheetMoved)
 	{
-		Snap = MobileSheet::NearestSnap(SheetHeight, DesignHeight, TabAreaHeight(), HeaderHeight + SafeTop);
+		Snap = NearestRestSnap(SheetHeight);
 	}
 	else
 	{
 		// A tap on the handle: the next height.
-		Snap = MobileSheet::NextSnap(MobileSheet::NearestSnap(SheetHeight, DesignHeight, TabAreaHeight(), HeaderHeight + SafeTop));
+		Snap = MobileSheet::NextSnap(NearestRestSnap(SheetHeight));
 	}
 }
 

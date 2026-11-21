@@ -49,20 +49,35 @@ TSharedRef<SWidget> UMobileArrivedPageWidget::RebuildWidget()
 		UButton* Another = MakeButton(Tree, TEXT("Btn_FindAnother"), TEXT("Find another place"), Blue, OnBlue, 12.f, 48.f);
 		Another->OnClicked.AddUniqueDynamic(this, &UMobileArrivedPageWidget::HandleFindAnotherClicked);
 		Page->AddChildToVerticalBox(Another)->SetPadding(FMargin(16.f, 16.f, 16.f, 0.f));
+		BodyWidgets.Add(Another);
 
 		// Save this place: a heart and the words, dark on white with an outline (blue when it is saved).
 		SaveButton = MobileIcons::IconLabelButton(Tree, TEXT("Btn_SaveThisPlace"), TEXT("Save this place"), TEXT("Heart"), White, Ink, 12.f, 48.f, &SaveLabel, &SaveHeart);
 		SaveButton->OnClicked.AddUniqueDynamic(this, &UMobileArrivedPageWidget::HandleSaveClicked);
 		Page->AddChildToVerticalBox(SaveButton)->SetPadding(FMargin(16.f, 8.f, 16.f, 0.f));
+		BodyWidgets.Add(SaveButton);
 
 		UButton* View = MakeButton(Tree, TEXT("Btn_ViewDestination"), TEXT("View destination"), White, Blue, 12.f, 48.f);
 		View->SetStyle(StartStyle::Button(White, White * 0.94f, White * 0.86f, FieldEdge, 12.f / StartStyle::DesignToUi));
 		View->OnClicked.AddUniqueDynamic(this, &UMobileArrivedPageWidget::HandleViewClicked);
 		Page->AddChildToVerticalBox(View)->SetPadding(FMargin(16.f, 8.f, 16.f, 12.f));
+		BodyWidgets.Add(View);
 
 		Refresh();
 	}
 	return Super::RebuildWidget();
+}
+
+void UMobileArrivedPageWidget::SetMinimized(bool bInMinimized)
+{
+	bMinimized = bInMinimized;
+	for (UWidget* Widget : BodyWidgets)
+	{
+		if (Widget)
+		{
+			Widget->SetVisibility(bMinimized ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+		}
+	}
 }
 
 void UMobileArrivedPageWidget::SetPlace(const FMobilePlace& InPlace, bool bInSaved)

@@ -10,6 +10,7 @@ class UBorder;
 class UButton;
 class UHorizontalBox;
 class UImage;
+class UOverlay;
 class UMobileReorderHandle;
 class USizeBox;
 class UTextBlock;
@@ -38,6 +39,9 @@ public:
 	void SetOnBack(TFunction<void()> InCallback) { OnBack = MoveTemp(InCallback); }
 	void SetOnRequestChanged(TFunction<void(const FMobileRouteRequest&)> InCallback) { OnRequestChanged = MoveTemp(InCallback); }
 	void SetOnStart(TFunction<void()> InCallback) { OnStart = MoveTemp(InCallback); }
+	// The sheet is down at its lowest: "Your route" and the travel mode, and Start navigation, and nothing between (as in the prototype).
+	void SetMinimized(bool bInMinimized);
+	bool IsMinimized() const { return bMinimized; }
 
 	// What the person does: a tap on a way-between-levels chip ("lift", "stairs", "escalator", "liftonly"), and a choice in each drop-down
 	// (the From and To values are place ids; From's empty value is My location; the level is its number).
@@ -100,6 +104,16 @@ private:
 	void HandleStartClicked();
 
 	void Refresh();
+	void RefreshSubtitle();
+
+	UPROPERTY()
+	UWidget* BodyScroll = nullptr;
+	// The overlay over the page that the drop-down lists open in (over the stops, not pushing them down).
+	UPROPERTY()
+	UOverlay* PopupRoot = nullptr;
+	UPROPERTY()
+	UTextBlock* SubtitleText = nullptr;
+	bool bMinimized = false;
 	void RefreshStops();
 	void RefreshSummary();
 	void RefreshTransport();

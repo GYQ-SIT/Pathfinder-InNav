@@ -38,6 +38,10 @@ void UMobileTapTarget::Setup(UWidget* Content, const FString& InPayload, const F
 			{
 				AsButtonSlot->SetHorizontalAlignment(HAlign_Fill);
 				AsButtonSlot->SetVerticalAlignment(VAlign_Fill);
+				if (bHasContentPadding)
+				{
+					AsButtonSlot->SetPadding(ContentPadding);
+				}
 			}
 		}
 	}

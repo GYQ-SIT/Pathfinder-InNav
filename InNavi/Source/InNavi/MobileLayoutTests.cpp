@@ -36,7 +36,7 @@ bool FMobileLayoutPrototypeTest::RunTest(const FString& Parameters)
 	const FMobileLayoutSnapshot Layout = Screen->GetLayoutSnapshot();
 	TestTrue(TEXT("44 tall at the top, 60 for the tab bar"), FMath::IsNearlyEqual(Layout.HeaderBottom, 44.0) && FMath::IsNearlyEqual(Layout.TabBarHeight, 60.0));
 
-	// The sheet rests at 26, 44 and 88 percent of what is between them; open to its top it stops under the top row (the search field and 2D | 3D) if that is lower.
+	// The sheet rests at 76 (minimised: a handle and a title), 44 and 88 percent of what is between them; open to its top it stops under the top row (the search field and 2D | 3D) if that is lower.
 	Screen->SetActiveTab(UMobileAppWidget::ETab::Directory);
 	const double Workspace = 812.0 - 44.0 - 60.0;
 	for (const TPair<EMobileSheetSnap, double>& Rest : { TPair<EMobileSheetSnap, double>(EMobileSheetSnap::Collapsed, 0.26), TPair<EMobileSheetSnap, double>(EMobileSheetSnap::Half, 0.44), TPair<EMobileSheetSnap, double>(EMobileSheetSnap::Full, 0.88) })
@@ -44,7 +44,7 @@ bool FMobileLayoutPrototypeTest::RunTest(const FString& Parameters)
 		Screen->SetSnap(Rest.Key);
 		Screen->SnapSheetNow();
 		const double UnderTopRow = 812.0 - 60.0 - (44.0 + UMobileAppWidget::TopRowTop + UMobileAppWidget::TopRowHeight + UMobileAppWidget::TopRowGap);
-		const double Expected = Rest.Key == EMobileSheetSnap::Full ? FMath::Min(Workspace * Rest.Value, UnderTopRow) : Workspace * Rest.Value;
+		const double Expected = Rest.Key == EMobileSheetSnap::Collapsed ? 76.0 : Rest.Key == EMobileSheetSnap::Full ? FMath::Min(Workspace * Rest.Value, UnderTopRow) : Workspace * Rest.Value;
 		TestTrue(*FString::Printf(TEXT("the sheet at %.0f percent"), Rest.Value * 100.0), FMath::IsNearlyEqual(Screen->GetLayoutSnapshot().SheetHeight, Expected, 0.01));
 		TestTrue(*FString::Printf(TEXT("the sheet at %.0f percent stays under the top row"), Rest.Value * 100.0), Screen->GetLayoutSnapshot().SheetTop >= Screen->GetLayoutSnapshot().TopBarBottom - 0.01);
 	}
