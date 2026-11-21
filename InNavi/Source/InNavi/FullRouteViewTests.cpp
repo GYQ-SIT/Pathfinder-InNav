@@ -4,6 +4,8 @@
 #include "NavigationDockPanelWidget.h"
 #include "NavigationRouteVisualization.h"
 #include "InteriorRoom.h"
+#include "InteriorConnectorMarker.h"
+#include "EngineUtils.h"
 #include "PolyBuilding.h"
 #include "Components/Button.h"
 #include "Camera/PlayerCameraManager.h"
@@ -73,13 +75,13 @@ bool FFullRouteRestoreTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("interior world visible"), F.Controller->IsIn3DPreviewMode());
 		TestFalse(TEXT("read-only"), F.Controller->IsIn3DEditMode());
 		TestEqual(TEXT("whole building visible"), F.Building->GetVisibleInteriorLevel(), 0);
-		TestTrue(TEXT("shell transparent"), F.Building->GetBuildingOpacity() < 0.15f);
-		TestTrue(TEXT("room meshes cannot obscure route"), Room->IsHidden());
+		TestTrue(TEXT("the building of the route is not drawn (its floors are pulled apart)"), F.Building->GetBuildingOpacity() < 0.05f);
+		// The rooms stay, drawn see-through, so the route is seen against them (they used to be hidden).
+		TestFalse(TEXT("rooms stay visible"), Room->IsHidden());
 		TestFalse(TEXT("camera moved outside"), F.Controller->GetPawn()->GetActorTransform().Equals(Camera));
-		const FBox ShellBounds = F.Building->GetComponentsBoundingBox(true);
-		TestFalse(TEXT("overview camera is outside the collision-disabled building"), ShellBounds.IsInside(F.Controller->GetPawn()->GetActorLocation()));
+		// The camera frames the route, not the whole building, so it may be inside the see-through shell (collision is off).
 		TestTrue(TEXT("camera targets the whole route across its floors"),
-			F.Controller->GetControlRotation().Vector().Equals((FVector(25400,40200,300) - F.Controller->GetPawn()->GetActorLocation()).GetSafeNormal(), 0.01));
+			F.Controller->GetControlRotation().Vector().Equals((FVector(25400,40200,375) - F.Controller->GetPawn()->GetActorLocation()).GetSafeNormal(), 0.01));
 		F.Controller->SetFullRouteViewEnabled(false);
 		TestEqual(TEXT("previous dimension restored"), F.Controller->IsIn3DPreviewMode(), bStartIn3D);
 		TestEqual(TEXT("previous editing mode restored"), F.Controller->IsIn3DEditMode(), bStartIn3D);
@@ -104,6 +106,89 @@ bool FFullRouteRestoreTest::RunTest(const FString& Parameters)
 	F.Controller->SetFullRouteViewEnabled(true);
 	F.Nav->SetRouteGuidanceVisible(false);
 	TestFalse(TEXT("hiding route exits overview"), F.Controller->IsFullRouteViewEnabled());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFullRouteFloorsTest, "InNavi.Navigation.FullRoute.FloorsPulledApart",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFullRouteFloorsTest::RunTest(const FString& Parameters)
+{
+	FullRouteViewTests::FFixture F;
+	// A room on each of the floors 1 (the fixture's own), 2 and 3 (the route goes through 1 and 3 only).
+	TArray<AInteriorRoom*> Rooms{ F.Interior->GetRoomsOnFloor(1)[0] };
+	for (int32 Floor = 2; Floor <= 3; ++Floor)
+	{
+		F.Controller->SetActiveFloor(Floor);
+		FString Error;
+		Rooms.Add(F.Interior->CreateRoomFromFootprint({ {10,10}, {35,10}, {35,35}, {10,35} }, FString::Printf(TEXT("R%d"), Floor), TEXT("Room"), true, false, false, Error));
+	}
+	if (!TestTrue(TEXT("rooms made"), Rooms.Num() == 3 && Rooms[0] && Rooms[1] && Rooms[2])) return false;
+	F.MakeRoute();
+	const FVector Floor1 = Rooms[0]->GetActorLocation();
+	const FVector Floor3 = Rooms[2]->GetActorLocation();
+	const bool bFloor2Hidden = Rooms[1]->IsHidden();
+	const bool bFloor3Hidden = Rooms[2]->IsHidden();
+	F.Controller->SetFullRouteViewEnabled(true);
+	TestTrue(TEXT("overview on"), F.Controller->IsFullRouteViewEnabled());
+	TestFalse(TEXT("a floor of the route is shown"), Rooms[0]->IsHidden());
+	TestFalse(TEXT("the other floor of the route is shown"), Rooms[2]->IsHidden());
+	TestTrue(TEXT("a floor the route does not use is hidden"), Rooms[1]->IsHidden());
+	TestEqual(TEXT("the lowest floor stays where it is"), F.Controller->FullRouteFloorShift(TEXT("ROUTE"), 1), 0.f, 0.01f);
+	TestTrue(TEXT("the floors are pulled apart"), F.Controller->FullRouteFloorShift(TEXT("ROUTE"), 3) > 0.f);
+	TestEqual(TEXT("the upper room moved up by the shift"), float(Rooms[2]->GetActorLocation().Z - Floor3.Z), F.Controller->FullRouteFloorShift(TEXT("ROUTE"), 3), 0.01f);
+	TestTrue(TEXT("the floors are pulled apart"), Rooms[2]->GetActorLocation().Z - Rooms[0]->GetActorLocation().Z > 0.f);
+	TestEqual(TEXT("the lower room did not move"), Rooms[0]->GetActorLocation().Z, Floor1.Z);
+	F.Controller->SetFullRouteViewEnabled(false);
+	TestTrue(TEXT("the rooms are back where they were"), Rooms[0]->GetActorLocation().Equals(Floor1) && Rooms[2]->GetActorLocation().Equals(Floor3));
+	TestEqual(TEXT("the visibility of the unused floor is back"), Rooms[1]->IsHidden(), bFloor2Hidden);
+	TestEqual(TEXT("the visibility of the route floor is back"), Rooms[2]->IsHidden(), bFloor3Hidden);
+	return true;
+}
+
+// A route that goes on into a building that is not open: its floors are pulled apart too, with its rooms (made for the overview from its stored
+// data) and its lifts, and all of it is gone again when the overview ends.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFullRouteOtherBuildingTest, "InNavi.Navigation.FullRoute.OtherBuilding",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFullRouteOtherBuildingTest::RunTest(const FString& Parameters)
+{
+	FullRouteViewTests::FFixture F;
+	F.Generator->SpawnBuildingFromData(TEXT("OTHER"), TEXT("Other building"),
+		{ {-500,-400}, {500,-400}, {500,400}, {-500,400} }, 30, 300.f, FVector2D(9000,4000));
+	F.Controller->LoadInteriorForBuilding(TEXT("OTHER"));
+	for (int32 Floor = 1; Floor <= 3; ++Floor)
+	{
+		F.Controller->SetActiveFloor(Floor);
+		FString Error;
+		if (!TestNotNull(TEXT("room in the other building"), F.Interior->CreateRoomFromFootprint({ {10,10}, {35,10}, {35,35}, {10,35} },
+			FString::Printf(TEXT("O%d"), Floor), TEXT("Room"), true, false, false, Error))) return false;
+	}
+	if (!TestFalse(TEXT("a lift in the other building"), F.Interior->PlaceConnectorNode(EInteriorNavNodeType::Elevator, FVector2D(100,100), { 1, 2, 3 }).IsEmpty())) return false;
+	F.Generator->SetInteriorDataForBuilding(TEXT("OTHER"), F.Interior->CaptureInteriorSnapshot());
+	F.Controller->LoadInteriorForBuilding(TEXT("ROUTE"));
+
+	FNavigationRouteResult Result;
+	for (const TPair<const TCHAR*, int32>& Place : { TPair<const TCHAR*, int32>(TEXT("ROUTE"), 1), TPair<const TCHAR*, int32>(TEXT("ROUTE"), 3),
+		TPair<const TCHAR*, int32>(TEXT("OTHER"), 1), TPair<const TCHAR*, int32>(TEXT("OTHER"), 3) })
+	{
+		FNavigationRoutePoint Point;
+		Point.BuildingId = Place.Key;
+		Point.Position = FVector2D(10, 20);
+		Point.Floor = Place.Value;
+		Result.Points.Add(Point);
+	}
+	F.Nav->ApplyRouteResult(Result);
+	auto CountLifts = [&]() { int32 Count = 0; for (TActorIterator<AInteriorConnectorMarker> It(F.World); It; ++It) ++Count; return Count; };
+	const int32 LiftsBefore = CountLifts();
+
+	F.Controller->SetFullRouteViewEnabled(true);
+	if (!TestTrue(TEXT("overview on"), F.Controller->IsFullRouteViewEnabled())) return false;
+	TestTrue(TEXT("the floors of the other building are pulled apart too"), F.Controller->FullRouteFloorShift(TEXT("OTHER"), 3) > 0.f);
+	TestEqual(TEXT("its rooms are shown for the floors of the route only"), F.Controller->CountShownCampusRoomsForTests(TEXT("OTHER")), 2);
+	TestEqual(TEXT("and its lift on those two floors"), CountLifts() - LiftsBefore, 2);
+
+	F.Controller->SetFullRouteViewEnabled(false);
+	TestEqual(TEXT("its rooms are hidden again"), F.Controller->CountShownCampusRoomsForTests(TEXT("OTHER")), 0);
+	TestEqual(TEXT("its lifts of the overview are gone"), CountLifts(), LiftsBefore);
 	return true;
 }
 

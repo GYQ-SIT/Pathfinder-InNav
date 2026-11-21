@@ -207,6 +207,10 @@ bool FMobileRouteFlowTest::RunTest(const FString& Parameters)
 
 	// The ways between levels change the route.
 	Route->ChooseTo(TEXT("E2-03-102"));
+	// The app starts with the lift only: the lift chip is on, the others are off, and the wheelchair pill is plain (it is not chosen).
+	TestTrue(TEXT("the lift is the way between levels at first"), Screen->GetRoutePreferences().bAllowLift && !Screen->GetRoutePreferences().bAllowStairs && !Screen->GetRoutePreferences().bAllowEscalator);
+	TestFalse(TEXT("the wheelchair choice is not made"), Screen->GetRoutePreferences().bWheelchair);
+	Route->TapOption(TEXT("stairs"));
 	Route->TapOption(TEXT("lift"));
 	TestTrue(TEXT("without the lift, by the stairs"), HasStep(EMobileStepKind::TakeStairs));
 	Route->TapOption(TEXT("stairs"));
@@ -215,6 +219,11 @@ bool FMobileRouteFlowTest::RunTest(const FString& Parameters)
 	Route->TapOption(TEXT("liftonly"));
 	TestTrue(TEXT("Use lift only brings the route back"), Screen->GetCurrentRoute().bFound);
 	TestFalse(TEXT("the choice is kept by the screen"), Screen->GetRoutePreferences().bAllowStairs);
+	TestTrue(TEXT("and it is the wheelchair choice"), Screen->GetRoutePreferences().bWheelchair);
+	TestEqual(TEXT("which the minimised route says"), Cast<UTextBlock>(Route->FindNamedWidget(TEXT("Txt_RouteSubtitle")))->GetText().ToString(), FString(TEXT("Travel mode · Wheelchair accessible")));
+	Route->TapOption(TEXT("lift"));
+	Route->TapOption(TEXT("lift"));
+	TestFalse(TEXT("choosing a way between levels is not the wheelchair choice"), Screen->GetRoutePreferences().bWheelchair);
 
 	// Start navigation.
 	Cast<UButton>(Route->FindNamedWidget(TEXT("Btn_StartNavigation")))->OnClicked.Broadcast();

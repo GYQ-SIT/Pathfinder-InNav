@@ -19,10 +19,16 @@ UFloorListEntryWidget::UFloorListEntryWidget(const FObjectInitializer& ObjectIni
 
 namespace
 {
-	// A floor row's look: plain, or amber for the active floor (the same amber as the Map panel's selected building).
-	FButtonStyle FloorRowStyle(bool bActive)
+	// A floor row's look: plain, or amber for the active floor (the same amber as the Map panel's selected building). A basement is red
+	// instead, dark when it is not the active floor and bright when it is.
+	FButtonStyle FloorRowStyle(bool bActive, bool bBasement)
 	{
 		using namespace StartStyle;
+		if (bBasement)
+		{
+			return bActive ? Button(Rgb(150, 40, 50), Rgb(170, 52, 62), Rgb(120, 30, 40), Rgb(255, 128, 128), 8.f)
+				: Button(Rgb(62, 24, 32), Rgb(84, 32, 42), Rgb(46, 18, 24), Rgb(128, 52, 62), 8.f);
+		}
 		return bActive ? ActiveButton()
 			: Button(Rgb(24, 38, 60), Rgb(33, 54, 84), Rgb(18, 30, 50), Rgb(46, 66, 94), 8.f);
 	}
@@ -94,7 +100,8 @@ void UFloorListEntryWidget::ApplyVisuals()
 {
 	if (Label)
 	{
-		Label->SetText(FText::FromString(TEXT("Level ") + LayoutValidation::LevelLabel(FloorNumber) + (FloorName.IsEmpty() ? FString() : TEXT(" - ") + FloorName)));
+		// The floor's own name when it has one, else "Level N" ("Level B1" for a basement).
+		Label->SetText(FText::FromString(FloorName.IsEmpty() ? TEXT("Level ") + LayoutValidation::LevelLabel(FloorNumber) : FloorName));
 	}
 	if (ElevationLabel)
 	{
@@ -104,7 +111,7 @@ void UFloorListEntryWidget::ApplyVisuals()
 	}
 	if (Button)
 	{
-		Button->SetStyle(FloorRowStyle(bIsActive));
+		Button->SetStyle(FloorRowStyle(bIsActive, FloorNumber < 0));
 	}
 	if (SizeBox)
 	{

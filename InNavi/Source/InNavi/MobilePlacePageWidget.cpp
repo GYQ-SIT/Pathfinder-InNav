@@ -86,6 +86,7 @@ TSharedRef<SWidget> UMobilePlacePageWidget::RebuildWidget()
 		StartButton = MakeButton(Tree, TEXT("Btn_UseAsStart"), TEXT("Use as starting point"), White, Blue, 12.f, 38.f, &StartLabel);
 		StartButton->OnClicked.AddUniqueDynamic(this, &UMobilePlacePageWidget::HandleStartClicked);
 		Content->AddChildToVerticalBox(StartButton)->SetPadding(FMargin(16.f, 8.f, 16.f, 12.f));
+		BodyScroll = Scroll;
 		Page->AddChildToVerticalBox(Scroll)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 
 		// Get directions stays at the bottom whatever the height of the sheet.
@@ -104,6 +105,15 @@ void UMobilePlacePageWidget::SetPlace(const FMobilePlace& InPlace, bool bInSaved
 	bSaved = bInSaved;
 	bIsStart = bInIsStart;
 	Refresh();
+}
+
+void UMobilePlacePageWidget::SetMinimized(bool bInMinimized)
+{
+	bMinimized = bInMinimized;
+	if (BodyScroll)
+	{
+		BodyScroll->SetVisibility(bMinimized ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	}
 }
 
 UWidget* UMobilePlacePageWidget::FindNamedWidget(const FName& Name) const

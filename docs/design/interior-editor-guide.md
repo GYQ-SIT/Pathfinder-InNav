@@ -397,12 +397,15 @@ empty. There is no level 0, and a building goes down to B20 and up to 200. The f
 or the lowest floor can be deleted (**Delete floor**), never one in the middle. A **main door** can only be on the ground
 floor, so a building without one (a walkway) is entered through the link doors of the buildings next to it.
 
-**Floor names and special floors (PAT-203).** The **Name** box under From / To gives the floor being viewed a name next to its number
-("Level 2 - Mezzanine"); Enter applies it, and it is saved with the floor (`name`). **+ Basement** adds B1, then B2 ... under the lowest floor
-(refused with the reason when the building starts above the ground, since a floor under floor 3 is not a basement); **+ Special** adds a floor on top
-named "Special floor", to rename; **+ Add** adds a numbered floor on top. New floors always go where they belong (basements below, the rest on top),
-so the order is automatic. A name is only a label: every floor keeps its level number, which is what routes, doors and lifts use, so a mezzanine is
-a floor with a name, a full storey high, not a half storey between two numbers, and the floors cannot be dragged into another order.
+**Floor names (PAT-203).** Every floor card says "Level 1", "Level 2" ... ("Level B1" for a basement) until it is named. The **Name** box under
+From / To gives the floor being viewed its own name, which the card shows **instead of** "Level N": type 1M, Floor 1 or Ground Floor and the card
+says exactly that; empty it and the card goes back to "Level N". Enter applies it, and it is saved with the floor (`name`, up to 40 characters).
+There is no separate special floor: any floor, a basement too, is named this way. **+ Basement** adds B1, then B2 ... under the lowest floor
+(refused with the reason when the building starts above the ground, since a floor under floor 3 is not a basement); **+ Add** adds a numbered
+floor on top. A basement's card is **red** (dark red, bright red while it is the floor being viewed), so the floors under the ground stand out.
+New floors always go where they belong (basements below, the rest on top), so the order is automatic. A name is only a label: every floor keeps its
+level number, which is what routes, doors and lifts use, so a mezzanine is a floor with a name, a full storey high, not a half storey between two
+numbers, and the floors cannot be dragged into another order.
 
 **Open floor (no outer wall)** is a tick box under From / To, for the floor being viewed (PAT-205). A sheltered walkway, an open lobby or an open
 ground floor has no outer wall: ticked, the floor's wall ring is not built in the 3D view (the slab stays) and, on the **ground floor**, the whole
@@ -578,12 +581,18 @@ on a building, inside one, or too far from every building is refused, and the st
 take (with building names, not ids), and "Step N: **Arrive at ...**" - the last step in green. In Go the route is shown as a line of its places above the directions. Before a route is found the places are in Plan. **Clear Route** resets the list and the route. **Hide Route** / **Show
 Route** hides or restores the route lines, direction arrows, markers and written steps without clearing the route.
 
-**Full Route View.** On either Plan or Go, click **Full Route View** after finding a route. The camera moves outside the buildings
-and zooms to frame the entire route, with a margin that adapts to the window's aspect ratio. Short routes remain readable even in
-large buildings. Building walls, roofs and slabs
-become transparent; room meshes are temporarily hidden. Every floor and leg is shown together at full brightness, with continuous
-connector lines between floors, Start/Destination markers and numbered stops. Route lines remain visible through the building and
-ground, including basement routes. Other buildings are temporarily hidden to keep the route clear.
+**Full Route View.** On either Plan or Go, click **Full Route View** after finding a route. The camera moves out and frames the entire
+route, with a margin that adapts to the window's aspect ratio (it looks down more steeply when a building the route has nothing to do with
+would be in the way). The overview shows only the floors the route goes through and pulls them apart, evenly (2.5 floor heights between
+two of them, however far apart they really are), so that the part of the route on each floor can be told from the others and a route across
+many floors is read at a glance. The floors are therefore not at their real heights in this view. Each of them is outlined and has a plate in
+the shape of its building (grey, about 70% see-through, so the floor below shows through), with its rooms and lifts on it as they are: the
+rooms and the lifts keep their solid look and their colours. The floors the route does not use, and the shell of the buildings the route is
+in, are not drawn. A route that goes on into another building pulls that building's floors apart too; its rooms are made for the overview from
+its stored data, as in the campus x-ray, and so are its lifts, stairs and escalators, for the floors the route uses. Every building the route
+has nothing to do with stays as it is, solid. Every floor and leg is shown together at full brightness, with the connector lines between
+floors, Start/Destination markers and numbered stops, all drawn thicker the larger the route is; there are no texts in the overview (the steps
+are in the panel). Route lines remain visible through the ground and the buildings, including basement routes.
 
 Click **Return to Previous View** or press **Esc** to restore the previous camera and zoom, 2D/3D editing view and building visibility.
 The overview is read-only and does not change project data, route points or the selected step. Choosing another floor, continuing

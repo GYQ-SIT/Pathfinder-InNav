@@ -55,6 +55,9 @@ private:
 
 	UPROPERTY()
 	UTextBlock* DestinationText = nullptr;
+	// Where it is ("E2/3 · L9"), small and grey under the name.
+	UPROPERTY()
+	UTextBlock* DestinationWhereText = nullptr;
 	UPROPERTY()
 	UTextBlock* StopText = nullptr;
 	UPROPERTY()

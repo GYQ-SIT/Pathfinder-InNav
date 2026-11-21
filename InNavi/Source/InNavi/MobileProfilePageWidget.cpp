@@ -97,10 +97,15 @@ TSharedRef<SWidget> UMobileProfilePageWidget::RebuildWidget()
 		// Larger text: a box and its label, all one tap. The ticked box is blue with a white check mark.
 		LargerTick = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
 		LargerTick->SetBrushColor(FLinearColor::Transparent);
+		// (A border pads its content by 4 and 2 unless told not to: the mark and the box did, and the mark sat off the middle.)
+		LargerTick->SetPadding(FMargin(0.f));
+		LargerTick->SetHorizontalAlignment(HAlign_Center);
+		LargerTick->SetVerticalAlignment(VAlign_Center);
 		UWidget* TickMark = MobileIcons::Tick(Tree, 16.f, OnBlue);
 		LargerTick->SetContent(TickMark);
 		LargerBox = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
 		LargerBox->SetBrushColor(FLinearColor::White);
+		LargerBox->SetPadding(FMargin(0.f));
 		LargerBox->SetHorizontalAlignment(HAlign_Center);
 		LargerBox->SetVerticalAlignment(VAlign_Center);
 		LargerBox->SetContent(LargerTick);

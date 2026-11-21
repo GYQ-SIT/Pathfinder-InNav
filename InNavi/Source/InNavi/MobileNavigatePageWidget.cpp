@@ -38,8 +38,20 @@ TSharedRef<SWidget> UMobileNavigatePageWidget::RebuildWidget()
 
 		// Where to, and Exit (blue words, no box).
 		UHorizontalBox* Top = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("NavigateTop"));
+		// The name wraps, up to two lines, and is cut with "..." after them (it ran under Exit); its building and level are small and grey under it, as in
+		// the rows of the route.
 		DestinationText = MakeText(Tree, TEXT("Txt_NavigateDestination"), TEXT(""), 14.f, Ink, true);
-		UHorizontalBoxSlot* DestinationSlot = Top->AddChildToHorizontalBox(DestinationText);
+		DestinationText->SetAutoWrapText(true);
+		DestinationText->SetTextOverflowPolicy(ETextOverflowPolicy::MultilineEllipsis);
+		DestinationText->SetClipping(EWidgetClipping::ClipToBounds);
+		USizeBox* DestinationLimit = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("NavigateDestinationLimit"));
+		DestinationLimit->SetMaxDesiredHeight(40.f);
+		DestinationLimit->SetContent(DestinationText);
+		DestinationWhereText = MakeText(Tree, TEXT("Txt_NavigateDestinationWhere"), TEXT(""), 12.f, Grey);
+		UVerticalBox* DestinationTexts = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("NavigateDestinationTexts"));
+		DestinationTexts->AddChildToVerticalBox(DestinationLimit);
+		DestinationTexts->AddChildToVerticalBox(DestinationWhereText)->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
+		UHorizontalBoxSlot* DestinationSlot = Top->AddChildToHorizontalBox(DestinationTexts);
 		DestinationSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		DestinationSlot->SetVerticalAlignment(VAlign_Center);
 		UButton* Exit = Tree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_Exit"));
@@ -161,7 +173,8 @@ void UMobileNavigatePageWidget::Refresh()
 	{
 		return;
 	}
-	DestinationText->SetText(FText::FromString(FString::Printf(TEXT("To %s · %s"), *Destination.Name, *Destination.GroupLabel())));
+	DestinationText->SetText(FText::FromString(FString::Printf(TEXT("To %s"), *Destination.Name)));
+	DestinationWhereText->SetText(FText::FromString(Destination.GroupLabel()));
 	StopText->SetText(FText::FromString(FString::Printf(TEXT("Destination %d of %d"), LegNumber, LegCount)));
 	StopText->SetVisibility(LegCount > 1 ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	const int32 Count = Route.Steps.Num();
@@ -266,7 +279,14 @@ void UMobileNavigatePageWidget::HandleNextClicked()
 	}
 }
 
-FString UMobileNavigatePageWidget::GetDestinationString() const { return DestinationText ? DestinationText->GetText().ToString() : FString(); }
+FString UMobileNavigatePageWidget::GetDestinationString() const
+{
+	if (!DestinationText)
+	{
+		return FString();
+	}
+	return DestinationText->GetText().ToString() + (DestinationWhereText ? TEXT(" · ") + DestinationWhereText->GetText().ToString() : FString());
+}
 FString UMobileNavigatePageWidget::GetInstructionString() const { return InstructionText ? InstructionText->GetText().ToString() : FString(); }
 FString UMobileNavigatePageWidget::GetProgressString() const { return ProgressText ? ProgressText->GetText().ToString() : FString(); }
 FString UMobileNavigatePageWidget::GetRemainingString() const { return RemainingText ? RemainingText->GetText().ToString() : FString(); }

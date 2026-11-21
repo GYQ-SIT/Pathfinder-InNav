@@ -82,12 +82,14 @@ bool FFullRouteSceneSmoke::RunTest(const FString& Parameters)
 	Screen->AddToViewport();
 	UNavigationPanelWidget* Nav = PC->GetNavigationPanel();
 	FString Start, End;
+	int32 EndFloor = 1;
 	for (const auto& Option : Nav->GetSelectableRooms())
 	{
 		if (Option.Floor == 1 && Start.IsEmpty()) Start = Option.GetDisplayLabel();
-		if (Option.Floor == 2 && End.IsEmpty()) End = Option.GetDisplayLabel();
+		// The destination is on the highest floor there is, so the route crosses as many floors as the building has.
+		if (Option.Floor > EndFloor) { EndFloor = Option.Floor; End = Option.GetDisplayLabel(); }
 	}
-	if (!TestTrue(TEXT("real E2 rooms on floors 1 and 2"), !Start.IsEmpty() && !End.IsEmpty())) return false;
+	if (!TestTrue(TEXT("real E2 rooms on floor 1 and on a higher floor"), !Start.IsEmpty() && !End.IsEmpty())) return false;
 	Nav->SetStartToRoom(Start);
 	Nav->SetDestinationToRoom(End);
 	Nav->RequestFindRoute();

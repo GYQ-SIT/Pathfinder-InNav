@@ -428,15 +428,15 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			FloorStack->AddChildToVerticalBox(RangeRow)->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f * StartStyle::DesignToUi));
 		}
 
-		// Name of the floor being viewed (a mezzanine, a lobby level ...), and the buttons for a basement and a special floor.
+		// Name of the floor being viewed (1M, Ground Floor ...), and the button for a basement.
 		{
 			UHorizontalBox* NameRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("FloorNameRow"));
 			UHorizontalBoxSlot* NameCaptionSlot = NameRow->AddChildToHorizontalBox(StartStyle::Text(WidgetTree, TEXT("Txt_FloorName"), TEXT("Name"), 12.f, StartStyle::Rgb(150, 172, 202), true));
 			NameCaptionSlot->SetVerticalAlignment(VAlign_Center);
 			NameCaptionSlot->SetPadding(FMargin(0.f, 0.f, 6.f * StartStyle::DesignToUi, 0.f));
 			FloorNameBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Edt_FloorName"));
-			FloorNameBox->SetHintText(FText::FromString(TEXT("e.g. Mezzanine")));
-			FloorNameBox->SetToolTip(MakeToolTipWidget(TEXT("What this floor is called besides its number, for example Mezzanine or Lobby level. Press Enter to apply. It is only a label: the floor keeps its level.")));
+			FloorNameBox->SetHintText(FText::FromString(TEXT("e.g. Ground Floor")));
+			FloorNameBox->SetToolTip(MakeToolTipWidget(TEXT("What this floor is called on its card instead of Level N, for example 1M, Floor 1 or Ground Floor. Empty: the card says Level N. Press Enter to apply. It is only a label: the floor keeps its level.")));
 			FloorNameBox->OnTextCommitted.AddUniqueDynamic(this, &UInteriorScreenWidget::OnFloorNameCommitted);
 			ApplyStandardFont(FloorNameBox);
 			FloorNameBox->SetWidgetStyle(StartStyle::Field(13.f));
@@ -462,7 +462,6 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 				Slot->SetPadding(FMargin(0.f, 0.f, 6.f * StartStyle::DesignToUi, 0.f));
 			};
 			AddSmallButton(AddBasementButton, TEXT("Btn_AddBasement"), TEXT("+ Basement"), TEXT("Adds a basement under the lowest floor (B1, then B2 ...). New floors go where they belong: basements below, the others on top."));
-			AddSmallButton(AddSpecialFloorButton, TEXT("Btn_AddSpecialFloor"), TEXT("+ Special"), TEXT("Adds a floor on top with a name to change, such as Mezzanine."));
 			FloorStack->AddChildToVerticalBox(AddRow)->SetPadding(FMargin(0.f, 0.f, 0.f, 10.f * StartStyle::DesignToUi));
 		}
 
@@ -1530,11 +1529,6 @@ void UInteriorScreenWidget::NativeConstruct()
 	{
 		AddBasementButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddBasementClicked);
 		AddBasementButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
-	}
-	if (AddSpecialFloorButton)
-	{
-		AddSpecialFloorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnAddSpecialFloorClicked);
-		AddSpecialFloorButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::PlayButtonClickSound);
 	}
 	if (RemoveFloorButton)
 	{
@@ -3654,18 +3648,6 @@ void UInteriorScreenWidget::OnAddBasementClicked()
 			return;
 		}
 		PC->AddFloorBelow();
-	}
-	RefreshFloorList();
-	RefreshLayersList();
-	RefreshNavigationPanelDisplay();
-	RefreshNavRoomDropdowns();
-}
-
-void UInteriorScreenWidget::OnAddSpecialFloorClicked()
-{
-	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>())
-	{
-		PC->AddSpecialFloor();
 	}
 	RefreshFloorList();
 	RefreshLayersList();

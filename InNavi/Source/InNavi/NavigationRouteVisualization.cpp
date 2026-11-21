@@ -300,30 +300,30 @@ void UNavigationRouteVisualization::ShowView(const FNavigation3DView& View)
 		if (Segment.bDimmed)
 		{
 			// Not the step being shown: a thin, dark line, without arrows.
-			DrawLine(Segment.From, Segment.To, Color * 0.25f, Depth, 2.f, -1.f);
+			DrawLine(Segment.From, Segment.To, Color * 0.25f, Depth, 2.f * DisplayScale, -1.f);
 			continue;
 		}
-		DrawLine(Segment.From, Segment.To, Color, Depth, 6.f, -1.f);
+		DrawLine(Segment.From, Segment.To, Color, Depth, 6.f * DisplayScale, -1.f);
 		const float Length = FVector::Distance(Segment.From, Segment.To);
 		const FVector Direction = (Segment.To - Segment.From).GetSafeNormal();
-		const int32 Arrows = FMath::Clamp(FMath::CeilToInt(Length / 250.f), 1, 32);
+		const int32 Arrows = FMath::Clamp(FMath::CeilToInt(Length / (250.f * DisplayScale)), 1, 32);
 		for (int32 I = 0; I < Arrows; ++I)
 		{
 			const FVector Center = FMath::Lerp(Segment.From, Segment.To, (I + 0.5f) / Arrows);
-			const float HalfLength = FMath::Min(30.f, Length / (Arrows * 4.f));
+			const float HalfLength = FMath::Min(30.f * DisplayScale, Length / (Arrows * 4.f));
 			const FVector Tip = Center + Direction * HalfLength;
 			FVector Side = FVector::CrossProduct(Direction, View.DisplayRotation.RotateVector(FVector::UpVector)).GetSafeNormal();
 			if (Side.IsNearlyZero()) Side = View.DisplayRotation.RotateVector(FVector::RightVector);
-			const float HeadSize = FMath::Min(20.f, HalfLength);
-			DrawLine(Center - Direction * HalfLength, Tip, Color, Depth, 4.f, -1.f);
-			DrawLine(Tip, Tip - Direction * HeadSize + Side * HeadSize * 0.5f, Color, Depth, 4.f, -1.f);
-			DrawLine(Tip, Tip - Direction * HeadSize - Side * HeadSize * 0.5f, Color, Depth, 4.f, -1.f);
+			const float HeadSize = FMath::Min(20.f * DisplayScale, HalfLength);
+			DrawLine(Center - Direction * HalfLength, Tip, Color, Depth, 4.f * DisplayScale, -1.f);
+			DrawLine(Tip, Tip - Direction * HeadSize + Side * HeadSize * 0.5f, Color, Depth, 4.f * DisplayScale, -1.f);
+			DrawLine(Tip, Tip - Direction * HeadSize - Side * HeadSize * 0.5f, Color, Depth, 4.f * DisplayScale, -1.f);
 		}
 	}
-	if (View.Start.IsSet()) DrawSphere(View.Start.GetValue(), 25.f, 12, FLinearColor::Green, -1.f, Depth, 3.f);
-	if (View.Destination.IsSet()) DrawSphere(View.Destination.GetValue(), 25.f, 12, FLinearColor::Red, -1.f, Depth, 3.f);
-	if (View.Here.IsSet()) DrawSphere(View.Here.GetValue(), 40.f, 12, FLinearColor::White, -1.f, Depth, 4.f);
-	for (const FNavigationDisplayStop& Stop : View.Stops) DrawSphere(Stop.Position, 20.f, 12, FLinearColor(Stop.Color), -1.f, Depth, 3.f);
+	if (View.Start.IsSet()) DrawSphere(View.Start.GetValue(), 25.f * DisplayScale, 12, FLinearColor::Green, -1.f, Depth, 3.f);
+	if (View.Destination.IsSet()) DrawSphere(View.Destination.GetValue(), 25.f * DisplayScale, 12, FLinearColor::Red, -1.f, Depth, 3.f);
+	if (View.Here.IsSet()) DrawSphere(View.Here.GetValue(), 40.f * DisplayScale, 12, FLinearColor::White, -1.f, Depth, 4.f);
+	for (const FNavigationDisplayStop& Stop : View.Stops) DrawSphere(Stop.Position, 20.f * DisplayScale, 12, FLinearColor(Stop.Color), -1.f, Depth, 3.f);
 	if (!GetOwner()) return;
 	for (const FNavigationDisplayLabel& Input : View.Labels)
 	{

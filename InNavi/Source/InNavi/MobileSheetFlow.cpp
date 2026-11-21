@@ -64,6 +64,19 @@ namespace MobileSheet
 		return Workspace * HalfFraction;
 	}
 
+	double MinimizedHeight(EMobileSheetState State)
+	{
+		switch (State)
+		{
+		case EMobileSheetState::Search:
+		case EMobileSheetState::Arrived: return 76.0;
+		case EMobileSheetState::Place:
+		case EMobileSheetState::Route: return 136.0;
+		case EMobileSheetState::Navigating: break;
+		}
+		return 0.0;
+	}
+
 	EMobileSheetSnap NearestSnap(double Height, double ScreenHeight, double TabBarHeight, double HeaderHeight)
 	{
 		EMobileSheetSnap Best = EMobileSheetSnap::Collapsed;
