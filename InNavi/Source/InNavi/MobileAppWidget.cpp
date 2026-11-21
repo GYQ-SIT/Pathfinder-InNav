@@ -442,7 +442,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 				{
 					if (UMobileAppWidget* Screen = WeakThis.Get())
 					{
-						Screen->SendSheetEvent(EMobileSheetEvent::ExitNavigation);
+						Screen->ShowExitDialog();
 					}
 				});
 				NavigatePage->SetOnNext([WeakThis]()
@@ -740,6 +740,47 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		UCanvasPanelSlot* SearchOverlaySlot = Phone->AddChildToCanvas(SearchOverlay);
 		SearchOverlaySlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
 		SearchOverlaySlot->SetOffsets(FMargin(0.f));
+
+		// "End this journey?" over everything: a dim layer that takes the taps, and a card with the question and its two answers.
+		ExitDialog = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("ExitDialog"));
+		ExitDialog->SetBrush(Rounded(FLinearColor(0.f, 0.f, 0.f, 0.45f), FLinearColor::Transparent, 0.f, 0.f));
+		ExitDialog->SetBrushColor(FLinearColor::White);
+		ExitDialog->SetPadding(FMargin(0.f));
+		ExitDialog->SetHorizontalAlignment(HAlign_Center);
+		ExitDialog->SetVerticalAlignment(VAlign_Center);
+		ExitDialog->SetVisibility(ESlateVisibility::Collapsed);
+		{
+			UVerticalBox* Card = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ExitDialogCard"));
+			Card->AddChildToVerticalBox(MakeText(Tree, TEXT("Txt_ExitDialogTitle"), TEXT("End this journey?"), 20.f, Ink, true));
+			UTextBlock* Body = MakeText(Tree, TEXT("Txt_ExitDialogBody"), TEXT("You can start this route again at any time."), 15.f, Grey);
+			Body->SetAutoWrapText(true);
+			Card->AddChildToVerticalBox(Body)->SetPadding(FMargin(0.f, 14.f, 0.f, 0.f));
+			UButton* Keep = MakeButton(Tree, TEXT("Btn_KeepNavigating"), TEXT("Keep navigating"), White, Ink, 10.f, 52.f);
+			Keep->SetStyle(StartStyle::Button(White, White * 0.94f, White * 0.86f, FieldEdge, 10.f / StartStyle::DesignToUi));
+			Keep->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::CancelExit);
+			UButton* End = MakeButton(Tree, TEXT("Btn_EndNavigation"), TEXT("End navigation"), Blue, OnBlue, 10.f, 52.f);
+			End->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::ConfirmExit);
+			UHorizontalBox* Answers = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ExitDialogAnswers"));
+			UHorizontalBoxSlot* KeepSlot = Answers->AddChildToHorizontalBox(Keep);
+			KeepSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			KeepSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
+			UHorizontalBoxSlot* EndSlot = Answers->AddChildToHorizontalBox(End);
+			EndSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			EndSlot->SetPadding(FMargin(6.f, 0.f, 0.f, 0.f));
+			Card->AddChildToVerticalBox(Answers)->SetPadding(FMargin(0.f, 24.f, 0.f, 0.f));
+			UBorder* CardBox = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("ExitDialogBox"));
+			CardBox->SetBrush(Rounded(White, FLinearColor::Transparent, 20.f, 0.f));
+			CardBox->SetBrushColor(FLinearColor::White);
+			CardBox->SetPadding(FMargin(20.f, 24.f, 20.f, 20.f));
+			CardBox->SetContent(Card);
+			USizeBox* CardSize = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("ExitDialogSize"));
+			CardSize->SetWidthOverride(335.f);
+			CardSize->SetContent(CardBox);
+			ExitDialog->SetContent(CardSize);
+		}
+		UCanvasPanelSlot* ExitDialogSlot = Phone->AddChildToCanvas(ExitDialog);
+		ExitDialogSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
+		ExitDialogSlot->SetOffsets(FMargin(0.f));
 
 		RefreshMap();
 		SetActiveTab(ActiveTab);
@@ -1060,6 +1101,11 @@ void UMobileAppWidget::SetSnap(EMobileSheetSnap NewSnap)
 
 void UMobileAppWidget::SetActiveTab(ETab Tab)
 {
+	// A tab opens at its top too.
+	if (Tab != ActiveTab)
+	{
+		ScrollPageToTop(Tab == ETab::Explore ? static_cast<UUserWidget*>(ExplorePage) : Tab == ETab::Saved ? static_cast<UUserWidget*>(SavedPage) : Tab == ETab::Profile ? static_cast<UUserWidget*>(ProfilePage) : nullptr);
+	}
 	ActiveTab = Tab;
 	if (ExploreOverlay) ExploreOverlay->SetVisibility(Tab == ETab::Explore ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	if (SavedOverlay) SavedOverlay->SetVisibility(Tab == ETab::Saved ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
@@ -1335,11 +1381,69 @@ void UMobileAppWidget::ApplyRouteRequest(const FMobileRouteRequest& Changed)
 	RefreshRoute();
 }
 
+void UMobileAppWidget::ShowExitDialog()
+{
+	if (ExitDialog && Flow.GetState() == EMobileSheetState::Navigating)
+	{
+		ExitDialog->SetVisibility(ESlateVisibility::Visible);
+	}
+}
+
+void UMobileAppWidget::CancelExit()
+{
+	if (ExitDialog)
+	{
+		ExitDialog->SetVisibility(ESlateVisibility::Collapsed);
+	}
+}
+
+void UMobileAppWidget::ConfirmExit()
+{
+	CancelExit();
+	SendSheetEvent(EMobileSheetEvent::ExitNavigation);
+}
+
+bool UMobileAppWidget::IsExitDialogOpen() const
+{
+	return ExitDialog && ExitDialog->GetVisibility() != ESlateVisibility::Collapsed;
+}
+
+void UMobileAppWidget::ScrollPageToTop(UUserWidget* Page)
+{
+	if (!Page || !Page->WidgetTree)
+	{
+		return;
+	}
+	++PagesScrolledToTop;
+	Page->WidgetTree->ForEachWidget([](UWidget* Widget)
+	{
+		if (UScrollBox* Scroll = Cast<UScrollBox>(Widget))
+		{
+			Scroll->ScrollToStart();
+		}
+	});
+}
+
 void UMobileAppWidget::RefreshSheetPage()
 {
 	if (SheetPages)
 	{
 		SheetPages->SetActiveWidgetIndex(static_cast<int32>(Flow.GetState()));
+	}
+	// A page opens at its top, not where it was left (the route page of the last trip, the place page of the last place).
+	if (Flow.GetState() != LastSheetState)
+	{
+		LastSheetState = Flow.GetState();
+		ScrollPageToTop(LastSheetState == EMobileSheetState::Search ? static_cast<UUserWidget*>(SearchPage)
+			: LastSheetState == EMobileSheetState::Place ? static_cast<UUserWidget*>(PlacePage)
+			: LastSheetState == EMobileSheetState::Route ? static_cast<UUserWidget*>(RoutePage)
+			: LastSheetState == EMobileSheetState::Navigating ? static_cast<UUserWidget*>(NavigatePage)
+			: static_cast<UUserWidget*>(ArrivedPage));
+	}
+	// The question "End this journey?" is only for a walk that is on.
+	if (Flow.GetState() != EMobileSheetState::Navigating)
+	{
+		CancelExit();
 	}
 	// What is on the map under the header follows the state too (the search field is not there while walking).
 	PositionSheet();
@@ -2066,7 +2170,7 @@ void UMobileAppWidget::OpenSite(const FString& NewSiteId)
 	SelectedPlace = FMobilePlace();
 	StartPlaceId.Reset();
 	CurrentRoute = FMobileRoute();
-	RoutePreferences = FMobileRoutePreferences();
+	RoutePreferences = FMobileRoutePreferences::LiftOnly();
 	ForgetTrip();
 	NavStepIndex = 0;
 	bMapOverview = false;

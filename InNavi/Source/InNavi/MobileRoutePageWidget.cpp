@@ -362,9 +362,9 @@ double UMobileRoutePageWidget::GetTotalMetres() const
 FString UMobileRoutePageWidget::GetViaString() const
 {
 	const FMobileRoutePreferences& Preferences = Request.Preferences;
-	const bool bLiftOnly = Preferences.bAllowLift && !Preferences.bAllowStairs && !Preferences.bAllowEscalator;
+	const bool bWheelchair = Preferences.bWheelchair && Preferences.bAllowLift && !Preferences.bAllowStairs && !Preferences.bAllowEscalator;
 	FString Modes;
-	if (bLiftOnly)
+	if (bWheelchair)
 	{
 		Modes = TEXT("Wheelchair accessible");
 	}
@@ -444,7 +444,7 @@ void UMobileRoutePageWidget::RefreshSubtitle()
 	}
 	const FMobileRoutePreferences& Preferences = Request.Preferences;
 	FString Mode;
-	if (Preferences.bAllowLift && !Preferences.bAllowStairs && !Preferences.bAllowEscalator)
+	if (Preferences.bWheelchair && Preferences.bAllowLift && !Preferences.bAllowStairs && !Preferences.bAllowEscalator)
 	{
 		Mode = TEXT("Wheelchair accessible");
 	}
@@ -726,22 +726,25 @@ void UMobileRoutePageWidget::RefreshOptions()
 {
 	OptionBox->ClearChildren();
 	const FMobileRoutePreferences& Preferences = Request.Preferences;
-	const bool bLiftOnly = Preferences.bAllowLift && !Preferences.bAllowStairs && !Preferences.bAllowEscalator;
+	// On only when the person chose it (the app starts with the lift, which is the same ways but not this choice): plain, like the chips that are not
+	// chosen, until then, and like a chosen chip after.
+	const bool bOn = Preferences.bWheelchair && Preferences.bAllowLift && !Preferences.bAllowStairs && !Preferences.bAllowEscalator;
 	UMobileTapTarget* Chip = CreateWidget<UMobileTapTarget>(this, UMobileTapTarget::StaticClass());
 	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-	UWidget* Chair = MobileIcons::Picture(WidgetTree, TEXT("Wheelchair"), 18.f, bLiftOnly ? OnBlue : Blue);
+	UWidget* Chair = MobileIcons::Picture(WidgetTree, TEXT("Wheelchair"), 18.f, bOn ? Blue : Ink);
 	if (Chair)
 	{
 		Row->AddChildToHorizontalBox(Chair)->SetVerticalAlignment(VAlign_Center);
 	}
-	UHorizontalBoxSlot* Words = Row->AddChildToHorizontalBox(MakeText(WidgetTree, FString(), TEXT("Wheelchair accessible"), 13.f, bLiftOnly ? OnBlue : Blue, true));
+	UHorizontalBoxSlot* Words = Row->AddChildToHorizontalBox(MakeText(WidgetTree, FString(), TEXT("Wheelchair accessible"), 13.f, bOn ? Blue : Ink, true));
 	Words->SetPadding(FMargin(Chair ? 8.f : 0.f, 0.f, 0.f, 0.f));
 	Words->SetVerticalAlignment(VAlign_Center);
 	UBorder* Pill = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-	Pill->SetBrushColor(FLinearColor::Transparent);
+	Pill->SetBrush(Rounded(bOn ? BlueSoft : White, bOn ? Blue : FieldEdge, 18.f, 1.f));
+	Pill->SetBrushColor(FLinearColor::White);
 	Pill->SetPadding(FMargin(14.f, 8.f));
 	Pill->SetContent(Row);
-	Chip->Setup(Pill, TEXT("liftonly"), bLiftOnly ? Blue : BlueSoft, 16.f);
+	Chip->Setup(Pill, TEXT("liftonly"), FLinearColor::Transparent, 18.f);
 	TWeakObjectPtr<UMobileRoutePageWidget> WeakThis(this);
 	Chip->SetOnTapped([WeakThis](const FString& Tapped)
 	{
@@ -840,18 +843,22 @@ void UMobileRoutePageWidget::TapOption(const FString& Option)
 	if (Option == TEXT("lift"))
 	{
 		Preferences.bAllowLift = !Preferences.bAllowLift;
+		Preferences.bWheelchair = false;
 	}
 	else if (Option == TEXT("stairs"))
 	{
 		Preferences.bAllowStairs = !Preferences.bAllowStairs;
+		Preferences.bWheelchair = false;
 	}
 	else if (Option == TEXT("escalator"))
 	{
 		Preferences.bAllowEscalator = !Preferences.bAllowEscalator;
+		Preferences.bWheelchair = false;
 	}
 	else if (Option == TEXT("liftonly"))
 	{
 		Preferences = FMobileRoutePreferences::LiftOnly();
+		Preferences.bWheelchair = true;
 	}
 	else
 	{

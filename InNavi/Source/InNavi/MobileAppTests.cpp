@@ -16,6 +16,7 @@
 #include "Components/TextBlock.h"
 #include "Components/EditableTextBox.h"
 #include "Components/Overlay.h"
+#include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/VerticalBox.h"
 #include "Blueprint/WidgetTree.h"
@@ -489,6 +490,40 @@ bool FMobileRouteRowsTest::RunTest(const FString& Parameters)
 			TestEqual(TEXT("is cut with an ellipsis"), Value->GetTextOverflowPolicy(), ETextOverflowPolicy::Ellipsis);
 		}
 	}
+	World->DestroyWorld(false);
+	return true;
+}
+
+// Every page opens at its top, not where it was left: the place page of the last place, the route page of the last trip, a tab.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobilePagesOpenAtTopTest, "InNavi.Mobile.PagesOpenAtTop", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobilePagesOpenAtTopTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	UMobileAppWidget* Screen = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
+	if (Screen) Screen->SetSource(MakeShared<FMobileMockSource>(), TEXT("sit-punggol"));
+	if (!TestNotNull(TEXT("the screen is created"), Screen)) return false;
+	Screen->TakeWidget();
+	Screen->SetActiveTab(UMobileAppWidget::ETab::Directory);
+
+	// A page opened by the flow is sent to its top (a page that was left scrolled would open in the middle).
+	const int32 Start = Screen->GetPagesScrolledToTop();
+	Screen->GetSearchPage()->ChoosePlace(TEXT("E2-01-102"));
+	TestEqual(TEXT("the place page opens at its top"), Screen->GetPagesScrolledToTop(), Start + 1);
+	Cast<UButton>(Screen->GetPlacePage()->FindNamedWidget(TEXT("Btn_GetDirections")))->OnClicked.Broadcast();
+	TestEqual(TEXT("so does the route page"), Screen->GetPagesScrolledToTop(), Start + 2);
+	Cast<UButton>(Screen->GetRoutePage()->FindNamedWidget(TEXT("Btn_RouteBack")))->OnClicked.Broadcast();
+	Cast<UButton>(Screen->GetPlacePage()->FindNamedWidget(TEXT("Btn_GetDirections")))->OnClicked.Broadcast();
+	TestEqual(TEXT("every time it is opened"), Screen->GetPagesScrolledToTop(), Start + 4);
+	// Editing the route does not send it back (that would lose the person's place while they work on it).
+	const int32 Before = Screen->GetPagesScrolledToTop();
+	Screen->GetRoutePage()->TapOption(TEXT("stairs"));
+	TestEqual(TEXT("a change in the route does not scroll"), Screen->GetPagesScrolledToTop(), Before);
+	// And a tab.
+	Screen->SetActiveTab(UMobileAppWidget::ETab::Profile);
+	TestEqual(TEXT("a tab opens at its top too"), Screen->GetPagesScrolledToTop(), Before + 1);
+	Screen->SetActiveTab(UMobileAppWidget::ETab::Profile);
+	TestEqual(TEXT("but the same tab again does not"), Screen->GetPagesScrolledToTop(), Before + 1);
+
 	World->DestroyWorld(false);
 	return true;
 }

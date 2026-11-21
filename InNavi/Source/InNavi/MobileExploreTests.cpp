@@ -89,10 +89,11 @@ bool FMobileOpenSiteTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("the map shows the mall's first level"), Screen->GetMapView()->GetBuildingId() == TEXT("PLM") && Screen->GetMapView()->GetLevel() == 1);
 	TestTrue(TEXT("with the person in the mall (My location)"), Screen->GetMyLocationBuildingId() == TEXT("PLM") && Screen->GetMapView()->HasPosition());
 
-	// A walk in the mall: by escalator when the lift is off (the campus has none).
+	// A walk in the mall: by escalator when the lift is off (the campus has none). The app starts with the lift only.
 	Screen->GetSearchPage()->ChoosePlace(TEXT("PLM-03-103"));
 	Click(Screen->GetPlacePage()->FindNamedWidget(TEXT("Btn_GetDirections")));
 	TestTrue(TEXT("a route in the mall"), Screen->GetCurrentRoute().bFound);
+	Screen->GetRoutePage()->TapOption(TEXT("escalator"));
 	Screen->GetRoutePage()->TapOption(TEXT("lift"));
 	TestTrue(TEXT("by escalator without the lift"), Screen->GetCurrentRoute().Steps.ContainsByPredicate([](const FMobileStep& S) { return S.Kind == EMobileStepKind::TakeEscalator; }));
 	Click(Screen->GetRoutePage()->FindNamedWidget(TEXT("Btn_StartNavigation")));
@@ -104,7 +105,7 @@ bool FMobileOpenSiteTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("the campus (its first building and level at the top)"), SiteName(), FString(TEXT("E2 · L1")));
 	TestEqual(TEXT("back at Where to?"), Screen->GetFlow().GetState(), EMobileSheetState::Search);
 	TestTrue(TEXT("no route is left"), !Screen->GetCurrentRoute().bFound && Screen->GetCurrentRoute().Steps.IsEmpty());
-	TestTrue(TEXT("the ways between levels are all on again"), Screen->GetRoutePreferences().bAllowLift && Screen->GetRoutePreferences().bAllowStairs && Screen->GetRoutePreferences().bAllowEscalator);
+	TestTrue(TEXT("the way between levels is the lift again"), Screen->GetRoutePreferences().bAllowLift && !Screen->GetRoutePreferences().bAllowStairs && !Screen->GetRoutePreferences().bAllowEscalator);
 	TestTrue(TEXT("the map is on E2"), Screen->GetMapView()->GetBuildingId() == TEXT("E2") && Screen->GetMapView()->GetRoutePointsOnLevel() == 0);
 	TestEqual(TEXT("with the campus's places"), Screen->GetSearchPage()->GetShownPlaces()[0].BuildingId, FString(TEXT("E2")));
 	TestEqual(TEXT("and the route page's choices are the campus's"), Screen->GetRoutePage()->GetToSelect()->GetOptionCount(), 36);

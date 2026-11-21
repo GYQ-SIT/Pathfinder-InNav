@@ -142,6 +142,15 @@ public:
 
 	UMobileSearchPageWidget* GetSearchPage() const { return SearchPage; }
 	UMobilePlacePageWidget* GetPlacePage() const { return PlacePage; }
+	// Exit while walking asks first; these are the two answers. A walk that ends some other way (it arrives) closes the question.
+	void ShowExitDialog();
+	UFUNCTION()
+	void ConfirmExit();
+	UFUNCTION()
+	void CancelExit();
+	bool IsExitDialogOpen() const;
+	// How many times a page was sent back to its top on opening (a test cannot scroll a page that has no layout, so it counts these).
+	int32 GetPagesScrolledToTop() const { return PagesScrolledToTop; }
 	// Whether the sheet is down at its lowest (the pages then show only a title and their button); not while walking.
 	bool IsSheetMinimized() const;
 	UMobileRoutePageWidget* GetRoutePage() const { return RoutePage; }
@@ -303,6 +312,12 @@ private:
 	UBorder* StorageError = nullptr;
 	float StorageErrorSeconds = 0.f;
 	void ShowStorageError();
+	// "End this journey?": Exit asks before it ends the walk (the prototype does), and the walk goes on unless the person ends it.
+	UPROPERTY()
+	UBorder* ExitDialog = nullptr;
+	EMobileSheetState LastSheetState = EMobileSheetState::Search;
+	void ScrollPageToTop(UUserWidget* Page);
+	int32 PagesScrolledToTop = 0;
 	UPROPERTY()
 	UBorder* SheetBorder = nullptr;
 	UPROPERTY()
@@ -418,7 +433,8 @@ private:
 	void ForgetTrip();
 	// Tells the place page whether its button is Add stop (a trip is open) or Get directions.
 	void RefreshPlaceButton();
-	FMobileRoutePreferences RoutePreferences;
+	// The app starts with the lift chosen, so that it is clear which way between levels the route takes (the others are a tap away).
+	FMobileRoutePreferences RoutePreferences = FMobileRoutePreferences::LiftOnly();
 	// Where "My location" is for the route (the prototype lets the person say which building and level they are on).
 	FString MyLocationBuildingId;
 	int32 MyLocationLevel = 1;

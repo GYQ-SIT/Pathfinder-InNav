@@ -91,6 +91,8 @@ struct FMobileRoutePreferences
 	bool bAllowLift = true;
 	bool bAllowStairs = true;
 	bool bAllowEscalator = true;
+	// The person chose "Wheelchair accessible" (which is the lift only): it is told apart from the lift alone, which is where the app starts.
+	bool bWheelchair = false;
 
 	static FMobileRoutePreferences LiftOnly()
 	{

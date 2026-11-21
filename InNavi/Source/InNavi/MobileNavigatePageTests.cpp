@@ -168,6 +168,15 @@ bool FMobileWalkFlowTest::RunTest(const FString& Parameters)
 	// Exit goes back to the route, which can be started again from the first step.
 	Click(Walk->FindNamedWidget(TEXT("Btn_NextInstruction")));
 	Click(Walk->FindNamedWidget(TEXT("Btn_Exit")));
+	// Exit asks first ("End this journey?"), as the prototype does, and the walk goes on until it is ended.
+	TestTrue(TEXT("exit asks first"), Screen->IsExitDialogOpen());
+	TestEqual(TEXT("and the walk goes on"), Screen->GetFlow().GetState(), EMobileSheetState::Navigating);
+	Click(Screen->FindNamedWidget(TEXT("Btn_KeepNavigating")));
+	TestFalse(TEXT("Keep navigating closes the question"), Screen->IsExitDialogOpen());
+	TestEqual(TEXT("and keeps walking"), Screen->GetFlow().GetState(), EMobileSheetState::Navigating);
+	Click(Walk->FindNamedWidget(TEXT("Btn_Exit")));
+	Click(Screen->FindNamedWidget(TEXT("Btn_EndNavigation")));
+	TestFalse(TEXT("End navigation closes it"), Screen->IsExitDialogOpen());
 	TestEqual(TEXT("exit goes to the route"), Screen->GetFlow().GetState(), EMobileSheetState::Route);
 	Click(Screen->GetRoutePage()->FindNamedWidget(TEXT("Btn_StartNavigation")));
 	TestEqual(TEXT("starting again begins at the first step"), Screen->GetNavStepIndex(), 0);
