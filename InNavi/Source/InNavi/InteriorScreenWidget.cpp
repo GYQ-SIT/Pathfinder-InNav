@@ -880,7 +880,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UHorizontalBox* SwitcherRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("BuildingSwitcherRow"));
 		BuildingSwitcherBarBackground->SetContent(SwitcherRow);
 
-		AddCentered(SwitcherRow, Text(WidgetTree, TEXT("Txt_BuildingMark"), TEXT("\u25A5"), 15.f, Rgb(80, 150, 255)), FMargin(0.f));
+		// The building mark: the design team's building when it is imported; else the old square.
+		UWidget* BuildingMark = EditorIcons::Picture(WidgetTree, TEXT("Txt_BuildingMark"), TEXT("Icon_Building"), 18.f, Rgb(80, 150, 255));
+		AddCentered(SwitcherRow, BuildingMark ? BuildingMark : static_cast<UWidget*>(Text(WidgetTree, TEXT("Txt_BuildingMark"), TEXT("\u25A5"), 15.f, Rgb(80, 150, 255))), FMargin(0.f));
 
 		BuildingSwitcherComboBox = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_BuildingSwitcher"));
 		BuildingSwitcherComboBox->OnGenerateWidgetEvent.BindDynamic(this, &UInteriorScreenWidget::HandleGenerateComboBoxItem);
@@ -907,7 +909,9 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		USizeBox* EditButtonSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 		EditButtonSizeBox->SetWidthOverride(32.f);
 		EditButtonSizeBox->SetHeightOverride(32.f);
-		if (USizeBoxSlot* EditButtonTextSlot = Cast<USizeBoxSlot>(EditButtonSizeBox->SetContent(EditBuildingNameButtonText)))
+		// The pencil is the design team's picture when it is imported (Icon_Rename); else the old pencil character.
+		EditBuildingNameIcon = EditorIcons::Picture(WidgetTree, TEXT("Btn_EditBuildingNameIcon"), TEXT("Icon_Rename"), 16.f, FLinearColor::White);
+		if (USizeBoxSlot* EditButtonTextSlot = Cast<USizeBoxSlot>(EditButtonSizeBox->SetContent(EditBuildingNameIcon ? EditBuildingNameIcon : static_cast<UWidget*>(EditBuildingNameButtonText))))
 		{
 			EditButtonTextSlot->SetHorizontalAlignment(HAlign_Center);
 			EditButtonTextSlot->SetVerticalAlignment(VAlign_Center);
@@ -3870,6 +3874,7 @@ void UInteriorScreenWidget::OnEditBuildingNameClicked()
 		BuildingNameTextBox->SetVisibility(ESlateVisibility::Visible);
 		BuildingSwitcherComboBox->SetVisibility(ESlateVisibility::Collapsed);
 		EditBuildingNameButtonText->SetText(FText::FromString(TEXT("\x2713"))); // checkmark
+		if (EditBuildingNameIcon) EditorIcons::Swap(EditBuildingNameIcon, TEXT("Icon_CircleCheck"));
 		return;
 	}
 
@@ -3879,6 +3884,7 @@ void UInteriorScreenWidget::OnEditBuildingNameClicked()
 	BuildingNameTextBox->SetVisibility(ESlateVisibility::Collapsed);
 	BuildingSwitcherComboBox->SetVisibility(ESlateVisibility::Visible);
 	EditBuildingNameButtonText->SetText(FText::FromString(TEXT("\x270E"))); // pencil
+	if (EditBuildingNameIcon) EditorIcons::Swap(EditBuildingNameIcon, TEXT("Icon_Rename"));
 	RefreshBuildingSwitcher();
 }
 
