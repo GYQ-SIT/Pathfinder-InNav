@@ -976,6 +976,9 @@ private:
 
 	UPROPERTY()
 	UTextBlock* EditBuildingNameButtonText = nullptr;
+	// The pencil as the design team's picture (Icon_Rename; a check mark, Icon_CircleCheck, while the name is being edited); null while it is not imported.
+	UPROPERTY()
+	UWidget* EditBuildingNameIcon = nullptr;
 
 	// 2D/3D toggle + "Reset View"/move-speed +/- - see the comment above OnSwitch2DClicked. Live on
 	// the building switcher bar (same row as EditBuildingNameButton), not the menu bar above it.

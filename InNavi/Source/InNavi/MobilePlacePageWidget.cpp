@@ -43,17 +43,25 @@ TSharedRef<SWidget> UMobilePlacePageWidget::RebuildWidget()
 		// The name and below it the code and where it is, with a close button (a circle with a cross) at the right: it goes back, as the back arrow did.
 		UHorizontalBox* Header = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("PlaceHeader"));
 		UVerticalBox* Titles = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("PlaceTitles"));
-		TitleText = MakeText(Tree, TEXT("Txt_PlaceTitle"), TEXT(""), 17.f, Ink, true);
+		TitleText = MakeText(Tree, TEXT("Txt_PlaceTitle"), TEXT(""), 16.f, Ink, true);
+		// The name wraps, up to two lines, and is cut with "..." after them (it ran under the close button, more so with larger text).
+		TitleText->SetAutoWrapText(true);
+		TitleText->SetTextOverflowPolicy(ETextOverflowPolicy::MultilineEllipsis);
+		TitleText->SetClipping(EWidgetClipping::ClipToBounds);
+		USizeBox* TitleLimit = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("PlaceTitleLimit"));
+		TitleLimit->SetMaxDesiredHeight(48.f);
+		TitleLimit->SetContent(TitleText);
 		SubtitleText = MakeText(Tree, TEXT("Txt_PlaceSubtitle"), TEXT(""), 12.f, Grey);
-		Titles->AddChildToVerticalBox(TitleText);
+		Titles->AddChildToVerticalBox(TitleLimit);
 		Titles->AddChildToVerticalBox(SubtitleText)->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
 		UHorizontalBoxSlot* TitlesSlot = Header->AddChildToHorizontalBox(Titles);
+		TitlesSlot->SetPadding(FMargin(0.f, 0.f, 8.f, 0.f));
 		TitlesSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		TitlesSlot->SetVerticalAlignment(VAlign_Center);
 		UButton* Back = MobileIcons::CloseButton(Tree, TEXT("Btn_PlaceBack"));
 		Back->OnClicked.AddUniqueDynamic(this, &UMobilePlacePageWidget::HandleBackClicked);
 		Header->AddChildToHorizontalBox(Back)->SetVerticalAlignment(VAlign_Top);
-		Page->AddChildToVerticalBox(Header)->SetPadding(FMargin(16.f, 0.f, 4.f, 0.f));
+		Page->AddChildToVerticalBox(Header)->SetPadding(FMargin(16.f, 0.f, 8.f, 0.f));
 
 		// The part that scrolls: the photo, the pills, the description and the two secondary buttons.
 		UScrollBox* Scroll = Tree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("PlaceScroll"));
@@ -89,7 +97,14 @@ TSharedRef<SWidget> UMobilePlacePageWidget::RebuildWidget()
 		BodyScroll = Scroll;
 		Page->AddChildToVerticalBox(Scroll)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 
-		// Get directions stays at the bottom whatever the height of the sheet.
+		// Get directions stays at the bottom whatever the height of the sheet, under a line, as Start navigation does on the route page (the two minimised
+		// sheets are then the same).
+		UBorder* BarRule = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
+		BarRule->SetBrushColor(FieldEdge);
+		USizeBox* BarLine = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		BarLine->SetHeightOverride(1.f);
+		BarLine->SetContent(BarRule);
+		Page->AddChildToVerticalBox(BarLine);
 		UButton* Directions = MobileIcons::IconLabelButton(Tree, TEXT("Btn_GetDirections"), bAddStop ? TEXT("Add stop") : TEXT("Get directions"), TEXT("Location"), Blue, OnBlue, 12.f, 48.f, &DirectionsLabel, nullptr);
 		Directions->OnClicked.AddUniqueDynamic(this, &UMobilePlacePageWidget::HandleDirectionsClicked);
 		Page->AddChildToVerticalBox(Directions)->SetPadding(FMargin(16.f, 8.f, 16.f, 12.f));

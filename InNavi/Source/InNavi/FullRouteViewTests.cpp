@@ -192,6 +192,50 @@ bool FFullRouteOtherBuildingTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+// The overview follows a route that is gone through a step at a time: what has been walked, the step being shown and what is to come are told apart, and
+// a step does not take the person out of the overview.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFullRouteProgressTest, "InNavi.Navigation.FullRoute.FollowsSteps",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFullRouteProgressTest::RunTest(const FString& Parameters)
+{
+	TArray<FNavigationRoutePoint> Points;
+	for (int32 Index = 0; Index < 6; ++Index)
+	{
+		FNavigationRoutePoint Point;
+		Point.Floor = 1;
+		Point.BuildingId = TEXT("A");
+		Point.bHasWorldPosition = true;
+		Point.WorldPosition = FVector(1000 + Index * 100, 0, 0);
+		Points.Add(Point);
+	}
+	// The step being shown is from point 2 to point 3.
+	const FNavigationRouteFocus Focus{ 2, 3 };
+	const FNavigation3DView View = UNavigationRouteVisualization::BuildView(Points, &Points[0], &Points.Last(),
+		FVector2D::ZeroVector, 1, 300, 1, true, TEXT("A"), nullptr, nullptr, &Focus, true);
+	if (!TestEqual(TEXT("a stretch for each pair of points"), View.Segments.Num(), 5)) return false;
+	TestTrue(TEXT("what is behind is walked"), View.Segments[0].Progress == ENavigationSegmentProgress::Done && View.Segments[1].Progress == ENavigationSegmentProgress::Done);
+	TestTrue(TEXT("the step being shown is current"), View.Segments[2].Progress == ENavigationSegmentProgress::Current);
+	TestTrue(TEXT("what is ahead is still to walk"), View.Segments[3].Progress == ENavigationSegmentProgress::Pending && View.Segments[4].Progress == ENavigationSegmentProgress::Pending);
+	TestTrue(TEXT("and the person is where the step begins"), View.Here.IsSet() && View.Here->X > 1199.f && View.Here->X < 1201.f);
+	// Without a step being shown nothing is told apart (the legs keep their colours).
+	const FNavigation3DView Whole = UNavigationRouteVisualization::BuildView(Points, &Points[0], &Points.Last(),
+		FVector2D::ZeroVector, 1, 300, 1, true, TEXT("A"), nullptr, nullptr, nullptr, true);
+	TestTrue(TEXT("no step, no progress"), !Whole.Segments.ContainsByPredicate([](const FNavigationDisplaySegment& Segment) { return Segment.Progress != ENavigationSegmentProgress::Unspecified; }));
+
+	// A step in the overview keeps it.
+	FullRouteViewTests::FFixture F;
+	F.MakeRoute();
+	F.Controller->SetFullRouteViewEnabled(true);
+	if (!TestTrue(TEXT("overview on"), F.Controller->IsFullRouteViewEnabled())) return false;
+	F.Nav->NextStep();
+	F.Controller->FollowNavigationStep();
+	TestTrue(TEXT("a step does not leave the overview"), F.Controller->IsFullRouteViewEnabled());
+	F.Nav->PreviousStep();
+	F.Controller->FollowNavigationStep();
+	TestTrue(TEXT("nor a step back"), F.Controller->IsFullRouteViewEnabled());
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFullRoutePanelTest, "InNavi.Navigation.FullRoute.PanelAndCampus",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FFullRoutePanelTest::RunTest(const FString& Parameters)

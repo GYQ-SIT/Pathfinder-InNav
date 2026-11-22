@@ -7,6 +7,10 @@
 
 class UTextRenderComponent;
 
+// How far the person has got along a stretch of the route, in the full route overview when the route is gone through a step at a time: what has been
+// walked, the stretch of the step being shown, and what is still to walk. Unspecified outside the overview (and before the first step).
+enum class ENavigationSegmentProgress : uint8 { Unspecified, Done, Current, Pending };
+
 struct FNavigationDisplaySegment
 {
 	FVector From;
@@ -16,6 +20,7 @@ struct FNavigationDisplaySegment
 	int32 RouteLegIndex = INDEX_NONE;
 	// Not the step being shown (see FNavigationRouteFocus): drawn faint.
 	bool bDimmed = false;
+	ENavigationSegmentProgress Progress = ENavigationSegmentProgress::Unspecified;
 };
 
 struct FNavigationDisplayLabel
@@ -82,6 +87,7 @@ public:
 	void ShowView(const FNavigation3DView& View);
 	// How much bigger than usual ShowView draws the lines, arrows and balls (the full route overview, seen from far, asks for more than 1).
 	void SetDisplayScale(float Scale) { DisplayScale = FMath::Max(Scale, 0.1f); }
+
 	static FNavigation3DView TransformView(const FNavigation3DView& View, const FTransform& Transform);
 	void ClearRoute();
 
@@ -93,4 +99,5 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTextRenderComponent>> RouteLabels;
 	float DisplayScale = 1.f;
+	void DrawProgressSegment(const FNavigationDisplaySegment& Segment, const FQuat& DisplayRotation, uint8 Depth);
 };

@@ -31,6 +31,10 @@ class AInteriorConnectorMarker;
 class UNavigationPanelWidget;
 class UMobileSplashWidget;
 class UAudioComponent;
+class UWidget;
+class USizeBox;
+class UUserWidget;
+class UFullRouteCalloutLayer;
 
 // One currently-playing audio file (see PlayAudioFile/StopAllAudio). AudioComponent already keeps
 // its own USoundWaveProcedural alive via its own Sound UPROPERTY, so there's no need to separately
@@ -221,6 +225,11 @@ public:
 	// IsSelectingNavigationPoint, and UInteriorFloorPlanWidget being hidden entirely while active).
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	bool IsIn3DPreviewMode() const { return bIsIn3DPreviewMode; }
+	// An issue of the validation, shown in the 3D view: a translucent beam over the place (red for an error, yellow for the rest) from the floor up, and the
+	// camera moved near it, looking at it. It stays until another issue is shown, or the 3D view, the building or the project is left.
+	void ShowValidationIssueIn3D(const FString& BuildingId, int32 Floor, const FVector2D& PlanPosition, bool bError);
+	void ClearValidationMarker();
+	bool HasValidationMarker() const { return ValidationBeacon.IsValid(); }
 
 	// Temporary, read-only exterior overview of every floor/leg of the current route.
 	UFUNCTION(BlueprintCallable, Category = "Navigation")
@@ -1545,6 +1554,25 @@ private:
 	TMap<FString, float> FullRouteFloorShifts;
 	// A solid plate at each of those floors (the shape of the building), made when the overview starts and destroyed when it ends.
 	TArray<TWeakObjectPtr<AActor>> FullRouteFloorPlates;
+	TWeakObjectPtr<AActor> ValidationBeacon;
+	// The call-outs of the overview (Start, Destination, the stops, where the person is): small tags on the screen, each held over the point it is for. They are
+	// a layer of the screen, not texts in the world, so that no floor hides them and they stay as large as they are.
+	UPROPERTY()
+	UFullRouteCalloutLayer* FullRouteCalloutLayer = nullptr;
+	UPROPERTY()
+	TArray<TObjectPtr<UWidget>> FullRouteCalloutWidgets;
+	TArray<FVector> FullRouteCalloutPoints;
+	// The stem of each call-out (it grows when the tag is lifted off another one) and how wide its tag is, about.
+	UPROPERTY()
+	TArray<TObjectPtr<USizeBox>> FullRouteCalloutStems;
+	TArray<float> FullRouteCalloutWidths;
+	// How far the camera was from the route when it was drawn: the width of the lines follows the distance, so it is drawn again when the camera has moved.
+	float FullRouteDrawnDistance = 0.f;
+	FBox FullRouteDrawnBounds = FBox(ForceInit);
+	float FullRouteCameraDistance() const;
+	void ClearFullRouteCallouts();
+	void AddFullRouteCallout(const FVector& Point, const FString& Text, const FColor& Color);
+	void UpdateFullRouteCallouts();
 
 	void BuildFullRouteFloorShifts();
 	void FrameFullRouteView();

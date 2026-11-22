@@ -133,6 +133,9 @@ void ULayoutValidationPanelWidget::NativeTick(const FGeometry& Geometry, float D
 {
     Super::NativeTick(Geometry, DeltaTime);
     PollElapsed += DeltaTime;
+    const auto* Player = GetOwningPlayer<ANavPlayerController>();
+    const bool bIn3D = Player && Player->IsIn3DPreviewMode();
+    if (bIn3D != bListedFor3D) { bListedFor3D = bIn3D; RebuildIssues(); }
     // Validation is stepped by the session itself; this only shows how far it is. Fingerprinting is throttled and stops as soon as the report becomes stale.
     const auto* State = Session();
     const bool bBusy = State && State->IsRunning();
@@ -209,7 +212,7 @@ void ULayoutValidationPanelWidget::RebuildIssues()
         auto* Title = AddText(Box, FString(LayoutValidation::SeverityName(Issue.Severity)) + TEXT(" - ") + Location + TEXT(" ") + Issue.ObjectId, NAME_None);
         Title->SetColorAndOpacity(FSlateColor(Issue.Severity == LayoutValidation::ESeverity::Error ? FLinearColor(1.f, .4f, .35f) : Issue.Severity == LayoutValidation::ESeverity::Warning ? FLinearColor::Yellow : FLinearColor(.6f, .8f, 1.f)));
         AddText(Box, Issue.Message, NAME_None); AddText(Box, Issue.Suggestion, NAME_None);
-        if (!Issue.BuildingId.IsEmpty()) AddText(Box, TEXT("Show on plan"), NAME_None);
+        if (!Issue.BuildingId.IsEmpty()) AddText(Box, bListedFor3D ? TEXT("Show in 3D") : TEXT("Show on plan"), NAME_None);
         Button->SetIsEnabled(!State->IsStale() && !Issue.BuildingId.IsEmpty());
         Issues->AddChild(Button);
     }

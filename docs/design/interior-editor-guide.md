@@ -594,6 +594,12 @@ has nothing to do with stays as it is, solid. Every floor and leg is shown toget
 floors, Start/Destination markers and numbered stops, all drawn thicker the larger the route is; there are no texts in the overview (the steps
 are in the panel). Route lines remain visible through the ground and the buildings, including basement routes.
 
+When the route is gone through a step at a time (**Next Step**, **Previous**), the overview follows it and stays on: **Next Step** does not take
+you back to the previous view, the camera does not move and the floor does not change. The route is drawn as a thick line with an outline round it and
+white chevrons on it: what has been walked is **grey**, the step being shown is **orange**, and what is still to walk is **blue**. A few call-outs, small
+tags on the screen that follow the points they are for, say what is where: **Start**, **Destination**, each **Stop** (with the name of the room) and
+**You are here**; when two would sit on each other the higher one is lifted. The lines and the chevrons grow with how far the camera is from the route.
+
 Click **Return to Previous View** or press **Esc** to restore the previous camera and zoom, 2D/3D editing view and building visibility.
 The overview is read-only and does not change project data, route points or the selected step. Choosing another floor, continuing
 to the next/previous step, hiding or clearing the route, editing its places, or leaving the editor also exits the overview. In 3D,

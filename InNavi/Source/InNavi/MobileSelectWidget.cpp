@@ -6,6 +6,7 @@
 
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
+#include "Components/Button.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Overlay.h"
@@ -34,13 +35,10 @@ TSharedRef<SWidget> UMobileSelectWidget::RebuildWidget()
 		const bool bCaptioned = Look == EMobileSelectLook::Normal || bCompact;
 		CaptionText = MakeText(Tree, TEXT("Txt_SelectCaption"), Caption, 11.f, Grey, !bCompact);
 		ValueText = MakeText(Tree, TEXT("Txt_SelectValue"), TEXT(""), Look == EMobileSelectLook::Normal ? 15.f : Look == EMobileSelectLook::Bare ? 15.f : 12.f, Ink, Look == EMobileSelectLook::Normal);
-		if (Look == EMobileSelectLook::Bare)
-		{
-			// A long name is cut with "..." before the cross and the handle at the right (it ran under them). The "..." comes where the text meets the
-			// edge of its clip, so the text clips.
-			ValueText->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
-			ValueText->SetClipping(EWidgetClipping::ClipToBounds);
-		}
+		// A long name is cut with "..." where the field ends (in a card row, before the cross and the handle; in a filter, before the arrow and the next
+		// filter: "bridge 1283901249" ran out of its box over the Level one). The "..." comes where the text meets the edge of its clip, so the text clips.
+		ValueText->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+		ValueText->SetClipping(EWidgetClipping::ClipToBounds);
 		if (bCompact)
 		{
 			// The caption is over the box, not in it.
@@ -52,7 +50,10 @@ TSharedRef<SWidget> UMobileSelectWidget::RebuildWidget()
 		}
 		Texts->AddChildToVerticalBox(ValueText)->SetPadding(FMargin(0.f, bCaptioned && !bCompact ? 2.f : 0.f, 0.f, 0.f));
 		UHorizontalBox* Row = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("SelectRow"));
-		Row->AddChildToHorizontalBox(Texts)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		UHorizontalBoxSlot* TextsSlot = Row->AddChildToHorizontalBox(Texts);
+		TextsSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		// A gap before the arrow, so that a name that fills the field does not touch it.
+		TextsSlot->SetPadding(FMargin(0.f, 0.f, 6.f, 0.f));
 		// The design team's arrow down; until its texture is imported, a letter.
 		// No arrow on a row of a card (Bare) or on a chip: the row is the control, as in the prototype.
 		bHasArrow = Look != EMobileSelectLook::Chip && Look != EMobileSelectLook::Bare;
@@ -122,12 +123,22 @@ TSharedRef<SWidget> UMobileSelectWidget::RebuildWidget()
 	return Super::RebuildWidget();
 }
 
+void UMobileSelectWidget::HandleCatcherPressed()
+{
+	SetOpen(false);
+}
+
 void UMobileSelectWidget::ClosePopup()
 {
 	bOpen = false;
 	if (PopupHost && PopupWidth && PopupSlot)
 	{
 		PopupHost->RemoveChild(PopupWidth);
+		if (Catcher)
+		{
+			PopupHost->RemoveChild(Catcher);
+			Catcher = nullptr;
+		}
 		PopupSlot = nullptr;
 	}
 }
@@ -169,19 +180,31 @@ void UMobileSelectWidget::PlacePopup()
 	constexpr float Edge = 8.f;
 	const float Width = FMath::Min(FMath::Max(Field.GetLocalSize().X, MinWidth), Host.GetLocalSize().X - 2.f * Edge);
 	const float Left = FMath::Clamp(Corner.X, Edge, FMath::Max(Edge, Host.GetLocalSize().X - Width - Edge));
-	// Under the field; but when the list would run off the bottom of the page (the sheet is half open and the field low), over the field instead,
-	// with its bottom edge just over the field (so that its own height does not matter once it is there).
-	const float ListHeight = FMath::Max3(static_cast<float>(PopupWidth->GetCachedGeometry().GetLocalSize().Y), static_cast<float>(PopupWidth->GetDesiredSize().Y), FMath::Min(MaxListHeight + 8.f, Options.Num() * 34.f + 8.f));
-	const float Below = Corner.Y + 4.f;
-	if (Below + ListHeight > Host.GetLocalSize().Y - Edge)
+	// How tall the whole list would be (its rows, up to the most it shows), and how much room the page has under the field and over it. The list goes
+	// under the field when it fits there; else on the side with more room, and then it is only as tall as that room (it scrolls), so that it is never
+	// cut off by the top or the bottom of the page: with the sheet half open the field is near the top and has the room below.
+	const float RowsHeight = ListBox && ListBox->GetDesiredSize().Y > 1.f ? static_cast<float>(ListBox->GetDesiredSize().Y) : Options.Num() * 34.f;
+	const float Natural = FMath::Min(RowsHeight, MaxListHeight) + 8.f;
+	const float FieldTop = Corner.Y - static_cast<float>(Field.GetLocalSize().Y);
+	const float RoomBelow = static_cast<float>(Host.GetLocalSize().Y) - Edge - (Corner.Y + 4.f);
+	const float RoomAbove = FieldTop - 4.f - Edge;
+	const bool bAbove = RoomBelow < Natural && RoomAbove > RoomBelow;
+	constexpr float TwoRows = 2.f * 34.f + 8.f;
+	const float Allowed = FMath::Min(Natural, FMath::Max(bAbove ? RoomAbove : RoomBelow, TwoRows));
+	if (!FMath::IsNearlyEqual(Allowed, ListHeightNow, 0.5f) && ListLimit)
+	{
+		ListHeightNow = Allowed;
+		ListLimit->SetMaxDesiredHeight(Allowed - 8.f);
+	}
+	if (bAbove)
 	{
 		PopupSlot->SetVerticalAlignment(VAlign_Bottom);
-		PopupSlot->SetPadding(FMargin(Left, 0.f, 0.f, FMath::Max(Edge, Host.GetLocalSize().Y - (Corner.Y - Field.GetLocalSize().Y - 4.f))));
+		PopupSlot->SetPadding(FMargin(Left, 0.f, 0.f, FMath::Max(Edge, static_cast<float>(Host.GetLocalSize().Y) - (FieldTop - 4.f))));
 	}
 	else
 	{
 		PopupSlot->SetVerticalAlignment(VAlign_Top);
-		PopupSlot->SetPadding(FMargin(Left, Below, 0.f, 0.f));
+		PopupSlot->SetPadding(FMargin(Left, Corner.Y + 4.f, 0.f, 0.f));
 	}
 	PopupWidth->SetWidthOverride(Width);
 }
@@ -268,11 +291,25 @@ void UMobileSelectWidget::Refresh()
 	// The list goes into the host's overlay the first time it opens (also when it was opened before the widget was built).
 	if (bOpen && PopupHost && PopupWidth && !PopupSlot)
 	{
+		Catcher = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("SelectCatcher"));
+		Catcher->SetStyle(StartStyle::Button(FLinearColor::Transparent, FLinearColor::Transparent, FLinearColor::Transparent, FLinearColor::Transparent, 0.f));
+		Catcher->SetBackgroundColor(FLinearColor::White);
+		// It closes the list as the finger goes down (a scroll starts with a touch too), not when it comes up.
+		Catcher->SetClickMethod(EButtonClickMethod::MouseDown);
+		Catcher->SetTouchMethod(EButtonTouchMethod::Down);
+		Catcher->OnClicked.AddUniqueDynamic(this, &UMobileSelectWidget::HandleCatcherPressed);
+		UOverlaySlot* CatcherSlot = PopupHost->AddChildToOverlay(Catcher);
+		CatcherSlot->SetHorizontalAlignment(HAlign_Fill);
+		CatcherSlot->SetVerticalAlignment(VAlign_Fill);
 		PopupSlot = PopupHost->AddChildToOverlay(PopupWidth);
 		PopupSlot->SetHorizontalAlignment(HAlign_Left);
 		PopupSlot->SetVerticalAlignment(VAlign_Top);
 	}
 	ListPanel->SetVisibility(bOpen ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	if (Catcher)
+	{
+		Catcher->SetVisibility(bOpen ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
 	if (PopupWidth)
 	{
 		// Its box is only there while it is open, so that it does not take a tap meant for the page under it.
