@@ -5,7 +5,10 @@
 #include "MobileMapWidget.h"
 #include "MobileRealSource.h"
 
+#include "Components/Button.h"
+#include "Engine/World.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/ScopeExit.h"
 #include "Misc/Paths.h"
 
 namespace
@@ -35,7 +38,12 @@ bool FMobileGpsTest::RunTest(const FString& Parameters)
 	const auto Origin = Data->GetGeoOrigin(Sites[0].Id);
 	if (!TestTrue(TEXT("The database exposes its projection origin"), Origin.IsSet())) return false;
 
-	auto* App = NewObject<UMobileAppWidget>();
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("The test world is created"), World)) return false;
+	ON_SCOPE_EXIT { World->DestroyWorld(false); };
+
+	auto* App = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
+	if (!TestNotNull(TEXT("The app is created"), App)) return false;
 	App->SetSource(Data, Sites[0].Id);
 	const TSharedRef<SWidget> Widget = App->TakeWidget();
 	auto* Map = App->GetMapView();
@@ -57,7 +65,9 @@ bool FMobileGpsTest::RunTest(const FString& Parameters)
 	if (!TestTrue(TEXT("The first fix reaches the dot"), Position.IsSet())) return false;
 	TestTrue(TEXT("The dot is in campus meters, north then east"), Position->Equals(FVector2D(20.0, 35.0), 1.e-6));
 
-	App->LocateMe();
+	auto* Locate = Cast<UButton>(App->FindNamedWidget(TEXT("Btn_Locate")));
+	if (!TestNotNull(TEXT("The app has a Locate button"), Locate)) return false;
+	Locate->OnClicked.Broadcast();
 	TestTrue(TEXT("Locate switches to campus overview"), Map->IsOverview());
 	const FVector2D PanAfterLocate = Map->GetPan();
 	TestTrue(TEXT("Locate centers the campus view on the fix"), !PanAfterLocate.IsNearlyZero());
