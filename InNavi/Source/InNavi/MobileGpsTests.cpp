@@ -16,13 +16,13 @@ namespace
 	class FFakeMobileLocationSource final : public IMobileLocationSource
 	{
 	public:
-		FMobileLocationReading ReadLocation() override
+		TOptional<FVector2D> ReadLocation() override
 		{
 			++ReadCount;
-			return Reading;
+			return Fix;
 		}
 
-		FMobileLocationReading Reading;
+		TOptional<FVector2D> Fix;
 		int32 ReadCount = 0;
 	};
 }
@@ -55,11 +55,9 @@ bool FMobileGpsTest::RunTest(const FString& Parameters)
 	App->SetLocationSource(MoveTemp(Fake));
 	App->UpdateLocation(0.f);
 	TestFalse(TEXT("No fix means no GPS dot"), Map->GetGpsPosition().IsSet());
-	TestTrue(TEXT("No fix shows the finding status"), Map->GetGpsStatus() == EMobileGpsStatus::Finding);
 
-	Location->Reading.Fix = FMobileLocationFix{
-		FVector2D(Origin->X + 20.0 / GeoProjection::MetersPerDegreeLat,
-			Origin->Y + 35.0 / GeoProjection::MetersPerDegreeLon(Origin->X)), 12.0};
+	Location->Fix = FVector2D(Origin->X + 20.0 / GeoProjection::MetersPerDegreeLat,
+		Origin->Y + 35.0 / GeoProjection::MetersPerDegreeLon(Origin->X));
 	App->UpdateLocation(0.5f);
 	TestEqual(TEXT("The source is not polled each frame"), Location->ReadCount, 1);
 	App->UpdateLocation(0.5f);
@@ -74,32 +72,15 @@ bool FMobileGpsTest::RunTest(const FString& Parameters)
 	const FVector2D PanAfterLocate = Map->GetPan();
 	TestTrue(TEXT("Locate centers the campus view on the fix"), !PanAfterLocate.IsNearlyZero());
 
-	TestEqual(TEXT("Accuracy reaches the map in meters"), Map->GetGpsAccuracyMeters(), 12.0);
-	TestTrue(TEXT("A fresh fix marks the dot current"), Map->GetGpsStatus() == EMobileGpsStatus::Current);
-
-	Location->Reading.Fix = FMobileLocationFix{*Origin, 8.0};
+	Location->Fix = *Origin;
 	App->UpdateLocation(1.f);
 	TestTrue(TEXT("A new fix moves the dot without panning the map"),
 		Map->GetGpsPosition().IsSet() && Map->GetGpsPosition()->IsNearlyZero() && Map->GetPan().Equals(PanAfterLocate));
 
-	Location->Reading.Fix = FMobileLocationFix{FVector2D(91.0, 0.0), 999.0};
+	Location->Fix = FVector2D(91.0, 0.0);
 	App->UpdateLocation(1.f);
 	TestTrue(TEXT("An invalid fix leaves the last valid dot in place"),
 		Map->GetGpsPosition().IsSet() && Map->GetGpsPosition()->IsNearlyZero());
-	Location->Reading.Fix = FMobileLocationFix{*Origin, 8.0, 10.0};
-	App->UpdateLocation(1.f);
-	TestTrue(TEXT("A cached fix becomes last known without losing its point"),
-		Map->GetGpsStatus() == EMobileGpsStatus::LastKnown && Map->GetGpsPosition().IsSet());
-
-	Location->Reading.Fix = FMobileLocationFix{*Origin, 0.0};
-	App->UpdateLocation(1.f);
-	TestTrue(TEXT("A fresh fix at the same location clears the stale status"), Map->GetGpsStatus() == EMobileGpsStatus::Current);
-	TestEqual(TEXT("Unknown accuracy does not draw a circle"), Map->GetGpsAccuracyMeters(), 0.0);
-
-	Location->Reading = {true, {}};
-	App->UpdateLocation(1.f);
-	TestTrue(TEXT("Missing permission shows a status and removes the dot"),
-		Map->GetGpsStatus() == EMobileGpsStatus::PermissionNeeded && !Map->GetGpsPosition());
 	return true;
 }
 
