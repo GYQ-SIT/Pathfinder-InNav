@@ -30,6 +30,7 @@ public:
 	virtual TUniquePtr<IMobileRouteJob> BeginWarmup(const FString& SiteId) override;
 	virtual bool GetLevelMap(const FString& BuildingId, int32 Level, FMobileLevelMap& OutMap) override;
 	virtual FMobileCampusMap GetCampusMap(const FString& SiteId) override;
+	virtual TOptional<FVector2D> GetGeoOrigin(const FString& SiteId) override;
 
 private:
 	struct FProject;

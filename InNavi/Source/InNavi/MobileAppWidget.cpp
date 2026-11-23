@@ -1,4 +1,5 @@
 #include "MobileAppWidget.h"
+#include "GeoProjection.h"
 
 #include "MobileArrivedPageWidget.h"
 #include "MobileExplorePageWidget.h"
@@ -797,6 +798,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 void UMobileAppWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	UpdateLocation(InDeltaTime);
 	// The map's list of levels and a drop-down list are not open together (two lists over one screen, and a touch has to close one of them).
 	if (bLevelPopupOpen && ((SearchPage && SearchPage->HasOpenSelect()) || (RoutePage && RoutePage->HasOpenSelect())))
 	{
@@ -1366,6 +1368,8 @@ void UMobileAppWidget::RequestDirections()
 void UMobileAppWidget::NativeDestruct()
 {
 	PendingRoute.Reset();
+	LocationSource.Reset();
+	LastLocation.Reset();
 	Super::NativeDestruct();
 }
 
@@ -2085,8 +2089,52 @@ void UMobileAppWidget::OpenBuilding(const FString& BuildingId)
 	}
 }
 
+void UMobileAppWidget::SetLocationSource(TUniquePtr<IMobileLocationSource> InSource)
+{
+	LocationSource = MoveTemp(InSource);
+	LocationPollSeconds = 0.f;
+	LastLocation.Reset();
+	if (MapView) MapView->SetGpsPosition({});
+}
+
+void UMobileAppWidget::UpdateLocation(float DeltaTime)
+{
+	if (!MapView || !Source) return;
+	const TOptional<FVector2D> Origin = Source->GetGeoOrigin(SiteId);
+	if (!Origin)
+	{
+		MapView->SetGpsPosition({});
+		return;
+	}
+	if (!LocationSource) LocationSource = MakePlatformMobileLocationSource();
+	if (!LocationSource) return;
+	LocationPollSeconds -= DeltaTime;
+	if (LocationPollSeconds <= 0.f)
+	{
+		LocationPollSeconds = 1.f;
+		const TOptional<FVector2D> Fix = LocationSource->ReadLocation();
+		if (Fix && FMath::IsFinite(Fix->X) && FMath::IsFinite(Fix->Y)
+			&& FMath::Abs(Fix->X) <= 90.0 && FMath::Abs(Fix->Y) <= 180.0)
+		{
+			LastLocation = Fix;
+		}
+	}
+	MapView->SetGpsPosition(LastLocation
+		? TOptional<FVector2D>(GeoProjection::ToLocalMeters(LastLocation->X, LastLocation->Y, Origin->X, Origin->Y))
+		: TOptional<FVector2D>());
+}
+
 void UMobileAppWidget::LocateMe()
 {
+	UpdateLocation(0.f);
+	if (MapView && MapView->GetGpsPosition())
+	{
+		bMapOverview = true;
+		bLevelPopupOpen = false;
+		ApplyMap();
+		MapView->CenterOnGps();
+		return;
+	}
 	if (!MyLocationBuildingId.IsEmpty())
 	{
 		MapBuildingId = MyLocationBuildingId;
