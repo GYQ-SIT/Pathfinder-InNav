@@ -608,6 +608,11 @@ white chevrons on it: what has been walked is **grey**, the step being shown is 
 tags on the screen that follow the points they are for, say what is where: **Start**, **Destination**, each **Stop** (with the name of the room) and
 **You are here**; when two would sit on each other the higher one is lifted. The lines and the chevrons grow with how far the camera is from the route.
 
+**The 3D view of a floor** (3D, also the whole-building view) draws the route in the same format: thick lines with an outline and chevrons, as thick on the screen as the
+camera is far from the route (they are drawn again when it has gone nearer or further), in the colour of the leg while no step is being shown and grey, orange and blue while one is,
+and the same call-outs for the **Start**, the **Destination**, the **Stops** and **You are here** instead of balls and texts. The texts for lifts, stairs and doors
+between buildings stay. Unlike the overview, the route here is hidden where a wall or a floor is in front of it.
+
 Click **Return to Previous View** or press **Esc** to restore the previous camera and zoom, 2D/3D editing view and building visibility.
 The overview is read-only and does not change project data, route points or the selected step. Choosing another floor, continuing
 to the next/previous step, hiding or clearing the route, editing its places, or leaving the editor also exits the overview. In 3D,

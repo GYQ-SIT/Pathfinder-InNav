@@ -23,6 +23,7 @@ enum class ETransformGizmo : uint8 { None, Translate, Rotate, Scale };
 // What a held mouse button does to the model in Isolate: the left one pans it, the right one turns it.
 enum class EInspectionDrag : uint8 { None, Pan, Rotate };
 struct FNavigationRoutePoint;
+struct FNavigation3DView;
 class ABuildingGenerator;
 class ULayoutValidationSession;
 class AInteriorGenerator;
@@ -1582,6 +1583,13 @@ private:
 	float FullRouteCameraDistance() const;
 	void ClearFullRouteCallouts();
 	void AddFullRouteCallout(const FVector& Point, const FString& Text, const FColor& Color);
+	// The call-outs for the Start, the Destination, each stop and where the person is, from a route view (named after the rooms, as the panel shows them).
+	void AddRouteCallouts(const FNavigation3DView& View);
+	// The view of a floor (3D preview, inspection) draws the route in the format of the overview, its thickness following how far the camera is from the route: how far it
+	// was when it was drawn (0 when nothing is drawn that way) and the box of the route, so it is drawn again when the camera has gone nearer or further.
+	float RoomRouteDrawnDistance = 0.f;
+	FBox RoomRouteBounds = FBox(ForceInit);
+	float RoomRouteCameraDistance() const;
 	void UpdateFullRouteCallouts();
 
 	void BuildFullRouteFloorShifts();

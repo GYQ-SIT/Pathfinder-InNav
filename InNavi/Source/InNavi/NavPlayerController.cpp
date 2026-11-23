@@ -4466,6 +4466,9 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 		return;
 	}
 	RouteVisualization->ClearRoute();
+	// What the view of a floor drew in the format of the overview (the call-outs) goes with it.
+	ClearFullRouteCallouts();
+	RoomRouteDrawnDistance = 0.f;
 	const FNavigationRouteFocus Focus = NavigationPanel ? NavigationPanel->GetGuidedFocus() : FNavigationRouteFocus();
 
 	// The exterior screen draws the whole route on the campus.
@@ -4495,9 +4498,24 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 		NavigationPanel->HasStart() ? &NavigationPanel->GetStart() : nullptr,
 		NavigationPanel->HasDestination() ? &NavigationPanel->GetDestination() : nullptr,
 		Building->BuildingOffset, Generator->GetScale(), Building->GetFloorHeight(), InteriorGen->GetActiveFloor(),
-		NavigationPanel->IsRouteGuidanceVisible(), Building->BuildingId, &NavigationPanel->GetStops(), &NavigationPanel->GetRouteLegs(), &Focus);
+		NavigationPanel->IsRouteGuidanceVisible(), Building->BuildingId, &NavigationPanel->GetStops(), &NavigationPanel->GetRouteLegs(), &Focus, false, true);
 	if (bInteriorInspectionEnabled && IsValid(InspectionPivot)) Display = UNavigationRouteVisualization::TransformView(Display, InspectionPivot->GetDisplayTransform());
+	// The same format as the full route overview: thick lines with an outline, as thick (on the screen) as the camera is far from the route, and call-outs for
+	// the Start, the Destination, the stops and where the person is.
+	FBox Bounds(ForceInit);
+	for (const FNavigationDisplaySegment& Segment : Display.Segments) { Bounds += Segment.From; Bounds += Segment.To; }
+	if (Display.Start.IsSet()) Bounds += Display.Start.GetValue();
+	if (Display.Destination.IsSet()) Bounds += Display.Destination.GetValue();
+	if (Bounds.IsValid)
+	{
+		RoomRouteBounds = Bounds;
+		RoomRouteDrawnDistance = RoomRouteCameraDistance();
+		RouteVisualization->SetDisplayScale(FMath::Clamp(RoomRouteDrawnDistance / 1500.f, 0.5f, 40.f));
+	}
 	RouteVisualization->ShowView(Display);
+	RouteVisualization->SetDisplayScale(1.f);
+	AddRouteCallouts(Display);
+	UpdateFullRouteCallouts();
 }
 
 void ANavPlayerController::FollowNavigationStep()
@@ -6410,6 +6428,13 @@ void ANavPlayerController::Tick(float DeltaSeconds)
 			UpdateFullRouteCallouts();
 			return;
 		}
+	}
+
+	// The route in the view of a floor is drawn in the same format: its lines follow how far the camera is, and its call-outs follow the points.
+	if (RoomRouteDrawnDistance > 0.f && NavigationPanel && (bIsIn3DPreviewMode || bInteriorInspectionEnabled))
+	{
+		if (FMath::Abs(RoomRouteCameraDistance() - RoomRouteDrawnDistance) > 0.08f * RoomRouteDrawnDistance) RefreshRoute3DVisualization();
+		UpdateFullRouteCallouts();
 	}
 
 	if (bInteriorInspectionEnabled)
