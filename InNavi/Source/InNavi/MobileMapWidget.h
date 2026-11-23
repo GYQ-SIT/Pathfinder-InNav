@@ -41,8 +41,13 @@ public:
 	void SetHighlightPlace(const FString& PlaceId);
 	void SetPosition(const FMobileRoutePoint& InPosition);
 	void ClearPosition();
+	// The device's position from the GPS, in the units of the campus map (metres for a real project), north then east of the campus origin.
 	void SetGpsPosition(TOptional<FVector2D> InPosition);
 	const TOptional<FVector2D>& GetGpsPosition() const { return GpsPosition; }
+	// Where that position is on the plan of the building shown, in the plan's units, when the plan is shown and the position is inside the building or a few
+	// metres from its wall (a GPS fix indoors is rarely better than that). The GPS does not know the floor: it is drawn on whichever level is shown.
+	TOptional<FVector2D> GetGpsLevelPosition() const;
+	// Centres the view on the GPS dot: the campus overview on the campus, the plan of a building on the dot inside it.
 	void CenterOnGps();
 	void Set3D(bool bInShow3D);
 	bool IsShowing3D() const { return bShow3D; }

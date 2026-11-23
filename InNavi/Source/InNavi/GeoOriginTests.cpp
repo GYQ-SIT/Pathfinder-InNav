@@ -1,6 +1,9 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "BuildingGenerator.h"
+#include "GeoProjection.h"
+#include "MobileAppWidget.h"
+#include "MobileMapWidget.h"
 #include "MobileRealSource.h"
 #include "NavPlayerController.h"
 #include "UiTestFixture.h"
@@ -9,6 +12,8 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
+#include "Engine/World.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
@@ -134,6 +139,86 @@ bool FGeoOriginMobileTest::RunTest(const FString& Parameters)
 
 	IFileManager::Get().Delete(*With);
 	IFileManager::Get().Delete(*Without);
+	return true;
+}
+
+// The GPS dot inside a building: on the plan of the building the device is in (or a few metres from its wall), on whichever level is shown; Locate stays
+// on that plan instead of leaving for the campus.
+namespace GeoOriginTests
+{
+	class FFixedLocationSource final : public IMobileLocationSource
+	{
+	public:
+		TOptional<FVector2D> ReadLocation() override { return Fix; }
+		TOptional<FVector2D> Fix;
+	};
+
+	// The fix of a point given in metres north and east of the campus origin.
+	FVector2D FixAt(const FVector2D& Origin, const FVector2D& Metres)
+	{
+		return FVector2D(Origin.X + Metres.X / GeoProjection::MetersPerDegreeLat, Origin.Y + Metres.Y / GeoProjection::MetersPerDegreeLon(Origin.X));
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGpsIndoorTest, "InNavi.Mobile.GpsIndoor", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FGpsIndoorTest::RunTest(const FString& Parameters)
+{
+	using namespace GeoOriginTests;
+	const TSharedPtr<FJsonObject> Fixture = ReadJson(FPaths::ProjectDir() / TEXT("../docs/test-data/e2-test-fixture.json"));
+	if (!TestTrue(TEXT("the test fixture is read"), Fixture.IsValid())) return false;
+	Fixture->SetObjectField(TEXT("geoOrigin"), Origin(1.4135, 103.9117));
+	const FString Path = TempProject(TEXT("gps-indoor-"));
+	if (!TestTrue(TEXT("a project with an origin is written"), WriteJson(Fixture, Path))) return false;
+	ON_SCOPE_EXIT { IFileManager::Get().Delete(*Path); };
+
+	const auto Data = MakeShared<FMobileRealSource>(Path);
+	const auto Sites = Data->ListSites();
+	if (!TestEqual(TEXT("it is one site"), Sites.Num(), 1)) return false;
+	const TOptional<FVector2D> Geo = Data->GetGeoOrigin(Sites[0].Id);
+	if (!TestTrue(TEXT("with an origin"), Geo.IsSet())) return false;
+	const FMobileCampusMap Campus = Data->GetCampusMap(Sites[0].Id);
+	const FMobileCampusBuilding* Building = Campus.Buildings.FindByPredicate([](const FMobileCampusBuilding& B) { return B.BuildingId.EndsWith(TEXT("E2")); });
+	if (!TestNotNull(TEXT("the building E2 is on the campus map"), Building)) return false;
+	FVector2D Centre = FVector2D::ZeroVector;
+	for (const FVector2D& Corner : Building->Outline) Centre += Corner;
+	Centre /= Building->Outline.Num();
+
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("the test world is created"), World)) return false;
+	ON_SCOPE_EXIT { World->DestroyWorld(false); };
+	auto* App = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
+	if (!TestNotNull(TEXT("the app is created"), App)) return false;
+	App->SetSource(Data, Sites[0].Id);
+	const TSharedRef<SWidget> Widget = App->TakeWidget();
+	auto* Map = App->GetMapView();
+	if (!TestNotNull(TEXT("the app has a map"), Map)) return false;
+	Map->SetViewSize(375.0, 812.0);
+	App->OpenBuilding(Building->BuildingId);
+	if (!TestFalse(TEXT("the plan of E2 is shown"), Map->IsOverview())) return false;
+
+	auto Fake = MakeUnique<FFixedLocationSource>();
+	auto* Location = Fake.Get();
+	App->SetLocationSource(MoveTemp(Fake));
+
+	// A fix inside the building is on its plan, where it is.
+	Location->Fix = FixAt(*Geo, Centre);
+	App->UpdateLocation(1.f);
+	const TOptional<FVector2D> OnPlan = Map->GetGpsLevelPosition();
+	if (TestTrue(TEXT("a fix inside the building is on the plan"), OnPlan.IsSet()))
+	{
+		TestTrue(TEXT("at the place in the building's own units (the campus position less the building's offset)"), OnPlan->Equals(Centre - Building->Offset, 1.e-3));
+	}
+	App->LocateMe();
+	TestFalse(TEXT("Locate inside the building stays on its plan"), Map->IsOverview());
+	TestTrue(TEXT("and still has the dot"), Map->GetGpsLevelPosition().IsSet());
+
+	// A fix far from the building is not on its plan.
+	Location->Fix = FixAt(*Geo, Centre + FVector2D(500.0, 0.0));
+	App->UpdateLocation(1.f);
+	TestFalse(TEXT("a fix 500 m away is not on the plan"), Map->GetGpsLevelPosition().IsSet());
+	TestTrue(TEXT("but is still the campus's"), Map->GetGpsPosition().IsSet());
+	App->LocateMe();
+	TestTrue(TEXT("Locate outside the building goes to the campus overview"), Map->IsOverview());
 	return true;
 }
 

@@ -2129,6 +2129,13 @@ void UMobileAppWidget::LocateMe()
 	UpdateLocation(0.f);
 	if (MapView && MapView->GetGpsPosition())
 	{
+		// On the plan of the building the person is in: stay on it and show where, rather than leave it for the campus.
+		if (!bMapOverview && MapView->GetGpsLevelPosition())
+		{
+			bLevelPopupOpen = false;
+			MapView->CenterOnGps();
+			return;
+		}
 		bMapOverview = true;
 		bLevelPopupOpen = false;
 		ApplyMap();

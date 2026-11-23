@@ -30,6 +30,20 @@ namespace
 		return bAvailable ? Colour : Colour * 0.8f;
 	}
 
+	// How far a point is from the nearest wall of a polygon, in its units.
+	double DistanceToPolygonEdge(const FVector2D& P, const TArray<FVector2D>& Poly)
+	{
+		double Nearest = TNumericLimits<double>::Max();
+		for (int32 i = 0, j = Poly.Num() - 1; i < Poly.Num(); j = i++)
+		{
+			const FVector2D Edge = Poly[i] - Poly[j];
+			const double LengthSquared = Edge.SizeSquared();
+			const double T = LengthSquared > UE_DOUBLE_SMALL_NUMBER ? FMath::Clamp(FVector2D::DotProduct(P - Poly[j], Edge) / LengthSquared, 0.0, 1.0) : 0.0;
+			Nearest = FMath::Min(Nearest, FVector2D::Distance(P, Poly[j] + Edge * T));
+		}
+		return Nearest;
+	}
+
 	bool PointInPolygon(const FVector2D& P, const TArray<FVector2D>& Poly)
 	{
 		bool bInside = false;
@@ -285,12 +299,24 @@ void UMobileMapWidget::SetGpsPosition(TOptional<FVector2D> InPosition)
 	}
 }
 
+TOptional<FVector2D> UMobileMapWidget::GetGpsLevelPosition() const
+{
+	if (!GpsPosition || bOverview || LevelMap.Outline.Num() < 3) return {};
+	const auto* Building = CampusMap.Buildings.FindByPredicate([&](const FMobileCampusBuilding& B) { return B.BuildingId == LevelMap.BuildingId; });
+	if (!Building) return {};
+	const FVector2D Local = *GpsPosition - Building->Offset;
+	const double Margin = 8.0 * LevelMap.UnitsPerMetre;
+	return PointInPolygon(Local, LevelMap.Outline) || DistanceToPolygonEdge(Local, LevelMap.Outline) <= Margin ? TOptional<FVector2D>(Local) : TOptional<FVector2D>();
+}
+
 void UMobileMapWidget::CenterOnGps()
 {
-	if (GpsPosition && ViewSize.X > 0.0 && ViewSize.Y > 0.0)
+	const TOptional<FVector2D> Level = GetGpsLevelPosition();
+	const TOptional<FVector2D> At = bOverview ? GpsPosition : Level;
+	if (At && ViewSize.X > 0.0 && ViewSize.Y > 0.0)
 	{
 		const double Lift = bShow3D ? SlabHeight : 0.0;
-		Pan += ViewCentre() - ToWidget(*GpsPosition, ViewSize.X, ViewSize.Y) + FVector2D(0.0, Lift);
+		Pan += ViewCentre() - ToWidget(*At, ViewSize.X, ViewSize.Y) + FVector2D(0.0, Lift);
 		InvalidateLayoutAndVolatility();
 	}
 }
@@ -872,6 +898,15 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 			FillPolygon(OutDrawElements, Layer + 8, AllottedGeometry, Circle(At, 9.0), Blue);
 			DrawLabel(OutDrawElements, Layer + 9, AllottedGeometry, FString::FromInt(StopIndex + 1), At, 11.f, OnBlue, false);
 		}
+	}
+
+	// Where the device is, by GPS: on whichever level is shown (the GPS does not know the floor), so a wide pale halo around a smaller dot, not a point.
+	if (const TOptional<FVector2D> Gps = GetGpsLevelPosition())
+	{
+		const FVector2D At = ToWidgetPolygon({ *Gps }, W, H, Lift)[0];
+		FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, Circle(At, 20.0), FLinearColor(0.12f, 0.39f, 0.94f, 0.16f));
+		FillPolygon(OutDrawElements, Layer + 10, AllottedGeometry, Circle(At, 7.5), FLinearColor(1.f, 1.f, 1.f, 0.9f));
+		FillPolygon(OutDrawElements, Layer + 11, AllottedGeometry, Circle(At, 5.5), FLinearColor(0.12f, 0.39f, 0.94f, 0.85f));
 	}
 
 	// Where the person is.
