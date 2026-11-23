@@ -25,6 +25,7 @@ class UMobilePlacePageWidget;
 class UMobileRoutePageWidget;
 class UMobileNavigatePageWidget;
 class UMobileMapWidget;
+class UMobileGpsMarkerWidget;
 class UMobileExplorePageWidget;
 class UMobileSavedPageWidget;
 class UMobileProfilePageWidget;
@@ -121,6 +122,8 @@ public:
 	void RefreshSearchStart();
 	void RefreshSaved();
 	void ApplyMap();
+	// The dot of the person on the map: the step they are at while walking, the place they start from, or My location (a guess, not drawn with a GPS fix).
+	void UpdatePositionDot();
 	void SetSnap(EMobileSheetSnap NewSnap);
 	// The sheet's height right now, mid-drag or mid-move included (design pixels).
 	double GetSheetHeight() const { return SheetHeight; }
@@ -157,7 +160,9 @@ public:
 	UMobileRoutePageWidget* GetRoutePage() const { return RoutePage; }
 	UMobileNavigatePageWidget* GetNavigatePage() const { return NavigatePage; }
 	UMobileMapWidget* GetMapView() const { return MapView; }
+	// Where the phone's position comes from: the device's GPS on Android by default, a fake one in the tests (InNavi.Mobile.Gps).
 	void SetLocationSource(TUniquePtr<IMobileLocationSource> InSource);
+	// Reads the location about once a second and moves the blue dot. The tick calls it; the tests call it to step time without a frame.
 	void UpdateLocation(float DeltaTime);
 	UMobileExplorePageWidget* GetExplorePage() const { return ExplorePage; }
 	UMobileSearchOverlayWidget* GetSearchOverlay() const { return SearchOverlay; }
@@ -378,11 +383,15 @@ private:
 	UMobileNavigatePageWidget* NavigatePage = nullptr;
 	UPROPERTY()
 	UMobileMapWidget* MapView = nullptr;
+	// The GPS dot, a layer above the map.
+	UPROPERTY()
+	UMobileGpsMarkerWidget* GpsMarker = nullptr;
 
 	TUniquePtr<IMobileLocationSource> LocationSource;
 	float LocationPollSeconds = 0.f;
-	TOptional<FMobileLocationFix> LastLocation;
-	bool bLocationPermissionNeeded = false;
+	float HeadingPollSeconds = 0.f;
+	bool bGpsHadFixForDot = false;
+	TOptional<FVector2D> LastLocation;
 	UPROPERTY()
 	UMobileExplorePageWidget* ExplorePage = nullptr;
 	// The full-screen search over the whole screen, and the search field of the map that opens it.

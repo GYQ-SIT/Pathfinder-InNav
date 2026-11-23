@@ -1,5 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
+using System.IO;
 using UnrealBuildTool;
 
 public class InNavi : ModuleRules
@@ -21,10 +22,12 @@ public class InNavi : ModuleRules
 		// the second, database-backed way to load exterior buildings (see
 		// ABuildingGenerator::LoadBuildingsFromDatabase), alongside the existing JSON path. Must also be
 		// enabled in InNavi.uproject's Plugins list (EnabledByDefault: false upstream).
-		PrivateDependencyModuleNames.AddRange(new string[] { "ApplicationCore", "Slate", "SlateCore", "SQLiteCore", "RenderCore", "ImageCore", "LocationServicesBPLibrary" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "ApplicationCore", "Slate", "SlateCore", "SQLiteCore", "RenderCore", "ImageCore" });
 		if (Target.Platform == UnrealTargetPlatform.Android)
 		{
-			PrivateDependencyModuleNames.Add("AndroidPermission");
+			PrivateDependencyModuleNames.AddRange(new string[] { "AndroidPermission", "LocationServicesBPLibrary", "Launch" });
+			// The phone's compass (the direction the arrow of the GPS dot points), see InNavi_UPL.xml.
+			AdditionalPropertiesForReceipt.Add("AndroidPlugin", Path.Combine(Utils.MakePathRelativeTo(ModuleDirectory, Target.RelativeEnginePath), "InNavi_UPL.xml"));
 		}
 
 		// The native file dialog exists on desktop only (the phone app has no import or save-as).

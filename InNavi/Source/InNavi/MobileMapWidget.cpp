@@ -30,6 +30,20 @@ namespace
 		return bAvailable ? Colour : Colour * 0.8f;
 	}
 
+	// How far a point is from the nearest wall of a polygon, in its units.
+	double DistanceToPolygonEdge(const FVector2D& P, const TArray<FVector2D>& Poly)
+	{
+		double Nearest = TNumericLimits<double>::Max();
+		for (int32 i = 0, j = Poly.Num() - 1; i < Poly.Num(); j = i++)
+		{
+			const FVector2D Edge = Poly[i] - Poly[j];
+			const double LengthSquared = Edge.SizeSquared();
+			const double T = LengthSquared > UE_DOUBLE_SMALL_NUMBER ? FMath::Clamp(FVector2D::DotProduct(P - Poly[j], Edge) / LengthSquared, 0.0, 1.0) : 0.0;
+			Nearest = FMath::Min(Nearest, FVector2D::Distance(P, Poly[j] + Edge * T));
+		}
+		return Nearest;
+	}
+
 	bool PointInPolygon(const FVector2D& P, const TArray<FVector2D>& Poly)
 	{
 		bool bInside = false;
@@ -97,6 +111,21 @@ namespace
 		{
 			const double Angle = i * UE_DOUBLE_TWO_PI / 20.0;
 			Points.Add(Centre2 + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Radius);
+		}
+		return Points;
+	}
+
+	// The cone that shows which way the device faces: a wedge opening from the dot towards Direction (a unit vector on the screen).
+	TArray<FVector2D> HeadingCone(const FVector2D& Centre2, const FVector2D& Direction)
+	{
+		constexpr double Reach = 46.0, HalfAngle = 0.56; // about 32 degrees each side
+		TArray<FVector2D> Points;
+		Points.Add(Centre2);
+		const double Base = FMath::Atan2(Direction.Y, Direction.X);
+		for (int32 i = 0; i <= 6; ++i)
+		{
+			const double Angle = Base - HalfAngle + 2.0 * HalfAngle * i / 6.0;
+			Points.Add(Centre2 + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Reach);
 		}
 		return Points;
 	}
@@ -184,6 +213,15 @@ void UMobileMapWidget::SetSource(IMobileNavSource* InSource, const FString& InSi
 	Source = InSource;
 	SiteId = InSiteId;
 	CampusMap = Source ? Source->GetCampusMap(SiteId) : FMobileCampusMap();
+	bPlanNorthOnX = Source && Source->IsPlanNorthOnX();
+}
+
+void UMobileMapWidget::SetPlanNorthOnX(bool bInNorthOnX)
+{
+	if (bPlanNorthOnX != bInNorthOnX)
+	{
+		bPlanNorthOnX = bInNorthOnX;
+	}
 }
 
 void UMobileMapWidget::SetMapsForTest(const FMobileLevelMap& Level, const FMobileCampusMap& Campus)
@@ -276,25 +314,134 @@ void UMobileMapWidget::SetHighlightPlace(const FString& PlaceId)
 void UMobileMapWidget::SetPosition(const FMobileRoutePoint& InPosition) { Position = InPosition; bHasPosition = true; }
 void UMobileMapWidget::ClearPosition() { bHasPosition = false; }
 
-void UMobileMapWidget::SetGpsPosition(TOptional<FVector2D> InPosition, double AccuracyMeters, EMobileGpsStatus Status)
+void UMobileMapWidget::SetGpsPosition(TOptional<FVector2D> InPosition)
 {
-	const double ValidAccuracy = InPosition && FMath::IsFinite(AccuracyMeters) && AccuracyMeters > 0.0 ? AccuracyMeters : 0.0;
-	if (GpsPosition != InPosition || GpsAccuracyMeters != ValidAccuracy || GpsStatus != Status)
+	if (GpsPosition != InPosition)
 	{
+		// No invalidation: the map is painted every frame from its state, as for a pan or a zoom. (A layout invalidation here, ten times a second while the
+		// phone turns, laid the whole screen out again each time and made the map flicker.)
 		GpsPosition = InPosition;
-		GpsAccuracyMeters = ValidAccuracy;
-		GpsStatus = Status;
-		InvalidateLayoutAndVolatility();
 	}
+}
+
+void UMobileMapWidget::SetGpsHeading(TOptional<double> Degrees)
+{
+	// A change of less than a degree is not worth drawing again.
+	const bool bChanged = GpsHeading.IsSet() != Degrees.IsSet() || (Degrees && FMath::Abs(FMath::FindDeltaAngleDegrees(*GpsHeading, *Degrees)) >= 1.0);
+	if (bChanged)
+	{
+		GpsHeading = Degrees;
+	}
+}
+
+TOptional<FVector2D> UMobileMapWidget::GetGpsHeadingOnScreen(const FVector2D& PlanPoint) const
+{
+	if (!GpsHeading || ViewSize.X <= 0.0 || ViewSize.Y <= 0.0) return {};
+	// The plan has north on X and east on Y (GeoProjection), so a heading clockwise from north points to (cos, sin).
+	const double Radians = FMath::DegreesToRadians(*GpsHeading);
+	const double Step = 5.0 * LevelMap.UnitsPerMetre;
+	const double Lift = bShow3D ? SlabHeight : 0.0;
+	const FVector2D From = ToWidgetPolygon({ PlanPoint }, ViewSize.X, ViewSize.Y, Lift)[0];
+	const FVector2D To = ToWidgetPolygon({ PlanPoint + FVector2D(FMath::Cos(Radians), FMath::Sin(Radians)) * Step }, ViewSize.X, ViewSize.Y, Lift)[0];
+	const FVector2D Direction = To - From;
+	return Direction.SizeSquared() > 1.e-9 ? TOptional<FVector2D>(Direction.GetSafeNormal()) : TOptional<FVector2D>();
+}
+
+TOptional<FVector2D> UMobileMapWidget::GetGpsLevelPosition() const
+{
+	if (!GpsPosition || bOverview || LevelMap.Outline.Num() < 3) return {};
+	const auto* Building = CampusMap.Buildings.FindByPredicate([&](const FMobileCampusBuilding& B) { return B.BuildingId == LevelMap.BuildingId; });
+	if (!Building) return {};
+	const FVector2D Local = *GpsPosition - Building->Offset;
+	const double Margin = 8.0 * LevelMap.UnitsPerMetre;
+	return PointInPolygon(Local, LevelMap.Outline) || DistanceToPolygonEdge(Local, LevelMap.Outline) <= Margin ? TOptional<FVector2D>(Local) : TOptional<FVector2D>();
+}
+
+FString UMobileMapWidget::GetGpsBuildingId() const
+{
+	if (!GpsPosition)
+	{
+		return FString();
+	}
+	const double Margin = 8.0 * LevelMap.UnitsPerMetre;
+	FString Nearest;
+	double NearestDistance = Margin;
+	for (const FMobileCampusBuilding& Building : CampusMap.Buildings)
+	{
+		if (Building.Outline.Num() < 3)
+		{
+			continue;
+		}
+		if (PointInPolygon(*GpsPosition, Building.Outline))
+		{
+			return Building.BuildingId;
+		}
+		const double Distance = DistanceToPolygonEdge(*GpsPosition, Building.Outline);
+		if (Distance <= NearestDistance)
+		{
+			NearestDistance = Distance;
+			Nearest = Building.BuildingId;
+		}
+	}
+	return Nearest;
+}
+
+bool UMobileMapWidget::GetGpsMarkerView(FMobileGpsMarkerView& Out) const
+{
+	if (ViewSize.X <= 0.0 || ViewSize.Y <= 0.0)
+	{
+		return false;
+	}
+	const TOptional<FVector2D> Plan = bOverview ? GpsPosition : GetGpsLevelPosition();
+	if (!Plan)
+	{
+		return false;
+	}
+	const double Lift = bShow3D ? SlabHeight : 0.0;
+	Out.At = ToWidgetPolygon({ *Plan }, ViewSize.X, ViewSize.Y, Lift)[0];
+	Out.Facing = GetGpsHeadingOnScreen(*Plan);
+	Out.bHalo = !bOverview;
+	return true;
+}
+
+void UMobileMapWidget::SetFollowHeading(bool bFollow)
+{
+	bFollowHeading = bFollow;
+	if (bFollow)
+	{
+		FollowGps();
+	}
+}
+
+void UMobileMapWidget::FollowGps()
+{
+	if (!bFollowHeading || bShow3D || !GpsHeading || ViewSize.X <= 0.0 || ViewSize.Y <= 0.0)
+	{
+		return;
+	}
+	if (!(bOverview ? GpsPosition : GetGpsLevelPosition()))
+	{
+		return;
+	}
+	// At a rotation of 0 north is up; facing H degrees from north, the map is turned back by H so that the way the person faces is up.
+	CenterOnGps();
+	double Delta = -FMath::DegreesToRadians(*GpsHeading) - Rotation;
+	if (Delta > UE_DOUBLE_PI) Delta -= UE_DOUBLE_TWO_PI;
+	if (Delta < -UE_DOUBLE_PI) Delta += UE_DOUBLE_TWO_PI;
+	RotateAround(ViewCentre(), Delta);
+	// Moving the map keeps some of its plan in view (ClampPan), and with the person far from the plan that pulls the view back to the plan and pushes the dot out;
+	// the dot is the focus here, so it is put back in the middle, last, without that limit.
+	CenterOnGps();
 }
 
 void UMobileMapWidget::CenterOnGps()
 {
-	if (GpsPosition && ViewSize.X > 0.0 && ViewSize.Y > 0.0)
+	const TOptional<FVector2D> Level = GetGpsLevelPosition();
+	const TOptional<FVector2D> At = bOverview ? GpsPosition : Level;
+	if (At && ViewSize.X > 0.0 && ViewSize.Y > 0.0)
 	{
 		const double Lift = bShow3D ? SlabHeight : 0.0;
-		Pan += ViewCentre() - ToWidget(*GpsPosition, ViewSize.X, ViewSize.Y) + FVector2D(0.0, Lift);
-		InvalidateLayoutAndVolatility();
+		Pan += ViewCentre() - ToWidget(*At, ViewSize.X, ViewSize.Y) + FVector2D(0.0, Lift);
 	}
 }
 void UMobileMapWidget::Set3D(bool bInShow3D)
@@ -364,12 +511,14 @@ FVector2D UMobileMapWidget::ViewCentre() const
 
 FVector2D UMobileMapWidget::ProjectFlat(const FVector2D& P) const
 {
+	// Plans with north on X and east on Y (the real projects) are drawn with north up: east to the right (the screen's x) and north up (minus the screen's y).
+	const FVector2D Flat = bPlanNorthOnX ? FVector2D(P.Y, -P.X) : P;
 	if (!bShow3D)
 	{
-		return P;
+		return Flat;
 	}
 	// A tilted view: turned a quarter, and squashed, so the plan reads as seen from an angle.
-	return FVector2D((P.X - P.Y) * 0.7071, (P.X + P.Y) * 0.7071 * 0.5);
+	return FVector2D((Flat.X - Flat.Y) * 0.7071, (Flat.X + Flat.Y) * 0.7071 * 0.5);
 }
 
 FBox2D UMobileMapWidget::PlanBounds() const
@@ -488,7 +637,8 @@ UMobileMapWidget::FStart UMobileMapWidget::WorkOutStart(double WidgetWidth, doub
 		if (Start > Result.Fit && RouteBoxOnLevel(RouteBox))
 		{
 			const double Pad = 10.0 * LevelMap.UnitsPerMetre;
-			const FVector2D RouteSize = RouteBox.GetSize() + FVector2D(2.0 * Pad, 2.0 * Pad);
+			// The route's size along the screen's width and height: north is up, so the plan's X is the screen's height.
+			const FVector2D RouteSize = (bPlanNorthOnX ? FVector2D(RouteBox.GetSize().Y, RouteBox.GetSize().X) : RouteBox.GetSize()) + FVector2D(2.0 * Pad, 2.0 * Pad);
 			Start = FMath::Max(Result.Fit, FMath::Min(Start, FMath::Min(Result.AvailW / RouteSize.X, Result.AvailH / RouteSize.Y)));
 		}
 		Result.Start = Start;
@@ -633,18 +783,6 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 	ViewSize = FVector2D(W, H);
 	const double Lift = bShow3D ? SlabHeight : 0.0;
 	int32 Layer = LayerId;
-	const TCHAR* StatusLabel = nullptr;
-	switch (GpsStatus)
-	{
-	case EMobileGpsStatus::Finding: StatusLabel = TEXT("Finding your location..."); break;
-	case EMobileGpsStatus::PermissionNeeded: StatusLabel = TEXT("Location permission needed"); break;
-	case EMobileGpsStatus::LastKnown: StatusLabel = TEXT("Last known location"); break;
-	default: break;
-	}
-	if (StatusLabel)
-	{
-		DrawLabel(OutDrawElements, Layer + 12, AllottedGeometry, StatusLabel, FVector2D(W * 0.5, InsetTop + 16.0), 13.f, Ink);
-	}
 
 	if (bOverview)
 	{
@@ -683,26 +821,18 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(CampusRouteLine[0], 6.0), Blue);
 			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(CampusRouteLine.Last(), 7.0), Red);
 		}
-		if (GpsPosition || bHasPosition)
+		// Where the person says they are (My location); the GPS dot is the marker layer's, above the map.
+		if (bHasPosition && !GpsPosition)
 		{
-			const FVector2D Point = GpsPosition ? *GpsPosition : MobileCampusPosition(Position, CampusMap);
-			const auto At = ToWidgetPolygon({Point}, W, H, Lift)[0];
-			const bool bStale = GpsPosition && GpsStatus == EMobileGpsStatus::LastKnown;
-			if (GpsPosition && GpsAccuracyMeters > 0.0)
-			{
-				TArray<FVector2D> Accuracy = Circle(Point, GpsAccuracyMeters);
-				Accuracy = ToWidgetPolygon(Accuracy, W, H, Lift);
-				FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Accuracy, Blue.CopyWithNewOpacity(bStale ? 0.07f : 0.16f));
-				OutlinePolygon(OutDrawElements, Layer + 8, AllottedGeometry, Accuracy, Blue.CopyWithNewOpacity(bStale ? 0.25f : 0.55f), 1.f);
-			}
-			FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, Circle(At, 8.0), FLinearColor::White.CopyWithNewOpacity(bStale ? 0.65f : 1.f));
-			FillPolygon(OutDrawElements, Layer + 10, AllottedGeometry, Circle(At, 5.0), Blue.CopyWithNewOpacity(bStale ? 0.48f : 1.f));
+			const auto At = ToWidgetPolygon({MobileCampusPosition(Position, CampusMap)}, W, H, Lift)[0];
+			FillPolygon(OutDrawElements, Layer + 8, AllottedGeometry, Circle(At, 8.0), FLinearColor::White);
+			FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, Circle(At, 5.0), Blue);
 		}
-		return Layer + 12;
+		return Layer + 10;
 	}
 	if (LevelMap.Outline.IsEmpty())
 	{
-		return StatusLabel ? Layer + 12 : Layer;
+		return Layer;
 	}
 
 	// The rest of the site round the building, faint and nameless: something to judge the size of the building by, as a street map has. They are drawn
@@ -1086,6 +1216,7 @@ FReply UMobileMapWidget::HandlePointerMove(const FGeometry& Geometry, const FPoi
 			}
 			else
 			{
+				bFollowHeading = false;
 				PanBy(Local - Before);
 			}
 		}
@@ -1127,6 +1258,11 @@ FReply UMobileMapWidget::HandlePointerMove(const FGeometry& Geometry, const FPoi
 			{
 				RotateAround(NewMiddle, Twist);
 			}
+		}
+		// Moving the map with two fingers, or turning it, is leaving the following (a pinch alone is not).
+		if (bTwisting || (NewMiddle - OldMiddle).Size() > 2.0)
+		{
+			bFollowHeading = false;
 		}
 		PanBy(NewMiddle - OldMiddle);
 	}
@@ -1204,4 +1340,41 @@ void UMobileMapWidget::NativeOnMouseCaptureLost(const FCaptureLostEvent& Capture
 {
 	Super::NativeOnMouseCaptureLost(CaptureLostEvent);
 	Pointers.Reset();
+}
+
+// ---- The GPS marker layer ----
+
+UMobileGpsMarkerWidget::UMobileGpsMarkerWidget(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	// It only draws: a touch goes through it to the map below.
+	SetVisibility(ESlateVisibility::HitTestInvisible);
+}
+
+int32 UMobileGpsMarkerWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+{
+	LayerId = Super::NativePaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
+	FMobileGpsMarkerView View;
+	if (!Map.IsValid() || !Map->GetGpsMarkerView(View))
+	{
+		return LayerId;
+	}
+	const FLinearColor Pale(0.12f, 0.39f, 0.94f, 0.35f);
+	if (View.Facing)
+	{
+		FillPolygon(OutDrawElements, LayerId, AllottedGeometry, HeadingCone(View.At, *View.Facing), Pale);
+	}
+	if (View.bHalo)
+	{
+		// On the plan of a building: a wide pale halo around a smaller dot, not a point (the GPS does not know the floor).
+		FillPolygon(OutDrawElements, LayerId, AllottedGeometry, Circle(View.At, 20.0), FLinearColor(0.12f, 0.39f, 0.94f, 0.16f));
+		FillPolygon(OutDrawElements, LayerId + 1, AllottedGeometry, Circle(View.At, 7.5), FLinearColor(1.f, 1.f, 1.f, 0.9f));
+		FillPolygon(OutDrawElements, LayerId + 2, AllottedGeometry, Circle(View.At, 5.5), FLinearColor(0.12f, 0.39f, 0.94f, 0.85f));
+	}
+	else
+	{
+		FillPolygon(OutDrawElements, LayerId + 1, AllottedGeometry, Circle(View.At, 8.0), FLinearColor::White);
+		FillPolygon(OutDrawElements, LayerId + 2, AllottedGeometry, Circle(View.At, 5.0), Blue);
+	}
+	return LayerId + 3;
 }

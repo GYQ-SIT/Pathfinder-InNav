@@ -404,7 +404,7 @@ TArray<FMobileSelectOption> UMobileRoutePageWidget::PlaceOptions(bool bWithMyLoc
 	if (bWithMyLocation)
 	{
 		FMobileSelectOption Mine;
-		Mine.Label = TEXT("My location");
+		Mine.Label = Request.bMyLocationUnavailable ? TEXT("Choose a starting point") : TEXT("My location");
 		Options.Add(Mine);
 	}
 	for (const FMobilePlace& Place : Places)
@@ -504,7 +504,7 @@ void UMobileRoutePageWidget::RefreshStops()
 
 	// Where the walk starts: My location first, then every place; for My location, which building and level the person is on.
 	FromSelect->SetOptions(PlaceOptions(true, TArray<FString>()), Request.FromPlaceId);
-	MyLocationRow->SetVisibility(Request.FromPlaceId.IsEmpty() ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	MyLocationRow->SetVisibility(Request.FromPlaceId.IsEmpty() && !Request.bMyLocationUnavailable ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	TArray<FMobileSelectOption> BuildingOptions, LevelOptions;
 	for (const FMobileBuilding& Building : Buildings)
 	{

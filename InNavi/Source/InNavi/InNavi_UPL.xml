@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The direction the phone faces (its compass), for the arrow of the GPS dot on the phone map. Read from C++ by FAndroidMobileLocationSource. -->
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+	<gameActivityClassAdditions>
+		<insert>
+	// ---- InNavi: the direction the device faces, in degrees clockwise from magnetic north (-1 while unknown)
+	private android.hardware.SensorManager InNaviSensorManager = null;
+	private android.hardware.SensorEventListener InNaviHeadingListener = null;
+	private final float[] InNaviRotation = new float[9];
+	private volatile float InNaviHeading = -1.0f;
+	private float InNaviHeadingSin = 0.0f;
+	private float InNaviHeadingCos = 0.0f;
+	private boolean InNaviHasHeading = false;
+
+	public boolean AndroidThunkJava_StartHeading()
+	{
+		try
+		{
+			if (InNaviHeadingListener != null)
+			{
+				return true;
+			}
+			InNaviSensorManager = (android.hardware.SensorManager) getSystemService(Context.SENSOR_SERVICE);
+			android.hardware.Sensor RotationSensor = InNaviSensorManager.getDefaultSensor(android.hardware.Sensor.TYPE_ROTATION_VECTOR);
+			if (RotationSensor == null)
+			{
+				Log.debug("InNavi: no rotation vector sensor");
+				return false;
+			}
+			InNaviHeadingListener = new android.hardware.SensorEventListener()
+			{
+				public void onSensorChanged(android.hardware.SensorEvent event)
+				{
+					android.hardware.SensorManager.getRotationMatrixFromVector(InNaviRotation, event.values);
+					// The rotation matrix turns a vector of the device into (east, north, up). Lying flat the device faces where its top edge (Y) points;
+					// held up, as a person looks at a map while walking, it faces where its back (-Z) points.
+					float East;
+					float North;
+					if (Math.abs(InNaviRotation[8]) > 0.7f)
+					{
+						East = InNaviRotation[1];
+						North = InNaviRotation[4];
+					}
+					else
+					{
+						East = -InNaviRotation[2];
+						North = -InNaviRotation[5];
+					}
+					float Degrees = (float) Math.toDegrees(Math.atan2(East, North));
+					// Smoothed on the circle (an average of 359 and 1 is 0, not 180).
+					float Sin = (float) Math.sin(Math.toRadians(Degrees));
+					float Cos = (float) Math.cos(Math.toRadians(Degrees));
+					if (!InNaviHasHeading)
+					{
+						InNaviHeadingSin = Sin;
+						InNaviHeadingCos = Cos;
+						InNaviHasHeading = true;
+					}
+					else
+					{
+						InNaviHeadingSin += 0.2f * (Sin - InNaviHeadingSin);
+						InNaviHeadingCos += 0.2f * (Cos - InNaviHeadingCos);
+					}
+					float Smoothed = (float) Math.toDegrees(Math.atan2(InNaviHeadingSin, InNaviHeadingCos));
+					if (Smoothed != Smoothed)
+					{
+						return;
+					}
+					if (Smoothed >= 0.0f)
+					{
+						InNaviHeading = Smoothed;
+					}
+					else
+					{
+						InNaviHeading = Smoothed + 360.0f;
+					}
+				}
+
+				public void onAccuracyChanged(android.hardware.Sensor sensor, int accuracy)
+				{
+				}
+			};
+			return InNaviSensorManager.registerListener(InNaviHeadingListener, RotationSensor, android.hardware.SensorManager.SENSOR_DELAY_UI);
+		}
+		catch (Exception e)
+		{
+			Log.debug("InNavi: AndroidThunkJava_StartHeading threw " + e.getMessage());
+			return false;
+		}
+	}
+
+	public float AndroidThunkJava_GetHeading()
+	{
+		return InNaviHeading;
+	}
+
+	public void AndroidThunkJava_StopHeading()
+	{
+		try
+		{
+			if (InNaviSensorManager != null &amp;&amp; InNaviHeadingListener != null)
+			{
+				InNaviSensorManager.unregisterListener(InNaviHeadingListener);
+			}
+		}
+		catch (Exception e)
+		{
+			Log.debug("InNavi: AndroidThunkJava_StopHeading threw " + e.getMessage());
+		}
+		InNaviHeadingListener = null;
+		InNaviHasHeading = false;
+		InNaviHeading = -1.0f;
+	}
+		</insert>
+	</gameActivityClassAdditions>
+</root>
