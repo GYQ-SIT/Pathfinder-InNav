@@ -343,7 +343,8 @@ namespace
 	// light card, which holds the text.
 	FString HoverHintText(const UWidget* Control)
 	{
-		const UOverlay* Hint = Control ? Cast<UOverlay>(Control->GetToolTip()) : nullptr;
+		const USizeBox* Size = Control ? Cast<USizeBox>(Control->GetToolTip()) : nullptr;
+		const UOverlay* Hint = Size ? Cast<UOverlay>(Size->GetContent()) : nullptr;
 		const UBorder* Card = Hint && Hint->GetChildrenCount() > 1 ? Cast<UBorder>(Hint->GetChildAt(1)) : nullptr;
 		const UTextBlock* Text = Card ? Cast<UTextBlock>(Card->GetContent()) : nullptr;
 		return Text ? Text->GetText().ToString() : FString();
@@ -369,10 +370,9 @@ bool FUiToolTipWidthTest::RunTest(const FString& Parameters)
 	const FVector2D Long = WidthOf(TEXT("Fill this floor with rooms along its outer wall and a core beside each door, then check every room that was made and the doors between them one by one"));
 	AddInfo(FString::Printf(TEXT("widths: short %.0f, medium %.0f, long %.0f (maximum %.0f)"), Short.X, Medium.X, Long.X, UiToolTip::MaxWidth));
 
-	TestTrue(TEXT("a short hint is narrower than a longer one"), Short.X < Medium.X && Medium.X < Long.X);
-	TestTrue(TEXT("a short hint is well under the maximum, not stretched to it"), Medium.X < UiToolTip::MaxWidth * 0.8f);
-	// The card adds its padding (10 on each side) and the shadow (3) to the text, which wraps at the maximum.
-	TestTrue(TEXT("a long hint stops at the maximum and wraps"), Long.X <= UiToolTip::MaxWidth + 20.f + 3.f + 1.f);
+	TestTrue(TEXT("a short hint has the shared minimum width"), FMath::IsNearlyEqual(Short.X, static_cast<double>(UiToolTip::MinWidth), 1.0));
+	TestTrue(TEXT("a medium hint fits between the short and long hints"), Short.X <= Medium.X && Medium.X < Long.X);
+	TestTrue(TEXT("a long hint stops at the maximum and wraps"), Long.X <= UiToolTip::MaxWidth + 1.0);
 	TestTrue(TEXT("and is taller than a short one for it"), Long.Y > Short.Y);
 	return true;
 }

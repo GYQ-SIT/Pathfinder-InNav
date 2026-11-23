@@ -203,6 +203,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")
 	FOnInteriorContentChanged OnInteriorContentChanged;
 
+	UPROPERTY()
+	FOnInteriorContentChanged OnReferenceImageChanged;
+
 	// See FOn3DPreviewModeChanged above.
 	UPROPERTY(BlueprintAssignable, Category = "Feedback")
 	FOn3DPreviewModeChanged OnPreviewModeChanged;
@@ -714,6 +717,7 @@ public:
 	// readable PNG, or is bigger than InteriorReferenceImage::MaxFileBytes, saying why. A floor has at most one: the new one replaces it.
 	bool ImportReferenceImage(const FString& FilePath);
 	bool GetActiveReferenceImage(FInteriorReferenceImage& Out) const;
+	FBox2D GetReferenceImageFrame() const;
 	// Changes the image of the floor being viewed (position, width, opacity, shown or hidden); one Undo step.
 	bool SetActiveReferenceImage(const FInteriorReferenceImage& Image);
 	bool RemoveActiveReferenceImage();

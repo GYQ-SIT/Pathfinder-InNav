@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "Styling/SlateBrush.h"
+#include "InteriorReferenceImage.h"
 #include "InteriorFloorPlanWidget.generated.h"
 
 class AInteriorGenerator;
@@ -34,6 +35,8 @@ public:
 	// Returns (0,0) if nothing is loaded.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	FVector2D LocalPositionToFootprintPoint(FVector2D LocalPosition, FVector2D WidgetSize) const;
+	void SetReferenceCropMode(bool bEnabled);
+	bool IsReferenceCropMode() const;
 	void ResetView() { PanOffset = FVector2D::ZeroVector; ZoomMultiplier = 1.f; }
 	void FinishEditDrag();
 
@@ -258,6 +261,22 @@ private:
 	mutable FSlateBrush ReferenceImageBrush;
 	mutable FString ReferenceImagePath;
 	mutable FString ReferenceImageFailedPath;
+	struct FReferenceDrag
+	{
+		FInteriorReferenceImage Start;
+		FInteriorReferenceImage Preview;
+		FVector2D StartPoint;
+		FBox2D CropPreview = FBox2D(ForceInit);
+		FString BuildingId;
+		int32 Level = 0;
+		bool bCrop = false;
+	};
+	TOptional<FReferenceDrag> ReferenceDrag;
+	FString CropBuildingId;
+	int32 CropLevel = INDEX_NONE;
+	const FInteriorReferenceImage* EditableReferenceImage() const;
+	FVector2D ReferenceImageSize(const FInteriorReferenceImage& Image) const;
+	bool IsReferenceDragValid(const FInteriorReferenceImage* Image) const;
 
 	// Connector markers (elevator/stairs/escalator - see NativePaint) are drawn as these icons
 	// instead of a plain colored box. Loaded once in NativeConstruct from the design team's tool

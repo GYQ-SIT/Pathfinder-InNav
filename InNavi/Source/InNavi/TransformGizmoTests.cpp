@@ -9,6 +9,7 @@
 #include "NavPlayerController.h"
 #include "UiTestFixture.h"
 
+#include "Engine/Texture2D.h"
 #include "Input/Events.h"
 #include "Misc/AutomationTest.h"
 
@@ -23,6 +24,12 @@ struct FGizmoTestAccess
 	static FReply Down(UInteriorFloorPlanWidget* W, const FGeometry& G, const FPointerEvent& E) { return W->NativeOnMouseButtonDown(G, E); }
 	static FReply Move(UInteriorFloorPlanWidget* W, const FGeometry& G, const FPointerEvent& E) { return W->NativeOnMouseMove(G, E); }
 	static FReply Up(UInteriorFloorPlanWidget* W, const FGeometry& G, const FPointerEvent& E) { return W->NativeOnMouseButtonUp(G, E); }
+	static FReply Wheel(UInteriorFloorPlanWidget* W, const FGeometry& G, const FPointerEvent& E) { return W->NativeOnMouseWheel(G, E); }
+	static void SetReferenceTexture(UInteriorFloorPlanWidget* W, const FString& Path)
+	{
+		W->ReferenceImageTexture = UTexture2D::CreateTransient(16, 16);
+		W->ReferenceImagePath = Path;
+	}
 	static TArray<FVector2D> ResizeHandles(UInteriorFloorPlanWidget* W, FVector2D Size) { return W->GetResizeHandles(Size); }
 	static TArray<FVector2D> VertexHandles(UInteriorFloorPlanWidget* W, FVector2D Size) { return W->GetVertexHandles(Size); }
 	static UInteriorFloorPlanWidget::FGizmoLayout Layout(UInteriorFloorPlanWidget* W, FVector2D Size) { return W->ComputeGizmoLayout(Size); }
@@ -234,6 +241,64 @@ bool FConnector3DDragTest::RunTest(const FString& Parameters)
 	FGizmoTestAccess::Note3DConnectorMove(PC, PC->MoveSelectedConnectorTo(Outside));
 	FGizmoTestAccess::Release3D(PC);
 	if (Debug) TestTrue(TEXT("the message says it stays and why"), Debug->GetLastErrorTextForTests().Contains(TEXT("stays where it was")) && Debug->GetLastErrorTextForTests().Contains(TEXT("outer wall")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FReferenceImageMouseTest, "InNavi.EditorUX.ReferenceImageMouse",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FReferenceImageMouseTest::RunTest(const FString& Parameters)
+{
+	using namespace TransformGizmoTests;
+	FNavigationSearchFixture Fixture;
+	Prepare(Fixture);
+	ANavPlayerController* PC = Fixture.MakeController();
+	PC->SetActiveFloor(1);
+	UInteriorFloorPlanWidget* Plan = NewObject<UInteriorFloorPlanWidget>();
+	Plan->Initialize();
+	Plan->SetOwningPlayer(PC);
+	const TSharedRef<SWidget> SlatePlan = Plan->TakeWidget();
+	FGizmoTestAccess::Bind(Plan, Fixture, PC);
+
+	const FBox2D Frame = PC->GetReferenceImageFrame();
+	FInteriorReferenceImage Image;
+	Image.Path = TEXT("reference.png");
+	Image.Center = Frame.GetCenter();
+	Image.Width = static_cast<float>(Frame.GetSize().X);
+	Image.Opacity = 0.8f;
+	Image.bLocked = false;
+	if (!TestTrue(TEXT("an unlocked image is set"), PC->SetActiveReferenceImage(Image))) return false;
+	FGizmoTestAccess::SetReferenceTexture(Plan, Image.Path);
+	const FGeometry Geometry = FGeometry::MakeRoot(FVector2f(1000, 1000), FSlateLayoutTransform());
+	const FVector2D Size = Geometry.GetLocalSize();
+	const FVector2D Middle = Size * 0.5;
+	const FVector2D Moved = Middle + FVector2D(80.0, 60.0);
+
+	TestTrue(TEXT("an unlocked image captures a drag"), FGizmoTestAccess::Down(Plan, Geometry, Mouse(Middle, true)).GetMouseCaptor().IsValid());
+	FGizmoTestAccess::Move(Plan, Geometry, Mouse(Moved, true));
+	FInteriorReferenceImage Current;
+	PC->GetActiveReferenceImage(Current);
+	TestTrue(TEXT("drag preview does not commit early"), Current == Image);
+	FGizmoTestAccess::Up(Plan, Geometry, Mouse(Moved, false));
+	PC->GetActiveReferenceImage(Current);
+	TestTrue(TEXT("release moves the image to the pointer"),
+		Current.Center.Equals(Plan->LocalPositionToFootprintPoint(Moved, Size), 0.01));
+	TestTrue(TEXT("one undo reverses the entire drag"), PC->UndoInteriorEdit());
+	PC->GetActiveReferenceImage(Current);
+	TestTrue(TEXT("the old image is restored"), Current == Image);
+
+	FGizmoTestAccess::Wheel(Plan, Geometry, FPointerEvent(0, Middle, Middle, {}, FKey(), 1.f, FModifierKeysState()));
+	PC->GetActiveReferenceImage(Current);
+	TestTrue(TEXT("wheel scales an unlocked image"), FMath::IsNearlyEqual(Current.Width, Image.Width * 1.1f, 0.01f));
+
+	Plan->SetReferenceCropMode(true);
+	FGizmoTestAccess::Down(Plan, Geometry, Mouse(Middle - FVector2D(120, 100), true));
+	FGizmoTestAccess::Move(Plan, Geometry, Mouse(Middle + FVector2D(120, 100), true));
+	FGizmoTestAccess::Up(Plan, Geometry, Mouse(Middle + FVector2D(120, 100), false));
+	PC->GetActiveReferenceImage(Current);
+	TestTrue(TEXT("cropping stores a smaller UV rectangle and exits crop mode"),
+		Current.Crop.GetArea() > 0.0 && Current.Crop.GetArea() < 1.0 && !Plan->IsReferenceCropMode());
+	TestTrue(TEXT("crop does not change saved opacity"), FMath::IsNearlyEqual(Current.Opacity, Image.Opacity));
 	return true;
 }
 

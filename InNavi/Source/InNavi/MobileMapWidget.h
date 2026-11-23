@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "MobileNavSource.h"
+#include "MobileLocationSource.h"
 #include "MobileMapWidget.generated.h"
 
 // The phone app's map: one level of a building as a floor plan (its rooms coloured by what they are, named, with the lifts and stairs), or the
@@ -41,7 +42,9 @@ public:
 	void SetHighlightPlace(const FString& PlaceId);
 	void SetPosition(const FMobileRoutePoint& InPosition);
 	void ClearPosition();
-	void SetGpsPosition(TOptional<FVector2D> InPosition);
+	void SetGpsPosition(TOptional<FVector2D> InPosition, double AccuracyMeters = 0.0, EMobileGpsStatus Status = EMobileGpsStatus::Hidden);
+	EMobileGpsStatus GetGpsStatus() const { return GpsStatus; }
+	double GetGpsAccuracyMeters() const { return GpsAccuracyMeters; }
 	const TOptional<FVector2D>& GetGpsPosition() const { return GpsPosition; }
 	void CenterOnGps();
 	void Set3D(bool bInShow3D);
@@ -160,6 +163,8 @@ private:
 	FMobileRoutePoint Position;
 	bool bHasPosition = false;
 	TOptional<FVector2D> GpsPosition;
+	double GpsAccuracyMeters = 0.0;
+	EMobileGpsStatus GpsStatus = EMobileGpsStatus::Hidden;
 	bool bShow3D = false;
 	// Where a big building's view is built around, kept once chosen (so a tap or a drag does not move it), until the view starts again or the route changes.
 	mutable TOptional<FVector2D> LatchedFocus;

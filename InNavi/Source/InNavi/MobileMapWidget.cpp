@@ -276,11 +276,14 @@ void UMobileMapWidget::SetHighlightPlace(const FString& PlaceId)
 void UMobileMapWidget::SetPosition(const FMobileRoutePoint& InPosition) { Position = InPosition; bHasPosition = true; }
 void UMobileMapWidget::ClearPosition() { bHasPosition = false; }
 
-void UMobileMapWidget::SetGpsPosition(TOptional<FVector2D> InPosition)
+void UMobileMapWidget::SetGpsPosition(TOptional<FVector2D> InPosition, double AccuracyMeters, EMobileGpsStatus Status)
 {
-	if (GpsPosition != InPosition)
+	const double ValidAccuracy = InPosition && FMath::IsFinite(AccuracyMeters) && AccuracyMeters > 0.0 ? AccuracyMeters : 0.0;
+	if (GpsPosition != InPosition || GpsAccuracyMeters != ValidAccuracy || GpsStatus != Status)
 	{
 		GpsPosition = InPosition;
+		GpsAccuracyMeters = ValidAccuracy;
+		GpsStatus = Status;
 		InvalidateLayoutAndVolatility();
 	}
 }
@@ -630,6 +633,18 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 	ViewSize = FVector2D(W, H);
 	const double Lift = bShow3D ? SlabHeight : 0.0;
 	int32 Layer = LayerId;
+	const TCHAR* StatusLabel = nullptr;
+	switch (GpsStatus)
+	{
+	case EMobileGpsStatus::Finding: StatusLabel = TEXT("Finding your location..."); break;
+	case EMobileGpsStatus::PermissionNeeded: StatusLabel = TEXT("Location permission needed"); break;
+	case EMobileGpsStatus::LastKnown: StatusLabel = TEXT("Last known location"); break;
+	default: break;
+	}
+	if (StatusLabel)
+	{
+		DrawLabel(OutDrawElements, Layer + 12, AllottedGeometry, StatusLabel, FVector2D(W * 0.5, InsetTop + 16.0), 13.f, Ink);
+	}
 
 	if (bOverview)
 	{
@@ -672,14 +687,22 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 		{
 			const FVector2D Point = GpsPosition ? *GpsPosition : MobileCampusPosition(Position, CampusMap);
 			const auto At = ToWidgetPolygon({Point}, W, H, Lift)[0];
-			FillPolygon(OutDrawElements, Layer + 8, AllottedGeometry, Circle(At, 8.0), FLinearColor::White);
-			FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, Circle(At, 5.0), Blue);
+			const bool bStale = GpsPosition && GpsStatus == EMobileGpsStatus::LastKnown;
+			if (GpsPosition && GpsAccuracyMeters > 0.0)
+			{
+				TArray<FVector2D> Accuracy = Circle(Point, GpsAccuracyMeters);
+				Accuracy = ToWidgetPolygon(Accuracy, W, H, Lift);
+				FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Accuracy, Blue.CopyWithNewOpacity(bStale ? 0.07f : 0.16f));
+				OutlinePolygon(OutDrawElements, Layer + 8, AllottedGeometry, Accuracy, Blue.CopyWithNewOpacity(bStale ? 0.25f : 0.55f), 1.f);
+			}
+			FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, Circle(At, 8.0), FLinearColor::White.CopyWithNewOpacity(bStale ? 0.65f : 1.f));
+			FillPolygon(OutDrawElements, Layer + 10, AllottedGeometry, Circle(At, 5.0), Blue.CopyWithNewOpacity(bStale ? 0.48f : 1.f));
 		}
-		return Layer + 10;
+		return Layer + 12;
 	}
 	if (LevelMap.Outline.IsEmpty())
 	{
-		return Layer;
+		return StatusLabel ? Layer + 12 : Layer;
 	}
 
 	// The rest of the site round the building, faint and nameless: something to judge the size of the building by, as a street map has. They are drawn

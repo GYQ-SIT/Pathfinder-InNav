@@ -2094,6 +2094,7 @@ void UMobileAppWidget::SetLocationSource(TUniquePtr<IMobileLocationSource> InSou
 	LocationSource = MoveTemp(InSource);
 	LocationPollSeconds = 0.f;
 	LastLocation.Reset();
+	bLocationPermissionNeeded = false;
 	if (MapView) MapView->SetGpsPosition({});
 }
 
@@ -2108,20 +2109,35 @@ void UMobileAppWidget::UpdateLocation(float DeltaTime)
 	}
 	if (!LocationSource) LocationSource = MakePlatformMobileLocationSource();
 	if (!LocationSource) return;
+	if (LastLocation) LastLocation->AgeSeconds += DeltaTime;
 	LocationPollSeconds -= DeltaTime;
 	if (LocationPollSeconds <= 0.f)
 	{
 		LocationPollSeconds = 1.f;
-		const TOptional<FVector2D> Fix = LocationSource->ReadLocation();
-		if (Fix && FMath::IsFinite(Fix->X) && FMath::IsFinite(Fix->Y)
-			&& FMath::Abs(Fix->X) <= 90.0 && FMath::Abs(Fix->Y) <= 180.0)
+		const FMobileLocationReading Reading = LocationSource->ReadLocation();
+		bLocationPermissionNeeded = Reading.bPermissionNeeded;
+		if (bLocationPermissionNeeded)
+		{
+			LastLocation.Reset();
+		}
+		else if (const auto& Fix = Reading.Fix; Fix
+			&& FMath::IsFinite(Fix->Coordinates.X) && FMath::IsFinite(Fix->Coordinates.Y)
+			&& FMath::Abs(Fix->Coordinates.X) <= 90.0 && FMath::Abs(Fix->Coordinates.Y) <= 180.0
+			&& FMath::IsFinite(Fix->AgeSeconds) && Fix->AgeSeconds >= 0.0)
 		{
 			LastLocation = Fix;
 		}
 	}
-	MapView->SetGpsPosition(LastLocation
-		? TOptional<FVector2D>(GeoProjection::ToLocalMeters(LastLocation->X, LastLocation->Y, Origin->X, Origin->Y))
-		: TOptional<FVector2D>());
+
+	if (!LastLocation)
+	{
+		MapView->SetGpsPosition({}, 0.0, bLocationPermissionNeeded ? EMobileGpsStatus::PermissionNeeded : EMobileGpsStatus::Finding);
+		return;
+	}
+	constexpr double StaleAfterSeconds = 10.0;
+	const FVector2D Point = GeoProjection::ToLocalMeters(LastLocation->Coordinates.X, LastLocation->Coordinates.Y, Origin->X, Origin->Y);
+	MapView->SetGpsPosition(Point, LastLocation->AccuracyMeters,
+		LastLocation->AgeSeconds >= StaleAfterSeconds ? EMobileGpsStatus::LastKnown : EMobileGpsStatus::Current);
 }
 
 void UMobileAppWidget::LocateMe()

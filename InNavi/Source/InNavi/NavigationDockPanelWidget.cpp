@@ -1,4 +1,5 @@
 #include "NavigationDockPanelWidget.h"
+#include "UiToolTip.h"
 
 #include "NavPlayerController.h"
 #include "NavigationPanelWidget.h"
@@ -359,7 +360,7 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 		// Keep the overview accessible above long route instructions, on either tab.
 		FullRouteViewButton = MakeButton(TEXT("Btn_NavFullRouteView"), TEXT("Full Route View"), FullRouteViewButtonLabel);
 		FullRouteViewButton->SetIsEnabled(false);
-		FullRouteViewButton->SetToolTipText(FText::FromString(TEXT("View the entire route from outside transparent buildings. Click again or press Esc to return.")));
+		FullRouteViewButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("View the entire route from outside transparent buildings. Click again or press Esc to return.")));
 		FullRouteViewButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnFullRouteViewClicked);
 		AddToStack(Stack, FullRouteViewButton, 6.f);
 
@@ -382,7 +383,7 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 			UNavigationPlaceButton* Badge = WidgetTree->ConstructWidget<UNavigationPlaceButton>(UNavigationPlaceButton::StaticClass(), FName(TEXT("Btn_NavPlaceBadge") + Suffix));
 			Badge->Setup(this, SlotIndex, false);
 			Badge->SetStyle(StartStyle::StatusButton(PendingColor));
-			Badge->SetToolTipText(FText::FromString(TEXT("Choose this place to move or remove it")));
+			Badge->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Choose this place to move or remove it")));
 			UTextBlock* BadgeText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), FName(TEXT("Txt_NavPlaceBadge") + Suffix));
 			BadgeText->SetJustification(ETextJustify::Center);
 			BadgeText->SetColorAndOpacity(FSlateColor(FLinearColor::White));
@@ -431,7 +432,7 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 			UNavigationPlaceButton* Pick = WidgetTree->ConstructWidget<UNavigationPlaceButton>(UNavigationPlaceButton::StaticClass(), FName(TEXT("Btn_NavPlacePick") + Suffix));
 			Pick->Setup(this, SlotIndex, true);
 			Pick->SetStyle(StartStyle::SecondaryButton());
-			Pick->SetToolTipText(FText::FromString(TEXT("Click a place on the map")));
+			Pick->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Click a place on the map")));
 			UTextBlock* PickText = WidgetTree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass());
 			PickText->SetText(FText::FromString(TEXT("+")));
 			PickText->SetJustification(ETextJustify::Center);
@@ -552,7 +553,7 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 		ToggleRouteButton = MakeButton(TEXT("Btn_NavToggleRoute"), TEXT("Hide Route"), ToggleRouteButtonLabel);
 		ToggleRouteIcon = AddButtonIcon(ToggleRouteButton, TEXT("Icon_EyeOff"));
 		ToggleRouteButton->SetIsEnabled(false);
-		ToggleRouteButton->SetToolTipText(FText::FromString(TEXT("Show or hide route lines, direction arrows, markers and instructions without clearing your route")));
+		ToggleRouteButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Show or hide route lines, direction arrows, markers and instructions without clearing your route")));
 		ToggleRouteButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnToggleRouteClicked);
 		AddToStack(PlanBox, ToggleRouteButton, 6.f);
 

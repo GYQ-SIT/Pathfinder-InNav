@@ -664,6 +664,13 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 			(*ReferenceObject)->TryGetNumberField(TEXT("width"), WidthValue);
 			(*ReferenceObject)->TryGetNumberField(TEXT("opacity"), OpacityValue);
 			(*ReferenceObject)->TryGetBoolField(TEXT("visible"), Image.bVisible);
+			(*ReferenceObject)->TryGetBoolField(TEXT("locked"), Image.bLocked);
+			const TArray<TSharedPtr<FJsonValue>>* CropValues = nullptr;
+			if ((*ReferenceObject)->TryGetArrayField(TEXT("crop"), CropValues) && CropValues->Num() == 4)
+			{
+				Image.Crop = FBox2D(FVector2D((*CropValues)[0]->AsNumber(), (*CropValues)[1]->AsNumber()),
+					FVector2D((*CropValues)[2]->AsNumber(), (*CropValues)[3]->AsNumber()));
+			}
 			if ((*ReferenceObject)->TryGetArrayField(TEXT("center"), CenterValues) && CenterValues->Num() >= 2)
 			{
 				Image.Center = FVector2D((*CenterValues)[0]->AsNumber(), (*CenterValues)[1]->AsNumber());
@@ -2259,15 +2266,17 @@ bool AInteriorGenerator::SetReferenceImage(int32 Level, FInteriorReferenceImage 
 	if (!FloorInfoByLevel.Contains(Level) || !InteriorReferenceImage::Normalize(Image)) return false;
 	const FInteriorReferenceImage* Existing = ReferenceImages.Find(Level);
 	if (Existing && *Existing == Image) return false;
+	FReferenceImageEdit Edit{Level, Existing ? TOptional<FInteriorReferenceImage>(*Existing) : TOptional<FInteriorReferenceImage>(), Image};
 	ReferenceImages.Add(Level, MoveTemp(Image));
-	RecordHistorySnapshot();
+	RecordHistorySnapshotInternal(FString(), nullptr, MoveTemp(Edit));
 	return true;
 }
 
 bool AInteriorGenerator::RemoveReferenceImage(int32 Level)
 {
-	if (ReferenceImages.Remove(Level) == 0) return false;
-	RecordHistorySnapshot();
+	FInteriorReferenceImage Previous;
+	if (!ReferenceImages.RemoveAndCopyValue(Level, Previous)) return false;
+	RecordHistorySnapshotInternal(FString(), nullptr, FReferenceImageEdit{Level, MoveTemp(Previous), {}});
 	return true;
 }
 
@@ -3667,6 +3676,13 @@ TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 			ImageObject->SetNumberField(TEXT("width"), Image->Width);
 			ImageObject->SetNumberField(TEXT("opacity"), Image->Opacity);
 			if (!Image->bVisible) ImageObject->SetBoolField(TEXT("visible"), false);
+			if (!Image->bLocked) ImageObject->SetBoolField(TEXT("locked"), false);
+			if (!Image->Crop.Min.IsNearlyZero() || !Image->Crop.Max.Equals(FVector2D(1.0, 1.0)))
+			{
+				ImageObject->SetArrayField(TEXT("crop"), {MakeShared<FJsonValueNumber>(Image->Crop.Min.X),
+					MakeShared<FJsonValueNumber>(Image->Crop.Min.Y), MakeShared<FJsonValueNumber>(Image->Crop.Max.X),
+					MakeShared<FJsonValueNumber>(Image->Crop.Max.Y)});
+			}
 			FloorObject->SetObjectField(TEXT("referenceImage"), ImageObject);
 		}
 
@@ -3924,7 +3940,8 @@ void AInteriorGenerator::RecordHistorySnapshot()
 	RecordHistorySnapshotInternal(FString(), nullptr);
 }
 
-void AInteriorGenerator::RecordHistorySnapshotInternal(const FString& EntranceOwnerId, TSharedPtr<FJsonObject> RemovedEntrance)
+void AInteriorGenerator::RecordHistorySnapshotInternal(const FString& EntranceOwnerId, TSharedPtr<FJsonObject> RemovedEntrance,
+	TOptional<FReferenceImageEdit> ReferenceImageEdit)
 {
 	// Only a new snapshot is an edit: selecting a door can also finish a gesture and record
 	// the same state. Live previews notify separately, before their eventual commit.
@@ -3944,6 +3961,7 @@ void AInteriorGenerator::RecordHistorySnapshotInternal(const FString& EntranceOw
 	Snapshot.FirstLevel = Building->GetFirstLevel();
 	Snapshot.EntranceOwnerId = EntranceOwnerId;
 	Snapshot.RemovedEntrance = MoveTemp(RemovedEntrance);
+	Snapshot.ReferenceImageEdit = MoveTemp(ReferenceImageEdit);
 	FString Json;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Json);
 
@@ -3975,7 +3993,7 @@ void AInteriorGenerator::RecordHistorySnapshotInternal(const FString& EntranceOw
 	Snapshot.Json.Set(MoveTemp(Json));
 	InteriorHistory.Add(MoveTemp(Snapshot));
 	HistoryIndex = InteriorHistory.Num() - 1;
-	NotifyNavigationLayoutChanged();
+	if (!InteriorHistory.Last().ReferenceImageEdit) NotifyNavigationLayoutChanged();
 
 	UE_LOG(LogTemp, Log,
 		TEXT("History snapshot recorded. Index=%d Total=%d"),
@@ -3986,18 +4004,40 @@ void AInteriorGenerator::RecordHistorySnapshotInternal(const FString& EntranceOw
 
 bool AInteriorGenerator::Undo()
 {
-	return RestoreHistorySnapshot(HistoryIndex - 1);
+	return RestoreHistorySnapshot(HistoryIndex - 1, nullptr);
 }
 
+bool AInteriorGenerator::UndoWithResult(bool& bReferenceImageOnly)
+{
+	return RestoreHistorySnapshot(HistoryIndex - 1, &bReferenceImageOnly);
+}
 
 bool AInteriorGenerator::Redo()
 {
-	return RestoreHistorySnapshot(HistoryIndex + 1);
+	return RestoreHistorySnapshot(HistoryIndex + 1, nullptr);
 }
 
-bool AInteriorGenerator::RestoreHistorySnapshot(int32 TargetIndex)
+bool AInteriorGenerator::RedoWithResult(bool& bReferenceImageOnly)
 {
+	return RestoreHistorySnapshot(HistoryIndex + 1, &bReferenceImageOnly);
+}
+
+bool AInteriorGenerator::RestoreHistorySnapshot(int32 TargetIndex, bool* bReferenceImageOnly)
+{
+	if (bReferenceImageOnly) *bReferenceImageOnly = false;
 	if (!InteriorHistory.IsValidIndex(HistoryIndex) || !InteriorHistory.IsValidIndex(TargetIndex)) return false;
+	const bool bUndo = TargetIndex < HistoryIndex;
+	const FInteriorHistorySnapshot& Edit = InteriorHistory[bUndo ? HistoryIndex : TargetIndex];
+	if (Edit.ReferenceImageEdit)
+	{
+		const FReferenceImageEdit& ImageEdit = *Edit.ReferenceImageEdit;
+		const auto& Image = bUndo ? ImageEdit.Before : ImageEdit.After;
+		if (Image) ReferenceImages.Add(ImageEdit.Level, *Image);
+		else ReferenceImages.Remove(ImageEdit.Level);
+		HistoryIndex = TargetIndex;
+		if (bReferenceImageOnly) *bReferenceImageOnly = true;
+		return true;
+	}
 
 	APolyBuilding* Building = Generator ? Generator->FindBuildingById(LoadedBuildingId) : nullptr;
 	if (!Building)
@@ -4030,8 +4070,6 @@ bool AInteriorGenerator::RestoreHistorySnapshot(int32 TargetIndex)
 		return false;
 	}
 
-	const bool bUndo = TargetIndex < HistoryIndex;
-	const FInteriorHistorySnapshot& Edit = bUndo ? InteriorHistory[HistoryIndex] : Snapshot;
 	const auto ApplyEntranceEdit = [&](bool bRestore)
 	{
 		if (!Edit.RemovedEntrance) return true;

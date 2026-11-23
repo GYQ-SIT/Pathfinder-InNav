@@ -1,8 +1,34 @@
 #include "MobileLocationSource.h"
 
+#include "HAL/PlatformTime.h"
+#include "MobileLocationListener.h"
+
+void UMobileLocationListener::OnLocationChanged(FLocationServicesData Location)
+{
+	if (!FMath::IsFinite(Location.Latitude) || !FMath::IsFinite(Location.Longitude)
+		|| FMath::Abs(Location.Latitude) > 90.f || FMath::Abs(Location.Longitude) > 180.f)
+	{
+		return;
+	}
+	Fix = FMobileLocationFix{FVector2D(Location.Latitude, Location.Longitude), Location.HorizontalAccuracy};
+	// Android's plugin exposes its epoch timestamp as a float. Its precision is too low for GPS freshness.
+	ReceivedAt = FPlatformTime::Seconds();
+}
+
+TOptional<FMobileLocationFix> UMobileLocationListener::ReadFix() const
+{
+	TOptional<FMobileLocationFix> Result = Fix;
+	if (Result)
+	{
+		Result->AgeSeconds = FPlatformTime::Seconds() - ReceivedAt;
+	}
+	return Result;
+}
+
 #if PLATFORM_ANDROID
 #include "AndroidPermissionFunctionLibrary.h"
-#include "LocationServicesBPLibrary.h"
+#include "LocationServicesImpl.h"
+#include "UObject/StrongObjectPtr.h"
 
 namespace
 {
@@ -11,13 +37,14 @@ namespace
 	public:
 		~FAndroidMobileLocationSource() override
 		{
-			if (bStarted)
+			Stop();
+			if (ULocationServicesImpl* Service = ULocationServices::GetLocationServicesImpl(); Service && Listener)
 			{
-				ULocationServices::StopLocationServices();
+				Service->OnLocationChanged.RemoveDynamic(Listener.Get(), &UMobileLocationListener::OnLocationChanged);
 			}
 		}
 
-		TOptional<FVector2D> ReadLocation() override
+		FMobileLocationReading ReadLocation() override
 		{
 			const FString Fine(TEXT("android.permission.ACCESS_FINE_LOCATION"));
 			const FString Coarse(TEXT("android.permission.ACCESS_COARSE_LOCATION"));
@@ -29,25 +56,39 @@ namespace
 					bRequestedPermission = true;
 					UAndroidPermissionFunctionLibrary::AcquirePermissions({Fine, Coarse});
 				}
-				return {};
+				Stop();
+				if (Listener) Listener->Clear();
+				return {true, {}};
 			}
 
 			if (!bStarted)
 			{
 				const ELocationAccuracy Accuracy = bFine ? ELocationAccuracy::LA_Best : ELocationAccuracy::LA_HundredMeters;
-				bStarted = ULocationServices::InitLocationServices(Accuracy, 1000.f, 0.f)
-					&& ULocationServices::StartLocationServices();
+				ULocationServicesImpl* Service = ULocationServices::GetLocationServicesImpl();
+				if (!Service || !ULocationServices::InitLocationServices(Accuracy, 1000.f, 0.f)) return {};
+				if (!Listener) Listener.Reset(NewObject<UMobileLocationListener>());
+				Service->OnLocationChanged.AddUniqueDynamic(Listener.Get(), &UMobileLocationListener::OnLocationChanged);
+				bStarted = ULocationServices::StartLocationServices();
 				if (!bStarted)
 				{
 					return {};
 				}
 			}
 
-			const FLocationServicesData Fix = ULocationServices::GetLastKnownLocation();
-			return Fix.Timestamp > 0.f ? TOptional<FVector2D>(FVector2D(Fix.Latitude, Fix.Longitude)) : TOptional<FVector2D>();
+			return {false, Listener->ReadFix()};
 		}
 
 	private:
+		void Stop()
+		{
+			if (bStarted)
+			{
+				ULocationServices::StopLocationServices();
+				bStarted = false;
+			}
+		}
+
+		TStrongObjectPtr<UMobileLocationListener> Listener;
 		bool bRequestedPermission = false;
 		bool bStarted = false;
 	};

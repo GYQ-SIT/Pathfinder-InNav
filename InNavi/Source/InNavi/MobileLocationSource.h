@@ -2,12 +2,33 @@
 
 #include "CoreMinimal.h"
 
-// A latitude/longitude pair in degrees, with latitude in X.
+enum class EMobileGpsStatus : uint8
+{
+	Hidden,
+	Finding,
+	PermissionNeeded,
+	Current,
+	LastKnown
+};
+
+struct FMobileLocationFix
+{
+	// A latitude/longitude pair in degrees, with latitude in X.
+	FVector2D Coordinates;
+	double AccuracyMeters = 0.0;
+	double AgeSeconds = 0.0;
+};
+
+struct FMobileLocationReading
+{
+	bool bPermissionNeeded = false;
+	TOptional<FMobileLocationFix> Fix;
+};
 class IMobileLocationSource
 {
 public:
 	virtual ~IMobileLocationSource() = default;
-	virtual TOptional<FVector2D> ReadLocation() = 0;
+	virtual FMobileLocationReading ReadLocation() = 0;
 };
 
 TUniquePtr<IMobileLocationSource> MakePlatformMobileLocationSource();

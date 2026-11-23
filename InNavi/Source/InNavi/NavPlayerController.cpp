@@ -1762,15 +1762,21 @@ bool ANavPlayerController::ImportReferenceImage(const FString& FilePath)
 		return false;
 	}
 	// Framed on the building: as wide as it is, centred on it; the fields in the Floor panel move and scale it from there.
-	const FBox2D Bounds(Building->GetFootprint());
+	const FBox2D Bounds = GetReferenceImageFrame();
 	FInteriorReferenceImage Image;
 	Image.Path = FPaths::ConvertRelativePathToFull(Path);
 	Image.Center = Bounds.GetCenter();
 	Image.Width = FMath::Max(1.f, static_cast<float>(Bounds.GetSize().X));
 	if (!InteriorGen->SetReferenceImage(InteriorGen->GetActiveFloor(), Image)) return false;
 	bHasUnsavedChanges = true;
-	OnInteriorContentChanged.Broadcast();
+	OnReferenceImageChanged.Broadcast();
 	return true;
+}
+
+FBox2D ANavPlayerController::GetReferenceImageFrame() const
+{
+	const APolyBuilding* Building = Generator && InteriorGen ? Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()) : nullptr;
+	return Building ? FBox2D(Building->GetFootprint()) : FBox2D(ForceInit);
 }
 
 bool ANavPlayerController::GetActiveReferenceImage(FInteriorReferenceImage& Out) const
@@ -1785,7 +1791,7 @@ bool ANavPlayerController::SetActiveReferenceImage(const FInteriorReferenceImage
 	if (bInteriorInspectionEnabled || !InteriorGen) return false;
 	if (!InteriorGen->SetReferenceImage(InteriorGen->GetActiveFloor(), Image)) return false;
 	bHasUnsavedChanges = true;
-	OnInteriorContentChanged.Broadcast();
+	OnReferenceImageChanged.Broadcast();
 	return true;
 }
 
@@ -1794,7 +1800,7 @@ bool ANavPlayerController::RemoveActiveReferenceImage()
 	if (bInteriorInspectionEnabled || !InteriorGen) return false;
 	if (!InteriorGen->RemoveReferenceImage(InteriorGen->GetActiveFloor())) return false;
 	bHasUnsavedChanges = true;
-	OnInteriorContentChanged.Broadcast();
+	OnReferenceImageChanged.Broadcast();
 	return true;
 }
 
@@ -5586,11 +5592,16 @@ bool ANavPlayerController::UndoInteriorEdit()
 	if (bInteriorInspectionEnabled) return false;
 	// While a room or wall is being clicked out, Undo takes back its last point; the older edits are for after it is finished.
 	if (RemoveLastRoomPoint()) return true;
-	if (InteriorGen && InteriorGen->Undo())
+	bool bReferenceImageOnly = false;
+	if (InteriorGen && InteriorGen->UndoWithResult(bReferenceImageOnly))
 	{
-		if (NavigationPanel) NavigationPanel->NotifyInteriorChanged();
-		SelectRoom(FString());
 		bHasUnsavedChanges = true;
+		if (!bReferenceImageOnly)
+		{
+			if (NavigationPanel) NavigationPanel->NotifyInteriorChanged();
+			SelectRoom(FString());
+		}
+		OnReferenceImageChanged.Broadcast();
 		return true;
 	}
 	return false;
@@ -5599,11 +5610,16 @@ bool ANavPlayerController::UndoInteriorEdit()
 bool ANavPlayerController::RedoInteriorEdit()
 {
 	if (bInteriorInspectionEnabled) return false;
-	if (InteriorGen && InteriorGen->Redo())
+	bool bReferenceImageOnly = false;
+	if (InteriorGen && InteriorGen->RedoWithResult(bReferenceImageOnly))
 	{
-		if (NavigationPanel) NavigationPanel->NotifyInteriorChanged();
-		SelectRoom(FString());
 		bHasUnsavedChanges = true;
+		if (!bReferenceImageOnly)
+		{
+			if (NavigationPanel) NavigationPanel->NotifyInteriorChanged();
+			SelectRoom(FString());
+		}
+		OnReferenceImageChanged.Broadcast();
 		return true;
 	}
 	return false;

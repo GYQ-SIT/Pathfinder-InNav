@@ -476,10 +476,12 @@ public:
 	// Go back to the previous interior state.
 	UFUNCTION(BlueprintCallable, Category = "Interior|History")
 	bool Undo();
+	bool UndoWithResult(bool& bReferenceImageOnly);
 
 	// Go forward to the next interior state.
 	UFUNCTION(BlueprintCallable, Category = "Interior|History")
 	bool Redo();
+	bool RedoWithResult(bool& bReferenceImageOnly);
 
 	// Remove all stored undo/redo history.
 	UFUNCTION(BlueprintCallable, Category = "Interior|History")
@@ -580,6 +582,13 @@ private:
 
 	// ---- Undo / Redo History ----
 
+	struct FReferenceImageEdit
+	{
+		int32 Level;
+		TOptional<FInteriorReferenceImage> Before;
+		TOptional<FInteriorReferenceImage> After;
+	};
+
 	struct FInteriorHistorySnapshot
 	{
 		FHistorySnapshotText Json;
@@ -588,9 +597,11 @@ private:
 		// An edit to another building is recorded on the transition into this snapshot.
 		FString EntranceOwnerId;
 		TSharedPtr<FJsonObject> RemovedEntrance;
+		TOptional<FReferenceImageEdit> ReferenceImageEdit;
 	};
-	void RecordHistorySnapshotInternal(const FString& EntranceOwnerId, TSharedPtr<FJsonObject> RemovedEntrance);
-	bool RestoreHistorySnapshot(int32 TargetIndex);
+	void RecordHistorySnapshotInternal(const FString& EntranceOwnerId, TSharedPtr<FJsonObject> RemovedEntrance,
+		TOptional<FReferenceImageEdit> ReferenceImageEdit = {});
+	bool RestoreHistorySnapshot(int32 TargetIndex, bool* bReferenceImageOnly);
 	TArray<FInteriorHistorySnapshot> InteriorHistory;
 
 	int32 HistoryIndex = -1;

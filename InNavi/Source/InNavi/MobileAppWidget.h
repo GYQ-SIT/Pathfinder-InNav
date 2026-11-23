@@ -381,7 +381,8 @@ private:
 
 	TUniquePtr<IMobileLocationSource> LocationSource;
 	float LocationPollSeconds = 0.f;
-	TOptional<FVector2D> LastLocation;
+	TOptional<FMobileLocationFix> LastLocation;
+	bool bLocationPermissionNeeded = false;
 	UPROPERTY()
 	UMobileExplorePageWidget* ExplorePage = nullptr;
 	// The full-screen search over the whole screen, and the search field of the map that opens it.

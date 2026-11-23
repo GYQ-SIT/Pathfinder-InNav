@@ -16,17 +16,21 @@ struct FInteriorReferenceImage
 	// 0.05 (almost clear) to 1 (solid).
 	float Opacity = 0.5f;
 	bool bVisible = true;
+	bool bLocked = true;
+	FBox2D Crop = FBox2D(FVector2D::ZeroVector, FVector2D(1.0, 1.0));
 
 	bool operator==(const FInteriorReferenceImage& Other) const
 	{
 		return Path == Other.Path && Center.Equals(Other.Center, 1e-6) && FMath::IsNearlyEqual(Width, Other.Width, 1e-6f)
-			&& FMath::IsNearlyEqual(Opacity, Other.Opacity, 1e-6f) && bVisible == Other.bVisible;
+			&& FMath::IsNearlyEqual(Opacity, Other.Opacity, 1e-6f) && bVisible == Other.bVisible
+			&& bLocked == Other.bLocked && Crop.Min.Equals(Other.Crop.Min, 1e-6) && Crop.Max.Equals(Other.Crop.Max, 1e-6);
 	}
 };
 
 namespace InteriorReferenceImage
 {
 	constexpr float MinOpacity = 0.05f;
+	constexpr double MinCropFraction = 0.01;
 	// Larger files are refused: a picture is read into memory whole.
 	constexpr int64 MaxFileBytes = 32ll * 1024 * 1024;
 
@@ -35,6 +39,12 @@ namespace InteriorReferenceImage
 	{
 		Image.Path = Image.Path.TrimStartAndEnd();
 		Image.Opacity = FMath::Clamp(Image.Opacity, MinOpacity, 1.f);
+		if (Image.Crop.Min.ContainsNaN() || Image.Crop.Max.ContainsNaN()
+			|| Image.Crop.Min.X < 0.0 || Image.Crop.Min.Y < 0.0 || Image.Crop.Max.X > 1.0 || Image.Crop.Max.Y > 1.0
+			|| Image.Crop.GetSize().X < MinCropFraction || Image.Crop.GetSize().Y < MinCropFraction)
+		{
+			Image.Crop = FBox2D(FVector2D::ZeroVector, FVector2D(1.0, 1.0));
+		}
 		return !Image.Path.IsEmpty() && FMath::IsFinite(Image.Width) && Image.Width > 0.f && Image.Width < 1.0e7f
 			&& FMath::IsFinite(Image.Center.X) && FMath::IsFinite(Image.Center.Y);
 	}

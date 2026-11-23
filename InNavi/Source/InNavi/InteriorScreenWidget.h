@@ -430,7 +430,20 @@ private:
 	UFUNCTION()
 	void OnReferenceShownChanged(bool bIsChecked);
 	UFUNCTION()
-	void OnReferenceFieldCommitted(const FText& Text, ETextCommit::Type CommitType);
+	void OnReferenceLockedChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnReferenceCropChanged(bool bIsChecked);
+	UFUNCTION()
+	void OnReferenceScaleCommitted(const FText& Text, ETextCommit::Type CommitType);
+	UFUNCTION()
+	void OnReferenceXCommitted(const FText& Text, ETextCommit::Type CommitType);
+	UFUNCTION()
+	void OnReferenceYCommitted(const FText& Text, ETextCommit::Type CommitType);
+	UFUNCTION()
+	void OnReferenceOpacityCommitted(const FText& Text, ETextCommit::Type CommitType);
+	enum class EReferenceField : uint8 { Scale, X, Y, Opacity };
+	void CommitReferenceField(EReferenceField Field, const FText& Text, ETextCommit::Type CommitType);
+	UFUNCTION()
 	void RefreshReferenceImagePanel();
 	bool bRefreshingReference = false;
 	UFUNCTION()
@@ -896,11 +909,15 @@ private:
 	UButton* RemoveReferenceButton = nullptr;
 	UPROPERTY()
 	UCheckBox* ReferenceShownCheckBox = nullptr;
+	UPROPERTY()
+	UCheckBox* ReferenceLockedCheckBox = nullptr;
+	UPROPERTY()
+	UCheckBox* ReferenceCropCheckBox = nullptr;
 	// Width, centre X, centre Y (metres) and opacity (per cent), shown only while the floor has an image.
 	UPROPERTY()
 	UVerticalBox* ReferenceFieldsBox = nullptr;
 	UPROPERTY()
-	UEditableTextBox* ReferenceWidthBox = nullptr;
+	UEditableTextBox* ReferenceScaleBox = nullptr;
 	UPROPERTY()
 	UEditableTextBox* ReferenceXBox = nullptr;
 	UPROPERTY()

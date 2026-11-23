@@ -6,6 +6,7 @@
 #include "Components/Border.h"
 #include "Components/Overlay.h"
 #include "Components/OverlaySlot.h"
+#include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
 
 UWidget* UiToolTip::Make(UWidgetTree* Tree, const FString& Label)
@@ -17,12 +18,13 @@ UWidget* UiToolTip::Make(UWidgetTree* Tree, const FString& Label)
 	// wrapped against, because a maximum width alone let the wrap collapse to one word per line: nothing gave AutoWrapText a width to wrap against.
 	// But then a short hint like "Save [Ctrl+S]" was a bar across the whole screen. WrapTextAt is that width: it wraps there, and a shorter text
 	// does not stretch to it.)
-	TooltipText->SetWrapTextAt(MaxWidth);
+	TooltipText->SetWrapTextAt(MaxWidth - 23.f);
 	// Left-justified text left a ragged, lopsided-looking gap on the right of every line shorter than the longest one - centering each wrapped
 	// line reads as a balanced block instead.
 	TooltipText->SetJustification(ETextJustify::Center);
 	FSlateFontInfo TooltipFont = TooltipText->GetFont();
 	TooltipFont.TypefaceFontName = TEXT("Regular"); // the default font style otherwise renders bold
+	TooltipFont.Size = 10.f;
 	TooltipText->SetFont(TooltipFont);
 
 	UBorder* TooltipBorder = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
@@ -51,5 +53,9 @@ UWidget* UiToolTip::Make(UWidgetTree* Tree, const FString& Label)
 	ForegroundSlot->SetVerticalAlignment(VAlign_Fill);
 	ForegroundSlot->SetPadding(FMargin(0.f, 0.f, 3.f, 3.f));
 
-	return TooltipOverlay;
+	USizeBox* Size = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+	Size->SetMinDesiredWidth(MinWidth);
+	Size->SetMaxDesiredWidth(MaxWidth);
+	Size->SetContent(TooltipOverlay);
+	return Size;
 }

@@ -61,6 +61,8 @@ bool FReferenceImageTest::RunTest(const FString& Parameters)
 
 	// Editing: position, width, opacity (kept within range), hidden. A width that is not a positive number is refused.
 	Image.Center += FVector2D(30, -20); Image.Width = 400.f; Image.Opacity = 3.f; Image.bVisible = false;
+	Image.bLocked = false;
+	Image.Crop = FBox2D(FVector2D(0.2, 0.15), FVector2D(0.8, 0.9));
 	TestTrue(TEXT("changed"), PC->SetActiveReferenceImage(Image));
 	FInteriorReferenceImage Kept;
 	PC->GetActiveReferenceImage(Kept);
@@ -105,7 +107,7 @@ bool FReferenceImageTest::RunTest(const FString& Parameters)
 	return true;
 }
 
-// The Floor panel: the fields are in metres and apply on Enter; Remove takes the image off.
+// The Floor panel: scale, relative position, opacity and lock update in place, including after undo and redo.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FReferenceImagePanelTest, "InNavi.EditorUX.ReferenceImage", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FReferenceImagePanelTest::RunTest(const FString& Parameters)
 {
@@ -115,27 +117,45 @@ bool FReferenceImagePanelTest::RunTest(const FString& Parameters)
 	F.Interior->LoadInteriorForBuilding(TEXT("REP"));
 	ANavPlayerController* PC = F.MakeController();
 	PC->SetActiveFloor(1);
-	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>(); Screen->Initialize(); Screen->TakeWidget(); Screen->SetOwningPlayer(PC);
+	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>(); Screen->Initialize(); Screen->SetOwningPlayer(PC);
+	const TSharedRef<SWidget> SlateScreen = Screen->TakeWidget();
 	auto* Import = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_ImportReference")));
 	auto* Remove = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_RemoveReference")));
 	auto* Shown = Cast<UCheckBox>(Screen->FindScreenWidget(TEXT("Chk_ReferenceShown")));
-	auto* Width = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Edt_ReferenceWidth")));
+	auto* Scale = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Edt_ReferenceScale")));
 	auto* X = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Edt_ReferenceX")));
 	auto* Opacity = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Edt_ReferenceOpacity")));
 	if (!TestNotNull(TEXT("Import PNG"), Import) || !TestNotNull(TEXT("Remove"), Remove) || !TestNotNull(TEXT("Show image"), Shown)
-		|| !TestNotNull(TEXT("Width"), Width) || !TestNotNull(TEXT("Centre X"), X) || !TestNotNull(TEXT("Opacity"), Opacity)) return false;
+		|| !TestNotNull(TEXT("Scale"), Scale) || !TestNotNull(TEXT("Position X"), X) || !TestNotNull(TEXT("Opacity"), Opacity)) return false;
 
 	TestTrue(TEXT("the file is imported by the controller (the button opens the system dialog)"), PC->ImportReferenceImage(WriteTinyPng(TEXT("ref_panel.png"))));
 	const float UnitCm = PC->GetFootprintUnitCm();
-	Width->SetText(FText::FromString(TEXT("25"))); X->SetText(FText::FromString(TEXT("12.5"))); Opacity->SetText(FText::FromString(TEXT("80")));
-	Width->OnTextCommitted.Broadcast(Width->GetText(), ETextCommit::OnEnter);
+	const FBox2D Frame = PC->GetReferenceImageFrame();
+	TestEqual(TEXT("initial scale fits the building"), Scale->GetText().ToString(), FString(TEXT("100.00")));
+	TestEqual(TEXT("initial position is relative to the centre"), X->GetText().ToString(), FString(TEXT("0.00")));
+	Scale->OnTextCommitted.Broadcast(FText::FromString(TEXT("125")), ETextCommit::OnEnter);
+	TestTrue(TEXT("image-only history skips the interior reload"), PC->UndoInteriorEdit());
+	TestEqual(TEXT("Undo updates the field immediately"), Scale->GetText().ToString(), FString(TEXT("100.00")));
+	TestTrue(TEXT("Redo restores the edit"), PC->RedoInteriorEdit());
+	TestEqual(TEXT("Redo updates the field immediately"), Scale->GetText().ToString(), FString(TEXT("125.00")));
+
+	X->OnTextCommitted.Broadcast(FText::FromString(TEXT("12.5")), ETextCommit::OnEnter);
+	Opacity->OnTextCommitted.Broadcast(FText::FromString(TEXT("80")), ETextCommit::OnEnter);
 	FInteriorReferenceImage Image;
 	PC->GetActiveReferenceImage(Image);
-	TestTrue(TEXT("the width is read in metres"), FMath::IsNearlyEqual(Image.Width, 2500.f / UnitCm, 0.01f));
-	TestTrue(TEXT("so is the position"), FMath::IsNearlyEqual(static_cast<float>(Image.Center.X), 1250.f / UnitCm, 0.01f));
+	TestTrue(TEXT("scale is relative to the original width"), FMath::IsNearlyEqual(static_cast<double>(Image.Width), Frame.GetSize().X * 1.25, 0.01));
+	TestTrue(TEXT("position offsets the centre in metres"), FMath::IsNearlyEqual(Image.Center.X, Frame.GetCenter().X + 1250.0 / UnitCm, 0.01));
+	auto* Locked = Cast<UCheckBox>(Screen->FindScreenWidget(TEXT("Chk_ReferenceLocked")));
+	if (!TestNotNull(TEXT("Lock Image"), Locked)) return false;
+	TestTrue(TEXT("images start locked"), Locked->IsChecked());
+	Locked->OnCheckStateChanged.Broadcast(false);
+	FInteriorReferenceImage Unlocked;
+	PC->GetActiveReferenceImage(Unlocked);
+	TestTrue(TEXT("unlock keeps the saved opacity and allows placement"), !Unlocked.bLocked && FMath::IsNearlyEqual(Unlocked.Opacity, 0.8f));
+	Locked->OnCheckStateChanged.Broadcast(true);
 	TestTrue(TEXT("and the opacity in per cent"), FMath::IsNearlyEqual(Image.Opacity, 0.8f, 0.001f));
-	Width->SetText(FText::FromString(TEXT("abc")));
-	Width->OnTextCommitted.Broadcast(Width->GetText(), ETextCommit::OnEnter);
+	Scale->SetText(FText::FromString(TEXT("abc")));
+	Scale->OnTextCommitted.Broadcast(Scale->GetText(), ETextCommit::OnEnter);
 	FInteriorReferenceImage After;
 	PC->GetActiveReferenceImage(After);
 	TestTrue(TEXT("text that is no number changes nothing"), After == Image);

@@ -14,7 +14,8 @@ class UWidgetTree;
 namespace UiToolTip
 {
 	// The card is as wide as its text up to this (in pixels); a longer text wraps there, centred.
-	inline constexpr float MaxWidth = 640.f;
+	inline constexpr float MinWidth = 120.f;
+	inline constexpr float MaxWidth = 300.f;
 
 	INNAVI_API UWidget* Make(UWidgetTree* Tree, const FString& Label);
 }
