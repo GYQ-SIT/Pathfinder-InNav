@@ -2093,8 +2093,9 @@ void UMobileAppWidget::SetLocationSource(TUniquePtr<IMobileLocationSource> InSou
 {
 	LocationSource = MoveTemp(InSource);
 	LocationPollSeconds = 0.f;
+	HeadingPollSeconds = 0.f;
 	LastLocation.Reset();
-	if (MapView) MapView->SetGpsPosition({});
+	if (MapView) { MapView->SetGpsPosition({}); MapView->SetGpsHeading({}); }
 }
 
 void UMobileAppWidget::UpdateLocation(float DeltaTime)
@@ -2108,6 +2109,13 @@ void UMobileAppWidget::UpdateLocation(float DeltaTime)
 	}
 	if (!LocationSource) LocationSource = MakePlatformMobileLocationSource();
 	if (!LocationSource) return;
+	// The direction the device faces (its compass) is read oftener than the position, for the arrow of the dot to turn with the person.
+	HeadingPollSeconds -= DeltaTime;
+	if (HeadingPollSeconds <= 0.f)
+	{
+		HeadingPollSeconds = 0.1f;
+		MapView->SetGpsHeading(LocationSource->ReadHeading());
+	}
 	LocationPollSeconds -= DeltaTime;
 	if (LocationPollSeconds <= 0.f)
 	{

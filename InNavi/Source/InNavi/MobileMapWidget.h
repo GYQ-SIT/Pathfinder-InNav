@@ -47,6 +47,11 @@ public:
 	// Where that position is on the plan of the building shown, in the plan's units, when the plan is shown and the position is inside the building or a few
 	// metres from its wall (a GPS fix indoors is rarely better than that). The GPS does not know the floor: it is drawn on whichever level is shown.
 	TOptional<FVector2D> GetGpsLevelPosition() const;
+	// The direction the device faces, in degrees clockwise from north: the GPS dot gets a cone that points that way (none while it is not known).
+	void SetGpsHeading(TOptional<double> Degrees);
+	const TOptional<double>& GetGpsHeading() const { return GpsHeading; }
+	// Which way the cone points on the screen from a place of the plan, as a unit vector (the map may be turned or tilted), if the heading is known.
+	TOptional<FVector2D> GetGpsHeadingOnScreen(const FVector2D& PlanPoint) const;
 	// Centres the view on the GPS dot: the campus overview on the campus, the plan of a building on the dot inside it.
 	void CenterOnGps();
 	void Set3D(bool bInShow3D);
@@ -165,6 +170,7 @@ private:
 	FMobileRoutePoint Position;
 	bool bHasPosition = false;
 	TOptional<FVector2D> GpsPosition;
+	TOptional<double> GpsHeading;
 	bool bShow3D = false;
 	// Where a big building's view is built around, kept once chosen (so a tap or a drag does not move it), until the view starts again or the route changes.
 	mutable TOptional<FVector2D> LatchedFocus;

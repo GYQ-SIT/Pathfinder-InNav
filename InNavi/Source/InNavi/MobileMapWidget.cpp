@@ -115,6 +115,21 @@ namespace
 		return Points;
 	}
 
+	// The cone that shows which way the device faces: a wedge opening from the dot towards Direction (a unit vector on the screen).
+	TArray<FVector2D> HeadingCone(const FVector2D& Centre2, const FVector2D& Direction)
+	{
+		constexpr double Reach = 46.0, HalfAngle = 0.56; // about 32 degrees each side
+		TArray<FVector2D> Points;
+		Points.Add(Centre2);
+		const double Base = FMath::Atan2(Direction.Y, Direction.X);
+		for (int32 i = 0; i <= 6; ++i)
+		{
+			const double Angle = Base - HalfAngle + 2.0 * HalfAngle * i / 6.0;
+			Points.Add(Centre2 + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * Reach);
+		}
+		return Points;
+	}
+
 	FVector2D LabelSize(const FString& Text, float PixelSize, bool bBold = true)
 	{
 		const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle(bBold ? "Bold" : "Regular", FMath::RoundToInt(PixelSize * StartStyle::PixelsToFont));
@@ -297,6 +312,30 @@ void UMobileMapWidget::SetGpsPosition(TOptional<FVector2D> InPosition)
 		GpsPosition = InPosition;
 		InvalidateLayoutAndVolatility();
 	}
+}
+
+void UMobileMapWidget::SetGpsHeading(TOptional<double> Degrees)
+{
+	// A change of less than a degree is not worth drawing again.
+	const bool bChanged = GpsHeading.IsSet() != Degrees.IsSet() || (Degrees && FMath::Abs(FMath::FindDeltaAngleDegrees(*GpsHeading, *Degrees)) >= 1.0);
+	if (bChanged)
+	{
+		GpsHeading = Degrees;
+		if (GpsPosition) InvalidateLayoutAndVolatility();
+	}
+}
+
+TOptional<FVector2D> UMobileMapWidget::GetGpsHeadingOnScreen(const FVector2D& PlanPoint) const
+{
+	if (!GpsHeading || ViewSize.X <= 0.0 || ViewSize.Y <= 0.0) return {};
+	// The plan has north on X and east on Y (GeoProjection), so a heading clockwise from north points to (cos, sin).
+	const double Radians = FMath::DegreesToRadians(*GpsHeading);
+	const double Step = 5.0 * LevelMap.UnitsPerMetre;
+	const double Lift = bShow3D ? SlabHeight : 0.0;
+	const FVector2D From = ToWidgetPolygon({ PlanPoint }, ViewSize.X, ViewSize.Y, Lift)[0];
+	const FVector2D To = ToWidgetPolygon({ PlanPoint + FVector2D(FMath::Cos(Radians), FMath::Sin(Radians)) * Step }, ViewSize.X, ViewSize.Y, Lift)[0];
+	const FVector2D Direction = To - From;
+	return Direction.SizeSquared() > 1.e-9 ? TOptional<FVector2D>(Direction.GetSafeNormal()) : TOptional<FVector2D>();
 }
 
 TOptional<FVector2D> UMobileMapWidget::GetGpsLevelPosition() const
@@ -698,6 +737,7 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 		{
 			const FVector2D Point = GpsPosition ? *GpsPosition : MobileCampusPosition(Position, CampusMap);
 			const auto At = ToWidgetPolygon({Point}, W, H, Lift)[0];
+			if (GpsPosition) if (const TOptional<FVector2D> Facing = GetGpsHeadingOnScreen(Point)) FillPolygon(OutDrawElements, Layer + 8, AllottedGeometry, HeadingCone(At, *Facing), FLinearColor(0.12f, 0.39f, 0.94f, 0.35f));
 			FillPolygon(OutDrawElements, Layer + 8, AllottedGeometry, Circle(At, 8.0), FLinearColor::White);
 			FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, Circle(At, 5.0), Blue);
 		}
@@ -904,6 +944,7 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 	if (const TOptional<FVector2D> Gps = GetGpsLevelPosition())
 	{
 		const FVector2D At = ToWidgetPolygon({ *Gps }, W, H, Lift)[0];
+		if (const TOptional<FVector2D> Facing = GetGpsHeadingOnScreen(*Gps)) FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, HeadingCone(At, *Facing), FLinearColor(0.12f, 0.39f, 0.94f, 0.35f));
 		FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, Circle(At, 20.0), FLinearColor(0.12f, 0.39f, 0.94f, 0.16f));
 		FillPolygon(OutDrawElements, Layer + 10, AllottedGeometry, Circle(At, 7.5), FLinearColor(1.f, 1.f, 1.f, 0.9f));
 		FillPolygon(OutDrawElements, Layer + 11, AllottedGeometry, Circle(At, 5.5), FLinearColor(0.12f, 0.39f, 0.94f, 0.85f));

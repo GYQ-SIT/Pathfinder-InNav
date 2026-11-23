@@ -383,6 +383,7 @@ private:
 
 	TUniquePtr<IMobileLocationSource> LocationSource;
 	float LocationPollSeconds = 0.f;
+	float HeadingPollSeconds = 0.f;
 	TOptional<FVector2D> LastLocation;
 	UPROPERTY()
 	UMobileExplorePageWidget* ExplorePage = nullptr;

@@ -150,7 +150,9 @@ namespace GeoOriginTests
 	{
 	public:
 		TOptional<FVector2D> ReadLocation() override { return Fix; }
+		TOptional<double> ReadHeading() override { return Heading; }
 		TOptional<FVector2D> Fix;
+		TOptional<double> Heading;
 	};
 
 	// The fix of a point given in metres north and east of the campus origin.
@@ -208,6 +210,28 @@ bool FGpsIndoorTest::RunTest(const FString& Parameters)
 	{
 		TestTrue(TEXT("at the place in the building's own units (the campus position less the building's offset)"), OnPlan->Equals(Centre - Building->Offset, 1.e-3));
 	}
+
+	// The arrow: the heading of the device reaches the map, and its cone points the way the plan's north and east go on the screen.
+	TestFalse(TEXT("no heading, no cone"), Map->GetGpsHeading().IsSet());
+	Location->Heading = 0.0;
+	App->UpdateLocation(0.2f);
+	TestTrue(TEXT("the heading reaches the map"), Map->GetGpsHeading().IsSet() && FMath::IsNearlyEqual(*Map->GetGpsHeading(), 0.0));
+	const FVector2D PlanPoint = *OnPlan;
+	const TOptional<FVector2D> North = Map->GetGpsHeadingOnScreen(PlanPoint);
+	Location->Heading = 90.0;
+	App->UpdateLocation(0.2f);
+	const TOptional<FVector2D> East = Map->GetGpsHeadingOnScreen(PlanPoint);
+	if (TestTrue(TEXT("the cone has a direction"), North.IsSet() && East.IsSet()))
+	{
+		TestTrue(TEXT("unit vectors"), FMath::IsNearlyEqual(North->Size(), 1.0, 1.e-6) && FMath::IsNearlyEqual(East->Size(), 1.0, 1.e-6));
+		TestTrue(TEXT("east is a quarter turn clockwise from north on the plan"), FMath::IsNearlyZero(FVector2D::DotProduct(*North, *East), 1.e-6));
+		const FVector2D PlanNorth = Map->ToWidget(PlanPoint + FVector2D(5.0, 0.0), 375.0, 812.0) - Map->ToWidget(PlanPoint, 375.0, 812.0);
+		TestTrue(TEXT("north is the way the plan's X goes on the screen"), FVector2D::DotProduct(*North, PlanNorth.GetSafeNormal()) > 0.999);
+	}
+	Location->Heading.Reset();
+	App->UpdateLocation(0.2f);
+	TestFalse(TEXT("a device without a compass has no cone"), Map->GetGpsHeading().IsSet());
+
 	App->LocateMe();
 	TestFalse(TEXT("Locate inside the building stays on its plan"), Map->IsOverview());
 	TestTrue(TEXT("and still has the dot"), Map->GetGpsLevelPosition().IsSet());
@@ -219,6 +243,32 @@ bool FGpsIndoorTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("but is still the campus's"), Map->GetGpsPosition().IsSet());
 	App->LocateMe();
 	TestTrue(TEXT("Locate outside the building goes to the campus overview"), Map->IsOverview());
+	return true;
+}
+
+// -GpsFake=<latitude>,<longitude> stands in for the device's GPS in a build that is not Shipping.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGpsFakeParseTest, "InNavi.Mobile.GpsFakeParse", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FGpsFakeParseTest::RunTest(const FString& Parameters)
+{
+	const TOptional<FVector2D> Fake = ParseFakeMobileLocation(TEXT("InNavi -game -GpsFake=1.4141,103.9125 -windowed"));
+	if (TestTrue(TEXT("a latitude and longitude are read"), Fake.IsSet()))
+	{
+		TestTrue(TEXT("latitude first, then longitude"), Fake->Equals(FVector2D(1.4141, 103.9125), 1.e-9));
+	}
+	const TOptional<FVector2D> South = ParseFakeMobileLocation(TEXT("-GpsFake=-33.8688,151.2093"));
+	TestTrue(TEXT("a negative one too"), South.IsSet() && South->Equals(FVector2D(-33.8688, 151.2093), 1.e-9));
+	TestFalse(TEXT("no argument, no fake"), ParseFakeMobileLocation(TEXT("InNavi -game")).IsSet());
+	TestFalse(TEXT("words are not a position"), ParseFakeMobileLocation(TEXT("-GpsFake=here,there")).IsSet());
+	TestFalse(TEXT("one number is not a position"), ParseFakeMobileLocation(TEXT("-GpsFake=1.41")).IsSet());
+	TestFalse(TEXT("an impossible latitude is not one"), ParseFakeMobileLocation(TEXT("-GpsFake=200,103.9")).IsSet());
+	TestFalse(TEXT("an impossible longitude is not one"), ParseFakeMobileLocation(TEXT("-GpsFake=1.4,400")).IsSet());
+
+	const TOptional<double> Heading = ParseFakeMobileHeading(TEXT("InNavi -GpsFake=1.4,103.9 -GpsFakeHeading=90"));
+	TestTrue(TEXT("a heading is read"), Heading.IsSet() && FMath::IsNearlyEqual(*Heading, 90.0));
+	const TOptional<double> Wrapped = ParseFakeMobileHeading(TEXT("-GpsFakeHeading=-90"));
+	TestTrue(TEXT("a heading is kept between 0 and 360"), Wrapped.IsSet() && FMath::IsNearlyEqual(*Wrapped, 270.0));
+	TestFalse(TEXT("no heading argument, no heading"), ParseFakeMobileHeading(TEXT("-GpsFake=1.4,103.9")).IsSet());
+	TestFalse(TEXT("a heading that is not a number is none"), ParseFakeMobileHeading(TEXT("-GpsFakeHeading=north")).IsSet());
 	return true;
 }
 
