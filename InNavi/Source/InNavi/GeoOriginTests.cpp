@@ -4,10 +4,15 @@
 #include "GeoProjection.h"
 #include "MobileAppWidget.h"
 #include "MobileMapWidget.h"
+#include "MobilePlacePageWidget.h"
 #include "MobileRealSource.h"
+#include "MobileRoutePageWidget.h"
+#include "MobileSearchPageWidget.h"
+#include "MobileSelectWidget.h"
 #include "NavPlayerController.h"
 #include "UiTestFixture.h"
 
+#include "Components/Button.h"
 #include "Dom/JsonObject.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
@@ -198,6 +203,8 @@ bool FGpsIndoorTest::RunTest(const FString& Parameters)
 	App->OpenBuilding(Building->BuildingId);
 	if (!TestFalse(TEXT("the plan of E2 is shown"), Map->IsOverview())) return false;
 
+	// Without a GPS fix My location is a guess: the door of the building the person said they are in.
+	TestTrue(TEXT("without a GPS fix the guessed My location is drawn"), Map->HasPosition());
 	auto Fake = MakeUnique<FFixedLocationSource>();
 	auto* Location = Fake.Get();
 	App->SetLocationSource(MoveTemp(Fake));
@@ -205,6 +212,7 @@ bool FGpsIndoorTest::RunTest(const FString& Parameters)
 	// A fix inside the building is on its plan, where it is.
 	Location->Fix = FixAt(*Geo, Centre);
 	App->UpdateLocation(1.f);
+	TestFalse(TEXT("with a GPS fix the guess is not drawn: the GPS dot is where the person is"), Map->HasPosition());
 	const TOptional<FVector2D> OnPlan = Map->GetGpsLevelPosition();
 	if (TestTrue(TEXT("a fix inside the building is on the plan"), OnPlan.IsSet()))
 	{
@@ -342,6 +350,82 @@ bool FGpsFakeParseTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("a heading is kept between 0 and 360"), Wrapped.IsSet() && FMath::IsNearlyEqual(*Wrapped, 270.0));
 	TestFalse(TEXT("no heading argument, no heading"), ParseFakeMobileHeading(TEXT("-GpsFake=1.4,103.9")).IsSet());
 	TestFalse(TEXT("a heading that is not a number is none"), ParseFakeMobileHeading(TEXT("-GpsFakeHeading=north")).IsSet());
+	return true;
+}
+
+// Where a route starts when the phone has a GPS fix: My location is the building the device is in; away from every building it is nowhere on the map, so the
+// start has to be chosen (the route page says so and plans nothing from My location).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGpsRouteStartTest, "InNavi.Mobile.GpsRouteStart", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FGpsRouteStartTest::RunTest(const FString& Parameters)
+{
+	using namespace GeoOriginTests;
+	const TSharedPtr<FJsonObject> Fixture = ReadJson(FPaths::ProjectDir() / TEXT("../docs/test-data/e2-test-fixture.json"));
+	if (!TestTrue(TEXT("the test fixture is read"), Fixture.IsValid())) return false;
+	Fixture->SetObjectField(TEXT("geoOrigin"), Origin(1.4135, 103.9117));
+	const FString Path = TempProject(TEXT("gps-route-"));
+	if (!TestTrue(TEXT("a project with an origin is written"), WriteJson(Fixture, Path))) return false;
+	ON_SCOPE_EXIT { IFileManager::Get().Delete(*Path); };
+	const auto Data = MakeShared<FMobileRealSource>(Path);
+	const auto Sites = Data->ListSites();
+	if (!TestEqual(TEXT("it is one site"), Sites.Num(), 1)) return false;
+	const TOptional<FVector2D> Geo = Data->GetGeoOrigin(Sites[0].Id);
+	const FMobileCampusMap Campus = Data->GetCampusMap(Sites[0].Id);
+	const FMobileCampusBuilding* Building = Campus.Buildings.FindByPredicate([](const FMobileCampusBuilding& B) { return B.BuildingId.EndsWith(TEXT("E2")); });
+	const TArray<FMobilePlace> Places = Data->SearchPlaces(Sites[0].Id, FString(), FMobilePlaceFilter());
+	if (!TestTrue(TEXT("an origin, a building and places"), Geo.IsSet() && Building && !Places.IsEmpty())) return false;
+	FVector2D Centre = FVector2D::ZeroVector;
+	for (const FVector2D& Corner : Building->Outline) Centre += Corner;
+	Centre /= Building->Outline.Num();
+
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("the test world is created"), World)) return false;
+	ON_SCOPE_EXIT { World->DestroyWorld(false); };
+
+	auto StartDirections = [&](const TOptional<FVector2D>& Fix) -> UMobileAppWidget*
+	{
+		UMobileAppWidget* App = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
+		App->SetSource(Data, Sites[0].Id);
+		App->TakeWidget();
+		App->SetActiveTab(UMobileAppWidget::ETab::Directory);
+		if (Fix)
+		{
+			auto Fake = MakeUnique<FFixedLocationSource>();
+			Fake->Fix = FixAt(*Geo, *Fix);
+			App->SetLocationSource(MoveTemp(Fake));
+			App->UpdateLocation(1.f);
+		}
+		App->GetSearchPage()->ChoosePlace(Places.Last().Id);
+		Cast<UButton>(App->GetPlacePage()->FindNamedWidget(TEXT("Btn_GetDirections")))->OnClicked.Broadcast();
+		return App;
+	};
+
+	// No GPS fix: My location is the guess, the door of the first building, as before.
+	{
+		UMobileAppWidget* App = StartDirections({});
+		UMobileRoutePageWidget* Route = App->GetRoutePage();
+		TestEqual(TEXT("without a fix the start is My location"), Route->GetFromSelect()->GetSelectedLabel(), FString(TEXT("My location")));
+		TestTrue(TEXT("with its building and level"), Route->IsMyLocationRowShown());
+	}
+	// A fix inside the building: My location is that building.
+	{
+		UMobileAppWidget* App = StartDirections(Centre);
+		UMobileRoutePageWidget* Route = App->GetRoutePage();
+		TestEqual(TEXT("inside a building the start is My location"), Route->GetFromSelect()->GetSelectedLabel(), FString(TEXT("My location")));
+		TestTrue(TEXT("in the building the device is in"), App->GetMyLocationBuildingId().EndsWith(TEXT("E2")));
+	}
+	// A fix far from every building: there is no My location to start from.
+	{
+		UMobileAppWidget* App = StartDirections(FVector2D(Centre.X + 20000.0, Centre.Y));
+		UMobileRoutePageWidget* Route = App->GetRoutePage();
+		TestEqual(TEXT("away from the campus the start has to be chosen"), Route->GetFromSelect()->GetSelectedLabel(), FString(TEXT("Choose a starting point")));
+		TestFalse(TEXT("no building and level to say"), Route->IsMyLocationRowShown());
+		TestFalse(TEXT("no route is planned from My location"), App->GetCurrentRoute().bFound);
+		TestTrue(TEXT("and the page says why"), Route->GetErrorString().Contains(TEXT("not at the campus")));
+		// Choosing a start plans the route again.
+		Route->ChooseFrom(Places[0].Id);
+		TestEqual(TEXT("a chosen start is the start"), App->GetStartPlaceId(), Places[0].Id);
+		TestFalse(TEXT("and the page no longer says to choose one"), Route->GetErrorString().Contains(TEXT("not at the campus")));
+	}
 	return true;
 }
 

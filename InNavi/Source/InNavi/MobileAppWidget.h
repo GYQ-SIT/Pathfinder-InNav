@@ -122,6 +122,8 @@ public:
 	void RefreshSearchStart();
 	void RefreshSaved();
 	void ApplyMap();
+	// The dot of the person on the map: the step they are at while walking, the place they start from, or My location (a guess, not drawn with a GPS fix).
+	void UpdatePositionDot();
 	void SetSnap(EMobileSheetSnap NewSnap);
 	// The sheet's height right now, mid-drag or mid-move included (design pixels).
 	double GetSheetHeight() const { return SheetHeight; }
@@ -388,6 +390,7 @@ private:
 	TUniquePtr<IMobileLocationSource> LocationSource;
 	float LocationPollSeconds = 0.f;
 	float HeadingPollSeconds = 0.f;
+	bool bGpsHadFixForDot = false;
 	TOptional<FVector2D> LastLocation;
 	UPROPERTY()
 	UMobileExplorePageWidget* ExplorePage = nullptr;

@@ -357,6 +357,35 @@ TOptional<FVector2D> UMobileMapWidget::GetGpsLevelPosition() const
 	return PointInPolygon(Local, LevelMap.Outline) || DistanceToPolygonEdge(Local, LevelMap.Outline) <= Margin ? TOptional<FVector2D>(Local) : TOptional<FVector2D>();
 }
 
+FString UMobileMapWidget::GetGpsBuildingId() const
+{
+	if (!GpsPosition)
+	{
+		return FString();
+	}
+	const double Margin = 8.0 * LevelMap.UnitsPerMetre;
+	FString Nearest;
+	double NearestDistance = Margin;
+	for (const FMobileCampusBuilding& Building : CampusMap.Buildings)
+	{
+		if (Building.Outline.Num() < 3)
+		{
+			continue;
+		}
+		if (PointInPolygon(*GpsPosition, Building.Outline))
+		{
+			return Building.BuildingId;
+		}
+		const double Distance = DistanceToPolygonEdge(*GpsPosition, Building.Outline);
+		if (Distance <= NearestDistance)
+		{
+			NearestDistance = Distance;
+			Nearest = Building.BuildingId;
+		}
+	}
+	return Nearest;
+}
+
 bool UMobileMapWidget::GetGpsMarkerView(FMobileGpsMarkerView& Out) const
 {
 	if (ViewSize.X <= 0.0 || ViewSize.Y <= 0.0)

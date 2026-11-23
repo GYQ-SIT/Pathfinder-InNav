@@ -64,6 +64,8 @@ public:
 	// Where to draw the GPS dot (and its cone) on the screen now, if there is one to draw here: the campus overview shows it when there is a position, the plan of a
 	// building when the position is inside or by it. It is drawn by UMobileGpsMarkerWidget, a layer above the map, not by the map.
 	bool GetGpsMarkerView(FMobileGpsMarkerView& Out) const;
+	// The building of the campus the GPS position is in (or within 8 m of its wall), or empty: not in one, or no position.
+	FString GetGpsBuildingId() const;
 	// The direction the device faces, in degrees clockwise from north: the GPS dot gets a cone that points that way (none while it is not known).
 	void SetGpsHeading(TOptional<double> Degrees);
 	const TOptional<double>& GetGpsHeading() const { return GpsHeading; }

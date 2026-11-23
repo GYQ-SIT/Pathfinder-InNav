@@ -116,6 +116,9 @@ struct FMobileRouteRequest
 	// destination's building, on level 1).
 	FString MyLocationBuildingId;
 	int32 MyLocationLevel = 0; // 0 = not set (0 is not a level: -1 is B1)
+	// The device has a GPS fix and it is not in any building of the site: My location is not on the map, so a start has to be chosen (the screen does not plan
+	// a route from My location then, and the From drop-down says "Choose a starting point").
+	bool bMyLocationUnavailable = false;
 };
 
 enum class EMobileStepKind : uint8
