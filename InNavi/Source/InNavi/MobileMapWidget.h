@@ -42,6 +42,9 @@ public:
 	void SetPosition(const FMobileRoutePoint& InPosition);
 	void ClearPosition();
 	// The device's position from the GPS, in the units of the campus map (metres for a real project), north then east of the campus origin.
+	// Whether the plans have north on X and east on Y (the real projects): the map is then drawn with north at the top. Set from the source; tests set it too.
+	void SetPlanNorthOnX(bool bInNorthOnX);
+	bool IsPlanNorthOnX() const { return bPlanNorthOnX; }
 	void SetGpsPosition(TOptional<FVector2D> InPosition);
 	const TOptional<FVector2D>& GetGpsPosition() const { return GpsPosition; }
 	// Where that position is on the plan of the building shown, in the plan's units, when the plan is shown and the position is inside the building or a few
@@ -171,6 +174,7 @@ private:
 	bool bHasPosition = false;
 	TOptional<FVector2D> GpsPosition;
 	TOptional<double> GpsHeading;
+	bool bPlanNorthOnX = false;
 	bool bShow3D = false;
 	// Where a big building's view is built around, kept once chosen (so a tap or a drag does not move it), until the view starts again or the route changes.
 	mutable TOptional<FVector2D> LatchedFocus;

@@ -227,6 +227,10 @@ bool FGpsIndoorTest::RunTest(const FString& Parameters)
 		TestTrue(TEXT("east is a quarter turn clockwise from north on the plan"), FMath::IsNearlyZero(FVector2D::DotProduct(*North, *East), 1.e-6));
 		const FVector2D PlanNorth = Map->ToWidget(PlanPoint + FVector2D(5.0, 0.0), 375.0, 812.0) - Map->ToWidget(PlanPoint, 375.0, 812.0);
 		TestTrue(TEXT("north is the way the plan's X goes on the screen"), FVector2D::DotProduct(*North, PlanNorth.GetSafeNormal()) > 0.999);
+		// A real project is drawn north up: facing north points to the top of the screen, facing east to the right.
+		TestTrue(TEXT("the map has north at the top"), Map->IsPlanNorthOnX());
+		TestTrue(TEXT("facing north points up the screen"), North->Y < -0.999 && FMath::Abs(North->X) < 1.e-3);
+		TestTrue(TEXT("facing east points to the right"), East->X > 0.999 && FMath::Abs(East->Y) < 1.e-3);
 	}
 	Location->Heading.Reset();
 	App->UpdateLocation(0.2f);

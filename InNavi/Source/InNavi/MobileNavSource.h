@@ -271,6 +271,9 @@ public:
 	virtual FMobileCampusMap GetCampusMap(const FString& SiteId) = 0;
 	// Geographic origin (latitude, longitude) for sites whose plan uses local meters.
 	virtual TOptional<FVector2D> GetGeoOrigin(const FString& SiteId) { return {}; }
+	// True when the plans of the site have north on their X axis and east on their Y axis, as the editor draws them with X up (the real projects): the map then
+	// draws north at the top of the screen. False for plans drawn in screen units (the prototype's), which are shown as they are.
+	virtual bool IsPlanNorthOnX() { return false; }
 };
 
 namespace MobileNav

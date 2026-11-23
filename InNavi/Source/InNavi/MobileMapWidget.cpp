@@ -213,6 +213,16 @@ void UMobileMapWidget::SetSource(IMobileNavSource* InSource, const FString& InSi
 	Source = InSource;
 	SiteId = InSiteId;
 	CampusMap = Source ? Source->GetCampusMap(SiteId) : FMobileCampusMap();
+	bPlanNorthOnX = Source && Source->IsPlanNorthOnX();
+}
+
+void UMobileMapWidget::SetPlanNorthOnX(bool bInNorthOnX)
+{
+	if (bPlanNorthOnX != bInNorthOnX)
+	{
+		bPlanNorthOnX = bInNorthOnX;
+		InvalidateLayoutAndVolatility();
+	}
 }
 
 void UMobileMapWidget::SetMapsForTest(const FMobileLevelMap& Level, const FMobileCampusMap& Campus)
@@ -426,12 +436,14 @@ FVector2D UMobileMapWidget::ViewCentre() const
 
 FVector2D UMobileMapWidget::ProjectFlat(const FVector2D& P) const
 {
+	// Plans with north on X and east on Y (the real projects) are drawn with north up: east to the right (the screen's x) and north up (minus the screen's y).
+	const FVector2D Flat = bPlanNorthOnX ? FVector2D(P.Y, -P.X) : P;
 	if (!bShow3D)
 	{
-		return P;
+		return Flat;
 	}
 	// A tilted view: turned a quarter, and squashed, so the plan reads as seen from an angle.
-	return FVector2D((P.X - P.Y) * 0.7071, (P.X + P.Y) * 0.7071 * 0.5);
+	return FVector2D((Flat.X - Flat.Y) * 0.7071, (Flat.X + Flat.Y) * 0.7071 * 0.5);
 }
 
 FBox2D UMobileMapWidget::PlanBounds() const
@@ -550,7 +562,8 @@ UMobileMapWidget::FStart UMobileMapWidget::WorkOutStart(double WidgetWidth, doub
 		if (Start > Result.Fit && RouteBoxOnLevel(RouteBox))
 		{
 			const double Pad = 10.0 * LevelMap.UnitsPerMetre;
-			const FVector2D RouteSize = RouteBox.GetSize() + FVector2D(2.0 * Pad, 2.0 * Pad);
+			// The route's size along the screen's width and height: north is up, so the plan's X is the screen's height.
+			const FVector2D RouteSize = (bPlanNorthOnX ? FVector2D(RouteBox.GetSize().Y, RouteBox.GetSize().X) : RouteBox.GetSize()) + FVector2D(2.0 * Pad, 2.0 * Pad);
 			Start = FMath::Max(Result.Fit, FMath::Min(Start, FMath::Min(Result.AvailW / RouteSize.X, Result.AvailH / RouteSize.Y)));
 		}
 		Result.Start = Start;
