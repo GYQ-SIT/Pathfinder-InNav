@@ -912,6 +912,15 @@ private:
 	UEditableTextBox* ReferenceYBox = nullptr;
 	UPROPERTY()
 	UEditableTextBox* ReferenceOpacityBox = nullptr;
+	// Crop (per cent of the whole picture cut away from each side).
+	UPROPERTY()
+	UEditableTextBox* ReferenceCropLeftBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* ReferenceCropRightBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* ReferenceCropTopBox = nullptr;
+	UPROPERTY()
+	UEditableTextBox* ReferenceCropBottomBox = nullptr;
 	UPROPERTY()
 	UEditableTextBox* FloorFromBox = nullptr;
 	UPROPERTY()

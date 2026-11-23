@@ -520,7 +520,7 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			ReferenceLockCheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), TEXT("Chk_ReferenceLock"));
 			StartStyle::DarkCheckBox(ReferenceLockCheckBox);
 			ReferenceLockCheckBox->SetIsChecked(true);
-			ReferenceLockCheckBox->SetToolTip(MakeToolTipWidget(TEXT("Lock image: ticked, the image lies under the drawing and the mouse does not touch it. Unticked, the image is on top, half clear: drag it to move it, drag a corner to scale it. Tick it again when it is in place.")));
+			ReferenceLockCheckBox->SetToolTip(MakeToolTipWidget(TEXT("Lock image: ticked, the image lies under the drawing and the mouse does not touch it. Unticked, the image is on top, half clear: drag it to move it, drag a corner to scale it, drag the middle handle of an edge to crop it. Tick it again when it is in place.")));
 			ReferenceLockCheckBox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnReferenceLockChanged);
 			LockRow->AddChildToHorizontalBox(ReferenceLockCheckBox)->SetVerticalAlignment(VAlign_Center);
 			UHorizontalBoxSlot* LockLabelSlot = LockRow->AddChildToHorizontalBox(StartStyle::Text(WidgetTree, TEXT("Txt_ReferenceLock"), TEXT("Lock image"), 12.f, StartStyle::Rgb(214, 226, 242)));
@@ -566,6 +566,40 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 				AddPositionBox(ReferenceXBox, TEXT("Edt_ReferenceX"), TEXT("X"), TEXT("Where the middle of the picture is along X, in metres from the middle of the building. 0 is the middle. Press Enter to apply."));
 				AddPositionBox(ReferenceYBox, TEXT("Edt_ReferenceY"), TEXT("Y"), TEXT("Where the middle of the picture is along Y, in metres from the middle of the building. 0 is the middle. Press Enter to apply."));
 				ReferenceFieldsBox->AddChildToVerticalBox(PositionBlock)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f * StartStyle::DesignToUi));
+			}
+			// Crop: how much is cut away from each side, in per cent of the whole picture. Left and Right on one row, Top and Bottom on the next, under one caption.
+			{
+				UVerticalBox* CropBlock = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ReferenceCropBlock"));
+				CropBlock->AddChildToVerticalBox(StartStyle::Text(WidgetTree, TEXT("Txt_ReferenceCrop"), TEXT("Crop (%)"), 12.f, StartStyle::Rgb(150, 172, 202), true))->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f * StartStyle::DesignToUi));
+				const auto AddCropRow = [this, CropBlock](const TCHAR* RowName, UEditableTextBox*& FirstBox, const TCHAR* FirstName, const TCHAR* FirstLetter, const TCHAR* FirstHint,
+					UEditableTextBox*& SecondBox, const TCHAR* SecondName, const TCHAR* SecondLetter, const TCHAR* SecondHint)
+				{
+					UHorizontalBox* CropRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), RowName);
+					const auto AddCropBox = [this, CropRow](UEditableTextBox*& OutBox, const TCHAR* Name, const TCHAR* Letter, const TCHAR* Hint)
+					{
+						UHorizontalBoxSlot* LetterSlot = CropRow->AddChildToHorizontalBox(StartStyle::Text(WidgetTree, FString(Name) + TEXT("Letter"), Letter, 12.f, StartStyle::Rgb(150, 172, 202), true));
+						LetterSlot->SetVerticalAlignment(VAlign_Center);
+						LetterSlot->SetPadding(FMargin(0.f, 0.f, 4.f * StartStyle::DesignToUi, 0.f));
+						OutBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), Name);
+						OutBox->SetToolTip(MakeToolTipWidget(Hint));
+						OutBox->OnTextCommitted.AddUniqueDynamic(this, &UInteriorScreenWidget::OnReferenceFieldCommitted);
+						ApplyStandardFont(OutBox);
+						OutBox->SetWidgetStyle(StartStyle::Field(13.f));
+						UHorizontalBoxSlot* BoxSlot = CropRow->AddChildToHorizontalBox(OutBox);
+						BoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+						BoxSlot->SetPadding(FMargin(0.f, 0.f, 6.f * StartStyle::DesignToUi, 0.f));
+					};
+					AddCropBox(FirstBox, FirstName, FirstLetter, FirstHint);
+					AddCropBox(SecondBox, SecondName, SecondLetter, SecondHint);
+					CropBlock->AddChildToVerticalBox(CropRow)->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f * StartStyle::DesignToUi));
+				};
+				AddCropRow(TEXT("ReferenceCropRowLR"),
+					ReferenceCropLeftBox, TEXT("Edt_ReferenceCropLeft"), TEXT("L"), TEXT("How much is cut away from the left side of the picture, in per cent of its width. 0 is none. You can also drag the middle handle of an edge when the image is unlocked. Press Enter to apply."),
+					ReferenceCropRightBox, TEXT("Edt_ReferenceCropRight"), TEXT("R"), TEXT("How much is cut away from the right side of the picture, in per cent of its width. 0 is none. Press Enter to apply."));
+				AddCropRow(TEXT("ReferenceCropRowTB"),
+					ReferenceCropTopBox, TEXT("Edt_ReferenceCropTop"), TEXT("T"), TEXT("How much is cut away from the top of the picture, in per cent of its height. 0 is none. Press Enter to apply."),
+					ReferenceCropBottomBox, TEXT("Edt_ReferenceCropBottom"), TEXT("B"), TEXT("How much is cut away from the bottom of the picture, in per cent of its height. 0 is none. Press Enter to apply."));
+				ReferenceFieldsBox->AddChildToVerticalBox(CropBlock)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f * StartStyle::DesignToUi));
 			}
 			AddReferenceField(ReferenceOpacityBox, TEXT("Edt_ReferenceOpacity"), TEXT("Opacity (%)"), TEXT("5 to 100. Press Enter to apply."));
 			ReferenceFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
@@ -3228,6 +3262,15 @@ void UInteriorScreenWidget::RefreshReferenceImagePanel()
 	Show(ReferenceXBox, (Image.Center.X - FrameCentre.X) * ToMetres);
 	Show(ReferenceYBox, (Image.Center.Y - FrameCentre.Y) * ToMetres);
 	Show(ReferenceOpacityBox, Image.Opacity * 100.0);
+	// Crop is shown to one decimal without trailing zeros (a drag with the mouse gives any value; the boxes are narrow).
+	const auto ShowCrop = [](UEditableTextBox* Box, double Fraction)
+	{
+		if (Box && !Box->HasKeyboardFocus()) Box->SetText(FText::FromString(FString::SanitizeFloat(FMath::RoundToDouble(Fraction * 1000.0) / 10.0, 0)));
+	};
+	ShowCrop(ReferenceCropLeftBox, Image.CropLeft);
+	ShowCrop(ReferenceCropRightBox, Image.CropRight);
+	ShowCrop(ReferenceCropTopBox, Image.CropTop);
+	ShowCrop(ReferenceCropBottomBox, Image.CropBottom);
 }
 
 void UInteriorScreenWidget::OnImportReferenceClicked()
@@ -3288,6 +3331,10 @@ void UInteriorScreenWidget::OnReferenceFieldCommitted(const FText& Text, ETextCo
 	if (Read(ReferenceXBox, Value)) Image.Center.X = FrameCentre.X + Value * ToUnits;
 	if (Read(ReferenceYBox, Value)) Image.Center.Y = FrameCentre.Y + Value * ToUnits;
 	if (Read(ReferenceOpacityBox, Value)) Image.Opacity = static_cast<float>(Value / 100.0);
+	if (Read(ReferenceCropLeftBox, Value)) Image.CropLeft = static_cast<float>(Value / 100.0);
+	if (Read(ReferenceCropRightBox, Value)) Image.CropRight = static_cast<float>(Value / 100.0);
+	if (Read(ReferenceCropTopBox, Value)) Image.CropTop = static_cast<float>(Value / 100.0);
+	if (Read(ReferenceCropBottomBox, Value)) Image.CropBottom = static_cast<float>(Value / 100.0);
 	PC->SetActiveReferenceImage(Image);
 	// The boxes show what was kept (an opacity out of range comes back corrected).
 	RefreshReferenceImagePanel();

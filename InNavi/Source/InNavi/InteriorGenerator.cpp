@@ -447,6 +447,15 @@ bool AInteriorGenerator::ReadReferenceImageOfFloor(const FJsonObject& FloorObjec
 	(*ReferenceObject)->TryGetNumberField(TEXT("width"), WidthValue);
 	(*ReferenceObject)->TryGetNumberField(TEXT("opacity"), OpacityValue);
 	(*ReferenceObject)->TryGetBoolField(TEXT("visible"), Image.bVisible);
+	// "crop": [left, top, right, bottom], fractions of the whole picture; absent = none.
+	const TArray<TSharedPtr<FJsonValue>>* CropValues = nullptr;
+	if ((*ReferenceObject)->TryGetArrayField(TEXT("crop"), CropValues) && CropValues->Num() >= 4)
+	{
+		Image.CropLeft = static_cast<float>((*CropValues)[0]->AsNumber());
+		Image.CropTop = static_cast<float>((*CropValues)[1]->AsNumber());
+		Image.CropRight = static_cast<float>((*CropValues)[2]->AsNumber());
+		Image.CropBottom = static_cast<float>((*CropValues)[3]->AsNumber());
+	}
 	if ((*ReferenceObject)->TryGetArrayField(TEXT("center"), CenterValues) && CenterValues->Num() >= 2)
 	{
 		Image.Center = FVector2D((*CenterValues)[0]->AsNumber(), (*CenterValues)[1]->AsNumber());
@@ -3685,6 +3694,11 @@ TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 			ImageObject->SetNumberField(TEXT("width"), Image->Width);
 			ImageObject->SetNumberField(TEXT("opacity"), Image->Opacity);
 			if (!Image->bVisible) ImageObject->SetBoolField(TEXT("visible"), false);
+			if (Image->HasCrop())
+			{
+				ImageObject->SetArrayField(TEXT("crop"), { MakeShared<FJsonValueNumber>(Image->CropLeft), MakeShared<FJsonValueNumber>(Image->CropTop),
+					MakeShared<FJsonValueNumber>(Image->CropRight), MakeShared<FJsonValueNumber>(Image->CropBottom) });
+			}
 			FloorObject->SetObjectField(TEXT("referenceImage"), ImageObject);
 		}
 

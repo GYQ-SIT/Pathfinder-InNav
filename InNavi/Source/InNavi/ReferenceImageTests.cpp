@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "BuildingGenerator.h"
+#include "InteriorFloorPlanWidget.h"
 #include "InteriorGenerator.h"
 #include "InteriorScreenWidget.h"
 #include "NavPlayerController.h"
@@ -16,6 +17,8 @@
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
+
+#include <limits>
 
 // PAT-201: a PNG under the 2D drawing of a floor.
 
@@ -127,6 +130,11 @@ bool FReferenceImagePanelTest::RunTest(const FString& Parameters)
 	auto* X = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Edt_ReferenceX")));
 	auto* Y = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Edt_ReferenceY")));
 	auto* Opacity = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Edt_ReferenceOpacity")));
+	auto* CropLeft = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Edt_ReferenceCropLeft")));
+	auto* CropRight = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Edt_ReferenceCropRight")));
+	auto* CropTop = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Edt_ReferenceCropTop")));
+	auto* CropBottom = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Edt_ReferenceCropBottom")));
+	if (!TestNotNull(TEXT("the four Crop boxes"), CropLeft) || !TestNotNull(TEXT("Crop right"), CropRight) || !TestNotNull(TEXT("Crop top"), CropTop) || !TestNotNull(TEXT("Crop bottom"), CropBottom)) return false;
 	if (!TestNotNull(TEXT("Import PNG"), Import) || !TestNotNull(TEXT("Remove"), Remove) || !TestNotNull(TEXT("Show image"), Shown) || !TestNotNull(TEXT("Lock image"), Lock)
 		|| !TestNotNull(TEXT("Scale"), Scale) || !TestNotNull(TEXT("Position X"), X) || !TestNotNull(TEXT("Position Y"), Y) || !TestNotNull(TEXT("Opacity"), Opacity)) return false;
 	TestTrue(TEXT("the image is locked at first"), Lock->IsChecked() && !PC->IsReferenceImageUnlocked());
@@ -151,6 +159,18 @@ bool FReferenceImagePanelTest::RunTest(const FString& Parameters)
 	FInteriorReferenceImage After;
 	PC->GetActiveReferenceImage(After);
 	TestTrue(TEXT("text that is no number changes nothing"), After == Image);
+	// Crop: per cent of the whole picture cut away from each side; none to start with, and a value that is too big is brought back so a bit is left.
+	TestTrue(TEXT("no crop at first"), CropLeft->GetText().ToString() == TEXT("0") && CropBottom->GetText().ToString() == TEXT("0"));
+	CropLeft->SetText(FText::FromString(TEXT("10"))); CropTop->SetText(FText::FromString(TEXT("20"))); CropRight->SetText(FText::FromString(TEXT("95")));
+	CropLeft->OnTextCommitted.Broadcast(CropLeft->GetText(), ETextCommit::OnEnter);
+	PC->GetActiveReferenceImage(After);
+	TestTrue(TEXT("the crop is kept as fractions"), FMath::IsNearlyEqual(After.CropLeft, 0.1f, 1e-4f) && FMath::IsNearlyEqual(After.CropTop, 0.2f, 1e-4f));
+	TestTrue(TEXT("one side cannot take the last of the picture"), After.CropLeft + After.CropRight <= 0.95f + 1e-4f);
+	TestEqual(TEXT("and the box shows what was kept"), CropRight->GetText().ToString(), FString::SanitizeFloat(FMath::RoundToDouble(After.CropRight * 1000.0) / 10.0, 0));
+	for (UEditableTextBox* Box : { CropLeft, CropTop, CropRight, CropBottom }) { Box->SetText(FText::FromString(TEXT("0"))); }
+	CropLeft->OnTextCommitted.Broadcast(CropLeft->GetText(), ETextCommit::OnEnter);
+	PC->GetActiveReferenceImage(After);
+	TestFalse(TEXT("zeros take the crop off"), After.HasCrop());
 	// Lock image: unticked, the controller has the picture unlocked; on another floor it is locked again.
 	Lock->SetIsChecked(false); Lock->OnCheckStateChanged.Broadcast(false);
 	TestTrue(TEXT("unticking Lock image unlocks it"), PC->IsReferenceImageUnlocked());
@@ -223,6 +243,73 @@ bool FReferenceImageUndoTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("one Undo takes the whole drag back"), PC->UndoInteriorEdit());
 	PC->GetActiveReferenceImage(Now);
 	TestTrue(TEXT("to where it began"), Now == Bigger);
+	return true;
+}
+
+// Crop of the reference image: the data (clamped, saved, back after a reload, one Undo step) and the drag of an edge handle.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FReferenceImageCropTest, "InNavi.Interior.ReferenceImageCrop", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FReferenceImageCropTest::RunTest(const FString& Parameters)
+{
+	// Normalize keeps a bit of the picture in each direction and drops what is no number.
+	FInteriorReferenceImage Raw;
+	Raw.Path = TEXT("a.png"); Raw.Width = 10.f;
+	Raw.CropLeft = 0.7f; Raw.CropRight = 0.7f; Raw.CropTop = -1.f; Raw.CropBottom = std::numeric_limits<float>::quiet_NaN();
+	TestTrue(TEXT("kept"), InteriorReferenceImage::Normalize(Raw));
+	TestTrue(TEXT("left and right leave at least the minimum"), Raw.CropLeft + Raw.CropRight <= 1.f - InteriorReferenceImage::MinVisibleFraction + 1e-4f && Raw.CropRight > 0.f);
+	TestTrue(TEXT("a negative or no-number crop is none"), Raw.CropTop == 0.f && Raw.CropBottom == 0.f);
+
+	// What is left after a crop is a box inside the whole picture, in its own axes.
+	FInteriorReferenceImage Picture;
+	Picture.Path = TEXT("a.png"); Picture.Center = FVector2D(100.0, 50.0); Picture.Width = 40.f;
+	const float Aspect = 2.f;	// 40 wide, 80 high: X from 80 to 120, Y from 10 to 90
+	FVector2D Min, Max;
+	UInteriorFloorPlanWidget::GetReferenceVisibleBounds(Picture, Aspect, Min, Max);
+	TestTrue(TEXT("without a crop it is the whole picture"), Min.Equals(FVector2D(80.0, 10.0), 1e-6) && Max.Equals(FVector2D(120.0, 90.0), 1e-6));
+	Picture.CropLeft = 0.25f; Picture.CropTop = 0.5f; Picture.CropRight = 0.f; Picture.CropBottom = 0.125f;
+	UInteriorFloorPlanWidget::GetReferenceVisibleBounds(Picture, Aspect, Min, Max);
+	TestTrue(TEXT("with a crop it is the part that is left"), Min.Equals(FVector2D(90.0, 50.0), 1e-6) && Max.Equals(FVector2D(120.0, 80.0), 1e-6));
+
+	// Dragging an edge handle: that side goes to where the pointer is; the others stay; a bit is always left.
+	Picture = FInteriorReferenceImage();
+	Picture.Path = TEXT("a.png"); Picture.Center = FVector2D(100.0, 50.0); Picture.Width = 40.f;
+	FInteriorReferenceImage Dragged = UInteriorFloorPlanWidget::CropReferenceImageEdge(Picture, Aspect, 0, FVector2D(90.0, 0.0));
+	TestTrue(TEXT("the left edge at a quarter of the width"), FMath::IsNearlyEqual(Dragged.CropLeft, 0.25f, 1e-4f) && Dragged.CropTop == 0.f && Dragged.CropRight == 0.f);
+	Dragged = UInteriorFloorPlanWidget::CropReferenceImageEdge(Dragged, Aspect, 2, FVector2D(110.0, 0.0));
+	TestTrue(TEXT("the right edge at three quarters"), FMath::IsNearlyEqual(Dragged.CropRight, 0.25f, 1e-4f) && FMath::IsNearlyEqual(Dragged.CropLeft, 0.25f, 1e-4f));
+	Dragged = UInteriorFloorPlanWidget::CropReferenceImageEdge(Dragged, Aspect, 1, FVector2D(100.0, 50.0));
+	TestTrue(TEXT("the top edge in the middle of the height"), FMath::IsNearlyEqual(Dragged.CropTop, 0.5f, 1e-4f));
+	Dragged = UInteriorFloorPlanWidget::CropReferenceImageEdge(Dragged, Aspect, 3, FVector2D(100.0, 0.0));
+	TestTrue(TEXT("dragged far past the other side it stops with a bit left"), Dragged.CropBottom + Dragged.CropTop <= 1.f - InteriorReferenceImage::MinVisibleFraction + 1e-4f);
+	Dragged = UInteriorFloorPlanWidget::CropReferenceImageEdge(Dragged, Aspect, 0, FVector2D(0.0, 0.0));
+	TestEqual(TEXT("dragged outwards past the picture the crop is none"), Dragged.CropLeft, 0.f);
+
+	// Saved with the floor and back after a reload; one Undo step; a cropped picture is not rebuilt with the rooms.
+	FNavigationSearchFixture F;
+	F.Interior->ClearLoadedInterior(); F.Generator->ClearAllBuildings();
+	F.Generator->CreateRectangleBuilding(TEXT("REC"), TEXT("REC"), {500,500}, 1000, 1000, 0, 2, 300);
+	F.Interior->LoadInteriorForBuilding(TEXT("REC"));
+	ANavPlayerController* PC = F.MakeController();
+	PC->SetActiveFloor(1);
+	if (!TestTrue(TEXT("a picture"), PC->ImportReferenceImage(WriteTinyPng(TEXT("ref_crop.png"))))) return false;
+	FInteriorReferenceImage Start;
+	PC->GetActiveReferenceImage(Start);
+	FInteriorReferenceImage Cropped = Start;
+	Cropped.CropLeft = 0.2f; Cropped.CropBottom = 0.3f;
+	TestTrue(TEXT("cropped"), PC->SetActiveReferenceImage(Cropped));
+	FInteriorReferenceImage Now;
+	PC->GetActiveReferenceImage(Now);
+	TestTrue(TEXT("the crop is kept"), Now == Cropped && Now.HasCrop());
+	TSharedPtr<FJsonObject> Saved = F.Interior->CaptureInteriorSnapshot();
+	F.Generator->SetInteriorDataForBuilding(TEXT("REC"), Saved);
+	F.Interior->LoadInteriorForBuilding(TEXT("REC"));
+	const FInteriorReferenceImage* Back = F.Interior->GetReferenceImage(1);
+	TestTrue(TEXT("and comes back after a reload"), Back && *Back == Cropped);
+	// A reload starts the history again: take the crop off and put it on once more, then one Undo takes it off.
+	TestTrue(TEXT("uncropped"), PC->SetActiveReferenceImage(Start));
+	TestTrue(TEXT("cropped again"), PC->SetActiveReferenceImage(Cropped));
+	TestTrue(TEXT("Undo takes the crop off in one step"), PC->UndoInteriorEdit());
+	PC->GetActiveReferenceImage(Now);
+	TestTrue(TEXT("to the picture as it was"), Now == Start && !Now.HasCrop());
 	return true;
 }
 

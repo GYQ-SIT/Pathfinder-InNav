@@ -299,11 +299,15 @@ floor (`utilities` in the project file) and come back when the project is opened
 The Floor panel has a **Reference image (PNG)** section for the floor being viewed: **Import PNG** opens the system file dialog (Windows), and the picture is shown under the 2D drawing,
 framed on the building (as wide as it, centred on it, half clear), so a scanned floor plan can be traced over. While the floor has an image, the dark floor of the ground floor is not drawn under it, so the picture
 is seen as it is. The section shows **Show image** (hide it without removing it), **Lock image** (below) and these fields, each applied on Enter: **Scale (%)** (100 is as wide as the building, where it starts; the height follows the
-picture), **Position (m)** (X and Y from the middle of the building; 0, 0 is the middle) and **Opacity** (5-100); **Remove** takes it off. A text that is not a number changes nothing. Every change is one Undo step.
+picture), **Position (m)** (X and Y from the middle of the building; 0, 0 is the middle), **Crop (%)** (L, R, T, B: how much is cut away from each side, 0 to 95; see below) and **Opacity** (5-100); **Remove** takes it off. A text that is not a number changes nothing. Every change is one Undo step.
 Undo and Redo of a picture only put the picture back: the rooms are not made again, and the boxes show the new numbers at once.
 
-**Lock image.** Ticked (the usual) the picture lies under the drawing, as clear as it was set, and the mouse does not touch it. Unticked, it is drawn on top of everything, half clear, with its outline and a handle at each corner:
-drag the picture to move it, drag a corner to scale it about its middle (the numbers follow when you let go). A whole drag is one Undo step. Tick it again, or go to another floor, and the picture goes back under the drawing at its own opacity.
+**Lock image.** Ticked (the usual) the picture lies under the drawing, as clear as it was set, and the mouse does not touch it. Unticked, it is drawn on top of everything, half clear, with its outline, a white handle at each corner and an orange handle in the middle of each edge:
+drag the picture to move it, drag a corner to scale it about its middle, drag an edge handle to crop that side (the numbers follow when you let go). A whole drag is one Undo step. Tick it again, or go to another floor, and the picture goes back under the drawing at its own opacity.
+
+**Crop.** A crop cuts away the edges of the picture (a scan with margins, a page with other drawings on it) so that only the part you trace over is drawn. It is only drawn that way: the file is never changed, the picture keeps its place, and **Scale** and **Position** still
+mean the whole picture (so cropping does not move what is left). Each side can be cut from 0 to 95 per cent, and at least 5 per cent of the picture is always left in each direction. While the image is unlocked the part that is cut away stays faintly visible, so it is seen what the crop takes off and
+the handle can be dragged back out. Crop is part of the image in the project file (`crop`: left, top, right, bottom as fractions) and one Undo step like the other changes.
 
 Each floor has its own image, at most one. It is a guide only: it never takes part in routes or checks, and is not in the 3D view. Only PNG files up to 32 MB are accepted. The project keeps the
 file's **path**, not the picture (`referenceImage` in the project file), so on another computer the floor draws without it until the file is put at the same path.
