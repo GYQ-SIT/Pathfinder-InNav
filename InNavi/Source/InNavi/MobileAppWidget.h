@@ -157,7 +157,9 @@ public:
 	UMobileRoutePageWidget* GetRoutePage() const { return RoutePage; }
 	UMobileNavigatePageWidget* GetNavigatePage() const { return NavigatePage; }
 	UMobileMapWidget* GetMapView() const { return MapView; }
+	// Where the phone's position comes from: the device's GPS on Android by default, a fake one in the tests (InNavi.Mobile.Gps).
 	void SetLocationSource(TUniquePtr<IMobileLocationSource> InSource);
+	// Reads the location about once a second and moves the blue dot. The tick calls it; the tests call it to step time without a frame.
 	void UpdateLocation(float DeltaTime);
 	UMobileExplorePageWidget* GetExplorePage() const { return ExplorePage; }
 	UMobileSearchOverlayWidget* GetSearchOverlay() const { return SearchOverlay; }
