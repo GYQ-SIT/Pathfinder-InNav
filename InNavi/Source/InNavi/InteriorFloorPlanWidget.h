@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "Styling/SlateBrush.h"
+#include "InteriorReferenceImage.h"
 #include "InteriorFloorPlanWidget.generated.h"
 
 class AInteriorGenerator;
@@ -34,6 +35,11 @@ public:
 	// Returns (0,0) if nothing is loaded.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	FVector2D LocalPositionToFootprintPoint(FVector2D LocalPosition, FVector2D WidgetSize) const;
+	// A press on a corner of the unlocked picture starts a scale, a press on its body a move; false when the press is on neither (or the picture is locked).
+	bool TryBeginReferenceDrag(const FVector2D& LocalPosition, const FVector2D& WidgetSize);
+	void UpdateReferenceDrag(const FVector2D& LocalPosition, const FVector2D& WidgetSize);
+	void EndReferenceDrag();
+	FVector2D FootprintPointToLocalPosition(const FVector2D& FootprintPoint, const FVector2D& WidgetSize) const;
 	void ResetView() { PanOffset = FVector2D::ZeroVector; ZoomMultiplier = 1.f; }
 	void FinishEditDrag();
 
@@ -258,6 +264,15 @@ private:
 	mutable FSlateBrush ReferenceImageBrush;
 	mutable FString ReferenceImagePath;
 	mutable FString ReferenceImageFailedPath;
+	// The unlocked picture moved or scaled with the mouse (see PlayerController->IsReferenceImageUnlocked): where the drag began, and the picture as it was.
+	enum class EReferenceDrag : uint8 { None, Move, Scale };
+	EReferenceDrag ReferenceDrag = EReferenceDrag::None;
+	FVector2D ReferenceDragStartPoint = FVector2D::ZeroVector;
+	double ReferenceDragStartRadius = 1.0;
+	FInteriorReferenceImage ReferenceDragStartImage;
+	// The picture of the floor as it is drawn: its middle and half its size, in footprint units; false when none is shown (or not read yet).
+	bool GetReferenceImageRect(FVector2D& OutCentre, FVector2D& OutHalfSize) const;
+
 
 	// Connector markers (elevator/stairs/escalator - see NativePaint) are drawn as these icons
 	// instead of a plain colored box. Loaded once in NativeConstruct from the design team's tool

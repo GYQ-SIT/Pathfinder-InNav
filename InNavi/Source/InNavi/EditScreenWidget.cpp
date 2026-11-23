@@ -1,4 +1,5 @@
 #include "EditScreenWidget.h"
+#include "UiToolTip.h"
 #include "EditorIcons.h"
 
 #include "AudioFileRowWidget.h"
@@ -150,7 +151,7 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		// Save icon button, left of File - see UInteriorScreenWidget::OnSaveClicked's own comment
 		// (mirrors it exactly, just without that class's MakeToolTipWidget helper).
 		SaveButton = StartStyle::SaveBarButton(WidgetTree, SaveIndicatorOuter, SaveIndicatorCore, EditSaveButtonWidth - 12.f);
-		SaveButton->SetToolTipText(FText::FromString(TEXT("Save [Ctrl+S]")));
+		SaveButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Save [Ctrl+S]")));
 		SaveButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnSaveClicked);
 		SaveButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::PlayButtonClickSound);
 		if (UHorizontalBoxSlot* SaveBarSlot = MenuBarRow->AddChildToHorizontalBox(SaveButton))
@@ -345,13 +346,13 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 		UVerticalBox* CameraDropdownStack = Cast<UVerticalBox>(CameraMenuDropdown->GetContent());
 		ResetCameraViewButton = AddDropdownButtonRow(CameraDropdownStack, TEXT("Btn_ResetCameraView"), TEXT("Reset"));
 		ResetCameraViewButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnResetCameraViewClicked);
-		ResetCameraViewButton->SetToolTipText(FText::FromString(TEXT("Reset camera to the default view")));
+		ResetCameraViewButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Reset camera to the default view")));
 
 		// Typed speed entry - see OnCameraSpeedTextCommitted. Shows/accepts the raw speed value directly (up to
 		// 6 digits at ExteriorCameraMaxSpeed=300000).
 		CameraSpeedTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_CameraSpeed"));
 		CameraSpeedTextBox->SetJustification(ETextJustify::Center);
-		CameraSpeedTextBox->SetToolTipText(FText::FromString(TEXT("Camera Speed (type a value, then press Enter or click away)")));
+		CameraSpeedTextBox->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Camera Speed (type a value, then press Enter or click away)")));
 		CameraSpeedTextBox->OnTextCommitted.AddUniqueDynamic(this, &UEditScreenWidget::OnCameraSpeedTextCommitted);
 		ApplyStandardFont(CameraSpeedTextBox);
 		CameraSpeedTextBox->SetWidgetStyle(StartStyle::Field(13.f));
@@ -363,13 +364,13 @@ TSharedRef<SWidget> UEditScreenWidget::RebuildWidget()
 
 		IncreaseCameraSpeedButton = AddDropdownButtonRow(CameraDropdownStack, TEXT("Btn_IncreaseCameraSpeed"), TEXT("+"));
 		IncreaseCameraSpeedButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnIncreaseCameraSpeedClicked);
-		IncreaseCameraSpeedButton->SetToolTipText(FText::FromString(TEXT("Increase Camera Speed")));
+		IncreaseCameraSpeedButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Increase Camera Speed")));
 		DecreaseCameraSpeedButton = AddDropdownButtonRow(CameraDropdownStack, TEXT("Btn_DecreaseCameraSpeed"), TEXT("-"));
 		DecreaseCameraSpeedButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnDecreaseCameraSpeedClicked);
-		DecreaseCameraSpeedButton->SetToolTipText(FText::FromString(TEXT("Decrease Camera Speed")));
+		DecreaseCameraSpeedButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Decrease Camera Speed")));
 		SetDefaultViewButton = AddDropdownButtonRow(CameraDropdownStack, TEXT("Btn_SetDefaultView"), TEXT("Set Default"));
 		SetDefaultViewButton->OnClicked.AddUniqueDynamic(this, &UEditScreenWidget::OnSetDefaultViewClicked);
-		SetDefaultViewButton->SetToolTipText(FText::FromString(TEXT("Save the current camera view as the default")));
+		SetDefaultViewButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Save the current camera view as the default")));
 
 		MenuClickCatcher = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("MenuClickCatcher"));
 		MenuClickCatcher->SetBrushColor(FLinearColor(0.f, 0.f, 0.f, 0.f));

@@ -430,6 +430,8 @@ private:
 	UFUNCTION()
 	void OnReferenceShownChanged(bool bIsChecked);
 	UFUNCTION()
+	void OnReferenceLockChanged(bool bIsChecked);
+	UFUNCTION()
 	void OnReferenceFieldCommitted(const FText& Text, ETextCommit::Type CommitType);
 	void RefreshReferenceImagePanel();
 	bool bRefreshingReference = false;
@@ -896,11 +898,14 @@ private:
 	UButton* RemoveReferenceButton = nullptr;
 	UPROPERTY()
 	UCheckBox* ReferenceShownCheckBox = nullptr;
-	// Width, centre X, centre Y (metres) and opacity (per cent), shown only while the floor has an image.
+	// Locked (ticked, the usual): the image lies under the drawing. Unticked: it is on top, half clear, and can be moved and scaled with the mouse.
+	UPROPERTY()
+	UCheckBox* ReferenceLockCheckBox = nullptr;
+	// Scale (per cent of the building's width), Position (X and Y in metres from the middle of the building) and opacity (per cent), shown only while the floor has an image.
 	UPROPERTY()
 	UVerticalBox* ReferenceFieldsBox = nullptr;
 	UPROPERTY()
-	UEditableTextBox* ReferenceWidthBox = nullptr;
+	UEditableTextBox* ReferenceScaleBox = nullptr;
 	UPROPERTY()
 	UEditableTextBox* ReferenceXBox = nullptr;
 	UPROPERTY()

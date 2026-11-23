@@ -13,8 +13,11 @@ class UWidgetTree;
 // calls this). Give the result to UWidget::SetToolTip; the widgets are constructed in Tree.
 namespace UiToolTip
 {
-	// The card is as wide as its text up to this (in pixels); a longer text wraps there, centred.
-	inline constexpr float MaxWidth = 640.f;
+	// The card is at least MinWidth wide (a short hint like "Redo [Ctrl+Y]" is not a small label of its own size) and as wide as its text up to MaxWidth, in
+	// pixels; a longer text wraps there, centred. The text is FontSize, small: a hint is a note, not a heading.
+	inline constexpr float MinWidth = 120.f;
+	inline constexpr float MaxWidth = 280.f;
+	inline constexpr int32 FontSize = 12;
 
 	INNAVI_API UWidget* Make(UWidgetTree* Tree, const FString& Label);
 }

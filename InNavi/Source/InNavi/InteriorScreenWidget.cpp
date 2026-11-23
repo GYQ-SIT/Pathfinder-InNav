@@ -516,6 +516,17 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 			ShownLabelSlot->SetPadding(FMargin(6.f * StartStyle::DesignToUi, 0.f, 0.f, 0.f));
 			ShownLabelSlot->SetVerticalAlignment(VAlign_Center);
 			ReferenceFieldsBox->AddChildToVerticalBox(ShownRow)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f * StartStyle::DesignToUi));
+			UHorizontalBox* LockRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ReferenceLockRow"));
+			ReferenceLockCheckBox = WidgetTree->ConstructWidget<UCheckBox>(UCheckBox::StaticClass(), TEXT("Chk_ReferenceLock"));
+			StartStyle::DarkCheckBox(ReferenceLockCheckBox);
+			ReferenceLockCheckBox->SetIsChecked(true);
+			ReferenceLockCheckBox->SetToolTip(MakeToolTipWidget(TEXT("Lock image: ticked, the image lies under the drawing and the mouse does not touch it. Unticked, the image is on top, half clear: drag it to move it, drag a corner to scale it. Tick it again when it is in place.")));
+			ReferenceLockCheckBox->OnCheckStateChanged.AddUniqueDynamic(this, &UInteriorScreenWidget::OnReferenceLockChanged);
+			LockRow->AddChildToHorizontalBox(ReferenceLockCheckBox)->SetVerticalAlignment(VAlign_Center);
+			UHorizontalBoxSlot* LockLabelSlot = LockRow->AddChildToHorizontalBox(StartStyle::Text(WidgetTree, TEXT("Txt_ReferenceLock"), TEXT("Lock image"), 12.f, StartStyle::Rgb(214, 226, 242)));
+			LockLabelSlot->SetPadding(FMargin(6.f * StartStyle::DesignToUi, 0.f, 0.f, 0.f));
+			LockLabelSlot->SetVerticalAlignment(VAlign_Center);
+			ReferenceFieldsBox->AddChildToVerticalBox(LockRow)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f * StartStyle::DesignToUi));
 			const auto AddReferenceField = [this](UEditableTextBox*& OutBox, const TCHAR* Name, const TCHAR* Caption, const TCHAR* Hint)
 			{
 				UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), FName(FString(Name) + TEXT("Row")));
@@ -530,9 +541,32 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 				Row->AddChildToHorizontalBox(OutBox)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 				ReferenceFieldsBox->AddChildToVerticalBox(Row)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f * StartStyle::DesignToUi));
 			};
-			AddReferenceField(ReferenceWidthBox, TEXT("Edt_ReferenceWidth"), TEXT("Width (m)"), TEXT("How wide the picture is, in metres; its height follows its proportions. Press Enter to apply."));
-			AddReferenceField(ReferenceXBox, TEXT("Edt_ReferenceX"), TEXT("Centre X (m)"), TEXT("Where the middle of the picture is, along X, in metres. Press Enter to apply."));
-			AddReferenceField(ReferenceYBox, TEXT("Edt_ReferenceY"), TEXT("Centre Y (m)"), TEXT("Where the middle of the picture is, along Y, in metres. Press Enter to apply."));
+			AddReferenceField(ReferenceScaleBox, TEXT("Edt_ReferenceScale"), TEXT("Scale (%)"), TEXT("How big the picture is: 100 is as wide as the building, where it was put when imported; its height follows its proportions. Press Enter to apply."));
+			// Position, as in a transform: one row, X and Y side by side, in metres from the middle of the building ((0, 0) is the middle).
+			{
+				// The caption on a line of its own and the two boxes under it: the panel is narrow, and a caption beside them left the boxes no room.
+				UVerticalBox* PositionBlock = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("ReferencePositionBlock"));
+				PositionBlock->AddChildToVerticalBox(StartStyle::Text(WidgetTree, TEXT("Txt_ReferencePosition"), TEXT("Position (m)"), 12.f, StartStyle::Rgb(150, 172, 202), true))->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f * StartStyle::DesignToUi));
+				UHorizontalBox* PositionRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("ReferencePositionRow"));
+				PositionBlock->AddChildToVerticalBox(PositionRow);
+				const auto AddPositionBox = [this, PositionRow](UEditableTextBox*& OutBox, const TCHAR* Name, const TCHAR* Letter, const TCHAR* Hint)
+				{
+					UHorizontalBoxSlot* LetterSlot = PositionRow->AddChildToHorizontalBox(StartStyle::Text(WidgetTree, FString(Name) + TEXT("Letter"), Letter, 12.f, StartStyle::Rgb(150, 172, 202), true));
+					LetterSlot->SetVerticalAlignment(VAlign_Center);
+					LetterSlot->SetPadding(FMargin(0.f, 0.f, 4.f * StartStyle::DesignToUi, 0.f));
+					OutBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), Name);
+					OutBox->SetToolTip(MakeToolTipWidget(Hint));
+					OutBox->OnTextCommitted.AddUniqueDynamic(this, &UInteriorScreenWidget::OnReferenceFieldCommitted);
+					ApplyStandardFont(OutBox);
+					OutBox->SetWidgetStyle(StartStyle::Field(13.f));
+					UHorizontalBoxSlot* BoxSlot = PositionRow->AddChildToHorizontalBox(OutBox);
+					BoxSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+					BoxSlot->SetPadding(FMargin(0.f, 0.f, 6.f * StartStyle::DesignToUi, 0.f));
+				};
+				AddPositionBox(ReferenceXBox, TEXT("Edt_ReferenceX"), TEXT("X"), TEXT("Where the middle of the picture is along X, in metres from the middle of the building. 0 is the middle. Press Enter to apply."));
+				AddPositionBox(ReferenceYBox, TEXT("Edt_ReferenceY"), TEXT("Y"), TEXT("Where the middle of the picture is along Y, in metres from the middle of the building. 0 is the middle. Press Enter to apply."));
+				ReferenceFieldsBox->AddChildToVerticalBox(PositionBlock)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f * StartStyle::DesignToUi));
+			}
 			AddReferenceField(ReferenceOpacityBox, TEXT("Edt_ReferenceOpacity"), TEXT("Opacity (%)"), TEXT("5 to 100. Press Enter to apply."));
 			ReferenceFieldsBox->SetVisibility(ESlateVisibility::Collapsed);
 			FloorStack->AddChildToVerticalBox(ReferenceFieldsBox)->SetPadding(FMargin(0.f, 0.f, 0.f, 6.f * StartStyle::DesignToUi));
@@ -815,12 +849,12 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 		UVerticalBox* CameraDropdownStack = Cast<UVerticalBox>(CameraMenuDropdown->GetContent());
 		ResetView3DButton = AddDropdownButtonRow(CameraDropdownStack, TEXT("Btn_ResetView3D"), TEXT("Reset"));
 		ResetView3DButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnResetView3DClicked);
-		ResetView3DButton->SetToolTipText(FText::FromString(TEXT("Reset View")));
+		ResetView3DButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Reset View")));
 
 		// Typed speed entry - see OnCameraSpeedTextCommitted.
 		CameraSpeedTextBox = WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), TEXT("Txt_CameraSpeed"));
 		CameraSpeedTextBox->SetJustification(ETextJustify::Center);
-		CameraSpeedTextBox->SetToolTipText(FText::FromString(TEXT("Camera Speed (type a value, then press Enter or click away)")));
+		CameraSpeedTextBox->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Camera Speed (type a value, then press Enter or click away)")));
 		CameraSpeedTextBox->OnTextCommitted.AddUniqueDynamic(this, &UInteriorScreenWidget::OnCameraSpeedTextCommitted);
 		ApplyStandardFont(CameraSpeedTextBox);
 		CameraSpeedTextBox->SetWidgetStyle(StartStyle::Field(13.f));
@@ -832,10 +866,10 @@ TSharedRef<SWidget> UInteriorScreenWidget::RebuildWidget()
 
 		IncreaseSpeedButton = AddDropdownButtonRow(CameraDropdownStack, TEXT("Btn_IncreaseSpeed"), TEXT("+"));
 		IncreaseSpeedButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnIncreaseSpeedClicked);
-		IncreaseSpeedButton->SetToolTipText(FText::FromString(TEXT("Increase Camera Speed")));
+		IncreaseSpeedButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Increase Camera Speed")));
 		DecreaseSpeedButton = AddDropdownButtonRow(CameraDropdownStack, TEXT("Btn_DecreaseSpeed"), TEXT("-"));
 		DecreaseSpeedButton->OnClicked.AddUniqueDynamic(this, &UInteriorScreenWidget::OnDecreaseSpeedClicked);
-		DecreaseSpeedButton->SetToolTipText(FText::FromString(TEXT("Decrease Camera Speed")));
+		DecreaseSpeedButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Decrease Camera Speed")));
 		// Full-screen, fully transparent, Collapsed by default - see the comment on
 		// OnMenuClickCatcherMouseButtonDown for why this is how "click elsewhere closes the dropdown"
 		// works. Z=5 sits above every dock panel/handle/splitter (2-4) but below the menu bar and
@@ -2201,6 +2235,8 @@ void UInteriorScreenWidget::HandleActiveFloorChanged()
 
 void UInteriorScreenWidget::HandleInteriorContentChanged()
 {
+	// After an Undo or Redo (and a drag of the picture) the boxes of the reference image show what is there now.
+	RefreshReferenceImagePanel();
 	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) HandleInspectionModeChanged(PC->IsInteriorInspectionEnabled());
 	RefreshLayersList();
 	RefreshNavRoomDropdowns();
@@ -2288,13 +2324,13 @@ void UInteriorScreenWidget::RefreshInspectionStyleButtons()
 	{
 		InspectionOrbitButton->SetIsEnabled(PC->IsInteriorInspectionEnabled());
 		InspectionOrbitButton->SetStyle(Button_Style_Segment(!bGrab));
-		InspectionOrbitButton->SetToolTipText(FText::FromString(TEXT("Orbit: turning the model is like moving the camera around it, so it turns the other way from the mouse.")));
+		InspectionOrbitButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Orbit: turning the model is like moving the camera around it, so it turns the other way from the mouse.")));
 	}
 	if (InspectionGrabButton)
 	{
 		InspectionGrabButton->SetIsEnabled(PC->IsInteriorInspectionEnabled());
 		InspectionGrabButton->SetStyle(Button_Style_Segment(bGrab));
-		InspectionGrabButton->SetToolTipText(FText::FromString(TEXT("Grab: the model follows the mouse when you turn it, as if you were holding it in your hand.")));
+		InspectionGrabButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Grab: the model follows the mouse when you turn it, as if you were holding it in your hand.")));
 	}
 }
 
@@ -2323,7 +2359,7 @@ void UInteriorScreenWidget::HandleInspectionModeChanged(bool bEnabled)
 	{
 		InspectionToggleButton->SetIsEnabled(bEnabled || PC->CanInspectBuilding());
 		InspectionToggleButton->SetStyle(Button_Style_Segment(bEnabled));
-		InspectionToggleButton->SetToolTipText(FText::FromString(PC->CanInspectBuilding()
+		InspectionToggleButton->SetToolTip(UiToolTip::Make(WidgetTree, PC->CanInspectBuilding()
 			? TEXT("Isolate: hide the bottom platform and the surroundings and look at the model on its own. Drag with the left button to move it, with the right button to turn it; scroll to zoom. Click again to restore the view.")
 			: TEXT("This building has no interior floor to look at.")));
 	}
@@ -3179,13 +3215,18 @@ void UInteriorScreenWidget::RefreshReferenceImagePanel()
 	const double ToMetres = PC->GetFootprintUnitCm() / 100.0;
 	TGuardValue<bool> Guard(bRefreshingReference, true);
 	if (ReferenceShownCheckBox) ReferenceShownCheckBox->SetIsChecked(Image.bVisible);
+	if (ReferenceLockCheckBox) ReferenceLockCheckBox->SetIsChecked(!PC->IsReferenceImageUnlocked());
 	const auto Show = [](UEditableTextBox* Box, double Value)
 	{
 		if (Box && !Box->HasKeyboardFocus()) Box->SetText(FText::FromString(FString::Printf(TEXT("%.2f"), Value)));
 	};
-	Show(ReferenceWidthBox, Image.Width * ToMetres);
-	Show(ReferenceXBox, Image.Center.X * ToMetres);
-	Show(ReferenceYBox, Image.Center.Y * ToMetres);
+	// Scale and position are relative to the building: 100 per cent is as wide as its outline, (0, 0) its middle.
+	FVector2D FrameCentre = FVector2D::ZeroVector;
+	double FrameWidth = 1.0;
+	PC->GetActiveReferenceFrame(FrameCentre, FrameWidth);
+	Show(ReferenceScaleBox, Image.Width / FrameWidth * 100.0);
+	Show(ReferenceXBox, (Image.Center.X - FrameCentre.X) * ToMetres);
+	Show(ReferenceYBox, (Image.Center.Y - FrameCentre.Y) * ToMetres);
 	Show(ReferenceOpacityBox, Image.Opacity * 100.0);
 }
 
@@ -3205,6 +3246,12 @@ void UInteriorScreenWidget::OnRemoveReferenceClicked()
 		PC->RemoveActiveReferenceImage();
 		RefreshReferenceImagePanel();
 	}
+}
+
+void UInteriorScreenWidget::OnReferenceLockChanged(bool bIsChecked)
+{
+	if (bRefreshingReference) return;
+	if (ANavPlayerController* PC = GetOwningPlayer<ANavPlayerController>()) PC->SetReferenceImageUnlocked(!bIsChecked);
 }
 
 void UInteriorScreenWidget::OnReferenceShownChanged(bool bIsChecked)
@@ -3233,10 +3280,13 @@ void UInteriorScreenWidget::OnReferenceFieldCommitted(const FText& Text, ETextCo
 		Out = FCString::Atod(*Typed);
 		return FMath::IsFinite(Out);
 	};
+	FVector2D FrameCentre = FVector2D::ZeroVector;
+	double FrameWidth = 1.0;
+	PC->GetActiveReferenceFrame(FrameCentre, FrameWidth);
 	double Value = 0;
-	if (Read(ReferenceWidthBox, Value) && Value > 0.0) Image.Width = static_cast<float>(Value * ToUnits);
-	if (Read(ReferenceXBox, Value)) Image.Center.X = Value * ToUnits;
-	if (Read(ReferenceYBox, Value)) Image.Center.Y = Value * ToUnits;
+	if (Read(ReferenceScaleBox, Value) && Value > 0.0) Image.Width = static_cast<float>(Value / 100.0 * FrameWidth);
+	if (Read(ReferenceXBox, Value)) Image.Center.X = FrameCentre.X + Value * ToUnits;
+	if (Read(ReferenceYBox, Value)) Image.Center.Y = FrameCentre.Y + Value * ToUnits;
 	if (Read(ReferenceOpacityBox, Value)) Image.Opacity = static_cast<float>(Value / 100.0);
 	PC->SetActiveReferenceImage(Image);
 	// The boxes show what was kept (an opacity out of range comes back corrected).

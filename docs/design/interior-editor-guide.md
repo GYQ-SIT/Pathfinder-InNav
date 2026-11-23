@@ -297,9 +297,13 @@ floor (`utilities` in the project file) and come back when the project is opened
 ### Reference image (a PNG under the plan)
 
 The Floor panel has a **Reference image (PNG)** section for the floor being viewed: **Import PNG** opens the system file dialog (Windows), and the picture is shown under the 2D drawing,
-framed on the building (as wide as it, centred on it, half clear), so a scanned floor plan can be traced over. Once there is one, the section shows **Show image** (hide it without removing it) and four
-fields in metres and per cent - **Width** (the height follows the picture), **Centre X**, **Centre Y** and **Opacity** (5-100) - each applied on Enter; **Remove** takes it off. A text that is not a number
-changes nothing. Every change is one Undo step.
+framed on the building (as wide as it, centred on it, half clear), so a scanned floor plan can be traced over. While the floor has an image, the dark floor of the ground floor is not drawn under it, so the picture
+is seen as it is. The section shows **Show image** (hide it without removing it), **Lock image** (below) and these fields, each applied on Enter: **Scale (%)** (100 is as wide as the building, where it starts; the height follows the
+picture), **Position (m)** (X and Y from the middle of the building; 0, 0 is the middle) and **Opacity** (5-100); **Remove** takes it off. A text that is not a number changes nothing. Every change is one Undo step.
+Undo and Redo of a picture only put the picture back: the rooms are not made again, and the boxes show the new numbers at once.
+
+**Lock image.** Ticked (the usual) the picture lies under the drawing, as clear as it was set, and the mouse does not touch it. Unticked, it is drawn on top of everything, half clear, with its outline and a handle at each corner:
+drag the picture to move it, drag a corner to scale it about its middle (the numbers follow when you let go). A whole drag is one Undo step. Tick it again, or go to another floor, and the picture goes back under the drawing at its own opacity.
 
 Each floor has its own image, at most one. It is a guide only: it never takes part in routes or checks, and is not in the 3D view. Only PNG files up to 32 MB are accepted. The project keeps the
 file's **path**, not the picture (`referenceImage` in the project file), so on another computer the floor draws without it until the file is put at the same path.

@@ -5,6 +5,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Overlay.h"
+#include "Components/SizeBox.h"
 #include "Components/OverlaySlot.h"
 #include "Components/TextBlock.h"
 
@@ -23,12 +24,17 @@ UWidget* UiToolTip::Make(UWidgetTree* Tree, const FString& Label)
 	TooltipText->SetJustification(ETextJustify::Center);
 	FSlateFontInfo TooltipFont = TooltipText->GetFont();
 	TooltipFont.TypefaceFontName = TEXT("Regular"); // the default font style otherwise renders bold
+	TooltipFont.Size = FontSize;
 	TooltipText->SetFont(TooltipFont);
 
 	UBorder* TooltipBorder = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
 	TooltipBorder->SetBrushColor(FLinearColor::White);
-	TooltipBorder->SetPadding(FMargin(10.f, 6.f));
-	TooltipBorder->SetContent(TooltipText);
+	TooltipBorder->SetPadding(FMargin(8.f, 5.f));
+	// At least MinWidth wide: the text inside is centred in it.
+	USizeBox* MinimumWidth = Tree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+	MinimumWidth->SetMinDesiredWidth(MinWidth);
+	MinimumWidth->SetContent(TooltipText);
+	TooltipBorder->SetContent(MinimumWidth);
 
 	// UWidget::SetToolTip builds its SToolTip with no border/background of its own
 	// (BorderImage(nullptr)), unlike the engine's native default tooltip (SetToolTipText),

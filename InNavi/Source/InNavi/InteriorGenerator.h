@@ -223,6 +223,10 @@ public:
 	// One Undo step.
 	bool SetReferenceImage(int32 Level, FInteriorReferenceImage Image);
 	bool RemoveReferenceImage(int32 Level);
+	// A picture being dragged or scaled with the mouse: the image changes at once, with no Undo step each time (a step per mouse move would be hundreds).
+	// CommitReferenceImageEdit makes the one step when the drag ends.
+	bool PreviewReferenceImage(int32 Level, FInteriorReferenceImage Image);
+	void CommitReferenceImageEdit();
 
 	// PAT-200: a copy of a room or wall on another floor, in the same place: same outline, doors and windows, type, tags and flags. It gets its own
 	// id and a name made unique the way a pasted room's is ("Lift lobby (1)"). Refused with the reason in OutError when it does not fit there (another
@@ -588,7 +592,13 @@ private:
 		// An edit to another building is recorded on the transition into this snapshot.
 		FString EntranceOwnerId;
 		TSharedPtr<FJsonObject> RemovedEntrance;
+		// The edit that made this snapshot changed only the reference pictures: Undo and Redo then put the pictures back and leave the rooms alone (rebuilding every
+		// room of the building for a picture's size made them lag).
+		bool bReferenceImagesOnly = false;
 	};
+	bool bRecordingReferenceImageEdit = false;
+	// The reference picture of a floor object of an interior JSON; false when it has none or one that cannot be kept.
+	static bool ReadReferenceImageOfFloor(const FJsonObject& FloorObject, FInteriorReferenceImage& Out);
 	void RecordHistorySnapshotInternal(const FString& EntranceOwnerId, TSharedPtr<FJsonObject> RemovedEntrance);
 	bool RestoreHistorySnapshot(int32 TargetIndex);
 	TArray<FInteriorHistorySnapshot> InteriorHistory;

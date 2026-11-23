@@ -1789,6 +1789,40 @@ bool ANavPlayerController::SetActiveReferenceImage(const FInteriorReferenceImage
 	return true;
 }
 
+bool ANavPlayerController::PreviewActiveReferenceImage(const FInteriorReferenceImage& Image)
+{
+	if (bInteriorInspectionEnabled || !InteriorGen) return false;
+	if (!InteriorGen->PreviewReferenceImage(InteriorGen->GetActiveFloor(), Image)) return false;
+	bHasUnsavedChanges = true;
+	return true;
+}
+
+void ANavPlayerController::CommitActiveReferenceImage()
+{
+	if (bInteriorInspectionEnabled || !InteriorGen) return;
+	InteriorGen->CommitReferenceImageEdit();
+	bHasUnsavedChanges = true;
+	OnInteriorContentChanged.Broadcast();
+}
+
+bool ANavPlayerController::GetActiveReferenceFrame(FVector2D& OutCentre, double& OutWidth) const
+{
+	const APolyBuilding* Building = (Generator && InteriorGen) ? Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()) : nullptr;
+	if (!Building) return false;
+	const FBox2D Bounds(Building->GetFootprint());
+	if (!Bounds.bIsValid) return false;
+	OutCentre = Bounds.GetCenter();
+	OutWidth = FMath::Max(1.0, Bounds.GetSize().X);
+	return true;
+}
+
+void ANavPlayerController::SetReferenceImageUnlocked(bool bUnlocked)
+{
+	if (bReferenceImageUnlocked == bUnlocked) return;
+	bReferenceImageUnlocked = bUnlocked;
+	OnInteriorContentChanged.Broadcast();
+}
+
 bool ANavPlayerController::RemoveActiveReferenceImage()
 {
 	if (bInteriorInspectionEnabled || !InteriorGen) return false;
@@ -5591,6 +5625,8 @@ bool ANavPlayerController::UndoInteriorEdit()
 		if (NavigationPanel) NavigationPanel->NotifyInteriorChanged();
 		SelectRoom(FString());
 		bHasUnsavedChanges = true;
+		// The panels show what is now there (the picture's size and place did not come back into their boxes until the view was left and entered again).
+		OnInteriorContentChanged.Broadcast();
 		return true;
 	}
 	return false;
@@ -5604,6 +5640,7 @@ bool ANavPlayerController::RedoInteriorEdit()
 		if (NavigationPanel) NavigationPanel->NotifyInteriorChanged();
 		SelectRoom(FString());
 		bHasUnsavedChanges = true;
+		OnInteriorContentChanged.Broadcast();
 		return true;
 	}
 	return false;
@@ -5941,6 +5978,8 @@ void ANavPlayerController::SetActiveFloor(int32 Level)
 
 	// A selection of several rooms belongs to the floor it was made on; it would otherwise go on, out of sight, on another floor.
 	if (IsMultiSelection() && InteriorGen->GetActiveFloor() != Level) SetRoomSelection(TArray<FString>());
+	// The picture of this floor is locked again on another floor: unlocked, it is on top of everything and takes the mouse.
+	if (InteriorGen->GetActiveFloor() != Level) bReferenceImageUnlocked = false;
 	InteriorGen->SetActiveFloor(Level);
 	RepositionCameraToActiveFloor();
 	// A selected connector's marker is a separate actor per floor (see
