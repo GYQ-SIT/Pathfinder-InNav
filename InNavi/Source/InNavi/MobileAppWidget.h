@@ -25,6 +25,7 @@ class UMobilePlacePageWidget;
 class UMobileRoutePageWidget;
 class UMobileNavigatePageWidget;
 class UMobileMapWidget;
+class UMobileGpsMarkerWidget;
 class UMobileExplorePageWidget;
 class UMobileSavedPageWidget;
 class UMobileProfilePageWidget;
@@ -380,6 +381,9 @@ private:
 	UMobileNavigatePageWidget* NavigatePage = nullptr;
 	UPROPERTY()
 	UMobileMapWidget* MapView = nullptr;
+	// The GPS dot, a layer above the map.
+	UPROPERTY()
+	UMobileGpsMarkerWidget* GpsMarker = nullptr;
 
 	TUniquePtr<IMobileLocationSource> LocationSource;
 	float LocationPollSeconds = 0.f;

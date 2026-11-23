@@ -110,6 +110,12 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		UCanvasPanelSlot* MapViewSlot = Phone->AddChildToCanvas(MapView);
 		MapViewSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
 		MapViewSlot->SetOffsets(FMargin(0.f));
+		// The GPS dot is a layer of its own above the map, as in a map app: its turning does not touch the map's picture.
+		GpsMarker = CreateWidget<UMobileGpsMarkerWidget>(this, UMobileGpsMarkerWidget::StaticClass());
+		GpsMarker->SetMap(MapView);
+		UCanvasPanelSlot* GpsMarkerSlot = Phone->AddChildToCanvas(GpsMarker);
+		GpsMarkerSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
+		GpsMarkerSlot->SetOffsets(FMargin(0.f));
 
 		// The top row of the map, as in the prototype: Zoom out (for a campus) and 2D | 3D, at the right. The title is a label at the bottom left (below).
 		TopBarBorder = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("TopBar"));
@@ -1060,6 +1066,10 @@ void UMobileAppWidget::PositionSheet()
 		// as in the prototype, and is not shown while the sheet is open to its top.
 		MapView->SetFitInsets(HeaderTotal + TopRowTop + TopRowHeight + 4.0, TabTotal + SheetHeight + ControlsGap + ControlsHeight + 8.0);
 		MapView->SetVisibility(bOpen ? ESlateVisibility::Hidden : ESlateVisibility::Visible);
+		if (GpsMarker)
+		{
+			GpsMarker->SetVisibility(bOpen ? ESlateVisibility::Hidden : ESlateVisibility::HitTestInvisible);
+		}
 	}
 	ApplyMinimized();
 	SheetBorder->SetVisibility(bMapPage ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
@@ -2115,6 +2125,7 @@ void UMobileAppWidget::UpdateLocation(float DeltaTime)
 	{
 		HeadingPollSeconds = 0.1f;
 		MapView->SetGpsHeading(LocationSource->ReadHeading());
+		MapView->FollowGps();
 	}
 	LocationPollSeconds -= DeltaTime;
 	if (LocationPollSeconds <= 0.f)
@@ -2142,12 +2153,14 @@ void UMobileAppWidget::LocateMe()
 		{
 			bLevelPopupOpen = false;
 			MapView->CenterOnGps();
+			MapView->SetFollowHeading(true);
 			return;
 		}
 		bMapOverview = true;
 		bLevelPopupOpen = false;
 		ApplyMap();
 		MapView->CenterOnGps();
+		MapView->SetFollowHeading(true);
 		return;
 	}
 	if (!MyLocationBuildingId.IsEmpty())
@@ -2191,6 +2204,7 @@ void UMobileAppWidget::OnCompassClicked()
 {
 	if (MapView)
 	{
+		MapView->SetFollowHeading(false);
 		MapView->ResetRotation();
 	}
 }

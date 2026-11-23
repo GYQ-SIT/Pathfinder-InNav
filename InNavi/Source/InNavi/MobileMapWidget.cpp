@@ -221,7 +221,6 @@ void UMobileMapWidget::SetPlanNorthOnX(bool bInNorthOnX)
 	if (bPlanNorthOnX != bInNorthOnX)
 	{
 		bPlanNorthOnX = bInNorthOnX;
-		InvalidateLayoutAndVolatility();
 	}
 }
 
@@ -319,8 +318,9 @@ void UMobileMapWidget::SetGpsPosition(TOptional<FVector2D> InPosition)
 {
 	if (GpsPosition != InPosition)
 	{
+		// No invalidation: the map is painted every frame from its state, as for a pan or a zoom. (A layout invalidation here, ten times a second while the
+		// phone turns, laid the whole screen out again each time and made the map flicker.)
 		GpsPosition = InPosition;
-		InvalidateLayoutAndVolatility();
 	}
 }
 
@@ -331,7 +331,6 @@ void UMobileMapWidget::SetGpsHeading(TOptional<double> Degrees)
 	if (bChanged)
 	{
 		GpsHeading = Degrees;
-		if (GpsPosition) InvalidateLayoutAndVolatility();
 	}
 }
 
@@ -358,6 +357,54 @@ TOptional<FVector2D> UMobileMapWidget::GetGpsLevelPosition() const
 	return PointInPolygon(Local, LevelMap.Outline) || DistanceToPolygonEdge(Local, LevelMap.Outline) <= Margin ? TOptional<FVector2D>(Local) : TOptional<FVector2D>();
 }
 
+bool UMobileMapWidget::GetGpsMarkerView(FMobileGpsMarkerView& Out) const
+{
+	if (ViewSize.X <= 0.0 || ViewSize.Y <= 0.0)
+	{
+		return false;
+	}
+	const TOptional<FVector2D> Plan = bOverview ? GpsPosition : GetGpsLevelPosition();
+	if (!Plan)
+	{
+		return false;
+	}
+	const double Lift = bShow3D ? SlabHeight : 0.0;
+	Out.At = ToWidgetPolygon({ *Plan }, ViewSize.X, ViewSize.Y, Lift)[0];
+	Out.Facing = GetGpsHeadingOnScreen(*Plan);
+	Out.bHalo = !bOverview;
+	return true;
+}
+
+void UMobileMapWidget::SetFollowHeading(bool bFollow)
+{
+	bFollowHeading = bFollow;
+	if (bFollow)
+	{
+		FollowGps();
+	}
+}
+
+void UMobileMapWidget::FollowGps()
+{
+	if (!bFollowHeading || bShow3D || !GpsHeading || ViewSize.X <= 0.0 || ViewSize.Y <= 0.0)
+	{
+		return;
+	}
+	if (!(bOverview ? GpsPosition : GetGpsLevelPosition()))
+	{
+		return;
+	}
+	// At a rotation of 0 north is up; facing H degrees from north, the map is turned back by H so that the way the person faces is up.
+	CenterOnGps();
+	double Delta = -FMath::DegreesToRadians(*GpsHeading) - Rotation;
+	if (Delta > UE_DOUBLE_PI) Delta -= UE_DOUBLE_TWO_PI;
+	if (Delta < -UE_DOUBLE_PI) Delta += UE_DOUBLE_TWO_PI;
+	RotateAround(ViewCentre(), Delta);
+	// Moving the map keeps some of its plan in view (ClampPan), and with the person far from the plan that pulls the view back to the plan and pushes the dot out;
+	// the dot is the focus here, so it is put back in the middle, last, without that limit.
+	CenterOnGps();
+}
+
 void UMobileMapWidget::CenterOnGps()
 {
 	const TOptional<FVector2D> Level = GetGpsLevelPosition();
@@ -366,7 +413,6 @@ void UMobileMapWidget::CenterOnGps()
 	{
 		const double Lift = bShow3D ? SlabHeight : 0.0;
 		Pan += ViewCentre() - ToWidget(*At, ViewSize.X, ViewSize.Y) + FVector2D(0.0, Lift);
-		InvalidateLayoutAndVolatility();
 	}
 }
 void UMobileMapWidget::Set3D(bool bInShow3D)
@@ -746,11 +792,10 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(CampusRouteLine[0], 6.0), Blue);
 			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(CampusRouteLine.Last(), 7.0), Red);
 		}
-		if (GpsPosition || bHasPosition)
+		// Where the person says they are (My location); the GPS dot is the marker layer's, above the map.
+		if (bHasPosition && !GpsPosition)
 		{
-			const FVector2D Point = GpsPosition ? *GpsPosition : MobileCampusPosition(Position, CampusMap);
-			const auto At = ToWidgetPolygon({Point}, W, H, Lift)[0];
-			if (GpsPosition) if (const TOptional<FVector2D> Facing = GetGpsHeadingOnScreen(Point)) FillPolygon(OutDrawElements, Layer + 8, AllottedGeometry, HeadingCone(At, *Facing), FLinearColor(0.12f, 0.39f, 0.94f, 0.35f));
+			const auto At = ToWidgetPolygon({MobileCampusPosition(Position, CampusMap)}, W, H, Lift)[0];
 			FillPolygon(OutDrawElements, Layer + 8, AllottedGeometry, Circle(At, 8.0), FLinearColor::White);
 			FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, Circle(At, 5.0), Blue);
 		}
@@ -953,16 +998,6 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 		}
 	}
 
-	// Where the device is, by GPS: on whichever level is shown (the GPS does not know the floor), so a wide pale halo around a smaller dot, not a point.
-	if (const TOptional<FVector2D> Gps = GetGpsLevelPosition())
-	{
-		const FVector2D At = ToWidgetPolygon({ *Gps }, W, H, Lift)[0];
-		if (const TOptional<FVector2D> Facing = GetGpsHeadingOnScreen(*Gps)) FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, HeadingCone(At, *Facing), FLinearColor(0.12f, 0.39f, 0.94f, 0.35f));
-		FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, Circle(At, 20.0), FLinearColor(0.12f, 0.39f, 0.94f, 0.16f));
-		FillPolygon(OutDrawElements, Layer + 10, AllottedGeometry, Circle(At, 7.5), FLinearColor(1.f, 1.f, 1.f, 0.9f));
-		FillPolygon(OutDrawElements, Layer + 11, AllottedGeometry, Circle(At, 5.5), FLinearColor(0.12f, 0.39f, 0.94f, 0.85f));
-	}
-
 	// Where the person is.
 	if (bHasPosition && Position.BuildingId == LevelMap.BuildingId && Position.Level == LevelMap.Level)
 	{
@@ -1152,6 +1187,7 @@ FReply UMobileMapWidget::HandlePointerMove(const FGeometry& Geometry, const FPoi
 			}
 			else
 			{
+				bFollowHeading = false;
 				PanBy(Local - Before);
 			}
 		}
@@ -1193,6 +1229,11 @@ FReply UMobileMapWidget::HandlePointerMove(const FGeometry& Geometry, const FPoi
 			{
 				RotateAround(NewMiddle, Twist);
 			}
+		}
+		// Moving the map with two fingers, or turning it, is leaving the following (a pinch alone is not).
+		if (bTwisting || (NewMiddle - OldMiddle).Size() > 2.0)
+		{
+			bFollowHeading = false;
 		}
 		PanBy(NewMiddle - OldMiddle);
 	}
@@ -1270,4 +1311,41 @@ void UMobileMapWidget::NativeOnMouseCaptureLost(const FCaptureLostEvent& Capture
 {
 	Super::NativeOnMouseCaptureLost(CaptureLostEvent);
 	Pointers.Reset();
+}
+
+// ---- The GPS marker layer ----
+
+UMobileGpsMarkerWidget::UMobileGpsMarkerWidget(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	// It only draws: a touch goes through it to the map below.
+	SetVisibility(ESlateVisibility::HitTestInvisible);
+}
+
+int32 UMobileGpsMarkerWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+{
+	LayerId = Super::NativePaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
+	FMobileGpsMarkerView View;
+	if (!Map.IsValid() || !Map->GetGpsMarkerView(View))
+	{
+		return LayerId;
+	}
+	const FLinearColor Pale(0.12f, 0.39f, 0.94f, 0.35f);
+	if (View.Facing)
+	{
+		FillPolygon(OutDrawElements, LayerId, AllottedGeometry, HeadingCone(View.At, *View.Facing), Pale);
+	}
+	if (View.bHalo)
+	{
+		// On the plan of a building: a wide pale halo around a smaller dot, not a point (the GPS does not know the floor).
+		FillPolygon(OutDrawElements, LayerId, AllottedGeometry, Circle(View.At, 20.0), FLinearColor(0.12f, 0.39f, 0.94f, 0.16f));
+		FillPolygon(OutDrawElements, LayerId + 1, AllottedGeometry, Circle(View.At, 7.5), FLinearColor(1.f, 1.f, 1.f, 0.9f));
+		FillPolygon(OutDrawElements, LayerId + 2, AllottedGeometry, Circle(View.At, 5.5), FLinearColor(0.12f, 0.39f, 0.94f, 0.85f));
+	}
+	else
+	{
+		FillPolygon(OutDrawElements, LayerId + 1, AllottedGeometry, Circle(View.At, 8.0), FLinearColor::White);
+		FillPolygon(OutDrawElements, LayerId + 2, AllottedGeometry, Circle(View.At, 5.0), Blue);
+	}
+	return LayerId + 3;
 }

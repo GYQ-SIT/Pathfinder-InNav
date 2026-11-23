@@ -236,17 +236,86 @@ bool FGpsIndoorTest::RunTest(const FString& Parameters)
 	App->UpdateLocation(0.2f);
 	TestFalse(TEXT("a device without a compass has no cone"), Map->GetGpsHeading().IsSet());
 
+
+	// The dot is drawn by the marker layer above the map: where the map says, with a halo on the plan of a building.
+	FMobileGpsMarkerView Marker;
+	if (TestTrue(TEXT("the marker layer has a dot to draw on the plan"), Map->GetGpsMarkerView(Marker)))
+	{
+		TestTrue(TEXT("at the place on the plan"), Marker.At.Equals(Map->ToWidget(*OnPlan, 375.0, 812.0), 1.e-3));
+		TestTrue(TEXT("with a halo, as on the plan of a building"), Marker.bHalo);
+	}
+
 	App->LocateMe();
 	TestFalse(TEXT("Locate inside the building stays on its plan"), Map->IsOverview());
 	TestTrue(TEXT("and still has the dot"), Map->GetGpsLevelPosition().IsSet());
 
-	// A fix far from the building is not on its plan.
-	Location->Fix = FixAt(*Geo, Centre + FVector2D(500.0, 0.0));
+	// Locate also starts following the heading: the map turns so that the way the person faces is up, and the cone points up.
+	TestTrue(TEXT("Locate starts following the heading"), Map->IsFollowingHeading());
+	Location->Heading = 90.0;
+	App->UpdateLocation(0.2f);
+	TestTrue(TEXT("facing east the map is turned a quarter back"), FMath::IsNearlyEqual(Map->GetRotation(), -UE_DOUBLE_HALF_PI, 1.e-3));
+	const TOptional<FVector2D> Up = Map->GetGpsHeadingOnScreen(*Map->GetGpsLevelPosition());
+	TestTrue(TEXT("and the cone points up the screen"), Up.IsSet() && Up->Y < -0.999 && FMath::Abs(Up->X) < 1.e-2);
+	Location->Heading = 200.0;
+	App->UpdateLocation(0.2f);
+	const TOptional<FVector2D> StillUp = Map->GetGpsHeadingOnScreen(*Map->GetGpsLevelPosition());
+	TestTrue(TEXT("whichever way the person turns"), StillUp.IsSet() && StillUp->Y < -0.999 && FMath::Abs(StillUp->X) < 1.e-2);
+	// A drag of the map ends it: the heading no longer turns the map.
+	Map->SetGesturesEnabled(true);
+	const FGeometry Geometry = FGeometry::MakeRoot(FVector2f(375.f, 812.f), FSlateLayoutTransform());
+	Map->HandlePointerDown(Geometry, FPointerEvent(0, 0, FVector2f(200.f, 300.f), FVector2f(200.f, 300.f), 1.f, true));
+	Map->HandlePointerMove(Geometry, FPointerEvent(0, 0, FVector2f(240.f, 330.f), FVector2f(200.f, 300.f), 1.f, true));
+	Map->HandlePointerUp(Geometry, FPointerEvent(0, 0, FVector2f(240.f, 330.f), FVector2f(240.f, 330.f), 1.f, false));
+	TestFalse(TEXT("a drag of the map stops following"), Map->IsFollowingHeading());
+	const double Turned = Map->GetRotation();
+	Location->Heading = 10.0;
+	App->UpdateLocation(0.2f);
+	TestTrue(TEXT("then the heading leaves the map as it is"), FMath::IsNearlyEqual(Map->GetRotation(), Turned, 1.e-9));
+	Location->Heading.Reset();
+	App->UpdateLocation(0.2f);
+	Map->ResetRotation();
+
+	// A fix outside the building, but near the campus, is not on its plan.
+	double NorthEdge = -1.e30;
+	for (const FMobileCampusBuilding& Other : Campus.Buildings) for (const FVector2D& Corner : Other.Outline) NorthEdge = FMath::Max(NorthEdge, Corner.X);
+	Location->Fix = FixAt(*Geo, FVector2D(NorthEdge + 100.0, Centre.Y));
 	App->UpdateLocation(1.f);
-	TestFalse(TEXT("a fix 500 m away is not on the plan"), Map->GetGpsLevelPosition().IsSet());
+	TestFalse(TEXT("a fix 100 m north of the campus is not on the plan"), Map->GetGpsLevelPosition().IsSet());
 	TestTrue(TEXT("but is still the campus's"), Map->GetGpsPosition().IsSet());
+	FMobileGpsMarkerView NotHere;
+	TestFalse(TEXT("the marker layer has nothing to draw on the plan of a building the fix is not at"), Map->GetGpsMarkerView(NotHere));
 	App->LocateMe();
 	TestTrue(TEXT("Locate outside the building goes to the campus overview"), Map->IsOverview());
+	FMobileGpsMarkerView OnCampus;
+	if (TestTrue(TEXT("on the campus overview the marker layer has the dot"), Map->GetGpsMarkerView(OnCampus)))
+	{
+		TestFalse(TEXT("a plain dot there, without the halo"), OnCampus.bHalo);
+	}
+	Map->ResetRotation();
+
+	// Following with the person far from the campus (at home): the dot stays where it is, in the view, whichever way the person turns. (The map keeps some of its plan
+	// in view when it is moved; the dot is the focus, so the view must not be pulled back to the campus and push the dot out.)
+	Map->SetFollowHeading(false);
+	Map->ResetRotation();
+	App->OpenBuilding(Building->BuildingId);
+	Location->Fix = FixAt(*Geo, Centre + FVector2D(20000.0, 0.0));
+	Location->Heading = 0.0;
+	App->UpdateLocation(1.f);
+	App->LocateMe();
+	FMobileGpsMarkerView First;
+	if (TestTrue(TEXT("far from the campus, the dot is there to draw"), Map->GetGpsMarkerView(First)))
+	{
+		TestTrue(TEXT("and it is inside the view"), First.At.X > 0.0 && First.At.X < 375.0 && First.At.Y > 0.0 && First.At.Y < 812.0);
+		for (const double Degrees : { 30.0, 90.0, 170.0, 250.0, 330.0, 10.0 })
+		{
+			Location->Heading = Degrees;
+			App->UpdateLocation(0.2f);
+			FMobileGpsMarkerView AtHeading;
+			const bool bThere = Map->GetGpsMarkerView(AtHeading);
+			TestTrue(FString::Printf(TEXT("turned to %.0f degrees the dot is still there"), Degrees), bThere);
+			TestTrue(FString::Printf(TEXT("and has not moved (%.0f degrees)"), Degrees), bThere && (AtHeading.At - First.At).Size() < 0.5);
+		}
+	}
 	return true;
 }
 
