@@ -275,6 +275,25 @@ void UMobileMapWidget::SetHighlightPlace(const FString& PlaceId)
 }
 void UMobileMapWidget::SetPosition(const FMobileRoutePoint& InPosition) { Position = InPosition; bHasPosition = true; }
 void UMobileMapWidget::ClearPosition() { bHasPosition = false; }
+
+void UMobileMapWidget::SetGpsPosition(TOptional<FVector2D> InPosition)
+{
+	if (GpsPosition != InPosition)
+	{
+		GpsPosition = InPosition;
+		InvalidateLayoutAndVolatility();
+	}
+}
+
+void UMobileMapWidget::CenterOnGps()
+{
+	if (GpsPosition && ViewSize.X > 0.0 && ViewSize.Y > 0.0)
+	{
+		const double Lift = bShow3D ? SlabHeight : 0.0;
+		Pan += ViewCentre() - ToWidget(*GpsPosition, ViewSize.X, ViewSize.Y) + FVector2D(0.0, Lift);
+		InvalidateLayoutAndVolatility();
+	}
+}
 void UMobileMapWidget::Set3D(bool bInShow3D)
 {
 	// The tilted plan has other extent, so a pan made on the flat one means nothing on it.
@@ -649,9 +668,10 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(CampusRouteLine[0], 6.0), Blue);
 			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(CampusRouteLine.Last(), 7.0), Red);
 		}
-		if (bHasPosition)
+		if (GpsPosition || bHasPosition)
 		{
-			const auto At = ToWidgetPolygon({MobileCampusPosition(Position, CampusMap)}, W, H, Lift)[0];
+			const FVector2D Point = GpsPosition ? *GpsPosition : MobileCampusPosition(Position, CampusMap);
+			const auto At = ToWidgetPolygon({Point}, W, H, Lift)[0];
 			FillPolygon(OutDrawElements, Layer + 8, AllottedGeometry, Circle(At, 8.0), FLinearColor::White);
 			FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, Circle(At, 5.0), Blue);
 		}

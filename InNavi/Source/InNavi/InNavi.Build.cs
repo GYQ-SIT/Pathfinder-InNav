@@ -22,6 +22,11 @@ public class InNavi : ModuleRules
 		// ABuildingGenerator::LoadBuildingsFromDatabase), alongside the existing JSON path. Must also be
 		// enabled in InNavi.uproject's Plugins list (EnabledByDefault: false upstream).
 		PrivateDependencyModuleNames.AddRange(new string[] { "ApplicationCore", "Slate", "SlateCore", "SQLiteCore", "RenderCore", "ImageCore" });
+		if (Target.Platform == UnrealTargetPlatform.Android)
+		{
+			PrivateDependencyModuleNames.AddRange(new string[] { "AndroidPermission", "LocationServicesBPLibrary" });
+		}
+
 		// The native file dialog exists on desktop only (the phone app has no import or save-as).
 		if (Target.Platform == UnrealTargetPlatform.Win64)
 		{

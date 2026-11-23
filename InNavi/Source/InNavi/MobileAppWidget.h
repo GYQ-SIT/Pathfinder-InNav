@@ -7,6 +7,7 @@
 #include "MobileSearchHistory.h"
 #include "MobileSavedPlaces.h"
 #include "MobileSheetFlow.h"
+#include "MobileLocationSource.h"
 #include "MobileAppWidget.generated.h"
 
 class UBorder;
@@ -156,6 +157,8 @@ public:
 	UMobileRoutePageWidget* GetRoutePage() const { return RoutePage; }
 	UMobileNavigatePageWidget* GetNavigatePage() const { return NavigatePage; }
 	UMobileMapWidget* GetMapView() const { return MapView; }
+	void SetLocationSource(TUniquePtr<IMobileLocationSource> InSource);
+	void UpdateLocation(float DeltaTime);
 	UMobileExplorePageWidget* GetExplorePage() const { return ExplorePage; }
 	UMobileSearchOverlayWidget* GetSearchOverlay() const { return SearchOverlay; }
 	// The full-screen search: the map's (the buildings and places of the site) and the Explore tab's (the sites).
@@ -375,6 +378,10 @@ private:
 	UMobileNavigatePageWidget* NavigatePage = nullptr;
 	UPROPERTY()
 	UMobileMapWidget* MapView = nullptr;
+
+	TUniquePtr<IMobileLocationSource> LocationSource;
+	float LocationPollSeconds = 0.f;
+	TOptional<FVector2D> LastLocation;
 	UPROPERTY()
 	UMobileExplorePageWidget* ExplorePage = nullptr;
 	// The full-screen search over the whole screen, and the search field of the map that opens it.

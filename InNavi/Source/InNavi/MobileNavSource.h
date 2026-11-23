@@ -269,6 +269,8 @@ public:
 	virtual bool GetLevelMap(const FString& BuildingId, int32 Level, FMobileLevelMap& OutMap) = 0;
 	// The site from above (a single building site has just that building).
 	virtual FMobileCampusMap GetCampusMap(const FString& SiteId) = 0;
+	// Geographic origin (latitude, longitude) for sites whose plan uses local meters.
+	virtual TOptional<FVector2D> GetGeoOrigin(const FString& SiteId) { return {}; }
 };
 
 namespace MobileNav

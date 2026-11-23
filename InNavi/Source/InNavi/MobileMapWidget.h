@@ -41,6 +41,9 @@ public:
 	void SetHighlightPlace(const FString& PlaceId);
 	void SetPosition(const FMobileRoutePoint& InPosition);
 	void ClearPosition();
+	void SetGpsPosition(TOptional<FVector2D> InPosition);
+	const TOptional<FVector2D>& GetGpsPosition() const { return GpsPosition; }
+	void CenterOnGps();
 	void Set3D(bool bInShow3D);
 	bool IsShowing3D() const { return bShow3D; }
 	void SetFitInsets(double Top, double Bottom);
@@ -156,6 +159,7 @@ private:
 	FString HighlightPlaceId;
 	FMobileRoutePoint Position;
 	bool bHasPosition = false;
+	TOptional<FVector2D> GpsPosition;
 	bool bShow3D = false;
 	// Where a big building's view is built around, kept once chosen (so a tap or a drag does not move it), until the view starts again or the route changes.
 	mutable TOptional<FVector2D> LatchedFocus;
