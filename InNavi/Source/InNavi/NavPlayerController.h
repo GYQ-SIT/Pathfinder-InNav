@@ -31,6 +31,10 @@ class AInteriorConnectorMarker;
 class UNavigationPanelWidget;
 class UMobileSplashWidget;
 class UAudioComponent;
+class UWidget;
+class USizeBox;
+class UUserWidget;
+class UFullRouteCalloutLayer;
 
 // One currently-playing audio file (see PlayAudioFile/StopAllAudio). AudioComponent already keeps
 // its own USoundWaveProcedural alive via its own Sound UPROPERTY, so there's no need to separately
@@ -221,6 +225,23 @@ public:
 	// IsSelectingNavigationPoint, and UInteriorFloorPlanWidget being hidden entirely while active).
 	UFUNCTION(BlueprintPure, Category = "Interior")
 	bool IsIn3DPreviewMode() const { return bIsIn3DPreviewMode; }
+	// An issue of the validation, shown in the 3D view: a translucent beam over the place (red for an error, yellow for the rest) from the floor up, and the
+	// camera moved near it, looking at it. It stays until another issue is shown, or the 3D view, the building or the project is left.
+	void ShowValidationIssueIn3D(const FString& BuildingId, int32 Floor, const FVector2D& PlanPosition, bool bError);
+	void ClearValidationMarker();
+	bool HasValidationMarker() const { return ValidationBeacon.IsValid(); }
+
+	// Temporary, read-only exterior overview of every floor/leg of the current route.
+	UFUNCTION(BlueprintCallable, Category = "Navigation")
+	void SetFullRouteViewEnabled(bool bEnable);
+	UFUNCTION(BlueprintPure, Category = "Navigation")
+	bool IsFullRouteViewEnabled() const { return bFullRouteViewEnabled; }
+	// How far the overview moves a floor of the route up (down when negative) to pull the floors apart; 0 for a floor it does not use.
+	float FullRouteFloorShift(const FString& BuildingId, int32 Floor) const;
+	bool CanShowFullRouteView() const;
+	// Fits both wide and tall viewports; public to allow projection tests without a renderer.
+	static FTransform FullRouteCameraTransform(const FBox& Bounds, float HorizontalFov, float AspectRatio,
+		const FBox* ExteriorBounds = nullptr, float* OutFov = nullptr, float PitchDegrees = -30.f);
 
 	// Enters/leaves 3D preview mode: positions the camera at a fixed oblique angle over the current
 	// floor (see PositionCameraFor3DPreview), hides every other loaded building
@@ -337,6 +358,10 @@ public:
 	// loading it.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	FString BrowseForBuildingDataFile();
+
+	// Asks for a PNG, JPEG or BMP picture with the system's file dialog (Windows), for a project's cover in the project library. The path, or an empty
+	// string when cancelled or when the dialog cannot be opened (then OnActionFailed says why).
+	FString BrowseForCoverPicture();
 
 	// Loads a project-format file from an explicit path (typically one
 	// BrowseForBuildingDataFile just returned) the same way the startup project is loaded.
@@ -680,8 +705,6 @@ public:
 	// Floor names (PAT-203): the name of a floor, and naming the floor being viewed. A name is only a label next to the level number.
 	FString GetFloorName(int32 Level) const;
 	bool SetActiveFloorName(const FString& NewName);
-	// "+ Special floor": a new floor on top with a name to change ("Special floor"). Returns its level, or 0. (+ Basement is AddFloorBelow.)
-	int32 AddSpecialFloor();
 	bool SetActiveFloorOpen(bool bOpen);
 
 	// ---- Reference image (PAT-201): a PNG under the 2D drawing of the floor being viewed ----
@@ -1503,6 +1526,59 @@ private:
 	TFunction<bool(const FVector2D&)> PointerOverUICallback;
 	UPROPERTY(VisibleAnywhere, Category = "Navigation")
 	class UNavigationRouteVisualization* RouteVisualization = nullptr;
+
+	bool bFullRouteViewEnabled = false;
+	bool bFullRouteSavedPreview = false;
+	bool bFullRouteSavedEdit = false;
+	bool bFullRouteSavedOutdoor = false;
+	uint32 FullRouteSavedSignature = 0;
+	FIntPoint FullRouteViewportSize = FIntPoint::ZeroValue;
+	float FullRouteSavedFov = 90.f;
+	float FullRouteSavedLockedFov = 0.f;
+	FTransform FullRouteSavedCamera;
+	FRotator FullRouteSavedControl;
+	TWeakObjectPtr<APawn> FullRouteSavedPawn;
+	struct FFullRouteActorState
+	{
+		TWeakObjectPtr<AActor> Actor;
+		bool bHidden = false;
+		bool bCollision = false;
+		int32 InteriorLevel = 0;
+		float Opacity = 1.f;
+		// Where it stood: the overview moves the rooms and the lifts of the floors it pulls apart.
+		FVector Location = FVector::ZeroVector;
+	};
+	TArray<FFullRouteActorState> FullRouteSavedActors;
+	// The overview shows only the floors the route goes through and pulls them apart, evenly, so that the part of the route on each can be told
+	// from the others. For each of them (the key is BuildingId|Floor) how far up or down it moves; a floor the route does not use is not here.
+	TMap<FString, float> FullRouteFloorShifts;
+	// A solid plate at each of those floors (the shape of the building), made when the overview starts and destroyed when it ends.
+	TArray<TWeakObjectPtr<AActor>> FullRouteFloorPlates;
+	TWeakObjectPtr<AActor> ValidationBeacon;
+	// The call-outs of the overview (Start, Destination, the stops, where the person is): small tags on the screen, each held over the point it is for. They are
+	// a layer of the screen, not texts in the world, so that no floor hides them and they stay as large as they are.
+	UPROPERTY()
+	UFullRouteCalloutLayer* FullRouteCalloutLayer = nullptr;
+	UPROPERTY()
+	TArray<TObjectPtr<UWidget>> FullRouteCalloutWidgets;
+	TArray<FVector> FullRouteCalloutPoints;
+	// The stem of each call-out (it grows when the tag is lifted off another one) and how wide its tag is, about.
+	UPROPERTY()
+	TArray<TObjectPtr<USizeBox>> FullRouteCalloutStems;
+	TArray<float> FullRouteCalloutWidths;
+	// How far the camera was from the route when it was drawn: the width of the lines follows the distance, so it is drawn again when the camera has moved.
+	float FullRouteDrawnDistance = 0.f;
+	FBox FullRouteDrawnBounds = FBox(ForceInit);
+	float FullRouteCameraDistance() const;
+	void ClearFullRouteCallouts();
+	void AddFullRouteCallout(const FVector& Point, const FString& Text, const FColor& Color);
+	void UpdateFullRouteCallouts();
+
+	void BuildFullRouteFloorShifts();
+	void FrameFullRouteView();
+	void ShowFullRouteVisualization();
+	bool ResolveFullRoutePoint(FNavigationRoutePoint& Point) const;
+	uint32 FullRouteSignature() const;
 
 	void SelectBuildingUnderCursor();
 

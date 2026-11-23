@@ -3,12 +3,16 @@
 #include "NavPlayerController.h"
 #include "NavigationPanelWidget.h"
 #include "NavigationRouteVisualization.h"
+#include "EditorIcons.h"
 #include "StartScreenStyle.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
+#include "Components/SizeBoxSlot.h"
 #include "Components/ProgressBar.h"
 #include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
@@ -304,6 +308,24 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 			OutLabel = Text;
 			return Button;
 		};
+		// The design team's picture in front of the word on a button, when its texture is imported; returns the picture (null if not), whose name is the button's + "IconSize".
+		auto AddButtonIcon = [this](UButton* Button, const TCHAR* Asset) -> UWidget*
+		{
+			USizeBox* SizeBox = Button ? Cast<USizeBox>(Button->GetContent()) : nullptr;
+			UTextBlock* Label = SizeBox ? Cast<UTextBlock>(SizeBox->GetContent()) : nullptr;
+			if (!Label || !EditorIcons::Load(Asset))
+			{
+				return nullptr;
+			}
+			Label->RemoveFromParent();
+			UWidget* Row = EditorIcons::IconAndLabel(WidgetTree, Button->GetName(), Asset, 16.f, 8.f, Label, FLinearColor::White);
+			if (USizeBoxSlot* RowSlot = Cast<USizeBoxSlot>(SizeBox->SetContent(Row)))
+			{
+				RowSlot->SetHorizontalAlignment(HAlign_Center);
+				RowSlot->SetVerticalAlignment(VAlign_Center);
+			}
+			return WidgetTree->FindWidget(FName(Button->GetName() + TEXT("IconSize")));
+		};
 		auto AddToStack = [](UVerticalBox* Box, UWidget* Widget, float Bottom)
 		{
 			Box->AddChildToVerticalBox(Widget)->SetPadding(FMargin(0.f, 0.f, 0.f, Bottom));
@@ -334,6 +356,12 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 		GoTabButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnGoTabClicked);
 		AddShare(Tabs, GoTabButton);
 		AddToStack(Stack, TabsSize, 8.f);
+		// Keep the overview accessible above long route instructions, on either tab.
+		FullRouteViewButton = MakeButton(TEXT("Btn_NavFullRouteView"), TEXT("Full Route View"), FullRouteViewButtonLabel);
+		FullRouteViewButton->SetIsEnabled(false);
+		FullRouteViewButton->SetToolTipText(FText::FromString(TEXT("View the entire route from outside transparent buildings. Click again or press Esc to return.")));
+		FullRouteViewButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnFullRouteViewClicked);
+		AddToStack(Stack, FullRouteViewButton, 6.f);
 
 		PlanBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Box_NavPlan"));
 		GoBox = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("Box_NavGo"));
@@ -362,7 +390,25 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 			USizeBox* BadgeSizeBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 			BadgeSizeBox->SetWidthOverride(BadgeSize);
 			BadgeSizeBox->SetHeightOverride(BadgeSize);
-			BadgeSizeBox->SetContent(BadgeText);
+			// The marker of the start / destination (shown instead of the letter once its texture is imported) sits over the text.
+			UOverlay* BadgeFace = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass());
+			if (UOverlaySlot* TextSlot = Cast<UOverlaySlot>(BadgeFace->AddChild(BadgeText)))
+			{
+				TextSlot->SetHorizontalAlignment(HAlign_Center);
+				TextSlot->SetVerticalAlignment(VAlign_Center);
+			}
+			UWidget* MarkerIcon = EditorIcons::Picture(WidgetTree, TEXT("Img_NavPlaceMarker") + Suffix, TEXT("Icon_CircleDot"), 16.f, FLinearColor::White);
+			if (MarkerIcon)
+			{
+				MarkerIcon->SetVisibility(ESlateVisibility::Collapsed);
+				if (UOverlaySlot* IconSlot = Cast<UOverlaySlot>(BadgeFace->AddChild(MarkerIcon)))
+				{
+					IconSlot->SetHorizontalAlignment(HAlign_Center);
+					IconSlot->SetVerticalAlignment(VAlign_Center);
+				}
+			}
+			BadgeIcons.Add(MarkerIcon);
+			BadgeSizeBox->SetContent(BadgeFace);
 			Badge->SetContent(BadgeSizeBox);
 
 			UTextBlock* Role = MakeText(*(TEXT("Txt_NavPlaceRole") + Suffix), 11.f, MutedColor);
@@ -394,7 +440,19 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 			USizeBox* PickSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 			PickSize->SetWidthOverride(PickWidth);
 			PickSize->SetHeightOverride(NavButtonHeight);
-			PickSize->SetContent(PickText);
+			// The design team's pointer (click a place on the map) instead of the plus, when its texture is imported.
+			if (UWidget* PointerIcon = EditorIcons::Picture(WidgetTree, TEXT("Img_NavPlacePick") + Suffix, TEXT("Icon_Pointer"), 16.f, FLinearColor::White))
+			{
+				if (USizeBoxSlot* PointerSlot = Cast<USizeBoxSlot>(PickSize->SetContent(PointerIcon)))
+				{
+					PointerSlot->SetHorizontalAlignment(HAlign_Center);
+					PointerSlot->SetVerticalAlignment(VAlign_Center);
+				}
+			}
+			else
+			{
+				PickSize->SetContent(PickText);
+			}
 			Pick->SetContent(PickSize);
 
 			UHorizontalBox* PlaceLine = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), FName(TEXT("Row_NavPlace") + Suffix));
@@ -447,6 +505,7 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 		AddToStack(PlanBox, AddRowSize, 8.f);
 
 		FindRouteButton = MakeButton(TEXT("Btn_NavFindRoute"), TEXT("Find Route"), UnusedLabel);
+		AddButtonIcon(FindRouteButton, TEXT("Icon_Route"));
 		FindRouteButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnFindRouteClicked);
 		FindRouteButton->SetIsEnabled(false);
 		AddToStack(PlanBox, FindRouteButton, 6.f);
@@ -468,13 +527,30 @@ TSharedRef<SWidget> UNavigationDockPanelWidget::RebuildWidget()
 		HintText = MakeText(TEXT("Txt_NavPlanHint"), 12.f, MutedColor);
 		AddToStack(PlanBox, HintText, 6.f);
 		StatusText = MakeText(TEXT("Txt_NavStatus"), 13.f, FLinearColor::White);
-		AddToStack(PlanBox, StatusText, 6.f);
+		StatusIcon = EditorIcons::Picture(WidgetTree, TEXT("Img_NavStatusWarning"), TEXT("Icon_Warning"), 16.f, FLinearColor(1.f, 0.65f, 0.15f, 1.f));
+		if (StatusIcon)
+		{
+			// The triangle is in front of a warning or an error only.
+			StatusIcon->SetVisibility(ESlateVisibility::Collapsed);
+			UHorizontalBox* StatusLine = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("Row_NavStatus"));
+			UHorizontalBoxSlot* IconSlot = StatusLine->AddChildToHorizontalBox(StatusIcon);
+			IconSlot->SetVerticalAlignment(VAlign_Top);
+			IconSlot->SetPadding(FMargin(0.f, 1.f, 6.f, 0.f));
+			StatusLine->AddChildToHorizontalBox(StatusText)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+			AddToStack(PlanBox, StatusLine, 6.f);
+		}
+		else
+		{
+			AddToStack(PlanBox, StatusText, 6.f);
+		}
 		RouteDetailsText = MakeText(TEXT("Txt_NavRouteDetails"), 13.f, FLinearColor(0.45f, 0.92f, 1.f, 1.f));
 		AddToStack(PlanBox, RouteDetailsText, 6.f);
 		ClearRouteButton = MakeButton(TEXT("Btn_NavClearRoute"), TEXT("Clear Route"), UnusedLabel);
+		AddButtonIcon(ClearRouteButton, TEXT("Icon_Close"));
 		ClearRouteButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnClearRouteClicked);
 		AddToStack(PlanBox, ClearRouteButton, 6.f);
 		ToggleRouteButton = MakeButton(TEXT("Btn_NavToggleRoute"), TEXT("Hide Route"), ToggleRouteButtonLabel);
+		ToggleRouteIcon = AddButtonIcon(ToggleRouteButton, TEXT("Icon_EyeOff"));
 		ToggleRouteButton->SetIsEnabled(false);
 		ToggleRouteButton->SetToolTipText(FText::FromString(TEXT("Show or hide route lines, direction arrows, markers and instructions without clearing your route")));
 		ToggleRouteButton->OnClicked.AddUniqueDynamic(this, &UNavigationDockPanelWidget::OnToggleRouteClicked);
@@ -550,7 +626,7 @@ void UNavigationDockPanelWidget::SetContentWidth(float Width)
 			Size->SetWidthOverride(Width);
 		}
 	}
-	for (UButton* Button : { FindRouteButton, CancelFindRouteButton, ClearRouteButton, ToggleRouteButton, StepModeButton, EditRouteButton })
+	for (UButton* Button : { FindRouteButton, CancelFindRouteButton, ClearRouteButton, ToggleRouteButton, StepModeButton, EditRouteButton, FullRouteViewButton })
 	{
 		SetButtonWidth(Button, Width);
 	}
@@ -814,6 +890,12 @@ void UNavigationDockPanelWidget::OnStepModeClicked()
 	}
 }
 
+void UNavigationDockPanelWidget::OnFullRouteViewClicked()
+{
+	if (ANavPlayerController* PC = GetController()) PC->SetFullRouteViewEnabled(!PC->IsFullRouteViewEnabled());
+	RefreshDisplay();
+}
+
 void UNavigationDockPanelWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
@@ -855,6 +937,11 @@ void UNavigationDockPanelWidget::RefreshDisplay()
 	}
 	const int32 Count = Nav->GetPlaceCount();
 	const bool bHasRoute = !Nav->GetRoutePoints().IsEmpty();
+	if (FullRouteViewButton)
+	{
+		FullRouteViewButton->SetIsEnabled(PC->IsFullRouteViewEnabled() || PC->CanShowFullRouteView());
+		FullRouteViewButtonLabel->SetText(FText::FromString(PC->IsFullRouteViewEnabled() ? TEXT("Return to Previous View") : TEXT("Full Route View")));
+	}
 	// A route that has just been found is gone through (Go); with no route there is nothing to go through, and the places are set.
 	if (bHasRoute && !bHadRoute)
 	{
@@ -917,6 +1004,19 @@ void UNavigationDockPanelWidget::RefreshDisplay()
 		const bool bPending = Row == PendingRow;
 		const bool bEnd = Row == 0 || Row == Count - 1;
 		BadgeTexts[SlotIndex]->SetText(FText::FromString(bPending ? FString(TEXT("+")) : PlaceBadge(Row, Count)));
+		// The start is the dot in a circle, and the destination of a two-place route the pin; the stops keep their numbers.
+		UWidget* Marker = BadgeIcons.IsValidIndex(SlotIndex) ? BadgeIcons[SlotIndex].Get() : nullptr;
+		if (Marker)
+		{
+			const bool bStartMarker = !bPending && Row == 0;
+			const bool bPinMarker = !bPending && Count == 2 && Row == 1;
+			if (bStartMarker || bPinMarker)
+			{
+				EditorIcons::Swap(Marker, bStartMarker ? TEXT("Icon_CircleDot") : TEXT("Icon_MapPin"));
+			}
+			Marker->SetVisibility(bStartMarker || bPinMarker ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+			BadgeTexts[SlotIndex]->SetVisibility(bStartMarker || bPinMarker ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+		}
 		Paint(BadgeButtons[SlotIndex], bPending ? PendingColor : PlaceColor(Row, Count));
 		RoleTexts[SlotIndex]->SetText(FText::FromString(bPending ? FString(TEXT("Add a stop")) : (Row > 0 && Count > 2 ? FString::FromInt(Row) : Nav->GetPlaceRole(Row))));
 		FieldBorders[SlotIndex]->SetBrushColor(Row == SelectedRow ? FLinearColor::White : FLinearColor::Transparent);
@@ -986,6 +1086,10 @@ void UNavigationDockPanelWidget::RefreshDisplay()
 	if (ToggleRouteButtonLabel)
 	{
 		ToggleRouteButtonLabel->SetText(FText::FromString(Nav->IsRouteGuidanceVisible() ? TEXT("Hide Route") : TEXT("Show Route")));
+		if (ToggleRouteIcon)
+		{
+			EditorIcons::Swap(ToggleRouteIcon, Nav->IsRouteGuidanceVisible() ? TEXT("Icon_EyeOff") : TEXT("Icon_Eye"));
+		}
 	}
 	if (HintText)
 	{
@@ -997,6 +1101,22 @@ void UNavigationDockPanelWidget::RefreshDisplay()
 	{
 		StatusText->SetText(FText::FromString(Nav->GetDisplayStatusMessage()));
 		StatusText->SetColorAndOpacity(FSlateColor(Nav->GetStatusColor()));
+		if (StatusIcon)
+		{
+			const ENavigationMessageKind Kind = Nav->GetStatusKind();
+			const bool bProblem = !Nav->GetDisplayStatusMessage().IsEmpty() && !Nav->IsFindingRoute() && (Kind == ENavigationMessageKind::Warning || Kind == ENavigationMessageKind::Error);
+			StatusIcon->SetVisibility(bProblem ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+			if (bProblem)
+			{
+				if (const USizeBox* IconBox = Cast<USizeBox>(StatusIcon))
+				{
+					if (UImage* Image = Cast<UImage>(IconBox->GetContent()))
+					{
+						Image->SetColorAndOpacity(Nav->GetStatusColor());
+					}
+				}
+			}
+		}
 	}
 
 	// ==== Go ====

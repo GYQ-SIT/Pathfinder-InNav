@@ -1,6 +1,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "BuildingGenerator.h"
+#include "FloorListEntryWidget.h"
 #include "InteriorGenerator.h"
 #include "InteriorScreenWidget.h"
 #include "NavPlayerController.h"
@@ -11,6 +12,8 @@
 #include "Components/Button.h"
 #include "Components/CheckBox.h"
 #include "Components/EditableTextBox.h"
+#include "Components/TextBlock.h"
+#include "Blueprint/WidgetTree.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Misc/AutomationTest.h"
@@ -122,12 +125,12 @@ bool FFloorNamesTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("and comes back"), F.Interior->GetFloorName(2), FString(TEXT("Mezzanine")));
 	TestTrue(TEXT("Undo takes a name back"), F.Interior->SetFloorName(2, TEXT("Roof")) && F.Interior->Undo() && F.Interior->GetFloorName(2) == TEXT("Mezzanine"));
 
-	// The Floor panel: the name box, "+ Basement" and "+ Special".
+	// The Floor panel: the name box and "+ Basement" (there is no "+ Special": any floor can be named).
 	UInteriorScreenWidget* Screen = NewObject<UInteriorScreenWidget>(); Screen->Initialize(); Screen->TakeWidget(); Screen->SetOwningPlayer(PC);
 	auto* NameBox = Cast<UEditableTextBox>(Screen->FindScreenWidget(TEXT("Edt_FloorName")));
 	auto* Basement = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_AddBasement")));
-	auto* Special = Cast<UButton>(Screen->FindScreenWidget(TEXT("Btn_AddSpecialFloor")));
-	if (!TestNotNull(TEXT("name box"), NameBox) || !TestNotNull(TEXT("+ Basement"), Basement) || !TestNotNull(TEXT("+ Special"), Special)) return false;
+	if (!TestNotNull(TEXT("name box"), NameBox) || !TestNotNull(TEXT("+ Basement"), Basement)) return false;
+	TestNull(TEXT("no + Special button any more"), Screen->FindScreenWidget(TEXT("Btn_AddSpecialFloor")));
 	PC->SetActiveFloor(1);
 	NameBox->SetText(FText::FromString(TEXT("Lobby level"))); NameBox->OnTextCommitted.Broadcast(NameBox->GetText(), ETextCommit::OnEnter);
 	TestEqual(TEXT("the name box names the floor being viewed"), F.Interior->GetFloorName(1), FString(TEXT("Lobby level")));
@@ -136,10 +139,44 @@ bool FFloorNamesTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("+ Basement adds B1 under the ground floor"), F.Interior->GetFloorLevels(), TArray<int32>({ -1, 1, 2 }));
 	Basement->OnClicked.Broadcast();
 	TestEqual(TEXT("and then B2"), F.Interior->GetFloorLevels(), TArray<int32>({ -2, -1, 1, 2 }));
-	Special->OnClicked.Broadcast();
-	TestEqual(TEXT("+ Special adds a floor on top"), F.Interior->GetFloorLevels().Last(), 3);
-	TestEqual(TEXT("named so it can be changed"), F.Interior->GetFloorName(3), FString(TEXT("Special floor")));
-	TestTrue(TEXT("the floors above keep their names"), F.Interior->GetFloorName(2) == TEXT("Mezzanine") && F.Interior->GetFloorName(1) == TEXT("Lobby level"));
+	TestTrue(TEXT("the floors keep their names"), F.Interior->GetFloorName(2) == TEXT("Mezzanine") && F.Interior->GetFloorName(1) == TEXT("Lobby level"));
+	// A basement can be named like any floor.
+	PC->SetActiveFloor(-1);
+	NameBox->SetText(FText::FromString(TEXT("Car park"))); NameBox->OnTextCommitted.Broadcast(NameBox->GetText(), ETextCommit::OnEnter);
+	TestEqual(TEXT("a basement is named too"), F.Interior->GetFloorName(-1), FString(TEXT("Car park")));
+	return true;
+}
+
+// A floor's card says what the floor is called instead of "Level N" (and "Level N" when it has no name); a basement's card is red.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFloorCardTest, "InNavi.Interior.FloorCards", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FFloorCardTest::RunTest(const FString& Parameters)
+{
+	auto MakeCard = [](int32 Level, bool bActive, const FString& Name)
+	{
+		UFloorListEntryWidget* Card = NewObject<UFloorListEntryWidget>();
+		Card->Initialize();
+		Card->SetFloorNumber(Level, bActive, 0.f, Name);
+		Card->TakeWidget();
+		return Card;
+	};
+	auto TextOf = [](UFloorListEntryWidget* Card) { return Cast<UTextBlock>(Card->WidgetTree->FindWidget(TEXT("Txt_FloorEntryLabel")))->GetText().ToString(); };
+	auto FillOf = [](UFloorListEntryWidget* Card) { return Cast<UButton>(Card->WidgetTree->FindWidget(TEXT("Btn_FloorEntry")))->GetStyle().Normal.TintColor.GetSpecifiedColor(); };
+
+	TestEqual(TEXT("no name: Level N"), TextOf(MakeCard(15, false, FString())), FString(TEXT("Level 15")));
+	TestEqual(TEXT("a basement without a name: Level B1"), TextOf(MakeCard(-1, false, FString())), FString(TEXT("Level B1")));
+	TestEqual(TEXT("a name takes the place of the whole label"), TextOf(MakeCard(15, false, TEXT("1M"))), FString(TEXT("1M")));
+	TestEqual(TEXT("whatever it is"), TextOf(MakeCard(1, true, TEXT("Ground Floor"))), FString(TEXT("Ground Floor")));
+	TestEqual(TEXT("a basement can be named too"), TextOf(MakeCard(-2, false, TEXT("Car park"))), FString(TEXT("Car park")));
+
+	// Red: the red is well above the green, and the green is not far above the blue (amber, the active colour, has no blue).
+	auto IsRed = [](const FLinearColor& C) { return C.R > C.G * 2.f && C.G < C.B * 1.8f; };
+	for (const bool bActive : { false, true })
+	{
+		const FLinearColor Basement = FillOf(MakeCard(-1, bActive, FString()));
+		const FLinearColor Ground = FillOf(MakeCard(1, bActive, FString()));
+		TestTrue(TEXT("a basement card is red"), IsRed(Basement));
+		TestFalse(TEXT("a floor above ground is not"), IsRed(Ground));
+	}
 	return true;
 }
 

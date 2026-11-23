@@ -416,7 +416,50 @@ namespace InNaviValidationTests
         return true;
     }
 
-    IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConcaveProbe, "InNavi.LayoutValidation.ConcaveRoomProbe", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+    // A link door that cannot be used says why: the building it leads to has nothing drawn inside (the case that read as "cannot be joined" and was hard to follow).
+    IMPLEMENT_SIMPLE_AUTOMATION_TEST(FLinkDoorExplainsWhy, "InNavi.LayoutValidation.LinkDoorExplainsWhy", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+    bool FLinkDoorExplainsWhy::RunTest(const FString& Parameters)
+    {
+        auto Root=Project(); auto Link=MakeShared<FJsonObject>();
+        Link->SetStringField(TEXT("id"),TEXT("AtoB")); Link->SetStringField(TEXT("kind"),TEXT("link")); Link->SetStringField(TEXT("connectsTo"),TEXT("B"));
+        Link->SetNumberField(TEXT("level"),2); Link->SetNumberField(TEXT("edge"),1); Link->SetNumberField(TEXT("offset"),500); Link->SetNumberField(TEXT("width"),120);
+        auto Doors=Interior(Root)->GetArrayField(TEXT("entrances")); Doors.Add(MakeShared<FJsonValueObject>(Link)); Interior(Root)->SetArrayField(TEXT("entrances"),Doors);
+        FFixture Fixture(Root);
+        // B exists on the campus but nothing is drawn inside it.
+        Fixture.Generator->SpawnBuildingFromData(TEXT("B"),TEXT("Building B"),{{0,0},{1000,0},{1000,1000},{0,1000}},2,300,{1030,0});
+        auto* Session=Fixture.Controller->GetLayoutValidationSession(); Session->Validate();
+        const int32 Index=Session->GetReport().Issues.IndexOfByPredicate([](const FIssue& I){return I.Rule==TEXT("LINK_UNUSABLE");});
+        if (!TestTrue(TEXT("a link into an empty building is reported"),Index!=INDEX_NONE)) return false;
+        const FIssue& Issue=Session->GetReport().Issues[Index];
+        TestTrue(TEXT("an unfinished building at the other end is a warning, not an error"),Issue.Severity==LayoutValidation::ESeverity::Warning);
+        TestTrue(TEXT("it names the building it leads to"),Issue.Message.Contains(TEXT("Building B")));
+        TestTrue(TEXT("it says nothing is drawn inside"),Issue.Message.Contains(TEXT("no interior")));
+        TestTrue(TEXT("it says what to do"),Issue.Suggestion.Contains(TEXT("Open Building B")));
+        return true;
+    }
+
+    // An issue shown from the 3D view stays in the 3D view, with a beam over the place; shown from the plan, no beam is left behind.
+    IMPLEMENT_SIMPLE_AUTOMATION_TEST(FIssueShownIn3D, "InNavi.LayoutValidation.IssueShownIn3D", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+    bool FIssueShownIn3D::RunTest(const FString& Parameters)
+    {
+        auto Root=Project(); Room(Root,1)->SetArrayField(TEXT("openings"), {}); FFixture Fixture(Root);
+        auto* PC=Fixture.Controller; auto* Session=PC->GetLayoutValidationSession(); Session->Validate();
+        const int32 Index=Session->GetReport().Issues.IndexOfByPredicate([](const FIssue& I){return I.Rule==TEXT("ROOM_UNREACHABLE");});
+        if (!TestTrue(TEXT("sealed room finding exists"),Index!=INDEX_NONE)) return false;
+        PC->SetIn3DPreviewMode(true);
+        TestTrue(TEXT("show issue from 3D succeeds"),Session->ShowIssue(*PC,Index));
+        TestTrue(TEXT("still in 3D"),PC->IsIn3DPreviewMode());
+        TestTrue(TEXT("a beam marks the place"),PC->HasValidationMarker());
+        TestEqual(TEXT("on the right floor"),PC->GetActiveFloor(),2);
+        PC->SetIn3DPreviewMode(false);
+        TestFalse(TEXT("leaving 3D removes the beam"),PC->HasValidationMarker());
+        TestTrue(TEXT("show issue from the plan succeeds"),Session->ShowIssue(*PC,Index));
+        TestFalse(TEXT("shown on the plan: still the plan"),PC->IsIn3DPreviewMode());
+        TestFalse(TEXT("and no beam"),PC->HasValidationMarker());
+        return true;
+    }
+
+    IMPLEMENT_SIMPLE_AUTOMATION_TEST(FConcaveProbe,"InNavi.LayoutValidation.ConcaveRoomProbe", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
     bool FConcaveProbe::RunTest(const FString& Parameters)
     {
         auto Root=Project(); TArray<TSharedPtr<FJsonValue>> Points;

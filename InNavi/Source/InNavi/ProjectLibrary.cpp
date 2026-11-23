@@ -3,6 +3,7 @@
 
 #include "Dom/JsonObject.h"
 #include "HAL/FileManager.h"
+#include "ImageUtils.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Serialization/JsonReader.h"
@@ -16,6 +17,25 @@ namespace
 	bool IsSampleFileName(const FString& FileName)
 	{
 		return FileName.Equals(TEXT("E2_Filled.json"), ESearchCase::IgnoreCase) || FileName.Equals(TEXT("map_extended.db"), ESearchCase::IgnoreCase);
+	}
+
+	// Moves or copies a project's cover along with the project. A cover that cannot be moved is left where it is: the project itself matters more.
+	void CarryCover(const FString& Directory, const FString& FromFileName, const FString& ToPath, bool bMove)
+	{
+		const FString From = ProjectLibrary::CoverPathFor(Directory, FromFileName);
+		if (!IFileManager::Get().FileExists(*From))
+		{
+			return;
+		}
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(ToPath), true);
+		if (bMove)
+		{
+			IFileManager::Get().Move(*ToPath, *From, true, true, false, true);
+		}
+		else
+		{
+			IFileManager::Get().Copy(*ToPath, *From, true, true);
+		}
 	}
 
 	bool ReadProjectJson(const FString& FilePath, TSharedPtr<FJsonObject>& OutRoot)
@@ -103,6 +123,128 @@ FString ProjectLibrary::FilePathForName(const FString& Directory, const FString&
 	return Directory / (FileName + TEXT(".json"));
 }
 
+FString ProjectLibrary::CoverPathFor(const FString& Directory, const FString& FileName)
+{
+	return Directory / TEXT("Covers") / (FileName + TEXT(".png"));
+}
+
+bool ProjectLibrary::SetCover(const FProjectLibraryEntry& Entry, const FString& PicturePath, const FString& Directory, FString& OutError)
+{
+	OutError.Reset();
+	const FString Picture = PicturePath.TrimStartAndEnd();
+	const FString Extension = FPaths::GetExtension(Picture).ToLower();
+	if (Extension != TEXT("png") && Extension != TEXT("jpg") && Extension != TEXT("jpeg") && Extension != TEXT("bmp"))
+	{
+		OutError = TEXT("A cover has to be a PNG, JPEG or BMP picture.");
+		return false;
+	}
+	const int64 Size = IFileManager::Get().FileSize(*Picture);
+	if (Size < 0)
+	{
+		OutError = TEXT("The picture could not be found.");
+		return false;
+	}
+	if (Size > MaxCoverFileBytes)
+	{
+		OutError = TEXT("The picture is too big (the limit is 32 MB).");
+		return false;
+	}
+	FImage Source;
+	if (!FImageUtils::LoadImage(*Picture, Source) || Source.SizeX <= 0 || Source.SizeY <= 0)
+	{
+		OutError = TEXT("The picture could not be read.");
+		return false;
+	}
+	if (Source.SizeX > MaxCoverSide || Source.SizeY > MaxCoverSide)
+	{
+		OutError = TEXT("The picture is too large (the limit is 16384 pixels on a side).");
+		return false;
+	}
+	Source.ChangeFormat(ERawImageFormat::BGRA8, EGammaSpace::sRGB);
+	const TArrayView64<FColor> Pixels = Source.AsBGRA8();
+
+	// The part of the picture the card shows: its middle, in the card's proportions.
+	const double Aspect = static_cast<double>(CoverWidth) / CoverHeight;
+	double CropW = Source.SizeX, CropH = Source.SizeY;
+	if (CropW / CropH > Aspect) CropW = CropH * Aspect; else CropH = CropW / Aspect;
+	const double CropX = (Source.SizeX - CropW) * 0.5, CropY = (Source.SizeY - CropH) * 0.5;
+
+	// Scaled down by averaging the pixels each new pixel covers (smooth), up by blending the four nearest (not blocky).
+	TArray<FColor> Cover;
+	Cover.SetNumUninitialized(CoverWidth * CoverHeight);
+	const double StepX = CropW / CoverWidth, StepY = CropH / CoverHeight;
+	auto At = [&](int32 X, int32 Y) -> const FColor& { return Pixels[static_cast<int64>(FMath::Clamp(Y, 0, Source.SizeY - 1)) * Source.SizeX + FMath::Clamp(X, 0, Source.SizeX - 1)]; };
+	for (int32 Y = 0; Y < CoverHeight; ++Y)
+	{
+		for (int32 X = 0; X < CoverWidth; ++X)
+		{
+			const double X0 = CropX + X * StepX, Y0 = CropY + Y * StepY;
+			double R = 0, G = 0, B = 0, A = 0;
+			if (StepX >= 1.0 && StepY >= 1.0)
+			{
+				const int32 IX0 = FMath::FloorToInt(X0), IX1 = FMath::Max(IX0 + 1, FMath::CeilToInt(X0 + StepX));
+				const int32 IY0 = FMath::FloorToInt(Y0), IY1 = FMath::Max(IY0 + 1, FMath::CeilToInt(Y0 + StepY));
+				int32 Count = 0;
+				for (int32 SY = IY0; SY < IY1; ++SY)
+				{
+					for (int32 SX = IX0; SX < IX1; ++SX)
+					{
+						const FColor& P = At(SX, SY);
+						R += P.R; G += P.G; B += P.B; A += P.A;
+						++Count;
+					}
+				}
+				R /= Count; G /= Count; B /= Count; A /= Count;
+			}
+			else
+			{
+				const double CX = X0 + StepX * 0.5 - 0.5, CY = Y0 + StepY * 0.5 - 0.5;
+				const int32 IX = FMath::FloorToInt(CX), IY = FMath::FloorToInt(CY);
+				const double FX = CX - IX, FY = CY - IY;
+				const FColor& P00 = At(IX, IY); const FColor& P10 = At(IX + 1, IY); const FColor& P01 = At(IX, IY + 1); const FColor& P11 = At(IX + 1, IY + 1);
+				auto Mix = [&](uint8 A00, uint8 A10, uint8 A01, uint8 A11) { return (A00 * (1 - FX) + A10 * FX) * (1 - FY) + (A01 * (1 - FX) + A11 * FX) * FY; };
+				R = Mix(P00.R, P10.R, P01.R, P11.R); G = Mix(P00.G, P10.G, P01.G, P11.G); B = Mix(P00.B, P10.B, P01.B, P11.B); A = Mix(P00.A, P10.A, P01.A, P11.A);
+			}
+			Cover[Y * CoverWidth + X] = FColor(static_cast<uint8>(FMath::Clamp(R + 0.5, 0.0, 255.0)), static_cast<uint8>(FMath::Clamp(G + 0.5, 0.0, 255.0)),
+				static_cast<uint8>(FMath::Clamp(B + 0.5, 0.0, 255.0)), static_cast<uint8>(FMath::Clamp(A + 0.5, 0.0, 255.0)));
+		}
+	}
+
+	const FString Target = CoverPathFor(Directory, Entry.FileName);
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(Target), true);
+	// Written beside the old cover first, so a failure leaves the old one in place.
+	const FString Temp = FPaths::GetPath(Target) / (FPaths::GetCleanFilename(Entry.FileName) + TEXT(".new.png"));
+	if (!FImageUtils::SaveImageByExtension(*Temp, FImageView(Cover.GetData(), CoverWidth, CoverHeight)))
+	{
+		IFileManager::Get().Delete(*Temp, false, true, true);
+		OutError = TEXT("The cover could not be saved - check that the Data folder can be written to.");
+		return false;
+	}
+	if (!IFileManager::Get().Move(*Target, *Temp, true, true, false, true))
+	{
+		IFileManager::Get().Delete(*Temp, false, true, true);
+		OutError = TEXT("The cover could not be saved - check that the Data folder can be written to.");
+		return false;
+	}
+	return true;
+}
+
+bool ProjectLibrary::RemoveCover(const FProjectLibraryEntry& Entry, const FString& Directory, FString& OutError)
+{
+	OutError.Reset();
+	const FString Target = CoverPathFor(Directory, Entry.FileName);
+	if (!IFileManager::Get().FileExists(*Target))
+	{
+		return true;
+	}
+	if (!IFileManager::Get().Delete(*Target, true, true, true))
+	{
+		OutError = TEXT("The cover could not be removed - it may be open in another program.");
+		return false;
+	}
+	return true;
+}
+
 TArray<FProjectLibraryEntry> ProjectLibrary::Scan(const FString& Directory)
 {
 	TArray<FProjectLibraryEntry> Entries;
@@ -121,6 +263,11 @@ TArray<FProjectLibraryEntry> ProjectLibrary::Scan(const FString& Directory)
 		Entry.bIsDatabase = FPaths::GetExtension(Name).Equals(TEXT("db"), ESearchCase::IgnoreCase);
 		Entry.Modified = IFileManager::Get().GetTimeStamp(*Entry.FilePath);
 		Entry.DisplayName = FPaths::GetBaseFilename(Name);
+		const FString Cover = CoverPathFor(Directory, Name);
+		if (IFileManager::Get().FileExists(*Cover))
+		{
+			Entry.CoverPath = Cover;
+		}
 
 		if (Entry.bIsDatabase)
 		{
@@ -190,6 +337,7 @@ bool ProjectLibrary::Duplicate(const FProjectLibraryEntry& Entry, const FString&
 		OutError = TEXT("The copy could not be written - check that the Data folder can be written to.");
 		return false;
 	}
+	CarryCover(Directory, Entry.FileName, CoverPathFor(Directory, FPaths::GetCleanFilename(CopyPath)), false);
 	OutNewPath = CopyPath;
 	return true;
 }
@@ -246,6 +394,10 @@ bool ProjectLibrary::Rename(const FProjectLibraryEntry& Entry, const FString& Ne
 			: TEXT("The original project could not be removed and the renamed copy could not be cleaned up. Both files may be present.");
 		return false;
 	}
+	if (!bSameFile)
+	{
+		CarryCover(Directory, Entry.FileName, CoverPathFor(Directory, FPaths::GetCleanFilename(NewPath)), true);
+	}
 	OutNewPath = bSameFile ? Entry.FilePath : NewPath;
 	return true;
 }
@@ -285,6 +437,8 @@ bool ProjectLibrary::SoftDelete(const FProjectLibraryEntry& Entry, const FString
 		OutError = TEXT("The project file could not be moved - it may be open in another program.");
 		return false;
 	}
+	// The cover goes into the Deleted folder with it, under the name the project got there.
+	CarryCover(Directory, Entry.FileName, DeletedFolder / (FPaths::GetCleanFilename(Target) + TEXT(".png")), true);
 	OutDeletedPath = Target;
 	return true;
 }

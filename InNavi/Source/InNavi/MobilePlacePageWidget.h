@@ -35,6 +35,9 @@ public:
 	const FMobilePlace& GetPlace() const { return Place; }
 	bool IsSaved() const { return bSaved; }
 	bool IsStart() const { return bIsStart; }
+	// The sheet is down at its lowest: the name and where it is, and the button, and nothing between (as in the prototype).
+	void SetMinimized(bool bInMinimized);
+	bool IsMinimized() const { return bMinimized; }
 	UWidget* FindNamedWidget(const FName& Name) const;
 
 protected:
@@ -51,6 +54,10 @@ private:
 	void HandleStartClicked();
 
 	void Refresh();
+
+	UPROPERTY()
+	UWidget* BodyScroll = nullptr;
+	bool bMinimized = false;
 
 	UPROPERTY()
 	UTextBlock* TitleText = nullptr;

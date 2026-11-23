@@ -1,4 +1,6 @@
 #include "BuildingInfoPanelWidget.h"
+#include "Components/ButtonSlot.h"
+#include "EditorIcons.h"
 #include "UiToolTip.h"
 #include "LayoutValidation.h"
 
@@ -253,7 +255,22 @@ TSharedRef<SWidget> UBuildingInfoPanelWidget::RebuildWidget()
 		UBorder* TransparentPad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("Btn_BuildingTransparentPad"));
 		TransparentPad->SetBrushColor(FLinearColor::Transparent);
 		TransparentPad->SetPadding(FMargin(10.f * DesignToUi, 11.f * DesignToUi));
-		TransparentPad->SetContent(TransparentLabel);
+		// The design team's eye in front of the words (open while it is on, crossed while it is off: ShowTransparentState), when its texture is imported.
+		TransparentIcon = EditorIcons::Picture(WidgetTree, TEXT("Btn_BuildingTransparentIcon"), TEXT("Icon_EyeOff"), 14.f * DesignToUi, FLinearColor::White);
+		if (TransparentIcon)
+		{
+			UHorizontalBox* TransparentRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("Btn_BuildingTransparentRow"));
+			TransparentRow->AddChildToHorizontalBox(TransparentIcon)->SetVerticalAlignment(VAlign_Center);
+			UHorizontalBoxSlot* TransparentLabelSlot = TransparentRow->AddChildToHorizontalBox(TransparentLabel);
+			TransparentLabelSlot->SetVerticalAlignment(VAlign_Center);
+			TransparentLabelSlot->SetPadding(FMargin(7.f * DesignToUi, 0.f, 0.f, 0.f));
+			TransparentPad->SetHorizontalAlignment(HAlign_Center);
+			TransparentPad->SetContent(TransparentRow);
+		}
+		else
+		{
+			TransparentPad->SetContent(TransparentLabel);
+		}
 		TransparentButton->SetContent(TransparentPad);
 		ShowTransparentState(false);
 		Content->AddChildToVerticalBox(TransparentButton)->SetPadding(FMargin(0.f, 0.f, 0.f, 8.f * DesignToUi));
@@ -267,24 +284,33 @@ TSharedRef<SWidget> UBuildingInfoPanelWidget::RebuildWidget()
 		Content->AddChildToVerticalBox(RoomFloorCombo);
 
 		// ---- The two ways in ----
-		auto AddWideButton = [this](const TCHAR* Name, const TCHAR* Label, const FButtonStyle& Style) -> UButton*
+		// The icon of the design team in front of the label when its texture is imported (and no arrow after it); until then the label with its arrow.
+		auto AddWideButton = [this](const TCHAR* Name, const TCHAR* Label, const TCHAR* FallbackLabel, const TCHAR* IconAsset, const FButtonStyle& Style) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
 			Button->SetStyle(Style);
 			Button->SetBackgroundColor(FLinearColor::White);
-			UTextBlock* Caption = StartStyle::Text(WidgetTree, FString(Name) + TEXT("Label"), Label, 13.f, FLinearColor::White, true);
+			const bool bIcon = EditorIcons::Load(IconAsset) != nullptr;
+			UTextBlock* Caption = StartStyle::Text(WidgetTree, FString(Name) + TEXT("Label"), bIcon ? Label : FallbackLabel, 13.f, FLinearColor::White, true);
 			Caption->SetJustification(ETextJustify::Center);
 			Caption->SetAutoWrapText(true);
 			UBorder* Pad = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), FName(FString(Name) + TEXT("Pad")));
 			Pad->SetBrushColor(FLinearColor::Transparent);
-			Pad->SetPadding(FMargin(10.f * StartStyle::DesignToUi, 12.f * StartStyle::DesignToUi));
-			Pad->SetContent(Caption);
-			Button->SetContent(Pad);
+			// The icon and the words from the left edge, so the icons of the two buttons stand in one column.
+			Pad->SetPadding(FMargin(22.f * StartStyle::DesignToUi, 12.f * StartStyle::DesignToUi, 10.f * StartStyle::DesignToUi, 12.f * StartStyle::DesignToUi));
+			Pad->SetHorizontalAlignment(HAlign_Left);
+			Pad->SetContent(EditorIcons::IconAndLabel(WidgetTree, FString(Name), IconAsset, 15.f * StartStyle::DesignToUi, 8.f * StartStyle::DesignToUi, Caption, FLinearColor::White));
+			// A button centres and shrinks its content: the pad fills the button, so the icon and the words start at its left edge.
+			if (UButtonSlot* PadSlot = Cast<UButtonSlot>(Button->SetContent(Pad)))
+			{
+				PadSlot->SetHorizontalAlignment(HAlign_Fill);
+				PadSlot->SetVerticalAlignment(VAlign_Fill);
+			}
 			return Button;
 		};
-		Open2DButton = AddWideButton(TEXT("Btn_Open2DEditor"), TEXT("Open 2D floor editor →"), PrimaryButton());
+		Open2DButton = AddWideButton(TEXT("Btn_Open2DEditor"), TEXT("Open 2D floor editor"), TEXT("Open 2D floor editor →"), TEXT("Icon_Open2D"), PrimaryButton());
 		Content->AddChildToVerticalBox(Open2DButton)->SetPadding(FMargin(0.f, 16.f * DesignToUi, 0.f, 0.f));
-		Open3DButton = AddWideButton(TEXT("Btn_Open3DView"), TEXT("Open 3D building view →"), SecondaryButton());
+		Open3DButton = AddWideButton(TEXT("Btn_Open3DView"), TEXT("Open 3D building view"), TEXT("Open 3D building view →"), TEXT("Icon_Open3D"), SecondaryButton());
 		Content->AddChildToVerticalBox(Open3DButton)->SetPadding(FMargin(0.f, 8.f * DesignToUi, 0.f, 0.f));
 	}
 	return Super::RebuildWidget();
@@ -347,6 +373,10 @@ void UBuildingInfoPanelWidget::ShowTransparentState(bool bOn)
 	if (TransparentLabel)
 	{
 		TransparentLabel->SetText(FText::FromString(bOn ? TEXT("Transparent ON") : TEXT("Transparent OFF")));
+	}
+	if (TransparentIcon)
+	{
+		EditorIcons::Swap(TransparentIcon, bOn ? TEXT("Icon_Eye") : TEXT("Icon_EyeOff"));
 	}
 }
 

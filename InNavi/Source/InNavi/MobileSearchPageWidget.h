@@ -51,6 +51,12 @@ public:
 	const TArray<FMobilePlace>& GetShownPlaces() const { return ShownPlaces; }
 	int32 GetGroupCount() const { return GroupCount; }
 	bool AreFiltersOpen() const { return bFiltersOpen; }
+	// The sheet is down at its lowest: only the title is shown (no filters button, filters, starting line or list), as in the prototype.
+	void SetMinimized(bool bInMinimized);
+	bool IsMinimized() const { return bMinimized; }
+	// A drop-down list is open (it floats over the page), and closing whichever is.
+	bool HasOpenSelect() const;
+	void CloseSelects() { CloseOtherSelects(nullptr); }
 	const FMobilePlaceFilter& GetFilter() const { return Filter; }
 	int32 GetActiveFilterCount() const;
 	// The site's name, or the name of the building the filter or the map has.
@@ -97,6 +103,9 @@ private:
 	UTextBlock* FiltersBadgeText = nullptr;
 	UPROPERTY()
 	UVerticalBox* FilterPanel = nullptr;
+	// How tall a filter list gets before it scrolls: five and a half rows of the small drop-down (the category list is five, and the half row
+	// that shows under a longer list says that it goes on, as there is no scroll bar).
+	static constexpr float FilterListHeight = 190.f;
 	UPROPERTY()
 	UMobileSelectWidget* CategorySelect = nullptr;
 	UPROPERTY()
@@ -114,6 +123,7 @@ private:
 	FMobilePlaceFilter Filter;
 	FString ContextBuildingId;
 	bool bFiltersOpen = false;
+	bool bMinimized = false;
 	TArray<FMobilePlace> ShownPlaces;
 	int32 GroupCount = 0;
 	FString LastGroup;

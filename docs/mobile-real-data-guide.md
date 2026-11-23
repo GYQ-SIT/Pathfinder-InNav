@@ -7,6 +7,7 @@ See [the design notes](design/mobile-app-data-interface.md) for the screen contr
 ## Data selection
 
 - Normally the source scans `InNavi/Data/`: each JSON project or SQLite map database is an Explore site. JSON projects precede footprint-only databases.
+- The Explore card of a site shows the project's cover picture when `InNavi/Data/Covers/<file name>.png` exists (chosen in the editor's project library, see [interior-editor-guide.md](design/interior-editor-guide.md)); the middle of the picture is shown in the card's proportions, with rounded corners. A project without a cover keeps the placeholder drawing. `Data` is packaged into the APK whole, so the covers go with it.
 - `Saved/MobileProjects/` supplies local projects. A file with the same name replaces a shipped project, preserving place IDs. Restart after changing files: the source caches a detached snapshot.
 - When opened from an editor session with a known project file, the phone view uses that project's current applied data, including unsaved edits. It does not switch editor buildings.
 - `-MobileProject="<project.json>"` selects one file explicitly and takes precedence over the editor session.
@@ -83,3 +84,7 @@ Run automation with the editor closed:
 `InNavi.Mobile.Source.Real*` covers the shared contract, scoped/stable IDs, search/maps, snapshot isolation, preferences, failed routes, campus paths, screen flow, source persistence and Android staging configuration. Prototype screen tests explicitly inject their mock fixtures. Windows CI also runs the mobile suite.
 
 Local verification on 2026-10-27: Win64 Editor and standalone game builds passed; all 137 InNavi automation tests passed (70 without warnings, 67 with warnings, zero failures). A Windows `.pak` probe loaded and routed a two-room project that had no loose JSON file, confirming packaged-file reads. After installing the Android engine components and toolchain, the Android ARM64 Development build, ASTC cook, signed packaging and archive also passed. The APK's version 1.1/code 2, ARM64 libraries, separate signing certificate and embedded project data were verified for `mobile-test-2`. Physical-device verification is still outstanding.
+
+## Phone GPS
+
+On Android, InNavi requests foreground location permission and reads a fix about once a second while a georeferenced campus map is open. The phone map projects each fix with `GeoProjection` using the same geographic origin as the campus database. The blue dot updates on the campus overview, and Locate centers that view on the latest fix. GPS does not infer an indoor floor. If there is no fix or the project has no geographic origin, Locate uses the existing manual location. The location source can be replaced with fake coordinates in the editor. Run `InNavi.Mobile.Gps` for the phone-free test.

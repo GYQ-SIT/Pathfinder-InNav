@@ -24,6 +24,9 @@ struct FMobileSite
 	int32 LevelCount = 1;
 	// "2.4 km", or "Demo"
 	FString DistanceLabel;
+	// The picture of the site on its Explore card: the project's cover (Data/Covers/<file name>.png, chosen in the project library of the editor). Empty:
+	// the card draws its own placeholder.
+	FString CoverPath;
 };
 
 struct FMobileLevel
@@ -88,6 +91,8 @@ struct FMobileRoutePreferences
 	bool bAllowLift = true;
 	bool bAllowStairs = true;
 	bool bAllowEscalator = true;
+	// The person chose "Wheelchair accessible" (which is the lift only): it is told apart from the lift alone, which is where the app starts.
+	bool bWheelchair = false;
 
 	static FMobileRoutePreferences LiftOnly()
 	{
@@ -264,6 +269,8 @@ public:
 	virtual bool GetLevelMap(const FString& BuildingId, int32 Level, FMobileLevelMap& OutMap) = 0;
 	// The site from above (a single building site has just that building).
 	virtual FMobileCampusMap GetCampusMap(const FString& SiteId) = 0;
+	// Geographic origin (latitude, longitude) for sites whose plan uses local meters.
+	virtual TOptional<FVector2D> GetGeoOrigin(const FString& SiteId) { return {}; }
 };
 
 namespace MobileNav

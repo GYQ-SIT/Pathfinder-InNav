@@ -15,8 +15,8 @@ class UTextBlock;
 // finds out which row was clicked without needing one hand-written handler per floor.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFloorEntryClicked, int32, FloorNumber);
 
-// One row in UInteriorScreenWidget's floor list - a single "Level N" button, highlighted when it's
-// the active floor. Built the same way as the other pure-C++ widgets (RebuildWidget()). Call
+// One row in UInteriorScreenWidget's floor list - a single button ("Level N", or the floor's own name), highlighted when it's
+// the active floor, and red for a basement. Built the same way as the other pure-C++ widgets (RebuildWidget()). Call
 // SetFloorNumber right after creating one, before adding it to the viewport/parent.
 UCLASS()
 class INNAVI_API UFloorListEntryWidget : public UUserWidget
@@ -27,7 +27,7 @@ public:
 	UFloorListEntryWidget(const FObjectInitializer& ObjectInitializer);
 
 	// ElevationMeters is how high the floor's level is above the ground floor, shown at the right of the row.
-	// Name is the floor's own name, shown after the level ("Level 2 - Mezzanine"); empty for none.
+	// Name is what the floor is called: the row shows it instead of "Level N" ("1M", "Ground Floor"); empty for the default "Level N".
 	void SetFloorNumber(int32 InFloorNumber, bool bInIsActive, float InElevationMeters = 0.f, const FString& InName = FString());
 
 	// Lets UInteriorScreenWidget::RefreshSidebarContentWidths keep this row's width in sync with the

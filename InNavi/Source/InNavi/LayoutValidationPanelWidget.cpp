@@ -1,15 +1,20 @@
 #include "LayoutValidationPanelWidget.h"
 
+#include "EditorIcons.h"
+#include "EditorIcons.h"
 #include "LayoutValidationSession.h"
 #include "NavPlayerController.h"
 #include "StartScreenStyle.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/ComboBoxString.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
 #include "Components/PanelWidget.h"
 #include "Components/ProgressBar.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
@@ -28,13 +33,22 @@ UTextBlock* ULayoutValidationPanelWidget::AddText(UPanelWidget* Parent, const FS
     Label->SetText(FText::FromString(Text)); Label->SetAutoWrapText(true); Label->SetColorAndOpacity(FSlateColor(FLinearColor::White));
     ApplyStandardFont(Label); Parent->AddChild(Label); return Label;
 }
-UButton* ULayoutValidationPanelWidget::AddButton(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Text)
+UButton* ULayoutValidationPanelWidget::AddButton(UVerticalBox* Stack, const TCHAR* Name, const TCHAR* Text, const TCHAR* IconAsset)
 {
     auto* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(Name));
     Button->SetStyle(StartStyle::SecondaryButton()); Button->SetBackgroundColor(FLinearColor::White);
     Button->OnClicked.AddUniqueDynamic(this, &ULayoutValidationPanelWidget::PlayButtonClickSound);
     auto* Size = WidgetTree->ConstructWidget<USizeBox>(); Size->SetMinDesiredHeight(34.f); Button->SetContent(Size);
     auto* Label = AddText(Size, Text, FName(FString(Name) + TEXT("Label"))); Label->SetJustification(ETextJustify::Center);
+    // The design team's picture in front of the word, when its texture is imported (the word stays where it was otherwise).
+    if (IconAsset && EditorIcons::Load(IconAsset))
+    {
+        Label->RemoveFromParent();
+        if (auto* RowSlot = Cast<USizeBoxSlot>(Size->SetContent(EditorIcons::IconAndLabel(WidgetTree, FString(Name), IconAsset, 16.f, 8.f, Label, FLinearColor::White))))
+        {
+            RowSlot->SetHorizontalAlignment(HAlign_Center); RowSlot->SetVerticalAlignment(VAlign_Center);
+        }
+    }
     Stack->AddChildToVerticalBox(Button)->SetPadding(FMargin(0, 0, 0, 6)); return Button;
 }
 TSharedRef<SWidget> ULayoutValidationPanelWidget::RebuildWidget()
@@ -51,13 +65,34 @@ TSharedRef<SWidget> ULayoutValidationPanelWidget::RebuildWidget()
         Scope->AddOption(TEXT("All buildings")); Scope->AddOption(TEXT("Current building")); Scope->SetSelectedIndex(0);
         Stack->AddChildToVerticalBox(Scope)->SetPadding(FMargin(0, 6, 0, 6));
         Scope->OnSelectionChanged.AddUniqueDynamic(this, &ULayoutValidationPanelWidget::OnScopeChanged);
-        ValidateButton = AddButton(Stack, TEXT("Btn_ValidateLayout"), TEXT("Validate layout"));
+        ValidateButton = AddButton(Stack, TEXT("Btn_ValidateLayout"), TEXT("Validate layout"), TEXT("Icon_ListChecks"));
         ValidateButton->SetStyle(StartStyle::PrimaryButton()); ValidateButton->OnClicked.AddUniqueDynamic(this, &ULayoutValidationPanelWidget::OnValidateClicked);
         Progress = WidgetTree->ConstructWidget<UProgressBar>(UProgressBar::StaticClass(), TEXT("Bar_ValidationProgress"));
         Progress->SetFillColorAndOpacity(FLinearColor(.3f, .85f, .4f)); Progress->SetPercent(0.f); Progress->SetVisibility(ESlateVisibility::Collapsed);
         Stack->AddChildToVerticalBox(Progress)->SetPadding(FMargin(0, 0, 0, 6));
         CancelButton = AddButton(Stack, TEXT("Btn_CancelValidation"), TEXT("Cancel"));
         CancelButton->SetVisibility(ESlateVisibility::Collapsed); CancelButton->OnClicked.AddUniqueDynamic(this, &ULayoutValidationPanelWidget::OnCancelClicked);
+        // The counts as icons with numbers (shown once there is a report), above the status text.
+        if (EditorIcons::Load(TEXT("Icon_CircleAlert")) && EditorIcons::Load(TEXT("Icon_Warning")) && EditorIcons::Load(TEXT("Icon_CircleCheck")))
+        {
+            CountsRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("Row_ValidationCounts"));
+            auto AddCount = [this](const TCHAR* Name, const TCHAR* Asset, const FLinearColor& Colour, UTextBlock*& OutText)
+            {
+                UHorizontalBoxSlot* IconSlot = CountsRow->AddChildToHorizontalBox(EditorIcons::Picture(WidgetTree, FString(Name) + TEXT("Icon"), Asset, 18.f, Colour));
+                IconSlot->SetVerticalAlignment(VAlign_Center);
+                OutText = AddText(CountsRow, TEXT("0"), FName(FString(Name) + TEXT("Count")));
+                OutText->SetColorAndOpacity(FSlateColor(Colour));
+                OutText->SetAutoWrapText(false);
+                UHorizontalBoxSlot* TextSlot = Cast<UHorizontalBoxSlot>(OutText->Slot);
+                TextSlot->SetVerticalAlignment(VAlign_Center);
+                TextSlot->SetPadding(FMargin(6, 0, 16, 0));
+            };
+            AddCount(TEXT("Err"), TEXT("Icon_CircleAlert"), FLinearColor(1.f, .4f, .35f), ErrorCountText);
+            AddCount(TEXT("Warn"), TEXT("Icon_Warning"), FLinearColor(1.f, .8f, .2f), WarningCountText);
+            AddCount(TEXT("Checked"), TEXT("Icon_CircleCheck"), FLinearColor(.3f, .85f, .5f), CheckedCountText);
+            CountsRow->SetVisibility(ESlateVisibility::Collapsed);
+            Stack->AddChildToVerticalBox(CountsRow)->SetPadding(FMargin(0, 0, 0, 6));
+        }
         Status = AddText(Stack, TEXT("Choose a scope, then validate."), TEXT("Txt_ValidationStatus"));
         Filter = WidgetTree->ConstructWidget<UComboBoxString>(UComboBoxString::StaticClass(), TEXT("Cbx_ValidationSeverity"));
         StartStyle::DarkCombo(Filter); Filter->OnGenerateWidgetEvent.BindDynamic(this, &ULayoutValidationPanelWidget::GenerateComboItem);
@@ -66,7 +101,7 @@ TSharedRef<SWidget> ULayoutValidationPanelWidget::RebuildWidget()
         Stack->AddChildToVerticalBox(Filter)->SetPadding(FMargin(0, 6, 0, 6));
         Issues = WidgetTree->ConstructWidget<UScrollBox>(UScrollBox::StaticClass(), TEXT("List_ValidationIssues"));
         auto* ListSlot = Stack->AddChildToVerticalBox(Issues); ListSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-        ExportButton = AddButton(Stack, TEXT("Btn_ExportValidation"), TEXT("Export report"));
+        ExportButton = AddButton(Stack, TEXT("Btn_ExportValidation"), TEXT("Export report"), TEXT("Icon_FileOutput"));
         ExportButton->OnClicked.AddUniqueDynamic(this, &ULayoutValidationPanelWidget::OnExportClicked);
         Feedback = AddText(Stack, FString(), TEXT("Txt_ValidationFeedback"));
     }
@@ -98,6 +133,9 @@ void ULayoutValidationPanelWidget::NativeTick(const FGeometry& Geometry, float D
 {
     Super::NativeTick(Geometry, DeltaTime);
     PollElapsed += DeltaTime;
+    const auto* Player = GetOwningPlayer<ANavPlayerController>();
+    const bool bIn3D = Player && Player->IsIn3DPreviewMode();
+    if (bIn3D != bListedFor3D) { bListedFor3D = bIn3D; RebuildIssues(); }
     // Validation is stepped by the session itself; this only shows how far it is. Fingerprinting is throttled and stops as soon as the report becomes stale.
     const auto* State = Session();
     const bool bBusy = State && State->IsRunning();
@@ -120,6 +158,7 @@ void ULayoutValidationPanelWidget::RefreshDisplay()
         // The old issues belong to the old report; clear them while the new one is made.
         if (DisplayedGeneration != State->GetGeneration()) { DisplayedGeneration = State->GetGeneration(); RebuildIssues(); }
         if (ExportButton) ExportButton->SetIsEnabled(false);
+        if (CountsRow) CountsRow->SetVisibility(ESlateVisibility::Collapsed);
         Status->SetText(FText::FromString(FString::Printf(TEXT("Validating... %d%%\n%s"), FMath::RoundToInt(State->GetProgress() * 100.f), *State->GetProgressText())));
         Status->SetColorAndOpacity(FSlateColor(FLinearColor::White));
         return;
@@ -131,9 +170,23 @@ void ULayoutValidationPanelWidget::RefreshDisplay()
     {
         const auto& Report = State->GetReport();
         const FString ScopeName = Report.ScopeBuildingId.IsEmpty() ? TEXT("All buildings") : Report.ScopeBuildingId;
-        Status->SetText(FText::FromString(FString::Printf(TEXT("%s\n%d errors / %d warnings / %d information\n%d rooms checked, %d skipped\n%s"),
+        if (CountsRow)
+        {
+            // The icons carry the errors, the warnings and the rooms checked; the text keeps what they do not.
+            CountsRow->SetVisibility(ESlateVisibility::HitTestInvisible);
+            ErrorCountText->SetText(FText::AsNumber(Report.Count(LayoutValidation::ESeverity::Error)));
+            WarningCountText->SetText(FText::AsNumber(Report.Count(LayoutValidation::ESeverity::Warning)));
+            CheckedCountText->SetText(FText::AsNumber(Report.RoomsChecked));
+            Status->SetText(FText::FromString(FString::Printf(TEXT("%s\n%d information, %d rooms skipped\n%s"),
+                *ScopeName, Report.Count(LayoutValidation::ESeverity::Info), Report.RoomsSkipped,
+                bStale ? TEXT("Layout changed - validate again.") : Report.bNavigationChecked ? TEXT("Data and entrance reachability checked.") : TEXT("Data checked; navigation not checked."))));
+        }
+        else
+        {
+            Status->SetText(FText::FromString(FString::Printf(TEXT("%s\n%d errors / %d warnings / %d information\n%d rooms checked, %d skipped\n%s"),
             *ScopeName, Report.Count(LayoutValidation::ESeverity::Error), Report.Count(LayoutValidation::ESeverity::Warning), Report.Count(LayoutValidation::ESeverity::Info),
             Report.RoomsChecked, Report.RoomsSkipped, bStale ? TEXT("Layout changed - validate again.") : Report.bNavigationChecked ? TEXT("Data and entrance reachability checked.") : TEXT("Data checked; navigation not checked."))));
+        }
         Status->SetColorAndOpacity(FSlateColor(bStale ? FLinearColor::Yellow : FLinearColor::White));
     }
     if (DisplayedGeneration != State->GetGeneration() || bDisplayedStale != bStale)
@@ -159,7 +212,7 @@ void ULayoutValidationPanelWidget::RebuildIssues()
         auto* Title = AddText(Box, FString(LayoutValidation::SeverityName(Issue.Severity)) + TEXT(" - ") + Location + TEXT(" ") + Issue.ObjectId, NAME_None);
         Title->SetColorAndOpacity(FSlateColor(Issue.Severity == LayoutValidation::ESeverity::Error ? FLinearColor(1.f, .4f, .35f) : Issue.Severity == LayoutValidation::ESeverity::Warning ? FLinearColor::Yellow : FLinearColor(.6f, .8f, 1.f)));
         AddText(Box, Issue.Message, NAME_None); AddText(Box, Issue.Suggestion, NAME_None);
-        if (!Issue.BuildingId.IsEmpty()) AddText(Box, TEXT("Show on plan"), NAME_None);
+        if (!Issue.BuildingId.IsEmpty()) AddText(Box, bListedFor3D ? TEXT("Show in 3D") : TEXT("Show on plan"), NAME_None);
         Button->SetIsEnabled(!State->IsStale() && !Issue.BuildingId.IsEmpty());
         Issues->AddChild(Button);
     }

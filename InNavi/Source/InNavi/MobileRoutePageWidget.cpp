@@ -12,6 +12,8 @@
 #include "Components/ButtonSlot.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/Spacer.h"
@@ -43,6 +45,7 @@ UMobileSelectWidget* UMobileRoutePageWidget::MakeSelect(EMobileSelectLook Look, 
 	TWeakObjectPtr<UMobileRoutePageWidget> WeakThis(this);
 	UMobileSelectWidget* Select = CreateWidget<UMobileSelectWidget>(this, UMobileSelectWidget::StaticClass());
 	Select->SetLook(Look);
+	Select->SetPopupHost(PopupRoot);
 	Select->SetCaption(Caption);
 	Select->SetOnChanged([WeakThis, OnChosen](const FString& Value)
 	{
@@ -101,7 +104,7 @@ USizeBox* UMobileRoutePageWidget::AddStopRow(UWidget* Badge, UWidget* Content, U
 	Row->AddChildToHorizontalBox(RouteSized(WidgetTree, Left, 24.f, StopRowHeight));
 	UHorizontalBoxSlot* ContentSlot = Row->AddChildToHorizontalBox(Content);
 	ContentSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-	ContentSlot->SetPadding(FMargin(12.f, 0.f, 0.f, 0.f));
+	ContentSlot->SetPadding(FMargin(12.f, 0.f, 8.f, 0.f));
 	ContentSlot->SetVerticalAlignment(VAlign_Center);
 	if (Actions)
 	{
@@ -109,7 +112,27 @@ USizeBox* UMobileRoutePageWidget::AddStopRow(UWidget* Badge, UWidget* Content, U
 	}
 	USizeBox* Box = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
 	Box->SetMinDesiredHeight(StopRowHeight);
-	Box->SetContent(Row);
+	// A hairline under the row, from the text to the right edge, between one place and the next (the prototype has it; the line between the badges
+	// already joins them, this one tells the places apart).
+	UOverlay* Layers = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass());
+	// (An overlay slot is aligned left and top unless it is told to fill: the row was only as wide as its words, and the cross and the handle
+	// followed the words instead of standing at the right edge.)
+	UOverlaySlot* RowSlot = Layers->AddChildToOverlay(Row);
+	RowSlot->SetHorizontalAlignment(HAlign_Fill);
+	RowSlot->SetVerticalAlignment(VAlign_Fill);
+	if (bLineBelow)
+	{
+		USizeBox* Hairline = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+		Hairline->SetHeightOverride(1.f);
+		UBorder* Rule = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("StopDivider"));
+		Rule->SetBrushColor(Line);
+		Hairline->SetContent(Rule);
+		UOverlaySlot* RuleSlot = Layers->AddChildToOverlay(Hairline);
+		RuleSlot->SetVerticalAlignment(VAlign_Bottom);
+		RuleSlot->SetHorizontalAlignment(HAlign_Fill);
+		RuleSlot->SetPadding(FMargin(36.f, 0.f, 0.f, 0.f));
+	}
+	Box->SetContent(Layers);
 	StopsBox->AddChildToVerticalBox(Box);
 	return Box;
 }
@@ -158,12 +181,24 @@ TSharedRef<SWidget> UMobileRoutePageWidget::RebuildWidget()
 	if (WidgetTree && !WidgetTree->RootWidget)
 	{
 		UWidgetTree* Tree = WidgetTree;
+		// An overlay over the page, which the lists of the drop-downs open in.
+		PopupRoot = Tree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("RouteRoot"));
+		Tree->RootWidget = PopupRoot;
 		UVerticalBox* Page = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RoutePage"));
-		Tree->RootWidget = Page;
+		// (An overlay slot is aligned left and top unless it is told to fill.)
+		UOverlaySlot* PageSlot = PopupRoot->AddChildToOverlay(Page);
+		PageSlot->SetHorizontalAlignment(HAlign_Fill);
+		PageSlot->SetVerticalAlignment(VAlign_Fill);
 
 		// "Your route" at the left and, at the right, a close button (a circle with a cross).
 		UHorizontalBox* Header = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("RouteHeader"));
-		UHorizontalBoxSlot* TitleSlot = Header->AddChildToHorizontalBox(MakeText(Tree, TEXT("Txt_RouteTitle"), TEXT("Your route"), 16.f, Ink, true));
+		// The title, and under it the travel mode, which is shown while the sheet is minimised (it is then the sheet's title).
+		UVerticalBox* Titles = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RouteTitles"));
+		Titles->AddChildToVerticalBox(MakeText(Tree, TEXT("Txt_RouteTitle"), TEXT("Your route"), 16.f, Ink, true));
+		SubtitleText = MakeText(Tree, TEXT("Txt_RouteSubtitle"), TEXT(""), 12.f, Grey);
+		SubtitleText->SetVisibility(ESlateVisibility::Collapsed);
+		Titles->AddChildToVerticalBox(SubtitleText)->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
+		UHorizontalBoxSlot* TitleSlot = Header->AddChildToHorizontalBox(Titles);
 		TitleSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 		TitleSlot->SetVerticalAlignment(VAlign_Center);
 		UButton* Close = Tree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_RouteBack"));
@@ -236,6 +271,7 @@ TSharedRef<SWidget> UMobileRoutePageWidget::RebuildWidget()
 		StepBox = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("RouteSteps"));
 		StepBox->SetVisibility(ESlateVisibility::Collapsed);
 		Content->AddChildToVerticalBox(StepBox)->SetPadding(FMargin(16.f, 0.f, 16.f, 12.f));
+		BodyScroll = Scroll;
 		Page->AddChildToVerticalBox(Scroll)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 
 		// Start navigation, pinned at the bottom under a line.
@@ -330,9 +366,9 @@ double UMobileRoutePageWidget::GetTotalMetres() const
 FString UMobileRoutePageWidget::GetViaString() const
 {
 	const FMobileRoutePreferences& Preferences = Request.Preferences;
-	const bool bLiftOnly = Preferences.bAllowLift && !Preferences.bAllowStairs && !Preferences.bAllowEscalator;
+	const bool bWheelchair = Preferences.bWheelchair && Preferences.bAllowLift && !Preferences.bAllowStairs && !Preferences.bAllowEscalator;
 	FString Modes;
-	if (bLiftOnly)
+	if (bWheelchair)
 	{
 		Modes = TEXT("Wheelchair accessible");
 	}
@@ -386,6 +422,51 @@ TArray<FMobileSelectOption> UMobileRoutePageWidget::PlaceOptions(bool bWithMyLoc
 	return Options;
 }
 
+void UMobileRoutePageWidget::SetMinimized(bool bInMinimized)
+{
+	bMinimized = bInMinimized;
+	if (BodyScroll)
+	{
+		BodyScroll->SetVisibility(bMinimized ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	}
+	if (bMinimized)
+	{
+		// A list that is open would float over the map.
+		CloseOtherSelects(nullptr);
+	}
+	if (SubtitleText)
+	{
+		SubtitleText->SetVisibility(bMinimized ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	}
+}
+
+void UMobileRoutePageWidget::RefreshSubtitle()
+{
+	if (!SubtitleText)
+	{
+		return;
+	}
+	const FMobileRoutePreferences& Preferences = Request.Preferences;
+	FString Mode;
+	if (Preferences.bWheelchair && Preferences.bAllowLift && !Preferences.bAllowStairs && !Preferences.bAllowEscalator)
+	{
+		Mode = TEXT("Wheelchair accessible");
+	}
+	else if (Preferences.bAllowLift && Preferences.bAllowStairs && Preferences.bAllowEscalator)
+	{
+		Mode = TEXT("Any way between levels");
+	}
+	else
+	{
+		TArray<FString> Allowed;
+		if (Preferences.bAllowEscalator) Allowed.Add(TEXT("escalator"));
+		if (Preferences.bAllowLift) Allowed.Add(TEXT("lift"));
+		if (Preferences.bAllowStairs) Allowed.Add(TEXT("stairs"));
+		Mode = Allowed.IsEmpty() ? FString(TEXT("Same level only")) : FString::Join(Allowed, TEXT(", "));
+	}
+	SubtitleText->SetText(FText::FromString(TEXT("Travel mode · ") + Mode));
+}
+
 void UMobileRoutePageWidget::Refresh()
 {
 	if (!FromSelect || !StopsBox || !WidgetTree)
@@ -394,6 +475,7 @@ void UMobileRoutePageWidget::Refresh()
 	}
 	RefreshStops();
 	RefreshSummary();
+	RefreshSubtitle();
 	RefreshTransport();
 	RefreshOptions();
 	RefreshSteps();
@@ -403,6 +485,14 @@ void UMobileRoutePageWidget::Refresh()
 
 void UMobileRoutePageWidget::RefreshStops()
 {
+	// The lists of the old rows' drop-downs are in the overlay: they go with their rows.
+	for (UMobileSelectWidget* Old : DestinationSelects)
+	{
+		if (Old) Old->ClosePopup();
+	}
+	if (AddSelect) AddSelect->ClosePopup();
+	EndDragGhost();
+	StopGhosts.Reset();
 	StopsBox->ClearChildren();
 	StopRowBoxes.Reset();
 	ReorderHandles.Reset();
@@ -507,28 +597,38 @@ void UMobileRoutePageWidget::RefreshStops()
 		}
 		USizeBox* RowBox = AddStopRow(Badge, Texts, Actions, true, true);
 		StopRowBoxes.Add(RowBox);
+		FStopGhost Ghost;
+		Ghost.Name = Select->GetSelectedShortLabel();
+		Ghost.Where = WhereLine;
+		Ghost.BadgeFill = bLast ? RouteDestinationRed() : Blue;
+		Ghost.BadgeNumber = FString::FromInt(Index + 1);
+		Ghost.bPin = bLast;
+		Ghost.bRemovable = Count > 1;
+		Ghost.bHandle = Count > 1;
+		StopGhosts.Add(Ghost);
 
 		UMobileReorderHandle* Handle = nullptr;
 		if (Count > 1)
 		{
 			Handle = CreateWidget<UMobileReorderHandle>(this, UMobileReorderHandle::StaticClass());
 			TWeakObjectPtr<USizeBox> WeakRow(RowBox);
-			Handle->SetOnDragged([WeakRow](float DeltaY)
+			Handle->SetOnDragged([WeakThis, Index](float DeltaY)
 			{
-				// The row follows the pointer while it is dragged.
-				if (USizeBox* Row = WeakRow.Get())
-				{
-					Row->SetRenderTranslation(FVector2D(0.0, DeltaY));
-				}
-			});
-			Handle->SetOnDropped([WeakThis, WeakRow, Index, Count](float DeltaY)
-			{
-				if (USizeBox* Row = WeakRow.Get())
-				{
-					Row->SetRenderTranslation(FVector2D::ZeroVector);
-				}
+				// The row is a card that follows the pointer while it is dragged.
 				if (UMobileRoutePageWidget* Self = WeakThis.Get())
 				{
+					if (!Self->IsDragGhostShown())
+					{
+						Self->BeginDragGhost(Index);
+					}
+					Self->MoveDragGhost(DeltaY);
+				}
+			});
+			Handle->SetOnDropped([WeakThis, Index, Count](float DeltaY)
+			{
+				if (UMobileRoutePageWidget* Self = WeakThis.Get())
+				{
+					Self->EndDragGhost();
 					Self->MoveDestination(Index, FMath::Clamp(Index + FMath::RoundToInt(DeltaY / StopRowHeight), 0, Count - 1));
 				}
 			});
@@ -642,22 +742,25 @@ void UMobileRoutePageWidget::RefreshOptions()
 {
 	OptionBox->ClearChildren();
 	const FMobileRoutePreferences& Preferences = Request.Preferences;
-	const bool bLiftOnly = Preferences.bAllowLift && !Preferences.bAllowStairs && !Preferences.bAllowEscalator;
+	// On only when the person chose it (the app starts with the lift, which is the same ways but not this choice): plain, like the chips that are not
+	// chosen, until then, and like a chosen chip after.
+	const bool bOn = Preferences.bWheelchair && Preferences.bAllowLift && !Preferences.bAllowStairs && !Preferences.bAllowEscalator;
 	UMobileTapTarget* Chip = CreateWidget<UMobileTapTarget>(this, UMobileTapTarget::StaticClass());
 	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-	UWidget* Chair = MobileIcons::Picture(WidgetTree, TEXT("Wheelchair"), 18.f, bLiftOnly ? OnBlue : Blue);
+	UWidget* Chair = MobileIcons::Picture(WidgetTree, TEXT("Wheelchair"), 18.f, bOn ? Blue : Ink);
 	if (Chair)
 	{
 		Row->AddChildToHorizontalBox(Chair)->SetVerticalAlignment(VAlign_Center);
 	}
-	UHorizontalBoxSlot* Words = Row->AddChildToHorizontalBox(MakeText(WidgetTree, FString(), TEXT("Wheelchair accessible"), 13.f, bLiftOnly ? OnBlue : Blue, true));
+	UHorizontalBoxSlot* Words = Row->AddChildToHorizontalBox(MakeText(WidgetTree, FString(), TEXT("Wheelchair accessible"), 13.f, bOn ? Blue : Ink, true));
 	Words->SetPadding(FMargin(Chair ? 8.f : 0.f, 0.f, 0.f, 0.f));
 	Words->SetVerticalAlignment(VAlign_Center);
 	UBorder* Pill = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
-	Pill->SetBrushColor(FLinearColor::Transparent);
+	Pill->SetBrush(Rounded(bOn ? BlueSoft : White, bOn ? Blue : FieldEdge, 18.f, 1.f));
+	Pill->SetBrushColor(FLinearColor::White);
 	Pill->SetPadding(FMargin(14.f, 8.f));
 	Pill->SetContent(Row);
-	Chip->Setup(Pill, TEXT("liftonly"), bLiftOnly ? Blue : BlueSoft, 16.f);
+	Chip->Setup(Pill, TEXT("liftonly"), FLinearColor::Transparent, 18.f);
 	TWeakObjectPtr<UMobileRoutePageWidget> WeakThis(this);
 	Chip->SetOnTapped([WeakThis](const FString& Tapped)
 	{
@@ -728,6 +831,116 @@ void UMobileRoutePageWidget::SetStepsOpen(bool bOpen)
 	RefreshSections();
 }
 
+bool UMobileRoutePageWidget::HasOpenSelect() const
+{
+	TArray<UMobileSelectWidget*> All = { FromSelect, BuildingSelect, LevelSelect, AddSelect };
+	All.Append(DestinationSelects);
+	return All.ContainsByPredicate([](const UMobileSelectWidget* Select) { return Select && Select->IsOpen(); });
+}
+
+void UMobileRoutePageWidget::BeginDragGhost(int32 Index)
+{
+	if (!PopupRoot || !StopGhosts.IsValidIndex(Index) || !StopRowBoxes.IsValidIndex(Index) || DragGhost)
+	{
+		return;
+	}
+	const FStopGhost& Spec = StopGhosts[Index];
+	// The card: the badge, the name and its place, the cross and the handle, as the row has them, on white.
+	UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
+	UWidget* Face = Spec.bPin ? MobileIcons::Picture(WidgetTree, TEXT("Destination"), 14.f, OnBlue) : nullptr;
+	Row->AddChildToHorizontalBox(MakeBadge(Spec.BadgeFill, Face ? Face : static_cast<UWidget*>(MakeText(WidgetTree, FString(), Spec.BadgeNumber, 12.f, OnBlue, true))))->SetVerticalAlignment(VAlign_Center);
+	UVerticalBox* Texts = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
+	UTextBlock* Name = MakeText(WidgetTree, FString(), Spec.Name, 15.f, Ink);
+	Name->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+	Name->SetClipping(EWidgetClipping::ClipToBounds);
+	Texts->AddChildToVerticalBox(Name);
+	if (!Spec.Where.IsEmpty())
+	{
+		Texts->AddChildToVerticalBox(MakeText(WidgetTree, FString(), Spec.Where, 11.f, Grey));
+	}
+	UHorizontalBoxSlot* TextSlot = Row->AddChildToHorizontalBox(Texts);
+	TextSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+	TextSlot->SetPadding(FMargin(12.f, 0.f, 8.f, 0.f));
+	TextSlot->SetVerticalAlignment(VAlign_Center);
+	// The cross and the handle as the row has them: the icon in the middle of a box 28 wide and 40 tall.
+	auto Action = [this](const TCHAR* IconName, const TCHAR* Glyph) -> UWidget*
+	{
+		UWidget* Icon = MobileIcons::Picture(WidgetTree, IconName, 20.f, Grey);
+		UBorder* Centre = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+		Centre->SetBrushColor(FLinearColor::Transparent);
+		Centre->SetHorizontalAlignment(HAlign_Center);
+		Centre->SetVerticalAlignment(VAlign_Center);
+		Centre->SetContent(Icon ? Icon : static_cast<UWidget*>(MakeText(WidgetTree, FString(), Glyph, 20.f, Grey, true)));
+		return RouteSized(WidgetTree, Centre, 28.f, 40.f);
+	};
+	if (Spec.bRemovable)
+	{
+		Row->AddChildToHorizontalBox(Action(TEXT("Remove"), TEXT("×")))->SetVerticalAlignment(VAlign_Center);
+	}
+	if (Spec.bHandle)
+	{
+		Row->AddChildToHorizontalBox(Action(TEXT("Reorder"), TEXT("≡")))->SetVerticalAlignment(VAlign_Center);
+	}
+	UBorder* Card = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("DragCard"));
+	Card->SetBrush(Rounded(White, FLinearColor::Transparent, 14.f, 0.f));
+	Card->SetBrushColor(FLinearColor::White);
+	Card->SetPadding(FMargin(12.f, 0.f, 4.f, 0.f));
+	Card->SetVerticalAlignment(VAlign_Center);
+	Card->SetContent(Row);
+	// A shadow under it: two darker rounded layers, a little lower, that show as a soft edge at the bottom.
+	UBorder* ShadowNear = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	ShadowNear->SetBrush(Rounded(FLinearColor(0.f, 0.f, 0.f, 0.14f), FLinearColor::Transparent, 14.f, 0.f));
+	ShadowNear->SetBrushColor(FLinearColor::White);
+	ShadowNear->SetPadding(FMargin(0.f, 0.f, 0.f, 3.f));
+	ShadowNear->SetContent(Card);
+	UBorder* ShadowFar = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
+	ShadowFar->SetBrush(Rounded(FLinearColor(0.f, 0.f, 0.f, 0.07f), FLinearColor::Transparent, 16.f, 0.f));
+	ShadowFar->SetBrushColor(FLinearColor::White);
+	ShadowFar->SetPadding(FMargin(0.f, 0.f, 0.f, 4.f));
+	ShadowFar->SetContent(ShadowNear);
+	USizeBox* Sized = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+	const FGeometry RowGeometry = StopRowBoxes[Index]->GetCachedGeometry();
+	const FGeometry HostGeometry = PopupRoot->GetCachedGeometry();
+	const FVector2D TopLeft = HostGeometry.AbsoluteToLocal(RowGeometry.GetAbsolutePositionAtCoordinates(FVector2D::ZeroVector));
+	Sized->SetWidthOverride(static_cast<float>(RowGeometry.GetLocalSize().X) > 1.f ? static_cast<float>(RowGeometry.GetLocalSize().X) : 320.f);
+	Sized->SetHeightOverride(StopRowHeight + 7.f);
+	Sized->SetContent(ShadowFar);
+	DragGhostSlot = PopupRoot->AddChildToOverlay(Sized);
+	DragGhostSlot->SetHorizontalAlignment(HAlign_Left);
+	DragGhostSlot->SetVerticalAlignment(VAlign_Top);
+	DragGhostTop = static_cast<float>(TopLeft.Y);
+	DragGhostSlot->SetPadding(FMargin(static_cast<float>(TopLeft.X), DragGhostTop, 0.f, 0.f));
+	DragGhost = Sized;
+	DragGhostIndex = Index;
+	// The row it leaves is faint, so that it is seen where it was.
+	StopRowBoxes[Index]->SetRenderOpacity(0.25f);
+	StopRowBoxes[Index]->SetRenderTranslation(FVector2D::ZeroVector);
+}
+
+void UMobileRoutePageWidget::MoveDragGhost(float DeltaY)
+{
+	if (DragGhost && DragGhostSlot)
+	{
+		const FMargin Now = DragGhostSlot->GetPadding();
+		DragGhostSlot->SetPadding(FMargin(Now.Left, DragGhostTop + DeltaY, 0.f, 0.f));
+	}
+}
+
+void UMobileRoutePageWidget::EndDragGhost()
+{
+	if (DragGhost && PopupRoot)
+	{
+		PopupRoot->RemoveChild(DragGhost);
+	}
+	if (StopRowBoxes.IsValidIndex(DragGhostIndex) && StopRowBoxes[DragGhostIndex])
+	{
+		StopRowBoxes[DragGhostIndex]->SetRenderOpacity(1.f);
+	}
+	DragGhost = nullptr;
+	DragGhostSlot = nullptr;
+	DragGhostIndex = INDEX_NONE;
+}
+
 void UMobileRoutePageWidget::CloseOtherSelects(const UMobileSelectWidget* Keep)
 {
 	TArray<UMobileSelectWidget*> All = { FromSelect, BuildingSelect, LevelSelect, AddSelect };
@@ -756,18 +969,22 @@ void UMobileRoutePageWidget::TapOption(const FString& Option)
 	if (Option == TEXT("lift"))
 	{
 		Preferences.bAllowLift = !Preferences.bAllowLift;
+		Preferences.bWheelchair = false;
 	}
 	else if (Option == TEXT("stairs"))
 	{
 		Preferences.bAllowStairs = !Preferences.bAllowStairs;
+		Preferences.bWheelchair = false;
 	}
 	else if (Option == TEXT("escalator"))
 	{
 		Preferences.bAllowEscalator = !Preferences.bAllowEscalator;
+		Preferences.bWheelchair = false;
 	}
 	else if (Option == TEXT("liftonly"))
 	{
 		Preferences = FMobileRoutePreferences::LiftOnly();
+		Preferences.bWheelchair = true;
 	}
 	else
 	{

@@ -1,19 +1,24 @@
 #include "ProjectCardWidget.h"
 
+#include "EditorIcons.h"
 #include "NavPlayerController.h"
 #include "StartScreenStyle.h"
 
+#include "Brushes/SlateNoResource.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
 #include "Components/Overlay.h"
 #include "Components/OverlaySlot.h"
+#include "Components/ScaleBox.h"
 #include "Components/SizeBox.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Engine/Texture2D.h"
 
 namespace
 {
@@ -32,9 +37,14 @@ TSharedRef<SWidget> UProjectCardWidget::RebuildWidget()
 		using namespace StartStyle;
 		const FString Base = TEXT("Card");
 
+		// The card is laid out 378 wide and drawn CardScale of that: everything on it (the fonts, the icons, the spaces) shrinks together.
+		UScaleBox* Scaler = WidgetTree->ConstructWidget<UScaleBox>(UScaleBox::StaticClass(), TEXT("CardScale"));
+		Scaler->SetStretch(EStretch::UserSpecified);
+		Scaler->SetUserSpecifiedScale(CardScale);
+		WidgetTree->RootWidget = Scaler;
 		USizeBox* Root = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("CardRoot"));
 		Root->SetWidthOverride(378.f * DesignToUi);
-		WidgetTree->RootWidget = Root;
+		Scaler->SetContent(Root);
 
 		UBorder* Panel = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("CardPanel"));
 		Panel->SetBrush(Rounded(Rgb(27, 43, 66), Rgb(44, 60, 84), 10.f));
@@ -87,6 +97,58 @@ TSharedRef<SWidget> UProjectCardWidget::RebuildWidget()
 		UOverlaySlot* IconSlot = Picture->AddChildToOverlay(IconSize);
 		IconSlot->SetHorizontalAlignment(HAlign_Center);
 		IconSlot->SetVerticalAlignment(VAlign_Center);
+		DrawingIcon = IconSize;
+
+		// The cover picture, if the project has one (it hides the drawing): its top corners are rounded like the card's.
+		if (CoverTexture && !Entry.CoverPath.IsEmpty())
+		{
+			FSlateBrush CoverBrush;
+			CoverBrush.SetResourceObject(CoverTexture);
+			CoverBrush.ImageSize = FVector2f(static_cast<float>(ProjectLibrary::CoverWidth), static_cast<float>(ProjectLibrary::CoverHeight));
+			CoverBrush.DrawAs = ESlateBrushDrawType::RoundedBox;
+			CoverBrush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+			CoverBrush.OutlineSettings.CornerRadii = FVector4(10.f, 10.f, 0.f, 0.f);
+			CoverBrush.OutlineSettings.Color = FSlateColor(FLinearColor::Transparent);
+			CoverBrush.OutlineSettings.Width = 0.f;
+			CoverImage = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), TEXT("PictureCover"));
+			CoverImage->SetBrush(CoverBrush);
+			CoverImage->SetVisibility(ESlateVisibility::HitTestInvisible);
+			UOverlaySlot* CoverSlot = Picture->AddChildToOverlay(CoverImage);
+			CoverSlot->SetHorizontalAlignment(HAlign_Fill);
+			CoverSlot->SetVerticalAlignment(VAlign_Fill);
+			DrawingIcon = nullptr;
+			IconSize->SetVisibility(ESlateVisibility::Collapsed);
+		}
+
+		// What a click on the picture does is said when the pointer is over it: a dark veil with the words.
+		HoverHint = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("PictureHint"));
+		HoverHint->SetBrush(Rounded(Rgb(13, 22, 36, 150), Rgb(13, 22, 36, 0), 10.f, 10.f, 0.f, 0.f, 0.f));
+		HoverHint->SetBrushColor(FLinearColor::White);
+		HoverHint->SetHorizontalAlignment(HAlign_Center);
+		HoverHint->SetVerticalAlignment(VAlign_Center);
+		HoverHint->SetContent(Text(WidgetTree, TEXT("Txt_PictureHint"), CoverImage ? TEXT("Click to change the cover") : TEXT("Click to add a cover picture"), 14.f, Rgb(241, 246, 255), true));
+		HoverHint->SetVisibility(ESlateVisibility::Collapsed);
+		UOverlaySlot* HintSlot = Picture->AddChildToOverlay(HoverHint);
+		HintSlot->SetHorizontalAlignment(HAlign_Fill);
+		HintSlot->SetVerticalAlignment(VAlign_Fill);
+
+		// The button over the whole picture, with nothing drawn of its own.
+		PictureButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_ProjectCover"));
+		{
+			FButtonStyle Invisible;
+			Invisible.SetNormal(FSlateNoResource());
+			Invisible.SetHovered(FSlateNoResource());
+			Invisible.SetPressed(FSlateNoResource());
+			Invisible.SetDisabled(FSlateNoResource());
+			Invisible.SetNormalPadding(FMargin(0.f));
+			Invisible.SetPressedPadding(FMargin(0.f));
+			PictureButton->SetStyle(Invisible);
+		}
+		PictureButton->SetCursor(EMouseCursor::Hand);
+		PictureButton->SetToolTipText(FText::FromString(TEXT("Choose a cover picture (PNG, JPEG or BMP) for this project")));
+		UOverlaySlot* PictureButtonSlot = Picture->AddChildToOverlay(PictureButton);
+		PictureButtonSlot->SetHorizontalAlignment(HAlign_Fill);
+		PictureButtonSlot->SetVerticalAlignment(VAlign_Fill);
 
 		const int32 Count = Entry.BuildingCount;
 		const FString BadgeText = Count <= 0 ? TEXT("NO BUILDINGS") : (Count == 1 ? TEXT("1 BUILDING") : FString::Printf(TEXT("%d BUILDINGS"), Count));
@@ -99,6 +161,28 @@ TSharedRef<SWidget> UProjectCardWidget::RebuildWidget()
 		BadgeSlot->SetHorizontalAlignment(HAlign_Right);
 		BadgeSlot->SetVerticalAlignment(VAlign_Top);
 		BadgeSlot->SetPadding(FMargin(0.f, 12.f * DesignToUi, 12.f * DesignToUi, 0.f));
+		Badge->SetVisibility(ESlateVisibility::HitTestInvisible);
+
+		// A project with a cover can go back to the drawing: a small cross at the corner of the picture.
+		if (CoverImage)
+		{
+			RemoveCoverButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_RemoveCover"));
+			RemoveCoverButton->SetStyle(Button(Rgb(13, 22, 36, 200), Rgb(96, 34, 42), Rgb(72, 24, 32), Rgb(58, 76, 102)));
+			RemoveCoverButton->SetBackgroundColor(FLinearColor::White);
+			RemoveCoverButton->SetCursor(EMouseCursor::Hand);
+			RemoveCoverButton->SetToolTipText(FText::FromString(TEXT("Remove the cover picture")));
+			UTextBlock* Cross = Text(WidgetTree, TEXT("Txt_RemoveCover"), TEXT("\u2715"), 12.f, FLinearColor::White, true);
+			Cross->SetJustification(ETextJustify::Center);
+			RemoveCoverButton->SetContent(Cross);
+			USizeBox* CrossSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Btn_RemoveCoverSize"));
+			CrossSize->SetWidthOverride(28.f * DesignToUi);
+			CrossSize->SetHeightOverride(28.f * DesignToUi);
+			CrossSize->SetContent(RemoveCoverButton);
+			UOverlaySlot* CrossSlot = Picture->AddChildToOverlay(CrossSize);
+			CrossSlot->SetHorizontalAlignment(HAlign_Left);
+			CrossSlot->SetVerticalAlignment(VAlign_Top);
+			CrossSlot->SetPadding(FMargin(12.f * DesignToUi, 12.f * DesignToUi, 0.f, 0.f));
+		}
 
 		// ---- Body ----
 		UVerticalBox* Body = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("CardBody"));
@@ -152,14 +236,16 @@ TSharedRef<SWidget> UProjectCardWidget::RebuildWidget()
 
 		// Open (wide), Duplicate, Rename.
 		UHorizontalBox* Buttons = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("CardButtons"));
-		auto AddButton = [this, Buttons](const TCHAR* ButtonName, const TCHAR* Label, const FButtonStyle& Style, bool bFill, float MinWidth, float LeftPadding) -> UButton*
+		// The label is next to the design team's icon when its texture is imported (IconAsset); until then FallbackLabel stands alone.
+		auto AddButton = [this, Buttons](const TCHAR* ButtonName, const TCHAR* Label, const TCHAR* FallbackLabel, const TCHAR* IconAsset, const FButtonStyle& Style, bool bFill, float MinWidth, float LeftPadding) -> UButton*
 		{
 			UButton* Button = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), FName(ButtonName));
 			Button->SetStyle(Style);
 			Button->SetBackgroundColor(FLinearColor::White);
-			UTextBlock* Caption = Text(WidgetTree, FString(ButtonName) + TEXT("Label"), Label, 12.f, FLinearColor::White, true);
+			const bool bIcon = EditorIcons::Load(IconAsset) != nullptr;
+			UTextBlock* Caption = Text(WidgetTree, FString(ButtonName) + TEXT("Label"), bIcon ? Label : FallbackLabel, 12.f, FLinearColor::White, true);
 			Caption->SetJustification(ETextJustify::Center);
-			Button->SetContent(Caption);
+			Button->SetContent(EditorIcons::IconAndLabel(WidgetTree, FString(ButtonName), IconAsset, 13.f * DesignToUi, 5.f * DesignToUi, Caption, FLinearColor::White));
 			USizeBox* Size = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), FName(FString(ButtonName) + TEXT("Size")));
 			Size->SetMinDesiredWidth(MinWidth * DesignToUi);
 			Size->SetHeightOverride(39.f * DesignToUi);
@@ -172,9 +258,9 @@ TSharedRef<SWidget> UProjectCardWidget::RebuildWidget()
 			}
 			return Button;
 		};
-		OpenButton = AddButton(TEXT("Btn_OpenProject"), TEXT("Open project →"), PrimaryButton(), true, 120.f, 0.f);
-		DuplicateButton = AddButton(TEXT("Btn_DuplicateProject"), TEXT("Duplicate"), SecondaryButton(), false, 74.f, 8.f);
-		RenameButton = AddButton(TEXT("Btn_RenameProject"), TEXT("Rename"), SecondaryButton(), false, 66.f, 8.f);
+		OpenButton = AddButton(TEXT("Btn_OpenProject"), TEXT("Open"), TEXT("Open →"), TEXT("Icon_OpenProject"), PrimaryButton(), true, 70.f, 0.f);
+		DuplicateButton = AddButton(TEXT("Btn_DuplicateProject"), TEXT("Duplicate"), TEXT("Duplicate"), TEXT("Icon_Duplicate"), SecondaryButton(), false, 74.f, 8.f);
+		RenameButton = AddButton(TEXT("Btn_RenameProject"), TEXT("Rename"), TEXT("Rename"), TEXT("Icon_Rename"), SecondaryButton(), false, 66.f, 8.f);
 
 		// Delete: a square button with a trash can drawn from bars, red when hovered.
 		DeleteButton = WidgetTree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("Btn_DeleteProject"));
@@ -208,7 +294,15 @@ TSharedRef<SWidget> UProjectCardWidget::RebuildWidget()
 		AddTrashPart(TEXT("TrashLineLeft"), 6.f, 9.f, 2.f, 8.f, nullptr, TrashColor);
 		AddTrashPart(TEXT("TrashLineRight"), 10.f, 9.f, 2.f, 8.f, nullptr, TrashColor);
 		TrashSize->SetContent(Trash);
-		DeleteButton->SetContent(TrashSize);
+		// The design team's trash can when its texture is imported; until then the one drawn from bars above.
+		if (UWidget* TrashIcon = EditorIcons::Picture(WidgetTree, TEXT("TrashIcon"), TEXT("Icon_Delete"), 20.f * DesignToUi, TrashColor))
+		{
+			DeleteButton->SetContent(TrashIcon);
+		}
+		else
+		{
+			DeleteButton->SetContent(TrashSize);
+		}
 		USizeBox* DeleteBox = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass(), TEXT("Btn_DeleteProjectSize"));
 		DeleteBox->SetWidthOverride(39.f * DesignToUi);
 		DeleteBox->SetHeightOverride(39.f * DesignToUi);
@@ -263,6 +357,50 @@ void UProjectCardWidget::NativeConstruct()
 	if (DeleteButton)
 	{
 		DeleteButton->OnClicked.AddUniqueDynamic(this, &UProjectCardWidget::HandleDeleteClicked);
+	}
+	if (PictureButton)
+	{
+		PictureButton->OnClicked.AddUniqueDynamic(this, &UProjectCardWidget::PlayButtonClickSound);
+		PictureButton->OnClicked.AddUniqueDynamic(this, &UProjectCardWidget::HandlePictureClicked);
+		PictureButton->OnHovered.AddUniqueDynamic(this, &UProjectCardWidget::HandlePictureHovered);
+		PictureButton->OnUnhovered.AddUniqueDynamic(this, &UProjectCardWidget::HandlePictureUnhovered);
+	}
+	if (RemoveCoverButton)
+	{
+		RemoveCoverButton->OnClicked.AddUniqueDynamic(this, &UProjectCardWidget::PlayButtonClickSound);
+		RemoveCoverButton->OnClicked.AddUniqueDynamic(this, &UProjectCardWidget::HandleRemoveCoverClicked);
+	}
+}
+
+void UProjectCardWidget::SetHoverHint(bool bShow)
+{
+	if (HoverHint)
+	{
+		HoverHint->SetVisibility(bShow ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	}
+}
+
+bool UProjectCardWidget::ShowsHoverHintForTests() const
+{
+	return HoverHint && HoverHint->GetVisibility() != ESlateVisibility::Collapsed;
+}
+
+void UProjectCardWidget::HandlePictureHovered() { SetHoverHint(true); }
+void UProjectCardWidget::HandlePictureUnhovered() { SetHoverHint(false); }
+
+void UProjectCardWidget::HandlePictureClicked()
+{
+	if (OnChangeCover)
+	{
+		OnChangeCover(Entry);
+	}
+}
+
+void UProjectCardWidget::HandleRemoveCoverClicked()
+{
+	if (OnRemoveCover)
+	{
+		OnRemoveCover(Entry);
 	}
 }
 

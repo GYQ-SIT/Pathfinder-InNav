@@ -7,6 +7,7 @@
 #include "MobileSearchHistory.h"
 #include "MobileSavedPlaces.h"
 #include "MobileSheetFlow.h"
+#include "MobileLocationSource.h"
 #include "MobileAppWidget.generated.h"
 
 class UBorder;
@@ -142,9 +143,22 @@ public:
 
 	UMobileSearchPageWidget* GetSearchPage() const { return SearchPage; }
 	UMobilePlacePageWidget* GetPlacePage() const { return PlacePage; }
+	// Exit while walking asks first; these are the two answers. A walk that ends some other way (it arrives) closes the question.
+	void ShowExitDialog();
+	UFUNCTION()
+	void ConfirmExit();
+	UFUNCTION()
+	void CancelExit();
+	bool IsExitDialogOpen() const;
+	// How many times a page was sent back to its top on opening (a test cannot scroll a page that has no layout, so it counts these).
+	int32 GetPagesScrolledToTop() const { return PagesScrolledToTop; }
+	// Whether the sheet is down at its lowest (the pages then show only a title and their button); not while walking.
+	bool IsSheetMinimized() const;
 	UMobileRoutePageWidget* GetRoutePage() const { return RoutePage; }
 	UMobileNavigatePageWidget* GetNavigatePage() const { return NavigatePage; }
 	UMobileMapWidget* GetMapView() const { return MapView; }
+	void SetLocationSource(TUniquePtr<IMobileLocationSource> InSource);
+	void UpdateLocation(float DeltaTime);
 	UMobileExplorePageWidget* GetExplorePage() const { return ExplorePage; }
 	UMobileSearchOverlayWidget* GetSearchOverlay() const { return SearchOverlay; }
 	// The full-screen search: the map's (the buildings and places of the site) and the Explore tab's (the sites).
@@ -286,6 +300,10 @@ private:
 	// Whether the sheet is open to the top (80 percent of the space between the header and the tab bar or more).
 	bool SheetIsOpen() const;
 	double RestHeight(EMobileSheetSnap Target) const;
+	// The rest height (of the three) closest to a height the sheet was dragged to.
+	EMobileSheetSnap NearestRestSnap(double Height) const;
+	// Minimised: the sheet is down at its lowest (not while walking), so its pages show only a title and their button.
+	void ApplyMinimized();
 
 	UPROPERTY()
 	UScaleBox* PhoneScaleBox = nullptr;
@@ -297,6 +315,12 @@ private:
 	UBorder* StorageError = nullptr;
 	float StorageErrorSeconds = 0.f;
 	void ShowStorageError();
+	// "End this journey?": Exit asks before it ends the walk (the prototype does), and the walk goes on unless the person ends it.
+	UPROPERTY()
+	UBorder* ExitDialog = nullptr;
+	EMobileSheetState LastSheetState = EMobileSheetState::Search;
+	void ScrollPageToTop(UUserWidget* Page);
+	int32 PagesScrolledToTop = 0;
 	UPROPERTY()
 	UBorder* SheetBorder = nullptr;
 	UPROPERTY()
@@ -354,6 +378,10 @@ private:
 	UMobileNavigatePageWidget* NavigatePage = nullptr;
 	UPROPERTY()
 	UMobileMapWidget* MapView = nullptr;
+
+	TUniquePtr<IMobileLocationSource> LocationSource;
+	float LocationPollSeconds = 0.f;
+	TOptional<FVector2D> LastLocation;
 	UPROPERTY()
 	UMobileExplorePageWidget* ExplorePage = nullptr;
 	// The full-screen search over the whole screen, and the search field of the map that opens it.
@@ -412,7 +440,8 @@ private:
 	void ForgetTrip();
 	// Tells the place page whether its button is Add stop (a trip is open) or Get directions.
 	void RefreshPlaceButton();
-	FMobileRoutePreferences RoutePreferences;
+	// The app starts with the lift chosen, so that it is clear which way between levels the route takes (the others are a tap away).
+	FMobileRoutePreferences RoutePreferences = FMobileRoutePreferences::LiftOnly();
 	// Where "My location" is for the route (the prototype lets the person say which building and level they are on).
 	FString MyLocationBuildingId;
 	int32 MyLocationLevel = 1;

@@ -1,5 +1,6 @@
 #include "MobileExplorePageWidget.h"
 
+#include "MobileAppWidget.h"
 #include "MobileIcons.h"
 #include "MobileSearchField.h"
 #include "MobileStyle.h"
@@ -10,12 +11,16 @@
 #include "Components/Button.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
 #include "Components/ScrollBox.h"
 #include "Components/SizeBox.h"
 #include "Components/Spacer.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Engine/Texture2D.h"
+#include "ImageUtils.h"
+#include "Misc/Paths.h"
 
 using namespace MobileStyle;
 
@@ -103,7 +108,44 @@ void UMobileExplorePageWidget::AddCard(const FMobileSite& Site)
 {
 	UVerticalBox* Card = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
 
-	// A picture of the site (a placeholder drawing of buildings until there are pictures).
+	// A picture of the site: the project's cover if it has one (cut to the card's proportions, with rounded corners), else a placeholder drawing of buildings.
+	USizeBox* PictureSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
+	PictureSize->SetHeightOverride(104.f);
+	if (UTexture2D* Cover = (!Site.CoverPath.IsEmpty() && FPaths::FileExists(Site.CoverPath)) ? FImageUtils::ImportFileAsTexture2D(Site.CoverPath) : nullptr)
+	{
+		// The card is as wide as the phone's page less its margins (327 of 375), 104 high: the part of the picture that shows is the middle, in those proportions.
+		const double CardAspect = (UMobileAppWidget::DesignWidth - 48.0) / 104.0;
+		const double CoverAspect = static_cast<double>(Cover->GetSizeX()) / FMath::Max(Cover->GetSizeY(), 1);
+		FVector2f Min(0.f, 0.f), Max(1.f, 1.f);
+		if (CoverAspect < CardAspect)
+		{
+			const float Shown = static_cast<float>(CoverAspect / CardAspect);
+			Min.Y = (1.f - Shown) * 0.5f;
+			Max.Y = 1.f - Min.Y;
+		}
+		else
+		{
+			const float Shown = static_cast<float>(CardAspect / CoverAspect);
+			Min.X = (1.f - Shown) * 0.5f;
+			Max.X = 1.f - Min.X;
+		}
+		FSlateBrush Brush;
+		Brush.SetResourceObject(Cover);
+		Brush.ImageSize = FVector2f(static_cast<float>(CardAspect * 104.0), 104.f);
+		Brush.SetUVRegion(FBox2f(Min, Max));
+		Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+		Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+		Brush.OutlineSettings.CornerRadii = FVector4(12.f, 12.f, 12.f, 12.f);
+		Brush.OutlineSettings.Color = FSlateColor(FLinearColor::Transparent);
+		Brush.OutlineSettings.Width = 0.f;
+		UImage* Image = WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), *FString::Printf(TEXT("Img_SiteCover_%d"), CoversShown));
+		Image->SetBrush(Brush);
+		PictureSize->SetContent(Image);
+		++CoversShown;
+		Card->AddChildToVerticalBox(PictureSize);
+	}
+	else
+	{
 	UHorizontalBox* Skyline = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
 	const float Heights[] = { 38.f, 62.f, 48.f };
 	for (int32 i = 0; i < 3; ++i)
@@ -124,10 +166,9 @@ void UMobileExplorePageWidget::AddCard(const FMobileSite& Site)
 	Picture->SetVerticalAlignment(VAlign_Bottom);
 	Picture->SetPadding(FMargin(0.f, 0.f, 0.f, 14.f));
 	Picture->SetContent(Skyline);
-	USizeBox* PictureSize = WidgetTree->ConstructWidget<USizeBox>(USizeBox::StaticClass());
-	PictureSize->SetHeightOverride(104.f);
 	PictureSize->SetContent(Picture);
 	Card->AddChildToVerticalBox(PictureSize);
+	}
 
 	// The name and an arrow, what it is, and the distance and how many buildings or levels.
 	UHorizontalBox* NameRow = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
@@ -183,6 +224,7 @@ void UMobileExplorePageWidget::Refresh()
 {
 	ShownSites.Reset();
 	bDataNoteShown = false;
+	CoversShown = 0;
 	if (!CardList || !WidgetTree)
 	{
 		return;

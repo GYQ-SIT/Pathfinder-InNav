@@ -62,6 +62,10 @@ namespace MobileSheet
 	// (HeaderHeight, with the status bar) and the tab bar at the bottom (TabBarHeight, with the gesture bar). ScreenHeight is the whole screen.
 	INNAVI_API double SnapHeight(EMobileSheetSnap Snap, double ScreenHeight, double TabBarHeight, double HeaderHeight);
 
+	// How tall the sheet is when it is minimised, as in the prototype (it keeps only its handle and a line or two of title, so the map gets the screen):
+	// 76 for the directory and the arrival, 136 for a place and a route (they keep their button). 0 while walking, where the sheet keeps the fraction above.
+	INNAVI_API double MinimizedHeight(EMobileSheetState State);
+
 	// The rest height closest to a height the sheet was dragged to.
 	INNAVI_API EMobileSheetSnap NearestSnap(double Height, double ScreenHeight, double TabBarHeight, double HeaderHeight);
 

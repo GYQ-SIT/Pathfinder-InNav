@@ -32,6 +32,8 @@ public:
 	const TArray<FMobileSite>& GetShownSites() const { return ShownSites; }
 	FString GetCountLabel(const FMobileSite& Site) const;
 	bool IsDataNoteShown() const { return bDataNoteShown; }
+	// How many cards show a cover picture instead of the placeholder drawing.
+	int32 GetCoverCountForTests() const { return CoversShown; }
 	UWidget* FindNamedWidget(const FName& Name) const;
 
 protected:
@@ -53,6 +55,7 @@ private:
 	IMobileNavSource* Source = nullptr;
 	TArray<FMobileSite> ShownSites;
 	bool bDataNoteShown = false;
+	int32 CoversShown = 0;
 
 	TFunction<void(const FString&)> OnSiteChosen;
 	TFunction<void()> OnSearchRequested;

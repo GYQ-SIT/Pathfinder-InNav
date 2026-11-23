@@ -83,6 +83,10 @@ public:
 	// real campus at real scale). Returns how many buildings were successfully spawned.
 	UFUNCTION(BlueprintCallable, Category = "Building")
 	int32 LoadBuildingsFromDatabase(const FString& DatabasePath);
+	TOptional<FVector2D> GetDatabaseGeoOrigin() const
+	{
+		return bHasDatabaseRefPoint ? TOptional<FVector2D>(FVector2D(DatabaseRefLat, DatabaseRefLon)) : TOptional<FVector2D>();
+	}
 
 	// Loads roads (as flat ribbon actors; the database's points of interest are not loaded) from the
 	// SAME database LoadBuildingsFromDatabase reads buildings from - must be called AFTER a

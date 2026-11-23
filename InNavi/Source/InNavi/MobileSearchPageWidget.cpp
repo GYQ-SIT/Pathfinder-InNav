@@ -27,8 +27,14 @@ TSharedRef<SWidget> UMobileSearchPageWidget::RebuildWidget()
 	if (WidgetTree && !WidgetTree->RootWidget)
 	{
 		UWidgetTree* Tree = WidgetTree;
+		// An overlay over the page, which the filter lists open in: over the list of places, not pushing it down.
+		UOverlay* Root = Tree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), TEXT("SearchRoot"));
+		Tree->RootWidget = Root;
 		UVerticalBox* Page = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("SearchPage"));
-		Tree->RootWidget = Page;
+		// (An overlay slot is aligned left and top unless it is told to fill.)
+		UOverlaySlot* PageSlot = Root->AddChildToOverlay(Page);
+		PageSlot->SetHorizontalAlignment(HAlign_Fill);
+		PageSlot->SetVerticalAlignment(VAlign_Fill);
 
 		// The title (the site, or the building when one is chosen) and, at the right, the filters button with the number of filters that are on.
 		UHorizontalBox* Header = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass(), TEXT("SearchHeader"));
@@ -93,10 +99,13 @@ TSharedRef<SWidget> UMobileSearchPageWidget::RebuildWidget()
 		FilterPanel = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass(), TEXT("FilterPanel"));
 		FilterPanel->SetVisibility(ESlateVisibility::Collapsed);
 		TWeakObjectPtr<UMobileSearchPageWidget> WeakThis(this);
-		auto MakeSelect = [this, WeakThis](const TCHAR* Caption, TFunction<void(UMobileSearchPageWidget*, const FString&)> OnChosen) -> UMobileSelectWidget*
+		auto MakeSelect = [this, WeakThis, Root](const TCHAR* Caption, TFunction<void(UMobileSearchPageWidget*, const FString&)> OnChosen) -> UMobileSelectWidget*
 		{
 			UMobileSelectWidget* Select = CreateWidget<UMobileSelectWidget>(this, UMobileSelectWidget::StaticClass());
 			Select->SetCompact(true);
+			Select->SetPopupHost(Root);
+			// Five rows, as many as the category list has: a longer list (the buildings) scrolls, and does not run off the half open sheet.
+			Select->SetMaxListHeight(FilterListHeight);
 			Select->SetCaption(Caption);
 			Select->SetOnChanged([WeakThis, OnChosen](const FString& Value)
 			{
@@ -147,6 +156,7 @@ void UMobileSearchPageWidget::SetSource(IMobileNavSource* InSource, const FStrin
 	Filter = FMobilePlaceFilter();
 	ContextBuildingId.Reset();
 	bFiltersOpen = false;
+	CloseOtherSelects(nullptr);
 	Refresh();
 }
 
@@ -190,6 +200,11 @@ void UMobileSearchPageWidget::ClearFilters()
 void UMobileSearchPageWidget::SetFiltersOpen(bool bOpen)
 {
 	bFiltersOpen = bOpen;
+	if (!bOpen)
+	{
+		// A list that is open goes with its panel (it floats over the page, so it would stay).
+		CloseOtherSelects(nullptr);
+	}
 	Refresh();
 }
 
@@ -273,7 +288,7 @@ void UMobileSearchPageWidget::RefreshHeader()
 	}
 	if (FilterPanel)
 	{
-		FilterPanel->SetVisibility(bFiltersOpen ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		FilterPanel->SetVisibility(bFiltersOpen && !bMinimized ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (!Source || !CategorySelect || !BuildingSelect || !LevelSelect)
 	{
@@ -399,9 +414,18 @@ void UMobileSearchPageWidget::AddPlaceRow(const FMobilePlace& Place)
 	IconSize->SetContent(Icon);
 
 	UVerticalBox* Text = WidgetTree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
-	Text->AddChildToVerticalBox(MakeText(WidgetTree, FString(), Place.Name, 15.f, Ink, true));
+	// A long name is cut with "..." before the building and level at the right (it used to run under them).
+	UTextBlock* PlaceName = MakeText(WidgetTree, FString(), Place.Name, 15.f, Ink, true);
+	PlaceName->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+	// The "..." is drawn where the text meets the edge of its widget's clip, so the widget has to clip (the culling rect is the page's otherwise).
+	PlaceName->SetClipping(EWidgetClipping::ClipToBounds);
+	Text->AddChildToVerticalBox(PlaceName);
 	UHorizontalBox* Detail = WidgetTree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
-	Detail->AddChildToHorizontalBox(MakeText(WidgetTree, FString(), Place.WithCode(Place.Category), 11.f, Grey))->SetVerticalAlignment(VAlign_Center);
+	UTextBlock* PlaceDetail = MakeText(WidgetTree, FString(), Place.WithCode(Place.Category), 11.f, Grey);
+	PlaceDetail->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+	UHorizontalBoxSlot* DetailSlot = Detail->AddChildToHorizontalBox(PlaceDetail);
+	DetailSlot->SetVerticalAlignment(VAlign_Center);
+	DetailSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
 	if (!Place.bAvailable)
 	{
 		UBorder* Pill = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
@@ -419,7 +443,9 @@ void UMobileSearchPageWidget::AddPlaceRow(const FMobilePlace& Place)
 	TextSlot->SetPadding(FMargin(12.f, 0.f, 8.f, 0.f));
 	TextSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
 	TextSlot->SetVerticalAlignment(VAlign_Center);
-	Row->AddChildToHorizontalBox(MakeText(WidgetTree, FString(), Place.GroupLabel(), 12.f, Blue, true))->SetVerticalAlignment(VAlign_Center);
+	UHorizontalBoxSlot* TagSlot = Row->AddChildToHorizontalBox(MakeText(WidgetTree, FString(), Place.GroupLabel(), 12.f, Blue, true));
+	TagSlot->SetVerticalAlignment(VAlign_Center);
+	TagSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
 
 	UBorder* Padded = WidgetTree->ConstructWidget<UBorder>(UBorder::StaticClass());
 	Padded->SetBrushColor(FLinearColor::Transparent);
@@ -446,12 +472,35 @@ void UMobileSearchPageWidget::AddPlaceRow(const FMobilePlace& Place)
 	ListBox->AddChildToVerticalBox(Divider)->SetPadding(FMargin(16.f, 0.f));
 }
 
+bool UMobileSearchPageWidget::HasOpenSelect() const
+{
+	return (CategorySelect && CategorySelect->IsOpen()) || (BuildingSelect && BuildingSelect->IsOpen()) || (LevelSelect && LevelSelect->IsOpen());
+}
+
+void UMobileSearchPageWidget::SetMinimized(bool bInMinimized)
+{
+	if (bMinimized == bInMinimized)
+	{
+		return;
+	}
+	bMinimized = bInMinimized;
+	const ESlateVisibility Shown = bMinimized ? ESlateVisibility::Collapsed : ESlateVisibility::Visible;
+	if (FiltersButton) FiltersButton->SetVisibility(Shown);
+	if (ListScroll) ListScroll->SetVisibility(Shown);
+	if (StartRow) StartRow->SetVisibility(bMinimized || StartLabel.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	if (FilterPanel) FilterPanel->SetVisibility(bMinimized || !bFiltersOpen ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	if (bMinimized)
+	{
+		CloseOtherSelects(nullptr);
+	}
+}
+
 void UMobileSearchPageWidget::SetStartLabel(const FString& Label)
 {
 	StartLabel = Label;
 	if (StartRow && StartText)
 	{
-		StartRow->SetVisibility(Label.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+		StartRow->SetVisibility(Label.IsEmpty() || bMinimized ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 		StartText->SetText(FText::FromString(Label.IsEmpty() ? FString() : TEXT("Starting from ") + Label));
 	}
 }

@@ -110,6 +110,12 @@ private:
 	UPROPERTY()
 	UTextBlock* VisibilityButtonText = nullptr;
 
+	// The design team's pictures (arrow right / down, eye open / crossed) in place of the glyphs, when their textures are imported.
+	UPROPERTY()
+	UWidget* ExpandIcon = nullptr;
+	UPROPERTY()
+	UWidget* VisibilityIcon = nullptr;
+
 	FString RowKey;
 	FString LabelText;
 	float Indent = 0.f;

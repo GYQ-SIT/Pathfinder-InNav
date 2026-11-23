@@ -145,6 +145,8 @@ private:
 	UFUNCTION()
 	void OnStepModeClicked();
 	UFUNCTION()
+	void OnFullRouteViewClicked();
+	UFUNCTION()
 	UWidget* HandleGenerateComboBoxItem(FString Item);
 
 	// Which place each row of the list shows: a row of the route, PendingRow for the row a stop is being added in, or INDEX_NONE for a
@@ -175,6 +177,9 @@ private:
 	TArray<TObjectPtr<UNavigationPlaceButton>> BadgeButtons;
 	UPROPERTY()
 	TArray<TObjectPtr<UTextBlock>> BadgeTexts;
+	// The start and destination markers (the design team's pictures) that stand in for the letters, when their textures are imported.
+	UPROPERTY()
+	TArray<TObjectPtr<UWidget>> BadgeIcons;
 	UPROPERTY()
 	TArray<TObjectPtr<UTextBlock>> RoleTexts;
 	UPROPERTY()
@@ -212,6 +217,9 @@ private:
 	UTextBlock* HintText = nullptr;
 	UPROPERTY()
 	UTextBlock* StatusText = nullptr;
+	// The warning triangle in front of a warning or an error.
+	UPROPERTY()
+	UWidget* StatusIcon = nullptr;
 	UPROPERTY()
 	UTextBlock* RouteDetailsText = nullptr;
 	UPROPERTY()
@@ -220,6 +228,9 @@ private:
 	UButton* ToggleRouteButton = nullptr;
 	UPROPERTY()
 	UTextBlock* ToggleRouteButtonLabel = nullptr;
+	// The eye on that button: open to show the route, crossed to hide it.
+	UPROPERTY()
+	UWidget* ToggleRouteIcon = nullptr;
 
 	// ---- Go ----
 	// The route in a line: a number for each place, in the colour it has on the map.
@@ -247,6 +258,10 @@ private:
 	UButton* StepModeButton = nullptr;
 	UPROPERTY()
 	UTextBlock* StepModeButtonLabel = nullptr;
+	UPROPERTY()
+	UButton* FullRouteViewButton = nullptr;
+	UPROPERTY()
+	UTextBlock* FullRouteViewButtonLabel = nullptr;
 	UPROPERTY()
 	UButton* EditRouteButton = nullptr;
 

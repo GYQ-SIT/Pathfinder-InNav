@@ -7,6 +7,10 @@
 
 class UTextRenderComponent;
 
+// How far the person has got along a stretch of the route, in the full route overview when the route is gone through a step at a time: what has been
+// walked, the stretch of the step being shown, and what is still to walk. Unspecified outside the overview (and before the first step).
+enum class ENavigationSegmentProgress : uint8 { Unspecified, Done, Current, Pending };
+
 struct FNavigationDisplaySegment
 {
 	FVector From;
@@ -16,6 +20,7 @@ struct FNavigationDisplaySegment
 	int32 RouteLegIndex = INDEX_NONE;
 	// Not the step being shown (see FNavigationRouteFocus): drawn faint.
 	bool bDimmed = false;
+	ENavigationSegmentProgress Progress = ENavigationSegmentProgress::Unspecified;
 };
 
 struct FNavigationDisplayLabel
@@ -43,6 +48,7 @@ struct FNavigation3DView
 	// Where the person is, at the step being shown.
 	TOptional<FVector> Here;
 	FQuat DisplayRotation = FQuat::Identity;
+	bool bForeground = false;
 };
 
 // Arrow geometry in local map pixels, so zooming does not make direction cues unreadable.
@@ -64,7 +70,8 @@ public:
 		const FNavigationRoutePoint* Start, const FNavigationRoutePoint* Destination,
 		FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible = true,
 		const FString& ActiveBuildingId = FString(), const TArray<FNavigationStop>* Stops = nullptr,
-		const TArray<FNavigationRouteLeg>* RouteLegs = nullptr, const FNavigationRouteFocus* Focus = nullptr);
+		const TArray<FNavigationRouteLeg>* RouteLegs = nullptr, const FNavigationRouteFocus* Focus = nullptr,
+		bool bFullRoute = false);
 	static bool IsPointVisible(const FNavigationRoutePoint& Point, const FString& ActiveBuildingId, int32 ActiveFloor);
 	// The route as the exterior screen draws it: the parts outside, a label where it enters or leaves a building, and the Start and
 	// Destination markers (also when they are indoors, then at their spot inside the building). Points carry their world positions.
@@ -78,6 +85,9 @@ public:
 	static FLinearColor LegColor2D(int32 LegIndex);
 	static TArray<FNavigationDirectionArrow2D> BuildDirectionArrows2D(FVector2D From, FVector2D To);
 	void ShowView(const FNavigation3DView& View);
+	// How much bigger than usual ShowView draws the lines, arrows and balls (the full route overview, seen from far, asks for more than 1).
+	void SetDisplayScale(float Scale) { DisplayScale = FMath::Max(Scale, 0.1f); }
+
 	static FNavigation3DView TransformView(const FNavigation3DView& View, const FTransform& Transform);
 	void ClearRoute();
 
@@ -88,4 +98,6 @@ protected:
 private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTextRenderComponent>> RouteLabels;
+	float DisplayScale = 1.f;
+	void DrawProgressSegment(const FNavigationDisplaySegment& Segment, const FQuat& DisplayRotation, uint8 Depth);
 };

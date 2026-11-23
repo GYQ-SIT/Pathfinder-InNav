@@ -9,12 +9,12 @@
 
 class UProceduralMeshComponent;
 class UMaterialInstanceDynamic;
+struct FConnectorPart;
 
-// Placeholder 3D geometry for one floor-segment of an elevator/stairs/escalator connector node -
-// the first 3D representation these have (the 2D floor plan already draws them as icons, see
-// UInteriorFloorPlanWidget, but the 3D preview mode - ANavPlayerController::SetIn3DPreviewMode -
-// had nothing at all to show for them). Basic primitive shapes, not real art, per the "占位"
-// (placeholder) scope of this pass.
+// The 3D shape of one floor-segment of an elevator, a staircase or an escalator: the lift is a glass shaft with its steel frame, a landing door
+// and a floor indicator; the stairs have treads, risers, side stringers, balusters and handrails; the escalator has a truss, a run of steps,
+// glass balustrades with skirts and moving handrails. Each is made of several parts (frame, glass, treads ...), each with its own material.
+// (The 2D floor plan draws these as icons, see UInteriorFloorPlanWidget.)
 //
 // One marker per FInteriorNavNode (see FInteriorNavNode::MarkerActor, and
 // AInteriorGenerator::SpawnConnectorMarker which owns the spawn/destroy lifecycle) - a multi-floor
@@ -33,18 +33,17 @@ class INNAVI_API AInteriorConnectorMarker : public AActor
 public:
 	AInteriorConnectorMarker();
 
-	// Builds this floor segment's placeholder geometry for Type, centered at WorldCenter (XY),
+	// Builds this floor segment's geometry for Type, centered at WorldCenter (XY),
 	// spanning FloorBaseZ to FloorBaseZ + FloorHeight, then rotated (about WorldCenter,
 	// RotationDegrees, positive = counter-clockwise) and uniformly scaled (SizeScale, footprint only
-	// - FloorHeight is never scaled). Matches GetConnectorFootprintCorners (InteriorTypes.h) exactly,
-	// so the mesh and the placement/overlap checks never disagree about where the connector actually
-	// is. No-op (empty mesh) for PathNode - callers shouldn't spawn a marker for one at all, see
-	// AInteriorGenerator::SpawnConnectorMarker.
+	// - FloorHeight is never scaled). Stays inside GetConnectorFootprintCorners (InteriorTypes.h), so the mesh and the
+	// placement/overlap checks never disagree about where the connector actually is, and its top lies a little under the slab above
+	// (see SlabClearance in the .cpp). No-op (empty mesh) for PathNode - callers shouldn't spawn a marker for one at all, see
+	// AInteriorGenerator::SpawnConnectorMarker. Can be called again to rebuild: the earlier parts are cleared first.
 	void BuildMarker(EInteriorNavNodeType Type, const FVector2D& WorldCenter, float FloorBaseZ, float FloorHeight, float RotationDegrees, float SizeScale);
 
-	// Tints the marker to a light green (3D Edit mode's selection indicator) when true, back to this
-	// connector's own normal tint (set by BuildMarker, per-type) when false. Mirrors
-	// APolyBuilding::SetHighlighted / AInteriorRoom::SetHighlighted.
+	// Tints the whole marker light green (3D Edit mode's selection indicator) when true, back to the parts' own colours when
+	// false. Mirrors APolyBuilding::SetHighlighted / AInteriorRoom::SetHighlighted.
 	void SetHighlighted(bool bHighlighted);
 
 	// Which connector group (FInteriorNavNode::ConnectorGroupId, same id RotateConnectorGroup/
@@ -55,25 +54,21 @@ public:
 	const FString& GetOwnerGroupId() const { return OwnerGroupId; }
 
 private:
-	// Both Build* functions build their geometry in LOCAL space first (centered on the origin,
-	// unrotated, unscaled - the same fixed +X "rise" direction as before) and only apply
-	// WorldCenter/RotationDegrees/SizeScale at the very end (see the TransformFootprintVertices
-	// helper in the .cpp) - keeps the actual box-building logic simple regardless of orientation.
+	// Each Build* function builds its parts in LOCAL space first (centered on the origin, unrotated, unscaled - the connector's "rise"
+	// direction is +X, its width Y) and CommitParts applies WorldCenter/RotationDegrees/SizeScale at the very end.
 	void BuildElevatorShaft(const FVector2D& WorldCenter, float FloorBaseZ, float FloorHeight, float RotationDegrees, float SizeScale);
-	// bIsEscalator only changes the tint, so stairs/escalator stay visually distinguishable despite
-	// sharing the exact same step shape.
-	void BuildStairsSteps(const FVector2D& WorldCenter, float FloorBaseZ, float FloorHeight, float RotationDegrees, float SizeScale, bool bIsEscalator);
+	void BuildStairs(const FVector2D& WorldCenter, float FloorBaseZ, float FloorHeight, float RotationDegrees, float SizeScale);
+	void BuildEscalator(const FVector2D& WorldCenter, float FloorBaseZ, float FloorHeight, float RotationDegrees, float SizeScale);
+	// Makes one mesh section and one material per non-empty part.
+	void CommitParts(TArray<FConnectorPart>& Parts, const FVector2D& WorldCenter, float RotationDegrees, float SizeScale);
 
 	UPROPERTY()
 	UProceduralMeshComponent* MeshComp;
 
+	// One material per part (the glass ones see-through), and the colour each had, which SetHighlighted(false) gives back.
 	UPROPERTY()
-	UMaterialInstanceDynamic* DynMaterial;
-
-	// This connector type's own tint (set by BuildElevatorShaft/BuildStairsSteps) - restored by
-	// SetHighlighted(false) instead of a single shared constant, since elevator/stairs/escalator each
-	// have a different normal color.
-	FLinearColor NormalColor = FLinearColor::White;
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> PartMaterials;
+	TArray<FLinearColor> PartColors;
 
 	FString OwnerGroupId;
 };

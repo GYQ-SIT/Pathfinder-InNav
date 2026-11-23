@@ -33,6 +33,10 @@
 		{
 			"Name": "InNaviLayoutValidator",
 			"Enabled": true
+		},
+		{
+			"Name": "LocationServicesAndroidImpl",
+			"Enabled": true
 		}
 	]
 }

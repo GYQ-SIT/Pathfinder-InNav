@@ -426,6 +426,34 @@ void AInteriorRoom::SetTypeColourShown(bool bShown)
 	RefreshFloorTint();
 }
 
+void AInteriorRoom::SetOverviewOpacity(float Opacity)
+{
+	if (!MeshComp)
+	{
+		return;
+	}
+	if (Opacity < 0.f)
+	{
+		if (DynMaterial) MeshComp->SetMaterial(0, DynMaterial);
+		if (FloorDynMaterial) MeshComp->SetMaterial(1, FloorDynMaterial);
+		return;
+	}
+	if (!OverviewMaterial)
+	{
+		// The material the buildings fade with: it has an Opacity and a Color.
+		UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/ImageAssets/Materials/M_BuildingTransparent.M_BuildingTransparent"));
+		if (!BaseMat)
+		{
+			return;
+		}
+		OverviewMaterial = UMaterialInstanceDynamic::Create(BaseMat, this);
+		OverviewMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.72f, 0.84f, 0.96f));
+	}
+	OverviewMaterial->SetScalarParameterValue(TEXT("Opacity"), FMath::Clamp(Opacity, 0.f, 1.f));
+	MeshComp->SetMaterial(0, OverviewMaterial);
+	if (FloorDynMaterial) MeshComp->SetMaterial(1, OverviewMaterial);
+}
+
 void AInteriorRoom::SetHighlighted(bool bHighlighted)
 {
 	bHighlightedNow = bHighlighted;

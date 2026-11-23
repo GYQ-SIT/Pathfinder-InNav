@@ -10,6 +10,7 @@ class UBorder;
 class UButton;
 class UHorizontalBox;
 class UImage;
+class UOverlay;
 class UMobileReorderHandle;
 class USizeBox;
 class UTextBlock;
@@ -38,6 +39,9 @@ public:
 	void SetOnBack(TFunction<void()> InCallback) { OnBack = MoveTemp(InCallback); }
 	void SetOnRequestChanged(TFunction<void(const FMobileRouteRequest&)> InCallback) { OnRequestChanged = MoveTemp(InCallback); }
 	void SetOnStart(TFunction<void()> InCallback) { OnStart = MoveTemp(InCallback); }
+	// The sheet is down at its lowest: "Your route" and the travel mode, and Start navigation, and nothing between (as in the prototype).
+	void SetMinimized(bool bInMinimized);
+	bool IsMinimized() const { return bMinimized; }
 
 	// What the person does: a tap on a way-between-levels chip ("lift", "stairs", "escalator", "liftonly"), and a choice in each drop-down
 	// (the From and To values are place ids; From's empty value is My location; the level is its number).
@@ -100,6 +104,16 @@ private:
 	void HandleStartClicked();
 
 	void Refresh();
+	void RefreshSubtitle();
+
+	UPROPERTY()
+	UWidget* BodyScroll = nullptr;
+	// The overlay over the page that the drop-down lists open in (over the stops, not pushing them down).
+	UPROPERTY()
+	UOverlay* PopupRoot = nullptr;
+	UPROPERTY()
+	UTextBlock* SubtitleText = nullptr;
+	bool bMinimized = false;
 	void RefreshStops();
 	void RefreshSummary();
 	void RefreshTransport();
@@ -107,6 +121,16 @@ private:
 	void RefreshSteps();
 	void RefreshSections();
 	void CloseOtherSelects(const UMobileSelectWidget* Keep);
+public:
+	// A drop-down list is open (it floats over the page), and closing whichever is.
+	bool HasOpenSelect() const;
+	void CloseSelects() { CloseOtherSelects(nullptr); }
+	// The row being dragged is drawn as a card over the page: solid white with a shadow under it, and the row it leaves is faint. Delta is how far it has gone.
+	void BeginDragGhost(int32 Index);
+	void MoveDragGhost(float DeltaY);
+	void EndDragGhost();
+	bool IsDragGhostShown() const { return DragGhost != nullptr; }
+private:
 	void Changed();
 	UMobileSelectWidget* MakeSelect(EMobileSelectLook Look, const TCHAR* Caption, TFunction<void(UMobileRoutePageWidget*, const FString&)> OnChosen);
 	// One row of the stops card; returns its box (a drag moves it). Badge is the circle at the left, joined by a line to the rows above and below.
@@ -132,6 +156,24 @@ private:
 	TArray<UMobileReorderHandle*> ReorderHandles;
 	UPROPERTY()
 	TArray<USizeBox*> StopRowBoxes;
+	// What the card of a row that is dragged shows (the row's own widgets stay where they are).
+	struct FStopGhost
+	{
+		FString Name;
+		FString Where;
+		FLinearColor BadgeFill = FLinearColor::Blue;
+		FString BadgeNumber;
+		bool bPin = false;
+		bool bRemovable = false;
+		bool bHandle = false;
+	};
+	TArray<FStopGhost> StopGhosts;
+	UPROPERTY()
+	UWidget* DragGhost = nullptr;
+	UPROPERTY()
+	UOverlaySlot* DragGhostSlot = nullptr;
+	float DragGhostTop = 0.f;
+	int32 DragGhostIndex = INDEX_NONE;
 	UPROPERTY()
 	UVerticalBox* StopsBox = nullptr;
 	UPROPERTY()

@@ -5,6 +5,10 @@
 #include "MobileSelectWidget.generated.h"
 
 class UBorder;
+class UButton;
+class UOverlay;
+class UOverlaySlot;
+class USizeBox;
 class UScrollBox;
 class UTextBlock;
 class UVerticalBox;
@@ -42,6 +46,15 @@ public:
 	// Called when the person (not the program) chooses an option, and when the list opens.
 	void SetOnChanged(TFunction<void(const FString&)> InCallback) { OnChanged = MoveTemp(InCallback); }
 	void SetOnOpened(TFunction<void()> InCallback) { OnOpened = MoveTemp(InCallback); }
+	// The list opens over the page instead of in it: it is put in this overlay (which covers the page), under the field, and so it does not push
+	// the content below the field down. Set before the widget is built. Without a host the list opens in the page, under the field.
+	void SetPopupHost(UOverlay* InHost) { PopupHost = InHost; }
+	// The most the open list shows before it scrolls (the same as five rows of the directory's small drop-down), so that it never runs off the
+	// screen when the sheet is only half open.
+	void SetMaxListHeight(float Height);
+	// Takes the popup list out of its host (the page rebuilds its rows, and the selects of the old ones go).
+	void ClosePopup();
+	float GetMaxListHeight() const { return MaxListHeight; }
 
 	void SetOpen(bool bInOpen);
 	bool IsOpen() const { return bOpen; }
@@ -54,13 +67,19 @@ public:
 	// What the field shows: the short label of the chosen option, else its label.
 	FString GetSelectedShortLabel() const;
 	int32 GetOptionCount() const { return Options.Num(); }
+	// The text that shows the chosen option, and whether the field has an arrow.
+	const UTextBlock* GetValueText() const { return ValueText; }
+	bool HasArrow() const { return bHasArrow; }
 	const TArray<FMobileSelectOption>& GetOptions() const { return Options; }
 
 protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 private:
 	void Refresh();
+	// Puts the popup list under the field (the page may move while it is open: the sheet is dragged, the window is resized).
+	void PlacePopup();
 
 	UPROPERTY()
 	UTextBlock* CaptionText = nullptr;
@@ -73,11 +92,30 @@ private:
 	UBorder* FieldBox = nullptr;
 	UPROPERTY()
 	UVerticalBox* ListBox = nullptr;
+	UPROPERTY()
+	USizeBox* ListLimit = nullptr;
+	// The overlay the list opens in, when it opens over the page; the box that gives it the width of the field, and its place there.
+	UPROPERTY()
+	UOverlay* PopupHost = nullptr;
+	UPROPERTY()
+	USizeBox* PopupWidth = nullptr;
+	// Over the page and under the list while it is open: it takes any touch that is not on the list and closes it, so that a tap on the page under it, or a
+	// scroll of it, does not act (a list open over a page that still answers is a list nobody can tell is open).
+	UPROPERTY()
+	UButton* Catcher = nullptr;
+	UFUNCTION()
+	void HandleCatcherPressed();
+	UPROPERTY()
+	UOverlaySlot* PopupSlot = nullptr;
+	float MaxListHeight = 190.f;
+	// The most the list is allowed now (less than MaxListHeight where the page has no room for more), so it is not set again every frame.
+	float ListHeightNow = -1.f;
 
 	FString Caption;
 	TArray<FMobileSelectOption> Options;
 	FString Selected;
 	bool bOpen = false;
+	bool bHasArrow = false;
 	EMobileSelectLook Look = EMobileSelectLook::Normal;
 
 	TFunction<void(const FString&)> OnChanged;

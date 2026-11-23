@@ -16,6 +16,8 @@ class INNAVI_API UMobileTapTarget : public UUserWidget
 
 public:
 	// Content is what the tap target shows; Fill is the button's colour when it is up (transparent for a plain row).
+	// The padding round the content (the engine's button gives 4 and 2 unless this is called before Setup); for a text that has to line up with another.
+	void SetContentPadding(const FMargin& InPadding) { ContentPadding = InPadding; bHasContentPadding = true; }
 	void Setup(UWidget* Content, const FString& InPayload, const FLinearColor& Fill, float CornerRadius);
 
 	void SetOnTapped(TFunction<void(const FString&)> InOnTapped) { OnTapped = MoveTemp(InOnTapped); }
@@ -30,6 +32,8 @@ protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 
 private:
+	FMargin ContentPadding;
+	bool bHasContentPadding = false;
 	UFUNCTION()
 	void HandleClicked();
 

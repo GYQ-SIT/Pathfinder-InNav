@@ -120,6 +120,9 @@ private:
 	UButton* TransparentButton = nullptr;
 	UPROPERTY()
 	UTextBlock* TransparentLabel = nullptr;
+	// The eye in front of it: open while the button is on, crossed while it is off (null while the textures are not imported).
+	UPROPERTY()
+	UWidget* TransparentIcon = nullptr;
 	bool bTransparentShownOn = false;
 	// "All floors", then one item per floor of the selected building.
 	UPROPERTY()

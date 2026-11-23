@@ -4,6 +4,9 @@
 #include "MobileExplorePageWidget.h"
 #include "MobileMapWidget.h"
 #include "MobileMockSource.h"
+#include "MobileRealSource.h"
+#include "ProjectLibrary.h"
+#include "ImageUtils.h"
 #include "MobileNavigatePageWidget.h"
 #include "MobilePlacePageWidget.h"
 #include "MobileRoutePageWidget.h"
@@ -14,7 +17,11 @@
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "Engine/World.h"
+#include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Guid.h"
+#include "Misc/Paths.h"
 
 // The Explore tab: a card for each site, and opening one starts the app again for that site.
 
@@ -82,10 +89,11 @@ bool FMobileOpenSiteTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("the map shows the mall's first level"), Screen->GetMapView()->GetBuildingId() == TEXT("PLM") && Screen->GetMapView()->GetLevel() == 1);
 	TestTrue(TEXT("with the person in the mall (My location)"), Screen->GetMyLocationBuildingId() == TEXT("PLM") && Screen->GetMapView()->HasPosition());
 
-	// A walk in the mall: by escalator when the lift is off (the campus has none).
+	// A walk in the mall: by escalator when the lift is off (the campus has none). The app starts with the lift only.
 	Screen->GetSearchPage()->ChoosePlace(TEXT("PLM-03-103"));
 	Click(Screen->GetPlacePage()->FindNamedWidget(TEXT("Btn_GetDirections")));
 	TestTrue(TEXT("a route in the mall"), Screen->GetCurrentRoute().bFound);
+	Screen->GetRoutePage()->TapOption(TEXT("escalator"));
 	Screen->GetRoutePage()->TapOption(TEXT("lift"));
 	TestTrue(TEXT("by escalator without the lift"), Screen->GetCurrentRoute().Steps.ContainsByPredicate([](const FMobileStep& S) { return S.Kind == EMobileStepKind::TakeEscalator; }));
 	Click(Screen->GetRoutePage()->FindNamedWidget(TEXT("Btn_StartNavigation")));
@@ -97,7 +105,7 @@ bool FMobileOpenSiteTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("the campus (its first building and level at the top)"), SiteName(), FString(TEXT("E2 · L1")));
 	TestEqual(TEXT("back at Where to?"), Screen->GetFlow().GetState(), EMobileSheetState::Search);
 	TestTrue(TEXT("no route is left"), !Screen->GetCurrentRoute().bFound && Screen->GetCurrentRoute().Steps.IsEmpty());
-	TestTrue(TEXT("the ways between levels are all on again"), Screen->GetRoutePreferences().bAllowLift && Screen->GetRoutePreferences().bAllowStairs && Screen->GetRoutePreferences().bAllowEscalator);
+	TestTrue(TEXT("the way between levels is the lift again"), Screen->GetRoutePreferences().bAllowLift && !Screen->GetRoutePreferences().bAllowStairs && !Screen->GetRoutePreferences().bAllowEscalator);
 	TestTrue(TEXT("the map is on E2"), Screen->GetMapView()->GetBuildingId() == TEXT("E2") && Screen->GetMapView()->GetRoutePointsOnLevel() == 0);
 	TestEqual(TEXT("with the campus's places"), Screen->GetSearchPage()->GetShownPlaces()[0].BuildingId, FString(TEXT("E2")));
 	TestEqual(TEXT("and the route page's choices are the campus's"), Screen->GetRoutePage()->GetToSelect()->GetOptionCount(), 36);
@@ -105,6 +113,42 @@ bool FMobileOpenSiteTest::RunTest(const FString& Parameters)
 	// A site that is not there changes nothing.
 	Screen->OpenSite(TEXT("nowhere"));
 	TestEqual(TEXT("an unknown site is ignored"), Screen->GetSiteId(), FString(TEXT("sit-punggol")));
+	World->DestroyWorld(false);
+	return true;
+}
+
+// A site whose project has a cover shows it on its card instead of the placeholder drawing; the others keep the drawing.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileExploreCoverTest, "InNavi.Mobile.ExplorePage.Cover", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileExploreCoverTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	UMobileExplorePageWidget* Page = CreateWidget<UMobileExplorePageWidget>(World, UMobileExplorePageWidget::StaticClass());
+	if (!TestNotNull(TEXT("the page is created"), Page)) return false;
+	Page->TakeWidget();
+	FMobileMockSource Mock;
+	Page->SetSource(&Mock);
+	TestEqual(TEXT("the prototype's sites have no covers"), Page->GetCoverCountForTests(), 0);
+
+	// A real project with a cover, and one without.
+	const FString Folder = FPaths::ProjectSavedDir() / TEXT("AutomationTemp") / FGuid::NewGuid().ToString(EGuidFormats::Digits);
+	IFileManager::Get().MakeDirectory(*Folder, true);
+	FString Layout;
+	FFileHelper::LoadFileToString(Layout, *(FPaths::ProjectPluginsDir() / TEXT("InNaviLayoutValidator/Examples/valid-layout.json")));
+	FFileHelper::SaveStringToFile(Layout, *(Folder / TEXT("with.json")));
+	FFileHelper::SaveStringToFile(Layout, *(Folder / TEXT("without.json")));
+	TArray<FColor> Pixels; Pixels.Init(FColor(200, 30, 90, 255), 100 * 40);
+	FImageUtils::SaveImageByExtension(*(Folder / TEXT("picture.png")), FImageView(Pixels.GetData(), 100, 40));
+	FProjectLibraryEntry Entry; Entry.FileName = TEXT("with.json");
+	FString Error;
+	TestTrue(TEXT("a cover is set"), ProjectLibrary::SetCover(Entry, Folder / TEXT("picture.png"), Folder, Error));
+	{
+		FMobileRealSource Real(Folder);
+		Page->SetSource(&Real);
+		TestEqual(TEXT("a card for each project"), Page->GetShownSites().Num(), 2);
+		TestEqual(TEXT("one of them shows its cover"), Page->GetCoverCountForTests(), 1);
+		Page->SetSource(nullptr);
+	}
+	IFileManager::Get().DeleteDirectory(*Folder, false, true);
 	World->DestroyWorld(false);
 	return true;
 }

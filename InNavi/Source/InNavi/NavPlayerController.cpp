@@ -18,6 +18,9 @@
 #include "InteriorFloorPlanWidget.h"
 #include "Blueprint/UserWidget.h"
 #include "GameFramework/Pawn.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "PolyBuilding.h"
 #include "InteriorBuildingPreviewPivot.h"
 #include "GameFramework/FloatingPawnMovement.h"
@@ -466,7 +469,7 @@ void ANavPlayerController::SelectOutdoorPointUnderCursor()
 
 void ANavPlayerController::SelectNavigationPoint(FVector2D FootprintPosition, int32 Floor)
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	UE_LOG(LogTemp, Warning,
 		TEXT("[Navigation] Controller forwarding point: position=(%.2f, %.2f), floor=%d, panel=%s"),
 		FootprintPosition.X, FootprintPosition.Y, Floor,
@@ -541,7 +544,7 @@ void ANavPlayerController::SetupInputComponent()
 
 void ANavPlayerController::OnClick()
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	UE_LOG(LogTemp, Warning, TEXT("[Navigation] PlayerController OnClick: selecting=%s build=%s"),
 		IsSelectingNavigationPoint() ? TEXT("true") : TEXT("false"),
 		bBuildMode ? TEXT("true") : TEXT("false"));
@@ -752,7 +755,7 @@ void ANavPlayerController::SelectBuildingUnderCursor()
 
 void ANavPlayerController::ToggleBuildMode()
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (!Generator)
 	{
 		UE_LOG(LogTemp, Error, TEXT("Cannot enter build mode: no BuildingGenerator found in the level"));
@@ -795,7 +798,7 @@ void ANavPlayerController::ToggleBuildMode()
 
 void ANavPlayerController::ToggleShapeTestMode()
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (!Generator)
 	{
 		UE_LOG(LogTemp, Error, TEXT("Cannot enter shape test mode: no BuildingGenerator found in the level"));
@@ -845,6 +848,7 @@ namespace
 
 void ANavPlayerController::UpdateBuildingTransparency()
 {
+	if (bFullRouteViewEnabled) return;
 	if (!Generator)
 		return;
 
@@ -1017,7 +1021,7 @@ void ANavPlayerController::SetBuildingRoomFloor(const FString& BuildingId, int32
 
 void ANavPlayerController::ToggleDrawRoomMode()
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
 	{
 		UE_LOG(LogTemp, Error, TEXT("Cannot enter draw room mode: no building interior currently loaded"));
@@ -1062,7 +1066,7 @@ void ANavPlayerController::ToggleDrawRoomMode()
 
 void ANavPlayerController::ToggleDrawWallMode()
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
 	{
 		UE_LOG(LogTemp, Error, TEXT("Cannot enter draw wall mode: no building interior currently loaded"));
@@ -1144,7 +1148,7 @@ void ANavPlayerController::ExitSelectMode()
 
 void ANavPlayerController::ToggleSelectMode()
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
 	{
 		UE_LOG(LogTemp, Error, TEXT("Cannot enter select mode: no building interior currently loaded"));
@@ -1215,7 +1219,7 @@ void ANavPlayerController::ExitPrefabRoomMode()
 
 void ANavPlayerController::TogglePrefabRoomMode(int32 ShapeId)
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
 	{
 		UE_LOG(LogTemp, Error, TEXT("Cannot place a prefab room: no building interior currently loaded"));
@@ -1284,7 +1288,7 @@ void ANavPlayerController::ExitConnectorMode()
 
 void ANavPlayerController::ToggleConnectorMode(EInteriorNavNodeType Type)
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
 	{
 		UE_LOG(LogTemp, Error, TEXT("Cannot place a connector: no building interior currently loaded"));
@@ -1387,7 +1391,7 @@ void ANavPlayerController::ExitAllMouseTools()
 
 void ANavPlayerController::ToggleAddDoorMode()
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
 	{
 		UE_LOG(LogTemp, Error, TEXT("Cannot enter add-door mode: no building interior currently loaded"));
@@ -1453,6 +1457,7 @@ FString ANavPlayerController::AddDoorToWall(const FString& RoomId, int32 EdgeInd
 
 void ANavPlayerController::OnConfirmPressed()
 {
+	if (bFullRouteViewEnabled) return;
 	if (bBuildMode)
 	{
 		FinishBuilding();
@@ -1473,6 +1478,7 @@ void ANavPlayerController::OnConfirmPressed()
 
 void ANavPlayerController::OnCancelPressed()
 {
+	if (bFullRouteViewEnabled) { SetFullRouteViewEnabled(false); return; }
 	if (bInteriorInspectionEnabled) { SetInteriorInspectionEnabled(false); return; }
 	if (NavigationPanel && NavigationPanel->GetSelectionMode() != ENavigationSelectionMode::None)
 	{
@@ -1704,17 +1710,6 @@ bool ANavPlayerController::SetActiveFloorName(const FString& NewName)
 	return true;
 }
 
-int32 ANavPlayerController::AddSpecialFloor()
-{
-	const int32 Level = AddFloor();
-	if (Level != 0 && InteriorGen)
-	{
-		InteriorGen->SetFloorName(Level, TEXT("Special floor"));
-		bHasUnsavedChanges = true;
-	}
-	return Level;
-}
-
 bool ANavPlayerController::BrowseForReferenceImage()
 {
 #if PLATFORM_WINDOWS
@@ -1725,7 +1720,7 @@ bool ANavPlayerController::BrowseForReferenceImage()
 		if (Window && Window->GetNativeWindow()) ParentWindowHandle = Window->GetNativeWindow()->GetOSWindowHandle();
 	}
 	FString Path, Error;
-	DesktopProjectFileDialog::Pick(ParentWindowHandle, GetProjectsDirectory(), false, Path, Error, /*bPng=*/true);
+	DesktopProjectFileDialog::Pick(ParentWindowHandle, GetProjectsDirectory(), false, Path, Error, DesktopProjectFileDialog::EKind::Png);
 	if (!Error.IsEmpty()) OnActionFailed.Broadcast(Error, EActionFailureSeverity::Warning);
 	return !Path.IsEmpty() && ImportReferenceImage(Path);
 #else
@@ -1805,7 +1800,7 @@ bool ANavPlayerController::RemoveActiveReferenceImage()
 
 void ANavPlayerController::ToggleUtilityMode(const FString& Type)
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (!InteriorGen || InteriorGen->GetLoadedBuildingId().IsEmpty())
 	{
 		OnActionFailed.Broadcast(TEXT("Load a building's interior first, then try placing a utility point."), EActionFailureSeverity::Warning);
@@ -3359,6 +3354,25 @@ APolyBuilding* ANavPlayerController::CreateRegularPolygonBuilding(const FString&
 	return Result;
 }
 
+FString ANavPlayerController::BrowseForCoverPicture()
+{
+#if PLATFORM_WINDOWS
+	const void* ParentWindowHandle = nullptr;
+	if (FSlateApplication::IsInitialized())
+	{
+		const TSharedPtr<SWindow> Window = FSlateApplication::Get().GetActiveTopLevelWindow();
+		if (Window && Window->GetNativeWindow()) ParentWindowHandle = Window->GetNativeWindow()->GetOSWindowHandle();
+	}
+	FString Path, Error;
+	DesktopProjectFileDialog::Pick(ParentWindowHandle, FPlatformProcess::UserDir(), false, Path, Error, DesktopProjectFileDialog::EKind::Picture);
+	if (!Error.IsEmpty()) OnActionFailed.Broadcast(Error, EActionFailureSeverity::Warning);
+	return Path;
+#else
+	OnActionFailed.Broadcast(TEXT("Choosing a picture is only available on Windows."), EActionFailureSeverity::Warning);
+	return FString();
+#endif
+}
+
 FString ANavPlayerController::BrowseForBuildingDataFile()
 {
 #if PLATFORM_WINDOWS
@@ -3516,6 +3530,8 @@ void ANavPlayerController::CloseProject()
 
 void ANavPlayerController::ClearProjectState()
 {
+	ClearValidationMarker();
+	SetFullRouteViewEnabled(false);
 	FinishRotationGesture();
 	ExitAllMouseTools();
 	CancelNavigationPicking();
@@ -3826,6 +3842,7 @@ void ANavPlayerController::ZoomOut3DPreview()
 
 void ANavPlayerController::ResetCamera3DPreview()
 {
+	if (bFullRouteViewEnabled) { FrameFullRouteView(); return; }
 	if (bInteriorInspectionEnabled && IsValid(InspectionPivot))
 	{
 		InspectionPivot->ResetRotation();
@@ -3849,7 +3866,7 @@ void ANavPlayerController::ResetCamera3DPreview()
 
 void ANavPlayerController::IncreaseMoveSpeed3DPreview()
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (!bIsIn3DPreviewMode)
 	{
 		return;
@@ -3866,7 +3883,7 @@ void ANavPlayerController::IncreaseMoveSpeed3DPreview()
 
 void ANavPlayerController::DecreaseMoveSpeed3DPreview()
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (!bIsIn3DPreviewMode)
 	{
 		return;
@@ -3919,7 +3936,7 @@ void ANavPlayerController::SetCameraSpeedExterior(float NewSpeed)
 
 void ANavPlayerController::SetMoveSpeed3DPreview(float NewSpeed)
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (!bIsIn3DPreviewMode)
 	{
 		return;
@@ -3945,8 +3962,56 @@ float ANavPlayerController::GetCameraMoveSpeed() const
 	return 0.f;
 }
 
+void ANavPlayerController::ClearValidationMarker()
+{
+	if (AActor* Beacon = ValidationBeacon.Get()) Beacon->Destroy();
+	ValidationBeacon.Reset();
+}
+
+void ANavPlayerController::ShowValidationIssueIn3D(const FString& BuildingId, int32 Floor, const FVector2D& PlanPosition, bool bError)
+{
+	ClearValidationMarker();
+	const APolyBuilding* Building = Generator ? Generator->FindBuildingById(BuildingId) : nullptr;
+	if (!Building || !GetWorld()) return;
+	const FVector2D XY = (PlanPosition + Building->BuildingOffset) * Generator->GetScale();
+	const float BaseZ = Floor == 0 ? 0.f : Building->GetLevelBaseZ(Floor);
+	const float Height = FMath::Max(Building->GetFloorHeight() * 1.6f, 300.f);
+	const FVector Where(XY.X, XY.Y, BaseZ);
+	// The beam: a thin translucent cylinder standing on the floor.
+	AStaticMeshActor* Beacon = GetWorld()->SpawnActor<AStaticMeshActor>(FVector(Where.X, Where.Y, Where.Z + Height * 0.5f), FRotator::ZeroRotator);
+	UStaticMesh* Cylinder = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	UMaterialInterface* Base = LoadObject<UMaterialInterface>(nullptr, TEXT("/Game/ImageAssets/Materials/M_BuildingTransparent.M_BuildingTransparent"));
+	if (Beacon && Cylinder && Base)
+	{
+		UStaticMeshComponent* Mesh = Beacon->GetStaticMeshComponent();
+		Mesh->SetMobility(EComponentMobility::Movable);
+		Mesh->SetStaticMesh(Cylinder);
+		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Mesh->SetCastShadow(false);
+		Mesh->SetWorldScale3D(FVector(0.6f, 0.6f, Height / 100.f));
+		UMaterialInstanceDynamic* Material = UMaterialInstanceDynamic::Create(Base, Beacon);
+		Material->SetVectorParameterValue(TEXT("Color"), bError ? FLinearColor(1.f, 0.18f, 0.12f) : FLinearColor(1.f, 0.85f, 0.15f));
+		Material->SetScalarParameterValue(TEXT("Opacity"), 0.6f);
+		Mesh->SetMaterial(0, Material);
+		ValidationBeacon = Beacon;
+	}
+	else if (Beacon)
+	{
+		Beacon->Destroy();
+	}
+	// The camera near it, above and to the side, looking at the place.
+	if (GetPawn())
+	{
+		const FVector Eye = Where + FVector(-700.f, -700.f, 700.f);
+		GetPawn()->SetActorLocation(Eye);
+		SetControlRotation((Where + FVector(0.f, 0.f, 100.f) - Eye).Rotation());
+	}
+}
+
 void ANavPlayerController::SetIn3DPreviewMode(bool bEnable)
 {
+	if (!bEnable) ClearValidationMarker();
+	if (bFullRouteViewEnabled) SetFullRouteViewEnabled(false);
 	if (!bEnable) SetInteriorInspectionEnabled(false);
 	if (bEnable == bIsIn3DPreviewMode || !Generator || !InteriorGen)
 	{
@@ -4005,7 +4070,8 @@ void ANavPlayerController::SetIn3DPreviewMode(bool bEnable)
 
 void ANavPlayerController::SetIn3DEditMode(bool bEnable)
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bEnable && bFullRouteViewEnabled) SetFullRouteViewEnabled(false);
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (!bIsIn3DPreviewMode || bEnable == bIsIn3DEditMode)
 	{
 		return;
@@ -4353,6 +4419,18 @@ void ANavPlayerController::DrawPendingRoomPointMarker3D()
 
 void ANavPlayerController::RefreshRoute3DVisualization()
 {
+	if (bFullRouteViewEnabled)
+	{
+		if (!CanShowFullRouteView() || !NavigationPanel->IsRouteGuidanceVisible()
+			|| NavigationPanel->IsOutdoorMode() != bFullRouteSavedOutdoor || FullRouteSignature() != FullRouteSavedSignature
+			|| NavigationPanel->GetSelectionMode() != ENavigationSelectionMode::None)
+		{
+			SetFullRouteViewEnabled(false);
+			return;
+		}
+		ShowFullRouteVisualization();
+		return;
+	}
 	RouteVisualization->ClearRoute();
 	const FNavigationRouteFocus Focus = NavigationPanel ? NavigationPanel->GetGuidedFocus() : FNavigationRouteFocus();
 
@@ -4390,6 +4468,13 @@ void ANavPlayerController::RefreshRoute3DVisualization()
 
 void ANavPlayerController::FollowNavigationStep()
 {
+	// In the full route view a step does not take the person out of it (nor move the camera or change the floor): only the route follows, drawn grey where
+	// it is walked, orange for this step and blue for what is to come.
+	if (bFullRouteViewEnabled)
+	{
+		RefreshRoute3DVisualization();
+		return;
+	}
 	if (bInteriorInspectionEnabled) return;
 	const FNavigationRoutePoint* Point = NavigationPanel ? NavigationPanel->GetGuidedPoint() : nullptr;
 	APolyBuilding* Building = Point && Generator ? Generator->FindBuildingById(Point->BuildingId) : nullptr;
@@ -4581,6 +4666,7 @@ bool ANavPlayerController::IsPointerOverUI() const
 
 void ANavPlayerController::OnLeftMouseDown3DEdit()
 {
+	if (bFullRouteViewEnabled) return;
 	if (bInteriorInspectionEnabled) { BeginInspectionDrag(EInspectionDrag::Pan); return; }
 	if (!bIsIn3DPreviewMode || !bIsIn3DEditMode || !bSelectMode || !InteriorGen || IsPointerOverUI())
 	{
@@ -4696,7 +4782,7 @@ void ANavPlayerController::RepositionCameraToActiveFloor()
 
 void ANavPlayerController::SetRoadCategoryVisible(ERoadCategory Category, bool bVisible)
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (Generator)
 	{
 		Generator->SetRoadCategoryVisible(Category, bVisible);
@@ -4705,7 +4791,7 @@ void ANavPlayerController::SetRoadCategoryVisible(ERoadCategory Category, bool b
 
 void ANavPlayerController::SetAllRoadsVisible(bool bVisible)
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (Generator)
 	{
 		Generator->SetAllRoadsVisible(bVisible);
@@ -4714,7 +4800,7 @@ void ANavPlayerController::SetAllRoadsVisible(bool bVisible)
 
 void ANavPlayerController::SetRoadsAndPOIsWithinCampusOnly(bool bEnable)
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (!Generator)
 	{
 		return;
@@ -4742,7 +4828,7 @@ void ANavPlayerController::SetRoadsAndPOIsWithinCampusOnly(bool bEnable)
 
 void ANavPlayerController::SetCampusBuildingsVisible(bool bVisible)
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (Generator)
 	{
 		Generator->SetCampusBuildingsVisible(bVisible);
@@ -4752,7 +4838,7 @@ void ANavPlayerController::SetCampusBuildingsVisible(bool bVisible)
 
 void ANavPlayerController::SetBuildingFilter(const FString& Query, int32 MinimumFloors, int32 MaximumFloors)
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (!Generator) return;
 	Generator->SetBuildingFilter(Query, MinimumFloors, MaximumFloors);
 	if (SelectedBuilding && SelectedBuilding->IsHidden())
@@ -4817,7 +4903,7 @@ bool ANavPlayerController::SelectBuildingById(const FString& BuildingId)
 
 void ANavPlayerController::SetNonCampusBuildingsVisible(bool bVisible)
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (Generator)
 	{
 		Generator->SetNonCampusBuildingsVisible(bVisible);
@@ -4882,7 +4968,7 @@ FString ANavPlayerController::GetSelectedBuildingType() const
 
 void ANavPlayerController::SetBuildingTypeVisible(const FString& Type, bool bVisible)
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (Generator)
 	{
 		Generator->SetBuildingTypeVisible(Type, bVisible);
@@ -4896,7 +4982,7 @@ bool ANavPlayerController::IsBuildingTypeVisible(const FString& Type) const
 
 void ANavPlayerController::ResetBuildingTypeFilter()
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (Generator)
 	{
 		Generator->ResetBuildingTypeFilter();
@@ -5162,6 +5248,7 @@ bool ANavPlayerController::CreateNewProject(const FString& Name, const FString& 
 
 void ANavPlayerController::RestoreExteriorCameraView()
 {
+	SetFullRouteViewEnabled(false);
 	FinishRotationGesture();
 	// Leaving interior editing entirely (any Back path) needs to unwind 3D preview mode first if it
 	// was left active - otherwise SetOtherBuildingsHidden(true)'s hide never gets undone (every other
@@ -5601,7 +5688,7 @@ TArray<FVector2D> ANavPlayerController::PastedFootprint(const TArray<FVector2D>&
 
 void ANavPlayerController::PasteInteriorKeyHandler()
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	// Paste a whole building when the building clipboard is active.
 	if (bHasCopiedBuilding && Generator && !CopiedBuildingFootprint.IsEmpty())
 	{
@@ -5764,6 +5851,7 @@ void ANavPlayerController::PasteInteriorKeyHandler()
 
 int32 ANavPlayerController::LoadInteriorForBuilding(const FString& BuildingId)
 {
+	SetFullRouteViewEnabled(false);
 	return LoadInteriorInternal(BuildingId, /*bKeepEditsOfCurrent=*/true);
 }
 
@@ -5844,6 +5932,7 @@ int32 ANavPlayerController::LoadInteriorInternal(const FString& BuildingId, bool
 
 void ANavPlayerController::SetActiveFloor(int32 Level)
 {
+	SetFullRouteViewEnabled(false);
 	if (!InteriorGen)
 	{
 		OnActionFailed.Broadcast(TEXT("No InteriorGenerator placed in the level."), EActionFailureSeverity::Warning);
@@ -6264,11 +6353,26 @@ void ANavPlayerController::NudgeSelectedRoomSize(float Delta)
 void ANavPlayerController::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-
 	if (ActiveAudioPlaybacks.Num() > 0)
 	{
 		PruneFinishedAudioPlaybacks();
 	}
+	if (bFullRouteViewEnabled)
+	{
+		if (GetPawn() != FullRouteSavedPawn.Get() || !NavigationPanel || NavigationPanel->GetRoutePoints().IsEmpty()) SetFullRouteViewEnabled(false);
+		else
+		{
+			FIntPoint Size;
+			GetViewportSize(Size.X, Size.Y);
+			if (Size != FullRouteViewportSize) FrameFullRouteView();
+			// The width of the lines follows how far the camera is from the route: when it has gone nearer or further, they are drawn again.
+			const float Distance = FullRouteCameraDistance();
+			if (FullRouteDrawnDistance > 0.f && FMath::Abs(Distance - FullRouteDrawnDistance) > 0.08f * FullRouteDrawnDistance && NavigationPanel) ShowFullRouteVisualization();
+			UpdateFullRouteCallouts();
+			return;
+		}
+	}
+
 	if (bInteriorInspectionEnabled)
 	{
 		TickInteriorInspection();
@@ -6359,7 +6463,7 @@ void ANavPlayerController::RotateSelectedRoom(float DeltaDegrees)
 
 void ANavPlayerController::StartRotateCCW()
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	BeginRotationGestureIfNeeded();
 	bRotatingCCW = true;
 }
@@ -6372,7 +6476,7 @@ void ANavPlayerController::StopRotateCCW()
 
 void ANavPlayerController::StartRotateCW()
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	BeginRotationGestureIfNeeded();
 	bRotatingCW = true;
 }
@@ -6416,7 +6520,7 @@ void ANavPlayerController::BeginRotationGestureIfNeeded()
 
 void ANavPlayerController::EndRotationGestureIfFinished()
 {
-	if (bInteriorInspectionEnabled) return;
+	if (bInteriorInspectionEnabled || bFullRouteViewEnabled) return;
 	if (!bRotatingCCW && !bRotatingCW) CommitRotationGesture();
 }
 

@@ -3,6 +3,7 @@
 #include "Engine/GameInstance.h"
 
 #include "EditScreenWidget.h"
+#include "EditorIcons.h"
 #include "NavPlayerController.h"
 #include "BrandTopBarWidget.h"
 #include "NewProjectDialogWidget.h"
@@ -216,6 +217,11 @@ UStartScreenWidget::UStartScreenWidget(const FObjectInitializer& ObjectInitializ
 {
 }
 
+UWidget* UStartScreenWidget::FindNamedWidgetForTests(const FName& Name) const
+{
+	return WidgetTree ? WidgetTree->FindWidget(Name) : nullptr;
+}
+
 TSharedRef<SWidget> UStartScreenWidget::RebuildWidget()
 {
 	if (WidgetTree && !WidgetTree->RootWidget)
@@ -388,7 +394,7 @@ TSharedRef<SWidget> UStartScreenWidget::RebuildWidget()
 		// One card: icon top-left, arrow top-right, title and caption bottom-left. Colours and sizes come from the
 		// design team's page. The browser draws a gradient across each card; a button brush is a single colour, so
 		// the middle of each gradient is used, with the two ends for hover and press.
-		auto AddCard = [this, CardRow, &MakeText](const TCHAR* Name, const TCHAR* Icon, const TCHAR* TitleText, const TCHAR* Caption,
+		auto AddCard = [this, CardRow, &MakeText](const TCHAR* Name, const TCHAR* Icon, const TCHAR* IconAsset, const TCHAR* TitleText, const TCHAR* Caption,
 			const FLinearColor& Normal, const FLinearColor& Hover, const FLinearColor& Pressed,
 			const FLinearColor& Outline, const FLinearColor& OutlineHover, bool bFirst) -> UButton*
 		{
@@ -407,7 +413,14 @@ TSharedRef<SWidget> UStartScreenWidget::RebuildWidget()
 			UOverlay* Face = WidgetTree->ConstructWidget<UOverlay>(UOverlay::StaticClass(), FName(Base + TEXT("Face")));
 			const FMargin Inset(18.f * DesignToUi, 22.f * DesignToUi, 18.f * DesignToUi, 18.f * DesignToUi);
 
-			UOverlaySlot* IconSlot = Face->AddChildToOverlay(MakeText(Base + TEXT("Icon"), Icon, 26.f * DesignToUi, Srgb(231, 241, 255), false));
+			// The icon is the design team's picture (white lines, drawn here in the card's light colour) when its texture is imported
+			// (Content/ImageAssets/<IconAsset>); until then it is the symbol.
+			UWidget* IconWidget = EditorIcons::Picture(WidgetTree, Base + TEXT("Icon"), IconAsset, 28.f * DesignToUi, Srgb(231, 241, 255));
+			if (!IconWidget)
+			{
+				IconWidget = MakeText(Base + TEXT("Icon"), Icon, 26.f * DesignToUi, Srgb(231, 241, 255), false);
+			}
+			UOverlaySlot* IconSlot = Face->AddChildToOverlay(IconWidget);
 			IconSlot->SetHorizontalAlignment(HAlign_Left);
 			IconSlot->SetVerticalAlignment(VAlign_Top);
 			IconSlot->SetPadding(Inset);
@@ -438,9 +451,9 @@ TSharedRef<SWidget> UStartScreenWidget::RebuildWidget()
 		};
 
 		// New project: the blue card; Open project: the slate one.
-		NewButton = AddCard(TEXT("Btn_New"), TEXT("+"), TEXT("New project"), TEXT("Start with a building"),
+		NewButton = AddCard(TEXT("Btn_New"), TEXT("+"), TEXT("Icon_NewProject"), TEXT("New project"), TEXT("Start with a building"),
 			Srgb(11, 105, 231), Srgb(21, 124, 255), Srgb(0, 87, 207), Srgb(74, 158, 255), Srgb(120, 184, 255), true);
-		OpenButton = AddCard(TEXT("Btn_Open"), TEXT("\u25A4"), TEXT("Open project"), TEXT("Continue editing"),
+		OpenButton = AddCard(TEXT("Btn_Open"), TEXT("\u25A4"), TEXT("Icon_OpenProject"), TEXT("Open project"), TEXT("Continue editing"),
 			Srgb(30, 53, 78), Srgb(42, 70, 101), Srgb(27, 48, 72), Srgb(61, 86, 116), Srgb(90, 120, 155), false);
 
 		// Quit has no card in the design (a web page has no need for it); it stays as a quiet text button because a
