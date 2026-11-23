@@ -14,6 +14,7 @@ struct FMobileGpsMarkerView
 	TOptional<FVector2D> Facing;
 	// On the plan of a building the dot has a wide pale halo (the GPS does not know the floor); on the campus overview it is a plain dot.
 	bool bHalo = false;
+	bool bCompact = false;
 };
 
 // The phone app's map: one level of a building as a floor plan (its rooms coloured by what they are, named, with the lifts and stairs), or the
@@ -36,6 +37,9 @@ public:
 	// What is shown: a level of a building, or the overview of the site.
 	void ShowLevel(const FString& BuildingId, int32 Level);
 	void ShowOverview();
+	// The compact campus view shows the active leg, splitting the line at indoor floor changes.
+	void ShowCampusMiniMap();
+	FVector2D GetCampusMiniMapViewportSize(FVector2D MaxSize) const;
 	bool IsOverview() const { return bOverview; }
 	const FString& GetBuildingId() const { return LevelMap.BuildingId; }
 	int32 GetLevel() const { return LevelMap.Level; }
@@ -131,6 +135,7 @@ public:
 
 	// For the tests: how much of the route is on the level shown, and where things are.
 	int32 GetRoutePointsOnLevel() const;
+	const TArray<TArray<FVector2D>>& GetCampusMiniMapRouteLines() const { return CampusMiniMapRouteLines; }
 	const FString& GetHighlightPlace() const { return HighlightPlaceId; }
 	bool HasPosition() const { return bHasPosition; }
 	// Where a point of the plan falls in the widget (design pixels).
@@ -184,12 +189,16 @@ private:
 	bool RouteBoxOnLevel(FBox2D& OutBox) const;
 	TArray<FVector2D> ToWidgetPolygon(const TArray<FVector2D>& Plan, double WidgetWidth, double WidgetHeight, double Lift) const;
 
+	void RefreshCampusMiniMapRoute();
+
 	IMobileNavSource* Source = nullptr;
 	FString SiteId;
 	bool bOverview = false;
+	bool bCampusMiniMap = false;
 	FMobileLevelMap LevelMap;
 	FMobileCampusMap CampusMap;
 	FMobileRoute Route;
+	TArray<TArray<FVector2D>> CampusMiniMapRouteLines;
 	TArray<FMobileRoutePoint> Stops;
 	FString HighlightPlaceId;
 	FMobileRoutePoint Position;

@@ -393,6 +393,10 @@ private:
 	bool bGpsHadFixForDot = false;
 	TOptional<FVector2D> LastLocation;
 	UPROPERTY()
+	UButton* CampusMiniMapButton = nullptr;
+	UPROPERTY()
+	UMobileMapWidget* CampusMiniMap = nullptr;
+	UPROPERTY()
 	UMobileExplorePageWidget* ExplorePage = nullptr;
 	// The full-screen search over the whole screen, and the search field of the map that opens it.
 	UPROPERTY()

@@ -26,6 +26,7 @@
 #include "Components/Border.h"
 #include "Components/BorderSlot.h"
 #include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/HorizontalBox.h"
@@ -49,6 +50,12 @@ using namespace MobileStyle;
 
 namespace
 {
+	const FVector2D CampusMiniMapMaxSize(172.0, 98.0);
+	constexpr float CampusMiniMapHorizontalPadding = 5.f;
+	constexpr float CampusMiniMapVerticalPadding = 4.f;
+	constexpr float CampusMiniMapLabelHeight = 15.f;
+	const FVector2D CampusMiniMapCardPadding(2.0 * CampusMiniMapHorizontalPadding, 2.0 * CampusMiniMapVerticalPadding + CampusMiniMapLabelHeight);
+
 	UCanvasPanelSlot* CanvasSlot(UWidget* Widget)
 	{
 		return Widget ? Cast<UCanvasPanelSlot>(Widget->Slot) : nullptr;
@@ -116,6 +123,52 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		UCanvasPanelSlot* GpsMarkerSlot = Phone->AddChildToCanvas(GpsMarker);
 		GpsMarkerSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
 		GpsMarkerSlot->SetOffsets(FMargin(0.f));
+
+		CampusMiniMapButton = Tree->ConstructWidget<UButton>(UButton::StaticClass(), TEXT("CampusMiniMapButton"));
+		FButtonStyle CampusButtonStyle;
+		CampusButtonStyle.SetNormal(FSlateNoResource()).SetHovered(FSlateNoResource()).SetPressed(FSlateNoResource());
+		CampusButtonStyle.SetNormalPadding(FMargin(0.f)).SetPressedPadding(FMargin(0.f));
+		CampusMiniMapButton->SetStyle(CampusButtonStyle);
+		CampusMiniMapButton->SetTouchMethod(EButtonTouchMethod::PreciseTap);
+		CampusMiniMapButton->SetToolTipText(FText::FromString(TEXT("Open campus overview")));
+		CampusMiniMapButton->OnClicked.AddUniqueDynamic(this, &UMobileAppWidget::OnOverviewClicked);
+		CampusMiniMapButton->SetVisibility(ESlateVisibility::Collapsed);
+		UBorder* CampusMiniMapFrame = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("CampusMiniMapFrame"));
+		CampusMiniMapFrame->SetBrush(Rounded(White, Line, 10.f));
+		CampusMiniMapFrame->SetPadding(FMargin(CampusMiniMapHorizontalPadding, CampusMiniMapVerticalPadding));
+		CampusMiniMapFrame->SetClipping(EWidgetClipping::ClipToBounds);
+		CampusMiniMapFrame->SetVisibility(ESlateVisibility::HitTestInvisible);
+		UButtonSlot* CampusContentSlot = CastChecked<UButtonSlot>(CampusMiniMapButton->SetContent(CampusMiniMapFrame));
+		CampusContentSlot->SetPadding(FMargin(0.f));
+		CampusContentSlot->SetHorizontalAlignment(HAlign_Fill);
+		CampusContentSlot->SetVerticalAlignment(VAlign_Fill);
+		UVerticalBox* CampusCard = Tree->ConstructWidget<UVerticalBox>();
+		CampusMiniMapFrame->SetContent(CampusCard);
+		USizeBox* CampusLabelRow = Tree->ConstructWidget<USizeBox>();
+		CampusLabelRow->SetHeightOverride(CampusMiniMapLabelHeight);
+		CampusLabelRow->SetContent(MakeText(Tree, TEXT("CampusMiniMapLabel"), TEXT("Campus"), 11.f, Ink, true));
+		CampusCard->AddChildToVerticalBox(CampusLabelRow);
+		CampusMiniMap = CreateWidget<UMobileMapWidget>(this, UMobileMapWidget::StaticClass(), TEXT("CampusMiniMap"));
+		CampusMiniMap->ShowCampusMiniMap();
+		UBorder* CampusMapBackground = Tree->ConstructWidget<UBorder>();
+		CampusMapBackground->SetBrush(Rounded(MapBackground, FLinearColor::Transparent, 5.f, 0.f));
+		CampusMapBackground->SetPadding(FMargin(0.f));
+		CampusMapBackground->SetClipping(EWidgetClipping::ClipToBounds);
+		UOverlay* CampusMapLayers = Tree->ConstructWidget<UOverlay>();
+		UOverlaySlot* CampusMapSlot = CampusMapLayers->AddChildToOverlay(CampusMiniMap);
+		CampusMapSlot->SetHorizontalAlignment(HAlign_Fill);
+		CampusMapSlot->SetVerticalAlignment(VAlign_Fill);
+		UMobileGpsMarkerWidget* CampusGpsMarker = CreateWidget<UMobileGpsMarkerWidget>(this, UMobileGpsMarkerWidget::StaticClass());
+		CampusGpsMarker->SetMap(CampusMiniMap);
+		UOverlaySlot* CampusGpsSlot = CampusMapLayers->AddChildToOverlay(CampusGpsMarker);
+		CampusGpsSlot->SetHorizontalAlignment(HAlign_Fill);
+		CampusGpsSlot->SetVerticalAlignment(VAlign_Fill);
+		CampusMapBackground->SetContent(CampusMapLayers);
+		CampusCard->AddChildToVerticalBox(CampusMapBackground)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+		UCanvasPanelSlot* CampusSlot = Phone->AddChildToCanvas(CampusMiniMapButton);
+		CampusSlot->SetAnchors(FAnchors(0.f, 0.f));
+		CampusSlot->SetAlignment(FVector2D::ZeroVector);
+		CampusSlot->SetSize(CampusMiniMapMaxSize);
 
 		// The top row of the map, as in the prototype: Zoom out (for a campus) and 2D | 3D, at the right. The title is a label at the bottom left (below).
 		TopBarBorder = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("TopBar"));
@@ -342,6 +395,7 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 					}
 				});
 				MapView->SetSource(Source.Get(), SiteId);
+				CampusMiniMap->SetSource(Source.Get(), SiteId);
 				MapBuildingId = ContextBuilding;
 				MapLevel = ContextLevel;
 				// My location starts in the first building, on its first level, as in the prototype.
@@ -1000,6 +1054,8 @@ void UMobileAppWidget::PositionSheet()
 	const double HeaderTotal = HeaderHeight + SafeTop;
 	const bool bMapPage = ActiveTab == ETab::Directory;
 	const bool bOpen = SheetIsOpen();
+	const bool bShowSearch = bMapPage && Flow.GetState() != EMobileSheetState::Navigating;
+	const double SheetTop = DesignHeight - TabTotal - SheetHeight;
 	if (UCanvasPanelSlot* PanelSlot = CanvasSlot(SheetBorder))
 	{
 		PanelSlot->SetOffsets(FMargin(0.f, static_cast<float>(-TabTotal), 0.f, static_cast<float>(SheetHeight)));
@@ -1024,7 +1080,6 @@ void UMobileAppWidget::PositionSheet()
 	if (UCanvasPanelSlot* PanelSlot = CanvasSlot(ControlsBox))
 	{
 		// Anchored at the top edge, moved down to sit just above the sheet.
-		const double SheetTop = DesignHeight - TabTotal - SheetHeight;
 		PanelSlot->SetPosition(FVector2D(-12.0, SheetTop - ControlsGap));
 	}
 	for (UBorder* Overlay : { ExploreOverlay, SavedOverlay, ProfileOverlay })
@@ -1050,7 +1105,7 @@ void UMobileAppWidget::PositionSheet()
 		{
 			PanelSlot->SetOffsets(FMargin(static_cast<float>(SearchDockMargin), static_cast<float>(HeaderTotal + SearchDockTop), static_cast<float>(SearchDockMargin), static_cast<float>(SearchDockHeight)));
 		}
-		SearchDock->SetVisibility(bMapPage && Flow.GetState() != EMobileSheetState::Navigating ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		SearchDock->SetVisibility(bShowSearch ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (SearchOverlay)
 	{
@@ -1060,11 +1115,29 @@ void UMobileAppWidget::PositionSheet()
 			PanelSlot->SetOffsets(FMargin(0.f, static_cast<float>(SafeTop), 0.f, static_cast<float>(SafeBottom)));
 		}
 	}
+	// Reserve space below search while browsing. During navigation the inset can use the search strip.
+	const double CampusTop = HeaderTotal + (bShowSearch ? SearchDockTop + SearchDockHeight + 6.0 : 3.0);
+	const FVector2D CampusSize = CampusMiniMap->GetCampusMiniMapViewportSize(CampusMiniMapMaxSize - CampusMiniMapCardPadding) + CampusMiniMapCardPadding;
+	const double CampusBottom = CampusTop + CampusSize.Y;
+	const double BottomControls = ControlsGap + ControlsHeight + 8.0;
+	const bool bShowMiniMap = bMapPage && !bMapOverview && !bOpen && MapView && MapView->HasLevelMap()
+		&& CampusBottom + 8.0 < SheetTop - BottomControls;
+	if (UCanvasPanelSlot* PanelSlot = CanvasSlot(CampusMiniMapButton))
+	{
+		PanelSlot->SetPosition(FVector2D(12.0, CampusTop));
+		PanelSlot->SetSize(CampusSize);
+		CampusMiniMapButton->SetVisibility(bShowMiniMap ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (OverviewButton)
+	{
+		// Keep a way back from the campus view, and a way in when the inset has no room.
+		const bool bShowOverviewButton = bMapOverview || (!bShowMiniMap && Source.IsValid() && Source->ListBuildings(SiteId).Num() > 1);
+		OverviewButton->SetVisibility(bShowOverviewButton ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
 	if (MapView)
 	{
-		// The plan fits between the top row and the toolbar, above the sheet at the height it has now: it grows and shrinks as the sheet is dragged,
-		// as in the prototype, and is not shown while the sheet is open to its top.
-		MapView->SetFitInsets(HeaderTotal + TopRowTop + TopRowHeight + 4.0, TabTotal + SheetHeight + ControlsGap + ControlsHeight + 8.0);
+		const double TopControls = HeaderTotal + TopRowTop + TopRowHeight + 4.0;
+		MapView->SetFitInsets(bShowMiniMap ? FMath::Max(TopControls, CampusBottom + 8.0) : TopControls, TabTotal + SheetHeight + BottomControls);
 		MapView->SetVisibility(bOpen ? ESlateVisibility::Hidden : ESlateVisibility::Visible);
 		if (GpsMarker)
 		{
@@ -1888,9 +1961,12 @@ void UMobileAppWidget::RefreshMap()
 	{
 		if (!BuildingId.IsEmpty())
 		{
-			MapBuildingId = BuildingId;
-			MapLevel = Level;
 			bMapOverview = Level == 0;
+			if (!bMapOverview)
+			{
+				MapBuildingId = BuildingId;
+				MapLevel = Level;
+			}
 		}
 	};
 	if (State == EMobileSheetState::Place || State == EMobileSheetState::Arrived)
@@ -1928,52 +2004,33 @@ void UMobileAppWidget::UpdatePositionDot()
 	{
 		return;
 	}
-	const EMobileSheetState State = Flow.GetState();
-	// The dot: the step the person is at while walking, otherwise My location (at the door of the building they said they are in).
-	if (State == EMobileSheetState::Navigating && CurrentRoute.bFound && CurrentRoute.Steps.IsValidIndex(NavStepIndex))
+	TOptional<FMobileRoutePoint> Here;
+	if (Flow.GetState() == EMobileSheetState::Navigating && CurrentRoute.bFound && CurrentRoute.Steps.IsValidIndex(NavStepIndex))
 	{
 		const FMobileStep& Step = CurrentRoute.Steps[NavStepIndex];
-		FMobileRoutePoint Here;
-		Here.BuildingId = Step.BuildingId;
-		Here.Level = Step.Level;
-		Here.Position = Step.Position;
-		MapView->SetPosition(Here);
+		Here = FMobileRoutePoint{ Step.BuildingId, Step.Level, Step.Position };
 	}
 	else if (!StartPlaceId.IsEmpty())
 	{
-		// Starting from a place: the dot is there.
 		FMobilePlace Start;
 		if (Source->FindPlace(StartPlaceId, Start))
 		{
-			FMobileRoutePoint Here;
-			Here.BuildingId = Start.BuildingId;
-			Here.Level = Start.Level;
-			Here.Position = Start.Position;
-			MapView->SetPosition(Here);
-		}
-		else
-		{
-			MapView->ClearPosition();
+			Here = FMobileRoutePoint{ Start.BuildingId, Start.Level, Start.Position };
 		}
 	}
-	// Without a GPS fix: My location is a guess, the door of the building the person said they are in. With one, the GPS dot is where the person is (or
-	// nowhere on the map, when they are not at the campus), and that guess is not drawn.
-	else if (StartPlaceId.IsEmpty() && !MyLocationBuildingId.IsEmpty() && !MapView->GetGpsPosition().IsSet())
+	else if (!MyLocationBuildingId.IsEmpty() && !MapView->GetGpsPosition().IsSet())
 	{
+		// When GPS has no fix, an authored entrance provides the manual position.
 		FMobileLevelMap Mine;
-		FMobileRoutePoint Here;
-		Here.BuildingId = MyLocationBuildingId;
-		Here.Level = MyLocationLevel;
 		if (Source->GetLevelMap(MyLocationBuildingId, MyLocationLevel, Mine) && Mine.bHasEntrance)
 		{
-			Here.Position = Mine.Entrance;
-			MapView->SetPosition(Here);
+			Here = FMobileRoutePoint{ MyLocationBuildingId, MyLocationLevel, Mine.Entrance };
 		}
-		else MapView->ClearPosition();
 	}
-	else
+	for (UMobileMapWidget* View : { MapView, CampusMiniMap })
 	{
-		MapView->ClearPosition();
+		if (Here) View->SetPosition(*Here);
+		else View->ClearPosition();
 	}
 }
 
@@ -1996,6 +2053,7 @@ void UMobileAppWidget::ApplyMap()
 	TArray<FMobileRoutePoint> StopPoints;
 	if (bWalking && CurrentRoute.bFound)
 	{
+		CampusMiniMap->SetRoute(CurrentRoute);
 		const bool bWholeTrip = State == EMobileSheetState::Route && Legs.Num() > 1 && Legs.Num() == DestinationIds().Num()
 			&& !Legs.ContainsByPredicate([](const FMobileRoute& Leg) { return !Leg.bFound; });
 		if (bWholeTrip)
@@ -2021,6 +2079,7 @@ void UMobileAppWidget::ApplyMap()
 	else
 	{
 		MapView->ClearRoute();
+		CampusMiniMap->ClearRoute();
 	}
 	MapView->SetStops(StopPoints);
 	const bool bShowsPlace = State == EMobileSheetState::Place || State == EMobileSheetState::Route || State == EMobileSheetState::Navigating || State == EMobileSheetState::Arrived;
@@ -2094,6 +2153,7 @@ void UMobileAppWidget::ApplyMap()
 			}
 		}
 	}
+	PositionSheet();
 }
 
 void UMobileAppWidget::SetLevelPopupOpen(bool bOpen)
@@ -2149,6 +2209,7 @@ void UMobileAppWidget::SetLocationSource(TUniquePtr<IMobileLocationSource> InSou
 	HeadingPollSeconds = 0.f;
 	LastLocation.Reset();
 	if (MapView) { MapView->SetGpsPosition({}); MapView->SetGpsHeading({}); }
+	if (CampusMiniMap) CampusMiniMap->SetGpsPosition({});
 }
 
 void UMobileAppWidget::UpdateLocation(float DeltaTime)
@@ -2158,6 +2219,7 @@ void UMobileAppWidget::UpdateLocation(float DeltaTime)
 	if (!Origin)
 	{
 		MapView->SetGpsPosition({});
+		CampusMiniMap->SetGpsPosition({});
 		return;
 	}
 	if (!LocationSource) LocationSource = MakePlatformMobileLocationSource();
@@ -2181,9 +2243,11 @@ void UMobileAppWidget::UpdateLocation(float DeltaTime)
 			LastLocation = Fix;
 		}
 	}
-	MapView->SetGpsPosition(LastLocation
+	const TOptional<FVector2D> Position = LastLocation
 		? TOptional<FVector2D>(GeoProjection::ToLocalMeters(LastLocation->X, LastLocation->Y, Origin->X, Origin->Y))
-		: TOptional<FVector2D>());
+		: TOptional<FVector2D>();
+	MapView->SetGpsPosition(Position);
+	CampusMiniMap->SetGpsPosition(Position);
 	// With a GPS fix the guessed My location is not drawn (see UpdatePositionDot), so the dot is made again when a fix first comes.
 	const bool bHasGps = MapView->GetGpsPosition().IsSet();
 	if (bHasGps != bGpsHadFixForDot)
@@ -2346,6 +2410,7 @@ void UMobileAppWidget::OpenSite(const FString& NewSiteId)
 	if (MapView)
 	{
 		MapView->SetSource(Source.Get(), SiteId);
+		CampusMiniMap->SetSource(Source.Get(), SiteId);
 		MapView->ResetView();
 	}
 	RefreshSiteName();
@@ -2566,11 +2631,6 @@ void UMobileAppWidget::RefreshSiteName()
 	if (SiteNameText)
 	{
 		SiteNameText->SetText(FText::FromString(Title));
-	}
-	// The button is only for a campus (more than one building); it says what a tap does: "Zoom out" (to the overview) from a level, "Back to building" from the overview.
-	if (OverviewButton)
-	{
-		OverviewButton->SetVisibility(Buildings.Num() > 1 ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
 	if (OverviewLabel)
 	{

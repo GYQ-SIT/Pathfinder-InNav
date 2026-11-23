@@ -2,6 +2,7 @@
 
 #include "MobileAppWidget.h"
 #include "MobileArrivedPageWidget.h"
+#include "MobileMapWidget.h"
 #include "MobileMockSource.h"
 #include "MobileNavigatePageWidget.h"
 #include "MobilePlacePageWidget.h"
@@ -10,6 +11,7 @@
 #include "MobileSheetFlow.h"
 
 #include "Components/Button.h"
+#include "Components/CanvasPanelSlot.h"
 #include "Engine/World.h"
 #include "Misc/AutomationTest.h"
 
@@ -125,18 +127,55 @@ bool FMobileWalkFlowTest::RunTest(const FString& Parameters)
 	UMobileNavigatePageWidget* Walk = Screen->GetNavigatePage();
 	UMobileArrivedPageWidget* Arrived = Screen->GetArrivedPage();
 	if (!TestTrue(TEXT("the screen has both pages"), Walk && Arrived)) return false;
+	UButton* MiniMapButton = Cast<UButton>(Screen->FindNamedWidget(TEXT("CampusMiniMapButton")));
+	UButton* OverviewButton = Cast<UButton>(Screen->FindNamedWidget(TEXT("Btn_Overview")));
+	UMobileMapWidget* MiniMap = Cast<UMobileMapWidget>(Screen->FindNamedWidget(TEXT("CampusMiniMap")));
+	if (!TestTrue(TEXT("the campus mini-map and both controls are built"), MiniMap && MiniMapButton && OverviewButton)) return false;
 	auto Click = [](UWidget* Widget) { Cast<UButton>(Widget)->OnClicked.Broadcast(); };
+
+	TestEqual(TEXT("the mini-map is visible while browsing"), MiniMapButton->GetVisibility(), ESlateVisibility::Visible);
+	TestTrue(TEXT("there is no route on the browsing inset"), MiniMap->GetCampusMiniMapRouteLines().IsEmpty());
 
 	// To a place a level up: walk to the lift, ride it, walk, turn, arrive.
 	Screen->GetSearchPage()->ChoosePlace(TEXT("E2-02-101"));
 	Click(Screen->GetPlacePage()->FindNamedWidget(TEXT("Btn_GetDirections")));
 	const int32 Count = Screen->GetCurrentRoute().Steps.Num();
 	TestTrue(TEXT("a route of several steps"), Screen->GetCurrentRoute().bFound && Count >= 4);
+	TestEqual(TEXT("the mini-map remains visible on the indoor route preview"), MiniMapButton->GetVisibility(), ESlateVisibility::Visible);
 	Click(Screen->GetRoutePage()->FindNamedWidget(TEXT("Btn_StartNavigation")));
 	TestEqual(TEXT("walking"), Screen->GetFlow().GetState(), EMobileSheetState::Navigating);
 	TestEqual(TEXT("on the first step"), Screen->GetNavStepIndex(), 0);
 	TestEqual(TEXT("the page shows it"), Walk->GetProgressString(), FString::Printf(TEXT("Step 1 of %d"), Count));
 	TestEqual(TEXT("with the sheet low"), Screen->GetSnap(), EMobileSheetSnap::Collapsed);
+	TestEqual(TEXT("the campus inset is tappable while walking"), MiniMapButton->GetVisibility(), ESlateVisibility::Visible);
+	TestTrue(TEXT("the inset shows the same-building trip and current position alongside the floor plan"),
+		!Screen->GetMapView()->IsOverview() && MiniMap->IsOverview() && MiniMap->IsShowing3D() && MiniMap->HasPosition() && !MiniMap->GetCampusMiniMapRouteLines().IsEmpty());
+	Screen->ApplyViewportSize(320.0, 640.0);
+	Screen->SetSafeInsets(24.0, 12.0);
+	const UCanvasPanelSlot* Slot = Cast<UCanvasPanelSlot>(MiniMapButton->Slot);
+	if (TestNotNull(TEXT("the mini-map has a canvas slot"), Slot))
+	{
+		const FAnchors Anchors = Slot->GetAnchors();
+		TestTrue(TEXT("the inset is anchored to the top left"), Anchors.Minimum.IsZero() && Anchors.Maximum.IsZero()
+			&& Slot->GetAlignment().IsZero() && FMath::IsNearlyEqual(Slot->GetPosition().X, 12.0));
+		TestTrue(TEXT("the inset uses a compact viewport"), Slot->GetSize().X <= 172.0 && Slot->GetSize().Y <= 98.0);
+		const FMobileLayoutSnapshot Layout = Screen->GetLayoutSnapshot();
+		TestTrue(TEXT("the inset fits below the header, left of the view controls and above the sheet"),
+			FMath::IsNearlyEqual(Slot->GetPosition().Y, Layout.HeaderBottom + 3.0) && Slot->GetPosition().X + Slot->GetSize().X < Layout.DesignWidth * 0.5
+			&& Slot->GetPosition().Y + Slot->GetSize().Y < Layout.SheetTop);
+	}
+	const FString BuildingId = Screen->GetMapView()->GetBuildingId();
+	const int32 Level = Screen->GetMapView()->GetLevel();
+	Click(MiniMapButton);
+	TestTrue(TEXT("tapping the inset opens full campus while walking"), Screen->GetMapView()->IsOverview());
+	TestEqual(TEXT("the inset is hidden in full overview"), MiniMapButton->GetVisibility(), ESlateVisibility::Collapsed);
+	TestEqual(TEXT("Back to building is available while walking"), OverviewButton->GetVisibility(), ESlateVisibility::Visible);
+	Click(OverviewButton);
+	TestTrue(TEXT("Back to building restores the same floor"), !Screen->GetMapView()->IsOverview()
+		&& Screen->GetMapView()->GetBuildingId() == BuildingId && Screen->GetMapView()->GetLevel() == Level);
+	TestEqual(TEXT("returning to the floor restores the inset"), MiniMapButton->GetVisibility(), ESlateVisibility::Visible);
+	TestEqual(TEXT("switching views keeps the walk active"), Screen->GetFlow().GetState(), EMobileSheetState::Navigating);
+	TestEqual(TEXT("switching views preserves the route step"), Screen->GetNavStepIndex(), 0);
 
 	// Next instruction goes through the steps.
 	for (int32 Step = 1; Step < Count; ++Step)
@@ -149,6 +188,9 @@ bool FMobileWalkFlowTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("still walking"), Screen->GetFlow().GetState(), EMobileSheetState::Navigating);
 	Click(Walk->FindNamedWidget(TEXT("Btn_NextInstruction")));
 	TestEqual(TEXT("the arrival"), Screen->GetFlow().GetState(), EMobileSheetState::Arrived);
+	TestEqual(TEXT("the mini-map remains visible on the indoor arrival screen"), MiniMapButton->GetVisibility(), ESlateVisibility::Visible);
+	TestTrue(TEXT("the mini-map route clears on arrival"), MiniMap->GetCampusMiniMapRouteLines().IsEmpty());
+	TestEqual(TEXT("both maps show the same default position state on arrival"), MiniMap->HasPosition(), Screen->GetMapView()->HasPosition());
 	TestTrue(TEXT("shows the place"), Arrived->GetPlaceString().Contains(TEXT("Study lounge")));
 
 	// Save this place: the screen remembers, the place page agrees, and it can be undone.

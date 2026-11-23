@@ -246,7 +246,7 @@ bool FMobileMapToolsTest::RunTest(const FString& Parameters)
 	Screen->ZoomMap(-2.0 * UMobileMapWidget::ZoomStep);
 	TestTrue(TEXT("zoom out is a step the other way"), FMath::IsNearlyEqual(Map->GetZoom(), 0.8));
 	Screen->ZoomMap(-10.0);
-	TestTrue(TEXT("zoom out stops at 0.7"), FMath::IsNearlyEqual(Map->GetZoom(), UMobileMapWidget::MinZoom));
+	TestTrue(TEXT("zoom out stops at the limit for the available map area"), FMath::IsNearlyEqual(Map->GetZoom(), Map->GetMinZoom()));
 	Screen->ZoomMap(10.0);
 	TestTrue(TEXT("zoom in stops at the largest"), FMath::IsNearlyEqual(Map->GetZoom(), UMobileMapWidget::MaxZoom));
 

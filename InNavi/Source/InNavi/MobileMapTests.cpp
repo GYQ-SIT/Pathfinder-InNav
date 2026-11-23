@@ -122,6 +122,54 @@ bool FMobileMapWidgetTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileCampusMiniMapRouteTest, "InNavi.Mobile.CampusMiniMapRoute", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FMobileCampusMiniMapRouteTest::RunTest(const FString& Parameters)
+{
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	UMobileMapWidget* Map = CreateWidget<UMobileMapWidget>(World, UMobileMapWidget::StaticClass());
+	if (!TestNotNull(TEXT("the mini-map is created"), Map))
+	{
+		World->DestroyWorld(false);
+		return false;
+	}
+
+	FMobileCampusMap Campus;
+	Campus.Buildings = {
+		{ TEXT("A"), TEXT("Building A"), { { 100.0, 200.0 }, { 150.0, 200.0 }, { 150.0, 250.0 }, { 100.0, 250.0 } }, { 100.0, 200.0 } },
+		{ TEXT("B"), TEXT("Building B"), { { 300.0, 200.0 }, { 350.0, 200.0 }, { 350.0, 250.0 }, { 300.0, 250.0 } }, { 300.0, 200.0 } },
+	};
+	Map->SetMapsForTest(FMobileLevelMap(), Campus);
+	Map->ShowCampusMiniMap();
+
+	FMobileRoute Route;
+	Route.bFound = true;
+	Route.Points = {
+		{ TEXT("A"), 2, { 10.0, 10.0 } }, { TEXT("A"), 2, { 20.0, 10.0 } },
+		{ TEXT("A"), 1, { 25.0, 20.0 } }, { TEXT("A"), 1, { 40.0, 20.0 } },
+		{ TEXT("A"), 0, { 40.0, 20.0 } }, { TEXT("B"), 0, { 0.0, 20.0 } },
+		{ TEXT("B"), 1, { 0.0, 20.0 } }, { TEXT("B"), 1, { 10.0, 20.0 } },
+	};
+	Map->SetRoute(Route);
+	const TArray<TArray<FVector2D>> ExpectedLines = {
+		{ { 110.0, 210.0 }, { 120.0, 210.0 } },
+		{ { 125.0, 220.0 }, { 140.0, 220.0 }, { 300.0, 220.0 }, { 310.0, 220.0 } },
+	};
+	TestTrue(TEXT("the mini-map splits the floor change and retains both entrance connections"), Map->GetCampusMiniMapRouteLines() == ExpectedLines);
+
+	const FVector2D Limit(162.0, 75.0);
+	const FVector2D Viewport = Map->GetCampusMiniMapViewportSize(Limit);
+	const FBox2D Extent = Map->GetPlanExtentInWidget(Viewport.X, Viewport.Y);
+	TestTrue(TEXT("the inset background trims excess width"), Viewport.X < Limit.X && Extent.GetSize().X > Viewport.X * 0.85);
+	TestTrue(TEXT("the campus is drawn wider than in the old shallow inset"), Extent.GetSize().X > Map->GetPlanExtentInWidget(156.0, 52.0).GetSize().X * 1.25);
+	TestTrue(TEXT("the campus ground and raised roofs fit inside the inset"), Extent.bIsValid && Extent.Min.X >= 0.0
+		&& Extent.Min.Y >= 8.0 && Extent.Max.X <= Viewport.X && Extent.Max.Y <= Viewport.Y);
+
+	Map->ClearRoute();
+	TestTrue(TEXT("clearing the route clears the mini-map lines"), Map->GetCampusMiniMapRouteLines().IsEmpty());
+	World->DestroyWorld(false);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMobileMapFlowTest, "InNavi.Mobile.MapFlow", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FMobileMapFlowTest::RunTest(const FString& Parameters)
 {

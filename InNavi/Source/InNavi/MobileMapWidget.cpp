@@ -206,6 +206,7 @@ namespace
 
 	// How tall the tilted view stands the plan, in design pixels.
 	constexpr double SlabHeight = 7.0;
+	constexpr double CampusMiniMapMargin = 4.0;
 }
 
 void UMobileMapWidget::SetSource(IMobileNavSource* InSource, const FString& InSiteId)
@@ -214,6 +215,7 @@ void UMobileMapWidget::SetSource(IMobileNavSource* InSource, const FString& InSi
 	SiteId = InSiteId;
 	CampusMap = Source ? Source->GetCampusMap(SiteId) : FMobileCampusMap();
 	bPlanNorthOnX = Source && Source->IsPlanNorthOnX();
+	RefreshCampusMiniMapRoute();
 }
 
 void UMobileMapWidget::SetPlanNorthOnX(bool bInNorthOnX)
@@ -228,6 +230,7 @@ void UMobileMapWidget::SetMapsForTest(const FMobileLevelMap& Level, const FMobil
 {
 	LevelMap = Level;
 	CampusMap = Campus;
+	RefreshCampusMiniMapRoute();
 	bOverview = false;
 	ResetView();
 }
@@ -262,18 +265,85 @@ void UMobileMapWidget::ShowOverview()
 	bOverview = true;
 }
 
+void UMobileMapWidget::ShowCampusMiniMap()
+{
+	bCampusMiniMap = true;
+	SetFitInsets(CampusMiniMapMargin, CampusMiniMapMargin);
+	Set3D(true);
+	ShowOverview();
+	RefreshCampusMiniMapRoute();
+}
+
+FVector2D UMobileMapWidget::GetCampusMiniMapViewportSize(FVector2D MaxSize) const
+{
+	const FStart Fit = WorkOutStart(MaxSize.X, MaxSize.Y);
+	if (!Fit.bValid)
+	{
+		return MaxSize;
+	}
+	const FVector2D ViewportPadding(2.0 * CampusMiniMapMargin, InsetTop + InsetBottom + (bShow3D ? SlabHeight : 0.0));
+	const FVector2D Size = Fit.Bounds.GetSize() * Fit.Fit + ViewportPadding;
+	return FVector2D(
+		FMath::Min(MaxSize.X, FMath::Max(72.0, FMath::CeilToDouble(Size.X))),
+		FMath::Min(MaxSize.Y, FMath::Max(44.0, FMath::CeilToDouble(Size.Y))));
+}
+
 void UMobileMapWidget::SetRoute(const FMobileRoute& InRoute)
 {
 	// A different route is looked at from its own middle; the screen sets the same one again whenever anything changes, and that must not move the view.
 	const bool bChanged = Route.bFound != InRoute.bFound || Route.Points.Num() != InRoute.Points.Num()
 		|| (!Route.Points.IsEmpty() && (!Route.Points[0].Position.Equals(InRoute.Points[0].Position) || !Route.Points.Last().Position.Equals(InRoute.Points.Last().Position)));
 	Route = InRoute;
+	RefreshCampusMiniMapRoute();
 	if (bChanged)
 	{
 		LatchedFocus.Reset();
 	}
 }
 void UMobileMapWidget::ClearRoute() { SetRoute(FMobileRoute()); }
+void UMobileMapWidget::RefreshCampusMiniMapRoute()
+{
+	if (!bCampusMiniMap)
+	{
+		return;
+	}
+	CampusMiniMapRouteLines.Reset();
+	if (!Route.bFound)
+	{
+		return;
+	}
+
+	TArray<FVector2D> RouteRun;
+	auto FinishRun = [&]()
+	{
+		if (RouteRun.Num() >= 2)
+		{
+			CampusMiniMapRouteLines.Add(MoveTemp(RouteRun));
+		}
+		RouteRun.Reset();
+	};
+	for (int32 Index = 0; Index < Route.Points.Num(); ++Index)
+	{
+		const FMobileRoutePoint& Point = Route.Points[Index];
+		// A lift or stair transition has no walkable segment on the campus plane. Keep entrances and outdoor segments connected.
+		if (Index > 0)
+		{
+			const FMobileRoutePoint& Previous = Route.Points[Index - 1];
+			if (Previous.BuildingId == Point.BuildingId && Previous.Level != 0 && Point.Level != 0 && Previous.Level != Point.Level)
+			{
+				FinishRun();
+			}
+		}
+
+		const FVector2D CampusPoint = MobileCampusPosition(Point, CampusMap);
+		if (RouteRun.IsEmpty() || !RouteRun.Last().Equals(CampusPoint))
+		{
+			RouteRun.Add(CampusPoint);
+		}
+	}
+	FinishRun();
+}
+
 void UMobileMapWidget::SetStops(const TArray<FMobileRoutePoint>& InStops) { Stops = InStops; }
 
 int32 UMobileMapWidget::GetStopsOnLevel() const
@@ -401,6 +471,7 @@ bool UMobileMapWidget::GetGpsMarkerView(FMobileGpsMarkerView& Out) const
 	Out.At = ToWidgetPolygon({ *Plan }, ViewSize.X, ViewSize.Y, Lift)[0];
 	Out.Facing = GetGpsHeadingOnScreen(*Plan);
 	Out.bHalo = !bOverview;
+	Out.bCompact = bCampusMiniMap;
 	return true;
 }
 
@@ -623,7 +694,7 @@ UMobileMapWidget::FStart UMobileMapWidget::WorkOutStart(double WidgetWidth, doub
 		return Result;
 	}
 	Result.bValid = true;
-	const double Margin = 16.0;
+	const double Margin = bCampusMiniMap ? CampusMiniMapMargin : 16.0;
 	Result.AvailW = FMath::Max(WidgetWidth - 2.0 * Margin, 10.0);
 	Result.AvailH = FMath::Max(WidgetHeight - InsetTop - InsetBottom - (bShow3D ? SlabHeight : 0.0), 10.0);
 	const FVector2D Size = Result.Bounds.GetSize();
@@ -661,9 +732,11 @@ void UMobileMapWidget::ComputeFit(double WidgetWidth, double WidgetHeight, doubl
 	{
 		return;
 	}
-	const double Margin = 16.0;
+	const double Margin = bCampusMiniMap ? CampusMiniMapMargin : 16.0;
 	const FVector2D Size = Found.Bounds.GetSize();
-	const FVector2D Centre(WidgetWidth * 0.5, InsetTop + Found.AvailH * 0.5);
+	// In the inset the reserved 3D slab space goes above the ground plane, where the rooftops are drawn.
+	const double FitTop = InsetTop + (bCampusMiniMap && bShow3D ? SlabHeight : 0.0);
+	const FVector2D Centre(WidgetWidth * 0.5, FitTop + Found.AvailH * 0.5);
 	FVector2D FitOffset;
 	if (Found.Start > Found.Fit * 1.0001)
 	{
@@ -674,7 +747,7 @@ void UMobileMapWidget::ComputeFit(double WidgetWidth, double WidgetHeight, doubl
 	else
 	{
 		// The plan is centred in the part that is not covered.
-		FitOffset = FVector2D(Margin + (Found.AvailW - Size.X * Found.Fit) * 0.5, InsetTop + (Found.AvailH - Size.Y * Found.Fit) * 0.5) - Found.Bounds.Min * Found.Fit;
+		FitOffset = FVector2D(Margin + (Found.AvailW - Size.X * Found.Fit) * 0.5, FitTop + (Found.AvailH - Size.Y * Found.Fit) * 0.5) - Found.Bounds.Min * Found.Fit;
 	}
 	// Then zoomed about the middle of that part, and moved by the person's pan.
 	OutScale = Found.Start * Zoom;
@@ -792,13 +865,17 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 		if (Route.bFound)
 		{
 			for (const FMobileRoutePoint& Point : Route.Points) RouteBuildings.Add(Point.BuildingId);
+			RouteBuildings.Remove(FString());
 		}
 		for (const FMobileCampusFeature& Feature : CampusMap.Features)
 		{
 			const TArray<FVector2D> Shape = ToWidgetPolygon(Feature.Outline, W, H, 0.0);
 			const bool bWater = Feature.Name == TEXT("Pond");
 			FillPolygon(OutDrawElements, Layer, AllottedGeometry, Shape, bWater ? MapColours.Water : MapColours.Grass);
-			Labels.Add({ Feature.Name, Centre(Shape), 11.f, Grey, -1.0, Layer + 1 });
+			if (!bCampusMiniMap)
+			{
+				Labels.Add({ Feature.Name, Centre(Shape), 11.f, Grey, -1.0, Layer + 1 });
+			}
 		}
 		for (const FMobileCampusBuilding& Building : CampusMap.Buildings)
 		{
@@ -808,25 +885,46 @@ int32 UMobileMapWidget::NativePaint(const FPaintArgs& Args, const FGeometry& All
 			}
 			const TArray<FVector2D> Top = ToWidgetPolygon(Building.Outline, W, H, Lift);
 			FillPolygon(OutDrawElements, Layer + 2, AllottedGeometry, Top, MapColours.BuildingTop);
-			OutlinePolygon(OutDrawElements, Layer + 3, AllottedGeometry, Top, MapColours.Edge, 2.f);
-			const FBox2D Extent = BoundsOf(Top);
-			Labels.Add({ Building.Name, Centre(Top), 15.f, Ink, RouteBuildings.Contains(Building.BuildingId) ? 1.0e9 : Extent.GetSize().X * Extent.GetSize().Y, Layer + 4 });
+			OutlinePolygon(OutDrawElements, Layer + 3, AllottedGeometry, Top, MapColours.Edge, bCampusMiniMap ? 1.f : 2.f);
+			const bool bOnRoute = RouteBuildings.Contains(Building.BuildingId);
+			// On the small map, a same-building label crowds the start, destination and route.
+			if (!bCampusMiniMap || (bOnRoute && RouteBuildings.Num() > 1))
+			{
+				const FBox2D Extent = BoundsOf(Top);
+				Labels.Add({ Building.Name, Centre(Top), bCampusMiniMap ? 8.f : 15.f, Ink, bOnRoute ? 1.0e9 : Extent.GetSize().X * Extent.GetSize().Y, Layer + 4 });
+			}
 		}
 		DrawChosenLabels(OutDrawElements, AllottedGeometry, Labels, TArray<FBox2D>(), W, H);
 		if (Route.bFound && Route.Points.Num() >= 2)
 		{
-			TArray<FVector2D> CampusRouteLine;
-			for (const auto& Point : Route.Points) CampusRouteLine.Add(ToWidgetPolygon({MobileCampusPosition(Point, CampusMap)}, W, H, Lift)[0]);
-			FSlateDrawElement::MakeLines(OutDrawElements, Layer + 6, AllottedGeometry.ToPaintGeometry(), CampusRouteLine, ESlateDrawEffect::None, Blue, true, 4.f);
-			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(CampusRouteLine[0], 6.0), Blue);
-			FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(CampusRouteLine.Last(), 7.0), Red);
+			if (bCampusMiniMap)
+			{
+				for (const auto& CampusLine : CampusMiniMapRouteLines)
+				{
+					const TArray<FVector2D> WidgetLine = ToWidgetPolygon(CampusLine, W, H, Lift);
+					FSlateDrawElement::MakeLines(OutDrawElements, Layer + 5, AllottedGeometry.ToPaintGeometry(), WidgetLine, ESlateDrawEffect::None, FLinearColor::White, true, 4.5f);
+					FSlateDrawElement::MakeLines(OutDrawElements, Layer + 6, AllottedGeometry.ToPaintGeometry(), WidgetLine, ESlateDrawEffect::None, Blue, true, 2.5f);
+				}
+				const FVector2D Start = ToWidgetPolygon({MobileCampusPosition(Route.Points[0], CampusMap)}, W, H, Lift)[0];
+				const FVector2D End = ToWidgetPolygon({MobileCampusPosition(Route.Points.Last(), CampusMap)}, W, H, Lift)[0];
+				FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(Start, 2.5), Blue);
+				FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(End, 3.0), Red);
+			}
+			else
+			{
+				TArray<FVector2D> CampusRouteLine;
+				for (const auto& Point : Route.Points) CampusRouteLine.Add(ToWidgetPolygon({MobileCampusPosition(Point, CampusMap)}, W, H, Lift)[0]);
+				FSlateDrawElement::MakeLines(OutDrawElements, Layer + 6, AllottedGeometry.ToPaintGeometry(), CampusRouteLine, ESlateDrawEffect::None, Blue, true, 4.f);
+				FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(CampusRouteLine[0], 6.0), Blue);
+				FillPolygon(OutDrawElements, Layer + 7, AllottedGeometry, Circle(CampusRouteLine.Last(), 7.0), Red);
+			}
 		}
 		// Where the person says they are (My location); the GPS dot is the marker layer's, above the map.
 		if (bHasPosition && !GpsPosition)
 		{
 			const auto At = ToWidgetPolygon({MobileCampusPosition(Position, CampusMap)}, W, H, Lift)[0];
-			FillPolygon(OutDrawElements, Layer + 8, AllottedGeometry, Circle(At, 8.0), FLinearColor::White);
-			FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, Circle(At, 5.0), Blue);
+			FillPolygon(OutDrawElements, Layer + 8, AllottedGeometry, Circle(At, bCampusMiniMap ? 4.0 : 8.0), FLinearColor::White);
+			FillPolygon(OutDrawElements, Layer + 9, AllottedGeometry, Circle(At, bCampusMiniMap ? 2.5 : 5.0), Blue);
 		}
 		return Layer + 10;
 	}
@@ -1373,8 +1471,8 @@ int32 UMobileGpsMarkerWidget::NativePaint(const FPaintArgs& Args, const FGeometr
 	}
 	else
 	{
-		FillPolygon(OutDrawElements, LayerId + 1, AllottedGeometry, Circle(View.At, 8.0), FLinearColor::White);
-		FillPolygon(OutDrawElements, LayerId + 2, AllottedGeometry, Circle(View.At, 5.0), Blue);
+		FillPolygon(OutDrawElements, LayerId + 1, AllottedGeometry, Circle(View.At, View.bCompact ? 4.0 : 8.0), FLinearColor::White);
+		FillPolygon(OutDrawElements, LayerId + 2, AllottedGeometry, Circle(View.At, View.bCompact ? 2.5 : 5.0), Blue);
 	}
 	return LayerId + 3;
 }
