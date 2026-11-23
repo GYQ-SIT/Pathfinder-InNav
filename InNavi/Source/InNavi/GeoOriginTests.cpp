@@ -1,0 +1,432 @@
+#if WITH_DEV_AUTOMATION_TESTS
+
+#include "BuildingGenerator.h"
+#include "GeoProjection.h"
+#include "MobileAppWidget.h"
+#include "MobileMapWidget.h"
+#include "MobilePlacePageWidget.h"
+#include "MobileRealSource.h"
+#include "MobileRoutePageWidget.h"
+#include "MobileSearchPageWidget.h"
+#include "MobileSelectWidget.h"
+#include "NavPlayerController.h"
+#include "UiTestFixture.h"
+
+#include "Components/Button.h"
+#include "Dom/JsonObject.h"
+#include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
+#include "Engine/World.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
+
+// The latitude and longitude the meters of a project are measured from ("geoOrigin") live in the file, so a project of a map database keeps its place on
+// the earth: the phone's GPS needs it to put the device on the map.
+namespace GeoOriginTests
+{
+	FString TempProject(const TCHAR* Prefix)
+	{
+		return FPaths::ProjectSavedDir() / TEXT("AutomationTemp") / (FString(Prefix) + FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT(".json"));
+	}
+
+	TSharedPtr<FJsonObject> ReadJson(const FString& Path)
+	{
+		FString Text;
+		TSharedPtr<FJsonObject> Root;
+		if (FFileHelper::LoadFileToString(Text, *Path)) FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(Text), Root);
+		return Root;
+	}
+
+	bool WriteJson(const TSharedPtr<FJsonObject>& Root, const FString& Path)
+	{
+		FString Text;
+		const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Text);
+		return FJsonSerializer::Serialize(Root.ToSharedRef(), Writer) && FFileHelper::SaveStringToFile(Text, *Path);
+	}
+
+	TSharedPtr<FJsonObject> Origin(double Lat, double Lon)
+	{
+		const TSharedRef<FJsonObject> Object = MakeShared<FJsonObject>();
+		Object->SetNumberField(TEXT("lat"), Lat);
+		Object->SetNumberField(TEXT("lon"), Lon);
+		return Object;
+	}
+}
+
+// Saved with the project, read back with it, and forgotten with it.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGeoOriginRoundTripTest, "InNavi.Project.GeoOrigin.RoundTrip", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FGeoOriginRoundTripTest::RunTest(const FString& Parameters)
+{
+	using namespace GeoOriginTests;
+	FNavigationSearchFixture Fixture;
+	const FString Database = FPaths::ProjectDir() / TEXT("Data/map_extended.db");
+	ANavPlayerController* Controller = Fixture.MakeController();
+	ABuildingGenerator* Generator = Fixture.Generator;
+	if (!TestTrue(TEXT("the campus database is opened"), Controller->LoadBuildingDataFromPathOrDatabase(Database) > 0)) return false;
+	const TOptional<FVector2D> Opened = Generator->GetDatabaseGeoOrigin();
+	if (!TestTrue(TEXT("a database project has an origin"), Opened.IsSet())) return false;
+
+	const FString Path = TempProject(TEXT("geo-origin-"));
+	if (!TestTrue(TEXT("it is saved as JSON"), Controller->SaveCurrentProjectAs(Path))) return false;
+	const TSharedPtr<FJsonObject> Saved = ReadJson(Path);
+	if (!TestTrue(TEXT("the file is read"), Saved.IsValid())) return false;
+	const TSharedPtr<FJsonObject>* GeoOrigin = nullptr;
+	if (TestTrue(TEXT("the file says where its meters are measured from"), Saved->TryGetObjectField(TEXT("geoOrigin"), GeoOrigin)))
+	{
+		TestTrue(TEXT("the latitude is kept"), FMath::IsNearlyEqual((*GeoOrigin)->GetNumberField(TEXT("lat")), Opened->X, 1.e-9));
+		TestTrue(TEXT("and the longitude"), FMath::IsNearlyEqual((*GeoOrigin)->GetNumberField(TEXT("lon")), Opened->Y, 1.e-9));
+	}
+	TestEqual(TEXT("a project with an origin is version 2"), (int32)Saved->GetNumberField(TEXT("version")), ABuildingGenerator::ProjectFileVersion);
+
+	// Opened again, the project has the same origin.
+	TestTrue(TEXT("it is opened again"), Controller->LoadBuildingDataFromPathOrDatabase(Path) > 0);
+	const TOptional<FVector2D> Reopened = Fixture.Generator->GetDatabaseGeoOrigin();
+	TestTrue(TEXT("the origin is read back"), Reopened.IsSet() && Reopened->Equals(*Opened, 1.e-9));
+
+	// A file without one has none, and does not keep the origin of the project opened before.
+	Saved->RemoveField(TEXT("geoOrigin"));
+	const FString Without = TempProject(TEXT("geo-origin-none-"));
+	TestTrue(TEXT("a copy without the origin is written"), WriteJson(Saved, Without));
+	TestTrue(TEXT("and opened"), Controller->LoadBuildingDataFromPathOrDatabase(Without) > 0);
+	TestFalse(TEXT("a project without an origin has none"), Fixture.Generator->GetDatabaseGeoOrigin().IsSet());
+
+	// A latitude or longitude that is not one is not taken for an origin.
+	for (const TPair<double, double>& Bad : { TPair<double, double>(200.0, 103.9), TPair<double, double>(1.4, 400.0) })
+	{
+		Saved->SetObjectField(TEXT("geoOrigin"), Origin(Bad.Key, Bad.Value));
+		TestTrue(TEXT("a copy with an impossible origin is written"), WriteJson(Saved, Without));
+		TestTrue(TEXT("and opened"), Controller->LoadBuildingDataFromPathOrDatabase(Without) > 0);
+		TestFalse(TEXT("an impossible origin is ignored"), Fixture.Generator->GetDatabaseGeoOrigin().IsSet());
+	}
+
+	// Forgotten with the project.
+	TestTrue(TEXT("the project with an origin is opened"), Controller->LoadBuildingDataFromPathOrDatabase(Path) > 0);
+	TestTrue(TEXT("it has it"), Fixture.Generator->GetDatabaseGeoOrigin().IsSet());
+	Fixture.Generator->ClearAllBuildings();
+	TestFalse(TEXT("clearing the project forgets its origin"), Fixture.Generator->GetDatabaseGeoOrigin().IsSet());
+
+	IFileManager::Get().Delete(*Path);
+	IFileManager::Get().Delete(*Without);
+	return true;
+}
+
+// The phone reads the origin of a JSON project, so the GPS dot works in a project of the campus, not only in the database itself.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGeoOriginMobileTest, "InNavi.Mobile.Source.RealGeoOrigin", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FGeoOriginMobileTest::RunTest(const FString& Parameters)
+{
+	using namespace GeoOriginTests;
+	const TSharedPtr<FJsonObject> Fixture = ReadJson(FPaths::ProjectDir() / TEXT("../docs/test-data/e2-test-fixture.json"));
+	if (!TestTrue(TEXT("the test fixture is read"), Fixture.IsValid())) return false;
+
+	Fixture->SetObjectField(TEXT("geoOrigin"), Origin(1.4135, 103.9117));
+	const FString With = TempProject(TEXT("mobile-geo-"));
+	TestTrue(TEXT("a project with an origin is written"), WriteJson(Fixture, With));
+	const auto WithData = MakeShared<FMobileRealSource>(With);
+	const auto WithSites = WithData->ListSites();
+	if (TestEqual(TEXT("it is one site"), WithSites.Num(), 1))
+	{
+		const auto Found = WithData->GetGeoOrigin(WithSites[0].Id);
+		TestTrue(TEXT("the phone reads its origin"), Found.IsSet() && Found->Equals(FVector2D(1.4135, 103.9117), 1.e-9));
+	}
+
+	Fixture->RemoveField(TEXT("geoOrigin"));
+	const FString Without = TempProject(TEXT("mobile-nogeo-"));
+	TestTrue(TEXT("a project without one is written"), WriteJson(Fixture, Without));
+	const auto WithoutData = MakeShared<FMobileRealSource>(Without);
+	const auto WithoutSites = WithoutData->ListSites();
+	if (TestEqual(TEXT("it is one site"), WithoutSites.Num(), 1))
+	{
+		TestFalse(TEXT("a project without an origin has none, so no GPS dot"), WithoutData->GetGeoOrigin(WithoutSites[0].Id).IsSet());
+	}
+
+	IFileManager::Get().Delete(*With);
+	IFileManager::Get().Delete(*Without);
+	return true;
+}
+
+// The GPS dot inside a building: on the plan of the building the device is in (or a few metres from its wall), on whichever level is shown; Locate stays
+// on that plan instead of leaving for the campus.
+namespace GeoOriginTests
+{
+	class FFixedLocationSource final : public IMobileLocationSource
+	{
+	public:
+		TOptional<FVector2D> ReadLocation() override { return Fix; }
+		TOptional<double> ReadHeading() override { return Heading; }
+		TOptional<FVector2D> Fix;
+		TOptional<double> Heading;
+	};
+
+	// The fix of a point given in metres north and east of the campus origin.
+	FVector2D FixAt(const FVector2D& Origin, const FVector2D& Metres)
+	{
+		return FVector2D(Origin.X + Metres.X / GeoProjection::MetersPerDegreeLat, Origin.Y + Metres.Y / GeoProjection::MetersPerDegreeLon(Origin.X));
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGpsIndoorTest, "InNavi.Mobile.GpsIndoor", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FGpsIndoorTest::RunTest(const FString& Parameters)
+{
+	using namespace GeoOriginTests;
+	const TSharedPtr<FJsonObject> Fixture = ReadJson(FPaths::ProjectDir() / TEXT("../docs/test-data/e2-test-fixture.json"));
+	if (!TestTrue(TEXT("the test fixture is read"), Fixture.IsValid())) return false;
+	Fixture->SetObjectField(TEXT("geoOrigin"), Origin(1.4135, 103.9117));
+	const FString Path = TempProject(TEXT("gps-indoor-"));
+	if (!TestTrue(TEXT("a project with an origin is written"), WriteJson(Fixture, Path))) return false;
+	ON_SCOPE_EXIT { IFileManager::Get().Delete(*Path); };
+
+	const auto Data = MakeShared<FMobileRealSource>(Path);
+	const auto Sites = Data->ListSites();
+	if (!TestEqual(TEXT("it is one site"), Sites.Num(), 1)) return false;
+	const TOptional<FVector2D> Geo = Data->GetGeoOrigin(Sites[0].Id);
+	if (!TestTrue(TEXT("with an origin"), Geo.IsSet())) return false;
+	const FMobileCampusMap Campus = Data->GetCampusMap(Sites[0].Id);
+	const FMobileCampusBuilding* Building = Campus.Buildings.FindByPredicate([](const FMobileCampusBuilding& B) { return B.BuildingId.EndsWith(TEXT("E2")); });
+	if (!TestNotNull(TEXT("the building E2 is on the campus map"), Building)) return false;
+	FVector2D Centre = FVector2D::ZeroVector;
+	for (const FVector2D& Corner : Building->Outline) Centre += Corner;
+	Centre /= Building->Outline.Num();
+
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("the test world is created"), World)) return false;
+	ON_SCOPE_EXIT { World->DestroyWorld(false); };
+	auto* App = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
+	if (!TestNotNull(TEXT("the app is created"), App)) return false;
+	App->SetSource(Data, Sites[0].Id);
+	const TSharedRef<SWidget> Widget = App->TakeWidget();
+	auto* Map = App->GetMapView();
+	if (!TestNotNull(TEXT("the app has a map"), Map)) return false;
+	Map->SetViewSize(375.0, 812.0);
+	App->OpenBuilding(Building->BuildingId);
+	if (!TestFalse(TEXT("the plan of E2 is shown"), Map->IsOverview())) return false;
+
+	// Without a GPS fix My location is a guess: the door of the building the person said they are in.
+	TestTrue(TEXT("without a GPS fix the guessed My location is drawn"), Map->HasPosition());
+	auto Fake = MakeUnique<FFixedLocationSource>();
+	auto* Location = Fake.Get();
+	App->SetLocationSource(MoveTemp(Fake));
+
+	// A fix inside the building is on its plan, where it is.
+	Location->Fix = FixAt(*Geo, Centre);
+	App->UpdateLocation(1.f);
+	TestFalse(TEXT("with a GPS fix the guess is not drawn: the GPS dot is where the person is"), Map->HasPosition());
+	const TOptional<FVector2D> OnPlan = Map->GetGpsLevelPosition();
+	if (TestTrue(TEXT("a fix inside the building is on the plan"), OnPlan.IsSet()))
+	{
+		TestTrue(TEXT("at the place in the building's own units (the campus position less the building's offset)"), OnPlan->Equals(Centre - Building->Offset, 1.e-3));
+	}
+
+	// The arrow: the heading of the device reaches the map, and its cone points the way the plan's north and east go on the screen.
+	TestFalse(TEXT("no heading, no cone"), Map->GetGpsHeading().IsSet());
+	Location->Heading = 0.0;
+	App->UpdateLocation(0.2f);
+	TestTrue(TEXT("the heading reaches the map"), Map->GetGpsHeading().IsSet() && FMath::IsNearlyEqual(*Map->GetGpsHeading(), 0.0));
+	const FVector2D PlanPoint = *OnPlan;
+	const TOptional<FVector2D> North = Map->GetGpsHeadingOnScreen(PlanPoint);
+	Location->Heading = 90.0;
+	App->UpdateLocation(0.2f);
+	const TOptional<FVector2D> East = Map->GetGpsHeadingOnScreen(PlanPoint);
+	if (TestTrue(TEXT("the cone has a direction"), North.IsSet() && East.IsSet()))
+	{
+		TestTrue(TEXT("unit vectors"), FMath::IsNearlyEqual(North->Size(), 1.0, 1.e-6) && FMath::IsNearlyEqual(East->Size(), 1.0, 1.e-6));
+		TestTrue(TEXT("east is a quarter turn clockwise from north on the plan"), FMath::IsNearlyZero(FVector2D::DotProduct(*North, *East), 1.e-6));
+		const FVector2D PlanNorth = Map->ToWidget(PlanPoint + FVector2D(5.0, 0.0), 375.0, 812.0) - Map->ToWidget(PlanPoint, 375.0, 812.0);
+		TestTrue(TEXT("north is the way the plan's X goes on the screen"), FVector2D::DotProduct(*North, PlanNorth.GetSafeNormal()) > 0.999);
+		// A real project is drawn north up: facing north points to the top of the screen, facing east to the right.
+		TestTrue(TEXT("the map has north at the top"), Map->IsPlanNorthOnX());
+		TestTrue(TEXT("facing north points up the screen"), North->Y < -0.999 && FMath::Abs(North->X) < 1.e-3);
+		TestTrue(TEXT("facing east points to the right"), East->X > 0.999 && FMath::Abs(East->Y) < 1.e-3);
+	}
+	Location->Heading.Reset();
+	App->UpdateLocation(0.2f);
+	TestFalse(TEXT("a device without a compass has no cone"), Map->GetGpsHeading().IsSet());
+
+
+	// The dot is drawn by the marker layer above the map: where the map says, with a halo on the plan of a building.
+	FMobileGpsMarkerView Marker;
+	if (TestTrue(TEXT("the marker layer has a dot to draw on the plan"), Map->GetGpsMarkerView(Marker)))
+	{
+		TestTrue(TEXT("at the place on the plan"), Marker.At.Equals(Map->ToWidget(*OnPlan, 375.0, 812.0), 1.e-3));
+		TestTrue(TEXT("with a halo, as on the plan of a building"), Marker.bHalo);
+	}
+
+	App->LocateMe();
+	TestFalse(TEXT("Locate inside the building stays on its plan"), Map->IsOverview());
+	TestTrue(TEXT("and still has the dot"), Map->GetGpsLevelPosition().IsSet());
+
+	// Locate also starts following the heading: the map turns so that the way the person faces is up, and the cone points up.
+	TestTrue(TEXT("Locate starts following the heading"), Map->IsFollowingHeading());
+	Location->Heading = 90.0;
+	App->UpdateLocation(0.2f);
+	TestTrue(TEXT("facing east the map is turned a quarter back"), FMath::IsNearlyEqual(Map->GetRotation(), -UE_DOUBLE_HALF_PI, 1.e-3));
+	const TOptional<FVector2D> Up = Map->GetGpsHeadingOnScreen(*Map->GetGpsLevelPosition());
+	TestTrue(TEXT("and the cone points up the screen"), Up.IsSet() && Up->Y < -0.999 && FMath::Abs(Up->X) < 1.e-2);
+	Location->Heading = 200.0;
+	App->UpdateLocation(0.2f);
+	const TOptional<FVector2D> StillUp = Map->GetGpsHeadingOnScreen(*Map->GetGpsLevelPosition());
+	TestTrue(TEXT("whichever way the person turns"), StillUp.IsSet() && StillUp->Y < -0.999 && FMath::Abs(StillUp->X) < 1.e-2);
+	// A drag of the map ends it: the heading no longer turns the map.
+	Map->SetGesturesEnabled(true);
+	const FGeometry Geometry = FGeometry::MakeRoot(FVector2f(375.f, 812.f), FSlateLayoutTransform());
+	Map->HandlePointerDown(Geometry, FPointerEvent(0, 0, FVector2f(200.f, 300.f), FVector2f(200.f, 300.f), 1.f, true));
+	Map->HandlePointerMove(Geometry, FPointerEvent(0, 0, FVector2f(240.f, 330.f), FVector2f(200.f, 300.f), 1.f, true));
+	Map->HandlePointerUp(Geometry, FPointerEvent(0, 0, FVector2f(240.f, 330.f), FVector2f(240.f, 330.f), 1.f, false));
+	TestFalse(TEXT("a drag of the map stops following"), Map->IsFollowingHeading());
+	const double Turned = Map->GetRotation();
+	Location->Heading = 10.0;
+	App->UpdateLocation(0.2f);
+	TestTrue(TEXT("then the heading leaves the map as it is"), FMath::IsNearlyEqual(Map->GetRotation(), Turned, 1.e-9));
+	Location->Heading.Reset();
+	App->UpdateLocation(0.2f);
+	Map->ResetRotation();
+
+	// A fix outside the building, but near the campus, is not on its plan.
+	double NorthEdge = -1.e30;
+	for (const FMobileCampusBuilding& Other : Campus.Buildings) for (const FVector2D& Corner : Other.Outline) NorthEdge = FMath::Max(NorthEdge, Corner.X);
+	Location->Fix = FixAt(*Geo, FVector2D(NorthEdge + 100.0, Centre.Y));
+	App->UpdateLocation(1.f);
+	TestFalse(TEXT("a fix 100 m north of the campus is not on the plan"), Map->GetGpsLevelPosition().IsSet());
+	TestTrue(TEXT("but is still the campus's"), Map->GetGpsPosition().IsSet());
+	FMobileGpsMarkerView NotHere;
+	TestFalse(TEXT("the marker layer has nothing to draw on the plan of a building the fix is not at"), Map->GetGpsMarkerView(NotHere));
+	App->LocateMe();
+	TestTrue(TEXT("Locate outside the building goes to the campus overview"), Map->IsOverview());
+	FMobileGpsMarkerView OnCampus;
+	if (TestTrue(TEXT("on the campus overview the marker layer has the dot"), Map->GetGpsMarkerView(OnCampus)))
+	{
+		TestFalse(TEXT("a plain dot there, without the halo"), OnCampus.bHalo);
+	}
+	Map->ResetRotation();
+
+	// Following with the person far from the campus (at home): the dot stays where it is, in the view, whichever way the person turns. (The map keeps some of its plan
+	// in view when it is moved; the dot is the focus, so the view must not be pulled back to the campus and push the dot out.)
+	Map->SetFollowHeading(false);
+	Map->ResetRotation();
+	App->OpenBuilding(Building->BuildingId);
+	Location->Fix = FixAt(*Geo, Centre + FVector2D(20000.0, 0.0));
+	Location->Heading = 0.0;
+	App->UpdateLocation(1.f);
+	App->LocateMe();
+	FMobileGpsMarkerView First;
+	if (TestTrue(TEXT("far from the campus, the dot is there to draw"), Map->GetGpsMarkerView(First)))
+	{
+		TestTrue(TEXT("and it is inside the view"), First.At.X > 0.0 && First.At.X < 375.0 && First.At.Y > 0.0 && First.At.Y < 812.0);
+		for (const double Degrees : { 30.0, 90.0, 170.0, 250.0, 330.0, 10.0 })
+		{
+			Location->Heading = Degrees;
+			App->UpdateLocation(0.2f);
+			FMobileGpsMarkerView AtHeading;
+			const bool bThere = Map->GetGpsMarkerView(AtHeading);
+			TestTrue(FString::Printf(TEXT("turned to %.0f degrees the dot is still there"), Degrees), bThere);
+			TestTrue(FString::Printf(TEXT("and has not moved (%.0f degrees)"), Degrees), bThere && (AtHeading.At - First.At).Size() < 0.5);
+		}
+	}
+	return true;
+}
+
+// -GpsFake=<latitude>,<longitude> stands in for the device's GPS in a build that is not Shipping.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGpsFakeParseTest, "InNavi.Mobile.GpsFakeParse", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FGpsFakeParseTest::RunTest(const FString& Parameters)
+{
+	const TOptional<FVector2D> Fake = ParseFakeMobileLocation(TEXT("InNavi -game -GpsFake=1.4141,103.9125 -windowed"));
+	if (TestTrue(TEXT("a latitude and longitude are read"), Fake.IsSet()))
+	{
+		TestTrue(TEXT("latitude first, then longitude"), Fake->Equals(FVector2D(1.4141, 103.9125), 1.e-9));
+	}
+	const TOptional<FVector2D> South = ParseFakeMobileLocation(TEXT("-GpsFake=-33.8688,151.2093"));
+	TestTrue(TEXT("a negative one too"), South.IsSet() && South->Equals(FVector2D(-33.8688, 151.2093), 1.e-9));
+	TestFalse(TEXT("no argument, no fake"), ParseFakeMobileLocation(TEXT("InNavi -game")).IsSet());
+	TestFalse(TEXT("words are not a position"), ParseFakeMobileLocation(TEXT("-GpsFake=here,there")).IsSet());
+	TestFalse(TEXT("one number is not a position"), ParseFakeMobileLocation(TEXT("-GpsFake=1.41")).IsSet());
+	TestFalse(TEXT("an impossible latitude is not one"), ParseFakeMobileLocation(TEXT("-GpsFake=200,103.9")).IsSet());
+	TestFalse(TEXT("an impossible longitude is not one"), ParseFakeMobileLocation(TEXT("-GpsFake=1.4,400")).IsSet());
+
+	const TOptional<double> Heading = ParseFakeMobileHeading(TEXT("InNavi -GpsFake=1.4,103.9 -GpsFakeHeading=90"));
+	TestTrue(TEXT("a heading is read"), Heading.IsSet() && FMath::IsNearlyEqual(*Heading, 90.0));
+	const TOptional<double> Wrapped = ParseFakeMobileHeading(TEXT("-GpsFakeHeading=-90"));
+	TestTrue(TEXT("a heading is kept between 0 and 360"), Wrapped.IsSet() && FMath::IsNearlyEqual(*Wrapped, 270.0));
+	TestFalse(TEXT("no heading argument, no heading"), ParseFakeMobileHeading(TEXT("-GpsFake=1.4,103.9")).IsSet());
+	TestFalse(TEXT("a heading that is not a number is none"), ParseFakeMobileHeading(TEXT("-GpsFakeHeading=north")).IsSet());
+	return true;
+}
+
+// Where a route starts when the phone has a GPS fix: My location is the building the device is in; away from every building it is nowhere on the map, so the
+// start has to be chosen (the route page says so and plans nothing from My location).
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FGpsRouteStartTest, "InNavi.Mobile.GpsRouteStart", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+bool FGpsRouteStartTest::RunTest(const FString& Parameters)
+{
+	using namespace GeoOriginTests;
+	const TSharedPtr<FJsonObject> Fixture = ReadJson(FPaths::ProjectDir() / TEXT("../docs/test-data/e2-test-fixture.json"));
+	if (!TestTrue(TEXT("the test fixture is read"), Fixture.IsValid())) return false;
+	Fixture->SetObjectField(TEXT("geoOrigin"), Origin(1.4135, 103.9117));
+	const FString Path = TempProject(TEXT("gps-route-"));
+	if (!TestTrue(TEXT("a project with an origin is written"), WriteJson(Fixture, Path))) return false;
+	ON_SCOPE_EXIT { IFileManager::Get().Delete(*Path); };
+	const auto Data = MakeShared<FMobileRealSource>(Path);
+	const auto Sites = Data->ListSites();
+	if (!TestEqual(TEXT("it is one site"), Sites.Num(), 1)) return false;
+	const TOptional<FVector2D> Geo = Data->GetGeoOrigin(Sites[0].Id);
+	const FMobileCampusMap Campus = Data->GetCampusMap(Sites[0].Id);
+	const FMobileCampusBuilding* Building = Campus.Buildings.FindByPredicate([](const FMobileCampusBuilding& B) { return B.BuildingId.EndsWith(TEXT("E2")); });
+	const TArray<FMobilePlace> Places = Data->SearchPlaces(Sites[0].Id, FString(), FMobilePlaceFilter());
+	if (!TestTrue(TEXT("an origin, a building and places"), Geo.IsSet() && Building && !Places.IsEmpty())) return false;
+	FVector2D Centre = FVector2D::ZeroVector;
+	for (const FVector2D& Corner : Building->Outline) Centre += Corner;
+	Centre /= Building->Outline.Num();
+
+	UWorld* World = UWorld::CreateWorld(EWorldType::Game, false);
+	if (!TestNotNull(TEXT("the test world is created"), World)) return false;
+	ON_SCOPE_EXIT { World->DestroyWorld(false); };
+
+	auto StartDirections = [&](const TOptional<FVector2D>& Fix) -> UMobileAppWidget*
+	{
+		UMobileAppWidget* App = CreateWidget<UMobileAppWidget>(World, UMobileAppWidget::StaticClass());
+		App->SetSource(Data, Sites[0].Id);
+		App->TakeWidget();
+		App->SetActiveTab(UMobileAppWidget::ETab::Directory);
+		if (Fix)
+		{
+			auto Fake = MakeUnique<FFixedLocationSource>();
+			Fake->Fix = FixAt(*Geo, *Fix);
+			App->SetLocationSource(MoveTemp(Fake));
+			App->UpdateLocation(1.f);
+		}
+		App->GetSearchPage()->ChoosePlace(Places.Last().Id);
+		Cast<UButton>(App->GetPlacePage()->FindNamedWidget(TEXT("Btn_GetDirections")))->OnClicked.Broadcast();
+		return App;
+	};
+
+	// No GPS fix: My location is the guess, the door of the first building, as before.
+	{
+		UMobileAppWidget* App = StartDirections({});
+		UMobileRoutePageWidget* Route = App->GetRoutePage();
+		TestEqual(TEXT("without a fix the start is My location"), Route->GetFromSelect()->GetSelectedLabel(), FString(TEXT("My location")));
+		TestTrue(TEXT("with its building and level"), Route->IsMyLocationRowShown());
+	}
+	// A fix inside the building: My location is that building.
+	{
+		UMobileAppWidget* App = StartDirections(Centre);
+		UMobileRoutePageWidget* Route = App->GetRoutePage();
+		TestEqual(TEXT("inside a building the start is My location"), Route->GetFromSelect()->GetSelectedLabel(), FString(TEXT("My location")));
+		TestTrue(TEXT("in the building the device is in"), App->GetMyLocationBuildingId().EndsWith(TEXT("E2")));
+	}
+	// A fix far from every building: there is no My location to start from.
+	{
+		UMobileAppWidget* App = StartDirections(FVector2D(Centre.X + 20000.0, Centre.Y));
+		UMobileRoutePageWidget* Route = App->GetRoutePage();
+		TestEqual(TEXT("away from the campus the start has to be chosen"), Route->GetFromSelect()->GetSelectedLabel(), FString(TEXT("Choose a starting point")));
+		TestFalse(TEXT("no building and level to say"), Route->IsMyLocationRowShown());
+		TestFalse(TEXT("no route is planned from My location"), App->GetCurrentRoute().bFound);
+		TestTrue(TEXT("and the page says why"), Route->GetErrorString().Contains(TEXT("not at the campus")));
+		// Choosing a start plans the route again.
+		Route->ChooseFrom(Places[0].Id);
+		TestEqual(TEXT("a chosen start is the start"), App->GetStartPlaceId(), Places[0].Id);
+		TestFalse(TEXT("and the page no longer says to choose one"), Route->GetErrorString().Contains(TEXT("not at the campus")));
+	}
+	return true;
+}
+
+#endif

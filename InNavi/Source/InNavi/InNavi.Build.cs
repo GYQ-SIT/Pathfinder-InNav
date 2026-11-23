@@ -1,5 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
+using System.IO;
 using UnrealBuildTool;
 
 public class InNavi : ModuleRules
@@ -24,7 +25,9 @@ public class InNavi : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[] { "ApplicationCore", "Slate", "SlateCore", "SQLiteCore", "RenderCore", "ImageCore" });
 		if (Target.Platform == UnrealTargetPlatform.Android)
 		{
-			PrivateDependencyModuleNames.AddRange(new string[] { "AndroidPermission", "LocationServicesBPLibrary" });
+			PrivateDependencyModuleNames.AddRange(new string[] { "AndroidPermission", "LocationServicesBPLibrary", "Launch" });
+			// The phone's compass (the direction the arrow of the GPS dot points), see InNavi_UPL.xml.
+			AdditionalPropertiesForReceipt.Add("AndroidPlugin", Path.Combine(Utils.MakePathRelativeTo(ModuleDirectory, Target.RelativeEnginePath), "InNavi_UPL.xml"));
 		}
 
 		// The native file dialog exists on desktop only (the phone app has no import or save-as).
