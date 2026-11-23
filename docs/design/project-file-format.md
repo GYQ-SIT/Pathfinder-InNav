@@ -66,6 +66,7 @@ A complete file to open and read is `docs/test-data/entrance-test-2-with-doors.j
 | `buildings` | array | **Required.** The buildings | - |
 | `contextBuildings` | array | The buildings around the campus of a map database, shown as blocks on the map. Each is `{ "buildingType", "footprint": [[x, y], ...] }`, in footprint units | none |
 | `roads` | array | The roads of a map database. Each is `{ "highway", "points": [[x, y], ...] }`: `highway` is the road's own kind in the database (primary, residential, footway ...), which sets its width and colour | none |
+| `geoOrigin` | object `{ "lat", "lon" }` | The latitude and longitude, in degrees, that the meters of the file are measured from. Written when the project was made from a map database. The phone's GPS uses it to put the device on the map: a project without it shows no GPS dot | none |
 | `pois` | array | Not written any more and not shown: a file saved by an earlier build may have it (`{ "poiType", "position": [x, y] }`), and it is read past | none |
 
 A project made by opening a map database (a `.db` file) and saving it keeps all of it: the campus `buildings` with their types, and the
@@ -142,7 +143,7 @@ The file says which format wrote it (`version`, **2** now for a project with the
 - **Adding** an optional field does not change the version: older builds ignore it and older files simply do not have it (the defaults above apply).
 - **Changing what a field means**, removing one, or making an optional one required **raises the version**, and the loader keeps reading the older one (converting it as it loads). The change
   is written down here, in the list below, in the same commit.
-- Saving writes the version the project needs: **2** when it holds the map around the campus (`contextBuildings`, `roads`), **1** otherwise. Opening an old file and saving it is the conversion.
+- Saving writes the version the project needs: **2** when it holds the map around the campus (`contextBuildings`, `roads`, `geoOrigin`), **1** otherwise. Opening an old file and saving it is the conversion.
 - A build that reads only version 1 and opens a version 2 file still shows the buildings, but it would not write the map back. A build that knows the check
   asks for a new file name instead of saving over it, so the map is not lost.
 
@@ -150,7 +151,7 @@ The file says which format wrote it (`version`, **2** now for a project with the
 |---------|-----------|
 | 0 | Files saved before `version` existed. The same layout as 1; they may lack the optional fields that were added later (for example `projectName`, `description`, `entrances`, `rotationDegrees`, `sizeScale`), and the defaults above apply |
 | 1 | Buildings, interiors and the doors in the outer wall |
-| 2 | Version 1 and the map around the campus: `contextBuildings` and `roads` at the top of the file. Written only when the project has them |
+| 2 | Version 1 and the map around the campus: `contextBuildings`, `roads` and `geoOrigin` at the top of the file. Written only when the project has them |
 
 `InNavi.Project.FileVersion` (in `NewProjectTests.cpp`) checks that a project says its version and that files without one, or with a newer one, still open; saving and loading again gives
 back what was saved.
