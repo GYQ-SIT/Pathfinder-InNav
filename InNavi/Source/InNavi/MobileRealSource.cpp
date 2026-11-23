@@ -217,6 +217,20 @@ FMobileRealSource::FMobileRealSource(const FString& ProjectPath, const FString& 
 
 namespace MobileRealData
 {
+	// The latitude and longitude a project's meters are measured from (its "geoOrigin"), if it has one: the phone's GPS needs it.
+	TOptional<FVector2D> GeoOriginOf(const TSharedPtr<FJsonObject>& Json)
+	{
+		const TSharedPtr<FJsonObject>* Origin = nullptr;
+		double Lat = 0.0, Lon = 0.0;
+		if (Json.IsValid() && Json->TryGetObjectField(TEXT("geoOrigin"), Origin) && Origin && Origin->IsValid()
+			&& (*Origin)->TryGetNumberField(TEXT("lat"), Lat) && (*Origin)->TryGetNumberField(TEXT("lon"), Lon)
+			&& FMath::IsFinite(Lat) && FMath::IsFinite(Lon) && FMath::Abs(Lat) <= 90.0 && FMath::Abs(Lon) <= 180.0)
+		{
+			return FVector2D(Lat, Lon);
+		}
+		return {};
+	}
+
 	// The cover picture of a project file, if it has one: Covers/<file name>.png next to it (see ProjectLibrary::CoverPathFor).
 	FString CoverOf(const FString& ProjectFile)
 	{
@@ -285,6 +299,7 @@ void FMobileRealSource::AddProject(const FString& Path)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("Mobile navigation could not read project %s"), *Path); return;
 		}
+		Project->GeoOrigin = GeoOriginOf(Project->Json);
 	}
 	IndexProject(*Project);
 	const int32 Existing = Projects.IndexOfByPredicate([&](const auto& P) { return P->Site.Id == Project->Site.Id; });

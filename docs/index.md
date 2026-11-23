@@ -17,6 +17,8 @@ the same places and routes on a phone.
 - [Deliverables](deliverables.md) - ownership and M1/M2/M3 targets
 - [Interior Editor Guide](design/interior-editor-guide.md) - how to use the editor (both screens)
 - [UI Panels Guide](design/ui-panels-guide.md) - how the dock panels work and how to add one
+- [UI gap list](design/ui-gap-list.md) - where the apps differ from the design team's prototypes, and what is missing
+- [Design prototypes](prototype/README.md) - the UX team's phone and editor prototypes
 
 Phone app:
 

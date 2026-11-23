@@ -5,6 +5,17 @@
 #include "MobileNavSource.h"
 #include "MobileMapWidget.generated.h"
 
+// Where the GPS dot is on the screen, for the marker layer to draw: the map works it out from its own view (it may be turned or tilted).
+struct FMobileGpsMarkerView
+{
+	// In the widget's own coordinates.
+	FVector2D At = FVector2D::ZeroVector;
+	// The way the device faces on the screen, as a unit vector, when the heading is known.
+	TOptional<FVector2D> Facing;
+	// On the plan of a building the dot has a wide pale halo (the GPS does not know the floor); on the campus overview it is a plain dot.
+	bool bHalo = false;
+};
+
 // The phone app's map: one level of a building as a floor plan (its rooms coloured by what they are, named, with the lifts and stairs), or the
 // site from above (Overview). It can draw the route on the level it shows, a pin on the destination, a dot where the person is, and a tilted
 // 3D-looking view of the same plan. A tap on a room or (in the overview) a building is reported. It asks an IMobileNavSource for what to draw.
@@ -41,8 +52,32 @@ public:
 	void SetHighlightPlace(const FString& PlaceId);
 	void SetPosition(const FMobileRoutePoint& InPosition);
 	void ClearPosition();
+	// The device's position from the GPS, in the units of the campus map (metres for a real project), north then east of the campus origin.
+	// Whether the plans have north on X and east on Y (the real projects): the map is then drawn with north at the top. Set from the source; tests set it too.
+	void SetPlanNorthOnX(bool bInNorthOnX);
+	bool IsPlanNorthOnX() const { return bPlanNorthOnX; }
 	void SetGpsPosition(TOptional<FVector2D> InPosition);
 	const TOptional<FVector2D>& GetGpsPosition() const { return GpsPosition; }
+	// Where that position is on the plan of the building shown, in the plan's units, when the plan is shown and the position is inside the building or a few
+	// metres from its wall (a GPS fix indoors is rarely better than that). The GPS does not know the floor: it is drawn on whichever level is shown.
+	TOptional<FVector2D> GetGpsLevelPosition() const;
+	// Where to draw the GPS dot (and its cone) on the screen now, if there is one to draw here: the campus overview shows it when there is a position, the plan of a
+	// building when the position is inside or by it. It is drawn by UMobileGpsMarkerWidget, a layer above the map, not by the map.
+	bool GetGpsMarkerView(FMobileGpsMarkerView& Out) const;
+	// The building of the campus the GPS position is in (or within 8 m of its wall), or empty: not in one, or no position.
+	FString GetGpsBuildingId() const;
+	// The direction the device faces, in degrees clockwise from north: the GPS dot gets a cone that points that way (none while it is not known).
+	void SetGpsHeading(TOptional<double> Degrees);
+	const TOptional<double>& GetGpsHeading() const { return GpsHeading; }
+	// Follow the direction the device faces, as a map app does while a person walks: the map turns so that the way the person faces is up, the GPS dot stays
+	// in the middle of the view and its cone points up. A drag or a twist of the map ends it (and the compass button, which turns the map back to north);
+	// Locate starts it. Not in the tilted view. FollowGps is one step of it, made when the heading or the position changes.
+	void SetFollowHeading(bool bFollow);
+	bool IsFollowingHeading() const { return bFollowHeading; }
+	void FollowGps();
+	// Which way the cone points on the screen from a place of the plan, as a unit vector (the map may be turned or tilted), if the heading is known.
+	TOptional<FVector2D> GetGpsHeadingOnScreen(const FVector2D& PlanPoint) const;
+	// Centres the view on the GPS dot: the campus overview on the campus, the plan of a building on the dot inside it.
 	void CenterOnGps();
 	void Set3D(bool bInShow3D);
 	bool IsShowing3D() const { return bShow3D; }
@@ -160,6 +195,9 @@ private:
 	FMobileRoutePoint Position;
 	bool bHasPosition = false;
 	TOptional<FVector2D> GpsPosition;
+	TOptional<double> GpsHeading;
+	bool bFollowHeading = false;
+	bool bPlanNorthOnX = false;
 	bool bShow3D = false;
 	// Where a big building's view is built around, kept once chosen (so a tap or a drag does not move it), until the view starts again or the route changes.
 	mutable TOptional<FVector2D> LatchedFocus;
@@ -183,4 +221,23 @@ private:
 
 	TFunction<void(const FString&)> OnPlaceTapped;
 	TFunction<void(const FString&)> OnBuildingTapped;
+};
+
+// The GPS dot of the phone map, in a layer of its own above the map (as in a map app: the position marker is not part of the map's picture). It takes where
+// to draw from the map (GetGpsMarkerView) and draws a pale cone for the direction the device faces, a halo on the plan of a building, and the dot.
+UCLASS()
+class INNAVI_API UMobileGpsMarkerWidget : public UUserWidget
+{
+	GENERATED_BODY()
+
+public:
+	UMobileGpsMarkerWidget(const FObjectInitializer& ObjectInitializer);
+
+	void SetMap(UMobileMapWidget* InMap) { Map = InMap; }
+
+protected:
+	virtual int32 NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
+
+private:
+	TWeakObjectPtr<UMobileMapWidget> Map;
 };

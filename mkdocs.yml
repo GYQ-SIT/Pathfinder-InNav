@@ -24,6 +24,8 @@ nav:
       - UI Panels Guide: design/ui-panels-guide.md
       - Layout Validator: design/layout-validator.md
       - Layout Validator M2 Evidence: design/layout-validator-m2-compliance.md
+      - UI Gap List: design/ui-gap-list.md
+      - Design Prototypes: prototype/README.md
   - Mobile app:
       - Installing the test build: android-install.md
       - Signing and building the APK: android-signing.md

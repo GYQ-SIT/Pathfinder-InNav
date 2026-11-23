@@ -342,6 +342,20 @@ int32 ABuildingGenerator::LoadBuildingsFromJson(const TSharedPtr<FJsonObject>& R
 
 	Scale = ProjectScale;
 
+	// Where the meters of the file are measured from, for a project made from a map database: the phone's GPS needs it to put a fix on the map. A file without it
+	// (or with a latitude or longitude that is not one) has none, and does not keep the origin of a project opened before.
+	bHasDatabaseRefPoint = false;
+	const TSharedPtr<FJsonObject>* GeoOrigin = nullptr;
+	double OriginLat = 0.0, OriginLon = 0.0;
+	if (RootObject->TryGetObjectField(TEXT("geoOrigin"), GeoOrigin) && GeoOrigin && GeoOrigin->IsValid()
+		&& (*GeoOrigin)->TryGetNumberField(TEXT("lat"), OriginLat) && (*GeoOrigin)->TryGetNumberField(TEXT("lon"), OriginLon)
+		&& FMath::IsFinite(OriginLat) && FMath::IsFinite(OriginLon) && FMath::Abs(OriginLat) <= 90.0 && FMath::Abs(OriginLon) <= 180.0)
+	{
+		bHasDatabaseRefPoint = true;
+		DatabaseRefLat = OriginLat;
+		DatabaseRefLon = OriginLon;
+	}
+
 	// A file made before projects had a name carries neither field.
 	ProjectName.Reset();
 	ProjectDescription.Reset();
@@ -1601,10 +1615,18 @@ bool ABuildingGenerator::SaveBuildingsToFile(const FString& FilePath, FString& O
 	TSharedRef<FJsonObject> RootObject = MakeShared<FJsonObject>();
 	// Version 2 only for a project that has the map around the campus; every other project stays version 1.
 	const bool bHasMap = Scale > KINDA_SMALL_NUMBER
-		&& (!SceneryContextBuildings.IsEmpty() || !SceneryRoads.IsEmpty());
+		&& (!SceneryContextBuildings.IsEmpty() || !SceneryRoads.IsEmpty() || bHasDatabaseRefPoint);
 	RootObject->SetNumberField(TEXT("version"), bHasMap ? ProjectFileVersion : BasicProjectFileVersion);
 	RootObject->SetNumberField(TEXT("scale"), Scale);
 	RootObject->SetNumberField(TEXT("floorHeight"), 300.f);
+	if (bHasDatabaseRefPoint)
+	{
+		// The latitude and longitude the meters of the file are measured from (the project came from a map database).
+		const TSharedRef<FJsonObject> GeoOrigin = MakeShared<FJsonObject>();
+		GeoOrigin->SetNumberField(TEXT("lat"), DatabaseRefLat);
+		GeoOrigin->SetNumberField(TEXT("lon"), DatabaseRefLon);
+		RootObject->SetObjectField(TEXT("geoOrigin"), GeoOrigin);
+	}
 	if (!ProjectName.IsEmpty())
 	{
 		RootObject->SetStringField(TEXT("projectName"), ProjectName);
@@ -2123,6 +2145,7 @@ void ABuildingGenerator::ClearAllBuildings()
 	BuildingBaselines.Empty();
 	Scale = 1.f;
 	LoadedFileVersion = 0;
+	bHasDatabaseRefPoint = false;
 	ProjectRevisionPath.Reset();
 	ProjectRevision.Reset();
 	MarkGroundDirty();

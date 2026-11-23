@@ -110,6 +110,12 @@ TSharedRef<SWidget> UMobileAppWidget::RebuildWidget()
 		UCanvasPanelSlot* MapViewSlot = Phone->AddChildToCanvas(MapView);
 		MapViewSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
 		MapViewSlot->SetOffsets(FMargin(0.f));
+		// The GPS dot is a layer of its own above the map, as in a map app: its turning does not touch the map's picture.
+		GpsMarker = CreateWidget<UMobileGpsMarkerWidget>(this, UMobileGpsMarkerWidget::StaticClass());
+		GpsMarker->SetMap(MapView);
+		UCanvasPanelSlot* GpsMarkerSlot = Phone->AddChildToCanvas(GpsMarker);
+		GpsMarkerSlot->SetAnchors(FAnchors(0.f, 0.f, 1.f, 1.f));
+		GpsMarkerSlot->SetOffsets(FMargin(0.f));
 
 		// The top row of the map, as in the prototype: Zoom out (for a campus) and 2D | 3D, at the right. The title is a label at the bottom left (below).
 		TopBarBorder = Tree->ConstructWidget<UBorder>(UBorder::StaticClass(), TEXT("TopBar"));
@@ -1060,6 +1066,10 @@ void UMobileAppWidget::PositionSheet()
 		// as in the prototype, and is not shown while the sheet is open to its top.
 		MapView->SetFitInsets(HeaderTotal + TopRowTop + TopRowHeight + 4.0, TabTotal + SheetHeight + ControlsGap + ControlsHeight + 8.0);
 		MapView->SetVisibility(bOpen ? ESlateVisibility::Hidden : ESlateVisibility::Visible);
+		if (GpsMarker)
+		{
+			GpsMarker->SetVisibility(bOpen ? ESlateVisibility::Hidden : ESlateVisibility::HitTestInvisible);
+		}
 	}
 	ApplyMinimized();
 	SheetBorder->SetVisibility(bMapPage ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
@@ -1271,13 +1281,44 @@ void UMobileAppWidget::RefreshRoute()
 	Request.Preferences = RoutePreferences;
 	Request.MyLocationBuildingId = MyLocationBuildingId;
 	Request.MyLocationLevel = MyLocationLevel;
+	// With a GPS fix, My location is where the device is: the building it is in (on the level the person says, or the first), or nowhere on the map.
+	if (StartPlaceId.IsEmpty() && MapView && MapView->GetGpsPosition().IsSet())
+	{
+		const FString GpsBuilding = MapView->GetGpsBuildingId();
+		if (GpsBuilding.IsEmpty())
+		{
+			Request.bMyLocationUnavailable = true;
+		}
+		else if (GpsBuilding != Request.MyLocationBuildingId)
+		{
+			Request.MyLocationBuildingId = GpsBuilding;
+			Request.MyLocationLevel = 0;
+			for (const FMobileBuilding& Building : Source->ListBuildings(SiteId))
+			{
+				if (Building.Id == GpsBuilding && !Building.Levels.IsEmpty())
+				{
+					Request.MyLocationLevel = Building.Levels[0].Level;
+				}
+			}
+			MyLocationBuildingId = Request.MyLocationBuildingId;
+			MyLocationLevel = Request.MyLocationLevel;
+		}
+	}
 	ActiveRouteRequest = Request;
 	TripDraft = DestinationIds();
 	PendingRoute.Reset();
 	Legs.Reset();
 	LegIndex = 0;
 	CurrentRoute = FMobileRoute();
-	PlanLeg(0);
+	if (Request.bMyLocationUnavailable)
+	{
+		// The person is not in a building of the site: there is no start to plan from until they choose one.
+		CurrentRoute.Error = TEXT("You are not at the campus. Choose where you start.");
+	}
+	else
+	{
+		PlanLeg(0);
+	}
 	RoutePage->SetRequest(Request, CurrentRoute, PendingRoute.IsValid(), Legs);
 	RefreshMap();
 }
@@ -1881,6 +1922,61 @@ void UMobileAppWidget::RefreshMap()
 	ApplyMap();
 }
 
+void UMobileAppWidget::UpdatePositionDot()
+{
+	if (!MapView || !Source.IsValid())
+	{
+		return;
+	}
+	const EMobileSheetState State = Flow.GetState();
+	// The dot: the step the person is at while walking, otherwise My location (at the door of the building they said they are in).
+	if (State == EMobileSheetState::Navigating && CurrentRoute.bFound && CurrentRoute.Steps.IsValidIndex(NavStepIndex))
+	{
+		const FMobileStep& Step = CurrentRoute.Steps[NavStepIndex];
+		FMobileRoutePoint Here;
+		Here.BuildingId = Step.BuildingId;
+		Here.Level = Step.Level;
+		Here.Position = Step.Position;
+		MapView->SetPosition(Here);
+	}
+	else if (!StartPlaceId.IsEmpty())
+	{
+		// Starting from a place: the dot is there.
+		FMobilePlace Start;
+		if (Source->FindPlace(StartPlaceId, Start))
+		{
+			FMobileRoutePoint Here;
+			Here.BuildingId = Start.BuildingId;
+			Here.Level = Start.Level;
+			Here.Position = Start.Position;
+			MapView->SetPosition(Here);
+		}
+		else
+		{
+			MapView->ClearPosition();
+		}
+	}
+	// Without a GPS fix: My location is a guess, the door of the building the person said they are in. With one, the GPS dot is where the person is (or
+	// nowhere on the map, when they are not at the campus), and that guess is not drawn.
+	else if (StartPlaceId.IsEmpty() && !MyLocationBuildingId.IsEmpty() && !MapView->GetGpsPosition().IsSet())
+	{
+		FMobileLevelMap Mine;
+		FMobileRoutePoint Here;
+		Here.BuildingId = MyLocationBuildingId;
+		Here.Level = MyLocationLevel;
+		if (Source->GetLevelMap(MyLocationBuildingId, MyLocationLevel, Mine) && Mine.bHasEntrance)
+		{
+			Here.Position = Mine.Entrance;
+			MapView->SetPosition(Here);
+		}
+		else MapView->ClearPosition();
+	}
+	else
+	{
+		MapView->ClearPosition();
+	}
+}
+
 void UMobileAppWidget::ApplyMap()
 {
 	if (!MapView || !Source.IsValid())
@@ -1930,50 +2026,7 @@ void UMobileAppWidget::ApplyMap()
 	const bool bShowsPlace = State == EMobileSheetState::Place || State == EMobileSheetState::Route || State == EMobileSheetState::Navigating || State == EMobileSheetState::Arrived;
 	MapView->SetHighlightPlace(bShowsPlace ? SelectedPlace.Id : FString());
 
-	// The dot: the step the person is at while walking, otherwise My location (at the door of the building they said they are in).
-	if (State == EMobileSheetState::Navigating && CurrentRoute.bFound && CurrentRoute.Steps.IsValidIndex(NavStepIndex))
-	{
-		const FMobileStep& Step = CurrentRoute.Steps[NavStepIndex];
-		FMobileRoutePoint Here;
-		Here.BuildingId = Step.BuildingId;
-		Here.Level = Step.Level;
-		Here.Position = Step.Position;
-		MapView->SetPosition(Here);
-	}
-	else if (!StartPlaceId.IsEmpty())
-	{
-		// Starting from a place: the dot is there.
-		FMobilePlace Start;
-		if (Source->FindPlace(StartPlaceId, Start))
-		{
-			FMobileRoutePoint Here;
-			Here.BuildingId = Start.BuildingId;
-			Here.Level = Start.Level;
-			Here.Position = Start.Position;
-			MapView->SetPosition(Here);
-		}
-		else
-		{
-			MapView->ClearPosition();
-		}
-	}
-	else if (StartPlaceId.IsEmpty() && !MyLocationBuildingId.IsEmpty())
-	{
-		FMobileLevelMap Mine;
-		FMobileRoutePoint Here;
-		Here.BuildingId = MyLocationBuildingId;
-		Here.Level = MyLocationLevel;
-		if (Source->GetLevelMap(MyLocationBuildingId, MyLocationLevel, Mine) && Mine.bHasEntrance)
-		{
-			Here.Position = Mine.Entrance;
-			MapView->SetPosition(Here);
-		}
-		else MapView->ClearPosition();
-	}
-	else
-	{
-		MapView->ClearPosition();
-	}
+	UpdatePositionDot();
 
 	// The level button says which level, and its list (when open) the building's levels, the top one first.
 	if (LevelLabel)
@@ -2093,8 +2146,9 @@ void UMobileAppWidget::SetLocationSource(TUniquePtr<IMobileLocationSource> InSou
 {
 	LocationSource = MoveTemp(InSource);
 	LocationPollSeconds = 0.f;
+	HeadingPollSeconds = 0.f;
 	LastLocation.Reset();
-	if (MapView) MapView->SetGpsPosition({});
+	if (MapView) { MapView->SetGpsPosition({}); MapView->SetGpsHeading({}); }
 }
 
 void UMobileAppWidget::UpdateLocation(float DeltaTime)
@@ -2108,6 +2162,14 @@ void UMobileAppWidget::UpdateLocation(float DeltaTime)
 	}
 	if (!LocationSource) LocationSource = MakePlatformMobileLocationSource();
 	if (!LocationSource) return;
+	// The direction the device faces (its compass) is read oftener than the position, for the arrow of the dot to turn with the person.
+	HeadingPollSeconds -= DeltaTime;
+	if (HeadingPollSeconds <= 0.f)
+	{
+		HeadingPollSeconds = 0.1f;
+		MapView->SetGpsHeading(LocationSource->ReadHeading());
+		MapView->FollowGps();
+	}
 	LocationPollSeconds -= DeltaTime;
 	if (LocationPollSeconds <= 0.f)
 	{
@@ -2122,6 +2184,13 @@ void UMobileAppWidget::UpdateLocation(float DeltaTime)
 	MapView->SetGpsPosition(LastLocation
 		? TOptional<FVector2D>(GeoProjection::ToLocalMeters(LastLocation->X, LastLocation->Y, Origin->X, Origin->Y))
 		: TOptional<FVector2D>());
+	// With a GPS fix the guessed My location is not drawn (see UpdatePositionDot), so the dot is made again when a fix first comes.
+	const bool bHasGps = MapView->GetGpsPosition().IsSet();
+	if (bHasGps != bGpsHadFixForDot)
+	{
+		bGpsHadFixForDot = bHasGps;
+		UpdatePositionDot();
+	}
 }
 
 void UMobileAppWidget::LocateMe()
@@ -2129,10 +2198,19 @@ void UMobileAppWidget::LocateMe()
 	UpdateLocation(0.f);
 	if (MapView && MapView->GetGpsPosition())
 	{
+		// On the plan of the building the person is in: stay on it and show where, rather than leave it for the campus.
+		if (!bMapOverview && MapView->GetGpsLevelPosition())
+		{
+			bLevelPopupOpen = false;
+			MapView->CenterOnGps();
+			MapView->SetFollowHeading(true);
+			return;
+		}
 		bMapOverview = true;
 		bLevelPopupOpen = false;
 		ApplyMap();
 		MapView->CenterOnGps();
+		MapView->SetFollowHeading(true);
 		return;
 	}
 	if (!MyLocationBuildingId.IsEmpty())
@@ -2176,6 +2254,7 @@ void UMobileAppWidget::OnCompassClicked()
 {
 	if (MapView)
 	{
+		MapView->SetFollowHeading(false);
 		MapView->ResetRotation();
 	}
 }
