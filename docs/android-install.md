@@ -7,13 +7,13 @@ This is for teammates who want to **try the phone app** on their own phone. You 
 
 - An **Android phone, Android 8 or newer** (API 26+), with a **64-bit ARM** processor. Nearly every phone from the last several years is. There is **no iPhone version**.
 - Enough free space for the APK and the installed app's data.
-- The file **`InNavi-arm64.apk`** (one file; the game's data is inside it). It is not in git because it is big. Download it from the **[mobile-test-3 pre-release](https://github.com/GYQ-SIT/Pathfinder-InNav/releases/tag/mobile-test-3)**
-  ("Assets" -> `InNavi-arm64.apk`). The repository is public, so no sign-in is needed;
+- The file **`InNavi-m3-build-1-arm64.apk`** (one file; the game's data is inside it). It is not in git because it is big. Download it from the **[m3-build-1 release](https://github.com/GYQ-SIT/Pathfinder-InNav/releases/tag/m3-build-1)**
+  ("Assets" -> `InNavi-m3-build-1-arm64.apk`). The repository is public, so no sign-in is needed;
   if the phone's browser does not let you download, download the file on a computer and send it to the phone (USB cable, a cloud drive or a chat app).
 
-**Mobile test build 3 (version 1.4, Android version code 5)** reads packaged project files and uses the real campus route planner. It includes the fading startup logo and app icon, navigation/arrival sounds and the Profile volume control, map-label improvements, and the current routing and project-data fixes. Positioning is still a manual building/level choice; there is no automatic indoor tracking. See [the real-data guide](mobile-real-data-guide.md) for the available data and test cases.
+**`m3-build-1` (version 2.0, Android version code 10)** reads the packaged project files and uses the real campus route planner. GPS shows a rough position on the map, but there is no automatic indoor tracking: you choose the building and level, and you move through the steps of a route yourself. See [the real-data guide](mobile-real-data-guide.md) for the available data and test cases, and "Known limitations" in the repository's README.
 
-**Updating:** `mobile-test-3` uses the **same signing key as `mobile-test-2`**, so it installs over test build 2 and keeps its saved places and preferences. It uses a different key from `mobile-test-1` and team-key builds. If Android reports a signature conflict with one of those builds, switching requires uninstalling the old app; uninstalling removes that app's saved places and preferences. Keep the older release if you need to retain that local data. The signing certificate SHA-256 for test builds 2 and 3 is `D6:B7:32:F0:9A:A2:72:AD:57:35:32:3F:4A:96:7B:31:30:64:07:FA:67:86:B7:4F:41:BD:A6:B3:A1:AA:2E:68`.
+**Updating:** `m3-build-1` is signed with the **team key** (see [Android signing](android-signing.md)). It installs over an earlier team-key build and keeps its saved places and preferences. It does **not** install over `mobile-test-2` or `mobile-test-3`, which use a separate key: uninstall the old app first. Uninstalling removes that app's saved places and preferences.
 
 ## Install
 
@@ -23,15 +23,15 @@ This is for teammates who want to **try the phone app** on their own phone. You 
 4. If Google Play Protect or the phone's security scan says the app is from an unknown developer or has not been scanned, choose **Install anyway** (仍然安装) or **Continue**. That is expected: this is a signed test release, not published in a store.
 5. Tap **Open**. The first start takes up to about half a minute while the app sets up; later starts are quicker.
 
-You should see **Explore** with sites from the packaged project library (`E2_Filled.json`, the real E2/3 project, and the footprint-only `map_extended.db`) and a tab bar at the bottom. The old prototype's mall/centre/demo-campus sites are available only when a build is launched with `-MobileMock`.
+You should see **Explore** with sites from the packaged project library (the projects `SIT.json` and `E2_Filled.json`, both with the real E2/3 interior, and the footprint-only `map_extended.db`) and a tab bar at the bottom. The old prototype's mall/centre/demo-campus sites are available only when a build is launched with `-MobileMock`.
 
 ## Things to try
 
 - **Explore -> a site card**: opens that site on the map.
-- **Directory**: the plan of a level. Tap a room, or pick a place from the list under "Where to?". Drag the sheet's handle up and down, or tap it.
+- **Directory**: the map and the plan of a level. Tap a room, or search for a place ("Search buildings or places"). Drag the sheet's handle up and down, or tap it.
 - **Get directions -> Start navigation**: the route, then walk it with "Next instruction" until "I have arrived".
 - **The route page's From and To lists** scroll with your finger. **Level** and **Building** change where "My location" is.
-- **Map tools** (the three dots at the bottom right of the map): turn **Move** on, then drag to move the map and pinch with two fingers to zoom; the **-** and **+** buttons zoom a step.
+- **The map**: drag to move it, pinch to zoom, and twist two fingers to turn it; the compass button shows while it is turned. The **Locate** button centres the map on where you are, and **2D** / **3D** switches the view.
 - **Saved**: save a place on its page and it shows here; it is kept after you close the app.
 - **Profile**: the night theme and larger text.
 
