@@ -2594,6 +2594,8 @@ bool AInteriorGenerator::NudgeFootprintClear(TArray<FVector2D>& Footprint, bool 
 	TArray<FVector2D> Best;
 	double BestLength = TNumericLimits<double>::Max();
 	const AInteriorRoom* FirstBlocker = Blocker(Footprint);
+	// No room or wall is in the way: the shape sticks out of the building or lies on a lift or stairs, and there is nothing to push it clear of.
+	if (!FirstBlocker) return false;
 	for (const FVector2D& First : Pushes(Footprint, FirstBlocker))
 	{
 		const TArray<FVector2D> AfterFirst = Moved(Footprint, First);
