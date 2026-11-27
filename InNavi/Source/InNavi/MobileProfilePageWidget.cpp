@@ -50,7 +50,7 @@ TSharedRef<SWidget> UMobileProfilePageWidget::RebuildWidget()
 		UWidget* Person = MobileIcons::Picture(Tree, TEXT("Profile"), 24.f, Ink);
 		UVerticalBox* WhoTexts = Tree->ConstructWidget<UVerticalBox>(UVerticalBox::StaticClass());
 		WhoTexts->AddChildToVerticalBox(MakeText(Tree, TEXT("Txt_ProfileName"), TEXT("Visitor"), 18.f, Ink, true));
-		WhoTexts->AddChildToVerticalBox(MakeText(Tree, TEXT("Txt_ProfileAccount"), TEXT("No account needed for this prototype"), 13.f, Grey))->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
+		WhoTexts->AddChildToVerticalBox(MakeText(Tree, TEXT("Txt_ProfileAccount"), TEXT("No account needed"), 13.f, Grey))->SetPadding(FMargin(0.f, 2.f, 0.f, 0.f));
 		UHorizontalBox* Who = Tree->ConstructWidget<UHorizontalBox>(UHorizontalBox::StaticClass());
 		if (Person)
 		{
@@ -179,7 +179,7 @@ TSharedRef<SWidget> UMobileProfilePageWidget::RebuildWidget()
 
 		// About, and the reset.
 		Add(MakeText(Tree, TEXT("Txt_ProfileAbout"), TEXT("About InNav"), 18.f, Ink, true), FMargin(0.f, 20.f, 0.f, 0.f));
-		Add(Wrapped(TEXT("Txt_ProfileAboutText"), TEXT("Indoor navigation by Team Pathfinder. This interactive reference demonstrates interface behaviour for the engineering team."), 13.f, Grey, false), FMargin(0.f, 6.f, 0.f, 0.f));
+		Add(Wrapped(TEXT("Txt_ProfileAboutText"), TEXT("Indoor navigation by Team Pathfinder. Search for a place, follow step-by-step directions and save the places you visit."), 13.f, Grey, false), FMargin(0.f, 6.f, 0.f, 0.f));
 
 		UBorder* ResetFace = Tree->ConstructWidget<UBorder>(UBorder::StaticClass());
 		ResetFace->SetBrush(Rounded(White, FieldEdge, 8.f));
