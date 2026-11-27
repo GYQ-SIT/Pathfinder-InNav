@@ -44,6 +44,8 @@ TSharedRef<FJsonObject> ULayoutValidationSession::Capture(const ABuildingGenerat
         Object->SetStringField(TEXT("id"), Building->BuildingId);
         Object->SetStringField(TEXT("name"), Generator.GetBuildingName(Building->BuildingId));
         Object->SetNumberField(TEXT("floorCount"), Building->GetFloorCount());
+        // As in a saved file (ABuildingGenerator::SaveBuildingsToFile): without it, floors of a building that does not start on level 1 read as outside it.
+        if (Building->GetFirstLevel() != 1) Object->SetNumberField(TEXT("firstLevel"), Building->GetFirstLevel());
         Object->SetNumberField(TEXT("floorHeight"), Building->GetFloorHeight());
         Object->SetArrayField(TEXT("offset"), { MakeShared<FJsonValueNumber>(Building->BuildingOffset.X), MakeShared<FJsonValueNumber>(Building->BuildingOffset.Y) });
         TArray<TSharedPtr<FJsonValue>> Points;

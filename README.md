@@ -9,6 +9,32 @@ in 3D, and navigate — inside a building, across floors, between buildings and
 across the open ground between them. It also has an Android phone app (a test
 build, reading project data and routes through a mobile data adapter).
 
+## The problem
+
+Knowing which building a room is in is not enough to find it. In a large building such as
+SIT Punggol's E2/3 (ten floors, more than 200 rooms), students and visitors can lose time
+searching floor by floor, especially on a first visit.
+
+## Who it is for
+
+| User group | Example user | What they need |
+|---|---|---|
+| New students (phone app) | Alex, in the first week of term, has a class at Project Hub - Prototyping (E2-04-01) and has never been inside E2/3 | Find the room and know which lift or stairs to take |
+| Visitors (phone app) | A guest invited to an event who does not know the campus | Find the building and then the room, without an account |
+| Map maintainers (editor) | The person who keeps a building's floor plans up to date | Change rooms, doors and lifts, and check that rooms can be reached, without writing code |
+
+## What it gives them
+
+- **Less searching:** search for a room and see the route before setting off, with the floor changes, the distance and the estimated time.
+- **A route that suits the person:** turn lifts, escalators or stairs on or off, for example to avoid stairs.
+- **No account or server:** the map ships with the app, so searching and routing work without an internet connection.
+- **Easier upkeep:** one editor draws the interior, and its validator reports rooms that cannot be reached.
+
+## What makes it different
+
+One project file made in our own editor drives a phone app that guides a person from the campus
+map to a specific room across floors, with no indoor positioning hardware and no server.
+
 ## Repository layout
 
 - `README.md` — this file
@@ -83,7 +109,7 @@ and the [M2 evidence](docs/design/layout-validator-m2-compliance.md) for the D1�
 
 ## Running the tests
 
-More than 240 automation tests (`InNavi.*`), including the measurements of `InNavi.Performance` (see
+About 390 automation tests (`InNavi.*`), including the measurements of `InNavi.Performance` (see
 [`docs/performance.md`](docs/performance.md) for the budgets and the numbers). With the editor closed:
 
 ```bash
@@ -151,6 +177,18 @@ UnrealEditor.exe InNavi/InNavi.uproject -game -windowed -ResX=375 -ResY=812 -Mob
 ```
 
 To try it on a phone, install the test build from the repository's **Releases** page by following `docs/android-install.md`.
+
+## Known limitations
+
+- **No indoor positioning.** GPS cannot tell which floor you are on, so you choose it. A route can start from the GPS position only inside a campus building or within 8 m of one.
+- **Steps do not advance by themselves.** While navigating, you tap **Next instruction**.
+- **One full interior.** In the SIT campus project only E2/3 has rooms; the other buildings are outlines.
+- **Not checked on site.** Distances, times and directions have not been verified by walking them.
+- **Outdoor routes** are straight-line paths around buildings; they do not follow roads or footpaths.
+- **Phone screens compared with the design prototype:** no "Up next" list or "Show my current level" while walking, the route is one colour, and there are no room-type icons (see `docs/design/ui-gap-list.md`).
+- **Utility points** cannot be searched for, and routes do not pass through them.
+- **A new map for the phone needs a new build,** because the project files are packaged inside the app.
+- **Platforms:** the editor runs on Windows and the phone app on Android 8 or newer (64-bit ARM). There is no iPhone version, and the AR mode in the proposal is not built.
 
 ## Supported platforms
 
