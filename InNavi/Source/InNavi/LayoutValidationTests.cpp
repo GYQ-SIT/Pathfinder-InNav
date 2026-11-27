@@ -252,6 +252,40 @@ namespace InNaviValidationTests
         return true;
     }
 
+    // The panel validates what Capture writes. A building that does not start on level 1 (a bridge high up, a building with basements) has to
+    // say where it starts, or the floors it has are taken for floors outside it and the route check is not run.
+    IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPanelKeepsFirstLevel, "InNavi.LayoutValidation.PanelKeepsFirstLevel", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+    bool FPanelKeepsFirstLevel::RunTest(const FString& Parameters)
+    {
+        FFixture Fixture;
+        const TArray<FVector2D> Outline = { {0,0}, {1000,0}, {1000,1000}, {0,1000} };
+        Fixture.Generator->SpawnBuildingFromData(TEXT("BRIDGE"), TEXT("Bridge"), Outline, 1, 300, FVector2D(2000, 0), 5);
+        Fixture.Generator->SpawnBuildingFromData(TEXT("DEEP"), TEXT("Deep"), Outline, 3, 300, FVector2D(4000, 0), -2);
+        const auto Floors = [](const TCHAR* Text)
+        {
+            TSharedPtr<FJsonObject> Data;
+            FJsonSerializer::Deserialize(TJsonReaderFactory<>::Create(FString(Text)), Data);
+            return Data;
+        };
+        Fixture.Generator->SetInteriorDataForBuilding(TEXT("BRIDGE"), Floors(TEXT(R"JSON({"floors":[{"level":5,"rooms":[],"navNodes":[]}]})JSON")));
+        Fixture.Generator->SetInteriorDataForBuilding(TEXT("DEEP"), Floors(TEXT(R"JSON({"floors":[{"level":-2,"rooms":[],"navNodes":[]},{"level":1,"rooms":[],"navNodes":[]}]})JSON")));
+
+        const auto Captured = ULayoutValidationSession::Capture(*Fixture.Generator, *Fixture.Interior);
+        TMap<FString, TSharedPtr<FJsonObject>> ById;
+        for (const auto& Value : Captured->GetArrayField(TEXT("buildings"))) ById.Add(Value->AsObject()->GetStringField(TEXT("id")), Value->AsObject());
+        if (!TestTrue(TEXT("all three buildings are checked"), ById.Contains(TEXT("A")) && ById.Contains(TEXT("BRIDGE")) && ById.Contains(TEXT("DEEP")))) return false;
+        int32 FirstLevel = 0;
+        TestTrue(TEXT("the bridge says it starts on level 5"), ById[TEXT("BRIDGE")]->TryGetNumberField(TEXT("firstLevel"), FirstLevel) && FirstLevel == 5);
+        TestTrue(TEXT("the building with basements says it starts at B2"), ById[TEXT("DEEP")]->TryGetNumberField(TEXT("firstLevel"), FirstLevel) && FirstLevel == -2);
+        TestFalse(TEXT("an ordinary building is written as before"), ById[TEXT("A")]->HasField(TEXT("firstLevel")));
+
+        auto* Session = Fixture.Controller->GetLayoutValidationSession();
+        Session->Validate();
+        TestFalse(TEXT("their floors are not reported as outside the building"), Has(Session->GetReport(), TEXT("FLOOR_RANGE")));
+        TestFalse(TEXT("and the route check is not skipped"), Has(Session->GetReport(), TEXT("NAVIGATION_SKIPPED")));
+        return true;
+    }
+
     IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPanelIntegration, "InNavi.LayoutValidation.DockPanel", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
     bool FPanelIntegration::RunTest(const FString& Parameters)
     {
