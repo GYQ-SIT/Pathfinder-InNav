@@ -240,6 +240,11 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 	if (PlayerController && InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 	{
 		const FVector2D LocalPosition = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+		// The unlocked reference picture takes the mouse first: a press on it moves it, a press on a corner scales it.
+		if (TryBeginReferenceDrag(LocalPosition, InGeometry.GetLocalSize()))
+		{
+			return FReply::Handled().CaptureMouse(TakeWidget());
+		}
 		UE_LOG(LogTemp, Warning,
 			TEXT("[Navigation] 2D left click: local=(%.2f, %.2f) size=(%.2f, %.2f) selecting=%s"),
 			LocalPosition.X, LocalPosition.Y,
@@ -473,6 +478,11 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseButtonDown(const FGeometry& InGeom
 
 FReply UInteriorFloorPlanWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
+	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && ReferenceDrag != EReferenceDrag::None)
+	{
+		EndReferenceDrag();
+		return FReply::Handled().ReleaseMouseCapture();
+	}
 	if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsDraggingPrefab)
 	{
 		if (IsPrefabDragValid())
@@ -644,6 +654,16 @@ FReply UInteriorFloorPlanWidget::NativeOnMouseMove(const FGeometry& InGeometry, 
 	bHasPointer = true;
 	PointerLocal = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
 	bPointerShift = InMouseEvent.IsShiftDown();
+	if (ReferenceDrag != EReferenceDrag::None)
+	{
+		if (!InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+		{
+			EndReferenceDrag();
+			return FReply::Handled().ReleaseMouseCapture();
+		}
+		UpdateReferenceDrag(PointerLocal, InGeometry.GetLocalSize());
+		return FReply::Handled();
+	}
 	if (bIsDraggingPrefab)
 	{
 		if (!IsPrefabDragValid() || !InMouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
@@ -1586,6 +1606,9 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 	// Blue is the selectable campus area. The exact building footprint is overlaid in dark gray
 	// and reinforced by the heavy black boundary below. Keeping this behind
 	// rooms, routes and markers makes the location type clear without obscuring editor content.
+	// With a picture shown on the floor, the dark floor is not drawn: under it the picture looked dim even at full opacity.
+	const FInteriorReferenceImage* ReferenceImage = InteriorGen->GetReferenceImage(InteriorGen->GetActiveFloor());
+	const bool bReferenceImageShown = ReferenceImage && ReferenceImage->bVisible;
 	if (InteriorGen->GetActiveFloor() == 1)
 	{
 		const FSlateBrush* AreaBrush = FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox"));
@@ -1603,7 +1626,7 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 
 		TArray<int32> TriangleIndices;
 		TriangulatePolygon(Building->GetFootprint(), TriangleIndices);
-		if (!TriangleIndices.IsEmpty())
+		if (!TriangleIndices.IsEmpty() && !bReferenceImageShown)
 		{
 			TArray<FSlateVertex> Vertices;
 			Vertices.Reserve(Building->GetFootprint().Num());
@@ -1627,7 +1650,8 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 	}
 
 	// ---- Reference image (PAT-201): under the drawing, never part of it ----
-	if (const FInteriorReferenceImage* Image = InteriorGen->GetReferenceImage(InteriorGen->GetActiveFloor()); Image && Image->bVisible)
+	const bool bReferenceImageUnlocked = bReferenceImageShown && PlayerController && PlayerController->IsReferenceImageUnlocked();
+	if (const FInteriorReferenceImage* Image = ReferenceImage; Image && Image->bVisible)
 	{
 		if (Image->Path != ReferenceImagePath && Image->Path != ReferenceImageFailedPath)
 		{
@@ -1642,14 +1666,19 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 				ReferenceImageBrush.DrawAs = ESlateBrushDrawType::Image;
 			}
 		}
-		if (ReferenceImageTexture && Image->Path == ReferenceImagePath && ReferenceImageTexture->GetSizeX() > 0)
+		if (!bReferenceImageUnlocked && ReferenceImageTexture && Image->Path == ReferenceImagePath && ReferenceImageTexture->GetSizeX() > 0)
 		{
 			const float Aspect = static_cast<float>(ReferenceImageTexture->GetSizeY()) / static_cast<float>(ReferenceImageTexture->GetSizeX());
-			const FVector2D PixelSize(Image->Width * Scale * PixelsPerUnit, Image->Width * Aspect * Scale * PixelsPerUnit);
-			const FVector2D CenterLocal = WorldToLocal((Image->Center + Building->BuildingOffset) * Scale);
+			// Only what is left after the crop is drawn: its box, and the same part of the picture.
+			FVector2D VisibleMin, VisibleMax;
+			GetReferenceVisibleBounds(*Image, Aspect, VisibleMin, VisibleMax);
+			const FVector2D PixelSize((VisibleMax - VisibleMin) * Scale * PixelsPerUnit);
+			const FVector2D CenterLocal = WorldToLocal(((VisibleMin + VisibleMax) * 0.5 + Building->BuildingOffset) * Scale);
+			ReferenceImageCropBrush = ReferenceImageBrush;
+			ReferenceImageCropBrush.SetUVRegion(FBox2f(FVector2f(Image->CropLeft, Image->CropTop), FVector2f(1.f - Image->CropRight, 1.f - Image->CropBottom)));
 			// Turned with the view, about its own middle, like the connector icons.
 			FSlateDrawElement::MakeRotatedBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(PixelSize), FSlateLayoutTransform(CenterLocal - PixelSize * 0.5)),
-				&ReferenceImageBrush, ESlateDrawEffect::None, FMath::DegreesToRadians(90.f * ViewQuarterTurns), FVector2f(PixelSize) * 0.5f,
+				&ReferenceImageCropBrush, ESlateDrawEffect::None, FMath::DegreesToRadians(90.f * ViewQuarterTurns), FVector2f(PixelSize) * 0.5f,
 				FSlateDrawElement::RelativeToElement, FLinearColor(1.f, 1.f, 1.f, Image->Opacity));
 		}
 	}
@@ -2240,5 +2269,178 @@ int32 UInteriorFloorPlanWidget::NativePaint(const FPaintArgs& Args, const FGeome
 		const TArray<FVector2D> Rim = { Min, FVector2D(Max.X, Min.Y), Max, FVector2D(Min.X, Max.Y), Min };
 		FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 10, AllottedGeometry.ToPaintGeometry(), Rim, ESlateDrawEffect::None, FLinearColor(0.2f, 0.6f, 1.f, 0.9f), true, 1.5f);
 	}
+	// ---- The unlocked reference image: on top of everything, half clear, with its outline and the corners to scale it by ----
+	if (bReferenceImageUnlocked && ReferenceImageTexture && ReferenceImage->Path == ReferenceImagePath && ReferenceImageTexture->GetSizeX() > 0)
+	{
+		const float Aspect = static_cast<float>(ReferenceImageTexture->GetSizeY()) / static_cast<float>(ReferenceImageTexture->GetSizeX());
+		const FVector2D PixelSize(ReferenceImage->Width * Scale * PixelsPerUnit, ReferenceImage->Width * Aspect * Scale * PixelsPerUnit);
+		const FVector2D CenterLocal = WorldToLocal((ReferenceImage->Center + Building->BuildingOffset) * Scale);
+		// A cropped picture: the part that is cut away stays faintly visible, so it is seen what a crop takes off (and can be dragged back).
+		if (ReferenceImage->HasCrop())
+		{
+			FSlateDrawElement::MakeRotatedBox(OutDrawElements, LayerId + 12, AllottedGeometry.ToPaintGeometry(FVector2f(PixelSize), FSlateLayoutTransform(CenterLocal - PixelSize * 0.5)),
+				&ReferenceImageBrush, ESlateDrawEffect::None, FMath::DegreesToRadians(90.f * ViewQuarterTurns), FVector2f(PixelSize) * 0.5f,
+				FSlateDrawElement::RelativeToElement, FLinearColor(1.f, 1.f, 1.f, 0.15f));
+		}
+		FVector2D VisibleMin, VisibleMax;
+		GetReferenceVisibleBounds(*ReferenceImage, Aspect, VisibleMin, VisibleMax);
+		const FVector2D VisiblePixelSize((VisibleMax - VisibleMin) * Scale * PixelsPerUnit);
+		const FVector2D VisibleCentreLocal = WorldToLocal(((VisibleMin + VisibleMax) * 0.5 + Building->BuildingOffset) * Scale);
+		ReferenceImageCropBrush = ReferenceImageBrush;
+		ReferenceImageCropBrush.SetUVRegion(FBox2f(FVector2f(ReferenceImage->CropLeft, ReferenceImage->CropTop), FVector2f(1.f - ReferenceImage->CropRight, 1.f - ReferenceImage->CropBottom)));
+		FSlateDrawElement::MakeRotatedBox(OutDrawElements, LayerId + 12, AllottedGeometry.ToPaintGeometry(FVector2f(VisiblePixelSize), FSlateLayoutTransform(VisibleCentreLocal - VisiblePixelSize * 0.5)),
+			&ReferenceImageCropBrush, ESlateDrawEffect::None, FMath::DegreesToRadians(90.f * ViewQuarterTurns), FVector2f(VisiblePixelSize) * 0.5f,
+			FSlateDrawElement::RelativeToElement, FLinearColor(1.f, 1.f, 1.f, 0.5f));
+		const FVector2D Corners[4] = { VisibleMin, FVector2D(VisibleMax.X, VisibleMin.Y), VisibleMax, FVector2D(VisibleMin.X, VisibleMax.Y) };
+		TArray<FVector2D> Outline;
+		for (const FVector2D& Corner : Corners) Outline.Add(WorldToLocal((Corner + Building->BuildingOffset) * Scale));
+		const FVector2D FirstCorner = Outline[0];
+		Outline.Add(FirstCorner);
+		FSlateDrawElement::MakeLines(OutDrawElements, LayerId + 13, AllottedGeometry.ToPaintGeometry(), Outline, ESlateDrawEffect::None, FLinearColor(0.2f, 0.75f, 1.f, 1.f), true, 2.f);
+		const FSlateBrush* HandleBrush = FCoreStyle::Get().GetBrush(TEXT("GenericWhiteBox"));
+		for (int32 Index = 0; Index < 4; ++Index)
+		{
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 14, AllottedGeometry.ToPaintGeometry(FVector2f(12.f, 12.f), FSlateLayoutTransform(Outline[Index] - FVector2D(6.0, 6.0))),
+				HandleBrush, ESlateDrawEffect::None, FLinearColor(0.2f, 0.75f, 1.f, 1.f));
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 15, AllottedGeometry.ToPaintGeometry(FVector2f(6.f, 6.f), FSlateLayoutTransform(Outline[Index] - FVector2D(3.0, 3.0))),
+				HandleBrush, ESlateDrawEffect::None, FLinearColor::White);
+		}
+		// The middle of each edge: a handle to crop that side (orange, to tell it from the corners that scale).
+		for (int32 Index = 0; Index < 4; ++Index)
+		{
+			const FVector2D EdgeMiddle = WorldToLocal(((Corners[Index] + Corners[(Index + 1) % 4]) * 0.5 + Building->BuildingOffset) * Scale);
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 14, AllottedGeometry.ToPaintGeometry(FVector2f(12.f, 12.f), FSlateLayoutTransform(EdgeMiddle - FVector2D(6.0, 6.0))),
+				HandleBrush, ESlateDrawEffect::None, FLinearColor(1.f, 0.62f, 0.1f, 1.f));
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 15, AllottedGeometry.ToPaintGeometry(FVector2f(4.f, 4.f), FSlateLayoutTransform(EdgeMiddle - FVector2D(2.0, 2.0))),
+				HandleBrush, ESlateDrawEffect::None, FLinearColor::White);
+		}
+		return LayerId + 16;
+	}
 	return LayerId + 11;
+}
+
+FVector2D UInteriorFloorPlanWidget::FootprintPointToLocalPosition(const FVector2D& FootprintPoint, const FVector2D& WidgetSize) const
+{
+	APolyBuilding* Building = (InteriorGen && Generator) ? Generator->FindBuildingById(InteriorGen->GetLoadedBuildingId()) : nullptr;
+	if (!Building || Generator->GetScale() <= KINDA_SMALL_NUMBER) return FVector2D::ZeroVector;
+	FVector2D Origin;
+	float PixelsPerUnit;
+	ComputeViewTransform(WidgetSize, Origin, PixelsPerUnit);
+	return ViewWorldToLocal((FootprintPoint + Building->BuildingOffset) * Generator->GetScale(), Origin, PixelsPerUnit, WidgetSize);
+}
+
+void UInteriorFloorPlanWidget::GetReferenceVisibleBounds(const FInteriorReferenceImage& Image, float Aspect, FVector2D& OutMin, FVector2D& OutMax)
+{
+	const FVector2D Half(Image.Width * 0.5f, Image.Width * Aspect * 0.5f);
+	const FVector2D FullMin = Image.Center - Half;
+	const FVector2D FullSize = Half * 2.0;
+	// Image.CropLeft/Right run along footprint X, Top/Bottom along footprint Y: the picture's own axes, as they are drawn.
+	OutMin = FullMin + FVector2D(FullSize.X * Image.CropLeft, FullSize.Y * Image.CropTop);
+	OutMax = FullMin + FullSize - FVector2D(FullSize.X * Image.CropRight, FullSize.Y * Image.CropBottom);
+}
+
+FInteriorReferenceImage UInteriorFloorPlanWidget::CropReferenceImageEdge(const FInteriorReferenceImage& Image, float Aspect, int32 Edge, const FVector2D& Point)
+{
+	FInteriorReferenceImage Result = Image;
+	// Where the pointer is on the whole picture, 0 to 1 along each of its axes; that side is cut there.
+	const FVector2D Half(Image.Width * 0.5, Image.Width * Aspect * 0.5);
+	const FVector2D U = (Point - (Image.Center - Half)) / FVector2D(FMath::Max(Half.X * 2.0, 1.e-9), FMath::Max(Half.Y * 2.0, 1.e-9));
+	constexpr float MinLeft = InteriorReferenceImage::MinVisibleFraction;
+	switch (Edge)
+	{
+	case 0: Result.CropLeft = FMath::Clamp(static_cast<float>(U.X), 0.f, 1.f - MinLeft - Image.CropRight); break;
+	case 1: Result.CropTop = FMath::Clamp(static_cast<float>(U.Y), 0.f, 1.f - MinLeft - Image.CropBottom); break;
+	case 2: Result.CropRight = FMath::Clamp(1.f - static_cast<float>(U.X), 0.f, 1.f - MinLeft - Image.CropLeft); break;
+	default: Result.CropBottom = FMath::Clamp(1.f - static_cast<float>(U.Y), 0.f, 1.f - MinLeft - Image.CropTop); break;
+	}
+	return Result;
+}
+
+bool UInteriorFloorPlanWidget::GetReferenceImageRect(FVector2D& OutCentre, FVector2D& OutHalfSize) const
+{
+	if (!InteriorGen) return false;
+	const FInteriorReferenceImage* Image = InteriorGen->GetReferenceImage(InteriorGen->GetActiveFloor());
+	if (!Image || !Image->bVisible || !ReferenceImageTexture || Image->Path != ReferenceImagePath || ReferenceImageTexture->GetSizeX() <= 0) return false;
+	const float Aspect = static_cast<float>(ReferenceImageTexture->GetSizeY()) / static_cast<float>(ReferenceImageTexture->GetSizeX());
+	OutCentre = Image->Center;
+	OutHalfSize = FVector2D(Image->Width, Image->Width * Aspect) * 0.5;
+	return true;
+}
+
+bool UInteriorFloorPlanWidget::TryBeginReferenceDrag(const FVector2D& LocalPosition, const FVector2D& WidgetSize)
+{
+	if (!PlayerController || !PlayerController->IsReferenceImageUnlocked() || !InteriorGen) return false;
+	FVector2D Centre, Half;
+	const FInteriorReferenceImage* Image = InteriorGen->GetReferenceImage(InteriorGen->GetActiveFloor());
+	if (!Image || !GetReferenceImageRect(Centre, Half)) return false;
+	// A corner (within a few pixels of its handle) scales, the middle of an edge crops that side, the body moves. All of them are on what is left after the crop.
+	FVector2D VisibleMin, VisibleMax;
+	GetReferenceVisibleBounds(*Image, static_cast<float>(Half.Y / FMath::Max(Half.X, 1.e-9)), VisibleMin, VisibleMax);
+	const FVector2D Corners[4] = { VisibleMin, FVector2D(VisibleMax.X, VisibleMin.Y), VisibleMax, FVector2D(VisibleMin.X, VisibleMax.Y) };
+	for (const FVector2D& Corner : Corners)
+	{
+		// A corner that lies on the middle of the picture (a crop of half on two sides) cannot be dragged to scale: the press falls through to the edges and the body.
+		if (FVector2D::Distance(Corner, Centre) < 0.02 * Image->Width) continue;
+		if (FVector2D::Distance(FootprintPointToLocalPosition(Corner, WidgetSize), LocalPosition) <= 12.0)
+		{
+			ReferenceDrag = EReferenceDrag::Scale;
+			ReferenceDragStartPoint = Corner;
+			ReferenceDragStartRadius = FMath::Max(FVector2D::Distance(Corner, Centre), 1.e-6);
+			ReferenceDragStartImage = *Image;
+			return true;
+		}
+	}
+	// Edge handles, in the order left, top, right, bottom.
+	const FVector2D EdgeMiddles[4] = { FVector2D(VisibleMin.X, (VisibleMin.Y + VisibleMax.Y) * 0.5), FVector2D((VisibleMin.X + VisibleMax.X) * 0.5, VisibleMin.Y),
+		FVector2D(VisibleMax.X, (VisibleMin.Y + VisibleMax.Y) * 0.5), FVector2D((VisibleMin.X + VisibleMax.X) * 0.5, VisibleMax.Y) };
+	for (int32 Edge = 0; Edge < 4; ++Edge)
+	{
+		if (FVector2D::Distance(FootprintPointToLocalPosition(EdgeMiddles[Edge], WidgetSize), LocalPosition) <= 10.0)
+		{
+			ReferenceDrag = EReferenceDrag::Crop;
+			ReferenceDragEdge = Edge;
+			ReferenceDragStartImage = *Image;
+			return true;
+		}
+	}
+	const FVector2D Point = LocalPositionToFootprintPoint(LocalPosition, WidgetSize);
+	if (Point.X >= VisibleMin.X && Point.X <= VisibleMax.X && Point.Y >= VisibleMin.Y && Point.Y <= VisibleMax.Y)
+	{
+		ReferenceDrag = EReferenceDrag::Move;
+		ReferenceDragStartPoint = Point;
+		ReferenceDragStartImage = *Image;
+		return true;
+	}
+	return false;
+}
+
+void UInteriorFloorPlanWidget::UpdateReferenceDrag(const FVector2D& LocalPosition, const FVector2D& WidgetSize)
+{
+	if (ReferenceDrag == EReferenceDrag::None || !PlayerController) return;
+	const FVector2D Point = LocalPositionToFootprintPoint(LocalPosition, WidgetSize);
+	FInteriorReferenceImage Image = ReferenceDragStartImage;
+	if (ReferenceDrag == EReferenceDrag::Move)
+	{
+		Image.Center = ReferenceDragStartImage.Center + (Point - ReferenceDragStartPoint);
+	}
+	else if (ReferenceDrag == EReferenceDrag::Crop)
+	{
+		const float Aspect = (ReferenceImageTexture && ReferenceImageTexture->GetSizeX() > 0)
+			? static_cast<float>(ReferenceImageTexture->GetSizeY()) / static_cast<float>(ReferenceImageTexture->GetSizeX()) : 1.f;
+		Image = CropReferenceImageEdge(ReferenceDragStartImage, Aspect, ReferenceDragEdge, Point);
+	}
+	else
+	{
+		// Scaled about its middle: as far from the middle as the corner was, times as wide.
+		const double Factor = FMath::Clamp(FVector2D::Distance(Point, ReferenceDragStartImage.Center) / ReferenceDragStartRadius, 0.02, 50.0);
+		Image.Width = static_cast<float>(ReferenceDragStartImage.Width * Factor);
+	}
+	PlayerController->PreviewActiveReferenceImage(Image);
+}
+
+void UInteriorFloorPlanWidget::EndReferenceDrag()
+{
+	if (ReferenceDrag == EReferenceDrag::None) return;
+	ReferenceDrag = EReferenceDrag::None;
+	if (PlayerController) PlayerController->CommitActiveReferenceImage();
 }

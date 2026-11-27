@@ -49,6 +49,9 @@ struct FNavigation3DView
 	TOptional<FVector> Here;
 	FQuat DisplayRotation = FQuat::Identity;
 	bool bForeground = false;
+	// Drawn in the format of the full route overview, in the view of a floor too: every stretch a thick line with an outline and chevrons (grey, orange, blue when
+	// a step is being shown), no balls and no texts for Start, Destination and the stops: the controller marks those with call-outs.
+	bool bThick = false;
 };
 
 // Arrow geometry in local map pixels, so zooming does not make direction cues unreadable.
@@ -71,7 +74,7 @@ public:
 		FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible = true,
 		const FString& ActiveBuildingId = FString(), const TArray<FNavigationStop>* Stops = nullptr,
 		const TArray<FNavigationRouteLeg>* RouteLegs = nullptr, const FNavigationRouteFocus* Focus = nullptr,
-		bool bFullRoute = false);
+		bool bFullRoute = false, bool bThick = false);
 	static bool IsPointVisible(const FNavigationRoutePoint& Point, const FString& ActiveBuildingId, int32 ActiveFloor);
 	// The route as the exterior screen draws it: the parts outside, a label where it enters or leaves a building, and the Start and
 	// Destination markers (also when they are indoors, then at their spot inside the building). Points carry their world positions.
@@ -99,5 +102,6 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UTextRenderComponent>> RouteLabels;
 	float DisplayScale = 1.f;
-	void DrawProgressSegment(const FNavigationDisplaySegment& Segment, const FQuat& DisplayRotation, uint8 Depth);
+	// LineColor: a stretch that follows no step (the progress colours do not apply) is drawn in this colour, in the same thick format.
+	void DrawProgressSegment(const FNavigationDisplaySegment& Segment, const FQuat& DisplayRotation, uint8 Depth, const FLinearColor* LineColor = nullptr);
 };

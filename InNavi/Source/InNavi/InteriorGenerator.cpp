@@ -436,6 +436,37 @@ static bool DoFootprintsOverlap(const TArray<FVector2D>& FootprintA, bool bAClos
 	return false;
 }
 
+bool AInteriorGenerator::ReadReferenceImageOfFloor(const FJsonObject& FloorObject, FInteriorReferenceImage& Out)
+{
+	const TSharedPtr<FJsonObject>* ReferenceObject = nullptr;
+	if (!FloorObject.TryGetObjectField(TEXT("referenceImage"), ReferenceObject) || !ReferenceObject->IsValid()) return false;
+	FInteriorReferenceImage Image;
+	double WidthValue = 0, OpacityValue = 0.5;
+	const TArray<TSharedPtr<FJsonValue>>* CenterValues = nullptr;
+	(*ReferenceObject)->TryGetStringField(TEXT("path"), Image.Path);
+	(*ReferenceObject)->TryGetNumberField(TEXT("width"), WidthValue);
+	(*ReferenceObject)->TryGetNumberField(TEXT("opacity"), OpacityValue);
+	(*ReferenceObject)->TryGetBoolField(TEXT("visible"), Image.bVisible);
+	// "crop": [left, top, right, bottom], fractions of the whole picture; absent = none.
+	const TArray<TSharedPtr<FJsonValue>>* CropValues = nullptr;
+	if ((*ReferenceObject)->TryGetArrayField(TEXT("crop"), CropValues) && CropValues->Num() >= 4)
+	{
+		Image.CropLeft = static_cast<float>((*CropValues)[0]->AsNumber());
+		Image.CropTop = static_cast<float>((*CropValues)[1]->AsNumber());
+		Image.CropRight = static_cast<float>((*CropValues)[2]->AsNumber());
+		Image.CropBottom = static_cast<float>((*CropValues)[3]->AsNumber());
+	}
+	if ((*ReferenceObject)->TryGetArrayField(TEXT("center"), CenterValues) && CenterValues->Num() >= 2)
+	{
+		Image.Center = FVector2D((*CenterValues)[0]->AsNumber(), (*CenterValues)[1]->AsNumber());
+	}
+	Image.Width = static_cast<float>(WidthValue);
+	Image.Opacity = static_cast<float>(OpacityValue);
+	if (!InteriorReferenceImage::Normalize(Image)) return false;
+	Out = Image;
+	return true;
+}
+
 int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 {
 	TGuardValue<bool> LoadingGuard(bLoadingInterior, true);
@@ -654,25 +685,9 @@ int32 AInteriorGenerator::LoadInteriorForBuilding(const FString& BuildingId)
 			}
 		}
 
-		const TSharedPtr<FJsonObject>* ReferenceObject = nullptr;
-		if (FloorObject->TryGetObjectField(TEXT("referenceImage"), ReferenceObject) && ReferenceObject->IsValid())
-		{
-			FInteriorReferenceImage Image;
-			double WidthValue = 0, OpacityValue = 0.5;
-			const TArray<TSharedPtr<FJsonValue>>* CenterValues = nullptr;
-			(*ReferenceObject)->TryGetStringField(TEXT("path"), Image.Path);
-			(*ReferenceObject)->TryGetNumberField(TEXT("width"), WidthValue);
-			(*ReferenceObject)->TryGetNumberField(TEXT("opacity"), OpacityValue);
-			(*ReferenceObject)->TryGetBoolField(TEXT("visible"), Image.bVisible);
-			if ((*ReferenceObject)->TryGetArrayField(TEXT("center"), CenterValues) && CenterValues->Num() >= 2)
-			{
-				Image.Center = FVector2D((*CenterValues)[0]->AsNumber(), (*CenterValues)[1]->AsNumber());
-			}
-			Image.Width = static_cast<float>(WidthValue);
-			Image.Opacity = static_cast<float>(OpacityValue);
-			// One that cannot be kept (no path, no width) is left out rather than failing the floor.
-			if (InteriorReferenceImage::Normalize(Image)) ReferenceImages.Add(Level, Image);
-		}
+		// One that cannot be kept (no path, no width) is left out rather than failing the floor.
+		FInteriorReferenceImage LoadedImage;
+		if (ReadReferenceImageOfFloor(*FloorObject, LoadedImage)) ReferenceImages.Add(Level, LoadedImage);
 
 		const TArray<TSharedPtr<FJsonValue>>* UtilitiesArray = nullptr;
 		if (FloorObject->TryGetArrayField(TEXT("utilities"), UtilitiesArray))
@@ -2256,18 +2271,30 @@ bool AInteriorGenerator::SetUtilityDetails(const FString& Id, const FString& Nam
 
 bool AInteriorGenerator::SetReferenceImage(int32 Level, FInteriorReferenceImage Image)
 {
+	if (!PreviewReferenceImage(Level, MoveTemp(Image))) return false;
+	CommitReferenceImageEdit();
+	return true;
+}
+
+bool AInteriorGenerator::PreviewReferenceImage(int32 Level, FInteriorReferenceImage Image)
+{
 	if (!FloorInfoByLevel.Contains(Level) || !InteriorReferenceImage::Normalize(Image)) return false;
 	const FInteriorReferenceImage* Existing = ReferenceImages.Find(Level);
 	if (Existing && *Existing == Image) return false;
 	ReferenceImages.Add(Level, MoveTemp(Image));
-	RecordHistorySnapshot();
 	return true;
+}
+
+void AInteriorGenerator::CommitReferenceImageEdit()
+{
+	TGuardValue<bool> OnlyPictures(bRecordingReferenceImageEdit, true);
+	RecordHistorySnapshot();
 }
 
 bool AInteriorGenerator::RemoveReferenceImage(int32 Level)
 {
 	if (ReferenceImages.Remove(Level) == 0) return false;
-	RecordHistorySnapshot();
+	CommitReferenceImageEdit();
 	return true;
 }
 
@@ -2567,6 +2594,8 @@ bool AInteriorGenerator::NudgeFootprintClear(TArray<FVector2D>& Footprint, bool 
 	TArray<FVector2D> Best;
 	double BestLength = TNumericLimits<double>::Max();
 	const AInteriorRoom* FirstBlocker = Blocker(Footprint);
+	// No room or wall is in the way: the shape sticks out of the building or lies on a lift or stairs, and there is nothing to push it clear of.
+	if (!FirstBlocker) return false;
 	for (const FVector2D& First : Pushes(Footprint, FirstBlocker))
 	{
 		const TArray<FVector2D> AfterFirst = Moved(Footprint, First);
@@ -3667,6 +3696,11 @@ TSharedRef<FJsonObject> AInteriorGenerator::SerializeCurrentInterior() const
 			ImageObject->SetNumberField(TEXT("width"), Image->Width);
 			ImageObject->SetNumberField(TEXT("opacity"), Image->Opacity);
 			if (!Image->bVisible) ImageObject->SetBoolField(TEXT("visible"), false);
+			if (Image->HasCrop())
+			{
+				ImageObject->SetArrayField(TEXT("crop"), { MakeShared<FJsonValueNumber>(Image->CropLeft), MakeShared<FJsonValueNumber>(Image->CropTop),
+					MakeShared<FJsonValueNumber>(Image->CropRight), MakeShared<FJsonValueNumber>(Image->CropBottom) });
+			}
 			FloorObject->SetObjectField(TEXT("referenceImage"), ImageObject);
 		}
 
@@ -3944,6 +3978,7 @@ void AInteriorGenerator::RecordHistorySnapshotInternal(const FString& EntranceOw
 	Snapshot.FirstLevel = Building->GetFirstLevel();
 	Snapshot.EntranceOwnerId = EntranceOwnerId;
 	Snapshot.RemovedEntrance = MoveTemp(RemovedEntrance);
+	Snapshot.bReferenceImagesOnly = bRecordingReferenceImageEdit;
 	FString Json;
 	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Json);
 
@@ -4032,6 +4067,28 @@ bool AInteriorGenerator::RestoreHistorySnapshot(int32 TargetIndex)
 
 	const bool bUndo = TargetIndex < HistoryIndex;
 	const FInteriorHistorySnapshot& Edit = bUndo ? InteriorHistory[HistoryIndex] : Snapshot;
+	// A step that only changed the pictures: put the pictures of that snapshot back and leave the rooms alone.
+	if (FMath::Abs(TargetIndex - HistoryIndex) == 1 && Edit.bReferenceImagesOnly && !Edit.RemovedEntrance)
+	{
+		TMap<int32, FInteriorReferenceImage> Pictures;
+		const TArray<TSharedPtr<FJsonValue>>* Floors = nullptr;
+		if (RestoredInterior->TryGetArrayField(TEXT("floors"), Floors))
+		{
+			for (const TSharedPtr<FJsonValue>& Value : *Floors)
+			{
+				const TSharedPtr<FJsonObject> FloorObject = Value.IsValid() ? Value->AsObject() : nullptr;
+				FInteriorReferenceImage Picture;
+				int32 FloorLevel = 1;
+				if (FloorObject.IsValid() && FloorObject->TryGetNumberField(TEXT("level"), FloorLevel) && ReadReferenceImageOfFloor(*FloorObject, Picture))
+				{
+					Pictures.Add(FloorLevel, Picture);
+				}
+			}
+		}
+		ReferenceImages = MoveTemp(Pictures);
+		HistoryIndex = TargetIndex;
+		return true;
+	}
 	const auto ApplyEntranceEdit = [&](bool bRestore)
 	{
 		if (!Edit.RemovedEntrance) return true;

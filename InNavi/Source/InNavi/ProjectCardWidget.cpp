@@ -1,4 +1,5 @@
 #include "ProjectCardWidget.h"
+#include "UiToolTip.h"
 
 #include "EditorIcons.h"
 #include "NavPlayerController.h"
@@ -145,7 +146,7 @@ TSharedRef<SWidget> UProjectCardWidget::RebuildWidget()
 			PictureButton->SetStyle(Invisible);
 		}
 		PictureButton->SetCursor(EMouseCursor::Hand);
-		PictureButton->SetToolTipText(FText::FromString(TEXT("Choose a cover picture (PNG, JPEG or BMP) for this project")));
+		PictureButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Choose a cover picture (PNG, JPEG or BMP) for this project")));
 		UOverlaySlot* PictureButtonSlot = Picture->AddChildToOverlay(PictureButton);
 		PictureButtonSlot->SetHorizontalAlignment(HAlign_Fill);
 		PictureButtonSlot->SetVerticalAlignment(VAlign_Fill);
@@ -170,7 +171,7 @@ TSharedRef<SWidget> UProjectCardWidget::RebuildWidget()
 			RemoveCoverButton->SetStyle(Button(Rgb(13, 22, 36, 200), Rgb(96, 34, 42), Rgb(72, 24, 32), Rgb(58, 76, 102)));
 			RemoveCoverButton->SetBackgroundColor(FLinearColor::White);
 			RemoveCoverButton->SetCursor(EMouseCursor::Hand);
-			RemoveCoverButton->SetToolTipText(FText::FromString(TEXT("Remove the cover picture")));
+			RemoveCoverButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Remove the cover picture")));
 			UTextBlock* Cross = Text(WidgetTree, TEXT("Txt_RemoveCover"), TEXT("\u2715"), 12.f, FLinearColor::White, true);
 			Cross->SetJustification(ETextJustify::Center);
 			RemoveCoverButton->SetContent(Cross);
@@ -309,24 +310,24 @@ TSharedRef<SWidget> UProjectCardWidget::RebuildWidget()
 		DeleteBox->SetContent(DeleteButton);
 		UHorizontalBoxSlot* DeleteSlot = Buttons->AddChildToHorizontalBox(DeleteBox);
 		DeleteSlot->SetPadding(FMargin(8.f * DesignToUi, 0.f, 0.f, 0.f));
-		DeleteButton->SetToolTipText(FText::FromString(TEXT("Delete")));
+		DeleteButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Delete")));
 		Body->AddChildToVerticalBox(Buttons);
 
 		// What cannot be done to this file is greyed out, with the reason as its tooltip.
 		if (Entry.bIsDatabase)
 		{
 			DuplicateButton->SetIsEnabled(false);
-			DuplicateButton->SetToolTipText(FText::FromString(TEXT("A map database cannot be duplicated.")));
+			DuplicateButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("A map database cannot be duplicated.")));
 		}
 		if (Entry.bIsSample)
 		{
 			DeleteButton->SetIsEnabled(false);
-			DeleteButton->SetToolTipText(FText::FromString(TEXT("The sample files that come with the project cannot be deleted.")));
+			DeleteButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("The sample files that come with the project cannot be deleted.")));
 		}
 		if (Entry.bIsDatabase || Entry.bIsSample)
 		{
 			RenameButton->SetIsEnabled(false);
-			RenameButton->SetToolTipText(FText::FromString(TEXT("The sample files that come with the project cannot be renamed. Duplicate it and rename the copy.")));
+			RenameButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("The sample files that come with the project cannot be renamed. Duplicate it and rename the copy.")));
 		}
 	}
 	return Super::RebuildWidget();

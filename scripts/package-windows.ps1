@@ -34,7 +34,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "BuildCookRun failed ($LASTEXITCODE)." }
 
     $root = Join-Path $archive 'Windows'
-    foreach ($needed in 'InNavi.exe', 'InNavi\Data\E2_Filled.json') {
+    foreach ($needed in 'InNavi.exe', 'InNavi\Data\E2_Filled.json', 'InNavi\Data\SIT.json') {
         if (-not (Test-Path -LiteralPath (Join-Path $root $needed) -PathType Leaf)) {
             throw "No $needed in $root. The package is not complete."
         }
@@ -53,9 +53,10 @@ try {
             Remove-Item -LiteralPath $resolved -Recurse -Force
         }
     }
-    # The sample project (E2_Filled.json) is what the app and the phone open by default. Keep it alongside the campus database.
+    # The projects that ship: the sample project (E2_Filled.json, what the app and the phone open by default) and the campus with its building names
+    # (SIT.json). Keep them alongside the campus database.
     Get-ChildItem -LiteralPath (Join-Path $root 'InNavi\Data') -File -Filter '*.json' |
-        Where-Object Name -ne 'E2_Filled.json' | Remove-Item -Force
+        Where-Object { $_.Name -notin 'E2_Filled.json', 'SIT.json' } | Remove-Item -Force
     # The cover pictures of the projects kept (Data/Covers/<file name>.png, shown on the Explore cards of the phone and the project library) stay; those of the
     # projects that were taken out go with them.
     $covers = Join-Path $root 'InNavi\Data\Covers'

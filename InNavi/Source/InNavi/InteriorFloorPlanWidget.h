@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "Styling/SlateBrush.h"
+#include "InteriorReferenceImage.h"
 #include "InteriorFloorPlanWidget.generated.h"
 
 class AInteriorGenerator;
@@ -34,6 +35,15 @@ public:
 	// Returns (0,0) if nothing is loaded.
 	UFUNCTION(BlueprintCallable, Category = "Interior")
 	FVector2D LocalPositionToFootprintPoint(FVector2D LocalPosition, FVector2D WidgetSize) const;
+	// The part of the picture that is left after the crop, as a box in footprint units (Aspect = height / width of the picture file). The whole picture without a crop.
+	static void GetReferenceVisibleBounds(const FInteriorReferenceImage& Image, float Aspect, FVector2D& OutMin, FVector2D& OutMax);
+	// The picture with one side cropped to where the pointer is (Point, in footprint units): Edge 0 left, 1 top, 2 right, 3 bottom. At least a bit is always left.
+	static FInteriorReferenceImage CropReferenceImageEdge(const FInteriorReferenceImage& Image, float Aspect, int32 Edge, const FVector2D& Point);
+	// A press on a corner of the unlocked picture starts a scale, on the middle handle of an edge a crop of that side, on its body a move; false when the press is on none of them (or the picture is locked).
+	bool TryBeginReferenceDrag(const FVector2D& LocalPosition, const FVector2D& WidgetSize);
+	void UpdateReferenceDrag(const FVector2D& LocalPosition, const FVector2D& WidgetSize);
+	void EndReferenceDrag();
+	FVector2D FootprintPointToLocalPosition(const FVector2D& FootprintPoint, const FVector2D& WidgetSize) const;
 	void ResetView() { PanOffset = FVector2D::ZeroVector; ZoomMultiplier = 1.f; }
 	void FinishEditDrag();
 
@@ -256,8 +266,21 @@ private:
 	UPROPERTY(Transient)
 	mutable UTexture2D* ReferenceImageTexture = nullptr;
 	mutable FSlateBrush ReferenceImageBrush;
+	// The same picture with the UV region of what is left after the crop.
+	mutable FSlateBrush ReferenceImageCropBrush;
 	mutable FString ReferenceImagePath;
 	mutable FString ReferenceImageFailedPath;
+	// The unlocked picture moved or scaled with the mouse (see PlayerController->IsReferenceImageUnlocked): where the drag began, and the picture as it was.
+	enum class EReferenceDrag : uint8 { None, Move, Scale, Crop };
+	EReferenceDrag ReferenceDrag = EReferenceDrag::None;
+	// For a crop: the side being dragged, 0 left, 1 top, 2 right, 3 bottom.
+	int32 ReferenceDragEdge = 0;
+	FVector2D ReferenceDragStartPoint = FVector2D::ZeroVector;
+	double ReferenceDragStartRadius = 1.0;
+	FInteriorReferenceImage ReferenceDragStartImage;
+	// The picture of the floor as it is drawn: its middle and half its size, in footprint units; false when none is shown (or not read yet).
+	bool GetReferenceImageRect(FVector2D& OutCentre, FVector2D& OutHalfSize) const;
+
 
 	// Connector markers (elevator/stairs/escalator - see NativePaint) are drawn as these icons
 	// instead of a plain colored box. Loaded once in NativeConstruct from the design team's tool

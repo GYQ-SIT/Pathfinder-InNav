@@ -340,18 +340,19 @@ bool FUiFootprintOutlineTest::RunTest(const FString& Parameters)
 namespace
 {
 	// The text of a control's hover hint, or empty if it has none. The hint is the card UiToolTip::Make builds: an overlay whose second child is the
-	// light card, which holds the text.
+	// light card, which holds a size box (the minimum width) with the text in it.
 	FString HoverHintText(const UWidget* Control)
 	{
 		const UOverlay* Hint = Control ? Cast<UOverlay>(Control->GetToolTip()) : nullptr;
 		const UBorder* Card = Hint && Hint->GetChildrenCount() > 1 ? Cast<UBorder>(Hint->GetChildAt(1)) : nullptr;
-		const UTextBlock* Text = Card ? Cast<UTextBlock>(Card->GetContent()) : nullptr;
+		const USizeBox* Width = Card ? Cast<USizeBox>(Card->GetContent()) : nullptr;
+		const UTextBlock* Text = Width ? Cast<UTextBlock>(Width->GetContent()) : nullptr;
 		return Text ? Text->GetText().ToString() : FString();
 	}
 }
 
-// The hover hint every button of the UI has is as wide as its text, up to a maximum, and a longer text wraps there: a short hint is not a bar
-// across the screen.
+// The hover hint every button of the UI has is as wide as its text, between a minimum and a maximum, and a longer text wraps at the maximum: a short
+// hint is not a bar across the screen, and two short hints are the same size.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FUiToolTipWidthTest, "InNavi.UI.ToolTipWidth", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FUiToolTipWidthTest::RunTest(const FString& Parameters)
 {
@@ -365,14 +366,17 @@ bool FUiToolTipWidthTest::RunTest(const FString& Parameters)
 	};
 
 	const FVector2D Short = WidthOf(TEXT("Save [Ctrl+S]"));
+	const FVector2D AlsoShort = WidthOf(TEXT("Redo [Ctrl+Y]"));
 	const FVector2D Medium = WidthOf(TEXT("Make the UI smaller [Ctrl -]"));
 	const FVector2D Long = WidthOf(TEXT("Fill this floor with rooms along its outer wall and a core beside each door, then check every room that was made and the doors between them one by one"));
 	AddInfo(FString::Printf(TEXT("widths: short %.0f, medium %.0f, long %.0f (maximum %.0f)"), Short.X, Medium.X, Long.X, UiToolTip::MaxWidth));
 
 	TestTrue(TEXT("a short hint is narrower than a longer one"), Short.X < Medium.X && Medium.X < Long.X);
+	// The card adds its padding (8 on each side) and the shadow (3) to the text.
+	TestTrue(TEXT("a short hint is at least the minimum wide"), Short.X >= UiToolTip::MinWidth + 16.f);
+	TestTrue(TEXT("so two short hints are the same size"), FMath::IsNearlyEqual(Short.X, AlsoShort.X, 0.5f) && FMath::IsNearlyEqual(Short.Y, AlsoShort.Y, 0.5f));
 	TestTrue(TEXT("a short hint is well under the maximum, not stretched to it"), Medium.X < UiToolTip::MaxWidth * 0.8f);
-	// The card adds its padding (10 on each side) and the shadow (3) to the text, which wraps at the maximum.
-	TestTrue(TEXT("a long hint stops at the maximum and wraps"), Long.X <= UiToolTip::MaxWidth + 20.f + 3.f + 1.f);
+	TestTrue(TEXT("a long hint stops at the maximum and wraps"), Long.X <= UiToolTip::MaxWidth + 16.f + 3.f + 4.f);
 	TestTrue(TEXT("and is taller than a short one for it"), Long.Y > Short.Y);
 	return true;
 }

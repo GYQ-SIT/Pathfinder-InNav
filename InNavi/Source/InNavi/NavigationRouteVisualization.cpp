@@ -58,10 +58,11 @@ UNavigationRouteVisualization::UNavigationRouteVisualization()
 FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigationRoutePoint>& Route,
 	const FNavigationRoutePoint* Start, const FNavigationRoutePoint* Destination,
 	FVector2D BuildingOffset, float Scale, float FloorHeight, int32 ActiveFloor, bool bGuidanceVisible, const FString& ActiveBuildingId,
-	const TArray<FNavigationStop>* Stops, const TArray<FNavigationRouteLeg>* RouteLegs, const FNavigationRouteFocus* Focus, bool bFullRoute)
+	const TArray<FNavigationStop>* Stops, const TArray<FNavigationRouteLeg>* RouteLegs, const FNavigationRouteFocus* Focus, bool bFullRoute, bool bThick)
 {
 	FNavigation3DView View;
 	View.bForeground = bFullRoute;
+	View.bThick = bThick;
 	if (!bGuidanceVisible) return View;
 	auto Visible = [&](const FNavigationRoutePoint& Point) { return bFullRoute || IsPointVisible(Point, ActiveBuildingId, ActiveFloor); };
 	auto WorldPoint = [&](const FNavigationRoutePoint& Point)
@@ -80,16 +81,16 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 		return INDEX_NONE;
 	};
 	// In the overview, with a step being shown: what has been walked, this step, and what is still to walk.
-	auto ProgressOf = [Focus, bFullRoute](int32 SegmentEndPointIndex)
+	auto ProgressOf = [Focus, bFullRoute, bThick](int32 SegmentEndPointIndex)
 	{
-		if (!bFullRoute || !Focus || !Focus->IsSet()) return ENavigationSegmentProgress::Unspecified;
+		if (!(bFullRoute || bThick) || !Focus || !Focus->IsSet()) return ENavigationSegmentProgress::Unspecified;
 		if (SegmentEndPointIndex <= Focus->FirstPointIndex) return ENavigationSegmentProgress::Done;
 		return SegmentEndPointIndex <= Focus->LastPointIndex ? ENavigationSegmentProgress::Current : ENavigationSegmentProgress::Pending;
 	};
 	// When a step is being shown, the rest of the route is faint.
-	auto Dimmed = [Focus, bFullRoute](int32 SegmentEndPointIndex)
+	auto Dimmed = [Focus, bFullRoute, bThick](int32 SegmentEndPointIndex)
 	{
-		return !bFullRoute && Focus && Focus->IsSet() && !(SegmentEndPointIndex > Focus->FirstPointIndex && SegmentEndPointIndex <= Focus->LastPointIndex);
+		return !bFullRoute && !bThick && Focus && Focus->IsSet() && !(SegmentEndPointIndex > Focus->FirstPointIndex && SegmentEndPointIndex <= Focus->LastPointIndex);
 	};
 	for (int32 I = 1; I < Route.Num(); ++I)
 	{
@@ -161,12 +162,12 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 	if (Start && Visible(*Start))
 	{
 		View.Start = WorldPoint(*Start);
-		View.Labels.Add({ View.Start.GetValue() + FVector(0, 0, 55), TEXT("Start"), FColor::Green });
+		if (!bThick) View.Labels.Add({ View.Start.GetValue() + FVector(0, 0, 55), TEXT("Start"), FColor::Green });
 	}
 	if (Destination && Visible(*Destination))
 	{
 		View.Destination = WorldPoint(*Destination);
-		View.Labels.Add({ View.Destination.GetValue() + FVector(0, 0, 55), TEXT("Destination"), FColor::Red });
+		if (!bThick) View.Labels.Add({ View.Destination.GetValue() + FVector(0, 0, 55), TEXT("Destination"), FColor::Red });
 	}
 	if (Stops)
 	{
@@ -179,7 +180,7 @@ FNavigation3DView UNavigationRouteVisualization::BuildView(const TArray<FNavigat
 			const FVector Position = WorldPoint(*Reached);
 			const FColor Color = LegColor(StopIndex);
 			View.Stops.Add({ Position, StopIndex + 1, Color });
-			View.Labels.Add({ Position + FVector(0, 0, 55), FString::Printf(TEXT("Stop %d"), StopIndex + 1), Color });
+			if (!bThick) View.Labels.Add({ Position + FVector(0, 0, 55), FString::Printf(TEXT("Stop %d"), StopIndex + 1), Color });
 		}
 	}
 	return View;
@@ -298,11 +299,15 @@ FNavigation3DView UNavigationRouteVisualization::TransformView(const FNavigation
 
 // A stretch of the overview that follows the person: a thick line with an outline round it (so it stands out on the rooms behind it), and chevrons on it
 // that point the way. Walked: grey. The step being shown: orange. Still to walk: blue.
-void UNavigationRouteVisualization::DrawProgressSegment(const FNavigationDisplaySegment& Segment, const FQuat& DisplayRotation, uint8 Depth)
+void UNavigationRouteVisualization::DrawProgressSegment(const FNavigationDisplaySegment& Segment, const FQuat& DisplayRotation, uint8 Depth, const FLinearColor* LineColor)
 {
 	FLinearColor Line, Outline, Chevron;
 	float Width = 0.f;
-	switch (Segment.Progress)
+	if (LineColor)
+	{
+		Line = *LineColor; Outline = FLinearColor(Line.R * 0.3f, Line.G * 0.3f, Line.B * 0.3f, 1.f); Chevron = FLinearColor::White; Width = 16.f;
+	}
+	else switch (Segment.Progress)
 	{
 	case ENavigationSegmentProgress::Done:
 		Line = FLinearColor(0.66f, 0.68f, 0.72f); Outline = FLinearColor(0.20f, 0.21f, 0.24f); Chevron = FLinearColor(0.92f, 0.93f, 0.95f); Width = 13.f;
@@ -348,6 +353,12 @@ void UNavigationRouteVisualization::ShowView(const FNavigation3DView& View)
 			DrawProgressSegment(Segment, View.DisplayRotation, Depth);
 			continue;
 		}
+		if (View.bThick && !Segment.bDimmed)
+		{
+			// The view of a floor, in the format of the overview: no step is being shown, so the leg's own colour.
+			DrawProgressSegment(Segment, View.DisplayRotation, Depth, &Color);
+			continue;
+		}
 		if (Segment.bDimmed)
 		{
 			// Not the step being shown: a thin, dark line, without arrows.
@@ -372,7 +383,7 @@ void UNavigationRouteVisualization::ShowView(const FNavigation3DView& View)
 		}
 	}
 	// The overview (it draws in the foreground) marks these points with call-outs, and a ball over each of them only hid the line: no balls there.
-	if (!View.bForeground)
+	if (!View.bForeground && !View.bThick)
 	{
 		if (View.Start.IsSet()) DrawSphere(View.Start.GetValue(), 25.f * DisplayScale, 12, FLinearColor::Green, -1.f, Depth, 3.f);
 		if (View.Destination.IsSet()) DrawSphere(View.Destination.GetValue(), 25.f * DisplayScale, 12, FLinearColor::Red, -1.f, Depth, 3.f);

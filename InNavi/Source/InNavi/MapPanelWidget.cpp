@@ -1,4 +1,5 @@
 #include "MapPanelWidget.h"
+#include "UiToolTip.h"
 #include "Components/OverlaySlot.h"
 #include "Components/Overlay.h"
 #include "EditorIcons.h"
@@ -905,7 +906,7 @@ void UMapPanelWidget::AddRenderingControls(UVerticalBox* Stack)
 	RenderingPadding->SetPadding(FMargin(8.f * DesignToUi));
 	RenderingPadding->SetContent(RenderingPresetLabel);
 	RenderingPresetButton->SetContent(RenderingPadding);
-	RenderingPresetButton->SetToolTipText(FText::FromString(TEXT("Switch between lightweight and standard lighting, reflections and shadows.")));
+	RenderingPresetButton->SetToolTip(UiToolTip::Make(WidgetTree, TEXT("Switch between lightweight and standard lighting, reflections and shadows.")));
 	RenderingPresetButton->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::OnRenderingPresetClicked);
 	RenderingPresetButton->OnClicked.AddUniqueDynamic(this, &UMapPanelWidget::PlayButtonClickSound);
 	Stack->AddChildToVerticalBox(WrapInPanelWidth(RenderingPresetButton))->SetPadding(FMargin(0.f, 14.f * DesignToUi, 0.f, 0.f));

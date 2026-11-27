@@ -141,9 +141,10 @@ position and size, so a larger viewport restores the arrangement. There is no pa
 
 Every button shows the same hover hint: a light card with a soft shadow, built by `UiToolTip::Make`
 ([UiToolTip.h](../../InNavi/Source/InNavi/UiToolTip.h)); `SetToolTip(UiToolTip::Make(WidgetTree, Label))`. The label says what
-the control does and, in square brackets at the end, its shortcut: `Save [Ctrl+S]`. The card is as wide as its text up to
-`UiToolTip::MaxWidth` and a longer text wraps there. Put the explanation and the shortcut in the hint, not in text inside a panel
-(the UI Size panel has no help text); do not build a hint of your own.
+the control does and, in square brackets at the end, its shortcut: `Save [Ctrl+S]`. Every card is at least `UiToolTip::MinWidth` wide (two
+short hints are the same size) and as wide as its text up to `UiToolTip::MaxWidth`, where a longer text wraps; the text is `UiToolTip::FontSize`,
+small. Put the explanation and the shortcut in the hint, not in text inside a panel (the UI Size panel has no help text); do not build a hint
+of your own, and do not use `SetToolTipText` (the engine's own tooltip has another size and font).
 
 ## Control styling
 

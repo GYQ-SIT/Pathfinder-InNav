@@ -65,6 +65,11 @@ bool FAdjacentRoomsTest::RunTest(const FString& Parameters)
 	const TArray<FVector2D> HugeBefore = Huge;
 	TestFalse(TEXT("a shape that cannot fit anywhere is not moved"), F.Interior->NudgeFootprintClear(Huge, true, FString()));
 	TestTrue(TEXT("and stays as it was"), Huge == HugeBefore);
+	// Not free, but with no room in the way: sticking out of the building. It is reported and left alone (this used to crash).
+	TArray<FVector2D> Outside = Square(960, 100, 100);
+	const TArray<FVector2D> OutsideBefore = Outside;
+	TestFalse(TEXT("a shape over the outer wall, with no room in the way, is not moved"), F.Interior->NudgeFootprintClear(Outside, true, FString()));
+	TestTrue(TEXT("and it stays as it was"), Outside == OutsideBefore);
 	return true;
 }
 

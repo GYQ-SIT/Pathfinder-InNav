@@ -495,6 +495,39 @@ void ANavPlayerController::AddFullRouteCallout(const FVector& Point, const FStri
 	FullRouteCalloutPoints.Add(Point);
 }
 
+void ANavPlayerController::AddRouteCallouts(const FNavigation3DView& View)
+{
+	if (!NavigationPanel) return;
+	const TArray<FNavigationStop>& Stops = NavigationPanel->GetStops();
+	auto Name = [](FString Label)
+	{
+		// "Lectorial 6 (Floor 1)" -> "Lectorial 6".
+		int32 Bracket = INDEX_NONE;
+		if (Label.FindChar(TEXT('('), Bracket) && Bracket > 0) Label.LeftInline(Bracket);
+		return Label.TrimStartAndEnd();
+	};
+	FString StartName = Name(NavigationPanel->GetStartRoomLabel());
+	if (StartName.IsEmpty()) StartName = Name(NavigationPanel->GetStartOtherBuildingLabel());
+	FString DestinationName = Name(NavigationPanel->GetDestinationRoomLabel());
+	if (DestinationName.IsEmpty()) DestinationName = Name(NavigationPanel->GetDestinationOtherBuildingLabel());
+	if (View.Start.IsSet()) AddFullRouteCallout(View.Start.GetValue(), StartName.IsEmpty() ? FString(TEXT("Start")) : TEXT("Start: ") + StartName, FColor(60, 230, 110));
+	if (View.Destination.IsSet()) AddFullRouteCallout(View.Destination.GetValue(), DestinationName.IsEmpty() ? FString(TEXT("Destination")) : TEXT("Destination: ") + DestinationName, FColor(255, 100, 100));
+	for (const FNavigationDisplayStop& Stop : View.Stops)
+	{
+		const FString StopName = Stops.IsValidIndex(Stop.Number - 1) ? Name(Stops[Stop.Number - 1].RoomOptionLabel) : FString();
+		AddFullRouteCallout(Stop.Position, StopName.IsEmpty() ? FString::Printf(TEXT("Stop %d"), Stop.Number) : FString::Printf(TEXT("Stop %d: %s"), Stop.Number, *StopName), FColor(255, 210, 70));
+	}
+	if (View.Here.IsSet()) AddFullRouteCallout(View.Here.GetValue(), TEXT("You are here"), FColor(90, 215, 255));
+}
+
+float ANavPlayerController::RoomRouteCameraDistance() const
+{
+	if (!RoomRouteBounds.IsValid) return 1000.f;
+	FVector Eye = GetPawn() ? GetPawn()->GetActorLocation() : FVector::ZeroVector;
+	if (PlayerCameraManager) Eye = PlayerCameraManager->GetCameraLocation();
+	return FMath::Max(50.f, static_cast<float>(FVector::Distance(Eye, RoomRouteBounds.GetCenter())));
+}
+
 void ANavPlayerController::UpdateFullRouteCallouts()
 {
 	const float Scale = FMath::Max(UWidgetLayoutLibrary::GetViewportScale(this), 0.01f);
@@ -578,27 +611,7 @@ void ANavPlayerController::ShowFullRouteVisualization()
 	const float LineScale = FMath::Clamp(Bounds.IsValid ? Bounds.GetExtent().Size() / 2500.f : 1.f, 1.f, 8.f);
 	// The call-outs: where it starts, where it ends, each stop and where the person is.
 	ClearFullRouteCallouts();
-	{
-		auto Name = [](FString Label)
-		{
-			// "Lectorial 6 (Floor 1)" -> "Lectorial 6".
-			int32 Bracket = INDEX_NONE;
-			if (Label.FindChar(TEXT('('), Bracket) && Bracket > 0) Label.LeftInline(Bracket);
-			return Label.TrimStartAndEnd();
-		};
-		FString StartName = Name(NavigationPanel->GetStartRoomLabel());
-		if (StartName.IsEmpty()) StartName = Name(NavigationPanel->GetStartOtherBuildingLabel());
-		FString DestinationName = Name(NavigationPanel->GetDestinationRoomLabel());
-		if (DestinationName.IsEmpty()) DestinationName = Name(NavigationPanel->GetDestinationOtherBuildingLabel());
-		if (View.Start.IsSet()) AddFullRouteCallout(View.Start.GetValue(), StartName.IsEmpty() ? FString(TEXT("Start")) : TEXT("Start: ") + StartName, FColor(60, 230, 110));
-		if (View.Destination.IsSet()) AddFullRouteCallout(View.Destination.GetValue(), DestinationName.IsEmpty() ? FString(TEXT("Destination")) : TEXT("Destination: ") + DestinationName, FColor(255, 100, 100));
-		for (const FNavigationDisplayStop& Stop : View.Stops)
-		{
-			const FString StopName = Stops.IsValidIndex(Stop.Number - 1) ? Name(Stops[Stop.Number - 1].RoomOptionLabel) : FString();
-			AddFullRouteCallout(Stop.Position, StopName.IsEmpty() ? FString::Printf(TEXT("Stop %d"), Stop.Number) : FString::Printf(TEXT("Stop %d: %s"), Stop.Number, *StopName), FColor(255, 210, 70));
-		}
-		if (View.Here.IsSet()) AddFullRouteCallout(View.Here.GetValue(), TEXT("You are here"), FColor(90, 215, 255));
-	}
+	AddRouteCallouts(View);
 	UpdateFullRouteCallouts();
 	RouteVisualization->SetDisplayScale(1.f);
 
