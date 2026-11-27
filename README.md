@@ -118,7 +118,7 @@ git push origin m2-build-1
 `release-windows.yml` then packages the build on the Windows runner (`scripts/package-windows.ps1`: cook, stage, pak, clean, zip), starts
 the package once without a window to see that it opens and closes (`scripts/smoke-test-package.ps1`), and attaches
 `InNavi-<tag>.zip` to a GitHub release marked as a test build (`scripts/publish-release.ps1`). Tags look like `m<milestone>-build-<n>`.
-The zip holds `InNavi.exe`, the campus database, the default layouts, `SampleProjects/` to try File > Load with, and `BUILD-INFO.txt`
+The zip holds `InNavi.exe`, the campus database, the projects `E2_Filled.json` and `SIT.json`, the default layouts, `SampleProjects/` to try File > Load with, and `BUILD-INFO.txt`
 (tag, commit, date). The same package can be made on your own machine with
 `powershell -File scripts\package-windows.ps1 -Name InNavi-test -OutputDir C:\Temp\release` (editor closed). The Android phone app is
 built and signed separately (`docs/android-signing.md`).
