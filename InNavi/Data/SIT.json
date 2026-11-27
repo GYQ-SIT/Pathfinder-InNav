@@ -1,15 +1,16 @@
 {
 	"version": 2,
-	"geoOrigin": {
-		"lat": 1.413507364394,
-		"lon": 103.911665713636
-	},
 	"scale": 100,
 	"floorHeight": 300,
+	"geoOrigin":
+	{
+		"lat": 1.4135073643939999,
+		"lon": 103.911665713636
+	},
 	"buildings": [
 		{
 			"id": "SQL-1161271358",
-			"name": "university 1161271358",
+			"name": "W4/W5",
 			"offset": [
 				0,
 				0
@@ -74,11 +75,51 @@
 					-137.53189086914062,
 					-384.69540405273438
 				]
-			]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 1,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 2,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 3,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 4,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 5,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					}
+				]
+			}
 		},
 		{
 			"id": "SQL-1161271359",
-			"name": "university 1161271359",
+			"name": "W2/W3",
 			"offset": [
 				0,
 				0
@@ -151,11 +192,51 @@
 					-163.01304626464844,
 					-122.29383850097656
 				]
-			]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 1,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 2,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 3,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 4,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 5,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					}
+				]
+			}
 		},
 		{
 			"id": "SQL-1161271360",
-			"name": "university 1161271360",
+			"name": "W1",
 			"offset": [
 				0,
 				0
@@ -240,7 +321,47 @@
 					45.144222259521484,
 					-110.68669891357422
 				]
-			]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 1,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 2,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 3,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 4,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 5,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					}
+				]
+			}
 		},
 		{
 			"id": "SQL-1161271361",
@@ -13814,7 +13935,7 @@
 		},
 		{
 			"id": "SQL-1161271362",
-			"name": "university 1161271362",
+			"name": "E1",
 			"offset": [
 				0,
 				0
@@ -13863,11 +13984,51 @@
 					42.750843048095703,
 					13.553133010864258
 				]
-			]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 1,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 2,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 3,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 4,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 5,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					}
+				]
+			}
 		},
 		{
 			"id": "SQL-1161271363",
-			"name": "university 1161271363",
+			"name": "E6",
 			"offset": [
 				0,
 				0
@@ -13980,11 +14141,51 @@
 					-40.015575408935547,
 					163.4666748046875
 				]
-			]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 1,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 2,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 3,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 4,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 5,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					}
+				]
+			}
 		},
 		{
 			"id": "SQL-1228643150",
-			"name": "university 1228643150",
+			"name": "W6",
 			"offset": [
 				0,
 				0
@@ -14021,11 +14222,51 @@
 					-39.759540557861328,
 					-353.16802978515625
 				]
-			]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 1,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 2,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 3,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 4,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 5,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					}
+				]
+			}
 		},
 		{
 			"id": "SQL-1283901240",
-			"name": "university 1283901240",
+			"name": "E4-Food Court",
 			"offset": [
 				0,
 				0
@@ -14074,11 +14315,51 @@
 					4.0114836692810059,
 					244.37168884277344
 				]
-			]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 1,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 2,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 3,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 4,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 5,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					}
+				]
+			}
 		},
 		{
 			"id": "SQL-1283901242",
-			"name": "university 1283901242",
+			"name": "E5",
 			"offset": [
 				0,
 				0
@@ -14123,11 +14404,51 @@
 					-23.529085159301758,
 					172.67002868652344
 				]
-			]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 1,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 2,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 3,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 4,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 5,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					}
+				]
+			}
 		},
 		{
 			"id": "SQL-1283901244",
-			"name": "university 1283901244",
+			"name": "E4",
 			"offset": [
 				0,
 				0
@@ -14176,16 +14497,57 @@
 					60.383930206298828,
 					184.94490051269531
 				]
-			]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 1,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 2,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 3,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 4,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					},
+					{
+						"level": 5,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					}
+				]
+			}
 		},
 		{
 			"id": "SQL-1283901247",
-			"name": "bridge 1283901247",
+			"name": "W2 bridge ",
 			"offset": [
 				0,
 				0
 			],
-			"floorCount": 5,
+			"floorCount": 1,
+			"firstLevel": 5,
 			"floorHeight": 300,
 			"buildingType": "Transport",
 			"footprint": [
@@ -14301,7 +14663,19 @@
 					7.9967398643493652,
 					-89.675880432128906
 				]
-			]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 5,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					}
+				]
+			}
 		},
 		{
 			"id": "SQL-1283901248",
@@ -14310,7 +14684,8 @@
 				0,
 				0
 			],
-			"floorCount": 5,
+			"floorCount": 1,
+			"firstLevel": 5,
 			"floorHeight": 300,
 			"buildingType": "Transport",
 			"footprint": [
@@ -14339,7 +14714,8 @@
 				0,
 				0
 			],
-			"floorCount": 5,
+			"floorCount": 1,
+			"firstLevel": 5,
 			"floorHeight": 300,
 			"buildingType": "Transport",
 			"footprint": [
@@ -14368,7 +14744,8 @@
 				0,
 				0
 			],
-			"floorCount": 5,
+			"floorCount": 1,
+			"firstLevel": 5,
 			"floorHeight": 300,
 			"buildingType": "Transport",
 			"footprint": [
@@ -14436,12 +14813,13 @@
 		},
 		{
 			"id": "SQL-1283901251",
-			"name": "bridge 1283901251",
+			"name": "W4 bridge ",
 			"offset": [
 				0,
 				0
 			],
-			"floorCount": 5,
+			"floorCount": 1,
+			"firstLevel": 5,
 			"floorHeight": 300,
 			"buildingType": "Transport",
 			"footprint": [
@@ -14541,16 +14919,29 @@
 					-123.31632995605469,
 					-277.927490234375
 				]
-			]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 5,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					}
+				]
+			}
 		},
 		{
 			"id": "SQL-1283901252",
-			"name": "bridge 1283901252",
+			"name": "W6 bridge ",
 			"offset": [
 				0,
 				0
 			],
-			"floorCount": 5,
+			"floorCount": 1,
+			"firstLevel": 5,
 			"floorHeight": 300,
 			"buildingType": "Transport",
 			"footprint": [
@@ -14582,7 +14973,19 @@
 					-42.587066650390625,
 					-351.88824462890625
 				]
-			]
+			],
+			"interior":
+			{
+				"floors": [
+					{
+						"level": 5,
+						"wallHeight": 280,
+						"wallThickness": 20,
+						"rooms": [],
+						"navNodes": []
+					}
+				]
+			}
 		},
 		{
 			"id": "SQL-1283901253",
@@ -14591,7 +14994,8 @@
 				0,
 				0
 			],
-			"floorCount": 5,
+			"floorCount": 1,
+			"firstLevel": 5,
 			"floorHeight": 300,
 			"buildingType": "Transport",
 			"footprint": [
@@ -14620,7 +15024,8 @@
 				0,
 				0
 			],
-			"floorCount": 5,
+			"floorCount": 1,
+			"firstLevel": 5,
 			"floorHeight": 300,
 			"buildingType": "Transport",
 			"footprint": [
@@ -14929,9 +15334,10 @@
 				0,
 				0
 			],
-			"floorCount": 5,
+			"floorCount": 1,
+			"firstLevel": 5,
 			"floorHeight": 300,
-			"buildingType": "Transport",
+			"buildingType": "Residential",
 			"footprint": [
 				[
 					110.67830657958984,
@@ -15220,7 +15626,7 @@
 			],
 			"floorCount": 5,
 			"floorHeight": 300,
-			"buildingType": "Transport",
+			"buildingType": "Commercial",
 			"footprint": [
 				[
 					247.98039245605469,
