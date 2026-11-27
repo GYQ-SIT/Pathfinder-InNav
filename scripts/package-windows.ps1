@@ -61,7 +61,7 @@ try {
     # projects that were taken out go with them.
     $covers = Join-Path $root 'InNavi\Data\Covers'
     if (Test-Path -LiteralPath $covers) {
-        Get-ChildItem -LiteralPath $covers -File | Where-Object { $_.Name -notin 'E2_Filled.json.png', 'map_extended.db.png' } | Remove-Item -Force
+        Get-ChildItem -LiteralPath $covers -File | Where-Object { $_.Name -notin 'E2_Filled.json.png', 'SIT.json.png', 'map_extended.db.png' } | Remove-Item -Force
     }
     $samples = Join-Path $root 'SampleProjects'
     New-Item -ItemType Directory -Force $samples | Out-Null

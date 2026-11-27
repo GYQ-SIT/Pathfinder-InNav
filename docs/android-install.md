@@ -7,13 +7,13 @@ This is for teammates who want to **try the phone app** on their own phone. You 
 
 - An **Android phone, Android 8 or newer** (API 26+), with a **64-bit ARM** processor. Nearly every phone from the last several years is. There is **no iPhone version**.
 - Enough free space for the APK and the installed app's data.
-- The file **`InNavi-m3-build-2-arm64.apk`** (one file; the game's data is inside it). It is not in git because it is big. Download it from the **[m3-build-2 release](https://github.com/GYQ-SIT/Pathfinder-InNav/releases/tag/m3-build-2)**
-  ("Assets" -> `InNavi-m3-build-2-arm64.apk`). The repository is public, so no sign-in is needed;
+- The file **`InNavi-m3-build-3-arm64.apk`** (one file; the game's data is inside it). It is not in git because it is big. Download it from the **[m3-build-3 release](https://github.com/GYQ-SIT/Pathfinder-InNav/releases/tag/m3-build-3)**
+  ("Assets" -> `InNavi-m3-build-3-arm64.apk`). The repository is public, so no sign-in is needed;
   if the phone's browser does not let you download, download the file on a computer and send it to the phone (USB cable, a cloud drive or a chat app).
 
-**`m3-build-2` (version 2.1, Android version code 11)** reads the packaged project files and uses the real campus route planner. GPS shows a rough position on the map, but there is no automatic indoor tracking: you choose the building and level, and you move through the steps of a route yourself. See [the real-data guide](mobile-real-data-guide.md) for the available data and test cases, and "Known limitations" in the repository's README.
+**`m3-build-3` (version 2.2, Android version code 12)** reads the packaged project files and uses the real campus route planner. GPS shows a rough position on the map, but there is no automatic indoor tracking: you choose the building and level, and you move through the steps of a route yourself. See [the real-data guide](mobile-real-data-guide.md) for the available data and test cases, and "Known limitations" in the repository's README.
 
-**Updating:** `m3-build-2` is signed with the **team key** (see [Android signing](android-signing.md)). It installs over an earlier team-key build and keeps its saved places and preferences. It does **not** install over `mobile-test-2` or `mobile-test-3`, which use a separate key: uninstall the old app first. Uninstalling removes that app's saved places and preferences.
+**Updating:** `m3-build-3` is signed with the **team key** (see [Android signing](android-signing.md)). It installs over an earlier team-key build and keeps its saved places and preferences. It does **not** install over `mobile-test-2` or `mobile-test-3`, which use a separate key: uninstall the old app first. Uninstalling removes that app's saved places and preferences.
 
 ## Install
 
