@@ -14541,7 +14541,7 @@
 		},
 		{
 			"id": "SQL-1283901247",
-			"name": "W2 bridge ",
+			"name": "W2 bridge",
 			"offset": [
 				0,
 				0
@@ -14679,7 +14679,7 @@
 		},
 		{
 			"id": "SQL-1283901248",
-			"name": "bridge 1283901248",
+			"name": "E1-E6 bridge",
 			"offset": [
 				0,
 				0
@@ -14709,7 +14709,7 @@
 		},
 		{
 			"id": "SQL-1283901249",
-			"name": "bridge 1283901249",
+			"name": "E1-E2/3 bridge",
 			"offset": [
 				0,
 				0
@@ -14739,7 +14739,7 @@
 		},
 		{
 			"id": "SQL-1283901250",
-			"name": "bridge 1283901250",
+			"name": "W1-E2/3 bridge",
 			"offset": [
 				0,
 				0
@@ -14813,7 +14813,7 @@
 		},
 		{
 			"id": "SQL-1283901251",
-			"name": "W4 bridge ",
+			"name": "W4 bridge",
 			"offset": [
 				0,
 				0
@@ -14935,7 +14935,7 @@
 		},
 		{
 			"id": "SQL-1283901252",
-			"name": "W6 bridge ",
+			"name": "W6 bridge",
 			"offset": [
 				0,
 				0
@@ -14989,7 +14989,7 @@
 		},
 		{
 			"id": "SQL-1283901253",
-			"name": "bridge 1283901253",
+			"name": "W6-86 bridge",
 			"offset": [
 				0,
 				0
@@ -15019,7 +15019,7 @@
 		},
 		{
 			"id": "SQL-1283901254",
-			"name": "bridge 1283901254",
+			"name": "W1-88 bridge",
 			"offset": [
 				0,
 				0
@@ -15049,7 +15049,7 @@
 		},
 		{
 			"id": "SQL-1228643123",
-			"name": "commercial 1228643123",
+			"name": "88 Punggol Coast Mall",
 			"offset": [
 				0,
 				0
@@ -15118,7 +15118,7 @@
 		},
 		{
 			"id": "SQL-1228643146",
-			"name": "commercial 1228643146",
+			"name": "Punggol Coast Mall East",
 			"offset": [
 				0,
 				0
@@ -15155,7 +15155,7 @@
 		},
 		{
 			"id": "SQL-1228643149",
-			"name": "commercial 1228643149",
+			"name": "Block 86",
 			"offset": [
 				0,
 				0
@@ -15264,7 +15264,7 @@
 		},
 		{
 			"id": "SQL-1283851776",
-			"name": "commercial 1283851776",
+			"name": "Block 84",
 			"offset": [
 				0,
 				0
@@ -15329,7 +15329,7 @@
 		},
 		{
 			"id": "SQL-1283901255",
-			"name": "bridge 1283901255",
+			"name": "84-88 bridge",
 			"offset": [
 				0,
 				0
@@ -15359,7 +15359,7 @@
 		},
 		{
 			"id": "SQL-1283901256",
-			"name": "roof 1283901256",
+			"name": "90-92 Link Roof",
 			"offset": [
 				0,
 				0
@@ -15448,7 +15448,7 @@
 		},
 		{
 			"id": "SQL-1228643122",
-			"name": "commercial 1228643122",
+			"name": "Block 90",
 			"offset": [
 				0,
 				0
@@ -15505,7 +15505,7 @@
 		},
 		{
 			"id": "SQL-1228643148",
-			"name": "commercial 1228643148",
+			"name": "Block 92",
 			"offset": [
 				0,
 				0
@@ -15558,7 +15558,7 @@
 		},
 		{
 			"id": "SQL-1283851771",
-			"name": "commercial 1283851771",
+			"name": "Tower 82",
 			"offset": [
 				0,
 				0
@@ -15619,7 +15619,7 @@
 		},
 		{
 			"id": "SQL-1456883732",
-			"name": "transportation 1456883732",
+			"name": "Tower 80-82 Podium",
 			"offset": [
 				0,
 				0
@@ -15668,7 +15668,7 @@
 		},
 		{
 			"id": "SQL-1283851772",
-			"name": "commercial 1283851772",
+			"name": "Tower 80",
 			"offset": [
 				0,
 				0
